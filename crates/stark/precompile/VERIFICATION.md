@@ -1,13 +1,16 @@
-# miden-precompiles-verifier
+# miden-precompile-stark
 
-`miden-precompiles-verifier` verifies STARK-backed deferred precompile claims
+`miden-precompile-stark` verifies STARK-backed deferred precompile claims
 for Miden VM execution proofs.
 
 Use `verify_deferred` to verify a proof against its deferred root. With `std`,
-the `masm_verifier` module builds host inputs for the in-VM PVM verifier.
+the `recursive` feature adds host inputs for the in-VM PVM verifier.
 
-The crate also owns the canonical PVM ACE circuit constants. The
-`constants-tools` feature enables the constants and MASM artifact generator.
+Accepted PVM ACE constants live in `miden-air`. Generation belongs to
+`miden-air-source` tooling; this product has no generation feature or command.
+Check all VM/PVM artifacts with `make check-constraints`, or regenerate managed
+outputs with `make regenerate-constraints`. Accepted pins remain protected and
+require deliberate review. See the [generation guide](../../../docs/masm-verifier-generation.md).
 
 The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
 input `abc`. Check or regenerate the proof and its deferred root with:
@@ -29,9 +32,9 @@ make test-fast
 ```
 src/
 ├── lib.rs                  crate root
-├── verify.rs               native precompile proof verification
-├── ace.rs                  PVM ACE circuit and proof-order policy
-├── ace_constants.rs        pinned circuit digest and relation constants
-├── ace_constants_regen.rs  constants and MASM artifact generator
-└── masm_verifier.rs        host inputs for the in-VM PVM verifier
+├── verifier.rs             native precompile proof verification
+├── setup.rs                canonical setup and validation
+├── ace.rs                  independent circuit and proof-order regression tests
+├── ace_constants.rs        test access to accepted constants from miden-air
+└── recursive.rs            host inputs for the in-VM PVM verifier
 ```

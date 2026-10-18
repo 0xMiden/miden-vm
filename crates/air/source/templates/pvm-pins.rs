@@ -1,7 +1,6 @@
 // Explicit accepted PVM generation inputs; deliberate review required before updates.
 use miden_core::{Felt, Word};
-pub const GENERATED_BY: &str = "cargo run -p miden-precompiles-verifier --release \
-     --features constants-tools --bin pvm-constants-regen -- --write";
+pub const GENERATED_BY: &str = "cargo run -p miden-air-source --features tooling --bin air-codegen -- <workspace-root> --write";
 
 pub const PVM_PROTOCOL_ID: u64 = 4;
 

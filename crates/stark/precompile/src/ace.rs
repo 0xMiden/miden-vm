@@ -239,7 +239,7 @@ mod tests {
             .sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
-        let circuit = miden_air::precompile::artifacts::recursive_circuit().unwrap();
+        let circuit = miden_air::precompile::artifacts::shared_recursive_circuit();
         assert!(
             circuit.num_eval_gates < 32_768,
             "the SHA program must not restore the 97,576-gate fixed verifier cost"
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; run `make regenerate-pvm-constants` for an \
+            "chiplet instance order moved; run `make regenerate-constraints` for an \
              intentional protocol break"
         );
     }

@@ -28,9 +28,10 @@ arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "miden-crypto/std", "miden-stark/std", "miden-ace/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std", "proptest?/std", "thiserror/std"]
 concurrent = ["std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary"]
-tooling = ["dep:miniz_oxide", "dep:serde_json", "dep:sha2", "std", "miden-stark/capture", "miden-ace/compiler"]
+tooling = ["dep:askama", "dep:miniz_oxide", "dep:serde_json", "dep:sha2", "std", "miden-stark/capture", "miden-ace/compiler"]
 
 [dependencies]
+askama = { workspace = true, optional = true }
 miniz_oxide = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }

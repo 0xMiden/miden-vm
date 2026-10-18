@@ -20,10 +20,8 @@ help:
 	@printf "  make test-prover                 # Test VM relation prover\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test VM relation verifier\n"
-	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
-	@printf "  make check-pvm-constants         # Check PVM ACE constants and MASM artifacts\n"
-	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make regenerate-pvm-constants    # Regenerate PVM ACE constants and MASM artifacts\n"
+	@printf "  make check-constraints           # Check VM/PVM MASM, Rust evaluator and ACE artifacts\n"
+	@printf "  make regenerate-constraints      # Regenerate VM/PVM MASM, Rust evaluator and ACE artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -37,14 +35,12 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
-PVM_GENERATOR_RUST_OUTPUTS := crates/air/generated/src/precompile/ace_constants.rs \
-	crates/air/generated/src/precompile/protocol.rs
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constants-tools,midenc-hir-type/arbitrary
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,miden-air-source/tooling,midenc-hir-type/arbitrary
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -355,15 +351,9 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
 .PHONY: regenerate-constraints
-regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
+regenerate-constraints: ## Regenerate VM/PVM MASM, Rust evaluator and ACE artifacts; never accept pins
 	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --write
 	cargo run --package miden-air-source --features tooling --bin air-artifacts -- --accepted-pins "$(CURDIR)/crates/air/generated/protocol/accepted.json" "$(CURDIR)/crates/air/generated/artifacts" --write
-	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
-
-.PHONY: regenerate-pvm-constants
-regenerate-pvm-constants: ## Regenerate staged PVM MASM artifacts without accepting protocol pins
-	cargo run --release --package miden-precompile-stark --features constants-tools --bin pvm-constants-regen -- --write
-	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: recursive-verifier-regeneration-handoff
@@ -375,10 +365,6 @@ recursive-verifier-regeneration-handoff:
 		'  2. Check embedded roots: cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library' \
 		'  3. Verify the pinned PVM fixture: make check-pvm-proof-fixture' \
 		'Review generated docs; update roots or the fixture only when the corresponding change is intentional.'
-
-.PHONY: check-pvm-constants
-check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
-	cargo run --release --package miden-precompile-stark --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift
@@ -409,12 +395,12 @@ check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root f
 	cargo run --release --no-default-features --package miden-precompile-stark --features fixture-tools --bin pvm-proof-fixture -- --check
 
 .PHONY: check-constraints
-check-constraints: ## Check the checked-in constraint artifacts for drift
+check-constraints: ## Check all VM/PVM MASM, Rust evaluator and ACE artifacts for drift
 	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --check
 	cargo run --package miden-air-source --features tooling --bin air-artifacts -- --accepted-pins "$(CURDIR)/crates/air/generated/protocol/accepted.json" "$(CURDIR)/crates/air/generated/artifacts" --check
 
 .PHONY: check-constraint-setup
-check-constraint-setup: ## Check the full canonical VM setup against deliberately accepted pins
+check-constraint-setup: ## Check canonical VM/PVM setup against deliberately accepted pins
 	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --check --derive-setup
 
 .PHONY: check-air-stark-boundaries

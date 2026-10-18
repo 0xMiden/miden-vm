@@ -2,8 +2,9 @@
 //!
 //! Runtime circuit data, canonical artifact decoding, selected-root evaluation and sequential
 //! evaluated-wire records are available without the compiler. The optional `compiler` feature
-//! captures AIR constraints through `miden_stark`, lowers them into a verifier DAG,
-//! and emits circuit streams and MASM. Enabling `std` alone does not enable the compiler.
+//! captures AIR constraints through `miden_stark`, lowers them into a verifier DAG, and emits
+//! circuit streams. MASM rendering belongs to source tooling. Enabling `std` alone does not
+//! enable the compiler.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -25,10 +26,6 @@ mod records;
 mod artifact;
 #[cfg(feature = "compiler")]
 mod dag;
-#[cfg(feature = "compiler")]
-mod masm;
-#[cfg(feature = "compiler")]
-mod order_maps;
 #[cfg(feature = "compiler")]
 mod pipeline;
 #[cfg(feature = "compiler")]
@@ -63,8 +60,6 @@ pub use crate::{
     artifact::CompiledCircuit,
     circuit::emit_circuit,
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
-    order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit,
@@ -74,7 +69,7 @@ pub use crate::{
     circuit::AceCircuit,
     encode::{EncodedCircuit, RecursiveAceCircuit},
     layout::{InputCounts, InputKey, InputLayout},
-    ood_scatter::OodScatterPlan,
+    ood_scatter::{OodScatterGroup, OodScatterPlan, OodScatterSegment},
     proof_order::{
         MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, factorial, order_from_tag, order_tag,
         sorting_network as proof_order_comparators,

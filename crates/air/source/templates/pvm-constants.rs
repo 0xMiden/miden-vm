@@ -5,14 +5,12 @@
 //! is served under, the value the MASM loader pins that stream to, and — through
 //! [`PVM_RELATION_DIGEST`] — what binds the Fiat-Shamir transcript to the relation.
 //!
-//! The values below are written by `pvm-constants-regen`; do not edit them by hand.
+//! Checked by `air-codegen`; changes to accepted values require deliberate protocol review.
 
 use miden_core::{Felt, Word};
 
-/// Command line that regenerates every artifact below and the generated MASM modules, quoted in
-/// their headers.
-pub const GENERATED_BY: &str = "cargo run -p miden-precompiles-verifier --release \
-     --features constants-tools --bin pvm-constants-regen -- --write";
+/// Command that regenerates managed MASM after checking these protected constants.
+pub const GENERATED_BY: &str = "cargo run -p miden-air-source --features tooling --bin air-codegen -- <workspace-root> --write";
 
 /// Protocol version included in the PVM relation digest.
 ///

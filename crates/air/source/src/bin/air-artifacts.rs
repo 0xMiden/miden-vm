@@ -83,17 +83,20 @@ fn run() -> Result<(), String> {
     let statement_context = required_string(&accepted, "statement_context")?;
 
     // These are authored source types. Compiled production evaluators are never capture inputs.
-    let vm_circuit =
-        vm::ace::build_canonical_multi_air_ace_circuit(vm::ace::recursive_verifier_ace_config())
-            .to_ace();
-    let precompile_circuit = precompile::ace::build_canonical_precompile_ace_circuit().to_ace();
+    let vm_circuit = miden_ace::CompiledCircuit::from_circuit(
+        vm::ace::build_canonical_multi_air_ace_circuit(vm::ace::recursive_verifier_ace_config()),
+    );
+    let precompile_circuit = miden_ace::CompiledCircuit::from_circuit(
+        precompile::ace::build_canonical_precompile_ace_circuit(),
+    );
     let circuits = [
         ("vm", "vm.ace", vm_circuit),
         ("precompile", "precompile.ace", precompile_circuit),
     ];
     let mut artifacts = Vec::new();
     let mut members = Vec::new();
-    for (relation, name, encoded) in circuits {
+    for (relation, name, compiled) in circuits {
+        let encoded = compiled.encoded();
         let pins = accepted
             .get("relations")
             .and_then(|relations| relations.get(relation))
@@ -106,7 +109,7 @@ fn run() -> Result<(), String> {
         let configuration = required_string(pins, "configuration")?;
         let accepted_circuit = required_digest(pins, "accepted_circuit_digest")?;
         let accepted_relation = required_digest(pins, "accepted_relation_digest")?;
-        let candidate_digest = encoded.circuit_hash();
+        let candidate_digest = compiled.commitment();
         let candidate: Vec<u64> =
             candidate_digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
         if candidate != accepted_circuit {
@@ -128,7 +131,7 @@ fn run() -> Result<(), String> {
         // Validate the transport independently before delivering a compiler-produced artifact.
         let decoded = miden_ace::EncodedCircuit::from_canonical_bytes(&bytes)
             .map_err(|error| format!("{name} canonical transport: {error}"))?;
-        if decoded != encoded {
+        if &decoded != encoded {
             return Err(format!("{name}: canonical artifact round trip changed the stream"));
         }
         let sha256: String =

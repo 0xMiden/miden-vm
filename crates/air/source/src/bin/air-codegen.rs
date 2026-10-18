@@ -19,12 +19,11 @@ fn run() -> Result<(), String> {
             other => return Err(format!("unknown option: {other}")),
         }
     }
-    codegen::run(&workspace, mode)?;
     if derive_setup {
         constraints::check_setup(&workspace)?;
         precompile::check_setup(&workspace)?;
     }
-    Ok(())
+    codegen::run(&workspace, mode)
 }
 
 fn main() -> ExitCode {

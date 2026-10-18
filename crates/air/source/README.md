@@ -2,7 +2,7 @@
 
 Authored VM and precompile AIR equations, stable trace schemas, statement binding, fixed data,
 and auxiliary-trace kernels. Ordinary relation types are `vm::Air` / `vm::MultiAir` and
-`precompile::Air` / `precompile::MultiAir`. `tooling` adds AIR capture and ACE generation; it never
+`precompile::Air` / `precompile::MultiAir`. `tooling` adds AIR capture, ACE generation, and Askama-based MASM rendering; it never
 changes constraint evaluation. Production optimized evaluators and staged artifacts live in
 `miden-air`.
 
@@ -12,3 +12,21 @@ canonical const shape/security wrappers live in production `miden-air`. Raw sour
 accessors and default symbolic degrees remain independent of generated tables. Source tooling
 captures counts/degrees and emits the small production metadata tables as well as the existing
 artifacts. Memory models remain here for processor consumers.
+
+Verifier templates live in `templates/verifier`; typed compilation adapters and pure rendering live
+in `src/codegen`. `air-codegen <workspace-root> --check` checks complete committed projections;
+`--write` updates managed outputs after validating accepted inputs and protected bodies. It does
+not accept protocol pins. Core-lib assembles the tracked MASM during its normal build.
+
+The compiler adapters derive rendering metadata from ACE's compiler-only `CompiledCircuit`,
+which retains the encoding, originating READ layout and cached commitment together. Code-owned
+ACE builders, compiler adapters and rendering/planning return values directly and panic on
+invariant violations. Destination and accepted-input validation retain their fallible contracts. New authored
+PVM glue shapes use release assertions. Typed plans/templates derive canonical height rules,
+one-per-AIR boundary slots, fixed message pushes, statement counts and transcript remainders;
+VM custom claim observation remains separate. The generated PVM aux/public hooks stay tracked
+in core-lib and are included in full-source freshness checks. Ordinary
+production builds continue to decode the precompiled canonical ACE artifacts.
+
+See the workspace [MASM generation guide](../../../docs/masm-verifier-generation.md) for ownership,
+the clean-room migration, compatibility checks, and protected-file policy.

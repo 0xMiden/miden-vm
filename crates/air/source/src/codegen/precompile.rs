@@ -1,82 +1,90 @@
 //! Source-owned PVM ACE constants, layout, and MASM generation.
 //!
-//! Rendering consumes authored AIR and explicit setup input plus shipped package-local templates.
+//! Compilation adapts authored AIR and explicit setup inputs; pure rendering consumes compiled
+//! metadata plus packaged engine templates.
 //! `run` defaults to checking the caller's checkout; ordinary writes update generated projections
 //! while retaining accepted pins. Fresh setup derivation and deliberate pin acceptance are separate
 //! operations. Byte comparisons complement independent numeric pin/shape checks and downstream
 //! native/MASM layout and protocol oracles.
 
 use std::{
-    fmt::Write as _,
-    format, io,
+    format,
     path::Path,
-    println,
     string::{String, ToString},
-    vec::Vec,
 };
 
-use miden_ace::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
-    render_masm_constraints_eval,
+use miden_ace::{CompiledCircuit, InputKey, InputLayout};
+use miden_core::{Felt, Word, utils::Matrix};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, MultiAir},
+    quotient_recomposition_inputs,
 };
-use miden_core::{Felt, Word, crypto::hash::Eidos};
-use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs};
 
 pub use super::Mode;
-use super::pvm_ood_frames::{
-    OOD_SCATTER_TABLE_FELTS, PvmOodGeometry, PvmScatterTableLayout, pvm_scatter_table_layout,
-    render_pvm_ood_frames,
+use super::{
+    constraints::{
+        self, canonical_word, query_leaf_initial_cvs, render_circuit_metadata,
+        render_quotient_inputs, render_read_layout,
+    },
+    masm_renderer::{
+        self, AirGeometry, ArtifactOwnership, FixedUintInput, HeightRule, PvmAbiAnchors,
+        PvmAirInput, PvmGlueInput, RelationInput, RenderedArtifact, SecurityParameters,
+        V1RenderInput,
+    },
 };
-use crate::precompile::{
-    Air as ChipletAir, NUM_CHIPLETS,
-    ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},
-    security as pvm_security,
-};
+use crate::precompile::{Air as ChipletAir, security as pvm_security};
+
 mod accepted {
     include!("../../templates/pvm-pins.rs");
 }
-pub(crate) use accepted::GENERATED_BY;
 use accepted::{
-    PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT, PVM_RELATION_DIGEST,
-    relation_digest_for_circuit,
+    GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
+    PVM_RELATION_DIGEST, relation_digest_for_circuit,
 };
 
 const CONSTANTS_PATH: &str = "crates/air/generated/src/precompile/ace_constants.rs";
 const PROTOCOL_PATH: &str = "crates/air/generated/src/precompile/protocol.rs";
-const PVM_CONSTRAINTS_EVAL_PATH: &str = "crates/lib/core/asm/sys/pvm/constraints_eval.masm";
+#[cfg(test)]
 const PVM_DEEP_QUERIES_PATH: &str = "crates/lib/core/asm/sys/pvm/deep_queries.masm";
-const PVM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/pvm/layout.masm";
-const PVM_OOD_FRAMES_PATH: &str = "crates/lib/core/asm/sys/pvm/ood_frames.masm";
-const PVM_RELATION_MOD_PATH: &str = "crates/lib/core/asm/sys/pvm/mod.masm";
 
 /// Fixed 4-Ki-felt boundary after the VM relation's reserved ACE stream region. The PVM's complete
 /// READ section starts here; its aux-randomness anchor is later because four public EF inputs
 /// precede it.
-const PVM_READ_START: u32 = 3_225_432_064;
+pub(super) const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
-const NEXT_VM_REGION_START: u32 = 3_238_002_688;
-/// `pos_by_id` is padded to a whole word so the following `id_by_pos` table is word-aligned.
-const PROOF_ORDER_POSITIONS_FELTS: u32 = (NUM_CHIPLETS as u32).next_multiple_of(4);
-
+const NEXT_VM_REGION_START: u32 = constraints::VM_ABI.current_trace_row_ptr;
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    let artifacts =
-        compile_and_render(Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked)))?;
-    match mode {
-        Mode::Check => check(root, &artifacts),
-        Mode::Write => write(root, &artifacts).map_err(|e| format!("{e}")),
-    }
+    // Validate both current relations before delivering any managed projection.
+    super::run(root, mode)
 }
 
-/// Compile/render from explicit accepted setup input, without deriving setup or accepting pins.
-pub fn compile_and_render(commitment: Word) -> Result<GeneratedArtifacts, String> {
-    compute(Some(commitment))
+/// Explicit accepted setup value; supplying it does not derive setup afresh.
+pub fn accepted_setup_commitment() -> Word {
+    Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked))
+}
+
+/// Captured circuit and layout inputs needed by pure MASM rendering.
+#[derive(Clone, Debug)]
+pub struct CompiledVerifierInputs {
+    pub masm: V1RenderInput,
+}
+
+/// Capture authored PVM AIR and adapt its compiled layout with explicit setup input.
+pub fn compile(commitment: Word) -> CompiledVerifierInputs {
+    compile_inputs(Some(commitment))
+}
+
+/// Compatibility orchestration over explicit compilation and pure rendering.
+pub fn compile_and_render(commitment: Word) -> GeneratedArtifacts {
+    render(&compile(commitment))
 }
 
 /// Independently derive source fixed setup and compare the accepted outputs.
 pub fn check_setup(root: &Path) -> Result<(), String> {
-    check(root, &compute(None)?)
+    let artifacts = compute(None);
+    validate_delivery(root, &artifacts)?;
+    super::delivery::deliver(root, &artifacts.files, Mode::Check)
 }
 
 pub struct GeneratedArtifacts {
@@ -93,37 +101,7 @@ pub struct GeneratedArtifacts {
     pub preprocessed_commitment: Word,
     /// Shape of the encoded circuit stream.
     pub shape: CircuitShape,
-    /// Generated PVM relation layout, derived from the ACE `InputLayout`.
-    pub layout_masm: String,
-    /// Generated PVM out-of-domain ingest hook, derived from the chiplet widths.
-    pub ood_frames_masm: String,
-    /// Hand-written DEEP-query implementation with its row-block counts and typed LMCS frames
-    /// updated from the same committed-row widths.
-    pub deep_queries_masm: String,
-    /// Generated PVM constraint evaluator, rendered from the same circuit metadata.
-    pub constraints_eval_masm: String,
-    /// Hand-written relation wrapper with its generated protocol constants updated.
-    pub relation_mod_masm: String,
-    /// Hand-written constants module with its generated values updated.
-    pub constants_rs: String,
-    /// PVM AIR protocol module with the canonical-circuit relation digest updated.
-    pub protocol_rs: String,
-}
-
-#[derive(Clone, Debug)]
-struct PvmReadLayout {
-    regions: Vec<PvmReadRegion>,
-    stream_ptr: u32,
-    query_row_felts: u32,
-    /// Felt offset of chiplet 0's fold-coefficient slot from `AUXILIARY_ACE_INPUTS_PTR`.
-    fold_coefficient_offset: usize,
-}
-
-#[derive(Clone, Debug)]
-struct PvmReadRegion {
-    constant: &'static str,
-    ptr: u32,
-    extent: u32,
+    pub files: std::vec::Vec<RenderedArtifact>,
 }
 
 /// The encoded ACE stream's shape, which an in-VM verifier needs as compile-time constants: how
@@ -135,218 +113,180 @@ pub struct CircuitShape {
     pub stream_len: usize,
 }
 
-impl PvmReadLayout {
-    /// Derive every READ-region boundary from the circuit's own `InputLayout`.
-    fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
-        let boundary_specs = [
-            ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
-            ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
-            ("PREPROCESSED_CURRENT_PTR", InputKey::Preprocessed { offset: 0, index: 0 }),
-            ("MAIN_CURRENT_PTR", InputKey::Main { offset: 0, index: 0 }),
-            ("AUX_CURRENT_PTR", InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
-            (
-                "QUOTIENT_CURRENT_PTR",
-                InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 },
-            ),
-            ("PREPROCESSED_NEXT_PTR", InputKey::Preprocessed { offset: 1, index: 0 }),
-            ("MAIN_NEXT_PTR", InputKey::Main { offset: 1, index: 0 }),
-            ("AUX_NEXT_PTR", InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }),
-            (
-                "QUOTIENT_NEXT_PTR",
-                InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 },
-            ),
-            ("AUX_BUS_BOUNDARY_PTR", InputKey::AuxBusBoundary(0)),
-            ("AUXILIARY_ACE_INPUTS_PTR", InputKey::Alpha),
-        ];
+/// Build candidates and render them without accepting new protocol values.
+fn compute(supplied_commitment: Option<Word>) -> GeneratedArtifacts {
+    render(&compile_inputs(supplied_commitment))
+}
 
-        let mut boundaries = Vec::with_capacity(boundary_specs.len() + 1);
-        for &(constant, key) in &boundary_specs {
-            let index = layout.index(key).ok_or_else(|| {
-                format!("PVM ACE layout is missing boundary {constant} ({key:?})")
-            })?;
-            let felt_offset = u32::try_from(index.checked_mul(2).ok_or_else(|| {
-                format!("PVM ACE layout boundary {constant} overflows its felt offset")
-            })?)
-            .map_err(|_| format!("PVM ACE layout boundary {constant} exceeds u32 memory"))?;
-            let ptr = PVM_READ_START
-                .checked_add(felt_offset)
-                .ok_or_else(|| format!("PVM ACE layout boundary {constant} overflows u32"))?;
-            boundaries.push((constant, ptr));
-        }
-
-        if boundaries.first().map(|(_, ptr)| *ptr) != Some(PVM_READ_START) {
-            return Err("PVM public inputs must begin at the complete READ-section anchor".into());
-        }
-        if boundaries.windows(2).any(|pair| pair[0].1 >= pair[1].1) {
-            return Err("PVM ACE READ-region boundaries are not strictly increasing".into());
-        }
-
-        let read_extent = u32::try_from(
-            layout
-                .total_inputs
-                .checked_mul(2)
-                .ok_or_else(|| "PVM ACE READ extent overflows usize".to_string())?,
-        )
-        .map_err(|_| "PVM ACE READ extent exceeds u32 memory".to_string())?;
-        let stream_ptr = PVM_READ_START
-            .checked_add(read_extent)
-            .ok_or_else(|| "PVM ACE stream pointer overflows u32".to_string())?;
-        boundaries.push(("ACE_CIRCUIT_STREAM_PTR", stream_ptr));
-
-        // The staged fold coefficients live at the end of the auxiliary-input region; a region
-        // that ended before them would silently overwrite the ACE stream reservation.
-        let fold_coefficients_end =
-            layout.index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1)).ok_or_else(|| {
-                "PVM ACE layout is missing its last fold-coefficient slot".to_string()
-            })? + 1;
-        if fold_coefficients_end > layout.total_inputs {
-            return Err("PVM fold coefficients fall outside the declared READ section".into());
-        }
-        let alpha_index = layout
-            .index(InputKey::Alpha)
-            .ok_or_else(|| "PVM ACE layout is missing its stark-vars base".to_string())?;
-        let first_fold_coefficient =
-            layout.index(InputKey::MultiAirFoldCoeff(0)).ok_or_else(|| {
-                "PVM ACE layout is missing its first fold-coefficient slot".to_string()
-            })?;
-        let fold_coefficient_offset = first_fold_coefficient
-            .checked_sub(alpha_index)
-            .ok_or_else(|| "PVM fold coefficients precede the stark-vars base".to_string())?
-            .checked_mul(EXT_DEGREE)
-            .ok_or_else(|| "PVM fold-coefficient felt offset overflows usize".to_string())?;
-
-        let regions = boundaries
-            .windows(2)
-            .map(|pair| PvmReadRegion {
-                constant: pair[0].0,
-                ptr: pair[0].1,
-                extent: pair[1].1 - pair[0].1,
-            })
-            .collect();
-
-        let current_row_start = layout
-            .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the current-row start".to_string())?;
-        let next_row_start = layout
-            .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the next-row start".to_string())?;
-        let query_row_felts = u32::try_from(
-            next_row_start
-                .checked_sub(current_row_start)
-                .ok_or_else(|| "PVM next-row boundary precedes the current row".to_string())?,
-        )
-        .map_err(|_| "PVM query row exceeds u32 memory".to_string())?;
-
-        Ok(Self {
-            regions,
-            stream_ptr,
-            query_row_felts,
-            fold_coefficient_offset,
-        })
+fn compile_inputs(supplied_commitment: Option<Word>) -> CompiledVerifierInputs {
+    let circuit = CompiledCircuit::from_circuit(
+        crate::precompile::ace::build_canonical_precompile_ace_circuit(),
+    );
+    let layout = circuit.layout();
+    let quotient_chunks = layout.counts.num_quotient_chunks;
+    assert!(
+        quotient_chunks.is_power_of_two(),
+        "PVM quotient chunk count {quotient_chunks} is not a power of two"
+    );
+    let quotient = quotient_recomposition_inputs::<Felt>(
+        quotient_chunks.ilog2() as u8,
+        crate::precompile::stark_config::precompile_pcs_params().log_blowup(),
+    )
+    .expect("compile_inputs requires valid authored compiler inputs");
+    let relation_digest = relation_digest_for_circuit(&circuit.commitment());
+    let preprocessed_commitment =
+        supplied_commitment.unwrap_or_else(|| derive_setup_commitment(relation_digest));
+    let geometry =
+        AirGeometry::from_airs(crate::precompile::MultiAir::new().airs(), quotient_chunks);
+    let air_shape = pvm_security::derive_air_shape();
+    let lookup = air_shape.lookup.expect("the relation uses lookup");
+    CompiledVerifierInputs {
+        masm: V1RenderInput {
+            relation: RelationInput::Pvm {
+                abi: PvmAbiAnchors {
+                    read_base: PVM_READ_START,
+                    scatter_reserve_felts: 96,
+                    next_region_start: NEXT_VM_REGION_START,
+                },
+                glue: compile_glue(layout),
+            },
+            circuit: render_circuit_metadata(&circuit, max_periodic_cycle_len_log()),
+            query_leaf_initial_cvs: query_leaf_initial_cvs(&geometry),
+            geometry,
+            counts: layout.counts,
+            read_layout: render_read_layout(layout),
+            quotient: render_quotient_inputs(quotient),
+            relation_digest: relation_digest.map(|felt| felt.as_canonical_u64()),
+            preprocessed_commitment: canonical_word(preprocessed_commitment),
+            security: SecurityParameters {
+                lookup_pow_bits: pvm_security::LOOKUP_POW_BITS,
+                max_message_width: lookup.max_message_width,
+                num_composed_constraints: air_shape.num_composed_constraints,
+                max_constraint_degree: air_shape.max_constraint_degree,
+                num_deep_terms: air_shape
+                    .num_deep_terms
+                    .expect("PVM AIR must use DEEP composition"),
+                lookup_fractions_per_row: lookup.fractions_per_row,
+                boundary_lookup_terms: pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS,
+            },
+            shared_abi: constraints::SHARED_ABI,
+            regeneration_command: GENERATED_BY.into(),
+        },
     }
 }
 
-/// Build the canonical circuit and derive every generated artifact from it.
-fn compute(supplied_commitment: Option<Word>) -> Result<GeneratedArtifacts, String> {
-    let source = build_canonical_precompile_ace_circuit();
-    let input_layout = source.layout();
-    let circuit = PvmRecursiveAceCircuit::from(source.to_ace());
-    let read_layout = PvmReadLayout::from_input_layout(input_layout)?;
-    let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(format!(
-            "PVM quotient chunk count {num_quotient_chunks} is not a power of two"
-        ));
-    }
-    let quotient_inputs = quotient_recomposition_inputs::<Felt>(
-        num_quotient_chunks.ilog2() as u8,
-        crate::precompile::stark_config::precompile_pcs_params().log_blowup(),
-    )
-    .map_err(|err| err.to_string())?;
-
-    let shape = CircuitShape {
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_len: circuit.stream_len,
+/// Adapt authored declarations and the originating ACE layout, never production metadata tables.
+fn compile_glue(layout: &InputLayout) -> PvmGlueInput {
+    use crate::precompile::{
+        fixed,
+        relations::{BusId, MAX_MESSAGE_WIDTH},
     };
-    let circuit_digest = circuit.commitment;
-    let relation_digest = relation_digest_for_circuit(&circuit_digest);
-    let preprocessed_commitment =
-        supplied_commitment.unwrap_or_else(|| derive_setup_commitment(relation_digest));
-
-    let geometry = PvmOodGeometry::from_input_layout(input_layout)?;
-    let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
-    let layout_masm = render_pvm_layout(&read_layout, shape.stream_len, &scatter_table_layout)?;
-    let stream_len = u32::try_from(shape.stream_len)
-        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
-    let scratch = pvm_scratch_allocation(&read_layout, stream_len)?;
-    let ood_frames_masm =
-        render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))?;
-    let deep_queries_masm = render_pvm_deep_queries(&geometry)?;
-    let constraints_eval_masm = render_pvm_constraints_eval(
-        shape,
-        circuit_digest,
-        quotient_inputs,
-        read_layout.fold_coefficient_offset,
-    )?;
-
-    let mut relation_mod_masm = read_template(PVM_RELATION_MOD_PATH)?;
-    for (prefix, word) in [
-        ("RELATION_DIGEST", Word::new(relation_digest)),
-        ("PREPROCESSED_COMMITMENT", preprocessed_commitment),
-    ] {
-        for (index, felt) in word.iter().enumerate() {
-            replace_masm_const(
-                &mut relation_mod_masm,
-                &format!("{prefix}_{index}"),
-                felt.as_canonical_u64(),
-                PVM_RELATION_MOD_PATH,
-            )?;
-        }
+    let relation = crate::precompile::MultiAir::new();
+    let airs = relation
+        .airs()
+        .iter()
+        .enumerate()
+        .map(|(id, air)| {
+            let rows = air
+                .max_periodic_length()
+                .max(2)
+                .max(air.preprocessed_trace().map(|trace| trace.height()).unwrap_or(0));
+            assert!(rows.is_power_of_two(), "PVM minimum height must be a power of two");
+            let height = match air.fixed_log_height() {
+                Some(log) => {
+                    assert_eq!(log, rows.ilog2(), "fixed height must match authored trace");
+                    HeightRule::Fixed(log)
+                },
+                None => HeightRule::Minimum(rows.ilog2()),
+            };
+            assert_eq!(air.num_aux_values(), 1, "PVM glue requires one boundary value per AIR");
+            PvmAirInput {
+                height,
+                boundary_slot: layout
+                    .index(InputKey::AuxBusBoundary(id))
+                    .expect("PVM ACE must contain each boundary slot"),
+            }
+        })
+        .collect();
+    let uints = fixed::fixed_uintval_msgs()
+        .map(|msg| FixedUintInput {
+            ptr: u32::try_from(msg.ptr.as_canonical_u64()).expect("fixed pointer fits u32"),
+            bound_ptr: u32::try_from(msg.bound_ptr.as_canonical_u64())
+                .expect("fixed pointer fits u32"),
+            limbs: msg
+                .limbs
+                .map(|limb| u32::try_from(limb.as_canonical_u64()).expect("32-bit limb")),
+        })
+        .collect();
+    let groups = fixed::fixed_ecgroup_msgs()
+        .map(|msg| {
+            [
+                msg.group_ptr,
+                msg.a_ptr,
+                msg.b_ptr,
+                msg.bound_ptr,
+                msg.scalar_bound_ptr,
+                msg.beta_ptr,
+                msg.lambda_ptr,
+            ]
+            .map(|felt| u32::try_from(felt.as_canonical_u64()).expect("fixed pointer fits u32"))
+        })
+        .collect();
+    PvmGlueInput {
+        airs,
+        num_public_values: relation.num_air_inputs(),
+        max_aux_inputs: relation.max_aux_inputs(),
+        num_aux_inputs: 0,
+        uints,
+        groups,
+        uint_bus_scale: BusId::UintVal as u32 + 1,
+        ec_bus_scale: BusId::EcGroup as u32 + 1,
+        max_message_width: MAX_MESSAGE_WIDTH,
     }
-    let air_shape = pvm_security::derive_air_shape();
-    let lookup = air_shape.lookup.expect("the relation uses lookup");
-    for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(lookup.max_message_width)),
-        ("NUM_COMPOSED_CONSTRAINTS", u64::from(air_shape.num_composed_constraints)),
-        ("MAX_CONSTRAINT_DEGREE", u64::from(air_shape.max_constraint_degree)),
-        (
-            "NUM_DEEP_TERMS",
-            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
-        ),
-        ("LOOKUP_FRACTIONS_PER_ROW", u64::from(lookup.fractions_per_row)),
-        (
-            "FIXED_BOUNDARY_LOOKUP_TERMS",
-            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        ),
-    ] {
-        replace_masm_const(&mut relation_mod_masm, name, value, PVM_RELATION_MOD_PATH)?;
-    }
+}
 
-    let mut constants_rs = read_template(CONSTANTS_PATH)?;
+/// Pure rendering of compiled metadata; no AIR capture, setup, acceptance or destination I/O.
+pub fn render(compiled: &CompiledVerifierInputs) -> GeneratedArtifacts {
+    render_prepared(&masm_renderer::prepare_v1(compiled.masm.clone()))
+}
+
+pub(super) fn render_prepared(plan: &masm_renderer::V1RenderPlan) -> GeneratedArtifacts {
+    let input = &plan.input;
+    let mut files = masm_renderer::render_v1(plan);
+    let circuit_digest = Word::new(input.circuit.digest.map(Felt::new_unchecked));
+    let relation_digest = input.relation_digest.map(Felt::new_unchecked);
+    let preprocessed_commitment = Word::new(input.preprocessed_commitment.map(Felt::new_unchecked));
+    let shape = CircuitShape {
+        num_inputs: input.circuit.encoded_read_count as usize,
+        num_eval_gates: input.circuit.eval_gate_count as usize,
+        stream_len: input.circuit.stream_felts as usize,
+    };
+    let mut constants_rs = include_str!("../../templates/pvm-constants.rs").to_string();
     for (name, word) in [
         ("PVM_RELATION_DIGEST", Word::new(relation_digest)),
         ("PVM_ACE_CIRCUIT_DIGEST", circuit_digest),
         ("PVM_PREPROCESSED_COMMITMENT", preprocessed_commitment),
     ] {
-        replace_limb_array_const(&mut constants_rs, name, &word)?;
+        replace_limb_array_const(&mut constants_rs, name, &word);
     }
-    replace_shape_const(&mut constants_rs, shape)?;
-    let protocol_rs = render_protocol(&relation_digest);
-
-    Ok(GeneratedArtifacts {
+    replace_shape_const(&mut constants_rs, shape);
+    for (path, body) in [
+        (CONSTANTS_PATH, constants_rs),
+        (PROTOCOL_PATH, render_protocol(&relation_digest)),
+    ] {
+        files.push(RenderedArtifact {
+            relative_path: path.into(),
+            body,
+            ownership: ArtifactOwnership::ProtectedCheckOnly,
+        });
+    }
+    GeneratedArtifacts {
         circuit_digest,
         relation_digest,
         preprocessed_commitment,
         shape,
-        layout_masm,
-        ood_frames_masm,
-        deep_queries_masm,
-        constraints_eval_masm,
-        relation_mod_masm,
-        constants_rs,
-        protocol_rs,
-    })
+        files,
+    }
 }
 
 /// Commitment to the setup (preprocessed) trace tree under the Eidos config.
@@ -375,315 +315,28 @@ pub fn derive_setup_commitment(digest: [Felt; 4]) -> Word {
     Word::new(commitment.map(Felt::new_unchecked))
 }
 
-/// Relation-local scratch that follows the ACE READ section, in allocation order.
-struct PvmScratchAllocation {
-    stream_end: u32,
-    bus_gamma_ptr: u32,
-    c_total_ptr: u32,
-    current_trace_row_ptr: u32,
-    preprocessed_com_ptr: u32,
-    ood_scatter_table_ptr: u32,
-    proof_order_positions_ptr: u32,
-    proof_order_ids_ptr: u32,
-    allocation_end: u32,
-}
-
-/// Lays out the scratch regions after a `stream_len`-felt circuit stream, checking every
-/// alignment their MASM consumers rely on.
-fn pvm_scratch_allocation(
-    layout: &PvmReadLayout,
-    stream_len: u32,
-) -> Result<PvmScratchAllocation, String> {
-    let stream_end = layout
-        .stream_ptr
-        .checked_add(stream_len)
-        .ok_or_else(|| "PVM ACE stream allocation overflows u32".to_string())?;
-    let bus_gamma_ptr = stream_end;
-    let c_total_ptr = bus_gamma_ptr
-        .checked_add(4)
-        .ok_or_else(|| "PVM bus-gamma allocation overflows u32".to_string())?;
-    let current_trace_row_ptr = c_total_ptr
-        .checked_add(4)
-        .ok_or_else(|| "PVM boundary-correction allocation overflows u32".to_string())?;
-    if !current_trace_row_ptr.is_multiple_of(8) {
-        return Err(format!(
-            "PVM current-trace-row base {current_trace_row_ptr} is not 8-felt aligned, which \
-             `adv_pipe` requires"
-        ));
-    }
-    let preprocessed_com_ptr = current_trace_row_ptr
-        .checked_add(layout.query_row_felts)
-        .ok_or_else(|| "PVM current-row allocation overflows u32".to_string())?;
-    let ood_scatter_table_ptr = preprocessed_com_ptr
-        .checked_add(4)
-        .ok_or_else(|| "PVM preprocessed-commitment allocation overflows u32".to_string())?;
-    if !ood_scatter_table_ptr.is_multiple_of(4) {
-        return Err(format!(
-            "PVM out-of-domain scatter table base {ood_scatter_table_ptr} is not 4-felt \
-             (word) aligned, which its `mem_storew_le`/`dynexec` entries require"
-        ));
-    }
-    let proof_order_positions_ptr = ood_scatter_table_ptr
-        .checked_add(OOD_SCATTER_TABLE_FELTS)
-        .ok_or_else(|| "PVM out-of-domain scatter table overflows u32".to_string())?;
-    // The ten live `pos_by_id` cells are padded to a whole word so that `id_by_pos`, which the
-    // proof-order pass writes with word stores, starts word-aligned.
-    let proof_order_ids_ptr = proof_order_positions_ptr
-        .checked_add(PROOF_ORDER_POSITIONS_FELTS)
-        .ok_or_else(|| "PVM proof-order position table overflows u32".to_string())?;
-    let allocation_end = proof_order_ids_ptr
-        .checked_add(NUM_CHIPLETS as u32)
-        .ok_or_else(|| "PVM proof-order id table overflows u32".to_string())?;
-    if allocation_end > NEXT_VM_REGION_START {
-        return Err(format!(
-            "PVM ACE allocation {PVM_READ_START}..{allocation_end} reaches the VM scratch region starting at {NEXT_VM_REGION_START}"
-        ));
-    }
-
-    Ok(PvmScratchAllocation {
-        stream_end,
-        bus_gamma_ptr,
-        c_total_ptr,
-        current_trace_row_ptr,
-        preprocessed_com_ptr,
-        ood_scatter_table_ptr,
-        proof_order_positions_ptr,
-        proof_order_ids_ptr,
-        allocation_end,
-    })
-}
-
-fn render_pvm_layout(
-    layout: &PvmReadLayout,
-    stream_len: usize,
-    scatter_table: &PvmScatterTableLayout,
-) -> Result<String, String> {
-    let stream_len = u32::try_from(stream_len)
-        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
-    let PvmScratchAllocation {
-        stream_end,
-        bus_gamma_ptr,
-        c_total_ptr,
-        current_trace_row_ptr,
-        preprocessed_com_ptr,
-        ood_scatter_table_ptr,
-        proof_order_positions_ptr,
-        proof_order_ids_ptr,
-        allocation_end,
-    } = pvm_scratch_allocation(layout, stream_len)?;
-    let proof_order_padding = PROOF_ORDER_POSITIONS_FELTS - NUM_CHIPLETS as u32;
-    let proof_order_liveness = if proof_order_padding == 0 {
-        format!("All {NUM_CHIPLETS} cells are live.")
-    } else {
-        format!(
-            "The first {NUM_CHIPLETS} cells are live and the final {proof_order_padding} pad the\n\
-             ### following table to a word boundary."
-        )
-    };
-    let pair_end = scatter_table
-        .proof_order_pairs
-        .end
-        .checked_sub(1)
-        .filter(|end| *end >= scatter_table.proof_order_pairs.start)
-        .ok_or_else(|| "PVM scatter-table pair range is empty".to_string())?;
-    let digest_end = scatter_table
-        .pipe_digests
-        .end
-        .checked_sub(1)
-        .filter(|end| *end >= scatter_table.pipe_digests.start)
-        .ok_or_else(|| "PVM scatter-table digest range is empty".to_string())?;
-
-    let mut out = String::new();
-    writeln!(out, "# GENERATED by `{GENERATED_BY}` — do not edit by hand.")
-        .expect("writing to String cannot fail");
-    out.push_str("### PVM relation memory layout.\n");
-    out.push_str("###\n");
-    out.push_str("### The ACE READ section is one dense vector of quadratic-extension inputs.\n");
-    out.push_str("### Every boundary below is derived from the PVM circuit's InputLayout; each\n");
-    writeln!(
-        out,
-        "### input occupies two base-field felts. The complete allocation, including relation-local\n### scratch after the stream, is the half-open range {PVM_READ_START}..{allocation_end}."
-    )
-    .expect("writing to String cannot fail");
-    out.push_str("### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()\n");
-    out.push_str(
-        "### order; the PVM wrapper supplies the relation count and that shared base.\n\n",
-    );
-    out.push_str("use miden::core::stark::types\n\n");
-
-    for region in &layout.regions {
-        writeln!(
-            out,
-            "### {} felts: {}..{}.\nconst {} = {}\n",
-            region.extent,
-            region.ptr,
-            region.ptr + region.extent,
-            region.constant,
-            region.ptr
-        )
-        .expect("writing to String cannot fail");
-    }
-    writeln!(
-        out,
-        "### {stream_len} felts: {}..{stream_end}.\nconst ACE_CIRCUIT_STREAM_PTR = {}\n",
-        layout.stream_ptr, layout.stream_ptr
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {bus_gamma_ptr}..{c_total_ptr}. Stores gamma = beta^18.\nconst BUS_GAMMA_PTR = {bus_gamma_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {c_total_ptr}..{current_trace_row_ptr}. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.\nconst C_TOTAL_PTR = {c_total_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {} felts: {current_trace_row_ptr}..{preprocessed_com_ptr}. Stores one opened query row in commitment-group order.\nconst CURRENT_TRACE_ROW_PTR = {current_trace_row_ptr}\n",
-        layout.query_row_felts
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {preprocessed_com_ptr}..{ood_scatter_table_ptr}. Stores the trusted preprocessed-tree commitment for DEEP openings.\nconst PREPROCESSED_COM_PTR = {preprocessed_com_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {OOD_SCATTER_TABLE_FELTS} felts: {ood_scatter_table_ptr}..{proof_order_positions_ptr}. Out-of-domain ingest scatter table:\n\
-         ###\n\
-         ###   +0            base address of the out-of-domain row being ingested\n\
-         ###   +{pair_start:<3}.. +{pair_end:<6}per proof position, in stream order: (row-relative destination, digest address)\n\
-         ###   +{digest_start:<3}.. +{digest_end:<6}`pipe_k` procedure digests reached by `dynexec`, one word each\n\
-         ###\n\
-         ### The internal offsets and the reserve's sufficiency are owned by the regeneration tool,\n\
-         ### which derives them from the chiplet widths and fills `sys/pvm/ood_frames.masm`\n\
-         ### accordingly.\nconst OOD_SCATTER_TABLE_PTR = {ood_scatter_table_ptr}\n",
-        pair_start = scatter_table.proof_order_pairs.start,
-        digest_start = scatter_table.pipe_digests.start,
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each\n\
-         ### chiplet, in ChipletAir::all() order, within the height-sorted proof order.\n\
-         ### {proof_order_liveness}\n\
-         ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both\n\
-         ### ingest scatters.\nconst PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {NUM_CHIPLETS} felts: {proof_order_ids_ptr}..{allocation_end}. `id_by_pos`: the\n\
-         ### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;\n\
-         ### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.\n\
-         const PROOF_ORDER_IDS_PTR = {proof_order_ids_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-
-    for (accessor, constant) in [
-        ("public_inputs_ptr", "PUBLIC_INPUTS_PTR"),
-        ("aux_rand_elem_ptr", "AUX_RAND_ELEM_PTR"),
-        ("preprocessed_current_ptr", "PREPROCESSED_CURRENT_PTR"),
-        ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR"),
-        ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR"),
-    ] {
-        writeln!(out, "pub proc {accessor}() -> types::Address\n    push.{constant}\nend\n")
-            .expect("writing to String cannot fail");
-    }
-    out.push_str("pub proc ace_circuit_stream_ptr() -> types::Address\n    push.ACE_CIRCUIT_STREAM_PTR\nend\n");
-    out.push_str("\npub proc bus_gamma_ptr() -> types::Address\n    push.BUS_GAMMA_PTR\nend\n");
-    out.push_str("\npub proc c_total_ptr() -> types::Address\n    push.C_TOTAL_PTR\nend\n");
-    out.push_str("\npub proc current_trace_row_ptr() -> types::Address\n    push.CURRENT_TRACE_ROW_PTR\nend\n");
-    out.push_str(
-        "\npub proc preprocessed_com_ptr() -> types::Address\n    push.PREPROCESSED_COM_PTR\nend\n",
-    );
-    out.push_str("\npub proc ood_scatter_table_ptr() -> types::Address\n    push.OOD_SCATTER_TABLE_PTR\nend\n");
-    out.push_str("\npub proc proof_order_positions_ptr() -> types::Address\n    push.PROOF_ORDER_POSITIONS_PTR\nend\n");
-    out.push_str(
-        "\npub proc proof_order_ids_ptr() -> types::Address\n    push.PROOF_ORDER_IDS_PTR\nend\n",
-    );
-
-    Ok(out)
-}
-
-fn render_pvm_constraints_eval(
-    shape: CircuitShape,
-    circuit_digest: Word,
-    quotient_inputs: QuotientRecompositionInputs<Felt>,
-    fold_coefficient_offset: usize,
-) -> Result<String, String> {
-    let max_cycle_len_log = max_periodic_cycle_len_log()?;
-    render_masm_constraints_eval(&MasmConstraintsEvalConfig {
-        generated_by: GENERATED_BY,
-        layout_module: "miden::core::sys::pvm::layout",
-        num_inputs: shape.num_inputs,
-        num_eval_gates: shape.num_eval_gates,
-        stream_len: shape.stream_len,
-        max_cycle_len_log,
-        num_airs: NUM_CHIPLETS,
-        fold_coefficients: FoldCoefficientStaging {
-            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-            coefficient_offset: fold_coefficient_offset,
-        },
-        quotient_inputs,
-        circuit_digest,
-    })
-    .map_err(|err| err.to_string())
-}
-
-fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> {
-    let mut deep_queries = read_template(PVM_DEEP_QUERIES_PATH)?;
-    apply_pvm_deep_query_geometry(&mut deep_queries, geometry)?;
-    Ok(deep_queries)
-}
-
-fn apply_pvm_deep_query_geometry(
-    deep_queries: &mut String,
-    geometry: &PvmOodGeometry,
-) -> Result<(), String> {
-    for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
-        if !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
-            return Err(format!(
-                "PVM {blocks_name} width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
-            ));
-        }
-        replace_masm_const(
-            deep_queries,
-            blocks_name,
-            width / EIDOS_BLOCK_WIDTH,
-            PVM_DEEP_QUERIES_PATH,
-        )?;
-
-        let encoded_len = u32::try_from(width)
-            .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
-        let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
-        replace_masm_const(
-            deep_queries,
-            init_cv_name,
-            masm_word_literal(init_cv),
-            PVM_DEEP_QUERIES_PATH,
-        )?;
-    }
-    Ok(())
-}
-
-fn max_periodic_cycle_len_log() -> Result<u32, String> {
+fn max_periodic_cycle_len_log() -> u32 {
     let max_len = ChipletAir::all()
         .iter()
         .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
         .map(|column| column.len())
         .max()
         .unwrap_or(1);
-    if !max_len.is_power_of_two() {
-        return Err("maximum PVM AIR periodic cycle length is not a power of two".into());
-    }
-    Ok(max_len.ilog2())
+    assert!(
+        max_len.is_power_of_two(),
+        "maximum PVM AIR periodic cycle length is not a power of two"
+    );
+    max_len.ilog2()
 }
 
-fn check(root: &Path, artifacts: &GeneratedArtifacts) -> Result<(), String> {
+/// Validate accepted inputs and protected projections before any managed output write.
+pub(super) fn validate_delivery(root: &Path, artifacts: &GeneratedArtifacts) -> Result<(), String> {
+    super::accepted::load(root)?.check(
+        "precompile",
+        canonical_word(artifacts.circuit_digest),
+        artifacts.relation_digest.map(|felt| felt.as_canonical_u64()),
+    )?;
+    constraints::validate_shared_abi(root)?;
     for (name, actual, expected) in [
         ("PVM_RELATION_DIGEST", PVM_RELATION_DIGEST, artifacts.relation_digest),
         ("PVM_ACE_CIRCUIT_DIGEST", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
@@ -694,7 +347,7 @@ fn check(root: &Path, artifacts: &GeneratedArtifacts) -> Result<(), String> {
         ),
     ] {
         if actual.map(Felt::new_unchecked) != expected {
-            return Err(format!("{name} in {CONSTANTS_PATH} is stale"));
+            return Err(format!("{name} differs from explicit accepted source inputs"));
         }
     }
     if PVM_CIRCUIT_SHAPE
@@ -704,94 +357,9 @@ fn check(root: &Path, artifacts: &GeneratedArtifacts) -> Result<(), String> {
             artifacts.shape.stream_len,
         )
     {
-        return Err(format!("PVM_CIRCUIT_SHAPE in {CONSTANTS_PATH} is stale"));
+        return Err("PVM_CIRCUIT_SHAPE differs from accepted source inputs".into());
     }
-
-    for (path, rendered) in [
-        (CONSTANTS_PATH, &artifacts.constants_rs),
-        (PROTOCOL_PATH, &artifacts.protocol_rs),
-        (PVM_LAYOUT_PATH, &artifacts.layout_masm),
-        (PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm),
-        (PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm),
-        (PVM_CONSTRAINTS_EVAL_PATH, &artifacts.constraints_eval_masm),
-        (PVM_RELATION_MOD_PATH, &artifacts.relation_mod_masm),
-    ] {
-        if read_generated_file(root, path)? != *rendered {
-            return Err(format!("{path} is stale; run `make regenerate-pvm-constants`"));
-        }
-    }
-    println!("PVM ACE constants and MASM artifacts are up to date");
-    Ok(())
-}
-
-fn write(root: &Path, artifacts: &GeneratedArtifacts) -> io::Result<()> {
-    write_generated_file(root, PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
-    write_generated_file(root, PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm)?;
-    write_generated_file(root, PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;
-    write_generated_file(root, PVM_CONSTRAINTS_EVAL_PATH, &artifacts.constraints_eval_masm)?;
-    Ok(())
-}
-
-fn read_template(path: &str) -> Result<String, String> {
-    match path {
-        CONSTANTS_PATH => Ok(include_str!("../../templates/pvm-constants.rs").to_string()),
-        PVM_RELATION_MOD_PATH => {
-            Ok(include_str!("../../templates/asm/sys/pvm/mod.masm").to_string())
-        },
-        PVM_DEEP_QUERIES_PATH => {
-            Ok(include_str!("../../templates/asm/sys/pvm/deep_queries.masm").to_string())
-        },
-        other => Err(format!("unknown PVM packaged template {other}")),
-    }
-}
-fn read_generated_file(root: &Path, relative: &str) -> Result<String, String> {
-    let path = root.join(relative);
-    std::fs::read_to_string(&path)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))
-}
-fn write_generated_file(root: &Path, relative: &str, contents: &str) -> io::Result<()> {
-    let path = root.join(relative);
-    std::fs::write(&path, contents).map_err(|err| {
-        io::Error::new(err.kind(), format!("failed to write {}: {err}", path.display()))
-    })?;
-    println!("wrote {}", path.display());
-    Ok(())
-}
-
-fn replace_masm_const(
-    content: &mut String,
-    name: &str,
-    value: impl core::fmt::Display,
-    path: &str,
-) -> Result<(), String> {
-    let prefix = format!("const {name} = ");
-    let mut declarations = content
-        .match_indices(&prefix)
-        .filter(|(start, _)| *start == 0 || content.as_bytes()[start - 1] == b'\n');
-    let line_start = declarations
-        .next()
-        .map(|(start, _)| start)
-        .ok_or_else(|| format!("{name} not found in {path}"))?;
-    if declarations.next().is_some() {
-        return Err(format!("{name} is declared more than once in {path}"));
-    }
-    let line_end = content[line_start..]
-        .find('\n')
-        .map(|offset| line_start + offset)
-        .unwrap_or(content.len());
-    content.replace_range(line_start..line_end, &format!("{prefix}{value}"));
-    Ok(())
-}
-
-fn masm_word_literal(word: Word) -> String {
-    let elements = word.as_elements();
-    format!(
-        "[{}, {}, {}, {}]",
-        elements[0].as_canonical_u64(),
-        elements[1].as_canonical_u64(),
-        elements[2].as_canonical_u64(),
-        elements[3].as_canonical_u64(),
-    )
+    super::delivery::validate_protected(root, &artifacts.files)
 }
 
 fn render_protocol(relation_digest: &[Felt; 4]) -> String {
@@ -802,15 +370,15 @@ fn render_protocol(relation_digest: &[Felt; 4]) -> String {
     format!(
         "/// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.\n\
          ///\n\
-         /// Regenerated by `pvm-constants-regen`; must match `PVM_RELATION_DIGEST` in\n\
-         /// `miden-precompiles-verifier`'s `ace_constants.rs`.\n\
+         /// Checked by `air-codegen`; must match `PVM_RELATION_DIGEST` in\n\
+         /// `miden-air::precompile::ace_constants`.\n\
          #[rustfmt::skip]\n\
          pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{body}];\n"
     )
 }
 
 /// Rewrite the initializer of a `pub const NAME: [u64; 4]` declaration.
-fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) -> Result<(), String> {
+fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) {
     let body: String =
         word.iter().map(|felt| format!("\n    {},", felt.as_canonical_u64())).collect();
     replace_const_initializer(content, name, "[", "];", &format!("{body}\n"))
@@ -818,7 +386,7 @@ fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) -> Re
 
 /// Rewrite the initializer of the `pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize)`
 /// declaration.
-fn replace_shape_const(content: &mut String, shape: CircuitShape) -> Result<(), String> {
+fn replace_shape_const(content: &mut String, shape: CircuitShape) {
     let body = format!("{}, {}, {}", shape.num_inputs, shape.num_eval_gates, shape.stream_len);
     replace_const_initializer(content, "PVM_CIRCUIT_SHAPE", "(", ");", &body)
 }
@@ -829,14 +397,15 @@ fn replace_const_initializer(
     open: &str,
     close: &str,
     body: &str,
-) -> Result<(), String> {
+) {
     let marker = format!("pub const {name}:");
     let start = content
         .find(&marker)
-        .ok_or_else(|| format!("{name} not found in {CONSTANTS_PATH}"))?;
-    if content[start + marker.len()..].contains(&marker) {
-        return Err(format!("{name} is declared more than once in {CONSTANTS_PATH}"));
-    }
+        .unwrap_or_else(|| panic!("{name} not found in {CONSTANTS_PATH}"));
+    assert!(
+        !content[start + marker.len()..].contains(&marker),
+        "{name} is declared more than once in {CONSTANTS_PATH}"
+    );
     let declaration_start = start + marker.len();
     let declaration_end = content[declaration_start..]
         .find("pub const ")
@@ -851,19 +420,18 @@ fn replace_const_initializer(
     let assign = declaration
         .find('=')
         .map(|offset| declaration_start + offset)
-        .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
+        .unwrap_or_else(|| panic!("{name} initializer not found in {CONSTANTS_PATH}"));
     let after_assign = &content[assign..declaration_end];
     let open_start = after_assign
         .find(open)
         .map(|offset| assign + offset)
-        .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
+        .unwrap_or_else(|| panic!("{name} initializer not found in {CONSTANTS_PATH}"));
     let body_start = open_start + open.len();
     let body_end = content[body_start..declaration_end]
         .find(close)
         .map(|offset| body_start + offset)
-        .ok_or_else(|| format!("{name} terminator not found in {CONSTANTS_PATH}"))?;
+        .unwrap_or_else(|| panic!("{name} terminator not found in {CONSTANTS_PATH}"));
     content.replace_range(assign..body_end + close.len(), &format!("= {open}{body}{close}"));
-    Ok(())
 }
 
 #[cfg(test)]
@@ -873,62 +441,59 @@ mod tests {
     use miden_core::{Felt, Word};
 
     use super::{
-        CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PVM_DEEP_QUERIES_PATH,
-        PvmOodGeometry, PvmReadLayout, apply_pvm_deep_query_geometry, pvm_scratch_allocation,
-        read_template, render_pvm_deep_queries, replace_limb_array_const, replace_masm_const,
-        replace_shape_const,
+        super::expect_panic, CircuitShape, NEXT_VM_REGION_START, PVM_DEEP_QUERIES_PATH,
+        PVM_READ_START, accepted_setup_commitment, compile, masm_renderer, render,
+        replace_limb_array_const, replace_shape_const,
     };
 
     #[test]
-    fn pvm_proof_order_tables_are_disjoint_and_word_aligned() {
-        let canonical = crate::precompile::ace::build_canonical_precompile_ace_circuit();
-        let read_layout = PvmReadLayout::from_input_layout(canonical.layout()).unwrap();
-        let circuit = crate::precompile::ace::build_pvm_recursive_verifier_ace_circuit();
-        let stream_len = u32::try_from(circuit.stream_len).unwrap();
-        let scratch = pvm_scratch_allocation(&read_layout, stream_len).unwrap();
+    fn pvm_read_and_scratch_regions_match_the_rendered_layout() {
+        {
+            let plan = masm_renderer::prepare_v1(compile(accepted_setup_commitment()).masm);
+            let input = &plan.input;
+            let layout = &plan.layout;
+            let num_airs = input.geometry.main.len() as u32;
+            let row_felts = (input.geometry.preprocessed.iter().sum::<usize>()
+                + input.geometry.main.iter().sum::<usize>()
+                + input.geometry.aux_coordinates.iter().sum::<usize>()
+                + input.geometry.quotient_coordinates) as u32;
+            let stream = PVM_READ_START + 2 * input.read_layout.total_slots as u32;
+            let gamma = stream + input.circuit.stream_felts;
+            let row = gamma + 8;
+            let setup = row + row_felts;
+            let scatter = setup + 4;
+            let positions = scatter + 96;
+            let ids = positions + num_airs.next_multiple_of(4);
 
-        assert!(scratch.proof_order_positions_ptr.is_multiple_of(4));
-        assert!(scratch.proof_order_ids_ptr.is_multiple_of(4));
-        assert_eq!(
-            scratch.proof_order_ids_ptr - scratch.proof_order_positions_ptr,
-            PROOF_ORDER_POSITIONS_FELTS,
-            "the ten live pos_by_id cells must be padded from 10 to 12 felts"
-        );
-        assert_eq!(
-            scratch.allocation_end - scratch.proof_order_ids_ptr,
-            crate::precompile::NUM_CHIPLETS as u32,
-            "id_by_pos must reserve exactly one cell per chiplet"
-        );
-        assert!(scratch.allocation_end <= NEXT_VM_REGION_START);
+            assert_eq!(layout.public_inputs_ptr, PVM_READ_START);
+            assert_eq!(layout.ace_circuit_stream_ptr, stream);
+            assert_eq!(layout.bus_gamma_ptr, gamma);
+            assert_eq!(layout.c_total_ptr, gamma + 4);
+            assert_eq!(layout.current_trace_row_ptr, row);
+            assert_eq!(layout.query_row_felts, row_felts);
+            assert_eq!(layout.preprocessed_com_ptr, setup);
+            assert_eq!(layout.ood_scatter_table_ptr, scatter);
+            assert_eq!(layout.proof_order_positions_ptr, positions);
+            assert_eq!(layout.proof_order_ids_ptr, ids);
+            assert_eq!(layout.fold_coefficient_felt_offset, 2 * (10 + 3 * num_airs));
+            assert!(row.is_multiple_of(8));
+            assert!([scatter, positions, ids].iter().all(|ptr| ptr.is_multiple_of(4)));
+            assert!(ids + num_airs <= NEXT_VM_REGION_START);
+        }
     }
 
     #[test]
-    fn relation_constants_are_replaced_without_touching_the_wrapper() {
-        let mut source = String::from(
-            "before\nconst RELATION_DIGEST_0 = 1\nconst PREPROCESSED_COMMITMENT_3 = 2\nafter\n",
-        );
-        replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap();
-        replace_masm_const(&mut source, "PREPROCESSED_COMMITMENT_3", 99, "test.masm").unwrap();
-        assert_eq!(
-            source,
-            "before\nconst RELATION_DIGEST_0 = 42\nconst PREPROCESSED_COMMITMENT_3 = 99\nafter\n"
-        );
+    fn renderer_rejects_geometry_that_disagrees_with_compiled_counts() {
+        let mut compiled = compile(accepted_setup_commitment());
+        compiled.masm.geometry.main[0] += 8;
+        expect_panic(|| render(&compiled));
     }
 
     #[test]
-    fn relation_constant_replacement_fails_closed_when_a_constant_is_missing() {
-        let mut source = String::from("const RELATION_DIGEST_0 = 1\n");
-        let error = replace_masm_const(&mut source, "PREPROCESSED_COMMITMENT_0", 42, "test.masm")
-            .unwrap_err();
-        assert!(error.contains("PREPROCESSED_COMMITMENT_0 not found"));
-    }
-
-    #[test]
-    fn relation_constant_replacement_rejects_duplicate_declarations() {
-        let mut source = String::from("const RELATION_DIGEST_0 = 1\nconst RELATION_DIGEST_0 = 2\n");
-        let error =
-            replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap_err();
-        assert!(error.contains("RELATION_DIGEST_0 is declared more than once"));
+    fn renderer_rejects_missing_read_slot_extent() {
+        let mut compiled = compile(accepted_setup_commitment());
+        compiled.masm.read_layout.total_slots = compiled.masm.read_layout.alpha;
+        expect_panic(|| render(&compiled));
     }
 
     #[test]
@@ -938,7 +503,7 @@ mod tests {
              PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (0, 0, 0);\n",
         );
         let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap();
+        replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word);
         replace_shape_const(
             &mut source,
             CircuitShape {
@@ -946,8 +511,7 @@ mod tests {
                 num_eval_gates: 6,
                 stream_len: 8,
             },
-        )
-        .unwrap();
+        );
         assert_eq!(
             source,
             "/// doc\npub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    1,\n    2,\n    3,\n    \
@@ -964,7 +528,7 @@ mod tests {
              PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n",
         );
         let word = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_RELATION_DIGEST", &word).unwrap();
+        replace_limb_array_const(&mut source, "PVM_RELATION_DIGEST", &word);
         assert_eq!(
             source,
             "pub const PVM_RELATION_DIGEST: [u64; 4] = [\n    5,\n    6,\n    7,\n    8,\n];\n\n\
@@ -992,8 +556,9 @@ mod tests {
             source.push_str(following);
             let original = source.clone();
 
-            let error =
-                replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap_err();
+            let error = expect_panic(|| {
+                replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word)
+            });
 
             assert!(error.contains(expected_error), "unexpected error: {error}");
             assert_eq!(source, original);
@@ -1002,26 +567,87 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_pvm_deep_query_geometry_is_idempotent_under_rendering() {
-        let canonical = crate::precompile::ace::build_canonical_precompile_ace_circuit();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
-        let checked_in = read_template(PVM_DEEP_QUERIES_PATH).unwrap();
-
-        assert_eq!(render_pvm_deep_queries(&geometry).unwrap(), checked_in);
+    fn pvm_deep_query_rendering_is_deterministic() {
+        let compiled = compile(accepted_setup_commitment());
+        let first = render(&compiled);
+        let second = render(&compiled);
+        assert_eq!(
+            first
+                .files
+                .iter()
+                .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
+                .unwrap()
+                .body,
+            second
+                .files
+                .iter()
+                .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
+                .unwrap()
+                .body
+        );
     }
 
     #[test]
-    fn pvm_deep_query_renderer_repairs_block_count_and_lmcs_cv_together() {
-        let canonical = crate::precompile::ace::build_canonical_precompile_ace_circuit();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
-        let expected = read_template(PVM_DEEP_QUERIES_PATH).unwrap();
-        let mut stale = expected.clone();
+    fn pvm_deep_query_block_counts_and_frames_follow_source_widths() {
+        let compiled = compile(accepted_setup_commitment());
+        let artifact = render(&compiled);
+        let deep_queries_masm = &artifact
+            .files
+            .iter()
+            .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
+            .unwrap()
+            .body;
+        let geometry = &compiled.masm.geometry;
+        let widths = [
+            geometry.preprocessed.iter().sum::<usize>(),
+            geometry.main.iter().sum(),
+            geometry.aux_coordinates.iter().sum(),
+            geometry.quotient_coordinates,
+        ];
+        for ((prefix, width), expected_cv) in ["PREPROCESSED", "MAIN", "AUX", "QUOTIENT"]
+            .into_iter()
+            .zip(widths)
+            .zip(compiled.masm.query_leaf_initial_cvs)
+        {
+            assert!(
+                deep_queries_masm
+                    .contains(&format!("const {prefix}_ROW_DOUBLE_WORDS = {}", width / 8))
+            );
+            let expected_cv = format!(
+                "[{}, {}, {}, {}]",
+                expected_cv[0], expected_cv[1], expected_cv[2], expected_cv[3]
+            );
+            assert!(
+                deep_queries_masm.contains(&format!("const {prefix}_LMCS_INIT_CV = {expected_cv}"))
+            );
+        }
+    }
 
-        replace_masm_const(&mut stale, "AUX_ROW_DOUBLE_WORDS", 1, PVM_DEEP_QUERIES_PATH).unwrap();
-        replace_masm_const(&mut stale, "AUX_LMCS_INIT_CV", "[1, 2, 3, 4]", PVM_DEEP_QUERIES_PATH)
-            .unwrap();
-
-        apply_pvm_deep_query_geometry(&mut stale, &geometry).unwrap();
-        assert_eq!(stale, expected);
+    #[test]
+    fn pvm_row_geometry_and_scatter_match_canonical_numeric_pins() {
+        let input = compile(accepted_setup_commitment()).masm;
+        let g = &input.geometry;
+        assert_eq!(g.preprocessed, [0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(g.main, [96, 112, 64, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
+        assert_eq!(g.aux_coordinates, [40, 40, 24, 8, 24, 56, 8, 8, 24, 24, 32, 24]);
+        assert_eq!(g.quotient_coordinates, 8);
+        let scatter = miden_ace::OodScatterPlan::new(
+            &g.preprocessed,
+            &g.main,
+            &g.aux_coordinates,
+            g.quotient_coordinates,
+        );
+        assert_eq!(scatter.row_felts(), 1_824);
+        assert_eq!(scatter.row_felts() / 8, 228);
+        assert_eq!(
+            scatter.row_felts() / 2,
+            input.counts.preprocessed_width
+                + input.counts.width
+                + 2 * input.counts.aux_width
+                + 2 * input.counts.num_quotient_chunks
+        );
+        assert_eq!(scatter.segment_count(), 26);
+        assert_eq!(scatter.dispatched_slots(), 24);
+        assert_eq!((scatter.proof_order_pairs(), scatter.pipe_digests()), (4..52, 52..88));
     }
 }

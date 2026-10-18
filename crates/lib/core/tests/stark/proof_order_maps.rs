@@ -6,7 +6,8 @@
 //! the Rust stable sort by `(height, instance index)` and against each other as inverses, for every
 //! VM order, the PVM structured sample, seeded random heights, and tied heights.
 
-use miden_ace::{MAX_ORDER_AIRS, ProofOrderMapsConfig, render_proof_order_maps};
+use miden_ace::MAX_ORDER_AIRS;
+use miden_air_source::codegen::masm_renderer::{PointerRef, ProofOrderConfig, render_proof_order};
 use miden_core::Felt;
 
 use super::{
@@ -157,19 +158,16 @@ end",
 /// Executes one renderer configuration as a local MASM procedure and checks its complete contract.
 fn check_generic_renderer_config(num_airs: usize, word_load_heights: bool, word_store_ids: bool) {
     let heights = &GENERIC_HEIGHTS[..num_airs];
-    let heights_ptr = format!("push.{GENERIC_HEIGHTS_PTR}");
-    let pos_by_id_ptr = format!("push.{GENERIC_POSITIONS_PTR}");
-    let id_by_pos_ptr = format!("push.{GENERIC_IDS_PTR}");
-    let procedure = render_proof_order_maps(&ProofOrderMapsConfig {
+    let procedure = render_proof_order(&ProofOrderConfig {
         num_airs,
-        heights_ptr: &heights_ptr,
-        pos_by_id_ptr: &pos_by_id_ptr,
-        id_by_pos_ptr: &id_by_pos_ptr,
+        heights: PointerRef::Absolute(GENERIC_HEIGHTS_PTR),
+        positions: PointerRef::Absolute(GENERIC_POSITIONS_PTR),
+        ids: PointerRef::Absolute(GENERIC_IDS_PTR),
         word_load_heights,
         word_store_ids,
-    })
-    .expect("every supported generic configuration must render")
-    .replacen("pub proc stage_proof_order_maps", "proc stage_proof_order_maps", 1);
+        procedure_name: "stage_proof_order_maps".into(),
+        public: false,
+    });
 
     let height_stores = heights
         .iter()

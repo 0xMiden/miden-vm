@@ -9,10 +9,6 @@ pub use verifier::{VerifyError, verify_deferred};
 mod ace;
 #[cfg(test)]
 mod ace_constants;
-#[cfg(feature = "constants-tools")]
-pub mod ace_constants_regen;
-#[cfg(test)]
-mod pvm_ood_frames;
 #[cfg(feature = "recursive")]
 pub mod recursive;
 #[cfg(feature = "prover")]

@@ -129,10 +129,7 @@ macro_rules! if_true {
 
 macro_rules! while_true {
     ($body:expr) => {
-        Op::While {
-            span: Default::default(),
-            body: $body,
-        }
+        Op::While { span: Default::default(), body: $body }
     };
 }
 

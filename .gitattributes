@@ -3,3 +3,19 @@ crates/lib/core/asm/precompiles/u256.masm linguist-generated=true
 crates/lib/core/asm/precompiles/fields/*.masm linguist-generated=true
 crates/lib/core/asm/precompiles/curves/*.masm linguist-generated=true
 crates/air/generated/artifacts/*.zlib binary linguist-generated=true
+
+# Askama removes one final source newline; templates retain a blank final line for MASM's final LF.
+crates/air/source/templates/verifier/*.masm whitespace=-blank-at-eof
+
+crates/lib/core/asm/sys/vm/constraints_eval.masm linguist-generated=true
+crates/lib/core/asm/sys/vm/layout.masm linguist-generated=true
+crates/lib/core/asm/sys/vm/ood_frames.masm linguist-generated=true
+crates/lib/core/asm/sys/vm/deep_queries.masm linguist-generated=true
+crates/lib/core/asm/sys/vm/mod.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/constraints_eval.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/layout.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/ood_frames.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/deep_queries.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/mod.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/aux_trace.masm linguist-generated=true
+crates/lib/core/asm/sys/pvm/public_inputs.masm linguist-generated=true

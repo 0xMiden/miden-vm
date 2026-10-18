@@ -67,6 +67,7 @@ fn all_airs_dag_matches_manual_eval() {
 }
 
 #[test]
+#[should_panic(expected = "missing input key in layout")]
 fn core_air_dag_rejects_mismatched_layout() {
     let air = MidenAir::Core;
     let dag_config = AceConfig {
@@ -82,7 +83,7 @@ fn core_air_dag_rejects_mismatched_layout() {
     let wrong_layout = build_ace_dag_for_air(&air, layout_config).layout;
     let inputs: Vec<QuadFelt> = fill_inputs(&wrong_layout);
 
-    assert!(std::panic::catch_unwind(|| eval_dag(&dag, &inputs, &wrong_layout)).is_err());
+    let _ = eval_dag(&dag, &inputs, &wrong_layout);
 }
 
 #[test]

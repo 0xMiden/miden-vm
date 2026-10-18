@@ -4,26 +4,27 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use std::{fs, io, path::Path, println};
+use std::{fs, io, path::Path};
 
-use miden_ace::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, OodScatterPlan,
-    ProofOrderMapsConfig, render_proof_order_maps,
+use miden_ace::{CompiledCircuit, InputKey, InputLayout};
+use miden_core::{Felt, Word, field::QuadFelt, program::KernelDescriptor};
+use miden_crypto::hash::eidos::{
+    Eidos,
+    domains::{GENERIC_FELT_SEQUENCE, LMCS_LEAF},
 };
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
 use miden_stark::{
-    Preprocessed, QuotientRecompositionInputs, StarkConfig,
-    air::{BaseAir, LiftedAir},
-    lmcs::Lmcs,
+    Preprocessed, QuotientRecompositionInputs, StarkConfig, air::BaseAir, lmcs::Lmcs,
     quotient_recomposition_inputs,
 };
 
+use super::masm_renderer::{
+    self, AirGeometry, ArtifactOwnership, CircuitMetadata, QuotientReconstruction, ReadLayout,
+    RelationInput, RenderedArtifact, SecurityParameters, SharedAbi, V1RenderInput, VmAbiAnchors,
+};
 use crate::vm::{
     AIRS, Air as MidenAir, MIDEN_AIR_COUNT, MultiAir as MidenMultiAir, NUM_PUBLIC_VALUES,
     Statement,
-    ace::{
-        RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
-    },
+    ace::{build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config},
     config::{self, relation_digest},
 };
 
@@ -39,22 +40,24 @@ mod accepted {
 
 const PROTOCOL_ID: u64 = 1;
 const AIR_CONFIG_PATH: &str = "crates/air/generated/src/config.rs";
+#[cfg(test)]
 const CONSTRAINTS_EVAL_PATH: &str = "crates/lib/core/asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "crates/lib/core/asm/sys/vm/mod.masm";
+#[cfg(test)]
 const VM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/vm/layout.masm";
 const STARK_CONSTANTS_PATH: &str = "crates/lib/core/asm/stark/constants.masm";
+#[cfg(test)]
 const VM_OOD_FRAMES_PATH: &str = "crates/lib/core/asm/sys/vm/ood_frames.masm";
+#[cfg(test)]
 const VM_DEEP_QUERIES_PATH: &str = "crates/lib/core/asm/sys/vm/deep_queries.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "crates/lib/core/asm/sys/vm/public_inputs.masm";
-const PVM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/pvm/layout.masm";
 const SECURITY_ESTIMATOR_PATH: &str = "crates/lib/core/asm/stark/security.masm";
 const GENERIC_UTILS_PATH: &str = "crates/lib/core/asm/stark/utils.masm";
-const LMCS_ALIGNMENT: usize = 8;
-
 /// Felts moved by one `adv_pipe`.
 ///
 /// This transport width governs block/segment arithmetic and destination alignment;
-/// [`LMCS_ALIGNMENT`] independently governs column-padding widths.
+/// Commitment padding independently governs column widths.
+#[cfg(test)]
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
 /// Computes the relation digest used by recursive verification.
@@ -64,17 +67,53 @@ pub fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    let artifact = compile_and_render(accepted_setup_commitments()).map_err(|e| e.to_string())?;
-    match mode {
-        Mode::Check => check_artifacts(root, &artifact),
-        Mode::Write => write_artifacts(root, &artifact).map_err(|e| e.to_string()),
-    }
+    // Validate both current relations before delivering any managed projection.
+    super::run(root, mode)
 }
 
-/// Render from explicit setup inputs, without performing setup derivation or accepting pins.
-pub fn compile_and_render(commitments: PreprocessedCommitments) -> io::Result<ComputedArtifacts> {
-    compute_artifacts(Some(commitments))
+/// Captured and compiled inputs, including layout metadata absent from canonical ACE bytes.
+#[derive(Clone, Debug)]
+pub struct CompiledVerifierInputs {
+    pub masm: V1RenderInput,
+    pub preprocessed_commitments: PreprocessedCommitments,
 }
+
+/// Capture and compile authored AIR, then adapt its layout and explicit setup inputs.
+pub fn compile(commitments: PreprocessedCommitments) -> CompiledVerifierInputs {
+    compile_inputs(Some(commitments))
+}
+
+/// Compatibility orchestration over explicit compilation and pure rendering.
+pub fn compile_and_render(commitments: PreprocessedCommitments) -> ComputedArtifacts {
+    render(&compile(commitments))
+}
+
+/// Shared verifier memory ABI expected by both source render adapters.
+///
+/// Core-lib independently compares these values with its live generic MASM constants.
+pub const SHARED_ABI: SharedAbi = SharedAbi {
+    heights_ptr: 3_223_322_744,
+    heights_capacity: 16,
+    composition_coefficients_ptr: 3_223_322_704,
+    public_inputs_address_ptr: 3_223_322_638,
+};
+
+pub(super) const VM_ABI: VmAbiAnchors = VmAbiAnchors {
+    num_kernel_procedures_ptr: 3_223_322_776,
+    control_alignment_padding_ptr: 3_223_322_777,
+    bus_gamma_ptr: 3_223_322_780,
+    c_total_ptr: 3_223_322_784,
+    claim_commitment_ptr: 3_223_322_788,
+    claim_ptr: 3_223_322_792,
+    boundary_anchor_padding_ptr: 3_223_322_832,
+    boundary_inputs_ptr: 3_223_322_836,
+    kernel_witness_ptr: 3_223_322_844,
+    scatter_ptr: 3_223_323_864,
+    scatter_reserve_felts: 64,
+    read_beta_anchor: 3_225_419_776,
+    current_trace_row_ptr: 3_238_002_688,
+    next_region_start: super::precompile::PVM_READ_START,
+};
 
 /// Accepted setup inputs for the current protocol. This is not a claim of fresh setup derivation.
 pub fn accepted_setup_commitments() -> PreprocessedCommitments {
@@ -90,121 +129,210 @@ pub fn accepted_setup_commitments() -> PreprocessedCommitments {
 
 /// Independently derive all fixed-table commitments and compare every generated output/pin.
 pub fn check_setup(root: &Path) -> Result<(), String> {
-    let artifact = compute_artifacts(None).map_err(|e| e.to_string())?;
+    let artifact = compute_artifacts(None);
     check_artifacts(root, &artifact)
 }
 
 /// Compare rendered outputs against the explicit destination checkout.
 pub fn check_artifacts(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
-    constraints_eval_masm_matches_artifact(root, artifact)?;
-    relation_digest_matches_artifact(root, artifact)?;
+    validate_delivery(root, artifact)?;
+    super::delivery::deliver(root, &artifact.files, Mode::Check)?;
     public_inputs_masm_matches_air(root)?;
-    vm_geometry_matches_artifact(root, artifact)?;
     security_masm_matches_air(root)?;
     Ok(())
 }
 
 /// Generate a full computed snapshot from the current AIR.
-fn compute_artifacts(
-    supplied_commitments: Option<PreprocessedCommitments>,
-) -> io::Result<ComputedArtifacts> {
-    // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
-    // scatter and fold-coefficient staging.
-    let source = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config());
-    let input_layout = source.layout();
-    let circuit = RecursiveAceCircuit::from(source.to_ace());
+fn compute_artifacts(supplied: Option<PreprocessedCommitments>) -> ComputedArtifacts {
+    render(&compile_inputs(supplied))
+}
 
-    let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("quotient chunk count {num_quotient_chunks} is not a power of two"),
-        ));
-    }
-    let quotient_inputs = quotient_recomposition_inputs::<Felt>(
-        num_quotient_chunks.ilog2() as u8,
+fn compile_inputs(supplied: Option<PreprocessedCommitments>) -> CompiledVerifierInputs {
+    let circuit = CompiledCircuit::from_circuit(build_canonical_multi_air_ace_circuit(
+        recursive_verifier_ace_config(),
+    ));
+    let layout = circuit.layout();
+    let quotient_chunks = layout.counts.num_quotient_chunks;
+    assert!(
+        quotient_chunks.is_power_of_two(),
+        "quotient chunk count {quotient_chunks} is not a power of two"
+    );
+    let quotient = quotient_recomposition_inputs::<Felt>(
+        quotient_chunks.ilog2() as u8,
         config::pcs_params().log_blowup(),
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-
-    let circuit_digest = word_to_array(circuit.commitment);
+    .expect("compile_inputs requires valid authored compiler inputs");
+    let geometry = AirGeometry::from_airs(&AIRS, quotient_chunks);
+    let circuit_digest = word_to_array(circuit.commitment());
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
-    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
-    let vm_layout = render_vm_layout(&vm_geometry)?;
-    let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
-    let vm_deep_queries = render_vm_deep_queries(&vm_geometry)?;
-
-    let preprocessed_commitments = match supplied_commitments {
+    let commitments = match supplied {
         Some(commitments) => commitments,
-        None => derive_setup_commitments(relation_digest)?,
+        None => derive_setup_commitments(relation_digest),
     };
+    let air_shape = crate::vm::security::derive_air_shape();
+    let lookup = air_shape.lookup.expect("the relation uses lookup");
+    CompiledVerifierInputs {
+        masm: V1RenderInput {
+            relation: RelationInput::Vm(VM_ABI),
+            circuit: render_circuit_metadata(&circuit, max_periodic_cycle_len_log()),
+            query_leaf_initial_cvs: query_leaf_initial_cvs(&geometry),
+            geometry,
+            counts: layout.counts,
+            read_layout: render_read_layout(layout),
+            quotient: render_quotient_inputs(quotient),
+            relation_digest: relation_digest.map(|felt| felt.as_canonical_u64()),
+            preprocessed_commitment: commitments.eidos,
+            security: SecurityParameters {
+                lookup_pow_bits: crate::vm::security::LOOKUP_POW_BITS,
+                max_message_width: lookup.max_message_width,
+                num_composed_constraints: air_shape.num_composed_constraints,
+                max_constraint_degree: air_shape.max_constraint_degree,
+                num_deep_terms: air_shape.num_deep_terms
+                    .expect("VM AIR must use DEEP composition"),
+                lookup_fractions_per_row: lookup.fractions_per_row,
+                boundary_lookup_terms: crate::vm::security::CORE_BOUNDARY_LOOKUP_TERMS,
+            },
+            shared_abi: SHARED_ABI,
+            regeneration_command: "cargo run -p miden-air-source --features tooling --bin air-codegen -- <workspace-root> --write".into(),
+        },
+        preprocessed_commitments: commitments,
+    }
+}
 
-    let mut relation_mod = read_template(RELATION_DIGEST_PATH)?;
-    for (i, elem) in relation_digest.iter().enumerate() {
-        replace_masm_const(
-            &mut relation_mod,
-            &format!("RELATION_DIGEST_{i}"),
-            &elem.as_canonical_u64().to_string(),
-        )?;
-    }
-    for (i, elem) in preprocessed_commitments.eidos.iter().enumerate() {
-        replace_masm_const(
-            &mut relation_mod,
-            &format!("AND8_PREPROCESSED_TRACE_COM_{i}"),
-            &elem.to_string(),
-        )?;
-    }
-    let mut air_config = read_template(AIR_CONFIG_PATH)?;
-    replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
-    replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_DIGEST", &circuit_digest)?;
+/// Render complete candidate projections without capture, compilation, setup or destination I/O.
+pub fn render(compiled: &CompiledVerifierInputs) -> ComputedArtifacts {
+    render_prepared(
+        &masm_renderer::prepare_v1(compiled.masm.clone()),
+        compiled.preprocessed_commitments,
+    )
+}
+
+pub(super) fn render_prepared(
+    plan: &masm_renderer::V1RenderPlan,
+    preprocessed_commitments: PreprocessedCommitments,
+) -> ComputedArtifacts {
+    let input = &plan.input;
+    let mut files = masm_renderer::render_v1(plan);
+    let circuit_digest = input.circuit.digest.map(Felt::new_unchecked);
+    let relation_digest = input.relation_digest.map(Felt::new_unchecked);
+    let mut air_config = include_str!("../../templates/vm-config.rs").to_string();
+    replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest);
+    replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_DIGEST", &circuit_digest);
     replace_u8_array_const(
         &mut air_config,
         "BLAKE3_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.blake3,
-    )?;
+    );
     replace_felt_array_const(
         &mut air_config,
         "RPO_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.rpo,
-    )?;
+    );
     replace_felt_array_const(
         &mut air_config,
         "RPX_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.rpx,
-    )?;
+    );
     replace_u64_array_const(
         &mut air_config,
         "EIDOS_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.eidos,
-    )?;
+    );
     replace_felt_array_const(
         &mut air_config,
         "POSEIDON2_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.poseidon2,
-    )?;
+    );
     replace_u64_array_const(
         &mut air_config,
         "KECCAK_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.keccak,
-    )?;
+    );
 
-    ensure_vm_ace_stream_fits(circuit.stream_len, &vm_layout)?;
-
-    Ok(ComputedArtifacts {
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_blocks: circuit.stream_len / 8,
+    files.push(RenderedArtifact {
+        relative_path: AIR_CONFIG_PATH.into(),
+        body: air_config,
+        ownership: ArtifactOwnership::ProtectedCheckOnly,
+    });
+    ComputedArtifacts {
         circuit_digest,
         relation_digest,
         preprocessed_commitments,
-        constraints_eval,
-        relation_mod,
-        air_config,
-        vm_layout,
-        vm_ood_frames,
-        vm_deep_queries,
-    })
+        files,
+    }
+}
+
+pub(super) fn canonical_word(word: Word) -> [u64; 4] {
+    word_to_array(word).map(|felt| felt.as_canonical_u64())
+}
+
+pub(super) fn render_circuit_metadata(
+    circuit: &CompiledCircuit,
+    max_cycle_log: u32,
+) -> CircuitMetadata {
+    let stream_felts = u32::try_from(circuit.encoded().size_in_felt())
+        .expect("render_circuit_metadata requires valid authored compiler inputs");
+    CircuitMetadata {
+        encoded_read_count: u32::try_from(circuit.encoded().num_vars())
+            .expect("render_circuit_metadata requires valid authored compiler inputs"),
+        eval_gate_count: u32::try_from(circuit.encoded().num_eval_rows())
+            .expect("render_circuit_metadata requires valid authored compiler inputs"),
+        stream_felts,
+        max_cycle_log: u8::try_from(max_cycle_log)
+            .expect("render_circuit_metadata requires valid authored compiler inputs"),
+        digest: canonical_word(circuit.commitment()),
+        stream_initial_cv: canonical_word(Eidos::init_chaining_word(
+            GENERIC_FELT_SEQUENCE,
+            stream_felts,
+        )),
+    }
+}
+
+pub(super) fn render_read_layout(layout: &InputLayout) -> ReadLayout {
+    let index = |key| require_input_index(layout, key);
+    ReadLayout {
+        total_slots: layout.total_inputs,
+        public_0: index(InputKey::Public(0)),
+        aux_rand_beta: index(InputKey::AuxRandBeta),
+        aux_rand_alpha: index(InputKey::AuxRandAlpha),
+        preprocessed_current: index(InputKey::Preprocessed { offset: 0, index: 0 }),
+        main_current: index(InputKey::Main { offset: 0, index: 0 }),
+        aux_current: index(InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
+        quotient_current: index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }),
+        preprocessed_next: index(InputKey::Preprocessed { offset: 1, index: 0 }),
+        main_next: index(InputKey::Main { offset: 1, index: 0 }),
+        aux_next: index(InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }),
+        quotient_next: index(InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 }),
+        aux_bus_boundary: index(InputKey::AuxBusBoundary(0)),
+        alpha: index(InputKey::Alpha),
+        multi_air_fold_coefficient_0: index(InputKey::MultiAirFoldCoeff(0)),
+    }
+}
+
+pub(super) fn render_quotient_inputs(
+    q: QuotientRecompositionInputs<Felt>,
+) -> QuotientReconstruction {
+    QuotientReconstruction {
+        shift_ratio: q.shift_ratio.as_canonical_u64(),
+        first_shift: q.first_shift.as_canonical_u64(),
+        first_weight: q.first_weight.as_canonical_u64(),
+    }
+}
+
+pub(super) fn query_leaf_initial_cvs(geometry: &AirGeometry) -> [[u64; 4]; 4] {
+    let widths = [
+        geometry.preprocessed.iter().sum::<usize>(),
+        geometry.main.iter().sum(),
+        geometry.aux_coordinates.iter().sum(),
+        geometry.quotient_coordinates,
+    ];
+    let mut cvs = [[0; 4]; 4];
+    for (slot, width) in cvs.iter_mut().zip(widths) {
+        let width = u32::try_from(width)
+            .expect("query_leaf_initial_cvs requires valid authored compiler inputs");
+        *slot = canonical_word(Eidos::init_chaining_word(LMCS_LEAF, width));
+    }
+    cvs
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -219,686 +347,56 @@ pub struct PreprocessedCommitments {
 
 type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 
-pub fn derive_setup_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
+pub fn derive_setup_commitments(digest: [Felt; 4]) -> PreprocessedCommitments {
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
         vec![Felt::ZERO; NUM_PUBLIC_VALUES],
         vec![],
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    .expect("canonical VM public input shape");
     let params = config::pcs_params();
-    Ok(PreprocessedCommitments {
+    PreprocessedCommitments {
         blake3: compute_preprocessed_commitment(
             &statement,
             &config::blake3_256_config(params, digest),
-        )?
+        )
         .into(),
-        rpo: compute_preprocessed_commitment(&statement, &config::rpo_config(params, digest))?
+        rpo: compute_preprocessed_commitment(&statement, &config::rpo_config(params, digest))
             .into(),
-        rpx: compute_preprocessed_commitment(&statement, &config::rpx_config(params, digest))?
+        rpx: compute_preprocessed_commitment(&statement, &config::rpx_config(params, digest))
             .into(),
-        eidos: compute_preprocessed_commitment(&statement, &config::eidos_config(params, digest))?
+        eidos: compute_preprocessed_commitment(&statement, &config::eidos_config(params, digest))
             .into(),
         poseidon2: compute_preprocessed_commitment(
             &statement,
             &config::poseidon2_config(params, digest),
-        )?
+        )
         .into(),
-        keccak: compute_preprocessed_commitment(
-            &statement,
-            &config::keccak_config(params, digest),
-        )?
-        .into(),
-    })
+        keccak: compute_preprocessed_commitment(&statement, &config::keccak_config(params, digest))
+            .into(),
+    }
 }
 
 fn compute_preprocessed_commitment<SC>(
     statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
     config: &SC,
-) -> io::Result<Commitment<SC>>
+) -> Commitment<SC>
 where
     SC: StarkConfig<Felt, QuadFelt>,
 {
     Preprocessed::build(statement, config)
         .map(|preprocessed| preprocessed.commitment())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "canonical verifier statement has no preprocessed trace",
-            )
-        })
+        .expect("canonical verifier statement has no preprocessed trace")
 }
 
-fn ensure_vm_ace_stream_fits(stream_len: usize, vm_layout: &str) -> io::Result<()> {
-    let pvm_layout = read_template(PVM_LAYOUT_PATH)?;
-    let stream_start =
-        parse_masm_const::<usize>(vm_layout, "ACE_CIRCUIT_STREAM_PTR", VM_LAYOUT_PATH)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let pvm_start = parse_masm_const::<usize>(&pvm_layout, "PUBLIC_INPUTS_PTR", PVM_LAYOUT_PATH)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-
-    check_vm_ace_stream_capacity(stream_start, pvm_start, stream_len)
-}
-
-fn check_vm_ace_stream_capacity(
-    stream_start: usize,
-    pvm_start: usize,
-    stream_len: usize,
-) -> io::Result<()> {
-    let capacity = pvm_start.checked_sub(stream_start).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "PVM allocation starts before the VM ACE stream")
-    })?;
-    if stream_len > capacity {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "VM ACE stream requires {stream_len} felts but its fixed reservation holds \
-                 {capacity}"
-            ),
-        ));
-    }
-    Ok(())
-}
-
-/// Felts reserved for the out-of-domain scatter table by `sys/vm/layout.masm`.
-const OOD_SCATTER_TABLE_FELTS: usize = 64;
-
-struct VmGeometry {
-    preprocessed_widths: Vec<usize>,
-    preprocessed_width: usize,
-    main_widths: Vec<usize>,
-    main_width: usize,
-    aux_widths: Vec<usize>,
-    aux_width: usize,
-    quotient_width: usize,
-    row_width: usize,
-    ood_row_felts: usize,
-    ood_frame_felts: usize,
-    preprocessed_pipe_blocks: usize,
-    main_pipe_blocks: usize,
-    aux_pipe_blocks: usize,
-    quotient_pipe_blocks: usize,
-    ood_pipe_blocks: usize,
-    ood_evaluations_ptr: usize,
-    aux_bus_boundary_ptr: usize,
-    auxiliary_ace_inputs_ptr: usize,
-    ace_circuit_stream_ptr: usize,
-    current_trace_row_ptr: usize,
-    ood_scatter_table_ptr: usize,
-    /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`.
-    fold_coefficient_offset: usize,
-}
-
-impl VmGeometry {
-    fn from_input_layout(input_layout: &InputLayout) -> io::Result<Self> {
-        let preprocessed_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
-            .collect();
-        let preprocessed_width: usize = preprocessed_widths.iter().sum();
-        let main_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
-            .collect();
-        let main_width: usize = main_widths.iter().sum();
-        let aux_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| {
-                (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
-                    .next_multiple_of(LMCS_ALIGNMENT)
-            })
-            .collect();
-        let aux_width: usize = aux_widths.iter().sum();
-        let aux_values: Vec<_> =
-            AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect();
-        if aux_values.as_slice() != [1usize; MIDEN_AIR_COUNT].as_slice() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM proof-order boundary scatter requires exactly one auxiliary value per \
-                     AIR, got {aux_values:?}"
-                ),
-            ));
-        }
-        let quotient_width = input_layout.counts.num_quotient_chunks * EXT_DEGREE;
-        let row_width = preprocessed_width + main_width + aux_width + quotient_width;
-
-        for (name, derived, actual) in [
-            ("preprocessed", preprocessed_width, input_layout.counts.preprocessed_width),
-            ("main", main_width, input_layout.counts.width),
-            ("auxiliary-coordinate", aux_width, input_layout.counts.aux_width * EXT_DEGREE),
-            (
-                "auxiliary-boundary",
-                aux_values.iter().sum::<usize>(),
-                input_layout.counts.num_aux_boundary,
-            ),
-        ] {
-            if derived != actual {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "AIR-derived {name} width {derived} disagrees with ACE input layout width \
-                         {actual}"
-                    ),
-                ));
-            }
-        }
-
-        for (name, width) in [
-            ("preprocessed", preprocessed_width),
-            ("main", main_width),
-            ("auxiliary", aux_width),
-            ("quotient", quotient_width),
-            ("ACE row", row_width),
-        ] {
-            if !width.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("VM {name} width {width} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned"),
-                ));
-            }
-        }
-
-        let layout = read_template(VM_LAYOUT_PATH)?;
-        let aux_rand_elem_ptr =
-            parse_masm_const::<usize>(&layout, "AUX_RAND_ELEM_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let current_trace_row_ptr =
-            parse_masm_const::<usize>(&layout, "CURRENT_TRACE_ROW_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if !current_trace_row_ptr.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM current-trace-row base {current_trace_row_ptr} is not \
-                     {ADV_PIPE_BLOCK_FELTS}-felt aligned, which `adv_pipe` requires"
-                ),
-            ));
-        }
-        // The scatter table is verifier scratch that must stay clear of the ACE READ section.
-        let ood_scatter_table_ptr =
-            parse_masm_const::<usize>(&layout, "OOD_SCATTER_TABLE_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if !ood_scatter_table_ptr.is_multiple_of(4) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM out-of-domain scatter table base {ood_scatter_table_ptr} is not \
-                     4-felt (word) aligned, which its `mem_storew_le`/`dynexec` entries require"
-                ),
-            ));
-        }
-        if ood_scatter_table_ptr + OOD_SCATTER_TABLE_FELTS > aux_rand_elem_ptr {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the {OOD_SCATTER_TABLE_FELTS}-felt out-of-domain scatter table at \
-                     {ood_scatter_table_ptr} runs into the ACE READ section at {aux_rand_elem_ptr}"
-                ),
-            ));
-        }
-        // Its lower neighbour is the kernel digest witness, one word per supported kernel
-        // procedure written by `materialize_kernel_witness`; the table must start at or after its
-        // end.
-        let kernel_witness_ptr =
-            parse_masm_const::<usize>(&layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let kernel_witness_end = kernel_witness_ptr
-            .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
-            })?;
-        if ood_scatter_table_ptr < kernel_witness_end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
-                     kernel digest witness, which ends at {kernel_witness_end}"
-                ),
-            ));
-        }
-
-        let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta)?;
-        let ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 0, index: 0 })?;
-        let next_ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 1, index: 0 })?;
-        let aux_bus_boundary_index =
-            require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
-        let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
-        let fold_coefficient_index =
-            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
-        let fold_coefficient_offset = input_layout_extent(
-            auxiliary_ace_inputs_index,
-            fold_coefficient_index,
-            "fold coefficients",
-        )?;
-
-        let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row")?;
-        let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame")?;
-        if ood_row_felts != row_width * EXT_DEGREE || ood_frame_felts != 2 * ood_row_felts {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "ACE input layout has {ood_row_felts} felts per OOD row and \
-                     {ood_frame_felts} per frame; AIR widths require {} and {}",
-                    row_width * EXT_DEGREE,
-                    2 * row_width * EXT_DEGREE,
-                ),
-            ));
-        }
-
-        let input_ptr =
-            |index, label| input_layout_ptr(aux_rand_elem_ptr, aux_rand_index, index, label);
-        let ood_evaluations_ptr = input_ptr(ood_index, "OOD evaluations")?;
-        let aux_bus_boundary_ptr = input_ptr(aux_bus_boundary_index, "aux bus boundary")?;
-        let auxiliary_ace_inputs_ptr =
-            input_ptr(auxiliary_ace_inputs_index, "auxiliary ACE inputs")?;
-        let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs, "ACE circuit stream")?;
-
-        Ok(Self {
-            preprocessed_widths,
-            preprocessed_width,
-            main_widths,
-            main_width,
-            aux_widths,
-            aux_width,
-            quotient_width,
-            row_width,
-            ood_row_felts,
-            ood_frame_felts,
-            preprocessed_pipe_blocks: preprocessed_width / ADV_PIPE_BLOCK_FELTS,
-            main_pipe_blocks: main_width / ADV_PIPE_BLOCK_FELTS,
-            aux_pipe_blocks: aux_width / ADV_PIPE_BLOCK_FELTS,
-            quotient_pipe_blocks: quotient_width / ADV_PIPE_BLOCK_FELTS,
-            ood_pipe_blocks: ood_row_felts / ADV_PIPE_BLOCK_FELTS,
-            ood_evaluations_ptr,
-            aux_bus_boundary_ptr,
-            auxiliary_ace_inputs_ptr,
-            ace_circuit_stream_ptr,
-            current_trace_row_ptr,
-            ood_scatter_table_ptr,
-            fold_coefficient_offset,
-        })
-    }
-}
-
-fn require_input_index(input_layout: &InputLayout, key: InputKey) -> io::Result<usize> {
-    input_layout.index(key).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("VM ACE input layout is missing {key:?}"),
-        )
-    })
-}
-
-fn input_layout_extent(start: usize, end: usize, label: &str) -> io::Result<usize> {
-    end.checked_sub(start)
-        .and_then(|slots| slots.checked_mul(EXT_DEGREE))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("VM ACE {label} extent is reversed or overflows"),
-            )
-        })
-}
-
-fn input_layout_ptr(
-    base_ptr: usize,
-    base_index: usize,
-    index: usize,
-    label: &str,
-) -> io::Result<usize> {
-    let offset = input_layout_extent(base_index, index, label)?;
-    base_ptr.checked_add(offset).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("VM ACE {label} pointer overflows"))
-    })
-}
-
-fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
-    let plan = vm_scatter_plan(geometry)?;
-    let mut layout = read_template(VM_LAYOUT_PATH)?;
-    for (name, value) in [
-        ("OOD_EVALUATIONS_PTR", geometry.ood_evaluations_ptr),
-        ("AUX_BUS_BOUNDARY_PTR", geometry.aux_bus_boundary_ptr),
-        ("AUXILIARY_ACE_INPUTS_PTR", geometry.auxiliary_ace_inputs_ptr),
-        ("ACE_CIRCUIT_STREAM_PTR", geometry.ace_circuit_stream_ptr),
-        ("CURRENT_TRACE_ROW_PTR", geometry.current_trace_row_ptr),
-    ] {
-        replace_masm_const(&mut layout, name, &value.to_string())?;
-    }
-
-    replace_comment_before_const(
-        &mut layout,
-        "OOD_SCATTER_TABLE_PTR",
-        &format!(
-            "### Out-of-domain ingest scatter table and proof-order maps, immediately after the VM \
-             control\n\
-             ### frame. Reserves {OOD_SCATTER_TABLE_FELTS} felts:\n\
-             ###\n\
-             ###   +0            base address of the out-of-domain row being ingested\n\
-             ###   +4  .. +{pairs_end}    per proof position, in stream order: (row-relative \
-             destination, digest address)\n\
-             ###   +{digests} .. +{digests_end}    `pipe_k` procedure digests reached by `dynexec`, \
-             one word each\n\
-             ###   +{positions} .. +{positions_end}    `pos_by_id`: each AIR's proof position, in \
-             instance order\n\
-             ###   +{ids} .. +{ids_end}    `id_by_pos`: the AIR committed at each proof position\n\
-             ###\n\
-             ### The internal offsets and the reserve's sufficiency are owned by the regeneration \
-             tool, which\n\
-             ### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.",
-            pairs_end = plan.pipe_digests().start - 1,
-            digests = plan.pipe_digests().start,
-            digests_end = plan.table_felts() - 1,
-            positions = plan.table_felts(),
-            positions_end = plan.table_felts() + MIDEN_AIR_COUNT - 1,
-            ids = plan.table_felts() + MIDEN_AIR_COUNT,
-            ids_end = plan.table_felts() + 2 * MIDEN_AIR_COUNT - 1,
-        ),
-    )?;
-
-    let positions_ptr =
-        geometry.ood_scatter_table_ptr.checked_add(plan.table_felts()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-        })?;
-    let ids_ptr = positions_ptr.checked_add(MIDEN_AIR_COUNT).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-    })?;
-    replace_masm_const(&mut layout, "PROOF_ORDER_POSITIONS_PTR", &positions_ptr.to_string())?;
-    replace_masm_const(&mut layout, "PROOF_ORDER_IDS_PTR", &ids_ptr.to_string())?;
-
-    replace_line_with_prefix(
-        &mut layout,
-        "##   OOD_EVALUATIONS_PTR -->",
-        &format!(
-            "##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  {} felts",
-            geometry.ood_frame_felts
-        ),
-    )?;
-    replace_comment_before_const(
-        &mut layout,
-        "OOD_EVALUATIONS_PTR",
-        &format!(
-            "### OOD evaluations in the VM ACE READ section. Each aligned current/next row has\n\
-             ### {} scalar evaluations: {} preprocessed, {} main, {} auxiliary-coordinate, and \
-             {}\n\
-             ### quotient. Each evaluation is quadratic-extension valued, so advice supplies {} \
-             base felts\n\
-             ### per row.",
-            geometry.row_width,
-            geometry.preprocessed_width,
-            geometry.main_width,
-            geometry.aux_width,
-            geometry.quotient_width,
-            geometry.ood_row_felts,
-        ),
-    )?;
-    replace_comment_before_const(
-        &mut layout,
-        "CURRENT_TRACE_ROW_PTR",
-        &format!(
-            "### Scratch row for DEEP query openings: {} preprocessed, {} main, {}\n\
-             ### auxiliary-coordinate, and {} quotient felts ({} total).",
-            geometry.preprocessed_width,
-            geometry.main_width,
-            geometry.aux_width,
-            geometry.quotient_width,
-            geometry.row_width,
-        ),
-    )?;
-    Ok(layout)
-}
-
-const WORD_FELTS: usize = 4;
-
-fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<OodScatterPlan> {
-    let plan = OodScatterPlan::new(
-        &geometry.preprocessed_widths,
-        &geometry.main_widths,
-        &geometry.aux_widths,
-        geometry.quotient_width,
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let required = plan.table_felts() + 2 * MIDEN_AIR_COUNT;
-    if required > OOD_SCATTER_TABLE_FELTS {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "the scatter table and proof-order maps need {required} felts but reserve {OOD_SCATTER_TABLE_FELTS}"
-            ),
-        ));
-    }
-    Ok(plan)
-}
-
-fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
-    let plan = vm_scatter_plan(geometry)?;
-    // Word reads and writes need word-aligned bases; the pass falls back to single-cell accesses
-    // otherwise, so alignment is a layout fact checked here, not an assumption.
-    let stark_constants = read_template(STARK_CONSTANTS_PATH)?;
-    let heights_ptr = parse_masm_const::<usize>(
-        &stark_constants,
-        "LOG_AIR_TRACE_LENGTHS_PTR",
-        STARK_CONSTANTS_PATH,
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let ids_ptr = geometry
-        .ood_scatter_table_ptr
-        .checked_add(plan.table_felts())
-        .and_then(|ptr| ptr.checked_add(MIDEN_AIR_COUNT))
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-        })?;
-    let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
-        num_airs: MIDEN_AIR_COUNT,
-        heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
-        pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
-        id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-        word_load_heights: heights_ptr.is_multiple_of(WORD_FELTS),
-        word_store_ids: ids_ptr.is_multiple_of(WORD_FELTS),
-    })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-
-    let procedures = plan.render(&proof_order_maps);
-
-    Ok(format!(
-        r#"# GENERATED by `cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write` — do not edit by hand.
-use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
-use miden::core::stark::types
-use miden::core::sys::vm::layout
-
-# Number of AIR instances in the relation.
-const NUM_AIRS = {num_airs}
-
-# Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
-#   preprocessed: {preprocessed_parts} = {preprocessed} scalar evaluations
-#   main:         {main_parts} = {main} scalar evaluations
-#   aux:          {aux_parts} = {aux} scalar evaluations
-#   quotient:     {quotient} scalar evaluations
-# The advice stream supplies {ood_felts} base felts, read as {pipe_blocks} `adv_pipe` blocks.
-
-{procedures}"#,
-        num_airs = MIDEN_AIR_COUNT,
-        preprocessed_parts = format_sum(&geometry.preprocessed_widths),
-        preprocessed = geometry.preprocessed_width,
-        main_parts = format_sum(&geometry.main_widths),
-        main = geometry.main_width,
-        aux_parts = format_sum(&geometry.aux_widths),
-        aux = geometry.aux_width,
-        quotient = geometry.quotient_width,
-        ood_felts = geometry.ood_row_felts,
-        pipe_blocks = geometry.ood_pipe_blocks,
-    ))
-}
-
-fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
-    let mut deep_queries = read_template(VM_DEEP_QUERIES_PATH)?;
-    replace_line_with_prefix(
-        &mut deep_queries,
-        "# AND8 preprocessed matrix:",
-        &format!(
-            "    # AND8 preprocessed matrix: {} columns, padded to {} base felts by LMCS.",
-            BaseAir::<Felt>::preprocessed_width(&MidenAir::And8Lookup),
-            geometry.preprocessed_width,
-        ),
-    )?;
-    replace_repeat_in_proc(
-        &mut deep_queries,
-        "load_preprocessed_segment",
-        geometry.preprocessed_pipe_blocks,
-    )?;
-    replace_line_with_prefix(
-        &mut deep_queries,
-        "# Load the aligned main leaf:",
-        &format!(
-            "    # Load the aligned main leaf: {} = {} base felts.",
-            format_sum(&geometry.main_widths),
-            geometry.main_width,
-        ),
-    )?;
-    replace_repeat_in_proc(
-        &mut deep_queries,
-        "load_main_segment_execution_trace",
-        geometry.main_pipe_blocks,
-    )?;
-    replace_line_with_prefix(
-        &mut deep_queries,
-        "# Load the aligned aux leaf:",
-        &format!(
-            "    # Load the aligned aux leaf: {} = {} base felts.",
-            format_sum(&geometry.aux_widths),
-            geometry.aux_width,
-        ),
-    )?;
-    replace_repeat_in_proc(
-        &mut deep_queries,
-        "load_aux_segment_execution_trace",
-        geometry.aux_pipe_blocks,
-    )?;
-    replace_repeat_in_proc(
-        &mut deep_queries,
-        "load_constraints_composition_polys_trace",
-        geometry.quotient_pipe_blocks,
-    )?;
-    Ok(deep_queries)
-}
-
-fn format_sum(parts: &[usize]) -> String {
-    parts.iter().map(usize::to_string).collect::<Vec<_>>().join(" + ")
-}
-
-fn replace_line_with_prefix(
-    content: &mut String,
-    prefix: &str,
-    replacement: &str,
-) -> io::Result<()> {
-    let start = content
-        .lines()
-        .scan(0usize, |offset, line| {
-            let start = *offset;
-            *offset += line.len() + 1;
-            Some((start, line))
-        })
-        .find_map(|(start, line)| line.trim_start().starts_with(prefix).then_some(start))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{prefix} not found")))?;
-    let end = content[start..].find('\n').map(|idx| start + idx).unwrap_or(content.len());
-    content.replace_range(start..end, replacement);
-    Ok(())
-}
-
-fn replace_comment_before_const(
-    content: &mut String,
-    name: &str,
-    replacement: &str,
-) -> io::Result<()> {
-    let const_marker = format!("const {name} = ");
-    let const_start = content.find(&const_marker).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("{const_marker} not found"))
-    })?;
-    let mut block_start = const_start;
-    while block_start > 0 {
-        let previous_end = block_start.saturating_sub(1);
-        let previous_start = content[..previous_end].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-        if !content[previous_start..previous_end].trim_start().starts_with("###") {
-            break;
-        }
-        block_start = previous_start;
-    }
-    if block_start == const_start {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("comment before {name} not found"),
-        ));
-    }
-    content.replace_range(block_start..const_start, &format!("{replacement}\n"));
-    Ok(())
-}
-
-fn replace_repeat_in_proc(content: &mut String, proc_name: &str, count: usize) -> io::Result<()> {
-    let proc_marker = format!("proc {proc_name}");
-    let proc_start = content.find(&proc_marker).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("{proc_marker} not found"))
-    })?;
-    let proc_end = content[proc_start..]
-        .find("\nend")
-        .map(|idx| proc_start + idx)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("end of {proc_name}")))?;
-    let repeat_start = content[proc_start..proc_end]
-        .find("repeat.")
-        .map(|idx| proc_start + idx)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("repeat in {proc_name}")))?;
-    let repeat_end = content[repeat_start..proc_end]
-        .find('\n')
-        .map(|idx| repeat_start + idx)
-        .unwrap_or(proc_end);
-    content.replace_range(repeat_start..repeat_end, &format!("repeat.{count}"));
-    Ok(())
-}
-
-fn write_artifacts(root: &Path, artifact: &ComputedArtifacts) -> io::Result<()> {
-    write_file(root, CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
-    write_file(root, VM_LAYOUT_PATH, &artifact.vm_layout)?;
-    write_file(root, VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
-    write_file(root, VM_DEEP_QUERIES_PATH, &artifact.vm_deep_queries)?;
-    println!(
-        "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
-        artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
-    );
-    println!("wrote VM recursive-verifier layout, OOD-frame, and DEEP-query geometry");
-    println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
-    Ok(())
+fn require_input_index(input_layout: &InputLayout, key: InputKey) -> usize {
+    input_layout
+        .index(key)
+        .unwrap_or_else(|| panic!("ACE READ input layout is missing {key:?}"))
 }
 
 fn word_to_array(word: Word) -> [Felt; 4] {
     [word[0], word[1], word[2], word[3]]
-}
-
-fn render_constraints_eval_file(
-    circuit: &RecursiveAceCircuit,
-    quotient_inputs: QuotientRecompositionInputs<Felt>,
-    geometry: &VmGeometry,
-) -> io::Result<String> {
-    miden_ace::render_masm_constraints_eval(&miden_ace::MasmConstraintsEvalConfig {
-        generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
-                           regenerate-constraints -- --write",
-        layout_module: "miden::core::sys::vm::layout",
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_len: circuit.stream_len,
-        max_cycle_len_log: max_periodic_cycle_len_log(),
-        num_airs: MIDEN_AIR_COUNT,
-        // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
-        // evaluator stages them from the proof-order maps; that block is what makes the circuit
-        // order-invariant.
-        fold_coefficients: FoldCoefficientStaging {
-            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-            coefficient_offset: geometry.fold_coefficient_offset,
-        },
-        quotient_inputs,
-        circuit_digest: circuit.commitment,
-    })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
 }
 
 fn max_periodic_cycle_len_log() -> u32 {
@@ -914,29 +412,6 @@ fn max_periodic_cycle_len_log() -> u32 {
         "maximum AIR periodic cycle length must be a power of two"
     );
     max_len.ilog2()
-}
-
-/// Verify that the ACE circuit constants in `constraints_eval.masm` match the current AIR.
-pub fn constraints_eval_masm_matches_air(root: &Path) -> Result<(), String> {
-    let artifact = compute_artifacts(None).map_err(|e| e.to_string())?;
-    constraints_eval_masm_matches_artifact(root, &artifact)
-}
-
-fn constraints_eval_masm_matches_artifact(
-    root: &Path,
-    artifact: &ComputedArtifacts,
-) -> Result<(), String> {
-    let masm = read_file(root, CONSTRAINTS_EVAL_PATH).map_err(|e| e.to_string())?;
-    if masm != artifact.constraints_eval {
-        return Err(format!("{CONSTRAINTS_EVAL_PATH} is stale"));
-    }
-    Ok(())
-}
-
-/// Verify that RELATION_DIGEST in `air/src/config.rs` and `sys/vm/mod.masm` matches current AIR.
-pub fn relation_digest_matches_air(root: &Path) -> Result<(), String> {
-    let artifact = compute_artifacts(None).map_err(|e| e.to_string())?;
-    relation_digest_matches_artifact(root, &artifact)
 }
 
 fn relation_digest_matches_artifact(
@@ -998,6 +473,8 @@ fn relation_digest_matches_artifact(
         return Err("And8 preprocessed commitment in sys/vm/mod.masm is stale".into());
     }
 
+    super::delivery::validate_protected(root, &artifact.files)?;
+
     let commitments = &artifact.preprocessed_commitments;
     if accepted::BLAKE3_PREPROCESSED_COMMITMENT != commitments.blake3
         || accepted::RPO_PREPROCESSED_COMMITMENT != commitments.rpo
@@ -1009,14 +486,34 @@ fn relation_digest_matches_artifact(
         return Err("preprocessed commitments in air/src/config.rs are stale".into());
     }
 
-    // The generated map/scatter hook is specialized to one block per AIR. A stale value would
-    // leave an AIR without a routed out-of-domain segment.
-    let ood_frames = read_file(root, VM_OOD_FRAMES_PATH).map_err(|e| e.to_string())?;
-    let scatter_airs = parse_masm_const::<usize>(&ood_frames, "NUM_AIRS", VM_OOD_FRAMES_PATH)?;
-    if scatter_airs != MIDEN_AIR_COUNT {
-        return Err("NUM_AIRS in sys/vm/ood_frames.masm is stale".into());
-    }
+    Ok(())
+}
 
+/// Validate protected inputs and source ABI before any output delivery.
+pub(super) fn validate_delivery(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
+    super::accepted::load(root)?.check(
+        "vm",
+        artifact.circuit_digest.map(|felt| felt.as_canonical_u64()),
+        artifact.relation_digest.map(|felt| felt.as_canonical_u64()),
+    )?;
+    relation_digest_matches_artifact(root, artifact)?;
+    validate_shared_abi(root)
+}
+
+pub(super) fn validate_shared_abi(root: &Path) -> Result<(), String> {
+    let constants = read_file(root, STARK_CONSTANTS_PATH).map_err(|error| error.to_string())?;
+    for (name, expected) in [
+        ("LOG_AIR_TRACE_LENGTHS_PTR", SHARED_ABI.heights_ptr),
+        ("LOG_AIR_TRACE_LENGTHS_CAPACITY", SHARED_ABI.heights_capacity),
+        ("CONSTRAINT_COMPOSITION_COEFS_PTR", SHARED_ABI.composition_coefficients_ptr),
+        ("PUBLIC_INPUTS_ADDRESS_PTR", SHARED_ABI.public_inputs_address_ptr),
+    ] {
+        if parse_masm_const::<u32>(&constants, name, STARK_CONSTANTS_PATH)? != expected {
+            return Err(format!(
+                "{name} in live generic MASM differs from the source-owned verifier ABI"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1027,27 +524,6 @@ pub fn public_inputs_masm_matches_air(root: &Path) -> Result<(), String> {
         parse_masm_const::<usize>(&public_inputs, "NUM_MIDEN_AIRS", VM_PUBLIC_INPUTS_PATH)?;
     if num_miden_airs != MIDEN_AIR_COUNT {
         return Err("NUM_MIDEN_AIRS in sys/vm/public_inputs.masm is stale".into());
-    }
-
-    Ok(())
-}
-
-/// Verify that recursive-verifier memory, OOD, and DEEP-query geometry matches the AIR widths.
-pub fn vm_geometry_matches_air(root: &Path) -> Result<(), String> {
-    let artifact = compute_artifacts(None).map_err(|e| e.to_string())?;
-    vm_geometry_matches_artifact(root, &artifact)
-}
-
-fn vm_geometry_matches_artifact(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
-    for (path, expected) in [
-        (VM_LAYOUT_PATH, artifact.vm_layout.as_str()),
-        (VM_OOD_FRAMES_PATH, artifact.vm_ood_frames.as_str()),
-        (VM_DEEP_QUERIES_PATH, artifact.vm_deep_queries.as_str()),
-    ] {
-        let actual = read_file(root, path).map_err(|e| e.to_string())?;
-        if actual != expected {
-            return Err(format!("{path} has stale AIR-width geometry"));
-        }
     }
 
     Ok(())
@@ -1186,29 +662,13 @@ where
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
 }
 
-fn replace_masm_const(content: &mut String, name: &str, new_value: &str) -> io::Result<()> {
-    let prefix = format!("const {name} = ");
-    let line_start = content
-        .find(&prefix)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let line_end = content[line_start..]
-        .find('\n')
-        .map(|i| line_start + i)
-        .unwrap_or(content.len());
-    let line = &content[line_start..line_end];
-    let suffix = line.find('#').map_or("", |comment_start| {
-        let whitespace_start = line[..comment_start].trim_end().len();
-        &line[whitespace_start..]
-    });
-    content.replace_range(line_start..line_end, &format!("{prefix}{new_value}{suffix}"));
-    Ok(())
-}
-
-fn replace_felt_array_const(
-    content: &mut String,
-    name: &str,
-    values: &[Felt; 4],
-) -> io::Result<()> {
+fn replace_felt_array_const(content: &mut String, name: &str, values: &[Felt; 4]) {
+    // Preserve authored formatting when accepted values are already current.
+    if parse_rust_pin_array(content, name)
+        .is_ok_and(|actual| actual == values.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>())
+    {
+        return;
+    }
     let mut body: String = values
         .iter()
         .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
@@ -1217,13 +677,23 @@ fn replace_felt_array_const(
     replace_rust_array_const(content, "pub const", name, &body)
 }
 
-fn replace_u64_array_const(content: &mut String, name: &str, values: &[u64; 4]) -> io::Result<()> {
+fn replace_u64_array_const(content: &mut String, name: &str, values: &[u64; 4]) {
+    // Preserve authored formatting when accepted values are already current.
+    if parse_rust_pin_array(content, name).is_ok_and(|actual| actual == values.to_vec()) {
+        return;
+    }
     let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
     body.push('\n');
     replace_rust_array_const(content, "pub const", name, &body)
 }
 
-fn replace_u8_array_const(content: &mut String, name: &str, values: &[u8; 32]) -> io::Result<()> {
+fn replace_u8_array_const(content: &mut String, name: &str, values: &[u8; 32]) {
+    // Preserve authored formatting when accepted values are already current.
+    if parse_rust_pin_array(content, name)
+        .is_ok_and(|actual| actual == values.iter().copied().map(u64::from).collect::<Vec<_>>())
+    {
+        return;
+    }
     let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
     body.push('\n');
     replace_rust_array_const(content, "pub const", name, &body)
@@ -1234,17 +704,13 @@ fn replace_rust_array_const(
     declaration_prefix: &str,
     name: &str,
     body: &str,
-) -> io::Result<()> {
+) {
     let marker = format!("{declaration_prefix} {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    if content[start + marker.len()..].contains(&marker) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{name} is declared more than once"),
-        ));
-    }
+    let start = content.find(&marker).unwrap_or_else(|| panic!("{name} not found"));
+    assert!(
+        !content[start + marker.len()..].contains(&marker),
+        "{name} is declared more than once"
+    );
 
     // These generated declarations keep `=` on the declaration line, while rustfmt may put the
     // opening bracket on the next line. Anchoring the assignment to that line prevents a malformed
@@ -1256,22 +722,13 @@ fn replace_rust_array_const(
     let assign = content[start + marker.len()..declaration_end]
         .find('=')
         .map(|offset| start + marker.len() + offset)
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
+        .unwrap_or_else(|| panic!("{name} initializer not found"));
 
     let init_start = content[assign + 1..]
         .find(|character: char| !character.is_whitespace())
         .map(|offset| assign + 1 + offset)
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    if content.as_bytes()[init_start] != b'[' {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{name} initializer not found"),
-        ));
-    }
+        .unwrap_or_else(|| panic!("{name} initializer not found"));
+    assert!(content.as_bytes()[init_start] == b'[', "{name} initializer not found");
 
     // rustfmt either closes a short array on the opening line or places the top-level `];` at
     // column zero. Array body lines are indented. Stop at the first other unindented line so a
@@ -1299,11 +756,8 @@ fn replace_rust_array_const(
         }
         line_start = line_end.saturating_add(1);
     }
-    let terminator_end = terminator_end.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-    })?;
+    let terminator_end = terminator_end.unwrap_or_else(|| panic!("{name} terminator not found"));
     content.replace_range(assign..terminator_end, &format!("= [{body}];"));
-    Ok(())
 }
 
 /// Read canonical integer pin arrays while tolerating rustfmt's array line wrapping.
@@ -1345,56 +799,258 @@ fn parse_rust_pin_array(content: &str, name: &str) -> Result<Vec<u64>, String> {
         .collect()
 }
 
-fn read_template(path: &str) -> io::Result<String> {
-    let content = match path {
-        AIR_CONFIG_PATH => include_str!("../../templates/vm-config.rs"),
-        RELATION_DIGEST_PATH => include_str!("../../templates/asm/sys/vm/mod.masm"),
-        VM_LAYOUT_PATH => include_str!("../../templates/asm/sys/vm/layout.masm"),
-        STARK_CONSTANTS_PATH => include_str!("../../templates/asm/stark/constants.masm"),
-        VM_DEEP_QUERIES_PATH => include_str!("../../templates/asm/sys/vm/deep_queries.masm"),
-        PVM_LAYOUT_PATH => include_str!("../../templates/asm/sys/pvm/layout.masm"),
-        other => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("unknown packaged template: {other}"),
-            ));
-        },
-    };
-    Ok(content.to_string())
-}
-
 fn read_file(root: &Path, rel_path: &str) -> io::Result<String> {
     let path = root.join(rel_path);
     fs::read_to_string(&path)
         .map_err(|e| io::Error::new(e.kind(), format!("failed to read {}: {e}", path.display())))
 }
 
-fn write_file(root: &Path, rel_path: &str, contents: &str) -> io::Result<()> {
-    let path = root.join(rel_path);
-    fs::write(&path, contents)
-        .map_err(|e| io::Error::new(e.kind(), format!("failed to write {}: {e}", path.display())))
-}
-
 pub struct ComputedArtifacts {
-    pub num_inputs: usize,
-    pub num_eval_gates: usize,
-    pub stream_blocks: usize,
     pub circuit_digest: [Felt; 4],
     pub relation_digest: [Felt; 4],
     pub preprocessed_commitments: PreprocessedCommitments,
-    pub constraints_eval: String,
-    pub relation_mod: String,
-    pub air_config: String,
-    pub vm_layout: String,
-    pub vm_ood_frames: String,
-    pub vm_deep_queries: String,
+    pub files: Vec<RenderedArtifact>,
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec};
+    use alloc::string::ToString;
 
-    use super::*;
+    use super::{super::expect_panic, *};
+
+    const PVM_PROTECTED_WRAPPER: &str = "crates/lib/core/asm/sys/pvm/mod.masm";
+    const DELIVERY_MANAGED_PATHS: [&str; 15] = [
+        CONSTRAINTS_EVAL_PATH,
+        VM_LAYOUT_PATH,
+        VM_OOD_FRAMES_PATH,
+        VM_DEEP_QUERIES_PATH,
+        "crates/lib/core/asm/sys/pvm/constraints_eval.masm",
+        "crates/lib/core/asm/sys/pvm/layout.masm",
+        "crates/lib/core/asm/sys/pvm/ood_frames.masm",
+        "crates/lib/core/asm/sys/pvm/deep_queries.masm",
+        "crates/lib/core/asm/sys/pvm/aux_trace.masm",
+        "crates/lib/core/asm/sys/pvm/public_inputs.masm",
+        "crates/air/generated/artifacts/vm-evaluator.rs.zlib",
+        "crates/air/generated/artifacts/vm-degrees.rs",
+        "crates/air/generated/artifacts/precompile-degrees.rs",
+        "crates/air/generated/artifacts/vm-metadata.rs",
+        "crates/air/generated/artifacts/precompile-metadata.rs",
+    ];
+
+    struct DeliveryFixture {
+        root: std::path::PathBuf,
+    }
+
+    impl DeliveryFixture {
+        fn new(vm: &ComputedArtifacts, pvm: &super::super::precompile::GeneratedArtifacts) -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let fixture = Self {
+                root: std::env::temp_dir().join(format!(
+                    "miden-masm-delivery-{}-{timestamp}-{unique}",
+                    std::process::id(),
+                )),
+            };
+            // This fixture exercises delivery behavior, not accepted-identity derivation.
+            // Independent pin/golden and live-library tests retain that separate obligation.
+            let accepted = serde_json::json!({
+                "accepted_schema": 1,
+                "relations": {
+                    "vm": {
+                        "protocol_id": 1,
+                        "accepted_circuit_digest": vm.circuit_digest.map(|felt| felt.as_canonical_u64()),
+                        "accepted_relation_digest": vm.relation_digest.map(|felt| felt.as_canonical_u64()),
+                    },
+                    "precompile": {
+                        "protocol_id": 4,
+                        "accepted_circuit_digest": canonical_word(pvm.circuit_digest),
+                        "accepted_relation_digest": pvm.relation_digest.map(|felt| felt.as_canonical_u64()),
+                    },
+                },
+            });
+            assert_eq!((vm.files.len(), pvm.files.len()), (6, 9));
+            for relative in &DELIVERY_MANAGED_PATHS[..10] {
+                let file = vm
+                    .files
+                    .iter()
+                    .chain(&pvm.files)
+                    .find(|file| file.relative_path == *relative)
+                    .unwrap();
+                assert_eq!(file.ownership, ArtifactOwnership::Managed);
+            }
+            fixture.write(
+                "crates/air/generated/protocol/accepted.json",
+                &serde_json::to_string_pretty(&accepted).unwrap(),
+            );
+            let shared = format!(
+                "pub const LOG_AIR_TRACE_LENGTHS_PTR = {}\n\
+                 pub const LOG_AIR_TRACE_LENGTHS_CAPACITY = {}\n\
+                 pub const CONSTRAINT_COMPOSITION_COEFS_PTR = {}\n\
+                 pub const PUBLIC_INPUTS_ADDRESS_PTR = {}\n",
+                SHARED_ABI.heights_ptr,
+                SHARED_ABI.heights_capacity,
+                SHARED_ABI.composition_coefficients_ptr,
+                SHARED_ABI.public_inputs_address_ptr,
+            );
+            fixture.write(STARK_CONSTANTS_PATH, &shared);
+            for relative in [
+                AIR_CONFIG_PATH,
+                RELATION_DIGEST_PATH,
+                "crates/air/generated/src/precompile/ace_constants.rs",
+                "crates/air/generated/src/precompile/protocol.rs",
+                PVM_PROTECTED_WRAPPER,
+            ] {
+                let file = vm
+                    .files
+                    .iter()
+                    .chain(&pvm.files)
+                    .find(|file| file.relative_path == relative)
+                    .unwrap();
+                assert_eq!(file.ownership, ArtifactOwnership::ProtectedCheckOnly);
+                fixture.write(relative, &file.body);
+            }
+            for relative in DELIVERY_MANAGED_PATHS {
+                fixture.write(relative, &format!("unchanged managed sentinel: {relative}\n"));
+            }
+            validate_delivery(&fixture.root, vm).expect("valid VM delivery fixture");
+            super::super::precompile::validate_delivery(&fixture.root, pvm)
+                .expect("valid PVM delivery fixture");
+            fixture
+        }
+
+        fn write(&self, relative: &str, body: &str) {
+            let path = self.root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, body).unwrap();
+        }
+
+        fn managed_contents(&self) -> Vec<Vec<u8>> {
+            DELIVERY_MANAGED_PATHS
+                .iter()
+                .map(|relative| fs::read(self.root.join(relative)).unwrap())
+                .collect()
+        }
+    }
+
+    impl Drop for DeliveryFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn delivery_artifacts() -> (ComputedArtifacts, super::super::precompile::GeneratedArtifacts) {
+        let vm = compile_and_render(accepted_setup_commitments());
+        let pvm = super::super::precompile::compile_and_render(
+            super::super::precompile::accepted_setup_commitment(),
+        );
+        (vm, pvm)
+    }
+
+    #[test]
+    fn typed_render_rejects_a_misaligned_ace_stream() {
+        let mut compiled = compile(accepted_setup_commitments());
+        compiled.masm.circuit.stream_felts -= 1;
+        let error = expect_panic(|| render(&compiled));
+        assert!(error.to_string().contains("circuit metadata"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn compiler_panic_prevents_managed_output_writes() {
+        let (vm, pvm) = delivery_artifacts();
+        let fixture = DeliveryFixture::new(&vm, &pvm);
+        let before = fixture.managed_contents();
+        let mut compiled = compile(accepted_setup_commitments());
+        compiled.masm.circuit.stream_felts -= 1;
+        expect_panic(|| {
+            let artifact = render(&compiled);
+            super::super::delivery::deliver(&fixture.root, &artifact.files, Mode::Write).unwrap();
+        });
+        assert_eq!(fixture.managed_contents(), before);
+    }
+
+    #[test]
+    fn protected_full_body_drift_is_detected_with_unchanged_numeric_pins() {
+        let (vm, pvm) = delivery_artifacts();
+        let fixture = DeliveryFixture::new(&vm, &pvm);
+        for (relative, suffix) in [
+            (AIR_CONFIG_PATH, "// protected body drift\n"),
+            (RELATION_DIGEST_PATH, "# protected body drift\n"),
+        ] {
+            let original = read_file(&fixture.root, relative).unwrap();
+            let drifted = format!("{original}\n{suffix}");
+            if relative == AIR_CONFIG_PATH {
+                assert_eq!(
+                    parse_rust_pin_array(&original, "RELATION_DIGEST").unwrap(),
+                    parse_rust_pin_array(&drifted, "RELATION_DIGEST").unwrap()
+                );
+            } else {
+                assert_eq!(
+                    parse_masm_const::<u64>(&original, "RELATION_DIGEST_0", relative).unwrap(),
+                    parse_masm_const::<u64>(&drifted, "RELATION_DIGEST_0", relative).unwrap()
+                );
+            }
+            fixture.write(relative, &drifted);
+            let error = validate_delivery(&fixture.root, &vm).unwrap_err();
+            assert!(
+                error.contains(relative) && error.contains("protected template-body drift"),
+                "unexpected error: {error}"
+            );
+            fixture.write(relative, &original);
+        }
+    }
+
+    #[test]
+    fn rejected_write_delivery_preserves_every_managed_output() {
+        let (vm, pvm) = delivery_artifacts();
+        for rejected_input in ["accepted identity", "VM protected body", "PVM protected body"] {
+            let fixture = DeliveryFixture::new(&vm, &pvm);
+            let before = fixture.managed_contents();
+            let expected = match rejected_input {
+                "accepted identity" => {
+                    let relative = "crates/air/generated/protocol/accepted.json";
+                    let mut accepted: serde_json::Value =
+                        serde_json::from_str(&read_file(&fixture.root, relative).unwrap()).unwrap();
+                    let limb = &mut accepted["relations"]["vm"]["accepted_circuit_digest"][0];
+                    *limb = serde_json::Value::from(limb.as_u64().unwrap() + 1);
+                    fixture.write(relative, &serde_json::to_string_pretty(&accepted).unwrap());
+                    "candidate identity differs"
+                },
+                "VM protected body" => {
+                    fixture.write(
+                        RELATION_DIGEST_PATH,
+                        &format!(
+                            "{}\n# rejected body drift\n",
+                            read_file(&fixture.root, RELATION_DIGEST_PATH).unwrap()
+                        ),
+                    );
+                    RELATION_DIGEST_PATH
+                },
+                "PVM protected body" => {
+                    fixture.write(
+                        PVM_PROTECTED_WRAPPER,
+                        &format!(
+                            "{}\n# rejected body drift\n",
+                            read_file(&fixture.root, PVM_PROTECTED_WRAPPER).unwrap()
+                        ),
+                    );
+                    PVM_PROTECTED_WRAPPER
+                },
+                _ => unreachable!(),
+            };
+            let error = super::super::run(&fixture.root, Mode::Write)
+                .expect_err("rejected input must prevent delivery");
+            assert!(error.contains(expected), "unexpected {rejected_input} error: {error}");
+            assert_eq!(
+                fixture.managed_contents(),
+                before,
+                "rejected {rejected_input} changed a managed output"
+            );
+        }
+    }
 
     #[test]
     fn accepted_pin_reader_supports_wrapping_and_rejects_malformed_values() {
@@ -1424,109 +1080,72 @@ mod tests {
         let following = "pub(crate) const UNTOUCHED: &str = \"];\";\n";
 
         let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
-        replace_felt_array_const(&mut wrapped, name, &values).unwrap();
+        replace_felt_array_const(&mut wrapped, name, &values);
         assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
 
         let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
         let original = malformed.clone();
-        let error = replace_felt_array_const(&mut malformed, name, &values).unwrap_err();
+        let error = expect_panic(|| replace_felt_array_const(&mut malformed, name, &values));
         assert!(error.to_string().contains("terminator not found"));
         assert_eq!(malformed, original);
 
         let mut duplicate =
             format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
         let original = duplicate.clone();
-        let error = replace_felt_array_const(&mut duplicate, name, &values).unwrap_err();
+        let error = expect_panic(|| replace_felt_array_const(&mut duplicate, name, &values));
         assert!(error.to_string().contains("declared more than once"));
         assert_eq!(duplicate, original);
     }
 
-    /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
-    /// single occupant needs no table at all. Anything between the two would address past the
-    /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
-    fn scatter_plan_rejects_partially_occupied_commitment_groups() {
-        // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
-        assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
-        // Every AIR occupies the group.
-        assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());
-        // Two of four: the proof-order position no longer indexes the group's slots.
-        let Err(partial) = vm_scatter_plan(&scatter_test_geometry(&[16, 0, 0, 16])) else {
-            panic!("a partially occupied group must be refused");
-        };
-        assert!(
-            partial
-                .to_string()
-                .contains("preprocessed commitment group is occupied by 2 of 4"),
-            "unexpected refusal: {partial}"
+    fn unchanged_pin_arrays_keep_authored_formatting() {
+        let mut felt = String::from(
+            "pub const PIN: [Felt; 4] =\n    [Felt::new_unchecked(1), Felt::new_unchecked(2),\n     Felt::new_unchecked(3), Felt::new_unchecked(4)];\n",
         );
-    }
+        let original = felt.clone();
+        replace_felt_array_const(&mut felt, "PIN", &[1, 2, 3, 4].map(Felt::new_unchecked));
+        assert_eq!(felt, original);
 
-    /// A geometry whose only meaningful axis is the preprocessed occupancy under test.
-    fn scatter_test_geometry(preprocessed_widths: &[usize]) -> VmGeometry {
-        let preprocessed_widths = preprocessed_widths.to_vec();
-        let main_widths = vec![8; preprocessed_widths.len()];
-        let aux_widths = vec![8; preprocessed_widths.len()];
-        let preprocessed_width: usize = preprocessed_widths.iter().sum();
-        let main_width: usize = main_widths.iter().sum();
-        let aux_width: usize = aux_widths.iter().sum();
-        let quotient_width = 8;
-        let row_width = preprocessed_width + main_width + aux_width + quotient_width;
-        VmGeometry {
-            preprocessed_widths,
-            preprocessed_width,
-            main_widths,
-            main_width,
-            aux_widths,
-            aux_width,
-            quotient_width,
-            row_width,
-            ood_row_felts: row_width * EXT_DEGREE,
-            ood_frame_felts: 2 * row_width * EXT_DEGREE,
-            preprocessed_pipe_blocks: preprocessed_width / ADV_PIPE_BLOCK_FELTS,
-            main_pipe_blocks: main_width / ADV_PIPE_BLOCK_FELTS,
-            aux_pipe_blocks: aux_width / ADV_PIPE_BLOCK_FELTS,
-            quotient_pipe_blocks: quotient_width / ADV_PIPE_BLOCK_FELTS,
-            ood_pipe_blocks: row_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
-            ood_evaluations_ptr: 0,
-            aux_bus_boundary_ptr: 0,
-            auxiliary_ace_inputs_ptr: 0,
-            ace_circuit_stream_ptr: 0,
-            current_trace_row_ptr: 0,
-            ood_scatter_table_ptr: 0,
-            fold_coefficient_offset: 0,
-        }
-    }
+        let mut limbs = String::from("pub const PIN: [u64; 4] = [1, 2,\n 3, 4];\n");
+        let original = limbs.clone();
+        replace_u64_array_const(&mut limbs, "PIN", &[1, 2, 3, 4]);
+        assert_eq!(limbs, original);
 
-    #[test]
-    fn vm_ace_stream_capacity_accepts_exact_fit_and_rejects_overflow() {
-        let stream_start = 1_000;
-        let pvm_start = 1_100;
-
-        check_vm_ace_stream_capacity(stream_start, pvm_start, 100).expect("exact fit");
-        let error = check_vm_ace_stream_capacity(stream_start, pvm_start, 101)
-            .expect_err("one felt beyond the reservation must fail");
-        assert!(error.to_string().contains("requires 101 felts"));
-    }
-
-    #[test]
-    fn vm_ace_stream_capacity_rejects_reversed_anchors() {
-        let error = check_vm_ace_stream_capacity(1_100, 1_000, 0)
-            .expect_err("the PVM allocation must follow the VM stream");
-        assert!(error.to_string().contains("PVM allocation starts before"));
+        let body = ["7"; 32].join(", ");
+        let mut bytes = format!("pub const PIN: [u8; 32] =\n    [{body}];\n");
+        let original = bytes.clone();
+        replace_u8_array_const(&mut bytes, "PIN", &[7; 32]);
+        assert_eq!(bytes, original);
     }
 
     #[test]
     fn deep_query_loader_repeats_follow_air_geometry() {
-        let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config());
-        let geometry = VmGeometry::from_input_layout(circuit.layout()).expect("VM geometry");
-        let deep_queries = render_vm_deep_queries(&geometry).expect("render DEEP-query loaders");
-
+        let compiled = compile(accepted_setup_commitments());
+        let artifact = render(&compiled);
+        let deep_queries = &artifact
+            .files
+            .iter()
+            .find(|file| file.relative_path == VM_DEEP_QUERIES_PATH)
+            .unwrap()
+            .body;
+        let geometry = &compiled.masm.geometry;
         for (proc_name, expected) in [
-            ("load_preprocessed_segment", geometry.preprocessed_pipe_blocks),
-            ("load_main_segment_execution_trace", geometry.main_pipe_blocks),
-            ("load_aux_segment_execution_trace", geometry.aux_pipe_blocks),
-            ("load_constraints_composition_polys_trace", geometry.quotient_pipe_blocks),
+            (
+                "load_preprocessed_segment",
+                geometry.preprocessed.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            ),
+            (
+                "load_main_segment_execution_trace",
+                geometry.main.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            ),
+            (
+                "load_aux_segment_execution_trace",
+                geometry.aux_coordinates.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            ),
+            (
+                "load_constraints_composition_polys_trace",
+                geometry.quotient_coordinates / ADV_PIPE_BLOCK_FELTS,
+            ),
         ] {
             let proc_marker = format!("proc {proc_name}");
             let proc_body = deep_queries

@@ -30,21 +30,16 @@
 "arbitrary" = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 "std" = ["miden-assembly/std", "miden-precompiles/std", "miden-processor/std", "miden-utils-sync/std"]
 "testing" = ["arbitrary"]
-"constraints-tools" = ["dep:miden-air-source", "miden-air-source/tooling", "std", "dep:miden-air", "dep:miden-ace", "dep:miden-stark"]
 
 [dependencies]
-"miden-air-source" = { workspace = true, optional = true }
 "miden-mast-package" = { "workspace" = true }
 "miden-core" = { "workspace" = true }
 "miden-crypto" = { "workspace" = true }
 "miden-precompiles" = { "workspace" = true }
 "miden-processor" = { "workspace" = true }
 "miden-utils-sync" = { "workspace" = true }
-"miden-air" = { "workspace" = true, "optional" = true }
 "p256" = { "workspace" = true, "features" = ["ecdsa"] }
 "thiserror" = { "workspace" = true }
-"miden-stark" = { "workspace" = true, "optional" = true, "features" = ["capture"] }
-"miden-ace" = { "workspace" = true, "optional" = true, "features" = ["compiler"] }
 
 [dev-dependencies]
 "miden-air-source" = { workspace = true, features = ["tooling"] }
@@ -75,12 +70,3 @@
 "miden-assembly-syntax" = { "workspace" = true, "features" = ["std"] }
 "miden-package-registry" = { "workspace" = true, "features" = ["resolver"] }
 "miden-core-lib-codegen" = { "workspace" = true, "features" = ["std"] }
-
-[[bin]]
-"name" = "regenerate-constraints"
-"path" = "src/bin/regenerate-constraints.rs"
-"required-features" = ["constraints-tools"]
-[[bin]]
-"name" = "regenerate-evaluator"
-"path" = "src/bin/regenerate-evaluator.rs"
-"required-features" = ["constraints-tools"]

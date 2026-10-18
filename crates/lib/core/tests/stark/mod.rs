@@ -1819,7 +1819,7 @@ fn quotient_recomposition_constants_match_derivation() {
 #[test]
 fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
     const STAGING_PROC: &str = "stage_air_fold_coefficients";
-    const OFFSET_SITE: &str = "exec.layout::auxiliary_ace_inputs_ptr add.";
+    const OFFSET_POINTER: &str = "exec.layout::auxiliary_ace_inputs_ptr";
     /// Base felts per staged coefficient (one quadratic-extension element).
     const COEFFICIENT_STRIDE: u32 = 2;
 
@@ -1859,9 +1859,10 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
         // of turning this guard into a silent no-op.
         let mut declares_staging = false;
         let mut in_staging = false;
-        let mut staged_offset = None;
+        let mut staging_depth = 0usize;
+        let mut staging_tokens = Vec::new();
         for line in evaluator.lines() {
-            let trimmed = line.trim();
+            let trimmed = line.split('#').next().unwrap_or_default().trim();
             if let Some(rest) =
                 trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
             {
@@ -1874,14 +1875,45 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
                 }
                 declares_staging |= name == STAGING_PROC;
                 in_staging = name == STAGING_PROC;
+                staging_depth = usize::from(in_staging);
+                continue;
             }
-            if in_staging && let Some(offset) = trimmed.strip_prefix(OFFSET_SITE) {
-                staged_offset = offset.parse::<u32>().ok();
+            if in_staging {
+                for token in trimmed.split_whitespace() {
+                    if token.starts_with("repeat.")
+                        || token.starts_with("if.")
+                        || token.starts_with("while.")
+                    {
+                        staging_depth += 1;
+                    }
+                    if token == "end" {
+                        staging_depth -= 1;
+                        if staging_depth == 0 {
+                            in_staging = false;
+                            break;
+                        }
+                    }
+                    staging_tokens.push(token);
+                }
             }
         }
         assert!(declares_staging, "{relation}: {STAGING_PROC} is no longer declared");
-        let staged_offset =
-            staged_offset.unwrap_or_else(|| panic!("{relation}: {STAGING_PROC} has no offset"));
+        let staged_offsets: Vec<u32> = staging_tokens
+            .windows(2)
+            .filter(|pair| pair[0] == OFFSET_POINTER)
+            .map(|pair| {
+                pair[1]
+                    .strip_prefix("add.")
+                    .and_then(|offset| offset.parse().ok())
+                    .unwrap_or_else(|| panic!("{relation}: {STAGING_PROC} has no immediate offset"))
+            })
+            .collect();
+        assert_eq!(
+            staged_offsets.len(),
+            1,
+            "{relation}: {STAGING_PROC} must address its coefficient base exactly once"
+        );
+        let staged_offset = staged_offsets[0];
 
         let selectors_end = first_selector_offset + selector_stride * num_airs;
         assert_eq!(

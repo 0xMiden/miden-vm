@@ -261,10 +261,10 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check recursive constraint artifacts for drift
+      - name: Check VM/PVM MASM, Rust evaluator and ACE artifacts for drift
         run: make check-constraints
-      - name: Check PVM ACE constants and MASM artifacts for drift
-        run: make check-pvm-constants
+      - name: Check independently derived VM/PVM setup against accepted pins
+        run: make check-constraint-setup
       - name: Check pinned PVM proof fixture for drift
         run: make check-pvm-proof-fixture
 

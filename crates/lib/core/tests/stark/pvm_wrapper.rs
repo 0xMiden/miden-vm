@@ -20,6 +20,31 @@ const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 12] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1, 7, 7];
 const HEIGHTS: [u64; 12] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14, 9, 8];
 
+/// Full-source freshness is separate from the independent behavioral oracles below and in the
+/// aux/public-input tests. In particular, those oracles do not consume the renderer's schedules.
+#[test]
+fn pvm_generated_glue_matches_complete_tracked_modules() {
+    use miden_air_source::codegen::precompile;
+    let generated = precompile::compile_and_render(precompile::accepted_setup_commitment());
+    for (path, expected) in [
+        (
+            "crates/lib/core/asm/sys/pvm/mod.masm",
+            include_str!("../../asm/sys/pvm/mod.masm"),
+        ),
+        (
+            "crates/lib/core/asm/sys/pvm/aux_trace.masm",
+            include_str!("../../asm/sys/pvm/aux_trace.masm"),
+        ),
+        (
+            "crates/lib/core/asm/sys/pvm/public_inputs.masm",
+            include_str!("../../asm/sys/pvm/public_inputs.masm"),
+        ),
+    ] {
+        let artifact = generated.files.iter().find(|file| file.relative_path == path).unwrap();
+        assert_eq!(artifact.body, expected, "{path}");
+    }
+}
+
 fn masm_const(source: &str, name: &str) -> u64 {
     let prefix = format!("const {name} = ");
     source

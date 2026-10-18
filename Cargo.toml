@@ -79,6 +79,7 @@ overflow-checks = true
 opt-level = 0
 
 [workspace.dependencies]
+askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
 miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-alloc"] }
 # Workspace crates
 miden-air-source = { path = "./crates/air/source", version = "1.0", default-features = false }

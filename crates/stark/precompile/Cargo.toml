@@ -14,17 +14,15 @@
 
 [features]
 "default" = ["std"]
-"std" = ["tracing/std", "miden-air/std", "miden-air-source/std", "miden-stark/std", "miden-core/std", "miden-crypto/std", "miden-precompiles/std", "miden-utils-sync/std", "thiserror/std"]
+"std" = ["tracing/std", "miden-air/std", "miden-stark/std", "miden-core/std", "miden-crypto/std", "miden-precompiles/std", "miden-utils-sync/std", "thiserror/std"]
 "concurrent" = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
 "trace" = []
 "prover" = ["trace"]
 "recursive" = ["std"]
-"constants-tools" = ["std", "miden-air-source/tooling", "miden-ace/compiler", "miden-stark/capture"]
 "fixture-tools" = ["std", "prover"]
 
 [dependencies]
 "miden-air" = { "workspace" = true }
-"miden-air-source" = { "workspace" = true }
 "miden-stark" = { "workspace" = true }
 "miden-ace" = { "workspace" = true }
 "miden-core" = { "workspace" = true }
@@ -52,7 +50,3 @@
 name = "pvm-proof-fixture"
 path = "src/bin/pvm_proof_fixture.rs"
 required-features = ["fixture-tools"]
-[[bin]]
-name = "pvm-constants-regen"
-path = "src/bin/pvm_constants_regen.rs"
-required-features = ["constants-tools"]
