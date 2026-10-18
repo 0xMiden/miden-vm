@@ -282,7 +282,8 @@ fn smt_witness_writes_leaf_positions_once_and_bounds_shared_reconstruction() {
     ];
     let full = Smt::with_entries(entries).unwrap();
     let partial = PartialSmt::from_proofs(entries.iter().map(|(key, _)| full.open(key))).unwrap();
-    let leaves: Vec<_> = partial.leaves().map(|(_, leaf)| leaf.clone()).collect();
+    // The fixture is ordered by leaf position; PartialSmt::leaves() has arbitrary order.
+    let leaves = entries.map(|(key, value)| SmtLeaf::new_single(key, value));
     let bytes = SmtWitness::from(&partial).to_bytes();
     assert_eq!(bytes, witness_payload(full.root(), &[], &leaves, &[]));
     assert_eq!(bytes.len(), 8 + 1 + 32 + 3 + 2 * (1 + 8 + 64));
