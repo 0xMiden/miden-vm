@@ -1,11 +1,15 @@
 
+# --- Trusted parameter staging ---
 #! Initialize every trusted parameter cell, including unused/padding cells, without observing data.
 pub proc stage_verifier_parameters()
+    # Labels follow increasing memory addresses; numeric pushes reverse each four-felt word.
 {%- for word in p.runtime.words %}
+    # Memory order: {% for field in word.fields() %}{{ field.name }}{% if field.width > 1 %} ({{ field.width }} felts){% endif %}{% if !loop.last %}, {% endif %}{% endfor %}
     push.{{ word.values[3] }}.{{ word.values[2] }}.{{ word.values[1] }}.{{ word.values[0] }}
     mem_storew_le.{{ word.address }} dropw
 {%- endfor %}
 {%- for binding in p.runtime.bindings %}
+    # {{ binding.field.name }} (procedure digest)
     procref.pipes::{{ binding.kind }}_{{ binding.blocks }}
     mem_storew_le.{{ binding.field.address() }} dropw
 {%- endfor %}
@@ -16,6 +20,7 @@ pub proc stage_verifier_parameters()
 {% endif %}
 end
 
+# --- OOD scatter ---
 #! Stage trusted dispatch pairs using the independently staged proof-order positions.
 pub proc stage_ood_scatter_table()
     exec.ood_scatter_table_ptr
@@ -25,6 +30,7 @@ pub proc stage_ood_scatter_table()
 {%- endfor %}
     exec.proof_order_positions_ptr
 {%- for air in p.ood.air_dispatch %}
+    # AIR {{ air.id }}: {{ p.air_names[air.id] }}
     dup{% if air.id > 0 %} add.{{ air.id }}{% endif %}
     mem_load mul.2 dup.2 add
 {%- for entry in air.entries %}

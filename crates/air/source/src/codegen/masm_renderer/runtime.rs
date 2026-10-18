@@ -83,6 +83,13 @@ pub(crate) struct ParameterWord {
     pub address: u32,
     pub values: [u64; 4],
 }
+impl ParameterWord {
+    pub(crate) fn fields(&self) -> impl Iterator<Item = &'static ParameterField> {
+        let start = (self.address - PARAMETERS_PTR) as usize;
+        let end = start + self.values.len();
+        FIELDS.iter().filter(move |field| (start..end).contains(&field.offset))
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimePlan {
     pub words: Vec<ParameterWord>,

@@ -36,6 +36,7 @@ use self::{
 pub struct V1RenderPlan {
     pub(crate) input: V1RenderInput,
     pub(crate) relation_name: String,
+    pub(crate) air_names: Vec<String>,
     pub(crate) num_airs: usize,
     pub(crate) stream_blocks: u32,
     pub(crate) layout: LayoutPlan,
@@ -48,21 +49,24 @@ pub struct V1RenderPlan {
 
 pub fn prepare_v1(input: V1RenderInput) -> V1RenderPlan {
     let num_airs = input.geometry.main.len();
-    let (relation_name, expected_airs) = match &input.relation {
-        RelationInput::Vm(_) => ("vm".into(), 4),
+    let (relation_name, air_names) = match &input.relation {
+        RelationInput::Vm(_) => (
+            "vm".into(),
+            crate::vm::AIRS.iter().map(|air| String::from(air.name())).collect::<Vec<_>>(),
+        ),
         RelationInput::Pvm { glue, .. } => {
             let variant = glue.variant;
-            let count = crate::precompile::MultiAir::with_variant(variant);
+            let relation = crate::precompile::MultiAir::with_variant(variant);
             use miden_stark::air::MultiAir as _;
             let namespace = if variant == miden_core::deferred::PvmAirVariant::ALL {
                 "pvm".into()
             } else {
                 std::format!("pvm::v{}", variant.as_u8())
             };
-            (namespace, count.airs().len())
+            (namespace, relation.airs().iter().map(|air| std::format!("{air:?}")).collect())
         },
     };
-    assert!(num_airs == expected_airs, "v1 relation: canonical relation AIR count differs");
+    assert!(num_airs == air_names.len(), "v1 relation: canonical relation AIR count differs");
     assert!(
         !input.regeneration_command.contains(['\n', '\r']),
         "header: regeneration command must occupy one line"
@@ -135,6 +139,7 @@ pub fn prepare_v1(input: V1RenderInput) -> V1RenderPlan {
     V1RenderPlan {
         input,
         relation_name,
+        air_names,
         num_airs,
         stream_blocks,
         layout,
