@@ -35,30 +35,10 @@ fn generated_evaluators_match_handwritten_structurally() {
         let generated = capture_into(&air, &mut builder);
         let graph = builder.freeze();
 
-        let canon = canonical_ids(&graph);
-        let canonical =
-            |roots: &[NodeId]| -> Vec<usize> { roots.iter().map(|r| canon[r.index()]).collect() };
-        assert_eq!(canonical(&handwritten.base_roots), canonical(&generated.base_roots));
-        assert_eq!(canonical(&handwritten.ext_roots), canonical(&generated.ext_roots));
-        assert_eq!(handwritten.base_global_indices, generated.base_global_indices);
-        assert_eq!(handwritten.ext_global_indices, generated.ext_global_indices);
-    }
-}
-
-/// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
-/// hand-written definitions. The emitter flips mixed-class commutative
-/// operands, so honest routing yields raw (pre-canonicalization) root ids that
-/// differ from the handwritten capture's for every AIR. If
-/// `miden_air_source::vm::Air` and `miden_air::vm::Air` ever route to the same evaluator for
-/// even one AIR, both drift oracles silently compare the generated path against
-/// itself for that AIR — and this test fails instead.
-#[test]
-fn handwritten_and_generated_are_distinct_captures() {
-    for air in AIRS {
-        let mut builder = Graph::builder();
-        let handwritten = capture_into(&air.source(), &mut builder);
-        let generated = capture_into(&air, &mut builder);
-        let _ = builder.freeze();
+        // Captures must follow independent evaluator routes. The emitter flips mixed-class
+        // commutative operands, so their raw roots differ for every AIR. If source and
+        // production ever route to the same evaluator, both drift oracles would compare
+        // the generated path against itself.
         let differs = handwritten.base_roots != generated.base_roots
             || handwritten.ext_roots != generated.ext_roots;
         assert!(
@@ -67,6 +47,14 @@ fn handwritten_and_generated_are_distinct_captures() {
              oracles would be comparing the generated evaluator against itself",
             air.name()
         );
+
+        let canon = canonical_ids(&graph);
+        let canonical =
+            |roots: &[NodeId]| -> Vec<usize> { roots.iter().map(|r| canon[r.index()]).collect() };
+        assert_eq!(canonical(&handwritten.base_roots), canonical(&generated.base_roots));
+        assert_eq!(canonical(&handwritten.ext_roots), canonical(&generated.ext_roots));
+        assert_eq!(handwritten.base_global_indices, generated.base_global_indices);
+        assert_eq!(handwritten.ext_global_indices, generated.ext_global_indices);
     }
 }
 

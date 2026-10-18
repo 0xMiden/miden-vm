@@ -33,7 +33,7 @@ fn vm_degrees_match_independent_authored_symbolic_evaluation() {
 #[test]
 fn pvm_degrees_match_independent_authored_symbolic_evaluation() {
     assert_eq!(
-        precompile::Air::all().map(|air| air.source()),
+        precompile::Air::all().map(precompile::Air::source),
         miden_air_source::precompile::Air::all()
     );
     // Query in a different order: lookup is keyed by canonical identity, not selection position.

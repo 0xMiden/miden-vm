@@ -409,7 +409,8 @@ fn selected_pvm_circuits_match_independent_authored_folds_and_periodic_basis() {
                 inputs[layout.index(InputKey::MultiAirFoldCoeff(id)).unwrap()] =
                     beta.exp_u64((airs.len() - 1 - position) as u64);
             }
-            // Direct symbolic evaluation uses independently authored constraints and periodic columns.
+            // Direct symbolic evaluation uses independently authored constraints and periodic
+            // columns.
             let expected = miden_ace::testing::eval_multi_air_constraints(
                 airs, layout, &inputs, &order, beta, 8,
             );
