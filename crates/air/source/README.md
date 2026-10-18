@@ -30,3 +30,20 @@ production builds continue to decode the precompiled canonical ACE artifacts.
 
 See the workspace [MASM generation guide](../../../docs/masm-verifier-generation.md) for ownership,
 the clean-room migration, compatibility checks, and protected-file policy.
+
+PVM `MultiAir::with_variant` selects canonical optional hash AIRs while retaining Eidos, transcript,
+uint, curve and lookup support. Tooling captures the exact selected slice, including its periodic
+basis. `codegen::pvm_variants` renders seven internal selected wrapper/layout pairs from the same typed templates
+as ALL; every wrapper remains protected/check-only. Initial creation and identity acceptance are
+explicit feature updates; ordinary generation rejects missing or drifted wrappers before managed
+writes. All eight canonical ACE streams are packaged in `miden-air`, with explicit accepted JSON
+identities and manifest fingerprints.
+
+Consolidated runtime generation emits `sys::verifier` once across VM and all eight PVM masks.
+Reduced selections retain only wrapper/layout modules; full VM/PVM module paths provide explicit
+standalone adapters. One named 80-felt ABI map generates trusted field constants and complete
+per-invocation stagers. Shared count/width kernels preserve transcript order and fixed stack frames.
+Both relation `run` APIs use global accepted/protected preflight before shared managed writes;
+obsolete reduced algorithm copies reject explicitly. No runtime/ordinary build enables tooling.
+Actual assembled roots are accepted separately from frozen circuit/relation/setup/ACE/evaluator
+identities and native ALL payload compatibility.

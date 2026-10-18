@@ -1,0 +1,85 @@
+{%- macro pointer(value) -%}
+{%- match value -%}
+{%- when PointerRef::Absolute with (address) -%}
+push.{{ address }}
+{%- when PointerRef::SharedHeights with { address } -%}
+push.LOG_AIR_TRACE_LENGTHS_PTR
+{%- when PointerRef::Layout with { accessor, address } -%}
+exec.parameters::{{ accessor.name() }}
+{%- endmatch -%}
+{%- endmacro %}
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+{% if proof.config.public %}pub {% endif %}proc {{ proof.config.procedure_name }}{% if proof.config.public %}(){% endif %}
+{%- if proof.word_load_heights %}
+    {{ pointer(proof.config.ids) }}
+    {{ pointer(proof.config.positions) }}
+    padw {{ pointer(proof.config.heights) }} mem_loadw_le
+{%- for id in proof.word_key_ids %}
+    mul.{{ proof.key_stride }}
+{%- if *id > 0 %}
+    add.{{ id }}
+{%- endif %}
+    movdn.3
+{%- endfor %}
+{%- else %}
+    {{ pointer(proof.config.heights) }}
+{%- for read in proof.scalar_key_reads %}
+{%- if read.pointer_depth == 0 %}
+    dup
+{%- else %}
+    dup.{{ read.pointer_depth }}
+{%- endif %}
+{%- if read.id > 0 %}
+    add.{{ read.id }}
+{%- endif %}
+    mem_load mul.{{ proof.key_stride }}
+{%- if read.id > 0 %}
+    add.{{ read.id }}
+{%- endif %}
+{%- endfor %}
+    movup.{{ proof.num_airs }} drop
+{%- endif %}
+{%- for step in proof.sort_steps %}
+{%- match step %}
+{%- when SortStep::Swap %}
+    swap
+{%- when SortStep::MoveUp with (depth) %}
+    movup.{{ depth }}
+{%- when SortStep::MoveDown with (depth) %}
+    movdn.{{ depth }}
+{%- when SortStep::CompareExchange %}
+    dup.1 dup.1 u32lt cswap
+{%- endmatch %}
+{%- endfor %}
+{%- if !proof.word_load_heights %}
+    {{ pointer(proof.config.ids) }}
+    {{ pointer(proof.config.positions) }}
+{%- endif %}
+{%- for word in proof.word_stores %}
+{%- for entry in word.entries %}
+    movup.{{ entry.key_depth }} u32and.{{ proof.key_id_mask }}
+    push.{{ entry.position }} dup.1 dup.{{ entry.positions_pointer_depth }} add mem_store
+{%- endfor %}
+    dup.5
+{%- if word.offset > 0 %}
+    add.{{ word.offset }}
+{%- endif %}
+    mem_storew_le dropw
+{%- endfor %}
+{%- for entry in proof.scalar_stores %}
+{%- if entry.key_depth == 1 %}
+    swap
+{%- else if entry.key_depth > 1 %}
+    movup.{{ entry.key_depth }}
+{%- endif %}
+    u32and.{{ proof.key_id_mask }}
+    push.{{ entry.position }} dup.1 dup.{{ entry.positions_pointer_depth }} add mem_store
+    dup.{{ entry.ids_pointer_depth }}
+{%- if entry.position > 0 %}
+    add.{{ entry.position }}
+{%- endif %}
+    mem_store
+{%- endfor %}
+    drop drop
+end
+

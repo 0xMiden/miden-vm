@@ -372,12 +372,33 @@ fn canonical_circuit_matches_every_vm_proof_order() {
 fn selected_pvm_circuits_match_independent_authored_folds_and_periodic_basis() {
     use miden_air_source::precompile::{self as pvm, PvmAirVariant};
     use miden_stark::air::MultiAir as _;
+    let render = miden_air_source::codegen::pvm_variants::generate();
     for variant in PvmAirVariant::ALL_VARIANTS {
         let relation = pvm::MultiAir::with_variant(variant);
         let airs = relation.airs();
         let circuit = pvm::ace::build_canonical_precompile_ace_circuit_for(variant);
         let layout = circuit.layout();
         let beta = QuadFelt::from_u32(97);
+        let max_len = airs
+            .iter()
+            .flat_map(|air| air.periodic_columns().into_owned())
+            .map(|column| column.len())
+            .max()
+            .unwrap_or(1);
+        if variant != PvmAirVariant::ALL {
+            let parameters = render[variant.as_u8() as usize]
+                .files
+                .iter()
+                .find(|file| file.relative_path.ends_with("layout.masm"))
+                .unwrap();
+            // Inspect the selected stager's actual cycle-log cell, independently of RuntimePlan.
+            // Field7 is the first push operand in the descriptor word beginning at field4.
+            let prefix = parameters.body.split_once("mem_storew_le.3223324004").unwrap().0;
+            let word =
+                prefix.lines().rev().find_map(|line| line.trim().strip_prefix("push.")).unwrap();
+            let actual_log = word.split('.').next().unwrap().parse::<u32>().unwrap();
+            assert_eq!(actual_log, max_len.ilog2());
+        }
         let mut orders = vec![(0..airs.len()).collect::<Vec<_>>(), (0..airs.len()).rev().collect()];
         let mut rotated = orders[0].clone();
         rotated.rotate_left(3);

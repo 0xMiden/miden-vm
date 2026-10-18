@@ -103,6 +103,18 @@ mod tests {
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
     }
 
+    const PVM_LAYOUT_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/layout.masm");
+    fn staged_parameter_felt(offset: u32) -> u64 {
+        let source = std::fs::read_to_string(PVM_LAYOUT_PATH).unwrap();
+        let marker = format!("mem_storew_le.{}", 3_223_324_000 + 4 * (offset / 4));
+        let prefix = source.split_once(&marker).expect("descriptor word store").0;
+        let push = prefix.lines().rev().find_map(|l| l.trim().strip_prefix("push.")).unwrap();
+        let limbs: Vec<u64> = push.split('.').map(|v| v.parse().unwrap()).collect();
+        assert_eq!(limbs.len(), 4);
+        limbs[3 - (offset % 4) as usize]
+    }
+
     /// The encoded recursive-verifier circuit must be the canonical builder's output and nothing
     /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
@@ -302,7 +314,7 @@ mod tests {
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/aux_trace.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/verifier/pvm_aux.masm");
 
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
@@ -313,10 +325,20 @@ mod tests {
             alloc::vec![1; NUM_CHIPLETS],
             "the PVM aux hook boundary shape drifted"
         );
+        let source = std::fs::read_to_string(HOOK_PATH).unwrap();
+        let observe = source
+            .split_once("pub proc observe_aux_trace_12()")
+            .unwrap()
+            .1
+            .split_once("\nend")
+            .unwrap()
+            .0;
+        let words = observe.split_whitespace().filter(|&op| op == "adv_loadw").count();
+        let scalars = observe.split_whitespace().filter(|&op| op == "adv_push").count();
         assert_eq!(
-            derived.iter().sum::<usize>(),
-            2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every normalized LogUp value exactly once"
+            4 * words + scalars - 4,
+            2 * derived.iter().sum::<usize>(),
+            "actual shared hook must absorb the commitment plus every boundary coordinate exactly once"
         );
 
         // The scatter permutes the region the circuit reads, so it must be exactly one slot per
@@ -337,7 +359,7 @@ mod tests {
         use miden_air::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
 
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/aux_trace.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/verifier/fixed.masm");
 
         assert_eq!(masm_const(HOOK_PATH, "UINT_VAL_BUS_SCALE"), BusId::UintVal as u64 + 1);
         assert_eq!(masm_const(HOOK_PATH, "EC_GROUP_BUS_SCALE"), BusId::EcGroup as u64 + 1);
@@ -352,7 +374,7 @@ mod tests {
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/public_inputs.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/verifier/pvm_public.masm");
         const RELATION_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/mod.masm");
 
@@ -360,7 +382,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), multi_air.num_air_inputs() as u64);
         assert_eq!(masm_const(HOOK_PATH, "MAX_AUX_INPUTS"), multi_air.max_aux_inputs() as u64);
         assert_eq!(masm_const(HOOK_PATH, "NUM_AUX_INPUTS"), 0);
-        assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
+        assert_eq!(staged_parameter_felt(8), multi_air.airs().len() as u64);
         for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
                 masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
@@ -449,7 +471,7 @@ mod tests {
         };
 
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/deep_queries.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/verifier/deep.masm");
 
         let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
@@ -464,25 +486,28 @@ mod tests {
         let quotient = index(InputKey::Preprocessed { offset: 1, index: 0 })
             - index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 });
 
-        for (name, width) in [
-            ("PREPROCESSED_ROW_DOUBLE_WORDS", preprocessed),
-            ("MAIN_ROW_DOUBLE_WORDS", main),
-            ("AUX_ROW_DOUBLE_WORDS", aux),
-            ("QUOTIENT_ROW_DOUBLE_WORDS", quotient),
-        ] {
+        let source = std::fs::read_to_string(PVM_LAYOUT_PATH).unwrap();
+        for (group, width) in [preprocessed, main, aux, quotient].into_iter().enumerate() {
+            let marker = format!("mem_storew_le.{}", 3_223_324_048 + 4 * group);
+            let prefix = source.rsplit_once(&marker).unwrap().0;
+            let blocks = prefix
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .and_then(|l| l.trim().strip_prefix("procref.pipes::base_"))
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
             assert_eq!(
-                masm_const(HOOK_PATH, name) * 8,
-                width as u64,
-                "{name} does not match the aligned commitment-group width"
+                blocks * 8,
+                width,
+                "actual selected DEEP pipe must match aligned group geometry"
             );
         }
 
         let preprocessed_tree_depth =
             TRACE_HEIGHT.ilog2() + u32::from(precompile_pcs_params().log_blowup());
-        assert_eq!(
-            masm_const(HOOK_PATH, "PREPROCESSED_TREE_DEPTH"),
-            preprocessed_tree_depth as u64
-        );
+        assert_eq!(staged_parameter_felt(18), preprocessed_tree_depth as u64);
         assert_eq!(
             masm_const(HOOK_PATH, "PREPROCESSED_INDEX_MASK"),
             (1u64 << preprocessed_tree_depth) - 1,
@@ -663,11 +688,6 @@ mod tests {
 
     #[test]
     fn pvm_masm_quotient_inputs_match_the_stark_domain() {
-        const EVALUATOR_PATH: &str = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../lib/core/asm/sys/pvm/constraints_eval.masm"
-        );
-
         let canonical = build_canonical_precompile_ace_circuit();
         let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
@@ -677,18 +697,9 @@ mod tests {
         )
         .expect("PVM quotient degree fits the PCS blowup");
 
-        assert_eq!(
-            Felt::new(masm_const(EVALUATOR_PATH, "QUOTIENT_SHIFT_RATIO")).unwrap(),
-            expected.shift_ratio
-        );
-        assert_eq!(
-            Felt::new(masm_const(EVALUATOR_PATH, "QUOTIENT_FIRST_SHIFT")).unwrap(),
-            expected.first_shift
-        );
-        assert_eq!(
-            Felt::new(masm_const(EVALUATOR_PATH, "QUOTIENT_FIRST_WEIGHT")).unwrap(),
-            expected.first_weight
-        );
+        assert_eq!(Felt::new(staged_parameter_felt(28)).unwrap(), expected.shift_ratio);
+        assert_eq!(Felt::new(staged_parameter_felt(29)).unwrap(), expected.first_shift);
+        assert_eq!(Felt::new(staged_parameter_felt(30)).unwrap(), expected.first_weight);
     }
 
     /// The circuit digest binds the generated circuit but not the external assertion, so each

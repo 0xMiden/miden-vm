@@ -84,6 +84,7 @@ pub mod pcs;
 mod preprocessed;
 pub mod proof;
 pub mod prover;
+pub mod recursive;
 mod selectors;
 pub(crate) mod util;
 pub mod verifier;

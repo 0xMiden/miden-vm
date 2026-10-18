@@ -27,18 +27,20 @@ const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
 const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
+/// Derived from the adapted shared runtime assembly; acceptance is current-only.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(6709788805636672991),
-    crate::Felt::new_unchecked(3123750071737729735),
-    crate::Felt::new_unchecked(9047041766774444338),
-    crate::Felt::new_unchecked(8997647198517130739),
+    crate::Felt::new_unchecked(2603767543770539887),
+    crate::Felt::new_unchecked(2276982665163883070),
+    crate::Felt::new_unchecked(8183189607394765382),
+    crate::Felt::new_unchecked(6790696423975467021),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
+/// Derived independently from the adapted shared runtime assembly, including all eight variants.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(5590780963878947933),
-    crate::Felt::new_unchecked(4630130988127364859),
-    crate::Felt::new_unchecked(6407532874471138157),
-    crate::Felt::new_unchecked(1323318770910249969),
+    crate::Felt::new_unchecked(3482323695689074059),
+    crate::Felt::new_unchecked(8512759071851127162),
+    crate::Felt::new_unchecked(3339266452839591316),
+    crate::Felt::new_unchecked(3848025012586791398),
 ]);
 
 // HASH FUNCTION

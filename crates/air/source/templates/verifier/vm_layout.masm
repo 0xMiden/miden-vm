@@ -3,6 +3,8 @@
 
 use { LOG_AIR_TRACE_LENGTHS_PTR, } from miden::core::stark::constants
 use miden::core::stark::types
+use {LOG_BLOWUP_FACTOR} from miden::core::stark::constants
+use miden::core::sys::verifier::pipes
 
 const NUM_KERNEL_PROCEDURES_PTR = {{ p.layout.num_kernel_procedures_ptr }}
 const CONTROL_ALIGNMENT_PADDING_PTR = {{ p.layout.control_alignment_padding_ptr }}
@@ -179,3 +181,5 @@ pub proc kernel_witness_ptr() -> types::Address
     push.KERNEL_WITNESS_PTR
 end
 
+
+{%- include "verifier/parameters_stage.masm" %}

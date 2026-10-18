@@ -3,7 +3,7 @@
 `miden-air-source` owns the recursive VM/PVM verifier templates, typed rendering plans and
 explicit generation CLI. Core-lib assembles the committed MASM; its normal build does not run
 the AIR renderer. Authored templates live in `crates/air/source/templates/verifier`, while the
-derived MASM lives in `crates/lib/core/asm/sys/{vm,pvm}` and is marked generated for GitHub review.
+derived MASM lives in `crates/lib/core/asm/sys/{vm,pvm,verifier}` and is marked generated for GitHub review.
 
 ## Templates and typed inputs
 
@@ -15,7 +15,7 @@ Calculated stack movements use a closed typed vocabulary rather than arbitrary a
 Portable `InputLayout`, `OodScatterPlan`, proof-order comparator schedules and circuit encoding
 remain in ACE. Assembly presentation belongs to source tooling, with no dependency from ACE
 back to source. Askama is optional under source's host-only `tooling` feature; ordinary native
-verifier dependencies do not select it. The source package includes all eleven verifier templates.
+verifier dependencies do not select it. The source package includes all 23 verifier templates.
 
 Compilation and rendering are separate operations:
 
@@ -25,8 +25,7 @@ let artifacts = constraints::render(&compiled);
 ```
 
 PVM exposes the same split. Compilation captures and lowers the authored AIR and retains its
-complete READ layout and ordered geometry. The source geometry adapter uses checked
-`metadata::ColumnWidths` arithmetic over authored AIR widths. Pure rendering performs no capture, compilation,
+complete READ layout and ordered geometry. Pure rendering performs no capture, compilation,
 filesystem access, setup derivation or pin acceptance. Canonical ACE bytes alone do not contain
 the layout needed to render a verifier. `compile_and_render` remains a convenience API.
 
@@ -41,8 +40,7 @@ the instruction buffer; it already moved before this refactor. Conversion from v
 Source compiler adapters, fixed-setup derivation, READ/DEEP/OOD/proof-order planning and
 Askama rendering also return values directly. Invalid authored declarations or packaged templates
 panic; the internal `RenderError` type and IO/String error translation chains are removed.
-Static Rust templates are included directly. Adapters retain one complete list of rendered artifacts,
-including explicit managed or protected ownership, for common delivery.
+Static Rust templates are included directly, and adapters move rendered bodies into their outputs.
 External byte decoding, accepted-pin checks, guest execution and delivery validation remain fallible. The selected-root evaluator remains an independent numerical oracle: encoded
 padding squares its root, so arbitrary nonzero outputs need not equal the runtime's final row.
 
@@ -67,8 +65,8 @@ cargo run -p miden-air-source --features tooling --bin air-codegen -- "$PWD" --w
 Check is the default. The CLI renders both relations, the VM Rust evaluator and VM/PVM degree/metadata
 tables, then validates accepted identities and protected files before writing managed outputs.
 Ordinary `--write`
-updates ten tracked MASM modules, the compressed Rust evaluator artifact and the small
-`artifacts/{vm,precompile}-{degrees,metadata}.rs` tables. It never writes the two verifier wrappers or Rust
+updates 26 tracked MASM modules, the compressed Rust evaluator artifact and the small
+`artifacts/{vm,precompile}-{degrees,metadata}.rs` tables. It never writes the nine verifier wrappers or Rust
 pin/config modules. Full-body comparisons cover those protected
 projections, including comments and procedure bodies; checking selected constants alone would miss drift.
 
@@ -172,3 +170,70 @@ separately from independent challenger, fixed-environment, height, scatter and p
 Ordinary generation does not accept pins or introduce variant dispatch. All cryptographic
 identities, setup, legacy proof encoding/acceptance and actual verifier roots stay unchanged.
 Hash-variant adaptation remains a later stage; optimized PVM Rust evaluation stays deferred.
+
+## Selected PVM generation
+
+`precompile::compile_for` obtains the selected authored AIR slice once and uses it for canonical
+ACE compilation and the shared periodic basis. Geometry, boundary slots, height rules and security
+are derived from that same relation. The base relation pads its two logical quotient chunks to
+the commitment width while recomposing only actual chunks. An odd AIR count leaves a single EF
+alignment slot before Alpha: only the last two boundary felts are absorbed and stored, without
+padding the transcript or overwriting the gap.
+
+`codegen::pvm_variants` uses the existing Askama engine for seven reduced internal modules. Their
+namespace derives from the validated mask, including same-count selections. It retains each
+projection's ownership. Full and reduced protected wrappers, all accepted identities, and shared
+ABI inputs validate before any managed output is written. Ordinary `--write` never creates or
+replaces a protected wrapper; deliberate feature acceptance seeds reviewed candidates separately.
+`air-artifacts` checks all eight captured identities against the explicit accepted JSON before
+delivering streams, descriptors and manifest fingerprints. ALL's stream remains byte-identical.
+
+The single `sys::pvm::verify_proof` checks the advice mask before entering its selected verifier.
+That verifier pins both the ACE stream and relation digest, observes the selected canonical heights
+and proof-ordered auxiliary values, and returns a selected security descriptor. Advice packaging
+includes the mask and only the selected precompiled stream; native payload framing is separate.
+Package-local templates and test fixtures remain self-contained. The independent semantic,
+raw-stream, sampled AIR/ACE, fixed-boundary, transcript, historical proof and assembled-root tests
+complement full-source freshness checks.
+
+## Shared runtime kernels (VM and all eight PVM selections)
+
+`sys::verifier` contains the emitted ACE authentication/evaluation, stable proof-order networks,
+OOD transport, DEEP authentication/Horner, and PVM auxiliary/public/fixed-environment kernels.
+Each reduced PVM selection now contains only `mod.masm` and `layout.masm`. Layouts stage trusted
+numeric parameters and scatter tables; wrappers retain their exact relation digest, height rules,
+setup commitment and security shape. Full VM/PVM module paths remain standalone adapters.
+Production registers shared hooks directly, so an ALL adapter cannot replace a selected context.
+VM claim/kernel/deferred observation and auxiliary identities remain separate from PVM statements.
+
+The fixed 80-felt descriptor occupies `[3223324000,3223324080)`. `runtime.rs` is its single named
+field map; it emits MASM constants/accessors and supplies all stager/procref addresses. Checked
+intervals exclude the generic/control/kernel/full-scatter reservation, the complete VM public
+READ prefix through ACE, VM query scratch, and every selected PVM READ/ACE/scratch/map allocation.
+Every stager overwrites all 80 cells, including reserved zero cells and every procedure digest.
+Staging observes no transcript input and never initializes or resets the challenger. Mutable row
+and scatter scratch remain outside the descriptor. Same-context tests poison all fields before
+ALL/NONE/VM/SHA256/SHA512 and every other mask transition and check independent values and stack.
+
+Counts 4 and 8–12 share one network/OOD/aux profile each. Width-specific base/extension pipes and
+ACE stream pipes are emitted once over a deterministic full-mask universe. Dispatch occurs
+outside the repeated block bodies; no loop counter is inserted into `adv_pipe`/Horner frames.
+Auxiliary values are absorbed in proof order, then ALL pairs are gathered before in-place scatter,
+then canonical height weighting is applied. Odd tails stop before alignment gaps/Alpha. The fixed
+uint/curve correction is emitted once and computed once per proof. DEEP keeps VM's generic setup
+commitment and And8-height-plus-blowup depth, PVM's own setup pointer/fixed depth19, and the quotient
+leaf's distinct final stack reshape.
+
+`shared_verifier` delivers the common universe once, outside per-variant projection. Both individual
+relation `run` APIs use the global preflight: all nine accepted identities and protected bodies,
+plus obsolete-module rejection, precede every managed write. The sharing migration explicitly
+removes 35 obsolete reduced algorithm modules; generation rejects any restored copy. Global
+failure fixtures cover reduced pin/body drift and obsolete copies and preserve shared/full/reduced
+managed sentinels. Pure synthetic absolute-pointer proof-order rendering remains descriptor-free.
+
+This changes actual VM and PVM instruction roots, deliberately derived from local assembly and
+accepted in `core/src/proof.rs`. Current-only execution envelopes reject the parent roots, including
+empty/deferred precompile states; no historical root is added to supported lists. Native ALL inner
+payload/history and all circuits, relations, setups, ACE streams, evaluator bytes and tables remain
+unchanged. The [validation appendix](air-stark-reorganization/validation.md) records roots and keeps
+actual source reduction, serialized MAST/package sizes, and measured cycles separate.

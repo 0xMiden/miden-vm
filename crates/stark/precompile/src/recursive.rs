@@ -11,8 +11,8 @@ use alloc::{
 };
 
 use miden_air::precompile::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
-    artifacts::shared_recursive_circuit as shared_pvm_recursive_circuit,
+    ChipletAir, ChipletMultiAir, PvmAirVariant,
+    artifacts::shared_recursive_circuit_for,
     stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
 };
 use miden_core::{
@@ -26,24 +26,16 @@ use miden_core::{
         HashFunction, MAX_STARK_PROOF_BYTES, PrecompileProof, StarkProof as SerializedStarkProof,
     },
 };
-use miden_crypto::merkle::{MerklePath, PartialMerkleTree};
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
     air::{LiftedAir, Statement},
-    lmcs::{Lmcs, proof::BatchProofView},
-    pcs::PcsProof,
     proof::{StarkProof, StarkProofData},
+    recursive::{append_ood_evaluations, batch_proof_to_merkle, commitment_felts},
 };
 use serde_wincode::SerdeCompat;
 
 use crate::setup as preprocessed;
-fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize; NUM_CHIPLETS] {
-    let mut order = core::array::from_fn(|index| index);
-    order.sort_by_key(|&index| (log_heights[index], index));
-    order
-}
-
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
 
@@ -132,13 +124,12 @@ pub enum PvmRecursiveVerifierInputsError {
     /// The trusted setup commitment did not match the PVM AIR declaration.
     #[error(transparent)]
     Preprocessed(#[from] miden_stark::PreprocessedValidationError),
-    /// The parsed proof does not have the fixed twelve-chiplet shape expected by the wrapper.
+    /// The parsed proof does not have the selected chiplet shape expected by the wrapper.
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),
 }
 
 type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
-type BatchMerkleResult = (PartialMerkleTree, Vec<(Word, Vec<Felt>)>);
 
 fn build_verifier_advice(
     proof: &SerializedStarkProof,
@@ -154,53 +145,62 @@ fn build_verifier_advice(
         });
     }
 
+    let (variant, proof_bytes) = miden_air::precompile::proof::decode_proof(proof.bytes())
+        .map_err(|err| PvmRecursiveVerifierInputsError::ProofDeserialization(err.to_string()))?;
     let config = eidos_config(
         precompile_pcs_params(),
-        miden_air::precompile::protocol::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
+        miden_air::precompile::protocol::relation_digest(variant),
     );
-    let preprocessed = preprocessed::eidos();
+    let preprocessed = preprocessed::eidos_for(variant);
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
         deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, Challenge, EidosConfig>>, _>(
-            proof.bytes(),
+            proof_bytes,
             proof_encoding_config,
         )
         .map_err(|err| PvmRecursiveVerifierInputsError::ProofDeserialization(err.to_string()))?;
 
     let public_root = claim.root();
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_elements().to_vec(), Vec::new())
-            .map_err(|_| {
-                PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement")
-            })?;
+    let statement = Statement::new(
+        ChipletMultiAir::with_variant(variant),
+        public_root.as_elements().to_vec(),
+        Vec::new(),
+    )
+    .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
         VerifierInstance::new(&config, &statement, Some(preprocessed.commitment()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;
 
-    build_advice(&config, &stark)
+    build_advice(&config, &stark, variant)
 }
 
 fn build_advice(
     config: &EidosConfig,
     stark: &StarkProof<Challenge, EidosLmcs>,
+    variant: PvmAirVariant,
 ) -> Result<AdviceInputs, PvmRecursiveVerifierInputsError> {
-    let log_heights: [u8; NUM_CHIPLETS] = stark.log_trace_heights().try_into().map_err(|_| {
-        PvmRecursiveVerifierInputsError::InvalidProofShape("unexpected AIR-height count")
-    })?;
+    let airs: Vec<_> =
+        ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+    let log_heights = stark.log_trace_heights();
+    if log_heights.len() != airs.len() {
+        return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
+            "unexpected AIR-height count",
+        ));
+    }
     // Fixed-height instances must arrive at exactly their pinned height: the MASM verifier
     // opens the setup tree at the matching fixed depth, so any other value would let the
     // recursive and native verifiers disagree on proof shape.
-    for (air, &log_height) in ChipletAir::all().iter().zip(&log_heights) {
+    for (air, &log_height) in airs.iter().zip(log_heights) {
         if air.fixed_log_height().is_some_and(|fixed| u32::from(log_height) != fixed) {
             return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
                 "fixed-height AIR arrived at a different trace height",
             ));
         }
     }
-    if stark.all_aux_values.len() != NUM_CHIPLETS {
+    if stark.all_aux_values.len() != airs.len() {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of aux-final groups",
         ));
@@ -208,11 +208,17 @@ fn build_advice(
     // The MASM ingest scatters each chiplet's data from proof order to the canonical address read
     // by the circuit. Validate each group width and the proof-carried permutation against the
     // native stable (height, instance-index) order.
-    let proof_order = proof_order_from_log_heights(&log_heights);
-    let airs = ChipletAir::all();
-    if stark.all_aux_values.iter().zip(proof_order).any(|(values, air_index)| {
-        values.len() != <ChipletAir as LiftedAir<Felt, Challenge>>::num_aux_values(&airs[air_index])
-    }) {
+    let mut proof_order: Vec<_> = (0..airs.len()).collect();
+    proof_order.sort_by_key(|&index| (log_heights[index], index));
+    if stark
+        .all_aux_values
+        .iter()
+        .zip(proof_order.iter().copied())
+        .any(|(values, air_index)| {
+            values.len()
+                != <ChipletAir as LiftedAir<Felt, Challenge>>::num_aux_values(&airs[air_index])
+        })
+    {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
             "unexpected proof-ordered aux-final group width",
         ));
@@ -230,6 +236,7 @@ fn build_advice(
 
     let params = config.pcs();
     let mut advice_stack = vec![
+        Felt::from_u8(variant.as_u8()),
         Felt::new_unchecked(params.num_queries() as u64),
         Felt::new_unchecked(params.query_pow_bits() as u64),
         Felt::new_unchecked(params.deep_pow_bits() as u64),
@@ -248,7 +255,8 @@ fn build_advice(
     let deep_alpha = pcs.deep_proof.challenge_columns;
     let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
     advice_stack.extend([deep_coeffs[1], deep_coeffs[0]]);
-    append_ood_evaluations(&mut advice_stack, pcs)?;
+    append_ood_evaluations(&mut advice_stack, &pcs.deep_proof.evals)
+        .map_err(PvmRecursiveVerifierInputsError::InvalidProofShape)?;
     advice_stack.push(pcs.deep_proof.pow_witness);
 
     for round in &pcs.fri_proof.rounds {
@@ -259,44 +267,16 @@ fn build_advice(
     advice_stack.extend(final_poly);
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(stark)?;
+    let (store, advice_map) = build_merkle_data(stark, variant)?;
     Ok(AdviceInputs::default()
         .with_stack(advice_stack.into())
         .with_map(advice_map)
         .with_merkle_store(store))
 }
 
-fn append_ood_evaluations<L>(
-    advice_stack: &mut Vec<Felt>,
-    pcs: &PcsProof<Challenge, L>,
-) -> Result<(), PvmRecursiveVerifierInputsError>
-where
-    L: Lmcs<F = Felt>,
-{
-    let mut local_values = Vec::new();
-    let mut next_values = Vec::new();
-    for group in &pcs.deep_proof.evals {
-        for matrix in group {
-            let width = matrix.width;
-            let values = matrix.values.as_slice();
-            if values.len() != width && values.len() != 2 * width {
-                return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-                    "OOD matrix must hold exactly one or two rows",
-                ));
-            }
-            local_values.extend_from_slice(&values[..width]);
-            if values.len() == 2 * width {
-                next_values.extend_from_slice(&values[width..]);
-            }
-        }
-    }
-    advice_stack.extend(challenge_felts(&local_values));
-    advice_stack.extend(challenge_felts(&next_values));
-    Ok(())
-}
-
 fn build_merkle_data(
     stark: &StarkProof<Challenge, EidosLmcs>,
+    variant: PvmAirVariant,
 ) -> Result<MerkleAdvice, PvmRecursiveVerifierInputsError> {
     let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
@@ -304,70 +284,18 @@ fn build_merkle_data(
     // The first DEEP witness is the setup-fixed preprocessed tree. The remaining witnesses are
     // main, auxiliary, and quotient. FRI witnesses follow them in proof order.
     for batch_proof in stark.pcs_proof.deep_witnesses.iter().chain(&stark.pcs_proof.fri_witnesses) {
-        let (tree, entries) = batch_proof_to_merkle::<EidosLmcs>(batch_proof)?;
+        let (tree, entries) = batch_proof_to_merkle::<EidosLmcs>(batch_proof)
+            .map_err(PvmRecursiveVerifierInputsError::InvalidProofShape)?;
         store.extend(tree.inner_nodes());
         advice_map.extend(entries);
     }
 
     // Serve the canonical circuit stream from the advice map under its commitment. MASM pins that
     // commitment to the compiled-in circuit digest.
-    let circuit = shared_pvm_recursive_circuit();
+    let circuit = shared_recursive_circuit_for(variant);
     advice_map.push((circuit.commitment, circuit.instructions.clone()));
 
     Ok((store, advice_map))
-}
-
-fn batch_proof_to_merkle<L>(
-    batch_proof: &L::BatchProof,
-) -> Result<BatchMerkleResult, PvmRecursiveVerifierInputsError>
-where
-    L: Lmcs<F = Felt>,
-    L::Commitment: Copy + Into<[u64; 4]> + PartialEq,
-    L::BatchProof: BatchProofView<Felt, L::Commitment>,
-{
-    let mut paths = Vec::new();
-    let mut advice_entries = Vec::new();
-    for index in batch_proof.indices() {
-        let rows = batch_proof.opening(index).ok_or(
-            PvmRecursiveVerifierInputsError::InvalidProofShape("missing opening for query index"),
-        )?;
-        let siblings =
-            batch_proof
-                .path(index)
-                .ok_or(PvmRecursiveVerifierInputsError::InvalidProofShape(
-                    "missing Merkle path for query index",
-                ))?;
-        let salt =
-            batch_proof
-                .salt(index)
-                .ok_or(PvmRecursiveVerifierInputsError::InvalidProofShape(
-                    "missing LMCS salt for query index",
-                ))?;
-        if !salt.is_empty() {
-            return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-                "hiding LMCS openings are unsupported by the MASM adapter",
-            ));
-        }
-        let leaf_data = rows.as_slice().to_vec();
-        let leaf_hash = *batch_proof.leaf_hash(index).ok_or(
-            PvmRecursiveVerifierInputsError::InvalidProofShape("missing leaf hash for query index"),
-        )?;
-        let leaf_word = Word::new(commitment_felts(leaf_hash));
-        let merkle_path = MerklePath::new(
-            siblings.into_iter().map(|commit| Word::new(commitment_felts(commit))).collect(),
-        );
-        paths.push((index as u64, leaf_word, merkle_path));
-        advice_entries.push((leaf_word, leaf_data));
-    }
-    let tree = PartialMerkleTree::with_paths(paths)
-        .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid Merkle paths"))?;
-    Ok((tree, advice_entries))
-}
-
-fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
-    // Eidos LMCS commitments are canonical, but this generic adapter accepts raw u64 limbs.
-    // Reduce them explicitly because advice words require canonical field representations.
-    commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
 }
 
 fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
@@ -377,15 +305,6 @@ fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn commitment_limbs_are_canonicalized_before_entering_advice() {
-        let felts = commitment_felts([Felt::ORDER + 7, u64::MAX, 0, Felt::ORDER - 1]);
-        assert_eq!(
-            felts.map(|felt| felt.as_canonical_u64()),
-            [7, u32::MAX as u64 - 1, 0, Felt::ORDER - 1]
-        );
-    }
 
     #[test]
     fn recursive_inputs_reject_non_eidos_proofs_before_parsing() {

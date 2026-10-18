@@ -14,6 +14,11 @@
 
 #### Changes
 
+- [BREAKING] Share emitted VM/PVM/all-eight-variant verifier kernels through trusted generated parameters, reducing reduced variants to wrapper/layout modules. Both actual recursive verifier roots change and are accepted under current-only execution-envelope policy. Circuit/relation/setup identities, ACE/evaluator bytes and native ALL inner payloads remain unchanged.
+
+- [BREAKING] Select the smallest PVM hash AIR subset for each witness batch, supporting all eight Keccak/SHA-256/SHA-512 selections in native and recursive verification. Reduced payloads use versioned `MIDENPVM` framing; ALL preserves legacy native bytes. The recursive PVM verifier root changes; the VM root and current full native fixture remain compatible.
+
+- [BREAKING] Reorganized VM AIR, STARK, ACE and proof APIs into `miden-air-source`, `miden-air`, `miden-stark`, `miden-ace`, `miden-vm-stark` and `miden-precompile-stark`, with complete/deferred proof composition in `miden_vm::proofs`. Moved stateful-hasher APIs into `miden_crypto::hasher`. Recursive verification consumes packaged ACE; source tooling renders tracked MASM with typed Askama templates, and ordinary AIR builds materialize the exact VM Rust evaluator from packaged zlib. Accepted proof relations, verifier roots and proof formats are unchanged. See the [review guide](docs/air-stark-reorganization/review-guide.md) for API correspondence and validation limits.
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).

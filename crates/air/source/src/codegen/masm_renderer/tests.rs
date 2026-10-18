@@ -1,4 +1,5 @@
-use super::{super::expect_panic, proof_order::ProofOrderPlan, *};
+use super::super::expect_panic;
+use super::{proof_order::ProofOrderPlan, *};
 
 fn proof_config(n: usize, word_load: bool, word_store: bool) -> ProofOrderConfig {
     ProofOrderConfig {
@@ -171,6 +172,47 @@ fn pvm_glue_rejects_changed_authored_shapes_and_boundary_slots() {
             "authored shape mutation {case} must panic"
         );
     }
+}
+
+#[test]
+fn trusted_parameters_reject_overlapping_and_overflowing_relation_regions() {
+    let mut vm = vm_render_input();
+    if let RelationInput::Vm(a) = &mut vm.relation {
+        a.read_beta_anchor = PARAMETERS_PTR + 2 * vm.counts.num_public as u32;
+    }
+    expect_panic(|| prepare_v1(vm));
+    let valid =
+        super::super::precompile::compile(super::super::precompile::accepted_setup_commitment())
+            .masm;
+    let mut pvm = valid.clone();
+    if let RelationInput::Pvm { abi: a, .. } = &mut pvm.relation {
+        a.read_base = PARAMETERS_PTR;
+    }
+    expect_panic(|| prepare_v1(pvm));
+    let mut pvm = valid;
+    if let RelationInput::Pvm { abi: a, .. } = &mut pvm.relation {
+        a.read_base = u32::MAX - 7;
+    }
+    expect_panic(|| prepare_v1(pvm));
+}
+
+#[test]
+fn shared_universe_is_independent_of_relation_render_order() {
+    let mut plans = std::vec![prepare_v1(vm_render_input())];
+    for variant in miden_core::deferred::PvmAirVariant::ALL_VARIANTS {
+        plans.push(prepare_v1(
+            super::super::precompile::compile_variant(
+                super::super::precompile::accepted_setup_commitment(),
+                variant,
+            )
+            .masm,
+        ));
+    }
+    let forward = shared::render(&plans);
+    assert_eq!(forward.len(), 9);
+    assert!(forward.iter().all(|file| file.ownership == ArtifactOwnership::Managed));
+    plans.reverse();
+    assert_eq!(forward, shared::render(&plans));
 }
 
 #[test]

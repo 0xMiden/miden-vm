@@ -1,0 +1,720 @@
+#! Generated shared ACE authentication and evaluation kernels.
+use {CONSTRAINT_COMPOSITION_COEFS_PTR, LOG_AIR_TRACE_LENGTHS_PTR, PUBLIC_INPUTS_ADDRESS_PTR} from miden::core::stark::constants
+use miden::core::crypto::hashes::eidos
+use miden::core::stark::constraints_eval_inputs
+use miden::core::sys::verifier::parameters
+use {
+    AUX_RAND_ELEM_PTR,
+    AUX_BUS_BOUNDARY_PTR,
+    AUXILIARY_ACE_INPUTS_PTR,
+    ACE_CIRCUIT_STREAM_PTR,
+    STREAM_BLOCKS,
+    NUM_INPUTS,
+    NUM_GATES,
+    CYCLE_LOG,
+    NUM_AIRS,
+    FOLD_OFFSET,
+    OOD_SCATTER_TABLE_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
+    PROOF_ORDER_IDS_PTR,
+    ROW_FELTS,
+    BUS_GAMMA_PTR,
+    C_TOTAL_PTR,
+    PUBLIC_INPUTS_PTR,
+    PREPROCESSED_COM_PTR,
+    PREPROCESSED_DEPTH,
+    SHAPE_BUFFERED,
+    ACE_INITIAL_CV,
+    ACE_DIGEST,
+    QUOTIENT_SHIFT_RATIO,
+    QUOTIENT_FIRST_SHIFT,
+    QUOTIENT_FIRST_WEIGHT,
+    RESERVED_31,
+    PREPROCESSED_LEAF_CV,
+    MAIN_LEAF_CV,
+    AUX_LEAF_CV,
+    QUOTIENT_LEAF_CV,
+    PREPROCESSED_BASE_PIPE,
+    MAIN_BASE_PIPE,
+    AUX_BASE_PIPE,
+    QUOTIENT_BASE_PIPE,
+    PREPROCESSED_EXT_PIPE,
+    QUOTIENT_EXT_PIPE,
+    QUOTIENT_DESTINATION,
+    FOLD_COEFFICIENTS_PTR,
+    RESERVED_74,
+    RESERVED_75,
+    ACE_PIPE,
+} from miden::core::sys::verifier::parameters
+const ERR_CIRCUIT_DIGEST_MISMATCH = "ACE circuit stream does not match the compiled-in circuit digest"
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_4()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.4
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_4
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_4
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_8()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.8
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_8
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_8
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.7
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.6
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.4
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_9()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.9
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_9
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_9
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.8
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.7
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.6
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.4
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_10()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.10
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_10
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_10
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.9
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.8
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.7
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.6
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.4
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_11()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.11
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_11
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_11
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.10
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.9
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.8
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.7
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.6
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.4
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_12()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.12
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_12
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_12
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+    dup.5
+    add.11
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.10
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.9
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.8
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.7
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.6
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.4
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.3
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.2
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    add.1
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    dup.3 dup.3 ext2mul
+    dup.5
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+    drop drop drop drop drop drop
+end
+proc load_and_authenticate_ace_circuit
+    padw mem_loadw_le.ACE_DIGEST
+    adv.push_mapval
+    exec.parameters::ace_circuit_stream_ptr
+    padw mem_loadw_le.ACE_INITIAL_CV
+    padw padw
+    push.ACE_PIPE dynexec
+    exec.eidos::digest
+    movup.4 drop
+    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH
+end

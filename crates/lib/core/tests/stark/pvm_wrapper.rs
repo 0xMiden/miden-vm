@@ -185,3 +185,55 @@ fn pvm_wrapper_preserves_the_caller_stack() {
         "load_air_context must leave the caller stack unchanged"
     );
 }
+
+#[test]
+fn pvm_selected_wrappers_bind_fixed_height_and_stable_order() {
+    let layouts = [
+        include_str!("../../asm/sys/pvm/v0/layout.masm"),
+        include_str!("../../asm/sys/pvm/v1/layout.masm"),
+        include_str!("../../asm/sys/pvm/v2/layout.masm"),
+        include_str!("../../asm/sys/pvm/v3/layout.masm"),
+        include_str!("../../asm/sys/pvm/v4/layout.masm"),
+        include_str!("../../asm/sys/pvm/v5/layout.masm"),
+        include_str!("../../asm/sys/pvm/v6/layout.masm"),
+        include_str!("../../asm/sys/pvm/layout.masm"),
+    ];
+    for (mask, layout) in layouts.into_iter().enumerate() {
+        // Independent protocol instance selection, preserving the original pinned index order.
+        let ids: Vec<_> = (0..12)
+            .filter(|id| match id {
+                0 | 2 => mask & 1 != 0,
+                10 => mask & 4 != 0,
+                11 => mask & 2 != 0,
+                _ => true,
+            })
+            .collect();
+        let heights: Vec<_> = ids.iter().map(|&id| HEIGHTS[id]).collect();
+        let (path, alias) = if mask == 7 {
+            ("pvm".to_string(), "pvm".to_string())
+        } else {
+            (format!("pvm::v{mask}"), format!("v{mask}"))
+        };
+        let source =
+            format!("use miden::core::sys::{path}\nbegin exec.{alias}::load_air_context end");
+        let (output, _) = build_test!(&source, &[], &heights).execute_for_output().unwrap();
+        let positions = masm_const(layout, "PROOF_ORDER_POSITIONS_PTR") as u32;
+        let mut order: Vec<_> = (0..heights.len()).collect();
+        order.sort_by_key(|&id| (heights[id], id));
+        for (position, &id) in order.iter().enumerate() {
+            assert_eq!(
+                read_memory_felt(&output, positions + id as u32),
+                Felt::from_u32(position as u32)
+            );
+        }
+        let fixed_index = ids.iter().position(|&id| id == BYTE_PAIR_LUT_AIR_INDEX).unwrap();
+        for wrong in [15, 17] {
+            let mut forged = heights.clone();
+            forged[fixed_index] = wrong;
+            assert!(
+                build_test!(&source, &[], &forged).execute_for_output().is_err(),
+                "mask {mask} must pin BytePairLut height"
+            );
+        }
+    }
+}

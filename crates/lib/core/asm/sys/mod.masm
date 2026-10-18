@@ -3,6 +3,7 @@ use miden::core::crypto::hashes::eidos
 
 pub mod pvm
 pub mod vm
+pub mod verifier
 
 # CONSTANTS
 # =================================================================================================

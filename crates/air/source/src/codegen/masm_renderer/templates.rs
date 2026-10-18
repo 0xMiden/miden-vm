@@ -6,7 +6,6 @@ use askama::Template;
 
 use super::{
     ArtifactOwnership, HeightRule, RenderedArtifact, V1RenderPlan,
-    ood::RowGroup,
     proof_order::{PointerRef, ProofOrderPlan, SortStep},
     pvm_glue::PvmGluePlan,
 };
@@ -21,7 +20,6 @@ struct EvaluatorTemplate<'a> {
 #[template(path = "verifier/ood.masm", escape = "none")]
 struct OodTemplate<'a> {
     p: &'a V1RenderPlan,
-    proof: &'a ProofOrderPlan,
 }
 
 #[derive(Template)]
@@ -71,7 +69,6 @@ struct PvmWrapperTemplate<'a> {
 #[template(path = "verifier/pvm_aux_trace.masm", escape = "none")]
 struct PvmAuxTemplate<'a> {
     p: &'a V1RenderPlan,
-    g: &'a PvmGluePlan,
 }
 
 #[derive(Template)]
@@ -133,9 +130,7 @@ pub(crate) fn render(p: &V1RenderPlan) -> Vec<RenderedArtifact> {
         },
         RenderedArtifact {
             relative_path: ood_path.into(),
-            body: OodTemplate { p, proof: &p.ood.proof_order }
-                .render()
-                .expect("packaged verifier template must render"),
+            body: OodTemplate { p }.render().expect("packaged verifier template must render"),
             ownership: ArtifactOwnership::Managed,
         },
         RenderedArtifact {
@@ -159,9 +154,7 @@ pub(crate) fn render(p: &V1RenderPlan) -> Vec<RenderedArtifact> {
         let public_path = "crates/lib/core/asm/sys/pvm/public_inputs.masm";
         artifacts.push(RenderedArtifact {
             relative_path: aux_path.into(),
-            body: PvmAuxTemplate { p, g }
-                .render()
-                .expect("packaged verifier template must render"),
+            body: PvmAuxTemplate { p }.render().expect("packaged verifier template must render"),
             ownership: ArtifactOwnership::Managed,
         });
         artifacts.push(RenderedArtifact {

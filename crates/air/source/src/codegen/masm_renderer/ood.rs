@@ -47,7 +47,7 @@ pub(crate) struct AirDispatch {
     pub entries: Vec<DispatchEntry>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DispatchCall {
     pub pair_offset: u32,
     pub digest_pointer_offset: u32,
@@ -62,7 +62,6 @@ pub(crate) enum RowGroup {
 #[derive(Clone, Debug)]
 pub(crate) struct OodPlan {
     pub row_felts: u32,
-    pub row_blocks: u32,
     pub helpers: Vec<PipeHelper>,
     pub air_dispatch: Vec<AirDispatch>,
     pub row_groups: Vec<RowGroup>,
@@ -172,7 +171,6 @@ impl OodPlan {
         }
         Self {
             row_felts,
-            row_blocks: row_felts / 8,
             helpers,
             air_dispatch,
             row_groups,

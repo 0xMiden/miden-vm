@@ -17,7 +17,6 @@ pub(crate) struct QueryGroup {
 #[derive(Clone, Debug)]
 pub(crate) struct DeepPlan {
     pub groups: [QueryGroup; 4],
-    pub unique_widths: Vec<QueryGroup>,
 }
 
 impl DeepPlan {
@@ -51,7 +50,6 @@ impl DeepPlan {
                 unique_widths.push(group.clone());
             }
         }
-        unique_widths.sort_by_key(|g| g.width);
-        Self { groups, unique_widths }
+        Self { groups }
     }
 }

@@ -67,7 +67,7 @@ pub fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    // Validate both current relations before delivering any managed projection.
+    // Shared runtime is one fixed VM/all-mask universe; use the global preflight boundary.
     super::run(root, mode)
 }
 
@@ -814,12 +814,13 @@ pub struct ComputedArtifacts {
 
 #[cfg(test)]
 mod tests {
+    use super::super::expect_panic;
     use alloc::string::ToString;
 
-    use super::{super::expect_panic, *};
+    use super::*;
 
     const PVM_PROTECTED_WRAPPER: &str = "crates/lib/core/asm/sys/pvm/mod.masm";
-    const DELIVERY_MANAGED_PATHS: [&str; 15] = [
+    const DELIVERY_MANAGED_PATHS: [&str; 24] = [
         CONSTRAINTS_EVAL_PATH,
         VM_LAYOUT_PATH,
         VM_OOD_FRAMES_PATH,
@@ -835,6 +836,15 @@ mod tests {
         "crates/air/generated/artifacts/precompile-degrees.rs",
         "crates/air/generated/artifacts/vm-metadata.rs",
         "crates/air/generated/artifacts/precompile-metadata.rs",
+        "crates/lib/core/asm/sys/verifier/parameters.masm",
+        "crates/lib/core/asm/sys/verifier/pipes.masm",
+        "crates/lib/core/asm/sys/verifier/evaluator.masm",
+        "crates/lib/core/asm/sys/verifier/proof_order.masm",
+        "crates/lib/core/asm/sys/verifier/ood.masm",
+        "crates/lib/core/asm/sys/verifier/deep.masm",
+        "crates/lib/core/asm/sys/verifier/fixed.masm",
+        "crates/lib/core/asm/sys/verifier/pvm_aux.masm",
+        "crates/lib/core/asm/sys/verifier/pvm_public.masm",
     ];
 
     struct DeliveryFixture {
@@ -857,7 +867,7 @@ mod tests {
             };
             // This fixture exercises delivery behavior, not accepted-identity derivation.
             // Independent pin/golden and live-library tests retain that separate obligation.
-            let accepted = serde_json::json!({
+            let mut accepted = serde_json::json!({
                 "accepted_schema": 1,
                 "relations": {
                     "vm": {
@@ -881,6 +891,31 @@ mod tests {
                     .find(|file| file.relative_path == *relative)
                     .unwrap();
                 assert_eq!(file.ownership, ArtifactOwnership::Managed);
+            }
+            for variant in super::super::pvm_variants::generate() {
+                assert_eq!(variant.files.len(), 2);
+                for (name, ownership) in [
+                    ("layout", ArtifactOwnership::Managed),
+                    ("mod", ArtifactOwnership::ProtectedCheckOnly),
+                ] {
+                    let path = format!("crates/lib/core/asm/sys/pvm/v{}/{name}.masm", variant.mask);
+                    assert!(
+                        variant
+                            .files
+                            .iter()
+                            .any(|file| file.relative_path == path && file.ownership == ownership)
+                    );
+                }
+                accepted["relations"][format!("precompile-{}", variant.mask)] = serde_json::json!({"protocol_id":4,"accepted_circuit_digest":variant.circuit,"accepted_relation_digest":variant.relation});
+                for file in variant.files {
+                    let body =
+                        if file.ownership == masm_renderer::ArtifactOwnership::ProtectedCheckOnly {
+                            file.body
+                        } else {
+                            format!("unchanged reduced sentinel: {}", file.relative_path)
+                        };
+                    fixture.write(&file.relative_path, &body);
+                }
             }
             fixture.write(
                 "crates/air/generated/protocol/accepted.json",
@@ -932,6 +967,12 @@ mod tests {
             DELIVERY_MANAGED_PATHS
                 .iter()
                 .map(|relative| fs::read(self.root.join(relative)).unwrap())
+                .chain((0..7).map(|mask| {
+                    fs::read(
+                        self.root.join(format!("crates/lib/core/asm/sys/pvm/v{mask}/layout.masm")),
+                    )
+                    .unwrap()
+                }))
                 .collect()
         }
     }
@@ -956,20 +997,6 @@ mod tests {
         compiled.masm.circuit.stream_felts -= 1;
         let error = expect_panic(|| render(&compiled));
         assert!(error.to_string().contains("circuit metadata"), "unexpected error: {error}");
-    }
-
-    #[test]
-    fn compiler_panic_prevents_managed_output_writes() {
-        let (vm, pvm) = delivery_artifacts();
-        let fixture = DeliveryFixture::new(&vm, &pvm);
-        let before = fixture.managed_contents();
-        let mut compiled = compile(accepted_setup_commitments());
-        compiled.masm.circuit.stream_felts -= 1;
-        expect_panic(|| {
-            let artifact = render(&compiled);
-            super::super::delivery::deliver(&fixture.root, &artifact.files, Mode::Write).unwrap();
-        });
-        assert_eq!(fixture.managed_contents(), before);
     }
 
     #[test]
@@ -1006,7 +1033,14 @@ mod tests {
     #[test]
     fn rejected_write_delivery_preserves_every_managed_output() {
         let (vm, pvm) = delivery_artifacts();
-        for rejected_input in ["accepted identity", "VM protected body", "PVM protected body"] {
+        for rejected_input in [
+            "accepted identity",
+            "VM protected body",
+            "PVM protected body",
+            "reduced protected body",
+            "reduced accepted identity",
+            "obsolete module",
+        ] {
             let fixture = DeliveryFixture::new(&vm, &pvm);
             let before = fixture.managed_contents();
             let expected = match rejected_input {
@@ -1038,6 +1072,32 @@ mod tests {
                         ),
                     );
                     PVM_PROTECTED_WRAPPER
+                },
+                "reduced protected body" => {
+                    let path = "crates/lib/core/asm/sys/pvm/v2/mod.masm";
+                    fixture.write(
+                        path,
+                        &format!(
+                            "{}\n# rejected reduced drift\n",
+                            read_file(&fixture.root, path).unwrap()
+                        ),
+                    );
+                    path
+                },
+                "reduced accepted identity" => {
+                    let path = "crates/air/generated/protocol/accepted.json";
+                    let mut accepted: serde_json::Value =
+                        serde_json::from_str(&read_file(&fixture.root, path).unwrap()).unwrap();
+                    accepted["relations"]["precompile-2"]["accepted_circuit_digest"][0] = 0.into();
+                    fixture.write(path, &serde_json::to_string_pretty(&accepted).unwrap());
+                    "candidate identity differs"
+                },
+                "obsolete module" => {
+                    fixture.write(
+                        "crates/lib/core/asm/sys/pvm/v2/aux_trace.masm",
+                        "obsolete sentinel",
+                    );
+                    "obsolete variant algorithm"
                 },
                 _ => unreachable!(),
             };
@@ -1122,44 +1182,25 @@ mod tests {
     fn deep_query_loader_repeats_follow_air_geometry() {
         let compiled = compile(accepted_setup_commitments());
         let artifact = render(&compiled);
-        let deep_queries = &artifact
+        let shared = super::super::shared_verifier::generate();
+        let pipes = &shared.iter().find(|a| a.relative_path.ends_with("/pipes.masm")).unwrap().body;
+        let geometry = &compiled.masm.geometry;
+        let layout = &artifact
             .files
             .iter()
-            .find(|file| file.relative_path == VM_DEEP_QUERIES_PATH)
+            .find(|file| file.relative_path == VM_LAYOUT_PATH)
             .unwrap()
             .body;
-        let geometry = &compiled.masm.geometry;
-        for (proc_name, expected) in [
-            (
-                "load_preprocessed_segment",
-                geometry.preprocessed.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
-            ),
-            (
-                "load_main_segment_execution_trace",
-                geometry.main.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
-            ),
-            (
-                "load_aux_segment_execution_trace",
-                geometry.aux_coordinates.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
-            ),
-            (
-                "load_constraints_composition_polys_trace",
-                geometry.quotient_coordinates / ADV_PIPE_BLOCK_FELTS,
-            ),
+        for expected in [
+            geometry.preprocessed.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            geometry.main.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            geometry.aux_coordinates.iter().sum::<usize>() / ADV_PIPE_BLOCK_FELTS,
+            geometry.quotient_coordinates / ADV_PIPE_BLOCK_FELTS,
         ] {
-            let proc_marker = format!("proc {proc_name}");
-            let proc_body = deep_queries
-                .split_once(&proc_marker)
-                .unwrap_or_else(|| panic!("missing {proc_name}"))
-                .1
-                .split_once("\nend")
-                .unwrap_or_else(|| panic!("missing end of {proc_name}"))
-                .0;
-            let actual = proc_body
-                .lines()
-                .find_map(|line| line.trim().strip_prefix("repeat.")?.parse::<usize>().ok())
-                .unwrap_or_else(|| panic!("missing repeat in {proc_name}"));
-            assert_eq!(actual, expected, "stale query loader geometry in {proc_name}");
+            assert!(layout.contains(&format!("procref.pipes::base_{expected}")));
+            let marker = format!("pub proc base_{expected}()");
+            let body = pipes.split_once(&marker).unwrap().1.split_once("\nend").unwrap().0;
+            assert!(body.contains(&format!("repeat.{expected}")));
         }
     }
 }

@@ -11,7 +11,10 @@ mod layout;
 mod ood;
 mod proof_order;
 mod pvm_glue;
+mod runtime;
+pub mod shared;
 mod templates;
+pub use runtime::{PARAMETERS_FELTS, PARAMETERS_PTR};
 #[cfg(test)]
 mod tests;
 
@@ -32,7 +35,7 @@ use self::{
 #[derive(Clone, Debug)]
 pub struct V1RenderPlan {
     pub(crate) input: V1RenderInput,
-    pub(crate) relation_name: &'static str,
+    pub(crate) relation_name: String,
     pub(crate) num_airs: usize,
     pub(crate) stream_blocks: u32,
     pub(crate) layout: LayoutPlan,
@@ -40,13 +43,24 @@ pub struct V1RenderPlan {
     pub(crate) ood: OodPlan,
     pub(crate) pvm_glue: Option<pvm_glue::PvmGluePlan>,
     pub(crate) fold_positions: Vec<usize>,
+    pub(crate) runtime: runtime::RuntimePlan,
 }
 
 pub fn prepare_v1(input: V1RenderInput) -> V1RenderPlan {
     let num_airs = input.geometry.main.len();
     let (relation_name, expected_airs) = match &input.relation {
-        RelationInput::Vm(_) => ("vm", 4),
-        RelationInput::Pvm { .. } => ("pvm", 12),
+        RelationInput::Vm(_) => ("vm".into(), 4),
+        RelationInput::Pvm { glue, .. } => {
+            let variant = glue.variant;
+            let count = crate::precompile::MultiAir::with_variant(variant);
+            use miden_stark::air::MultiAir as _;
+            let namespace = if variant == miden_core::deferred::PvmAirVariant::ALL {
+                "pvm".into()
+            } else {
+                std::format!("pvm::v{}", variant.as_u8())
+            };
+            (namespace, count.airs().len())
+        },
     };
     assert!(num_airs == expected_airs, "v1 relation: canonical relation AIR count differs");
     assert!(
@@ -87,6 +101,7 @@ pub fn prepare_v1(input: V1RenderInput) -> V1RenderPlan {
         RelationInput::Vm(_) => None,
     };
     let deep = deep::DeepPlan::new(&input);
+    let runtime = runtime::RuntimePlan::new(&input, &layout, &deep, pvm_glue.as_ref());
     let proof_order = ProofOrderPlan::new(&ProofOrderConfig {
         num_airs,
         heights: PointerRef::SharedHeights { address: input.shared_abi.heights_ptr },
@@ -126,6 +141,7 @@ pub fn prepare_v1(input: V1RenderInput) -> V1RenderPlan {
         deep,
         ood,
         pvm_glue,
+        runtime,
         fold_positions: (0..num_airs).rev().collect(),
     }
 }

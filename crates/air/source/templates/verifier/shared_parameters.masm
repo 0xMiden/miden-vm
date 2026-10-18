@@ -1,0 +1,9 @@
+#! Generated trusted runtime parameter ABI. Never populated from proof/advice configuration.
+{%- for field in abi %}
+pub const {{ field.name }} = {{ field.address() }}
+{% if !field.accessor.is_empty() %}
+pub proc {{ field.accessor }}()
+    mem_load.{{ field.name }}
+end
+{% endif %}
+{%- endfor %}

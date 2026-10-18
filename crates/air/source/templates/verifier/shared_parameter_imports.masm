@@ -1,0 +1,5 @@
+use {
+{%- for field in abi %}
+    {{ field.name }},
+{%- endfor %}
+} from miden::core::sys::verifier::parameters

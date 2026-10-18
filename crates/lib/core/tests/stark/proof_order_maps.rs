@@ -327,11 +327,10 @@ fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
 /// by `miden-ace-codegen`.
 #[test]
 fn the_pass_is_a_fixed_comparator_network() {
-    for (hook, comparators) in [
-        (include_str!("../../asm/sys/vm/ood_frames.masm"), 5),
-        (include_str!("../../asm/sys/pvm/ood_frames.masm"), 41),
-    ] {
-        let start = hook.find("pub proc stage_proof_order_maps").expect("the pass is generated");
+    let hook = include_str!("../../asm/sys/verifier/proof_order.masm");
+    for (count, comparators) in [(4, 5), (12, 41)] {
+        let marker = format!("pub proc stage_proof_order_maps_{count}()");
+        let start = hook.find(&marker).expect("the shared pass is generated");
         let body = &hook[start..];
         let body = &body[..body.find("\nend").expect("the pass ends")];
         let ops: Vec<_> = body

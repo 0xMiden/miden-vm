@@ -4,15 +4,28 @@
 use { AUXILIARY_ACE_INPUTS_ADDRESS_PTR, AUX_RAND_ELEM_ADDRESS_PTR, CURRENT_TRACE_ROW_ADDRESS_PTR, LOG_AIR_TRACE_LENGTHS_PTR, LOG_TRACE_LENGTH_PTR, OOD_EVALUATIONS_ADDRESS_PTR, PREPROCESSED_TRACE_COM_PTR, RELATION_DIGEST_PTR, } from miden::core::stark::constants
 use miden::core::stark::types
 
+{%- if g.variant_mask == 7 %}
 pub mod aux_trace
 pub mod constraints_eval
 pub mod deep_queries
-pub mod layout
 pub mod ood_frames
 pub mod public_inputs
+{%- endif %}
+pub mod layout
+{%- if g.variant_mask == 7 %}
+{%- for mask in g.dispatch_masks %}
+pub mod v{{ mask }}
+{%- endfor %}
+{%- endif %}
 
 use miden::core::stark::utils
 use miden::core::stark::verifier
+use miden::core::sys::verifier::evaluator
+use miden::core::sys::verifier::ood
+use miden::core::sys::verifier::deep
+use miden::core::sys::verifier::proof_order
+use miden::core::sys::verifier::pvm_public
+use miden::core::sys::verifier::pvm_aux
 
 const LOOKUP_POW_BITS = {{ p.input.security.lookup_pow_bits }}
 const MAX_MESSAGE_WIDTH = {{ p.input.security.max_message_width }}
@@ -57,8 +70,9 @@ pub proc load_air_context()
 {%- endfor %}
     drop
     mem_store.LOG_TRACE_LENGTH_PTR
-    exec.ood_frames::stage_proof_order_maps
-    exec.ood_frames::stage_ood_scatter_table
+    exec.layout::stage_verifier_parameters
+    exec.proof_order::stage_proof_order_maps_{{ p.num_airs }}
+    exec.layout::stage_ood_scatter_table
     exec.store_relation_digest
     exec.store_preprocessed_commitment
     exec.layout::preprocessed_current_ptr
@@ -148,8 +162,27 @@ pub proc request_proof(root: types::Digest) -> types::Digest
     dropw
 end
 
-#! Reserve the call window before entering the isolated verifier.
+{%- if g.variant_mask == 7 %}
+#! Select the exact trusted relation before consuming its proof stream.
+#! The advice mask is checked; the selected hook pins both ACE and transcript identities.
 pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescriptor
+    adv_push u32assert
+    dup u32lte.7 assert.err="unsupported PVM AIR variant"
+{%- for mask in g.dispatch_masks %}
+    dup eq.{{ mask }}
+    if.true
+        drop exec.v{{ mask }}::verify_proof
+    else
+{%- endfor %}
+        drop exec.verify_selected_proof
+{%- for mask in g.dispatch_masks %}
+    end
+{%- endfor %}
+end
+{%- endif %}
+
+#! Reserve the call window before entering the isolated verifier.
+pub proc {% if g.variant_mask == 7 %}verify_selected_proof{% else %}verify_proof{% endif %}(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     padw
     padw
     padw
@@ -162,18 +195,29 @@ end
 #! Stage context, register hooks in ABI order, verify, then construct the descriptor.
 proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     exec.utils::load_security_params
-    exec.public_inputs::stage_public_root
+    exec.stage_public_root
     exec.load_air_context
-    procref.deep_queries::compute_deep_composition_polynomial_queries
-    procref.constraints_eval::execute_constraint_evaluation_check
-    procref.ood_frames::process_row_ood_evaluations
-    procref.public_inputs::process_public_inputs
-    procref.aux_trace::observe_aux_trace
+    procref.deep::compute_deep_composition_polynomial_queries
+    procref.evaluator::execute_constraint_evaluation_check_{{ p.num_airs }}
+    procref.ood::process_row_ood_evaluations_{{ p.num_airs }}
+    procref.pvm_public::process_public_inputs
+    procref.pvm_aux::observe_aux_trace_{{ p.num_airs }}
     exec.verifier::verify
     exec.build_security_descriptor
     repeat.3
         movupw.3
         dropw
     end
+end
+
+
+proc stage_public_root(root: types::Digest)
+{%- for offset in g.public_offsets %}
+    exec.layout::public_inputs_ptr{% if *offset != 0 %} add.{{ offset }}{% endif %} mem_store
+{%- endfor %}
+
+{%- for offset in g.public_offsets %}
+    push.0 exec.layout::public_inputs_ptr add.{{ offset + 1 }} mem_store
+{%- endfor %}
 end
 

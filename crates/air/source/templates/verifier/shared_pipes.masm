@@ -1,0 +1,24 @@
+#! Generated fixed pipe universe for VM and every PVM mask. No metadata on the Horner/hash frame.
+use miden::core::crypto::hashes::eidos
+{%- for blocks in base_blocks %}
+pub proc base_{{ blocks }}()
+    repeat.{{ blocks }}
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+{%- endfor %}
+{%- for blocks in ext_blocks %}
+pub proc ext_{{ blocks }}()
+    repeat.{{ blocks }}
+        adv_pipe horner_eval_ext compress
+    end
+end
+{%- endfor %}
+{%- for blocks in ace_blocks %}
+pub proc ace_{{ blocks }}()
+    repeat.{{ blocks }}
+        adv_pipe exec.eidos::compress
+    end
+end
+{%- endfor %}
+

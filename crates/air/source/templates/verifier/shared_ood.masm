@@ -1,0 +1,39 @@
+#! Generated OOD kernels. Absorb in proof wire order, store in canonical order.
+use miden::core::stark::types
+use miden::core::sys::verifier::parameters
+{% include "verifier/shared_parameter_imports.masm" %}
+{%- for p in counts %}
+#! Consume one OOD row in preprocessed, main, auxiliary and quotient wire order.
+#! Require a staged scatter table; update Eidos and extension Horner state while storing evaluations canonically.
+#! Addresses and offsets count base felts; each scalar evaluation occupies two felts.
+#! Return the stream pointer at row base plus the full row length and preserve caller values below the state frame.
+pub proc process_row_ood_evaluations_{{ p.num_airs }}(
+    state: types::EidosState,
+    evaluation: types::HornerState,
+) -> (types::EidosState, types::HornerState)
+    dup.12 exec.parameters::ood_scatter_table_ptr mem_store
+{%- for group in p.ood.row_groups %}
+{%- match group %}
+{%- when RowGroup::Sole with { destination, blocks } %}
+    exec.parameters::ood_scatter_table_ptr mem_load
+{%- if *destination > 0 %}
+    mem_load.QUOTIENT_DESTINATION add
+{%- endif %}
+    swap.13 drop
+    push.{% if *destination == 0 %}PREPROCESSED_EXT_PIPE{% else %}QUOTIENT_EXT_PIPE{% endif %} dynexec
+{%- when RowGroup::Full with { calls } %}
+{%- for call in calls %}
+    exec.parameters::ood_scatter_table_ptr
+    dup add.{{ call.pair_offset }} mem_load
+    swap mem_load add swap.13 drop
+    exec.parameters::ood_scatter_table_ptr add.{{ call.digest_pointer_offset }} mem_load
+    dynexec
+{%- endfor %}
+{%- endmatch %}
+{%- endfor %}
+    exec.parameters::ood_scatter_table_ptr mem_load mem_load.ROW_FELTS add swap.13 drop
+end
+
+
+{%- endfor %}
+

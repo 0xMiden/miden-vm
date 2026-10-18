@@ -1,0 +1,162 @@
+#! Generated trusted runtime parameter ABI. Never populated from proof/advice configuration.
+pub const AUX_RAND_ELEM_PTR = 3223324000
+
+pub proc aux_rand_elem_ptr()
+    mem_load.AUX_RAND_ELEM_PTR
+end
+
+pub const AUX_BUS_BOUNDARY_PTR = 3223324001
+
+pub proc aux_bus_boundary_ptr()
+    mem_load.AUX_BUS_BOUNDARY_PTR
+end
+
+pub const AUXILIARY_ACE_INPUTS_PTR = 3223324002
+
+pub proc auxiliary_ace_inputs_ptr()
+    mem_load.AUXILIARY_ACE_INPUTS_PTR
+end
+
+pub const ACE_CIRCUIT_STREAM_PTR = 3223324003
+
+pub proc ace_circuit_stream_ptr()
+    mem_load.ACE_CIRCUIT_STREAM_PTR
+end
+
+pub const STREAM_BLOCKS = 3223324004
+
+pub proc stream_blocks()
+    mem_load.STREAM_BLOCKS
+end
+
+pub const NUM_INPUTS = 3223324005
+
+pub proc num_inputs()
+    mem_load.NUM_INPUTS
+end
+
+pub const NUM_GATES = 3223324006
+
+pub proc num_gates()
+    mem_load.NUM_GATES
+end
+
+pub const CYCLE_LOG = 3223324007
+
+pub proc cycle_log()
+    mem_load.CYCLE_LOG
+end
+
+pub const NUM_AIRS = 3223324008
+
+pub proc num_airs()
+    mem_load.NUM_AIRS
+end
+
+pub const FOLD_OFFSET = 3223324009
+
+pub proc fold_offset()
+    mem_load.FOLD_OFFSET
+end
+
+pub const OOD_SCATTER_TABLE_PTR = 3223324010
+
+pub proc ood_scatter_table_ptr()
+    mem_load.OOD_SCATTER_TABLE_PTR
+end
+
+pub const PROOF_ORDER_POSITIONS_PTR = 3223324011
+
+pub proc proof_order_positions_ptr()
+    mem_load.PROOF_ORDER_POSITIONS_PTR
+end
+
+pub const PROOF_ORDER_IDS_PTR = 3223324012
+
+pub proc proof_order_ids_ptr()
+    mem_load.PROOF_ORDER_IDS_PTR
+end
+
+pub const ROW_FELTS = 3223324013
+
+pub proc row_felts()
+    mem_load.ROW_FELTS
+end
+
+pub const BUS_GAMMA_PTR = 3223324014
+
+pub proc bus_gamma_ptr()
+    mem_load.BUS_GAMMA_PTR
+end
+
+pub const C_TOTAL_PTR = 3223324015
+
+pub proc c_total_ptr()
+    mem_load.C_TOTAL_PTR
+end
+
+pub const PUBLIC_INPUTS_PTR = 3223324016
+
+pub proc public_inputs_ptr()
+    mem_load.PUBLIC_INPUTS_PTR
+end
+
+pub const PREPROCESSED_COM_PTR = 3223324017
+
+pub proc preprocessed_com_ptr()
+    mem_load.PREPROCESSED_COM_PTR
+end
+
+pub const PREPROCESSED_DEPTH = 3223324018
+
+pub proc preprocessed_depth()
+    mem_load.PREPROCESSED_DEPTH
+end
+
+pub const SHAPE_BUFFERED = 3223324019
+
+pub proc shape_buffered()
+    mem_load.SHAPE_BUFFERED
+end
+
+pub const ACE_INITIAL_CV = 3223324020
+
+pub const ACE_DIGEST = 3223324024
+
+pub const QUOTIENT_SHIFT_RATIO = 3223324028
+
+pub const QUOTIENT_FIRST_SHIFT = 3223324029
+
+pub const QUOTIENT_FIRST_WEIGHT = 3223324030
+
+pub const RESERVED_31 = 3223324031
+
+pub const PREPROCESSED_LEAF_CV = 3223324032
+
+pub const MAIN_LEAF_CV = 3223324036
+
+pub const AUX_LEAF_CV = 3223324040
+
+pub const QUOTIENT_LEAF_CV = 3223324044
+
+pub const PREPROCESSED_BASE_PIPE = 3223324048
+
+pub const MAIN_BASE_PIPE = 3223324052
+
+pub const AUX_BASE_PIPE = 3223324056
+
+pub const QUOTIENT_BASE_PIPE = 3223324060
+
+pub const PREPROCESSED_EXT_PIPE = 3223324064
+
+pub const QUOTIENT_EXT_PIPE = 3223324068
+
+pub const QUOTIENT_DESTINATION = 3223324072
+
+pub const FOLD_COEFFICIENTS_PTR = 3223324073
+
+pub const RESERVED_74 = 3223324074
+
+pub const RESERVED_75 = 3223324075
+
+pub const ACE_PIPE = 3223324076

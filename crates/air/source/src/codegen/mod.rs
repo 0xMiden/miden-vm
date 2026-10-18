@@ -11,6 +11,8 @@ pub mod metadata;
 pub use constraints::Mode;
 
 pub mod precompile;
+pub mod pvm_variants;
+pub mod shared_verifier;
 
 mod accepted;
 mod delivery;
@@ -38,6 +40,17 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
     )?;
     constraints::validate_delivery(root, &vm)?;
     precompile::validate_delivery(root, &pvm)?;
+    let mut plans = std::vec![vm_plan];
+    plans.extend(miden_core::deferred::PvmAirVariant::ALL_VARIANTS[..7].iter().map(|&variant| {
+        masm_renderer::prepare_v1(
+            precompile::compile_for(Some(precompile::accepted_setup_commitment()), variant).masm,
+        )
+    }));
+    let variants = pvm_variants::render_prepared(&plans[1..]);
+    pvm_variants::validate(root, &variants)?;
+    shared_verifier::validate_obsolete(root)?;
+    plans.push(pvm_plan);
+    let shared = masm_renderer::shared::render(&plans);
     let rust_evaluator = evaluator::generate();
     let degree_tables = degrees::generate();
     let metadata_tables = metadata::generate();
@@ -48,11 +61,15 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
         constraints::public_inputs_masm_matches_air(root)?;
         constraints::security_masm_matches_air(root)?;
     }
+    delivery::deliver(root, &shared, mode)?;
     delivery::deliver(root, &vm.files, mode)?;
     delivery::deliver(root, &pvm.files, mode)?;
     degrees::deliver(&artifacts, &degree_tables, mode)?;
     degrees::deliver(&artifacts, &metadata_tables, mode)?;
     evaluator::deliver(&evaluator_path, &rust_evaluator, mode)?;
+    for variant in variants {
+        delivery::deliver(root, &variant.files, mode)?;
+    }
     Ok(())
 }
 

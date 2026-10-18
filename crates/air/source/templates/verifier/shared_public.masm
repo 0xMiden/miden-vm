@@ -1,0 +1,46 @@
+#! Generated shared PVM statement hook. Trusted parameters must be staged.
+use {LOG_AIR_TRACE_LENGTHS_PTR, RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR} from miden::core::stark::constants
+use miden::core::stark::random_coin
+use miden::core::stark::public_inputs
+use miden::core::sys::verifier::parameters
+{% include "verifier/shared_parameter_imports.masm" %}
+# Full relation reference: {{ g.statement_and_shape_felts }} statement/shape felts.
+# Every selected relation uses the staged count/remainder; no heights are observed by staging.
+const NUM_PUBLIC_VALUES = {{ g.num_public_values }}
+const MAX_AUX_INPUTS = {{ g.max_aux_inputs }}
+const NUM_AUX_INPUTS = {{ g.num_aux_inputs }}
+pub proc process_public_inputs()
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+    push.{{ g.setup_buffered }} assert_eq.err="PVM process_public_inputs: preprocessed commitment is not buffered"
+
+    # Publish the dense ACE READ public-input start through the generic verifier cell.
+    push.NUM_PUBLIC_VALUES
+    exec.parameters::aux_rand_elem_ptr
+    exec.public_inputs::compute_and_store_public_inputs_address
+
+    # Default statement encoding ({{ g.statement_felts }} felts), before the instance heights.
+    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt
+{%- for offset in g.public_offsets %}
+    exec.parameters::public_inputs_ptr{% if *offset != 0 %} add.{{ offset }}{% endif %} mem_load exec.random_coin::observe_felt
+{%- endfor %}
+    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
+    push.NUM_AUX_INPUTS exec.random_coin::observe_felt
+
+    # Instance shape: canonical AIR count followed by its canonical heights.
+    mem_load.NUM_AIRS exec.random_coin::observe_felt
+    push.LOG_AIR_TRACE_LENGTHS_PTR mem_load.NUM_AIRS add
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup.1 dup.1 neq
+    while.true
+        dup mem_load exec.random_coin::observe_felt
+        add.1
+        dup.1 dup.1 neq
+    end
+    drop drop
+
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+    mem_load.SHAPE_BUFFERED assert_eq.err="PVM process_public_inputs: transcript framing drifted"
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
+    assertz.err="PVM process_public_inputs: observed input exposed stale output"
+end
+

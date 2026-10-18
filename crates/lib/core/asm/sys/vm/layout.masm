@@ -3,6 +3,8 @@
 
 use { LOG_AIR_TRACE_LENGTHS_PTR, } from miden::core::stark::constants
 use miden::core::stark::types
+use {LOG_BLOWUP_FACTOR} from miden::core::stark::constants
+use miden::core::sys::verifier::pipes
 
 const NUM_KERNEL_PROCEDURES_PTR = 3223322776
 const CONTROL_ALIGNMENT_PADDING_PTR = 3223322777
@@ -177,4 +179,113 @@ end
 #! Each kernel procedure digest occupies four felts.
 pub proc kernel_witness_ptr() -> types::Address
     push.KERNEL_WITNESS_PTR
+end
+#! Initialize every trusted parameter cell, including unused/padding cells, without observing data.
+pub proc stage_verifier_parameters()
+    push.3225420968.3225420912.3225420904.3225419776
+    mem_storew_le.3223324000 dropw
+    push.5.6780.734.874
+    mem_storew_le.3223324004 dropw
+    push.3223323908.3223323864.44.4
+    mem_storew_le.3223324008 dropw
+    push.3223322784.3223322780.560.3223323912
+    mem_storew_le.3223324012 dropw
+    push.0.19.3223322740.0
+    mem_storew_le.3223324016 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875166544.13503953893947607553
+    mem_storew_le.3223324020 dropw
+    push.7406482881221041553.5414688566126692380.4575736417990392984.9122225125595333314
+    mem_storew_le.3223324024 dropw
+    push.0.8868329529835627796.5473358340599679662.18446744069397807105
+    mem_storew_le.3223324028 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159560.13503953893947607809
+    mem_storew_le.3223324032 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159744.13503953893947607809
+    mem_storew_le.3223324036 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159616.13503953893947607809
+    mem_storew_le.3223324040 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159568.13503953893947607809
+    mem_storew_le.3223324044 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324048 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324052 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324056 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324060 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324064 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324068 dropw
+    push.0.0.3225420956.528
+    mem_storew_le.3223324072 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324076 dropw
+    procref.pipes::base_1
+    mem_storew_le.3223324048 dropw
+    procref.pipes::base_24
+    mem_storew_le.3223324052 dropw
+    procref.pipes::base_8
+    mem_storew_le.3223324056 dropw
+    procref.pipes::base_2
+    mem_storew_le.3223324060 dropw
+    procref.pipes::ext_2
+    mem_storew_le.3223324064 dropw
+    procref.pipes::ext_4
+    mem_storew_le.3223324068 dropw
+    procref.pipes::ace_874
+    mem_storew_le.3223324076 dropw
+
+    # VM setup depth comes from its And8 instance plus the shared blowup, not PVM fixed geometry.
+    exec.get_and8_lookup_trace_length_log push.LOG_BLOWUP_FACTOR add
+    mem_store.3223324018
+
+end
+
+#! Stage trusted dispatch pairs using the independently staged proof-order positions.
+pub proc stage_ood_scatter_table()
+    exec.ood_scatter_table_ptr
+    procref.pipes::ext_2
+    dup.4 add.20 mem_storew_le dropw
+    procref.pipes::ext_4
+    dup.4 add.24 mem_storew_le dropw
+    procref.pipes::ext_6
+    dup.4 add.28 mem_storew_le dropw
+    procref.pipes::ext_10
+    dup.4 add.32 mem_storew_le dropw
+    procref.pipes::ext_12
+    dup.4 add.36 mem_storew_le dropw
+    procref.pipes::ext_28
+    dup.4 add.40 mem_storew_le dropw
+    exec.proof_order_positions_ptr
+    dup
+    mem_load mul.2 dup.2 add
+    push.16 dup.1 add.4 mem_store
+    dup.2 add.36 dup.1 add.5 mem_store
+    push.400 dup.1 add.12 mem_store
+    dup.2 add.20 dup.1 add.13 mem_store
+    drop
+    dup add.1
+    mem_load mul.2 dup.2 add
+    push.112 dup.1 add.4 mem_store
+    dup.2 add.28 dup.1 add.5 mem_store
+    push.416 dup.1 add.12 mem_store
+    dup.2 add.20 dup.1 add.13 mem_store
+    drop
+    dup add.2
+    mem_load mul.2 dup.2 add
+    push.160 dup.1 add.4 mem_store
+    dup.2 add.40 dup.1 add.5 mem_store
+    push.432 dup.1 add.12 mem_store
+    dup.2 add.32 dup.1 add.13 mem_store
+    drop
+    dup add.3
+    mem_load mul.2 dup.2 add
+    push.384 dup.1 add.4 mem_store
+    dup.2 add.20 dup.1 add.5 mem_store
+    push.512 dup.1 add.12 mem_store
+    dup.2 add.20 dup.1 add.13 mem_store
+    drop
+    drop drop
 end

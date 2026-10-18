@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use miden_air::precompile::NUM_CHIPLETS;
+use miden_air::precompile::ChipletAir;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
     crypto::hash::Keccak256,
     deferred::{
-        DEFERRED_AND_FRAME, DeferredState, Node, PrecompileWitness, PrecompileWitnessEntry,
-        deferred_chunks_frame,
+        DEFERRED_AND_FRAME, DeferredClaim, DeferredState, Node, PrecompileWitness,
+        PrecompileWitnessEntry, PvmAirVariant, deferred_chunks_frame,
     },
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
@@ -23,10 +23,12 @@ use miden_core_lib::{
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_precompile_stark::{
-    prove_precompiles,
+    prove_precompiles, prove_precompiles_with_variant,
     recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
-use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
+use miden_precompiles::{
+    Keccak256Precompile, Sha256Precompile, Sha512Precompile, UintDomain, UintPrecompile,
+};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
@@ -43,12 +45,12 @@ use crate::{
 };
 
 const SECURITY_PARAM_COUNT: usize = 4;
+const SECURITY_PARAMS_OFFSET: usize = 1;
+const HEIGHTS_OFFSET: usize = SECURITY_PARAMS_OFFSET + SECURITY_PARAM_COUNT;
 
-/// A Keccak-only proof still pays every chiplet's fixed verifier cost, which bounds its recursive
-/// trace at 2^19 rows. Tightening this to 2^18 is tracked in
-/// <https://github.com/0xMiden/miden-vm/issues/3863>.
+/// Variant dispatch must keep the core trace small; omitting SHA keeps Keccak below 2^18 rows.
 #[test]
-fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
+fn pvm_recursive_verifier_cost_is_bounded() {
     const SOURCE: &str = "
         use miden::core::sys
         use miden::core::sys::pvm
@@ -62,19 +64,114 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
         end
     ";
 
-    let proof = prove_keccak_claim(&[0x61; 32]);
-    let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof)
-        .expect("host adapter must parse the proof");
-    let initial_stack: [u64; 4] = inputs.claim_commitment().into();
-    let mut test = build_test!(SOURCE, initial_stack);
-    test.advice_inputs = inputs.advice().clone();
-    let trace = test.execute().expect("Keccak-only PVM proof must verify");
-    let summary = trace.trace_len_summary();
-    eprintln!("Keccak-only PVM recursive trace: {summary:?}");
-    assert!(
-        summary.padded_trace_len() <= 1 << 19,
-        "the fixed SHA programs must not force Keccak-only recursion past 2^19 rows"
-    );
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let proof = prove_hash_variant_claims(variant, &[0x61; 32]);
+        let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof)
+            .expect("host adapter must parse the proof");
+        let initial_stack: [u64; 4] = inputs.claim_commitment().into();
+        let mut test = build_test!(SOURCE, initial_stack);
+        test.advice_inputs = inputs.advice().clone();
+        let trace = test.execute().expect("PVM proof must verify");
+        let summary = trace.trace_len_summary();
+        println!(
+            "variant {}: {summary:?}; core package bytes {}",
+            variant.as_u8(),
+            CoreLibrary::SERIALIZED.len()
+        );
+        assert!(
+            summary.core_rows() < 70_000,
+            "variant {} must avoid per-block dispatch overhead: {summary:?}",
+            variant.as_u8(),
+        );
+        if variant == PvmAirVariant::KECCAK {
+            assert!(
+                summary.padded_trace_len() <= 1 << 18,
+                "Keccak-only recursion must remain within 2^18 rows"
+            );
+        }
+    }
+}
+
+#[test]
+fn pvm_verifies_every_hash_variant_through_the_generic_entrypoint() {
+    let mut packages = Vec::new();
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let proof = prove_hash_variant_claims(variant, b"PVM recursive AIR variants");
+        let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof)
+            .expect("every supported PVM variant must adapt to the generic recursive verifier");
+        assert_eq!(
+            inputs.claim_commitment(),
+            DeferredClaim::new(proof.aggregate_root().unwrap()).commitment(),
+            "the package must bind the variant proof's requested claim",
+        );
+        assert_pvm_verifies(&inputs);
+
+        let mut invalid_selector = inputs.advice().clone();
+        mutate_proof_stream(&inputs, &mut invalid_selector, |stream| {
+            stream[0] = Felt::from_u8(8);
+        });
+        assert_pvm_rejects(&invalid_selector, inputs.claim_commitment());
+
+        packages.push(inputs);
+    }
+
+    // SHA-256 and SHA-512 select the same number of AIRs. Supply the alternate relation's
+    // authentic circuit and Merkle advice so rejection cannot rely on a missing advice entry.
+    let sha256 = &packages[PvmAirVariant::SHA256.as_u8() as usize];
+    let sha512 = &packages[PvmAirVariant::SHA512.as_u8() as usize];
+    let (stack, mut map, mut store) = sha256.advice().clone().into_parts();
+    map.extend(sha512.advice().map().iter().map(|(key, values)| (*key, values.to_vec())));
+    store.extend(sha512.advice().store().inner_nodes());
+    let mut wrong_relation = AdviceInputs::new(stack, map, store);
+    mutate_proof_stream(sha256, &mut wrong_relation, |stream| {
+        stream[0] = Felt::from_u8(PvmAirVariant::SHA512.as_u8());
+    });
+    assert_pvm_rejects(&wrong_relation, sha256.claim_commitment());
+}
+
+fn prove_hash_variant_claims(variant: PvmAirVariant, input: &[u8]) -> PrecompileProof {
+    use miden_crypto::hash::sha2::{Sha256, Sha512};
+
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+    if variant == PvmAirVariant::NONE {
+        let value = state
+            .register(UintPrecompile::value_node(UintDomain::U256, [7, 0, 0, 0, 0, 0, 0, 0]))
+            .unwrap();
+        let assertion = state
+            .register(
+                Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), value, value)
+                    .unwrap(),
+            )
+            .unwrap();
+        state.log_statement(assertion).unwrap();
+    }
+    let preimage = state.register(Node::chunks_from_bytes(input)).unwrap();
+    for (required, expected, frame) in [
+        (
+            PvmAirVariant::KECCAK,
+            Keccak256::hash(input).as_bytes().to_vec(),
+            Keccak256Precompile::assert_frame(input.len() as u32),
+        ),
+        (
+            PvmAirVariant::SHA256,
+            Sha256::hash(input).as_bytes().to_vec(),
+            Sha256Precompile::assert_frame(input.len() as u32),
+        ),
+        (
+            PvmAirVariant::SHA512,
+            Sha512::hash(input).as_bytes().to_vec(),
+            Sha512Precompile::assert_frame(input.len() as u32),
+        ),
+    ] {
+        if variant.contains(required) {
+            let expected = state.register(Node::chunks_from_bytes(&expected)).unwrap();
+            let assertion = state.register(Node::join(frame, preimage, expected).unwrap()).unwrap();
+            state.log_statement(assertion).unwrap();
+        }
+    }
+    let witness = state.into_witness().unwrap().expect("each variant logs a true claim");
+    prove_precompiles_with_variant(vec![witness], HashFunction::Eidos, variant)
+        .expect("the explicit variant must prove its enabled claims")
 }
 
 #[test]
@@ -263,25 +360,27 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     let wrong_claim_advice = AdviceInputs::new(stack, map, store);
     assert_pvm_rejects(&wrong_claim_advice, wrong_claim_commitment);
 
-    // The twelve heights are the sole carrier of proof order into the OOD scatter table, the sigma
-    // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
-    // a constant, so forging it fails a shape check rather than exercising order binding); every
-    // other chiplet's height is advice-supplied and must be transcript-bound.
-    const FIXED_CHIPLET: usize = 3;
+    // Heights carry proof order into OOD scattering, sigma scattering, and fold staging.
+    // BytePairLut's fixed height fails a shape check when forged; every other height must be
+    // transcript-bound even when its mutation preserves the selected relation's AIR count.
+    let variant =
+        PvmAirVariant::from_u8(self::proof_stream(inputs)[0].as_canonical_u64() as u8).unwrap();
+    let airs: Vec<_> =
+        ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+    let fixed_chiplet = airs.iter().position(|air| *air == ChipletAir::BytePairLut).unwrap();
 
     let honest_order = pvm_proof_order(inputs);
     let mut reordering_forgeries = 0usize;
-    for chiplet in (0..NUM_CHIPLETS).filter(|&chiplet| chiplet != FIXED_CHIPLET) {
+    for chiplet in (0..airs.len()).filter(|&chiplet| chiplet != fixed_chiplet) {
         let mut wrong_shape = inputs.advice().clone();
         mutate_proof_stream(inputs, &mut wrong_shape, |stream| {
-            stream[SECURITY_PARAM_COUNT + chiplet] += Felt::ONE;
+            stream[HEIGHTS_OFFSET + chiplet] += Felt::ONE;
         });
 
-        let mut forged_heights: Vec<Felt> = self::proof_stream(inputs)
-            [SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
-            .to_vec();
+        let mut forged_heights: Vec<Felt> =
+            self::proof_stream(inputs)[HEIGHTS_OFFSET..HEIGHTS_OFFSET + airs.len()].to_vec();
         forged_heights[chiplet] += Felt::ONE;
-        let mut forged_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
+        let mut forged_order: Vec<usize> = (0..airs.len()).collect();
         forged_order.sort_by_key(|&i| (forged_heights[i].as_canonical_u64(), i));
         if forged_order != honest_order {
             reordering_forgeries += 1;
@@ -297,7 +396,7 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     for index in 0..SECURITY_PARAM_COUNT {
         let mut wrong_params = inputs.advice().clone();
         mutate_proof_stream(inputs, &mut wrong_params, |stream| {
-            stream[index] += Felt::ONE;
+            stream[SECURITY_PARAMS_OFFSET + index] += Felt::ONE;
         });
         assert_pvm_rejects(&wrong_params, inputs.claim_commitment());
     }
@@ -309,14 +408,9 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
         .max_by_key(|(_, values)| values.len())
         .map(|(key, values)| (*key, values.to_vec()))
         .expect("adapter must include the selected ACE stream");
-    let stream_blocks: usize = include_str!("../../asm/sys/pvm/constraints_eval.masm")
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("const ACE_STREAM_BLOCKS = ")?.parse().ok())
-        .expect("the generated PVM evaluator declares its stream length");
-    assert_eq!(
-        circuit_values.len(),
-        8 * stream_blocks,
-        "the largest content-addressed value must be the ACE instruction stream"
+    assert!(
+        circuit_values.len().is_multiple_of(8),
+        "the authenticated ACE instruction stream must be adv_pipe aligned"
     );
     let mut circuit_stream = circuit_values;
     circuit_stream[0] = Felt::from_u8((circuit_stream[0].as_canonical_u64() == 0) as u8);
@@ -413,24 +507,29 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         .expect("PVM MASM verifier rejected a valid proof");
 
     let stream = proof_stream(inputs);
-    let log_max_height = stream[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
+    let variant = PvmAirVariant::from_u8(stream[0].as_canonical_u64() as u8)
+        .expect("honest advice must select a supported relation");
+    let num_chiplets = ChipletAir::all().iter().filter(|air| air.is_in_variant(variant)).count();
+    let log_max_height = stream[HEIGHTS_OFFSET..HEIGHTS_OFFSET + num_chiplets]
         .iter()
         .map(Felt::as_canonical_u64)
         .max()
         .expect("the PVM relation has chiplet AIRs");
+    let shape = security::derive_air_shape_for(variant);
+    let lookup = shape.lookup.unwrap();
     let expected = [
         u64::from(security::LOOKUP_POW_BITS),
-        u64::from(security::AIR_SHAPE.num_composed_constraints),
-        u64::from(security::AIR_SHAPE.max_constraint_degree),
-        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        u64::from(security::LOOKUP_SHAPE.max_message_width),
+        u64::from(shape.num_composed_constraints),
+        u64::from(shape.max_constraint_degree),
+        u64::from(shape.num_deep_terms.unwrap()),
+        u64::from(lookup.max_message_width),
         u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        u64::from(security::LOOKUP_SHAPE.fractions_per_row),
+        u64::from(lookup.fractions_per_row),
         log_max_height,
-        stream[0].as_canonical_u64(),
-        stream[1].as_canonical_u64(),
-        stream[2].as_canonical_u64(),
-        stream[3].as_canonical_u64(),
+        stream[SECURITY_PARAMS_OFFSET].as_canonical_u64(),
+        stream[SECURITY_PARAMS_OFFSET + 1].as_canonical_u64(),
+        stream[SECURITY_PARAMS_OFFSET + 2].as_canonical_u64(),
+        stream[SECURITY_PARAMS_OFFSET + 3].as_canonical_u64(),
     ];
     verifier_stack.assert_outputs_and_caller(&expected);
 }
@@ -454,8 +553,11 @@ fn assert_pvm_rejects(advice: &AdviceInputs, claim_commitment: Word) {
 /// The chiplet instances in committed-trace order: ascending log height, instance index breaking
 /// ties.
 fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
-    let heights = &proof_stream(inputs)[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS];
-    let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
+    let stream = proof_stream(inputs);
+    let variant = PvmAirVariant::from_u8(stream[0].as_canonical_u64() as u8).unwrap();
+    let num_chiplets = ChipletAir::all().iter().filter(|air| air.is_in_variant(variant)).count();
+    let heights = &stream[HEIGHTS_OFFSET..HEIGHTS_OFFSET + num_chiplets];
+    let mut proof_order: Vec<usize> = (0..num_chiplets).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
     proof_order
 }

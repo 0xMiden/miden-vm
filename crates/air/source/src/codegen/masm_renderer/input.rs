@@ -174,6 +174,7 @@ pub struct FixedUintInput {
 
 #[derive(Clone, Debug)]
 pub struct PvmGlueInput {
+    pub variant: miden_core::deferred::PvmAirVariant,
     pub airs: Vec<PvmAirInput>,
     pub num_public_values: usize,
     pub max_aux_inputs: usize,

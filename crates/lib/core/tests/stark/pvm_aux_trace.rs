@@ -440,3 +440,75 @@ fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
         expect_assert_error_message!(test);
     }
 }
+
+#[test]
+fn pvm_odd_selected_aux_hook_preserves_alignment_gap_and_independent_boundary() {
+    // SHA-256 selects nine AIRs. This hand-authored schedule includes a tie and a nonidentity order.
+    let heights = [16, 16, 5, 9, 10, 11, 12, 13, 7, 0, 0, 0];
+    let selected_ptr = |name: &str| {
+        let prefix = format!("const {name} = ");
+        include_str!("../../asm/sys/pvm/v2/layout.masm")
+            .lines()
+            .find_map(|line| line.strip_prefix(&prefix)?.parse::<u32>().ok())
+            .unwrap()
+    };
+    let boundary = selected_ptr("AUX_BUS_BOUNDARY_PTR");
+    let alpha_ptr = selected_ptr("AUXILIARY_ACE_INPUTS_PTR");
+    assert_eq!(alpha_ptr, boundary + 20, "nine pairs leave one EF alignment slot");
+    let (alpha, beta) = sampled_challenges(&heights);
+    let correction = fixed_boundary_correction(alpha, beta);
+    let mut sums: Vec<_> = (0..9)
+        .map(|i| QuadFelt::new([Felt::from_u32(2 * i + 1), Felt::from_u32(2 * i + 2)]))
+        .collect();
+    sums[8] = QuadFelt::ZERO;
+    let weighted: QuadFelt = sums
+        .iter()
+        .zip(heights)
+        .map(|(&value, height)| value * Felt::new_unchecked(1 << height))
+        .sum();
+    sums[8] = (-correction - weighted) * Felt::new_unchecked(1 << heights[8]).inverse();
+    let mut order: Vec<_> = (0..9).collect();
+    order.sort_by_key(|&i| (heights[i], i));
+    let advice: Vec<u64> = COMMITMENT
+        .into_iter()
+        .chain(order.iter().flat_map(|&i| {
+            sums[i].as_basis_coefficients_slice().iter().map(Felt::as_canonical_u64)
+        }))
+        .collect();
+    let sentinels: String = (0..4)
+        .map(|i| format!("push.{} mem_store.{}\n", 777 + i, boundary + 18 + i))
+        .collect();
+    let hook = hook_source(&heights)
+        .replace("use miden::core::sys::pvm::aux_trace", "use miden::core::sys::verifier::pvm_aux")
+        .replace("use miden::core::sys::pvm::ood_frames", "use miden::core::sys::verifier::proof_order\nuse miden::core::sys::pvm::v2::layout")
+        .replace("exec.ood_frames::stage_proof_order_maps", &format!("{sentinels}\nexec.layout::stage_verifier_parameters\nexec.proof_order::stage_proof_order_maps_9"))
+        .replace("exec.aux_trace::observe_aux_trace", "exec.pvm_aux::observe_aux_trace_9");
+    let (output, _) = build_test!(&hook, &[], &advice).execute_for_output().unwrap();
+    for (i, sum) in sums.iter().enumerate() {
+        let coordinates: &[Felt] = sum.as_basis_coefficients_slice();
+        for (j, &coordinate) in coordinates.iter().enumerate() {
+            assert_eq!(read_memory_felt(&output, boundary + (2 * i + j) as u32), coordinate);
+        }
+    }
+    for i in 0..4 {
+        assert_eq!(read_memory_felt(&output, boundary + 18 + i), Felt::from_u32(777 + i));
+    }
+    let correction_ptr = selected_ptr("C_TOTAL_PTR");
+    let correction_coordinates: &[Felt] = correction.as_basis_coefficients_slice();
+    for (i, &coordinate) in correction_coordinates.iter().enumerate() {
+        assert_eq!(read_memory_felt(&output, correction_ptr + i as u32), coordinate);
+    }
+    // A separate scalar observation route checks all 22 proof-ordered input felts.
+    let reference = sampler_source(&heights).replace("exec.random_coin::generate_aux_randomness", "exec.random_coin::generate_aux_randomness\nrepeat.22 adv_push exec.random_coin::observe_felt end");
+    let (expected, _) = build_test!(&reference, &[], &advice).execute_for_output().unwrap();
+    for addr in (RANDOM_COIN_CV_PTR..RANDOM_COIN_CV_PTR + 4)
+        .chain(3_223_322_676..3_223_322_684)
+        .chain([
+            RANDOM_COIN_INPUT_LENGTH_PTR,
+            RANDOM_COIN_OUTPUT_LENGTH_PTR,
+            RANDOM_COIN_COUNTER_PTR,
+        ])
+    {
+        assert_eq!(read_memory_felt(&output, addr), read_memory_felt(&expected, addr));
+    }
+}

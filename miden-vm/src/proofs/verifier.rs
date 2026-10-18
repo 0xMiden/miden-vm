@@ -671,6 +671,56 @@ mod tests {
     }
 
     #[test]
+    fn shared_runtime_rejects_parent_verifier_envelopes_before_payload_verification() {
+        // Actual assembled identities at parent54d29aeb8, kept only as rejection fixtures.
+        let old_vm = Word::new(
+            [
+                6709788805636672991,
+                3123750071737729735,
+                9047041766774444338,
+                8997647198517130739,
+            ]
+            .map(Felt::new_unchecked),
+        );
+        let old_pvm = Word::new(
+            [
+                3574486121566389623,
+                5820205566457587259,
+                252779576332978399,
+                4493818589800250298,
+            ]
+            .map(Felt::new_unchecked),
+        );
+        let proof = complete(TRUE_DIGEST, None);
+        let deferred = PrecompileStatus::Deferred(
+            PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 0,
+            }])
+            .unwrap(),
+        );
+        for status in [proof.precompile().clone(), deferred] {
+            for (vm, pvm, vm_error) in [
+                (old_vm, CURRENT_PVM_VERIFIER_ROOT, true),
+                (CURRENT_VM_VERIFIER_ROOT, old_pvm, false),
+            ] {
+                let old = ExecutionProof::from_parts(
+                    ExecutionProofCompatibility::new(vec![vm], vec![pvm]).unwrap(),
+                    proof.vm().clone(),
+                    status.clone(),
+                );
+                let error = Verifier::new().verify(&claim(), &old).unwrap_err();
+                assert!(if vm_error {
+                    matches!(error, VerificationError::IncompatibleVmVerifier)
+                } else {
+                    matches!(error, VerificationError::IncompatiblePvmVerifier)
+                });
+            }
+        }
+    }
+
+    #[test]
     fn current_proof_compatibility_excludes_verifier_history() {
         const OLD_VM_ROOT: Word = Word::new([
             Felt::new_unchecked(1),

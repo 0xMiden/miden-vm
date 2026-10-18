@@ -13,7 +13,7 @@ pub(crate) struct AirSlot {
     pub boundary_offset: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct UintPush {
     pub ptr: u32,
     pub bound_ptr: u32,
@@ -25,6 +25,9 @@ pub(crate) struct UintPush {
 #[derive(Clone, Debug)]
 pub(crate) struct PvmGluePlan {
     pub airs: Vec<AirSlot>,
+    pub variant_mask: u8,
+    pub dispatch_masks: Vec<u8>,
+    pub boundary_tail_offsets: Vec<usize>,
     pub scatter_reads: Vec<usize>,
     pub boundary_word_offsets: Vec<usize>,
     pub public_offsets: Vec<usize>,
@@ -48,7 +51,7 @@ pub(crate) struct PvmGluePlan {
 impl PvmGluePlan {
     pub fn new(input: &V1RenderInput, glue: &PvmGlueInput) -> Self {
         let n = input.geometry.main.len();
-        assert_eq!(n, 12, "canonical PVM has twelve instances");
+        assert!((8..=12).contains(&n), "PVM instance count outside variant range");
         assert_eq!(glue.airs.len(), n, "AIR schedule must match geometry");
         assert_eq!(input.counts.num_aux_boundary, n, "one boundary value per AIR");
         assert_eq!(glue.num_public_values, DIGEST_WIDTH, "four root limbs");
@@ -88,8 +91,8 @@ impl PvmGluePlan {
         let mut uints = glue.uints.clone();
         uints.sort_by_key(|msg| (msg.ptr != msg.bound_ptr, msg.ptr));
         assert!(
-            !uints.iter().enumerate().any(|(i, msg)| {
-                msg.ptr == 0 || uints[..i].iter().any(|previous| previous.ptr == msg.ptr)
+            uints.iter().enumerate().all(|(i, msg)| {
+                msg.ptr != 0 && uints[..i].iter().all(|previous| previous.ptr != msg.ptr)
             }),
             "fixed uint pointers must be nonzero and unique"
         );
@@ -119,8 +122,11 @@ impl PvmGluePlan {
         let aux_felts = DIGEST_WIDTH + 2 * n;
         Self {
             airs,
+            variant_mask: glue.variant.as_u8(),
+            dispatch_masks: (0..7).collect(),
+            boundary_tail_offsets: (2 * (n / 2 * 2)..2 * n).collect(),
             scatter_reads: (0..n).rev().collect(),
-            boundary_word_offsets: (0..2 * n).step_by(DIGEST_WIDTH).collect(),
+            boundary_word_offsets: (0..2 * (n / 2 * 2)).step_by(DIGEST_WIDTH).collect(),
             public_offsets: (0..glue.num_public_values).map(|i| 2 * i).collect(),
             num_public_values: glue.num_public_values,
             max_aux_inputs: glue.max_aux_inputs,

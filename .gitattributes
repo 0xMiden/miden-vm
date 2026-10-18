@@ -19,3 +19,16 @@ crates/lib/core/asm/sys/pvm/deep_queries.masm linguist-generated=true
 crates/lib/core/asm/sys/pvm/mod.masm linguist-generated=true
 crates/lib/core/asm/sys/pvm/aux_trace.masm linguist-generated=true
 crates/lib/core/asm/sys/pvm/public_inputs.masm linguist-generated=true
+
+crates/lib/core/asm/sys/pvm/v*/*.masm linguist-generated=true
+
+# Shared runtime kernels; the module declaration is authored core-lib assembly.
+crates/lib/core/asm/sys/verifier/parameters.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/pipes.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/evaluator.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/proof_order.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/ood.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/deep.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/fixed.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/pvm_aux.masm linguist-generated=true
+crates/lib/core/asm/sys/verifier/pvm_public.masm linguist-generated=true

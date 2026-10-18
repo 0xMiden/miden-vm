@@ -1,0 +1,192 @@
+#! Generated fixed pipe universe for VM and every PVM mask. No metadata on the Horner/hash frame.
+use miden::core::crypto::hashes::eidos
+pub proc base_1()
+    repeat.1
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_2()
+    repeat.2
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_8()
+    repeat.8
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_24()
+    repeat.24
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_27()
+    repeat.27
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_28()
+    repeat.28
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_31()
+    repeat.31
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_32()
+    repeat.32
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_35()
+    repeat.35
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_36()
+    repeat.36
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_39()
+    repeat.39
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_41()
+    repeat.41
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_46()
+    repeat.46
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_48()
+    repeat.48
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_53()
+    repeat.53
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_61()
+    repeat.61
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_66()
+    repeat.66
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_68()
+    repeat.68
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc base_73()
+    repeat.73
+        adv_pipe horner_eval_base exec.eidos::compress
+    end
+end
+pub proc ext_2()
+    repeat.2
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_4()
+    repeat.4
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_6()
+    repeat.6
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_8()
+    repeat.8
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_10()
+    repeat.10
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_12()
+    repeat.12
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_14()
+    repeat.14
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_16()
+    repeat.16
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_24()
+    repeat.24
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ext_28()
+    repeat.28
+        adv_pipe horner_eval_ext compress
+    end
+end
+pub proc ace_711()
+    repeat.711
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_874()
+    repeat.874
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1122()
+    repeat.1122
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1127()
+    repeat.1127
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1276()
+    repeat.1276
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1426()
+    repeat.1426
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1500()
+    repeat.1500
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1558()
+    repeat.1558
+        adv_pipe exec.eidos::compress
+    end
+end
+pub proc ace_1779()
+    repeat.1779
+        adv_pipe exec.eidos::compress
+    end
+end

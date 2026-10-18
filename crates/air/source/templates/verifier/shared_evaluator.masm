@@ -1,0 +1,69 @@
+#! Generated shared ACE authentication and evaluation kernels.
+use {CONSTRAINT_COMPOSITION_COEFS_PTR, LOG_AIR_TRACE_LENGTHS_PTR, PUBLIC_INPUTS_ADDRESS_PTR} from miden::core::stark::constants
+use miden::core::crypto::hashes::eidos
+use miden::core::stark::constraints_eval_inputs
+use miden::core::sys::verifier::parameters
+{% include "verifier/shared_parameter_imports.masm" %}
+const ERR_CIRCUIT_DIGEST_MISMATCH = "ACE circuit stream does not match the compiled-in circuit digest"
+{%- for p in counts %}
+#! Stage auxiliary inputs and canonical AIR fold coefficients, then authenticate and evaluate the ACE circuit.
+#! Require staged proof-order maps and verifier memory context; authenticate against the compiled-in digest before evaluation.
+#! The logical stack is empty on entry and return.
+pub proc execute_constraint_evaluation_check_{{ p.num_airs }}()
+    mem_load.QUOTIENT_SHIFT_RATIO
+    mem_load.QUOTIENT_FIRST_SHIFT
+    mem_load.QUOTIENT_FIRST_WEIGHT
+    exec.parameters::auxiliary_ace_inputs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    push.{{ p.num_airs }}
+    mem_load.CYCLE_LOG
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
+    exec.stage_air_fold_coefficients_{{ p.num_airs }}
+    exec.load_and_authenticate_ace_circuit
+    mem_load.NUM_GATES
+    mem_load.NUM_INPUTS
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    eval_circuit
+    drop drop drop
+end
+
+#! Stage beta^(N-1-p) into the canonical AIR slot named by proof position p.
+proc stage_air_fold_coefficients_{{ p.num_airs }}
+    exec.parameters::proof_order_ids_ptr
+    mem_load.FOLD_COEFFICIENTS_PTR
+    padw
+    mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
+    drop drop
+    push.0.1
+{%- for position in p.fold_positions %}
+    dup.5
+{%- if *position > 0 %}
+    add.{{ position }}
+{%- endif %}
+    mem_load
+    mul.2
+    dup.5 add
+    dup.2 dup.2 dup.2
+    mem_store
+    swap add.1 mem_store
+{%- if *position > 0 %}
+    dup.3 dup.3 ext2mul
+{%- endif %}
+{%- endfor %}
+    drop drop drop drop drop drop
+end
+
+
+{%- endfor %}
+proc load_and_authenticate_ace_circuit
+    padw mem_loadw_le.ACE_DIGEST
+    adv.push_mapval
+    exec.parameters::ace_circuit_stream_ptr
+    padw mem_loadw_le.ACE_INITIAL_CV
+    padw padw
+    push.ACE_PIPE dynexec
+    exec.eidos::digest
+    movup.4 drop
+    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH
+end
+

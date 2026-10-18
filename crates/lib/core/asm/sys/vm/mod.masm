@@ -15,6 +15,10 @@ pub mod public_inputs
 use miden::core::mem
 use miden::core::stark::utils
 use miden::core::stark::verifier
+use miden::core::sys::verifier::evaluator
+use miden::core::sys::verifier::ood
+use miden::core::sys::verifier::deep
+use miden::core::sys::verifier::proof_order
 
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 16
@@ -61,8 +65,9 @@ pub proc load_air_context()
     exec.layout::get_and8_lookup_trace_length_log
     u32max
     mem_store.LOG_TRACE_LENGTH_PTR
-    exec.ood_frames::stage_proof_order_maps
-    exec.ood_frames::stage_ood_scatter_table
+    exec.layout::stage_verifier_parameters
+    exec.proof_order::stage_proof_order_maps_4
+    exec.layout::stage_ood_scatter_table
     exec.store_relation_digest
     exec.store_and8_preprocessed_trace_commitment
     exec.layout::ood_evaluations_ptr
@@ -161,9 +166,9 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     exec.materialize_kernel_witness
     exec.public_inputs::stage_boundary_inputs
     exec.load_air_context
-    procref.deep_queries::compute_deep_composition_polynomial_queries
-    procref.constraints_eval::execute_constraint_evaluation_check
-    procref.ood_frames::process_row_ood_evaluations
+    procref.deep::compute_deep_composition_polynomial_queries
+    procref.evaluator::execute_constraint_evaluation_check_4
+    procref.ood::process_row_ood_evaluations_4
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
     exec.verifier::verify

@@ -46,6 +46,8 @@ const CONSTANTS_PATH: &str = "crates/air/generated/src/precompile/ace_constants.
 const PROTOCOL_PATH: &str = "crates/air/generated/src/precompile/protocol.rs";
 #[cfg(test)]
 const PVM_DEEP_QUERIES_PATH: &str = "crates/lib/core/asm/sys/pvm/deep_queries.masm";
+#[cfg(test)]
+const PVM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/pvm/layout.masm";
 
 /// Fixed 4-Ki-felt boundary after the VM relation's reserved ACE stream region. The PVM's complete
 /// READ section starts here; its aux-randomness anchor is later because four public EF inputs
@@ -55,7 +57,7 @@ pub(super) const PVM_READ_START: u32 = 3_225_432_064;
 const NEXT_VM_REGION_START: u32 = constraints::VM_ABI.current_trace_row_ptr;
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    // Validate both current relations before delivering any managed projection.
+    // Shared runtime is one fixed VM/all-mask universe; use the global preflight boundary.
     super::run(root, mode)
 }
 
@@ -119,8 +121,26 @@ fn compute(supplied_commitment: Option<Word>) -> GeneratedArtifacts {
 }
 
 fn compile_inputs(supplied_commitment: Option<Word>) -> CompiledVerifierInputs {
+    compile_for(supplied_commitment, crate::precompile::PvmAirVariant::ALL)
+}
+
+/// Compile an explicitly selected relation using an explicitly supplied trusted setup.
+/// Host tooling/tests only; ordinary runtime builds do not select this module.
+pub fn compile_variant(
+    commitment: Word,
+    variant: crate::precompile::PvmAirVariant,
+) -> CompiledVerifierInputs {
+    compile_for(Some(commitment), variant)
+}
+
+pub(super) fn compile_for(
+    supplied_commitment: Option<Word>,
+    variant: crate::precompile::PvmAirVariant,
+) -> CompiledVerifierInputs {
+    let relation = crate::precompile::MultiAir::with_variant(variant);
+    let airs = relation.airs();
     let circuit = CompiledCircuit::from_circuit(
-        crate::precompile::ace::build_canonical_precompile_ace_circuit(),
+        crate::precompile::ace::build_canonical_precompile_ace_circuit_from_airs(airs),
     );
     let layout = circuit.layout();
     let quotient_chunks = layout.counts.num_quotient_chunks;
@@ -136,9 +156,8 @@ fn compile_inputs(supplied_commitment: Option<Word>) -> CompiledVerifierInputs {
     let relation_digest = relation_digest_for_circuit(&circuit.commitment());
     let preprocessed_commitment =
         supplied_commitment.unwrap_or_else(|| derive_setup_commitment(relation_digest));
-    let geometry =
-        AirGeometry::from_airs(crate::precompile::MultiAir::new().airs(), quotient_chunks);
-    let air_shape = pvm_security::derive_air_shape();
+    let geometry = AirGeometry::from_airs(airs, quotient_chunks);
+    let air_shape = pvm_security::derive_air_shape_for(variant);
     let lookup = air_shape.lookup.expect("the relation uses lookup");
     CompiledVerifierInputs {
         masm: V1RenderInput {
@@ -148,9 +167,9 @@ fn compile_inputs(supplied_commitment: Option<Word>) -> CompiledVerifierInputs {
                     scatter_reserve_felts: 96,
                     next_region_start: NEXT_VM_REGION_START,
                 },
-                glue: compile_glue(layout),
+                glue: compile_glue(layout, variant),
             },
-            circuit: render_circuit_metadata(&circuit, max_periodic_cycle_len_log()),
+            circuit: render_circuit_metadata(&circuit, max_periodic_cycle_len_log(airs)),
             query_leaf_initial_cvs: query_leaf_initial_cvs(&geometry),
             geometry,
             counts: layout.counts,
@@ -176,12 +195,12 @@ fn compile_inputs(supplied_commitment: Option<Word>) -> CompiledVerifierInputs {
 }
 
 /// Adapt authored declarations and the originating ACE layout, never production metadata tables.
-fn compile_glue(layout: &InputLayout) -> PvmGlueInput {
+fn compile_glue(layout: &InputLayout, variant: crate::precompile::PvmAirVariant) -> PvmGlueInput {
     use crate::precompile::{
         fixed,
         relations::{BusId, MAX_MESSAGE_WIDTH},
     };
-    let relation = crate::precompile::MultiAir::new();
+    let relation = crate::precompile::MultiAir::with_variant(variant);
     let airs = relation
         .airs()
         .iter()
@@ -233,6 +252,7 @@ fn compile_glue(layout: &InputLayout) -> PvmGlueInput {
         })
         .collect();
     PvmGlueInput {
+        variant,
         airs,
         num_public_values: relation.num_air_inputs(),
         max_aux_inputs: relation.max_aux_inputs(),
@@ -315,8 +335,8 @@ pub fn derive_setup_commitment(digest: [Felt; 4]) -> Word {
     Word::new(commitment.map(Felt::new_unchecked))
 }
 
-fn max_periodic_cycle_len_log() -> u32 {
-    let max_len = ChipletAir::all()
+fn max_periodic_cycle_len_log(airs: &[ChipletAir]) -> u32 {
+    let max_len = airs
         .iter()
         .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
         .map(|column| column.len())
@@ -436,20 +456,22 @@ fn replace_const_initializer(
 
 #[cfg(test)]
 mod tests {
+    use super::super::expect_panic;
     use std::string::String;
 
     use miden_core::{Felt, Word};
 
     use super::{
-        super::expect_panic, CircuitShape, NEXT_VM_REGION_START, PVM_DEEP_QUERIES_PATH,
-        PVM_READ_START, accepted_setup_commitment, compile, masm_renderer, render,
-        replace_limb_array_const, replace_shape_const,
+        CircuitShape, NEXT_VM_REGION_START, PVM_READ_START, accepted_setup_commitment, compile,
+        compile_variant, masm_renderer, render, replace_limb_array_const, replace_shape_const,
     };
 
     #[test]
-    fn pvm_read_and_scratch_regions_match_the_rendered_layout() {
-        {
-            let plan = masm_renderer::prepare_v1(compile(accepted_setup_commitment()).masm);
+    fn selected_pvm_read_and_scratch_regions_match_the_rendered_layout() {
+        for variant in crate::precompile::PvmAirVariant::ALL_VARIANTS {
+            let plan = masm_renderer::prepare_v1(
+                compile_variant(accepted_setup_commitment(), variant).masm,
+            );
             let input = &plan.input;
             let layout = &plan.layout;
             let num_airs = input.geometry.main.len() as u32;
@@ -480,6 +502,34 @@ mod tests {
             assert!([scatter, positions, ids].iter().all(|ptr| ptr.is_multiple_of(4)));
             assert!(ids + num_airs <= NEXT_VM_REGION_START);
         }
+    }
+
+    #[test]
+    fn pvm_row_geometry_and_scatter_match_canonical_numeric_pins() {
+        let input = compile(accepted_setup_commitment()).masm;
+        let g = &input.geometry;
+        assert_eq!(g.preprocessed, [0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(g.main, [96, 112, 64, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
+        assert_eq!(g.aux_coordinates, [40, 40, 24, 8, 24, 56, 8, 8, 24, 24, 32, 24]);
+        assert_eq!(g.quotient_coordinates, 8);
+        let scatter = miden_ace::OodScatterPlan::new(
+            &g.preprocessed,
+            &g.main,
+            &g.aux_coordinates,
+            g.quotient_coordinates,
+        );
+        assert_eq!(scatter.row_felts(), 1_824);
+        assert_eq!(scatter.row_felts() / 8, 228);
+        assert_eq!(
+            scatter.row_felts() / 2,
+            input.counts.preprocessed_width
+                + input.counts.width
+                + 2 * input.counts.aux_width
+                + 2 * input.counts.num_quotient_chunks
+        );
+        assert_eq!(scatter.segment_count(), 26);
+        assert_eq!(scatter.dispatched_slots(), 24);
+        assert_eq!((scatter.proof_order_pairs(), scatter.pipe_digests()), (4..52, 52..88));
     }
 
     #[test]
@@ -571,83 +621,46 @@ mod tests {
         let compiled = compile(accepted_setup_commitment());
         let first = render(&compiled);
         let second = render(&compiled);
-        assert_eq!(
-            first
-                .files
-                .iter()
-                .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
-                .unwrap()
-                .body,
-            second
-                .files
-                .iter()
-                .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
+        let deep = |files: std::vec::Vec<masm_renderer::RenderedArtifact>| {
+            files
+                .into_iter()
+                .find(|file| file.relative_path == super::PVM_DEEP_QUERIES_PATH)
                 .unwrap()
                 .body
-        );
+        };
+        assert_eq!(deep(first.files), deep(second.files));
     }
 
     #[test]
     fn pvm_deep_query_block_counts_and_frames_follow_source_widths() {
         let compiled = compile(accepted_setup_commitment());
         let artifact = render(&compiled);
-        let deep_queries_masm = &artifact
+        let geometry = &compiled.masm.geometry;
+        let layout = &artifact
             .files
             .iter()
-            .find(|file| file.relative_path == PVM_DEEP_QUERIES_PATH)
+            .find(|file| file.relative_path == super::PVM_LAYOUT_PATH)
             .unwrap()
             .body;
-        let geometry = &compiled.masm.geometry;
         let widths = [
             geometry.preprocessed.iter().sum::<usize>(),
             geometry.main.iter().sum(),
             geometry.aux_coordinates.iter().sum(),
             geometry.quotient_coordinates,
         ];
-        for ((prefix, width), expected_cv) in ["PREPROCESSED", "MAIN", "AUX", "QUOTIENT"]
-            .into_iter()
-            .zip(widths)
-            .zip(compiled.masm.query_leaf_initial_cvs)
-        {
-            assert!(
-                deep_queries_masm
-                    .contains(&format!("const {prefix}_ROW_DOUBLE_WORDS = {}", width / 8))
+        let shared = super::super::shared_verifier::generate();
+        let pipes = &shared.iter().find(|a| a.relative_path.ends_with("/pipes.masm")).unwrap().body;
+        for (width, expected_cv) in widths.into_iter().zip(compiled.masm.query_leaf_initial_cvs) {
+            let blocks = width / 8;
+            assert!(layout.contains(&format!("procref.pipes::base_{blocks}")));
+            let marker = format!("pub proc base_{blocks}()");
+            let body = pipes.split_once(&marker).unwrap().1.split_once("\nend").unwrap().0;
+            assert!(body.contains(&format!("repeat.{blocks}")));
+            let expected = format!(
+                "push.{}.{}.{}.{}",
+                expected_cv[3], expected_cv[2], expected_cv[1], expected_cv[0]
             );
-            let expected_cv = format!(
-                "[{}, {}, {}, {}]",
-                expected_cv[0], expected_cv[1], expected_cv[2], expected_cv[3]
-            );
-            assert!(
-                deep_queries_masm.contains(&format!("const {prefix}_LMCS_INIT_CV = {expected_cv}"))
-            );
+            assert!(layout.contains(&expected));
         }
-    }
-
-    #[test]
-    fn pvm_row_geometry_and_scatter_match_canonical_numeric_pins() {
-        let input = compile(accepted_setup_commitment()).masm;
-        let g = &input.geometry;
-        assert_eq!(g.preprocessed, [0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(g.main, [96, 112, 64, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
-        assert_eq!(g.aux_coordinates, [40, 40, 24, 8, 24, 56, 8, 8, 24, 24, 32, 24]);
-        assert_eq!(g.quotient_coordinates, 8);
-        let scatter = miden_ace::OodScatterPlan::new(
-            &g.preprocessed,
-            &g.main,
-            &g.aux_coordinates,
-            g.quotient_coordinates,
-        );
-        assert_eq!(scatter.row_felts(), 1_824);
-        assert_eq!(scatter.row_felts() / 8, 228);
-        assert_eq!(
-            scatter.row_felts() / 2,
-            input.counts.preprocessed_width
-                + input.counts.width
-                + 2 * input.counts.aux_width
-                + 2 * input.counts.num_quotient_chunks
-        );
-        assert_eq!(scatter.segment_count(), 26);
-        assert_eq!(scatter.dispatched_slots(), 24);
-        assert_eq!((scatter.proof_order_pairs(), scatter.pipe_digests()), (4..52, 52..88));
     }
 }

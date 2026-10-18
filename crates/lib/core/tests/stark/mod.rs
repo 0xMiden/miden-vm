@@ -41,6 +41,7 @@ mod pvm_wrapper;
 mod random_coin;
 mod security;
 mod security_math;
+mod shared_runtime;
 mod verifier_stack;
 mod vm_scatter_bench;
 mod vm_sigma_scatter;
@@ -1769,26 +1770,10 @@ fn quotient_recomposition_constants_match_derivation() {
     // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The VM
     // has arity = blowup = 8, so deriving all three from the blowup would produce the
     // same numbers and conceal the conflation that breaks relations where they differ.
-    let masm = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/asm/sys/vm/constraints_eval.masm"
-    ))
-    .expect("read generated VM constraints evaluator");
-    let masm_const = |name: &str| -> u64 {
-        masm.lines()
-            .find_map(|line| {
-                let (lhs, rhs) = line.trim().strip_prefix("const ")?.split_once('=')?;
-                if lhs.trim() != name {
-                    return None;
-                }
-                Some(rhs.split_whitespace().next()?.parse().expect("parse const value"))
-            })
-            .unwrap_or_else(|| panic!("const {name} not found in VM constraints evaluator"))
-    };
-
-    let shift_ratio = Felt::new(masm_const("QUOTIENT_SHIFT_RATIO")).unwrap();
-    let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
-    let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
+    let layout = include_str!("../../asm/sys/vm/layout.masm");
+    let shift_ratio = Felt::new(staged_parameter_felt(layout, 28)).unwrap();
+    let first_shift = Felt::new(staged_parameter_felt(layout, 29)).unwrap();
+    let first_weight = Felt::new(staged_parameter_felt(layout, 30)).unwrap();
 
     let log_quotient_degree = miden_air::AIRS
         .iter()
@@ -1818,117 +1803,79 @@ fn quotient_recomposition_constants_match_derivation() {
 /// here instead, against the offset the evaluator actually addresses.
 #[test]
 fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
-    const STAGING_PROC: &str = "stage_air_fold_coefficients";
-    const OFFSET_POINTER: &str = "exec.layout::auxiliary_ace_inputs_ptr";
-    /// Base felts per staged coefficient (one quadratic-extension element).
-    const COEFFICIENT_STRIDE: u32 = 2;
-
     let shared = include_str!("../../asm/stark/constraints_eval_inputs.masm");
-    let masm_const = |source: &str, name: &str, what: &str| -> u32 {
+    let evaluator = include_str!("../../asm/sys/verifier/evaluator.masm");
+    let parameter_abi = include_str!("../../asm/sys/verifier/parameters.masm");
+    let constant = |source: &str, name: &str| -> u32 {
         let prefix = format!("const {name} = ");
         source
             .lines()
-            .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("missing {what} constant {name}"))
+            .find_map(|l| l.trim().trim_start_matches("pub ").strip_prefix(&prefix)?.parse().ok())
+            .unwrap()
     };
-
-    let first_selector_offset = masm_const(shared, "FIRST_SELECTOR_OFFSET", "shared");
-    let selector_stride = masm_const(shared, "SELECTOR_STRIDE", "shared");
+    let first_selector_offset = constant(shared, "FIRST_SELECTOR_OFFSET");
+    let selector_stride = constant(shared, "SELECTOR_STRIDE");
+    assert_eq!(constant(parameter_abi, "FOLD_COEFFICIENTS_PTR"), 3_223_324_073);
     assert!(
-        !shared.contains(&format!("proc {STAGING_PROC}")),
-        "the shared module must not carry a second fold-coefficient algorithm"
+        !shared.contains("proc stage_air_fold_coefficients"),
+        "generic auxiliary setup must not carry another fold algorithm"
     );
-
-    for (relation, layout_const, evaluator) in [
-        (
-            "vm",
-            vm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/vm/constraints_eval.masm"),
-        ),
-        (
-            "pvm",
-            pvm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
-        ),
-    ] {
-        let num_airs = masm_const(evaluator, "NUM_AIRS", relation);
-        let region_felts =
-            layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
-
-        // Walk the procedure declarations rather than the raw text so a rename fails here instead
-        // of turning this guard into a silent no-op.
-        let mut declares_staging = false;
-        let mut in_staging = false;
-        let mut staging_depth = 0usize;
-        let mut staging_tokens = Vec::new();
-        for line in evaluator.lines() {
-            let trimmed = line.split('#').next().unwrap_or_default().trim();
-            if let Some(rest) =
-                trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
-            {
-                let name = rest.split(['(', ' ']).next().unwrap_or(rest);
-                if name == STAGING_PROC {
-                    assert!(
-                        !trimmed.starts_with("pub "),
-                        "{relation}: {STAGING_PROC} must stay private to the evaluator"
-                    );
-                }
-                declares_staging |= name == STAGING_PROC;
-                in_staging = name == STAGING_PROC;
-                staging_depth = usize::from(in_staging);
-                continue;
-            }
-            if in_staging {
-                for token in trimmed.split_whitespace() {
-                    if token.starts_with("repeat.")
-                        || token.starts_with("if.")
-                        || token.starts_with("while.")
-                    {
-                        staging_depth += 1;
-                    }
-                    if token == "end" {
-                        staging_depth -= 1;
-                        if staging_depth == 0 {
-                            in_staging = false;
-                            break;
-                        }
-                    }
-                    staging_tokens.push(token);
-                }
-            }
-        }
-        assert!(declares_staging, "{relation}: {STAGING_PROC} is no longer declared");
-        let staged_offsets: Vec<u32> = staging_tokens
-            .windows(2)
-            .filter(|pair| pair[0] == OFFSET_POINTER)
-            .map(|pair| {
-                pair[1]
-                    .strip_prefix("add.")
-                    .and_then(|offset| offset.parse().ok())
-                    .unwrap_or_else(|| panic!("{relation}: {STAGING_PROC} has no immediate offset"))
-            })
-            .collect();
+    let layouts = [
+        (4, include_str!("../../asm/sys/vm/layout.masm")),
+        (8, include_str!("../../asm/sys/pvm/v0/layout.masm")),
+        (10, include_str!("../../asm/sys/pvm/v1/layout.masm")),
+        (9, include_str!("../../asm/sys/pvm/v2/layout.masm")),
+        (11, include_str!("../../asm/sys/pvm/v3/layout.masm")),
+        (9, include_str!("../../asm/sys/pvm/v4/layout.masm")),
+        (11, include_str!("../../asm/sys/pvm/v5/layout.masm")),
+        (10, include_str!("../../asm/sys/pvm/v6/layout.masm")),
+        (12, include_str!("../../asm/sys/pvm/layout.masm")),
+    ];
+    for (num_airs, layout) in layouts {
+        assert_eq!(staged_parameter_felt(layout, 8), num_airs as u64);
+        let marker = format!("proc stage_air_fold_coefficients_{num_airs}\n");
+        assert!(!evaluator.contains(&format!("pub {marker}")), "fold helper must remain private");
+        let body = evaluator
+            .split_once(&marker)
+            .expect("shared fold procedure declared")
+            .1
+            .split_once("\nend")
+            .unwrap()
+            .0;
         assert_eq!(
-            staged_offsets.len(),
+            body.matches("mem_load.FOLD_COEFFICIENTS_PTR").count(),
             1,
-            "{relation}: {STAGING_PROC} must address its coefficient base exactly once"
+            "address the staged coefficient base exactly once"
         );
-        let staged_offset = staged_offsets[0];
-
+        let auxiliary = constant(layout, "AUXILIARY_ACE_INPUTS_PTR");
+        let stream = constant(layout, "ACE_CIRCUIT_STREAM_PTR");
         let selectors_end = first_selector_offset + selector_stride * num_airs;
+        let actual = staged_parameter_felt(layout, 73) as u32;
         assert_eq!(
-            staged_offset, selectors_end,
-            "{relation}: the evaluator stages fold coefficients off the slot right after the \
-             selector block"
+            actual,
+            auxiliary + selectors_end,
+            "fold coefficients must follow all selectors"
         );
-        let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
         assert!(
-            coefficients_end <= region_felts,
-            "{relation}: {num_airs} fold coefficients end at felt {coefficients_end}, past the \
-             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region; enlarge the region before \
-             staging them"
+            actual.checked_add(2 * num_airs).unwrap() <= stream,
+            "fold stores must stay entirely inside READ, before the ACE stream"
         );
     }
+}
+
+/// Observe the selected stager's actual word operands without using RuntimePlan or its field map.
+fn staged_parameter_felt(layout: &str, offset: u32) -> u64 {
+    let word_address = 3_223_324_000 + 4 * (offset / 4);
+    let marker = format!("mem_storew_le.{word_address}");
+    let prefix = layout.split_once(&marker).expect("trusted descriptor word store").0;
+    let push = prefix
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("push."))
+        .expect("word initializer");
+    let limbs: Vec<u64> = push.split('.').map(|v| v.parse().unwrap()).collect();
+    assert_eq!(limbs.len(), 4, "complete word initializer");
+    limbs[3 - (offset % 4) as usize]
 }
 
 // HELPERS

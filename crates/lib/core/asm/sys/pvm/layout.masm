@@ -2,6 +2,8 @@
 #! miden::core::sys::pvm::layout
 
 use miden::core::stark::types
+use {LOG_BLOWUP_FACTOR} from miden::core::stark::constants
+use miden::core::sys::verifier::pipes
 
 const PUBLIC_INPUTS_PTR = 3225432064
 const AUX_RAND_ELEM_PTR = 3225432072
@@ -100,4 +102,171 @@ end
 #! Each proof position has one scalar-felt AIR ID entry.
 pub proc proof_order_ids_ptr() -> types::Address
     push.PROOF_ORDER_IDS_PTR
+end
+#! Initialize every trusted parameter cell, including unused/padding cells, without observing data.
+pub proc stage_verifier_parameters()
+    push.3225435872.3225435752.3225435728.3225432072
+    mem_storew_le.3223324000 dropw
+    push.7.13000.2520.1779
+    mem_storew_le.3223324004 dropw
+    push.3225451124.3225451028.92.12
+    mem_storew_le.3223324008 dropw
+    push.3225450108.3225450104.1824.3225451136
+    mem_storew_le.3223324012 dropw
+    push.0.19.3225451024.3225432064
+    mem_storew_le.3223324016 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875173784.13503953893947607553
+    mem_storew_le.3223324020 dropw
+    push.5560235558590875651.1935595524963351362.8088146176287763667.2255028588524991477
+    mem_storew_le.3223324024 dropw
+    push.0.2704820172613542122.5473358340599679662.281474976710656
+    mem_storew_le.3223324028 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159560.13503953893947607809
+    mem_storew_le.3223324032 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875160136.13503953893947607809
+    mem_storew_le.3223324036 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159864.13503953893947607809
+    mem_storew_le.3223324040 dropw
+    push.6620516959492505600.11170449401267093504.11912009168875159560.13503953893947607809
+    mem_storew_le.3223324044 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324048 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324052 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324056 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324060 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324064 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324068 dropw
+    push.0.0.3225435844.1808
+    mem_storew_le.3223324072 dropw
+    push.0.0.0.0
+    mem_storew_le.3223324076 dropw
+    procref.pipes::base_1
+    mem_storew_le.3223324048 dropw
+    procref.pipes::base_73
+    mem_storew_le.3223324052 dropw
+    procref.pipes::base_39
+    mem_storew_le.3223324056 dropw
+    procref.pipes::base_1
+    mem_storew_le.3223324060 dropw
+    procref.pipes::ext_2
+    mem_storew_le.3223324064 dropw
+    procref.pipes::ext_2
+    mem_storew_le.3223324068 dropw
+    procref.pipes::ace_1779
+    mem_storew_le.3223324076 dropw
+
+end
+
+#! Stage trusted dispatch pairs using the independently staged proof-order positions.
+pub proc stage_ood_scatter_table()
+    exec.ood_scatter_table_ptr
+    procref.pipes::ext_2
+    dup.4 add.52 mem_storew_le dropw
+    procref.pipes::ext_6
+    dup.4 add.56 mem_storew_le dropw
+    procref.pipes::ext_8
+    dup.4 add.60 mem_storew_le dropw
+    procref.pipes::ext_10
+    dup.4 add.64 mem_storew_le dropw
+    procref.pipes::ext_12
+    dup.4 add.68 mem_storew_le dropw
+    procref.pipes::ext_14
+    dup.4 add.72 mem_storew_le dropw
+    procref.pipes::ext_16
+    dup.4 add.76 mem_storew_le dropw
+    procref.pipes::ext_24
+    dup.4 add.80 mem_storew_le dropw
+    procref.pipes::ext_28
+    dup.4 add.84 mem_storew_le dropw
+    exec.proof_order_positions_ptr
+    dup
+    mem_load mul.2 dup.2 add
+    push.16 dup.1 add.4 mem_store
+    dup.2 add.80 dup.1 add.5 mem_store
+    push.1184 dup.1 add.28 mem_store
+    dup.2 add.64 dup.1 add.29 mem_store
+    drop
+    dup add.1
+    mem_load mul.2 dup.2 add
+    push.208 dup.1 add.4 mem_store
+    dup.2 add.84 dup.1 add.5 mem_store
+    push.1264 dup.1 add.28 mem_store
+    dup.2 add.64 dup.1 add.29 mem_store
+    drop
+    dup add.2
+    mem_load mul.2 dup.2 add
+    push.432 dup.1 add.4 mem_store
+    dup.2 add.76 dup.1 add.5 mem_store
+    push.1344 dup.1 add.28 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
+    drop
+    dup add.3
+    mem_load mul.2 dup.2 add
+    push.560 dup.1 add.4 mem_store
+    dup.2 add.52 dup.1 add.5 mem_store
+    push.1392 dup.1 add.28 mem_store
+    dup.2 add.52 dup.1 add.29 mem_store
+    drop
+    dup add.4
+    mem_load mul.2 dup.2 add
+    push.576 dup.1 add.4 mem_store
+    dup.2 add.64 dup.1 add.5 mem_store
+    push.1408 dup.1 add.28 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
+    drop
+    dup add.5
+    mem_load mul.2 dup.2 add
+    push.656 dup.1 add.4 mem_store
+    dup.2 add.68 dup.1 add.5 mem_store
+    push.1456 dup.1 add.28 mem_store
+    dup.2 add.72 dup.1 add.29 mem_store
+    drop
+    dup add.6
+    mem_load mul.2 dup.2 add
+    push.752 dup.1 add.4 mem_store
+    dup.2 add.60 dup.1 add.5 mem_store
+    push.1568 dup.1 add.28 mem_store
+    dup.2 add.52 dup.1 add.29 mem_store
+    drop
+    dup add.7
+    mem_load mul.2 dup.2 add
+    push.816 dup.1 add.4 mem_store
+    dup.2 add.56 dup.1 add.5 mem_store
+    push.1584 dup.1 add.28 mem_store
+    dup.2 add.52 dup.1 add.29 mem_store
+    drop
+    dup add.8
+    mem_load mul.2 dup.2 add
+    push.864 dup.1 add.4 mem_store
+    dup.2 add.56 dup.1 add.5 mem_store
+    push.1600 dup.1 add.28 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
+    drop
+    dup add.9
+    mem_load mul.2 dup.2 add
+    push.912 dup.1 add.4 mem_store
+    dup.2 add.64 dup.1 add.5 mem_store
+    push.1648 dup.1 add.28 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
+    drop
+    dup add.10
+    mem_load mul.2 dup.2 add
+    push.992 dup.1 add.4 mem_store
+    dup.2 add.72 dup.1 add.5 mem_store
+    push.1696 dup.1 add.28 mem_store
+    dup.2 add.60 dup.1 add.29 mem_store
+    drop
+    dup add.11
+    mem_load mul.2 dup.2 add
+    push.1104 dup.1 add.4 mem_store
+    dup.2 add.64 dup.1 add.5 mem_store
+    push.1760 dup.1 add.28 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
+    drop
+    drop drop
 end

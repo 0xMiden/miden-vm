@@ -236,13 +236,16 @@ fn generated_hook_source(heights: &[u64], ood_ptr: u32) -> String {
         .join("\n");
     format!(
         "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
-use miden::core::sys::pvm::ood_frames
+use miden::core::sys::pvm::layout
+use miden::core::sys::verifier::proof_order
+use miden::core::sys::verifier::ood
 
 begin
 {stores}
         clk mem_store.{CLK0_PTR}
-        exec.ood_frames::stage_proof_order_maps
-        exec.ood_frames::stage_ood_scatter_table
+        exec.layout::stage_verifier_parameters
+        exec.proof_order::stage_proof_order_maps_12
+        exec.layout::stage_ood_scatter_table
         clk mem_store.{CLK2_PTR}
 
         push.0.0.{a1}.{a0} push.{ALPHA_PTR} mem_storew_le dropw
@@ -250,8 +253,8 @@ begin
         push.{c3}.{c2}.{c1}.{c0}
         push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
         push.{r0_3}.{r0_2}.{r0_1}.{r0_0}
-        exec.ood_frames::process_row_ood_evaluations
-        exec.ood_frames::process_row_ood_evaluations
+        exec.ood::process_row_ood_evaluations_12
+        exec.ood::process_row_ood_evaluations_12
         clk mem_store.{CLK1_PTR}
 {epilogue}end",
         a0 = ALPHA[0],

@@ -1,0 +1,1179 @@
+#! Generated stable (height, canonical ID) networks, once per AIR count.
+use {LOG_AIR_TRACE_LENGTHS_PTR} from miden::core::stark::constants
+use miden::core::sys::verifier::parameters
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_4()
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    padw push.LOG_AIR_TRACE_LENGTHS_PTR mem_loadw_le
+    mul.16
+    movdn.3
+    mul.16
+    add.1
+    movdn.3
+    mul.16
+    add.2
+    movdn.3
+    mul.16
+    add.3
+    movdn.3
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.3
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.3
+    dup.1 dup.1 u32lt cswap
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.3 u32and.15
+    push.3 dup.1 dup.6 add mem_store
+    movup.3 u32and.15
+    push.2 dup.1 dup.6 add mem_store
+    movup.3 u32and.15
+    push.1 dup.1 dup.6 add mem_store
+    movup.3 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    drop drop
+end
+
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_8()
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup
+    add.7
+    mem_load mul.16
+    add.7
+    dup.1
+    add.6
+    mem_load mul.16
+    add.6
+    dup.2
+    add.5
+    mem_load mul.16
+    add.5
+    dup.3
+    add.4
+    mem_load mul.16
+    add.4
+    dup.4
+    add.3
+    mem_load mul.16
+    add.3
+    dup.5
+    add.2
+    mem_load mul.16
+    add.2
+    dup.6
+    add.1
+    mem_load mul.16
+    add.1
+    dup.7
+    mem_load mul.16
+    movup.8 drop
+    movup.4
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.4
+    movup.5
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.5
+    movup.6
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.6
+    movup.7
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.7
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.3
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.3
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.7
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.7
+    movup.4
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.4
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    dup.1 dup.1 u32lt cswap
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.5
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.5
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.4
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.4
+    movup.6
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.6
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.4
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.4
+    movup.6
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.6
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    movup.5 u32and.15
+    push.3 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.2 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.1 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.7 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.6 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.5 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.4 dup.1 dup.6 add mem_store
+    dup.5
+    add.4
+    mem_storew_le dropw
+    drop drop
+end
+
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_9()
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup
+    add.8
+    mem_load mul.16
+    add.8
+    dup.1
+    add.7
+    mem_load mul.16
+    add.7
+    dup.2
+    add.6
+    mem_load mul.16
+    add.6
+    dup.3
+    add.5
+    mem_load mul.16
+    add.5
+    dup.4
+    add.4
+    mem_load mul.16
+    add.4
+    dup.5
+    add.3
+    mem_load mul.16
+    add.3
+    dup.6
+    add.2
+    mem_load mul.16
+    add.2
+    dup.7
+    add.1
+    mem_load mul.16
+    add.1
+    dup.8
+    mem_load mul.16
+    movup.9 drop
+    movup.8
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.8
+    movup.4
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.4
+    movup.5
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.5
+    movup.6
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.6
+    movup.7
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.7
+    movup.8
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.8
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.3
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.3
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.7
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.7
+    movup.8
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.8
+    movup.4
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.4
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    movup.8
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.8
+    dup.1 dup.1 u32lt cswap
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.5
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.5
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.8
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.8
+    movup.4
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.4
+    movup.6
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.6
+    movup.8
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.8
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.4
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.4
+    movup.6
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.6
+    movup.8
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.8
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    movup.5 u32and.15
+    push.3 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.2 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.1 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.7 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.6 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.5 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.4 dup.1 dup.6 add mem_store
+    dup.5
+    add.4
+    mem_storew_le dropw
+    movup.2
+    u32and.15
+    push.8 dup.1 dup.3 add mem_store
+    dup.2
+    add.8
+    mem_store
+    drop drop
+end
+
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_10()
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup
+    add.9
+    mem_load mul.16
+    add.9
+    dup.1
+    add.8
+    mem_load mul.16
+    add.8
+    dup.2
+    add.7
+    mem_load mul.16
+    add.7
+    dup.3
+    add.6
+    mem_load mul.16
+    add.6
+    dup.4
+    add.5
+    mem_load mul.16
+    add.5
+    dup.5
+    add.4
+    mem_load mul.16
+    add.4
+    dup.6
+    add.3
+    mem_load mul.16
+    add.3
+    dup.7
+    add.2
+    mem_load mul.16
+    add.2
+    dup.8
+    add.1
+    mem_load mul.16
+    add.1
+    dup.9
+    mem_load mul.16
+    movup.10 drop
+    movup.8
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.8
+    movup.9
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.9
+    movup.7
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.7
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.4
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.4
+    movup.8
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.8
+    movup.9
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.9
+    movup.3
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.3
+    movup.4
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.4
+    movup.7
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.7
+    movup.9
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.9
+    dup.1 dup.1 u32lt cswap
+    movup.6
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.6
+    movup.9
+    movup.9
+    dup.1 dup.1 u32lt cswap
+    movdn.9
+    movdn.9
+    movup.5
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.5
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.8
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.8
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.8
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.8
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.5
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.5
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.4
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.4
+    movup.6
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.6
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    movup.5 u32and.15
+    push.3 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.2 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.1 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.7 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.6 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.5 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.4 dup.1 dup.6 add mem_store
+    dup.5
+    add.4
+    mem_storew_le dropw
+    movup.3
+    u32and.15
+    push.9 dup.1 dup.3 add mem_store
+    dup.2
+    add.9
+    mem_store
+    movup.2
+    u32and.15
+    push.8 dup.1 dup.3 add mem_store
+    dup.2
+    add.8
+    mem_store
+    drop drop
+end
+
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_11()
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup
+    add.10
+    mem_load mul.16
+    add.10
+    dup.1
+    add.9
+    mem_load mul.16
+    add.9
+    dup.2
+    add.8
+    mem_load mul.16
+    add.8
+    dup.3
+    add.7
+    mem_load mul.16
+    add.7
+    dup.4
+    add.6
+    mem_load mul.16
+    add.6
+    dup.5
+    add.5
+    mem_load mul.16
+    add.5
+    dup.6
+    add.4
+    mem_load mul.16
+    add.4
+    dup.7
+    add.3
+    mem_load mul.16
+    add.3
+    dup.8
+    add.2
+    mem_load mul.16
+    add.2
+    dup.9
+    add.1
+    mem_load mul.16
+    add.1
+    dup.10
+    mem_load mul.16
+    movup.11 drop
+    movup.8
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.8
+    movup.9
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.9
+    movup.10
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.10
+    movup.4
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.4
+    movup.5
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.5
+    movup.6
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.6
+    movup.7
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.7
+    movup.8
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.8
+    movup.9
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.9
+    movup.10
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.10
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.3
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.3
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.7
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.7
+    movup.10
+    movup.9
+    dup.1 dup.1 u32lt cswap
+    movdn.9
+    movdn.10
+    movup.8
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.8
+    movup.9
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.9
+    movup.4
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.4
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    movup.8
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.8
+    movup.9
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.9
+    dup.1 dup.1 u32lt cswap
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.5
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.5
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.9
+    movup.9
+    dup.1 dup.1 u32lt cswap
+    movdn.9
+    movdn.9
+    movup.8
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.8
+    movup.10
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.10
+    movup.4
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.4
+    movup.6
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.6
+    movup.8
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.8
+    movup.10
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.10
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.4
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.4
+    movup.6
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.6
+    movup.8
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.8
+    movup.10
+    movup.10
+    dup.1 dup.1 u32lt cswap
+    movdn.10
+    movdn.10
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    movup.5 u32and.15
+    push.3 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.2 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.1 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.7 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.6 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.5 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.4 dup.1 dup.6 add mem_store
+    dup.5
+    add.4
+    mem_storew_le dropw
+    movup.4
+    u32and.15
+    push.10 dup.1 dup.3 add mem_store
+    dup.2
+    add.10
+    mem_store
+    movup.3
+    u32and.15
+    push.9 dup.1 dup.3 add mem_store
+    dup.2
+    add.9
+    mem_store
+    movup.2
+    u32and.15
+    push.8 dup.1 dup.3 add mem_store
+    dup.2
+    add.8
+    mem_store
+    drop drop
+end
+
+#! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
+pub proc stage_proof_order_maps_12()
+    push.LOG_AIR_TRACE_LENGTHS_PTR
+    dup
+    add.11
+    mem_load mul.16
+    add.11
+    dup.1
+    add.10
+    mem_load mul.16
+    add.10
+    dup.2
+    add.9
+    mem_load mul.16
+    add.9
+    dup.3
+    add.8
+    mem_load mul.16
+    add.8
+    dup.4
+    add.7
+    mem_load mul.16
+    add.7
+    dup.5
+    add.6
+    mem_load mul.16
+    add.6
+    dup.6
+    add.5
+    mem_load mul.16
+    add.5
+    dup.7
+    add.4
+    mem_load mul.16
+    add.4
+    dup.8
+    add.3
+    mem_load mul.16
+    add.3
+    dup.9
+    add.2
+    mem_load mul.16
+    add.2
+    dup.10
+    add.1
+    mem_load mul.16
+    add.1
+    dup.11
+    mem_load mul.16
+    movup.12 drop
+    movup.8
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.8
+    movup.9
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.9
+    movup.10
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.10
+    movup.11
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.11
+    movup.4
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.4
+    movup.5
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.5
+    movup.6
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.6
+    movup.7
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.7
+    movup.8
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.8
+    movup.9
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.9
+    movup.10
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.10
+    movup.11
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.11
+    movup.2
+    swap
+    dup.1 dup.1 u32lt cswap
+    swap
+    movdn.2
+    movup.3
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.3
+    movup.6
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.6
+    movup.7
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.7
+    movup.10
+    movup.9
+    dup.1 dup.1 u32lt cswap
+    movdn.9
+    movdn.10
+    movup.11
+    movup.10
+    dup.1 dup.1 u32lt cswap
+    movdn.10
+    movdn.11
+    movup.8
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.8
+    movup.9
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.9
+    movup.4
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.4
+    movup.5
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.5
+    movup.8
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.8
+    movup.9
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.9
+    dup.1 dup.1 u32lt cswap
+    movup.3
+    movup.3
+    dup.1 dup.1 u32lt cswap
+    movdn.3
+    movdn.3
+    movup.5
+    movup.5
+    dup.1 dup.1 u32lt cswap
+    movdn.5
+    movdn.5
+    movup.7
+    movup.7
+    dup.1 dup.1 u32lt cswap
+    movdn.7
+    movdn.7
+    movup.9
+    movup.9
+    dup.1 dup.1 u32lt cswap
+    movdn.9
+    movdn.9
+    movup.11
+    movup.11
+    dup.1 dup.1 u32lt cswap
+    movdn.11
+    movdn.11
+    movup.8
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.8
+    movup.10
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.10
+    movup.4
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.4
+    movup.6
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.6
+    movup.8
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.8
+    movup.10
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.10
+    movup.2
+    movup.2
+    dup.1 dup.1 u32lt cswap
+    movdn.2
+    movdn.2
+    movup.4
+    movup.4
+    dup.1 dup.1 u32lt cswap
+    movdn.4
+    movdn.4
+    movup.6
+    movup.6
+    dup.1 dup.1 u32lt cswap
+    movdn.6
+    movdn.6
+    movup.8
+    movup.8
+    dup.1 dup.1 u32lt cswap
+    movdn.8
+    movdn.8
+    movup.10
+    movup.10
+    dup.1 dup.1 u32lt cswap
+    movdn.10
+    movdn.10
+    exec.parameters::proof_order_ids_ptr
+    exec.parameters::proof_order_positions_ptr
+    movup.5 u32and.15
+    push.3 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.2 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.1 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.0 dup.1 dup.6 add mem_store
+    dup.5
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.7 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.6 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.5 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.4 dup.1 dup.6 add mem_store
+    dup.5
+    add.4
+    mem_storew_le dropw
+    movup.5 u32and.15
+    push.11 dup.1 dup.3 add mem_store
+    movup.5 u32and.15
+    push.10 dup.1 dup.4 add mem_store
+    movup.5 u32and.15
+    push.9 dup.1 dup.5 add mem_store
+    movup.5 u32and.15
+    push.8 dup.1 dup.6 add mem_store
+    dup.5
+    add.8
+    mem_storew_le dropw
+    drop drop
+end

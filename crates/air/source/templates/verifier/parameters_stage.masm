@@ -1,0 +1,37 @@
+
+#! Initialize every trusted parameter cell, including unused/padding cells, without observing data.
+pub proc stage_verifier_parameters()
+{%- for word in p.runtime.words %}
+    push.{{ word.values[3] }}.{{ word.values[2] }}.{{ word.values[1] }}.{{ word.values[0] }}
+    mem_storew_le.{{ word.address }} dropw
+{%- endfor %}
+{%- for binding in p.runtime.bindings %}
+    procref.pipes::{{ binding.kind }}_{{ binding.blocks }}
+    mem_storew_le.{{ binding.field.address() }} dropw
+{%- endfor %}
+{% if p.input.relation.is_vm() %}
+    # VM setup depth comes from its And8 instance plus the shared blowup, not PVM fixed geometry.
+    exec.get_and8_lookup_trace_length_log push.LOG_BLOWUP_FACTOR add
+    mem_store.{{ p.runtime.preprocessed_depth_address }}
+{% endif %}
+end
+
+#! Stage trusted dispatch pairs using the independently staged proof-order positions.
+pub proc stage_ood_scatter_table()
+    exec.ood_scatter_table_ptr
+{%- for helper in p.ood.helpers %}
+    procref.pipes::ext_{{ helper.blocks }}
+    dup.4 add.{{ helper.digest_offset }} mem_storew_le dropw
+{%- endfor %}
+    exec.proof_order_positions_ptr
+{%- for air in p.ood.air_dispatch %}
+    dup{% if air.id > 0 %} add.{{ air.id }}{% endif %}
+    mem_load mul.2 dup.2 add
+{%- for entry in air.entries %}
+    push.{{ entry.destination }} dup.1 add.{{ entry.pair_offset }} mem_store
+    dup.2 add.{{ entry.digest_offset }} dup.1 add.{{ entry.digest_pointer_offset }} mem_store
+{%- endfor %}
+    drop
+{%- endfor %}
+    drop drop
+end
