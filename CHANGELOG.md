@@ -13,6 +13,8 @@
 
 #### Changes
 
+- [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
@@ -90,10 +92,6 @@
 - Replaced custom release version comparisons with Rust `semver` and added Rust tests. Added release preparation and recovery instructions in `docs/RELEASING.md` ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - Separated synthetic CodSpeed compilation from measurement while retaining the optimized profile and benchmark coverage. The executable builds on an ARM64 8x runner using Ubuntu 22.04, and SMT benchmarks run independently ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
-
-#### Changes
-
-- [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 ## v0.35.0 (2026-10-01)
 
