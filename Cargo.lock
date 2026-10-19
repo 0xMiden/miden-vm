@@ -2796,7 +2796,9 @@ version = "0.36.2"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "rustix",
  "serde-wincode",
+ "tempfile",
  "wincode",
 ]
 

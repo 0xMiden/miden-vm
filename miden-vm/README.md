@@ -295,6 +295,24 @@ Above, we used public inputs to initialize the stack. This keeps the program sim
 
 If you want to execute, prove, and verify programs on Miden VM, but don't want to write Rust code, you can use Miden CLI. It also contains a number of useful tools to help analyze and debug programs.
 
+The CLI limits package (`.masp`) files to 512 MiB, input (`.inputs`) JSON files to
+64 MiB, and output (`.outputs`) JSON files to 64 KiB. Files at the limit are accepted;
+larger files are rejected before decoding. These readers accept regular files and
+symlinks to regular files. Pipes, devices, and directories are rejected.
+
+The CLI writes each proof and output JSON artifact to a temporary file in the
+destination directory. It replaces the destination after writing and syncing the
+complete artifact, so a write failure leaves the previous file intact. Replacing
+a destination symlink replaces the link itself.
+
+New artifacts and replacements belong to the current user and use normal file
+creation permissions, including inherited ACLs. The CLI does not copy the previous
+file's ownership or access controls.
+
+On Unix, the CLI syncs the destination directory after replacement to persist the
+rename. A failure at this final step reports that the new artifact has already
+replaced the previous file.
+
 ### Compiling Miden VM
 
 First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96** or later.

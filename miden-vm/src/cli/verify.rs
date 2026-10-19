@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
@@ -6,9 +6,7 @@ use miden_assembly::{
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
-use miden_vm::{
-    ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile, serde::Deserializable,
-};
+use miden_vm::{ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
 
@@ -151,13 +149,10 @@ fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Rep
     let kernel_pkg = match ext.as_str() {
         "masp" => {
             // Load kernel from package file
-            let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
-                format!("Failed to read kernel package `{}`", kernel_path.display())
-            })?;
             let package =
-                Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
-                    format!("Failed to deserialize kernel package `{}`", kernel_path.display())
-                })?;
+                Package::deserialize_from_file(kernel_path).into_diagnostic().wrap_err_with(
+                    || format!("Failed to deserialize kernel package `{}`", kernel_path.display()),
+                )?;
             if !package.is_kernel() {
                 return Err(Report::msg(format!(
                     "invalid kernel package, package is of type {}",
