@@ -178,15 +178,17 @@ pub fn exp(
 /// - pow = 1: 1 cycles
 /// - pow = 2: 2 cycles
 /// - pow = 3: 4 cycles
-/// - pow = 4: 6 cycles
-/// - pow = 5: 8 cycles
-/// - pow = 6: 10 cycles
-/// - pow = 7: 12 cycles
-/// - pow > 7: 11 + Floor(log2(pow)) — one `Push` plus `exp`'s 9 + num_pow_bits, where num_pow_bits
-///   is the bit length of pow
+/// - pow = 4: 4 cycles
+/// - pow = 5: 6 cycles
+/// - pow = 6: 6 cycles
+/// - pow = 7: 8 cycles
+/// - pow = 8: 6 cycles
+/// - pow = 16: 8 cycles
+/// - otherwise: 11 + Floor(log2(pow)) — one `Push` plus `exp`'s 9 + num_pow_bits, where
+///   num_pow_bits is the bit length of pow
 pub fn exp_imm(span_builder: &mut BasicBlockBuilder, pow: Felt) {
     let pow_u64 = pow.as_canonical_u64();
-    if pow_u64 <= 7 {
+    if pow_u64 <= 8 || pow_u64 == 16 {
         perform_exp_for_small_power(span_builder, pow_u64);
     } else {
         let num_pow_bits = (u64::BITS - pow_u64.leading_zeros()) as u8;
@@ -211,23 +213,23 @@ fn append_exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) {
     span_builder.push_ops([Swap, Eqz, Assert(ZERO)]);
 }
 
-/// If the immediate value of the `exp` instruction is less than 8, then, it is be cheaper to
-/// compute the exponentiation of the base to the power imm using `dup` and `mul` instructions.
+/// Computes selected small immediate powers using addition chains of `dup` and `mul`.
 ///
 /// The expected starting state of the stack (from the top) is: [b, ...].
 ///
-/// After these operations, the stack state will be: [b^pow, ...], where b is the immediate value
-/// and b is less than 8.
+/// After these operations, the stack state will be: [b^pow, ...].
 ///
 /// VM cycles per mode:
 /// - pow = 0: 3 cycles
 /// - pow = 1: 1 cycles
 /// - pow = 2: 2 cycles
 /// - pow = 3: 4 cycles
-/// - pow = 4: 6 cycles
-/// - pow = 5: 8 cycles
-/// - pow = 6: 10 cycles
-/// - pow = 7: 12 cycles
+/// - pow = 4: 4 cycles
+/// - pow = 5: 6 cycles
+/// - pow = 6: 6 cycles
+/// - pow = 7: 8 cycles
+/// - pow = 8: 6 cycles
+/// - pow = 16: 8 cycles
 fn perform_exp_for_small_power(span_builder: &mut BasicBlockBuilder, pow: u64) {
     match pow {
         0 => {
@@ -244,23 +246,13 @@ fn perform_exp_for_small_power(span_builder: &mut BasicBlockBuilder, pow: u64) {
             span_builder.push_op_many(Dup0, 2);
             span_builder.push_op_many(Mul, 2);
         },
-        4 => {
-            span_builder.push_op_many(Dup0, 3);
-            span_builder.push_op_many(Mul, 3);
-        },
-        5 => {
-            span_builder.push_op_many(Dup0, 4);
-            span_builder.push_op_many(Mul, 4);
-        },
-        6 => {
-            span_builder.push_op_many(Dup0, 5);
-            span_builder.push_op_many(Mul, 5);
-        },
-        7 => {
-            span_builder.push_op_many(Dup0, 6);
-            span_builder.push_op_many(Mul, 6);
-        },
-        _ => unreachable!("pow must be less than 8"),
+        4 => span_builder.push_ops([Dup0, Mul, Dup0, Mul]),
+        5 => span_builder.push_ops([Dup0, Dup0, Mul, Dup0, Mul, Mul]),
+        6 => span_builder.push_ops([Dup0, Dup0, Mul, Mul, Dup0, Mul]),
+        7 => span_builder.push_ops([Dup0, Dup0, Dup0, Mul, Mul, Dup0, Mul, Mul]),
+        8 => span_builder.push_ops([Dup0, Mul, Dup0, Mul, Dup0, Mul]),
+        16 => span_builder.push_ops([Dup0, Mul, Dup0, Mul, Dup0, Mul, Dup0, Mul]),
+        _ => unreachable!("pow must be at most 8 or equal to 16"),
     }
 }
 
@@ -369,10 +361,15 @@ pub fn lt(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
-/// Same as `lt`, but pushes `imm` on the operand stack first
+/// Same as `lt`, but compares against `imm`. The zero-immediate case takes 2 cycles.
 pub fn lt_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
-    span_builder.push_op(Push(imm));
-    lt(span_builder)
+    if imm == ZERO {
+        // Push before consuming the operand to preserve the minimum stack depth.
+        span_builder.push_ops([Pad, Mul]);
+    } else {
+        span_builder.push_op(Push(imm));
+        lt(span_builder)
+    }
 }
 
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "less
@@ -399,10 +396,14 @@ pub fn lte(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
-/// Same as `lte`, but pushes `imm` on the operand stack first
+/// Same as `lte`, but compares against `imm`. The zero-immediate case takes 1 cycle.
 pub fn lte_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
-    span_builder.push_op(Push(imm));
-    lte(span_builder)
+    if imm == ZERO {
+        span_builder.push_op(Eqz);
+    } else {
+        span_builder.push_op(Push(imm));
+        lte(span_builder)
+    }
 }
 
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "greater
@@ -429,10 +430,14 @@ pub fn gt(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
-/// Same as `gt`, but pushes `imm` on the operand stack first
+/// Same as `gt`, but compares against `imm`. The zero-immediate case takes 2 cycles.
 pub fn gt_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
-    span_builder.push_op(Push(imm));
-    gt(span_builder)
+    if imm == ZERO {
+        span_builder.push_ops([Eqz, Not]);
+    } else {
+        span_builder.push_op(Push(imm));
+        gt(span_builder)
+    }
 }
 
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "greater
@@ -459,10 +464,14 @@ pub fn gte(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
-/// Same as `gte`, but pushes `imm` on the operand stack first
+/// Same as `gte`, but compares against `imm`. The zero-immediate case takes 3 cycles.
 pub fn gte_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
-    span_builder.push_op(Push(imm));
-    gte(span_builder)
+    if imm == ZERO {
+        span_builder.push_ops([Pad, Mul, Incr]);
+    } else {
+        span_builder.push_op(Push(imm));
+        gte(span_builder)
+    }
 }
 
 /// Checks if the top element in the stack is an odd number or not.

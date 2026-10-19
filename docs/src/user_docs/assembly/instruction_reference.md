@@ -13,10 +13,10 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 | Instruction          | Stack Input   | Stack Output     | Cycles       | Notes                                                                                                         |
 | -------------------- | ------------- | ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
-| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 18 <br /> 19 | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$                             |
-| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$                                |
-| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$                             |
-| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 17 | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$                                |
+| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 18 <br /> 1 if b = 0, 19 otherwise | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$                             |
+| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 2 if b = 0, 18 otherwise | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$                                |
+| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 3 if b = 0, 18 otherwise | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$                             |
+| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 2 if b = 0, 17 otherwise | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$                                |
 | `eq` <br /> `eq.b`   | `[b, a, ...]` | `[c, ...]`       | 1 <br /> 1-2 | $$c = \begin{cases} 1, & \text{if } a = b \\ 0, & \text{otherwise} \end{cases}$$                                |
 | `neq` <br /> `neq.b` | `[b, a, ...]` | `[c, ...]`       | 2 <br /> 2-3 | $$c = \begin{cases} 1, & \text{if } a \neq b \\ 0, & \text{otherwise} \end{cases}$$                             |
 | `eqw`                | `[A, B, ...]` | `[c, A, B, ...]` | 15           | $$c = \begin{cases} 1, & \text{if } a_i = b_i\ \forall i \in \{0,1,2,3\} \\ 0, & \text{otherwise} \end{cases}$$ |
@@ -45,7 +45,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `inv`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = a^{-1} \bmod p$. Fails if $a = 0$.                                        |
 | `pow2`                   | `[a, ...]`    | `[b, ...]`   | 16                    | $b = 2^a$. Fails if $a > 63$.                                                  |
 | `exp` <br /> `exp.uxx`   | `[b, a, ...]` | `[c, ...]`   | 72 <br /> 9+xx        | $c = a^b$. `exp` is `exp.u63` and fails if $b \ge 2^{63}$. `exp.uxx` requires $xx \in [0, 63]$ and fails if $b \ge 2^{xx}$. |
-| `exp.b`                  | `[a, ...]`    | `[c, ...]`   | See notes             | $c = a^b$, with $b \in [0, p)$. Costs 3, 1, 2, 4, 6, 8, 10, or 12 cycles for $b = 0, 1, \ldots, 7$ respectively, and $11 + \lfloor \log_2(b) \rfloor$ cycles for $b > 7$. |
+| `exp.b`                  | `[a, ...]`    | `[c, ...]`   | See notes             | $c = a^b$, with $b \in [0, p)$. Costs 3, 1, 2, 4, 4, 6, 6, 8, or 6 cycles for $b = 0, 1, \ldots, 8$ respectively; 8 cycles for $b = 16$; and $11 + \lfloor \log_2(b) \rfloor$ cycles otherwise. |
 | `ilog2`                  | `[a, ...]`    | `[b, ...]`   | 70                    | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                             |
 | `not`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = 1 - a$. Fails if $a > 1$.                                                 |
 | `and`                    | `[b, a, ...]` | `[c, ...]`   | 1                     | $c = a \cdot b$. Fails if $\max(a, b) > 1$.                                    |
@@ -130,7 +130,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `u32gt` <br /> `u32gt.b`   | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.    |
 | `u32gte` <br /> `u32gte.b` | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$. |
 | `u32min` <br /> `u32min.b` | `[b, a, ...]` | `[c, ...]`   | 8 <br /> 9  | $c = \min(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
-| `u32max` <br /> `u32max.b` | `[b, a, ...]` | `[c, ...]`   | 9 <br /> 10 | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
+| `u32max` <br /> `u32max.b` | `[b, a, ...]` | `[c, ...]`   | 7 <br /> 9 if b = 1, 8 otherwise | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
 
 ## Stack Manipulation
 
