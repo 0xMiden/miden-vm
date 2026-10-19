@@ -29,11 +29,8 @@ jobs:
           workspaces: tools/midenc-masm-lint
       - name: Build advice analysis CLI
         run: make build-masm-advice-lint
-      - name: Check formatting and Rust lints
-        working-directory: tools/midenc-masm-lint
-        run: |
-          cargo fmt --check
-          cargo clippy --locked -- -D warnings
+      - name: Check advice CLI and runner lints
+        run: make lint-masm-advice-lint
       - name: Check findings and coverage failure behavior
         run: make test-masm-advice-lint
       - name: Collect core reports

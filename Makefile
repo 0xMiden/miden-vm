@@ -143,6 +143,12 @@ test-masm-advice-lint: build-masm-advice-lint ## Checks advice-taint findings an
 	cd tools/midenc-masm-lint && cargo test --locked
 	bash scripts/test-masm-advice-taint.sh
 
+.PHONY: lint-masm-advice-lint
+lint-masm-advice-lint: ## Checks formatting, Clippy, and the advice CLI runner scripts
+	cd tools/midenc-masm-lint && cargo fmt --check
+	cd tools/midenc-masm-lint && cargo clippy --locked -- -D warnings
+	shellcheck scripts/check-masm-advice-taint.sh scripts/test-masm-advice-taint.sh
+
 # --- docs ----------------------------------------------------------------------------------------
 
 .PHONY: doc

@@ -1582,6 +1582,7 @@ dependencies = [
 name = "midenc-masm-lint"
 version = "0.0.0"
 dependencies = [
+ "miden-project",
  "midenc-dialect-hir",
  "midenc-frontend-masm",
  "midenc-hir",
