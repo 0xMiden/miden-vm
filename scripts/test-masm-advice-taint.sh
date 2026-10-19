@@ -138,8 +138,8 @@ check_result u32cast 0
 
 write_project comparison
 cat > "$test_root/comparison/mod.masm" <<'EOF'
-pub proc entry() -> felt
-    adv_push eq.0 if.true push.1 else push.2 end
+pub proc entry() -> u32
+    adv_push eq.0 push.1 u32wrapping_add
 end
 EOF
 check_result comparison 0
