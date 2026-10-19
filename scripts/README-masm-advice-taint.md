@@ -22,7 +22,8 @@ bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 
 `tools/midenc-masm-lint` is a separate Cargo workspace with its own manifest and
 lockfile. Its Rust toolchain is pinned. The compiler dependencies use commit
-`51c31fdbf4473b049512961fc1d9f6f2f388edee` from the compiler's `next` branch.
+`2be47a4e15559c66c821882c7c91a6ac0ca18656` from
+[compiler #1473](https://github.com/0xMiden/compiler/pull/1473).
 That compiler retains its published VM 0.35 and HIR type 0.17 dependencies.
 Existing VM workspace dependencies and lockfiles are unchanged.
 
@@ -58,10 +59,11 @@ Display detail does not change the counts or exit status.
 Public-return advisories remain fatal in this implementation. Any later change to
 that enforcement policy needs review and must preserve taint through callers.
 
-The pinned compiler has gaps in [stream and Horner memory propagation](https://github.com/0xMiden/compiler/issues/1469)
-and [assembled dependency coverage](https://github.com/0xMiden/compiler/issues/1470).
-It also adds [fresh advice origins during deferred-data registration](https://github.com/0xMiden/compiler/issues/1471).
-The `u32cast` and `eq.0` controls from the VM review currently produce false positives.
+The pinned compiler tracks [stream and Horner memory propagation](https://github.com/0xMiden/compiler/issues/1469)
+and skips [compiled procedures](https://github.com/0xMiden/compiler/issues/1470)
+with neither a body nor a complete advice and memory effect summary.
+It preserves [stack taint and advice origins during deferred-data registration](https://github.com/0xMiden/compiler/issues/1471).
+The [`u32cast` and `eq.0` controls](https://github.com/0xMiden/compiler/issues/1472) from the VM review now pass.
 The report's coverage counts describe procedures the compiler lifted, so those
 counts do not account for missing rules within a lifted procedure.
 
@@ -77,13 +79,13 @@ No release workflows or branch protections change in this branch.
 ## Current validation
 
 The VM 0.36 core source runs with the compiler's existing VM 0.35 dependencies.
-Both modes report 39 diagnostics and 359 skipped procedures, and exit with status 1.
-The reports comprise 12 operation sinks and 27 public-return advisories. They need
+Both modes report 12 diagnostics and 359 skipped procedures, and exit with status 1.
+The reports comprise six operation sinks and six public-return advisories. They need
 triage before classification as MASM defects. The 117 root failures cause another
 242 callers to be skipped. Root failures include 46 analysis-size limits and
 67 stack/signature inference failures, with four unsupported constructs.
 
-Compact output has 27 lines and verbose output has 15,342. Local evidence is in
+Local evidence is in
 `target/masm-advice-lint/evidence/core-taint-compact.txt` and
 `target/masm-advice-lint/evidence/core-taint-verbose.txt`.
 The CLI cases cover clean code, sink findings,
