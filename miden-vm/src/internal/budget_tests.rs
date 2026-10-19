@@ -286,18 +286,30 @@ fn partial_duplicate_indices_keep_the_last_value() {
 
 #[test]
 fn partial_missing_node_error_reports_depth_and_position() {
-    let inputs = inputs_with(MerkleData::PartialMerkleTree(vec![
-        ((2, 0), word_hex(1)),
-        ((2, 2), word_hex(2)),
-        ((2, 3), word_hex(3)),
-    ]));
-
-    let err = inputs
-        .parse_advice_inputs_with_options(&ExecutionOptions::default())
-        .unwrap_err();
-
-    assert!(err.contains("incomplete leaves"), "{err}");
-    assert!(err.contains("depth 2 and position 1"), "{err}");
+    let cases = [
+        (
+            vec![((2, 0), word_hex(1)), ((2, 2), word_hex(2)), ((2, 3), word_hex(3))],
+            "failed to parse a Partial Merkle Tree: incomplete leaves: missing node at depth 2 \
+             and position 1",
+        ),
+        (
+            vec![((1, 1), word_hex(1))],
+            "failed to parse a Partial Merkle Tree: incomplete leaves: missing node at depth 1 \
+             and position 0",
+        ),
+        (
+            vec![((1, 0), word_hex(1))],
+            "failed to parse a Partial Merkle Tree: incomplete leaves: missing node at depth 1 \
+             and position 1",
+        ),
+    ];
+    for (leaves, expected) in cases {
+        let inputs = inputs_with(MerkleData::PartialMerkleTree(leaves));
+        let err = inputs
+            .parse_advice_inputs_with_options(&ExecutionOptions::default())
+            .unwrap_err();
+        assert_eq!(err, expected);
+    }
 }
 
 #[test]
@@ -313,8 +325,11 @@ fn partial_overlap_error_reports_ancestor_depth_and_position() {
         .parse_advice_inputs_with_options(&ExecutionOptions::default())
         .unwrap_err();
 
-    assert!(err.contains("overlapping leaves"), "{err}");
-    assert!(err.contains("depth 1 and position 0"), "{err}");
+    assert_eq!(
+        err,
+        "failed to parse a Partial Merkle Tree: overlapping leaves: node at depth 1 and position \
+         0 is an ancestor of node at depth 2 and position 0"
+    );
 }
 
 #[test]
