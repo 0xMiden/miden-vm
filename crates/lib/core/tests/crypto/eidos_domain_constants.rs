@@ -45,9 +45,13 @@ fn parse_u64(value: &str) -> u64 {
 
 fn masm_scalar(source: &str, name: &str) -> u64 {
     let prefix = format!("const {name} = ");
+    let metadata_prefix = format!("# {name} = ");
     source
         .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix))
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix(&prefix).or_else(|| line.strip_prefix(&metadata_prefix))
+        })
         .map(|value| parse_u64(value.split('#').next().expect("constant value")))
         .unwrap_or_else(|| panic!("missing MASM constant {name}"))
 }
