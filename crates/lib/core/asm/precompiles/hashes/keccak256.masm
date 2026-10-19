@@ -14,8 +14,8 @@ use miden::core::precompiles
 # Pinned to the Rust-side Keccak256Precompile constants. DOMAIN_TAG identifies the registered
 # Keccak-256 precompile domain; ASSERT_OP_ID identifies the assertion operation within that domain.
 
-const DOMAIN_TAG = 16778753
-const ASSERT_OP_ID = 0
+# DOMAIN_TAG = 16778753
+# ASSERT_OP_ID = 0
 const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::digest")
 
 # Fixed lanes of `init(DOMAIN_TAG, [ASSERT_OP_ID, len_bytes, 0])`.

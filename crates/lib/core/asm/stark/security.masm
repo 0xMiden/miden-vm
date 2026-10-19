@@ -8,7 +8,7 @@ const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_SAMPLE_BITS = 126
 const SECURITY_CAP_BITS = 126
 const DEEP_FIELD_BASE_BITS = 123
-const FRI_FOLDING_BASE_BITS = 120
+pub const FRI_FOLDING_BASE_BITS = 120
 const LOG2_E_FP = 94549
 
 # Inputs outside these bounds are not supported. The bounds prevent overflow and underflow in the

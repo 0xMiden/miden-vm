@@ -7,6 +7,7 @@ use miden_core::{
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_precompiles::{CurveId, UintDomain};
+use miden_precompiles_air::relations::MAX_MESSAGE_WIDTH;
 
 use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
@@ -184,7 +185,7 @@ fn sampled_challenges(log_heights: &LogHeights) -> (QuadFelt, QuadFelt) {
 }
 
 fn encode_message(alpha: QuadFelt, beta: QuadFelt, scale: u32, payload: &[u32]) -> QuadFelt {
-    let gamma = (0..18).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    let gamma = (0..MAX_MESSAGE_WIDTH).fold(QuadFelt::ONE, |acc, _| acc * beta);
     let message = payload
         .iter()
         .rev()
@@ -355,7 +356,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
             );
         }
 
-        let gamma = (0..18).fold(QuadFelt::ONE, |acc, _| acc * beta);
+        let gamma = (0..MAX_MESSAGE_WIDTH).fold(QuadFelt::ONE, |acc, _| acc * beta);
         let expected_gamma: &[Felt] = gamma.as_basis_coefficients_slice();
         let bus_gamma_ptr = pvm_layout_const("BUS_GAMMA_PTR");
         assert_eq!(

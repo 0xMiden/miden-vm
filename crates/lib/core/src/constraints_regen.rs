@@ -686,7 +686,7 @@ use miden::core::stark::types
 use miden::core::sys::vm::layout
 
 # Number of AIR instances in the relation.
-const NUM_AIRS = {num_airs}
+# NUM_AIRS = {num_airs}
 
 # Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
 #   preprocessed: {preprocessed_parts} = {preprocessed} scalar evaluations
@@ -1141,10 +1141,15 @@ where
     T::Err: core::fmt::Debug,
 {
     let prefix = format!("const {name} = ");
+    let metadata_prefix = format!("# {name} = ");
     masm.lines()
         .find_map(|line| {
             let line = line.trim();
-            let value = line.strip_prefix("pub ").unwrap_or(line).strip_prefix(&prefix)?;
+            let value = line
+                .strip_prefix("pub ")
+                .unwrap_or(line)
+                .strip_prefix(&prefix)
+                .or_else(|| line.strip_prefix(&metadata_prefix))?;
             let value = value.split('#').next().unwrap_or(value).trim();
             value.parse::<T>().ok()
         })
