@@ -127,6 +127,101 @@ end
 EOF
 check_result clean 0
 
+# Truncation and comparison results are constrained even when their inputs are advice.
+write_project u32cast
+cat > "$test_root/u32cast/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    adv_push u32cast push.1 u32wrapping_add
+end
+EOF
+check_result u32cast 0
+
+write_project comparison
+cat > "$test_root/comparison/mod.masm" <<'EOF'
+pub proc entry() -> felt
+    adv_push eq.0 if.true push.1 else push.2 end
+end
+EOF
+check_result comparison 0
+
+# Deferred-data registration preserves each stack slot and its original advice source.
+write_project event_clean_top
+cat > "$test_root/event_clean_top/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    adv_push push.1.1.1.1.1
+    adv.register_deferred_data
+    push.1 u32wrapping_add movdn.5 dropw drop
+end
+EOF
+check_result event_clean_top 0
+
+write_project event_tainted_top
+cat > "$test_root/event_tainted_top/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    push.1.1.1.1.1 adv_push
+    adv.register_deferred_data
+    push.1 u32wrapping_add movdn.5 dropw drop
+end
+EOF
+check_result event_tainted_top 1 "reaches operation requiring"
+grep -Fq 'origin mod.masm:2:20]' "$test_root/event_tainted_top/output"
+
+# Memory operations must carry stored advice to the arithmetic sink.
+write_project mem_stream
+cat > "$test_root/mem_stream/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    adv_pushw mem_storew_le.0 dropw
+    adv_pushw mem_storew_le.4 dropw
+    push.0 padw padw padw mem_stream
+    push.1 u32wrapping_add
+    movdn.12 dropw dropw dropw
+end
+EOF
+check_result mem_stream 1 "reaches operation requiring"
+
+write_project crypto_stream
+cat > "$test_root/crypto_stream/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    adv_push mem_store.0
+    push.64 push.0 padw padw padw crypto_stream
+    dropw dropw dropw drop drop
+    mem_load.64 push.1 u32wrapping_add
+end
+EOF
+check_result crypto_stream 1 "reaches operation requiring"
+
+# The second stream reads the next memory block, which contains the advice.
+write_project consecutive_streams
+cat > "$test_root/consecutive_streams/mod.masm" <<'EOF'
+pub proc entry() -> u32
+    adv_push mem_store.8
+    push.0 padw padw padw mem_stream mem_stream
+    push.1 u32wrapping_add movdn.12 dropw dropw dropw
+end
+EOF
+check_result consecutive_streams 1 "reaches operation requiring"
+
+for operation in horner_eval_base horner_eval_ext; do
+    write_project "$operation"
+    cat > "$test_root/$operation/mod.masm" <<EOF
+pub proc entry() -> u32
+    adv_push mem_store.0
+    padw padw push.1.1.1.1 push.1.1.1.1 $operation
+    dropw dropw dropw drop drop
+    push.1 u32wrapping_add swap drop
+end
+EOF
+    check_result "$operation" 1 "reaches operation requiring"
+done
+
+# Each tainted example has one arithmetic finding and complete procedure coverage.
+for name in event_tainted_top mem_stream crypto_stream consecutive_streams \
+    horner_eval_base horner_eval_ext; do
+    grep -Fq '[sink arith.add;' "$test_root/$name/output"
+    grep -Fxq 'midenc-masm-lint: 1 finding(s), 0 skipped procedure(s), analysis complete' \
+        "$test_root/$name/output"
+done
+
 # The default library and an explicit executable have different analysis results.
 write_project target_selection
 cat >> "$test_root/target_selection/miden-project.toml" <<'EOF'
