@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 miden-project = { version = "0.35.0", default-features = false, features = ["std", "serde"] }
-midenc-dialect-hir = { git = "https://github.com/0xMiden/compiler", rev = "51c31fdbf4473b049512961fc1d9f6f2f388edee" }
-midenc-frontend-masm = { git = "https://github.com/0xMiden/compiler", rev = "51c31fdbf4473b049512961fc1d9f6f2f388edee" }
-midenc-hir = { git = "https://github.com/0xMiden/compiler", rev = "51c31fdbf4473b049512961fc1d9f6f2f388edee" }
-midenc-hir-analysis = { git = "https://github.com/0xMiden/compiler", rev = "51c31fdbf4473b049512961fc1d9f6f2f388edee" }
+midenc-dialect-hir = { git = "https://github.com/0xMiden/compiler", rev = "2be47a4e15559c66c821882c7c91a6ac0ca18656" }
+midenc-frontend-masm = { git = "https://github.com/0xMiden/compiler", rev = "2be47a4e15559c66c821882c7c91a6ac0ca18656" }
+midenc-hir = { git = "https://github.com/0xMiden/compiler", rev = "2be47a4e15559c66c821882c7c91a6ac0ca18656" }
+midenc-hir-analysis = { git = "https://github.com/0xMiden/compiler", rev = "2be47a4e15559c66c821882c7c91a6ac0ca18656" }
