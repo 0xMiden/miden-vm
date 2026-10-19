@@ -138,6 +138,9 @@ struct Parser<'input> {
     tokens: Vec<Token<'input>>,
     attribute_lookahead: Option<AttributeLookahead>,
     pos: usize,
+    /// Caches (start, next non-trivia index) to avoid rescanning suffixes of a trivia run.
+    /// The next index is `tokens.len()` when the run reaches EOF.
+    cached_block_trivia_run: Option<(usize, usize)>,
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
     eof_span: SourceSpan,
@@ -241,6 +244,7 @@ impl<'input> Parser<'input> {
         Self {
             tokens: tokenize(source),
             attribute_lookahead: None,
+            cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -255,6 +259,7 @@ impl<'input> Parser<'input> {
         Self {
             tokens: tokenize(source),
             attribute_lookahead: None,
+            cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -1358,7 +1363,7 @@ impl<'input> Parser<'input> {
     }
 
     fn should_stop_instruction_before(
-        &self,
+        &mut self,
         current: SyntaxKind,
         previous_significant: Option<SyntaxKind>,
         nesting: Nesting,
@@ -1399,17 +1404,28 @@ impl<'input> Parser<'input> {
         None
     }
 
-    fn next_relevant_block_token(&self, mut index: usize) -> Option<usize> {
+    /// Finds the next non-trivia block token, consulting and updating an internal cache
+    /// to avoid rescanning trivia suffixes.
+    fn next_relevant_block_token(&mut self, mut index: usize) -> Option<usize> {
+        if let Some((start, next)) = self.cached_block_trivia_run
+            && start <= index
+            && index <= next
+        {
+            return (next < self.tokens.len()).then_some(next);
+        }
+
+        let start = index;
         while let Some(token) = self.tokens.get(index) {
             match token.kind() {
                 SyntaxKind::Whitespace
                 | SyntaxKind::Newline
                 | SyntaxKind::Comment
                 | SyntaxKind::DocComment => index += 1,
-                _ => return Some(index),
+                _ => break,
             }
         }
-        None
+        self.cached_block_trivia_run = Some((start, index));
+        (index < self.tokens.len()).then_some(index)
     }
 
     fn peek_after_inline_whitespace(&self) -> Option<SyntaxKind> {
@@ -1578,7 +1594,7 @@ impl<'input> Parser<'input> {
         )
     }
 
-    fn block_recovery_boundary(&self, terminators: &[&str]) -> Option<BlockRecoveryBoundary> {
+    fn block_recovery_boundary(&mut self, terminators: &[&str]) -> Option<BlockRecoveryBoundary> {
         if self.at_keyword("else") && !terminators.contains(&"else") {
             return Some(BlockRecoveryBoundary::Else);
         }
@@ -1590,7 +1606,7 @@ impl<'input> Parser<'input> {
         None
     }
 
-    fn at_block_recovery_boundary(&self) -> bool {
+    fn at_block_recovery_boundary(&mut self) -> bool {
         self.at_keyword("else") || self.at_top_level_form_starter_in_block()
     }
 
@@ -1598,7 +1614,7 @@ impl<'input> Parser<'input> {
         self.is_top_level_starter(self.pos)
     }
 
-    fn at_top_level_form_starter_in_block(&self) -> bool {
+    fn at_top_level_form_starter_in_block(&mut self) -> bool {
         match self.current() {
             Some(token) if token.kind() == SyntaxKind::DocComment => self
                 .next_relevant_block_token(self.pos + 1)
