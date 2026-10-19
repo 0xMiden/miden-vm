@@ -42,7 +42,7 @@
 //! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
 //!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //! - **Kernel leaf compression** (kernel ROM rows, multiplicity `+1`): `[procedure_digest(4),
-//!   zero(4), kernel_leaf_cv(4), leaf(4)]`.
+//!   procedure_digest(4), kernel_export_cv(4), leaf(4)]`.
 //!
 //! The Eidos compression AIR emits the matching receive on the final footer row of the
 //! standalone block.
@@ -56,7 +56,7 @@
 
 use core::{array, borrow::Borrow};
 
-use miden_core::{field::PrimeCharacteristicRing, program::domain::KERNEL_LEAF};
+use miden_core::program::domain::KERNEL_EXPORT;
 use miden_crypto::hash::eidos::Eidos;
 
 use super::super::operations::{aead_stream, merkle};
@@ -201,16 +201,14 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     merkle::emit_compression::<LB, _>(g, ctx);
 
-                    // Bind the original syscall digest to the authenticated Merkle leaf.
+                    // Bind the syscall digest to both words of its identity export pair.
                     g.add(
                         "kernel_leaf_compression",
                         ctx.chiplet_active.kernel_rom.clone(),
                         || {
                             let kernel = local.kernel_rom();
-                            let block = array::from_fn(|i| {
-                                if i < 4 { kernel.root[i].into() } else { LB::Expr::ZERO }
-                            });
-                            let cv_in = Eidos::init_chaining_word(KERNEL_LEAF, 4)
+                            let block = array::from_fn(|i| kernel.root[i % 4].into());
+                            let cv_in = Eidos::init_chaining_word(KERNEL_EXPORT, 8)
                                 .into_elements()
                                 .map(LB::Expr::from);
                             let cv_out = kernel.leaf.map(LB::Expr::from);

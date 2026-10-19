@@ -14,10 +14,13 @@ use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// Reserved domain tag for the legacy sequential kernel commitment.
 pub const KERNEL_DOMAIN_TAG: crate::Felt = super::domain::KernelCommitmentDomain::TAG.as_felt();
 
-/// Hashes a procedure digest under the kernel-leaf domain before Merkle authentication.
+/// Hashes the identity export pair `procedure_root || procedure_root` under `KERNEL_EXPORT`.
 /// This separates authorized leaves from Merkle inner nodes, independently of the path depth.
 pub fn hash_kernel_leaf(procedure_root: Word) -> Word {
-    Eidos::hash_elements_in_domain(procedure_root.as_elements(), super::domain::KERNEL_LEAF)
+    Eidos::hash_double_word_in_domain(
+        &[procedure_root, procedure_root],
+        super::domain::KERNEL_EXPORT,
+    )
 }
 
 // KERNEL
@@ -102,7 +105,7 @@ impl KernelDescriptor {
         &self.0
     }
 
-    /// Builds the kernel tree from domain-separated hashes of sorted procedure digests, then zeros.
+    /// Builds the kernel tree from sorted identity export-pair hashes, followed by zeros.
     /// Empty and singleton kernels use two leaves; larger kernels use the next power of two.
     pub fn to_merkle_tree(&self) -> MerkleTree {
         let mut leaves: Vec<_> = self.0.iter().copied().map(hash_kernel_leaf).collect();

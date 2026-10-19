@@ -378,7 +378,10 @@ The declarations in `core::program::domain` are normative and are the source for
 | `0x0008` | 1       | `CURVE_PRECOMPILE`     | `Custom`       |
 | `0x0009` | 1       | `PVM_UINT_PIN_CLAIM`   | `Custom`       |
 | `0x000a` | 2       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
-| `0x000d` | 1       | `KERNEL_LEAF`          | `FeltSequence` |
+| `0x000d` | 1       | `KERNEL_EXPORT`        | `FeltSequence` |
+
+`KERNEL_EXPORT` hashes exactly eight Felts: an export key followed by its implementation MAST
+root. The current kernel uses identity pairs `D | D`, with the procedure digest in both words.
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar

@@ -13,11 +13,14 @@ Each accessed procedure supplies its path depth $d$ as private trace data.
 ## Kernel commitment
 
 `KernelDescriptor` sorts unique procedure digests by their byte encoding. Each digest $D_i$ is
-hashed as $L_i = H_{\mathrm{KERNEL\_LEAF}}(D_i)$, under the registered `KERNEL_LEAF` Felt-sequence
-domain. The payload is exactly four Felts: one compression block `D_i | zero`, initialized with
-`Eidos::init_chaining_word(KERNEL_LEAF, 4)`. These leaf hashes retain the procedure ordering and are
-followed by zero words up to `max(2, next_power_of_two(number_of_procedures))` leaves. Padding is
-raw zero, rather than a hashed procedure digest.
+hashed as $L_i = H_{\mathrm{KERNEL\_EXPORT}}(D_i \mathbin{\|} D_i)$, under the registered
+`KERNEL_EXPORT` Felt-sequence domain. The payload is exactly eight Felts: one compression block
+`D_i | D_i`, initialized with `Eidos::init_chaining_word(KERNEL_EXPORT, 8)`.
+The procedure digest is both the export key and the implementation digest. `KernelDescriptor`
+remains a digest list, and `SYSCALL` executes its existing digest target. These leaf hashes retain
+the procedure ordering and are followed by zero words up to
+`max(2, next_power_of_two(number_of_procedures))` leaves. Padding is raw zero, rather than a hashed
+procedure digest.
 
 Internal nodes use the standard VM Merkle hash. The empty kernel therefore has root
 `merge(zero, zero)`. The descriptor allows at most 255 exports, so $1 \le d \le 8$.
@@ -54,7 +57,7 @@ After:
 | `index` | Leaf index in the full canonical kernel tree |
 | `bit` | Least significant bit of `index` |
 | `depth` | Private path length, bound to the controller's final level |
-| `leaf[4]` | Domain-separated hash of `digest`, authenticated against $K$ |
+| `leaf[4]` | Domain-separated hash of the identity pair `digest | digest`, authenticated against $K$ |
 
 For example, if exports $a,b,c$ occupy indices 0,1,2 and calls use $a$ once and $c$ three times,
 the kernel table has two rows, with multiplicities 1 and 3 and indices 0 and 2. Each row requests
@@ -69,7 +72,7 @@ emits:
 public Chiplets inputs: K[4]
 
 for each active kernel row:
-    provide CompressionRequest(digest | zero, KernelLeafCV, leaf) count 1
+    provide CompressionRequest(digest | digest, KernelExportCV, leaf) count 1
     require Hasher.MerkleVerifyInit(start, index, bit, leaf)   count 1
     require Hasher.ReturnMerkleRoot(start + depth - 1, depth, K) count 1
     provide KernelRomCall(digest)                           count m
@@ -84,10 +87,10 @@ for each valid Eidos compression execution:
     require CompressionRequest(block, input_cv, output_cv) count compression_multiplicity
 ```
 
-`KernelLeafCV` is the fixed initial chaining word for `KERNEL_LEAF` and payload length four.
-The compression-link lookup binds the raw syscall digest to the leaf hash using one existing
-Eidos compression cycle. Kernel ROM rows provide the compression request directly, so leaf
-hashing needs no additional controller operation or bus.
+`KernelExportCV` is the fixed initial chaining word for `KERNEL_EXPORT` and payload length eight.
+The compression-link lookup binds both words of the identity export pair to the raw syscall
+digest, using one existing Eidos compression cycle. Kernel ROM rows provide the compression
+request directly, so leaf hashing needs no additional controller operation or bus.
 
 The existing hasher-controller constraints enforce the direction bit, index decomposition,
 Merkle hashing, and path termination. One controller row represents one tree level, which makes

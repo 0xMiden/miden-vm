@@ -6,10 +6,11 @@ use miden_air::{
 };
 use miden_core::{
     Felt, ONE, ZERO,
+    crypto::hash::Eidos,
     field::QuadFelt,
     mast::{BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt},
     operations::Operation,
-    program::{KernelDescriptor, Program, hash_kernel_leaf},
+    program::{KernelDescriptor, Program, domain::KERNEL_EXPORT},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -94,9 +95,10 @@ fn kernel_membership_authenticates_distinct_accessed_procedures() {
             chiplets.values[row * chiplets.width()..(row + 1) * chiplets.width()].borrow();
         assert_ne!(cols.kernel_rom().hasher_start, ZERO);
         assert_eq!(cols.kernel_rom().depth, Felt::from_u8(2));
+        let identity_pair: [Felt; 8] = core::array::from_fn(|i| cols.kernel_rom().root[i % 4]);
         assert_eq!(
             cols.kernel_rom().leaf,
-            hash_kernel_leaf(cols.kernel_rom().root.into()).into_elements(),
+            Eidos::hash_elements_in_domain(&identity_pair, KERNEL_EXPORT).into_elements(),
         );
     }
 }

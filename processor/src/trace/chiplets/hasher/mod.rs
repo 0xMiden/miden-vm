@@ -16,7 +16,7 @@ use miden_air::trace::{
 use miden_core::{
     chiplets::{eidos_compression, hasher::compress_state},
     crypto::hash::Eidos,
-    program::domain::KERNEL_LEAF,
+    program::domain::KERNEL_EXPORT,
     utils::RowMajorMatrix,
 };
 use rayon::prelude::*;
@@ -178,11 +178,12 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records a kernel leaf compression, whose lookup request comes from the kernel ROM row.
+    /// Records an identity export-pair compression requested by the kernel ROM row.
     pub(super) fn hash_kernel_leaf(&mut self, procedure_root: Digest) -> Digest {
         let mut state = [ZERO; STATE_WIDTH];
         state[..4].copy_from_slice(procedure_root.as_elements());
-        state[8..].copy_from_slice(Eidos::init_chaining_word(KERNEL_LEAF, 4).as_elements());
+        state[4..8].copy_from_slice(procedure_root.as_elements());
+        state[8..].copy_from_slice(Eidos::init_chaining_word(KERNEL_EXPORT, 8).as_elements());
         self.record_compression_request(&state, CompressionOutput::Packed);
         compress_state(&mut state);
         get_digest(&state)
