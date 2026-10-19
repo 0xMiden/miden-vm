@@ -5,9 +5,8 @@ use rand::{
     rand_core::{Infallible, TryRng, utils},
 };
 
-use super::{Felt, FeltRng};
 use crate::{
-    Word,
+    Felt, Word,
     field::ExtensionField,
     hash::eidos::{
         Eidos,
@@ -177,16 +176,6 @@ impl EidosRandomCoin {
         ];
         self.output = Eidos::hash_elements_in_domain(&input, RANDOM_COIN_OUTPUT);
         self.current = 0;
-    }
-}
-
-impl FeltRng for EidosRandomCoin {
-    fn draw_element(&mut self) -> Felt {
-        self.draw_basefield()
-    }
-
-    fn draw_word(&mut self) -> Word {
-        Word::new(core::array::from_fn(|_| self.draw_basefield()))
     }
 }
 
@@ -390,18 +379,6 @@ mod tests {
 
         let actual: [u32; OUTPUT_FELTS] = core::array::from_fn(|_| coin.random());
         assert_eq!(actual, [3_745_419_018, 1_592_641_853, 33_771_270, 3_071_911_292]);
-    }
-
-    #[test]
-    fn felt_rng_methods_follow_the_base_field_stream() {
-        let mut actual = EidosRandomCoin::new(seed());
-        let mut expected = actual;
-
-        assert_eq!(actual.draw_element(), expected.draw_basefield());
-        assert_eq!(
-            actual.draw_word(),
-            Word::new(core::array::from_fn(|_| expected.draw_basefield()))
-        );
     }
 
     #[test]
