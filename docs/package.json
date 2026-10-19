@@ -14,9 +14,9 @@
     "@docusaurus/theme-classic": "3.10.2",
     "@docusaurus/theme-mermaid": "3.10.2",
     "@mdx-js/react": "^3.1.1",
-    "@mermaid-js/layout-elk": "0.1.9",
-    "katex": "^0.18.2",
-    "mermaid": "^11.17.2",
+    "@mermaid-js/layout-elk": "1.0.1",
+    "katex": "^0.19.0",
+    "mermaid": "^12.1.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "rehype-katex": "^7",
@@ -26,6 +26,7 @@
     "@cmfcmf/docusaurus-search-local": "^2.0.1"
   },
   "overrides": {
+    "@mermaid-js/layout-elk": "$@mermaid-js/layout-elk",
     "mermaid": "$mermaid",
     "serialize-javascript": "^7.1.2",
     "sockjs": {
