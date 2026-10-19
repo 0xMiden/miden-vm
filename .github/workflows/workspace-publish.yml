@@ -24,6 +24,11 @@ on:
         required: false
         default: true
         type: boolean
+      skip_package_version_gate:
+        description: "Skip version/archive/semver validation for manual recovery. Requires an explicit package selection. Package verification and approval still run."
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -74,6 +79,7 @@ jobs:
       ref: ${{ github.sha }}
       packages: ${{ inputs.packages }}
       allow_existing: ${{ inputs.allow_existing }}
+      skip_checks: ${{ inputs.skip_package_version_gate }}
 
   create-draft:
     name: create draft release
@@ -327,6 +333,7 @@ jobs:
           mode: publish
           packages: ${{ join(fromJSON(needs.package-version-gate.outputs.packages), ' ') }}
           token: ${{ steps.auth.outputs.token }}
+          allow_existing: ${{ inputs.allow_existing }}
 
   publish-github-release:
     name: publish GitHub release
