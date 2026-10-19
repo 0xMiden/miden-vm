@@ -26,6 +26,7 @@
     "@cmfcmf/docusaurus-search-local": "^2.0.1"
   },
   "overrides": {
+    "@mermaid-js/layout-elk": "$@mermaid-js/layout-elk",
     "mermaid": "$mermaid",
     "serialize-javascript": "^7.1.2",
     "sockjs": {
