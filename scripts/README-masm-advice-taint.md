@@ -19,11 +19,11 @@ bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 
 `tools/midenc-masm-lint` is a separate Cargo workspace with its own manifest and
 lockfile. Its Rust toolchain is pinned. The compiler dependencies use commit
-`5d45ed62b2f3ba390cc212e8a4519b2896941af9` from the published compiler fixes branch.
+`51c31fdbf4473b049512961fc1d9f6f2f388edee` from the compiler's `next` branch.
 That compiler retains its published VM 0.35 and HIR type 0.17 dependencies.
 Existing VM workspace dependencies and lockfiles are unchanged.
 
-Update the pin and tool lockfile after the compiler PR merges if its SHA changes.
+Update the pin and tool lockfile together when adopting compiler changes.
 
 `make test-masm-advice-lint` runs the renderer test and CLI fixtures.
 
