@@ -40,10 +40,12 @@ blog and pages plugins even though this preview does not enable them.
 
 Keep live Mermaid rendering. The current Docusaurus build also requires
 `@mermaid-js/layout-elk` to resolve its optional layout import, even though the
-existing diagram uses the default layout. Local search remains enabled.
+existing diagram uses the default layout. The `$@mermaid-js/layout-elk` override
+keeps Docusaurus on the direct dependency's version because its optional peer
+range still requests ELK 0.1.9. Local search remains enabled.
 
 KaTeX CSS and fonts come from the locked npm package. The `$katex` override also
-keeps Mermaid and `rehype-katex` on the patched KaTeX 0.18 release line. Mermaid
+keeps Mermaid and `rehype-katex` on the patched KaTeX 0.19 release line. Mermaid
 resolves to the direct dependency's version range through the `$mermaid`
 override.
 
