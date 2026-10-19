@@ -43,6 +43,7 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 pub fn build_logup_aux_trace<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
+    public_values: &[F],
     challenges: &[EF],
 ) -> (RowMajorMatrix<EF>, Vec<EF>)
 where
@@ -52,7 +53,13 @@ where
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
     let preprocessed = air.preprocessed_trace();
-    build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
+    build_logup_aux_trace_with_preprocessed(
+        air,
+        main,
+        preprocessed.as_ref(),
+        public_values,
+        challenges,
+    )
 }
 
 /// Build a LogUp auxiliary trace from a setup trace already held by the prover.
@@ -63,6 +70,7 @@ pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
+    public_values: &[F],
     challenges: &[EF],
 ) -> (RowMajorMatrix<EF>, Vec<EF>)
 where
@@ -115,6 +123,7 @@ where
             main,
             preprocessed,
             &periodic,
+            public_values,
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
         );
@@ -618,10 +627,11 @@ mod tests {
             &main,
             Some(&preprocessed),
             &air.periodic_columns(),
+            &[],
             &lookup_challenges,
         );
         let (expected, sigma_prime) = accumulate_slow(&fractions);
-        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
+        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &[], &challenges);
         let borrowed = air.build_aux_trace_with_preprocessed(
             &main,
             Some(&preprocessed),

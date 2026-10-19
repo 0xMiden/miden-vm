@@ -367,7 +367,7 @@ The declarations in `core::program::domain` are normative and are the source for
 
 | Local ID | Version | Rust domain            | Encoding       |
 |---------:|--------:|------------------------|----------------|
-| `0x0000` | 1       | `KERNEL_COMMITMENT`    | `FeltSequence` |
+| `0x0000` | 1       | `KERNEL_COMMITMENT` (reserved legacy sequential hash) | `FeltSequence` |
 | `0x0001` | 1       | `EXECUTION_CLAIM`      | `FeltSequence` |
 | `0x0002` | 1       | `PROOF_REQUEST`        | `FeltSequence` |
 | `0x0003` | 1       | `DEFERRED_AND`         | `Custom`       |
@@ -378,6 +378,7 @@ The declarations in `core::program::domain` are normative and are the source for
 | `0x0008` | 1       | `CURVE_PRECOMPILE`     | `Custom`       |
 | `0x0009` | 1       | `PVM_UINT_PIN_CLAIM`   | `Custom`       |
 | `0x000a` | 2       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
+| `0x000d` | 1       | `KERNEL_LEAF`          | `FeltSequence` |
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar

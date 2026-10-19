@@ -15,6 +15,7 @@ use crate::{
 
 mod chiplets;
 mod decoder;
+mod kernel_membership;
 mod lookup;
 mod lookup_harness;
 mod range;

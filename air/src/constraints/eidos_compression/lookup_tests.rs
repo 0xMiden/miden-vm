@@ -125,6 +125,7 @@ fn lookup_fractions(trace: &RowMajorMatrix<Felt>) -> LookupFractions<Felt, QuadF
         trace,
         None,
         &get_periodic_column_values(),
+        &[],
         &lookup_challenges(),
     )
 }
@@ -737,6 +738,7 @@ fn aead_output_batch_binds_both_pairs_on_every_footer() {
         &honest_matrix,
         None,
         &periodic,
+        &[],
         &challenges,
     );
 

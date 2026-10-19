@@ -301,7 +301,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
+        build_logup_aux_trace_with_preprocessed(self, main, preprocessed, &[], challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -452,7 +452,7 @@ pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&BytePairLutAir, main, challenges)
+    build_logup_aux_trace(&BytePairLutAir, main, &[], challenges)
 }
 
 #[cfg(test)]

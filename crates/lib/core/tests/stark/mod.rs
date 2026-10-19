@@ -276,7 +276,6 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         };
         format!(
             "
-        use miden::core::mem
         use miden::core::sys
         use miden::core::stark::utils
         use miden::core::stark::verifier
@@ -290,35 +289,11 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         use miden::core::sys::vm::public_inputs
         use miden::core::sys::vm::aux_trace
 
-        const KERNEL_COMMITMENT_OFFSET = 4
-        const KERNEL_DOMAIN_TAG = 0x01000001
-        const FELTS_PER_KERNEL_DIGEST = 4
-        const MAX_NUM_KERNEL_PROCEDURES = 255
-        # Mirrors the private `vm::materialize_kernel_witness`; any drift fails the control below.
-        proc materialize_kernel_witness
-            padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
-            adv.push_mapvaln
-            adv_push
-            u32assert.err=\"kernel witness length must fit in a u32\"
-            dup u32mod.FELTS_PER_KERNEL_DIGEST
-            assertz.err=\"kernel witness length must be word-aligned\"
-            div.FELTS_PER_KERNEL_DIGEST
-            dup u32lte.MAX_NUM_KERNEL_PROCEDURES
-            assert.err=\"number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES\"
-            dup exec.layout::num_kernel_procedures_ptr mem_store
-            exec.layout::kernel_witness_ptr swap
-            push.KERNEL_DOMAIN_TAG
-            exec.mem::pipe_words_to_memory_in_domain
-            movup.4 drop
-            assert_eqw.err=\"fetched kernel digests do not hash to the claim's kernel commitment\"
-        end
-
         begin
             exec.layout::claim_commitment_ptr mem_storew_le
             exec.layout::claim_ptr exec.claim::materialize_claim
 
             exec.utils::load_security_params
-            exec.materialize_kernel_witness
             exec.public_inputs::stage_boundary_inputs
             exec.vm::load_air_context
             {routing_mutation}
@@ -899,21 +874,13 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
         .chain([u64::from(AND8_LOOKUP_LOG_HEIGHT)])
         .max()
         .expect("the MVM relation has AIR instances");
-    let kernel_commitment = claim_kernel_commitment(data);
-    let num_kernel_procedures = data
-        .advice_map
-        .iter()
-        .find(|(key, _)| *key == kernel_commitment)
-        .map(|(_, values)| values.len() / WORD_SIZE)
-        .expect("the authenticated kernel witness must be present");
-
     let mut expected = vec![
         u64::from(security::LOOKUP_POW_BITS),
         u64::from(security::AIR_SHAPE.num_composed_constraints),
         u64::from(security::AIR_SHAPE.max_constraint_degree),
         u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
         u64::from(security::LOOKUP_SHAPE.max_message_width),
-        u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures as u64,
+        u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS),
         u64::from(security::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         params.num_queries() as u64,
@@ -928,7 +895,7 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
 
 /// Derives the expected proof order from the log heights carried in the proof stream.
 ///
-/// Proof-stream layout: 4 security parameters, the 4-felt deferred root, then the three
+/// Proof-stream layout: 4 security parameters, the 4-felt deferred root, then three
 /// execution-dependent log heights (the And8Lookup height is verifier-fixed).
 fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
     ProofOrder::from_instance_log_heights(&[
@@ -964,83 +931,17 @@ fn each_security_parameter_is_transcript_bound() {
     }
 }
 
-/// The fetched kernel digests must hash to the claim's K before the outer-LogUp fold uses them.
-/// Check the explicit authentication failure because the later boundary check also rejects
-/// tampered digests.
+/// Recursive verification needs only K, without private procedure digests or tree depth.
 #[test]
-fn tampered_kernel_witness_is_rejected() {
-    let mut data = generate_recursive_verifier_data(
+fn recursive_advice_omits_kernel_descriptor() {
+    let data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,
         fib_stack_inputs(),
         Some(KERNEL_EVEN_NUM_PROC),
     );
     let k = claim_kernel_commitment(&data);
-    let witness = advice_map_value_mut(&mut data, k);
-    // Flip one felt of the first digest while preserving the witness length.
-    witness[0] = Felt::new_unchecked(witness[0].as_canonical_u64() ^ 1);
-
-    let source = vm_verify_proof_program();
-    let test = build_test!(
-        source.as_str(),
-        &data.initial_stack(),
-        data.advice_stack(),
-        data.store.clone(),
-        data.advice_map.clone()
-    );
-    expect_assert_error_code_from_msg!(
-        test,
-        "fetched kernel digests do not hash to the claim's kernel commitment"
-    );
-}
-
-/// `vm::verify_proof` derives the kernel procedure count from the advice-map value length and
-/// rejects a witness containing more than `KernelDescriptor::MAX_NUM_PROCEDURES` digests before
-/// copying it.
-#[test]
-fn vm_verify_proof_rejects_oversized_kernel_witness() {
-    let mut data = generate_recursive_verifier_data(
-        EXAMPLE_FIB_KERNEL_SMALL,
-        fib_stack_inputs(),
-        Some(KERNEL_EVEN_NUM_PROC),
-    );
-    let k = claim_kernel_commitment(&data);
-    *advice_map_value_mut(&mut data, k) =
-        vec![Felt::ZERO; (KernelDescriptor::MAX_NUM_PROCEDURES + 1) * WORD_SIZE];
-
-    let source = vm_verify_proof_program();
-    let test = build_test!(
-        source.as_str(),
-        &data.initial_stack(),
-        data.advice_stack(),
-        data.store.clone(),
-        data.advice_map.clone()
-    );
-    expect_assert_error_code_from_msg!(
-        test,
-        "number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
-    );
-}
-
-/// A kernel witness is a list of four-felt procedure digests.
-#[test]
-fn vm_verify_proof_rejects_misaligned_kernel_witness() {
-    let mut data = generate_recursive_verifier_data(
-        EXAMPLE_FIB_KERNEL_SMALL,
-        fib_stack_inputs(),
-        Some(KERNEL_EVEN_NUM_PROC),
-    );
-    let k = claim_kernel_commitment(&data);
-    advice_map_value_mut(&mut data, k).push(Felt::ZERO);
-
-    let source = vm_verify_proof_program();
-    let test = build_test!(
-        source.as_str(),
-        &data.initial_stack(),
-        data.advice_stack(),
-        data.store.clone(),
-        data.advice_map.clone()
-    );
-    expect_assert_error_code_from_msg!(test, "kernel witness length must be word-aligned");
+    assert!(!data.advice_map.iter().any(|(key, _)| *key == k));
+    run_recursive_verifier(&data);
 }
 
 /// The claim preimage is untrusted advice and must match the caller-provided commitment.
@@ -1202,9 +1103,9 @@ fn read_word(output: &miden_processor::ExecutionOutput, addr: u32) -> [Felt; WOR
 }
 
 /// Step-I transcript parity: the MASM Fiat-Shamir schedule (relation digest + PCS params via
-/// `init_seed`, preprocessed commitment, `[CLAIM_HASH | D]`, AIR shape as five single felts,
-/// main-trace commitment) squeezes the same word as the Rust Eidos challenger fed the identical
-/// observation stream.
+/// `init_seed`, preprocessed commitment, `[CLAIM_HASH | D]`, AIR shape as five single
+/// felts, main-trace commitment) squeezes the same word as the Rust Eidos challenger fed the
+/// identical observation stream.
 #[test]
 fn public_input_transcript_matches_rust_challenger() {
     const SQUEEZED_WORD_PTR: u32 = 1000;
@@ -1589,14 +1490,8 @@ fn eidos_hash_elements_advice_map_loop_matches_masm_compress_loop() {
 // REDUCED INPUTS TESTS
 // ================================================================================================
 
-#[rstest]
-#[case(0)]
-#[case(1)]
-#[case(2)]
-#[case(3)]
-#[case(8)]
-#[case(KernelDescriptor::MAX_NUM_PROCEDURES)]
-fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize) {
+#[test]
+fn boundary_inputs_and_outer_logup_boundary() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
@@ -1605,20 +1500,14 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     let stack_outputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
     let deferred_root: [u64; 4] = array::from_fn(|_| rng.next_u64());
-    let kernel_digest_felts = generate_kernel_procedure_digests(&mut rng, num_kernel_procedures);
+    let kernel_root = Word::from([11_u32, 22, 33, 44]);
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
-    // 2) Initial operand stack: the kernel procedure count used by this test's setup code.
-    let initial_stack = vec![num_kernel_procedures as u64];
-
-    // 3) Build the advice stack: kernel digests (4N), the claim encoding (P, K, I, O), the deferred
-    //    root, and the aux randomness used by `compute_outer_logup_correction`.
-    let digest_felts: Vec<Felt> =
-        kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
+    // Stage P | K | I | O, D, and the aux randomness
+    // used by `compute_outer_logup_correction`.
     let mut claim_elements = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
     claim_elements[..WORD_SIZE].copy_from_slice(&program_digest.map(Felt::new_unchecked));
-    claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&expected_kernel_h);
+    claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(kernel_root.as_elements());
     claim_elements[2 * WORD_SIZE..6 * WORD_SIZE]
         .copy_from_slice(&stack_inputs.map(Felt::new_unchecked));
     claim_elements[6 * WORD_SIZE..].copy_from_slice(&stack_outputs.map(Felt::new_unchecked));
@@ -1628,15 +1517,14 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             .map(|felt| felt.as_canonical_u64());
 
     let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&program_digest);
-    advice_stack.extend(expected_kernel_h.iter().map(Felt::as_canonical_u64));
+    advice_stack.extend(kernel_root.iter().map(Felt::as_canonical_u64));
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
     advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
-    // 4) Populate verifier memory, stage the statement inputs, run process_public_inputs, then
+    // 2) Populate verifier memory, stage the statement inputs, run process_public_inputs, then
     //    emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
     //    `generate_aux_randomness` samples it) and compute `c_total`.
     let source = format!(
@@ -1649,18 +1537,10 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
         {COPY_ADVICE_TO_MEM}
 
         begin
-            # Initial stack: [num_kernel_procedures].
-
-            # Copy kernel digests (4·num_kernel_procedures felts) from advice into the witness
-            # region. Build [dst=KERNEL_WITNESS_PTR, count=4N].
-            dup mul.4 exec.layout::kernel_witness_ptr
-            exec.copy_advice_to_mem
-
             # Copy the full claim encoding P | K | I | O into verifier-owned memory.
             push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr
             exec.copy_advice_to_mem
 
-            exec.layout::num_kernel_procedures_ptr mem_store
             exec.public_inputs::stage_boundary_inputs
 
             push.10 exec.layout::set_core_trace_length_log
@@ -1681,7 +1561,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
         "
     );
 
-    let test = build_test!(source.as_str(), &initial_stack, &advice_stack);
+    let test = build_test!(source.as_str(), &[], &advice_stack);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
     use miden_processor::ContextId;
@@ -1701,7 +1581,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
     let pi_ptr = read_elem(PUBLIC_INPUTS_ADDRESS_PTR) as u32;
 
-    // 4) program_digest and deferred_root pass through to the boundary-inputs block.
+    // 3) program_digest and deferred_root pass through to the boundary-inputs block.
     for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
             read_elem(BOUNDARY_INPUTS_PTR + i as u32),
@@ -1709,16 +1589,19 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             "boundary-inputs window felt {i} mismatch"
         );
     }
-    // 5) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).
+    // 4) Public inputs hold Core stack I/O followed by Chiplets K as EF elements ([val, 0]).
     for (i, &v) in stack_inputs.iter().chain(stack_outputs.iter()).enumerate() {
         assert_eq!(read_elem(pi_ptr + 2 * i as u32), v, "FLPI slot {i} value mismatch");
         assert_eq!(read_elem(pi_ptr + 2 * i as u32 + 1), 0, "FLPI slot {i} high coord");
     }
 
-    // 6) Verify the outer-LogUp boundary correction c_total at C_TOTAL_PTR:
+    for (i, value) in kernel_root.iter().copied().enumerate() {
+        assert_eq!(read_elem(pi_ptr + 64 + 2 * i as u32), value.as_canonical_u64());
+        assert_eq!(read_elem(pi_ptr + 65 + 2 * i as u32), 0);
+    }
+    // 5) Verify the outer-LogUp boundary correction c_total at C_TOTAL_PTR:
     //
-    //     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))
-    //             + 1 / ((α + 2γ) + msg(program_digest))
+    //     c_total = 1 / ((α + 2γ) + msg(program_digest))
     //             + 1 / (α + 3γ)
     //             − 1 / ((α + 3γ) + msg(deferred_root))
     //
@@ -1739,20 +1622,10 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             .fold(QuadFelt::ZERO, |acc, m| acc * beta + QuadFelt::from(Felt::new_unchecked(*m)))
     };
 
-    #[allow(clippy::chunks_exact_to_as_chunks)]
-    let kernel_corr = kernel_digest_felts
-        .as_chunks::<WORD_SIZE>()
-        .0
-        .iter()
-        .map(|digest| alpha + gamma + msg(digest))
-        .fold(QuadFelt::ZERO, |acc, term| {
-            acc + term.try_inverse().expect("zero kernel ROM denominator")
-        });
     let d_bh = alpha + gamma.double() + msg(&program_digest);
     let prefix_lp = alpha + gamma * QuadFelt::from_u8(3);
     let d_lpf = prefix_lp + msg(&deferred_root);
-    let expected_c_total = kernel_corr
-        + d_bh.try_inverse().expect("zero block-hash denominator")
+    let expected_c_total = d_bh.try_inverse().expect("zero block-hash denominator")
         + prefix_lp.try_inverse().expect("zero log-deferred init denominator")
         - d_lpf.try_inverse().expect("zero log-deferred final denominator");
     let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
@@ -1760,12 +1633,12 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     assert_eq!(
         read_elem(C_TOTAL_PTR),
         expected[0].as_canonical_u64(),
-        "c_total coord 0 mismatch (nk={num_kernel_procedures})"
+        "c_total coord 0 mismatch"
     );
     assert_eq!(
         read_elem(C_TOTAL_PTR + 1),
         expected[1].as_canonical_u64(),
-        "c_total coord 1 mismatch (nk={num_kernel_procedures})"
+        "c_total coord 1 mismatch"
     );
 }
 
@@ -1907,14 +1780,6 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
 
 // HELPERS
 // ===============================================================================================
-
-/// Generates kernel-procedure digest felts: 4 canonical felts per digest.
-fn generate_kernel_procedure_digests<R: Rng>(
-    rng: &mut R,
-    num_kernel_procedures: usize,
-) -> Vec<u64> {
-    (0..num_kernel_procedures * WORD_SIZE).map(|_| rng.next_u64()).collect()
-}
 
 fn max_kernel_source() -> String {
     let mut source = KERNEL_SINGLE_PROC.to_owned();

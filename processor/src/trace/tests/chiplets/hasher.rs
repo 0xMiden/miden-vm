@@ -457,7 +457,7 @@ fn mpverify_hasher_bus() {
             row,
             &HasherMsg::merkle_verify_init(helper0, mp_index, direction_bit, leaf_word),
         );
-        exp.remove(row, &HasherMsg::return_hash(return_addr, old_root));
+        exp.remove(row, &HasherMsg::return_merkle_root(return_addr, mp_depth, old_root));
         request_count += 2;
     }
 
@@ -481,10 +481,7 @@ fn mpverify_hasher_bus() {
                 mp_input_count += 1;
             },
             HasherResponseKind::ReturnHash => {
-                exp.add(
-                    usize::from(idx),
-                    &HasherMsg::return_hash(addr, return_digest_from_controller_row(main, idx)),
-                );
+                exp.add(usize::from(idx), &return_message_from_controller_row(main, idx));
                 return_count += 1;
             },
             _ => {},
@@ -545,9 +542,9 @@ fn mrupdate_hasher_bus() {
             - ONE;
 
         exp.remove(row, &HasherMsg::merkle_old_init(helper0, mr_index, direction_bit, old_leaf));
-        exp.remove(row, &HasherMsg::return_hash(old_return, old_root));
+        exp.remove(row, &HasherMsg::return_merkle_root(old_return, mr_depth, old_root));
         exp.remove(row, &HasherMsg::merkle_new_init(new_init, mr_index, direction_bit, new_leaf));
-        exp.remove(row, &HasherMsg::return_hash(new_return, new_root));
+        exp.remove(row, &HasherMsg::return_merkle_root(new_return, mr_depth, new_root));
         request_count += 4;
     }
 
@@ -573,10 +570,7 @@ fn mrupdate_hasher_bus() {
                 mu_count += 1;
             },
             HasherResponseKind::ReturnHash => {
-                exp.add(
-                    usize::from(idx),
-                    &HasherMsg::return_hash(addr, return_digest_from_controller_row(main, idx)),
-                );
+                exp.add(usize::from(idx), &return_message_from_controller_row(main, idx));
                 return_count += 1;
             },
             _ => {},
@@ -617,6 +611,16 @@ fn return_digest_from_controller_row(main: &MainTrace, row: RowIndex) -> [Felt; 
         ctrl.merkle_digest()
     } else {
         ctrl.hash_cv()
+    }
+}
+
+fn return_message_from_controller_row(main: &MainTrace, row: RowIndex) -> HasherMsg<Felt> {
+    let addr = main.chiplet_clk(row);
+    let digest = return_digest_from_controller_row(main, row);
+    if main.chiplet_cols(row).controller_merkle_or_padding() == ONE {
+        HasherMsg::return_merkle_root(addr, main.chiplet_merkle_level(row) + ONE, digest)
+    } else {
+        HasherMsg::return_hash(addr, digest)
     }
 }
 

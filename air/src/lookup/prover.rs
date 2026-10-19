@@ -33,6 +33,7 @@ where
     main: RowWindow<'a, F>,
     preprocessed: RowWindow<'a, F>,
     periodic_values: &'a [F],
+    public_values: &'a [F],
     challenges: &'a Challenges<EF>,
     /// Flat fractions and per-column counts shared across the collected rows.
     fractions: &'a mut LookupFractions<F, EF>,
@@ -49,6 +50,7 @@ where
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
+    /// - `public_values`: this AIR's public inputs; pass `&[]` when unused by its lookups.
     /// - `challenges`: precomputed LogUp challenges (shared across every row; the caller builds
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only to validate the fraction-buffer width; the builder
@@ -63,6 +65,7 @@ where
         main: RowWindow<'a, F>,
         preprocessed: RowWindow<'a, F>,
         periodic_values: &'a [F],
+        public_values: &'a [F],
         challenges: &'a Challenges<EF>,
         air: &A,
         fractions: &'a mut LookupFractions<F, EF>,
@@ -76,6 +79,7 @@ where
             main,
             preprocessed,
             periodic_values,
+            public_values,
             challenges,
             fractions,
             column_idx: 0,
@@ -112,6 +116,7 @@ where
 /// - `preprocessed_trace`: verifier-known trace for AIRs that declare preprocessed columns. Its
 ///   height must match `main_trace`; pass `None` when the AIR has no preprocessed columns.
 /// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.
+/// - `public_values`: this AIR's public inputs; pass `&[]` when unused by its lookups.
 /// - `challenges`: precomputed LogUp challenges (shared across every row).
 ///
 /// # Panics
@@ -124,6 +129,7 @@ pub fn build_lookup_fractions<A, F, EF>(
     main_trace: &RowMajorMatrix<F>,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
     periodic_columns: &[Vec<F>],
+    public_values: &[F],
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
 where
@@ -139,6 +145,7 @@ where
             main_trace,
             preprocessed_trace,
             periodic_columns,
+            public_values,
             challenges,
             rows,
         )
@@ -243,6 +250,7 @@ pub(super) fn build_lookup_fraction_chunk<A, F, EF>(
     main_trace: &RowMajorMatrix<F>,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
     periodic_columns: &[Vec<F>],
+    public_values: &[F],
     challenges: &Challenges<EF>,
     rows: Range<usize>,
 ) -> LookupFractions<F, EF>
@@ -286,6 +294,7 @@ where
             window,
             preprocessed_window,
             &periodic_row,
+            public_values,
             challenges,
             air,
             &mut chunk,
@@ -310,6 +319,7 @@ where
     type VarEF = EF;
 
     type PeriodicVar = F;
+    type PublicVar = F;
 
     type MainWindow = RowWindow<'a, F>;
     type PreprocessedWindow = RowWindow<'a, F>;
@@ -325,6 +335,10 @@ where
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
         &self.preprocessed
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.public_values
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -727,6 +741,7 @@ mod tests {
                 window,
                 preprocessed,
                 &periodic_values,
+                &[],
                 &challenges,
                 &air,
                 &mut fractions,
@@ -881,6 +896,7 @@ mod tests {
             &main,
             None,
             &periodic,
+            &[],
             &challenges,
             rows.clone(),
         );
@@ -920,7 +936,7 @@ mod tests {
             1,
         );
 
-        let fractions = build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
+        let fractions = build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &[], &challenges);
 
         assert_eq!(fractions.counts(), expected_counts);
         assert_eq!(fractions.fractions().len(), expected_tags.len());

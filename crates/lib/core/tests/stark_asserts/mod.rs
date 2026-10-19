@@ -733,15 +733,19 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         // Twelve live position cells, followed by one ID per proof position.
         ("pvm/layout.masm", "PROOF_ORDER_POSITIONS_PTR", 0, Until("PROOF_ORDER_IDS_PTR")),
         ("pvm/layout.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(12)),
-        ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
-        ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
+        ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Until("BUS_GAMMA_PTR")),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
         ("vm/layout.masm", "C_TOTAL_PTR", 0, Fixed(4)),
         ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, Fixed(4)),
         ("vm/layout.masm", "CLAIM_PTR", 0, Fixed(40)),
         ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, Fixed(4)),
         ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, Fixed(8)),
-        ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, Fixed(1020)),
+        (
+            "vm/layout.masm",
+            "CONTROL_FRAME_RESERVED_PTR",
+            0,
+            Until("OOD_SCATTER_TABLE_PTR"),
+        ),
         // Out-of-domain scatter table: row base, per-position dispatch pairs, and the `pipe_k`
         // digests, followed by the two proof-order maps inside the same 64-felt reserve. Sits
         // immediately after the VM control frame, so it is outside the tiling above.
@@ -1113,16 +1117,6 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     assert_tiled_frame(&relation_region_refs, "vm/layout.masm", GENERIC_FRAME_END, VM_FRAME_END);
     assert_tiled_frame(&relation_region_refs, "vm/layout.masm", VM_ACE_READ_START, PVM_FRAME_START);
     assert_tiled_frame(&relation_region_refs, "pvm/layout.masm", PVM_FRAME_START, pvm_frame_end);
-
-    let kernel_witness = relation_regions
-        .iter()
-        .find(|region| region.source == "vm/layout.masm" && region.name == "KERNEL_WITNESS_PTR")
-        .expect("VM kernel witness region is declared");
-    assert_eq!(
-        kernel_witness.hi - kernel_witness.lo + 1,
-        (miden_core::program::KernelDescriptor::MAX_NUM_PROCEDURES * 4) as u64,
-        "the VM kernel witness must hold the maximum number of procedure digests"
-    );
 }
 
 /// The relation's named height setters must write consecutive cells of the generic

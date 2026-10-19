@@ -171,6 +171,7 @@ where
         (0..layout.preprocessed_width).map(|_| rng.random()).collect();
     let preprocessed_next: Vec<Felt> =
         (0..layout.preprocessed_width).map(|_| rng.random()).collect();
+    let public_values: Vec<Felt> = (0..layout.num_public_values).map(|_| rng.random()).collect();
     let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| rng.random()).collect();
     let alpha = QuadFelt::new(rng.random());
     let beta = QuadFelt::new(rng.random());
@@ -182,6 +183,7 @@ where
         preprocessed_current: &preprocessed_current,
         preprocessed_next: &preprocessed_next,
         periodic: &periodic,
+        public_values: &public_values,
         alpha,
         beta,
     };
@@ -224,6 +226,7 @@ struct RowValuation<'r> {
     preprocessed_current: &'r [Felt],
     preprocessed_next: &'r [Felt],
     periodic: &'r [Felt],
+    public_values: &'r [Felt],
     /// `Challenge[0]` in any `SymbolicExpressionExt` tree.
     alpha: QuadFelt,
     /// `Challenge[1]` in any `SymbolicExpressionExt` tree.
@@ -253,9 +256,7 @@ impl<'r> RowValuation<'r> {
                 BaseEntry::Main { offset } | BaseEntry::Preprocessed { offset } => {
                     panic!("unexpected {entry:?} offset {offset} in LookupAir::eval")
                 },
-                // LookupBuilder doesn't expose public values, and LookupAir::eval can't
-                // construct these leaves.
-                BaseEntry::Public => panic!("unexpected {entry:?} leaf in LookupAir::eval"),
+                BaseEntry::Public => self.public_values[*index],
             },
             // Selector leaves are only produced by `AirBuilder::is_first_row` / etc.,
             // which LookupBuilder does not expose.
@@ -353,6 +354,7 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
     type VarEF = SymbolicVariableExt<Felt, QuadFelt>;
 
     type PeriodicVar = SymbolicVariable<Felt>;
+    type PublicVar = SymbolicVariable<Felt>;
 
     type MainWindow = <Inner as AirBuilder>::MainWindow;
     type PreprocessedWindow = <Inner as AirBuilder>::PreprocessedWindow;
@@ -368,6 +370,10 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
         self.ab.preprocessed()
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.ab.public_values()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

@@ -225,7 +225,7 @@ fn forged_merkle_depths_emit_unbalanced_lookup_requests() {
             exp.remove(usize::from(op_row), message);
         }
         let return_addr = helper0 + forged_depth * CONTROLLER_ROWS_PER_HASHER_OP_FELT - Felt::ONE;
-        let return_message = HasherMsg::return_hash(return_addr, root);
+        let return_message = HasherMsg::return_merkle_root(return_addr, forged_depth, root);
         exp.remove(usize::from(op_row), &return_message);
         log.assert_contains(&exp);
         for message in &messages {

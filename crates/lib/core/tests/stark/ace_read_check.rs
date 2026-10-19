@@ -62,6 +62,15 @@ pub(super) fn assert_proof_stream_read_sections(
         );
     }
 
+    for (i, value) in claim[4..8].iter().copied().enumerate() {
+        assert_eq!(
+            read(public_ptr + 64 + 2 * i as u32),
+            Felt::new_unchecked(value),
+            "Chiplets input {i} differs from K"
+        );
+        assert_eq!(read(public_ptr + 65 + 2 * i as u32), Felt::ZERO);
+    }
+
     for (memory, stream) in [
         (MAIN_TRACE_COM_PTR, MAIN_OFFSET),
         (AUX_TRACE_COM_PTR, AUX_COMMIT_OFFSET),

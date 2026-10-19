@@ -8,7 +8,7 @@ use miden_air::{
 };
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
-    program::ExecutionClaim,
+    program::{ExecutionClaim, KernelDescriptor, Program},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -68,7 +68,7 @@ pub struct ExecutionWitness {
 
 impl ExecutionWitness {
     pub(crate) fn from_execution(
-        program_info: ProgramInfo,
+        program: &Program,
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         trace: TraceReplay,
@@ -82,7 +82,8 @@ impl ExecutionWitness {
         let precompile_root =
             precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
-            program_info,
+            program_root: program.hash(),
+            kernel: program.kernel().clone(),
             stack_inputs,
             stack_outputs,
             trace,
@@ -223,7 +224,8 @@ impl Deserializable for ExecutionWitness {
 /// versioned [`ExecutionWitness`] envelope for transport or persistence.
 #[derive(Debug)]
 pub struct VmWitness {
-    program_info: ProgramInfo,
+    program_root: Word,
+    kernel: KernelDescriptor,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     trace: TraceReplay,
@@ -233,8 +235,9 @@ pub struct VmWitness {
 impl VmWitness {
     /// Returns the public claim associated with this witness.
     pub fn claim(&self) -> ExecutionClaim {
-        ExecutionClaim::from_program_info(
-            self.program_info.clone(),
+        ExecutionClaim::new(
+            self.program_root,
+            self.kernel.commitment(),
             self.stack_inputs,
             self.stack_outputs,
         )
@@ -281,7 +284,8 @@ impl VmWitness {
 
 impl Serializable for VmWitness {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.program_info.write_into(target);
+        self.program_root.write_into(target);
+        self.kernel.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
         self.trace.write_into(target);
@@ -292,7 +296,8 @@ impl Serializable for VmWitness {
 impl Deserializable for VmWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            program_info: ProgramInfo::read_from(source)?,
+            program_root: Word::read_from(source)?,
+            kernel: KernelDescriptor::read_from(source)?,
             stack_inputs: StackInputs::read_from(source)?,
             stack_outputs: StackOutputs::read_from(source)?,
             trace: TraceReplay::read_from(source)?,
@@ -452,10 +457,10 @@ impl VmTrace {
     pub fn check_constraints(&self) {
         let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
             self.main_trace.clone_air_matrices();
-        let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
+        let (public_values, aux_inputs) = self.public_inputs().to_air_inputs();
 
         let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
-            Statement::new(MidenMultiAir::new(), vec![(0, public_values)], kernel_felts)
+            Statement::new(MidenMultiAir::new(), public_values, aux_inputs)
                 .expect("statement construction failed");
         let prover_statement = ProverStatement::new(
             statement,

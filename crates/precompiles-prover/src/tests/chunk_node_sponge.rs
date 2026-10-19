@@ -48,7 +48,7 @@ where
 {
     let periodic = air.periodic_columns();
     let preprocessed = air.preprocessed_trace();
-    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges)
+    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, &[], challenges)
 }
 
 /// Cross-multiply every row-local lookup column from the prover's raw fractions.

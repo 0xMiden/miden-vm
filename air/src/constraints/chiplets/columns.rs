@@ -457,7 +457,7 @@ const _: () = {
 // KERNEL ROM COLUMNS
 // ================================================================================================
 
-/// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
+/// Kernel ROM chiplet columns (13 columns), viewed from `chiplets[5..18]`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct KernelRomCols<T> {
@@ -465,6 +465,16 @@ pub struct KernelRomCols<T> {
     pub multiplicity: T,
     /// Kernel procedure root digest.
     pub root: [T; WORD_SIZE],
+    /// Start address of this procedure's Merkle verification in the hasher controller.
+    pub hasher_start: T,
+    /// Index in the canonical padded kernel tree.
+    pub leaf_index: T,
+    /// First direction bit, bound by the Merkle init lookup.
+    pub direction_bit: T,
+    /// Path length, bound to the final controller row through the Merkle return message.
+    pub depth: T,
+    /// Domain-separated kernel leaf hash of the procedure root.
+    pub leaf: [T; WORD_SIZE],
 }
 
 // PERIODIC COLUMNS

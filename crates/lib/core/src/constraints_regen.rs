@@ -17,7 +17,7 @@ use miden_air::{
     },
     config::{self, relation_digest},
 };
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::stark::{
     Preprocessed, QuotientRecompositionInputs, StarkConfig,
     air::{BaseAir, LiftedAir},
@@ -111,6 +111,11 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
     let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
+    let public_span = input_layout_extent(
+        require_input_index(input_layout, InputKey::Public(0))?,
+        require_input_index(input_layout, InputKey::AuxRandBeta)?,
+        "public inputs",
+    )?;
     let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
     let vm_layout = render_vm_layout(&vm_geometry)?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
@@ -118,6 +123,13 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
     let preprocessed_commitments = compute_preprocessed_commitments(relation_digest)?;
 
+    let mut public_inputs = read_file(VM_PUBLIC_INPUTS_PATH)?;
+    replace_masm_const(
+        &mut public_inputs,
+        "NUM_FIXED_LEN_PUBLIC_INPUTS",
+        &input_layout.counts.num_public.to_string(),
+    )?;
+    replace_masm_const(&mut public_inputs, "PUBLIC_INPUTS_READ_FELTS", &public_span.to_string())?;
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
     for (i, elem) in relation_digest.iter().enumerate() {
         replace_masm_const(
@@ -167,6 +179,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         vm_layout,
         vm_ood_frames,
         vm_deep_queries,
+        public_inputs,
     })
 }
 
@@ -387,27 +400,6 @@ impl VmGeometry {
                 ),
             ));
         }
-        // Its lower neighbour is the kernel digest witness, one word per supported kernel
-        // procedure written by `materialize_kernel_witness`; the table must start at or after its
-        // end.
-        let kernel_witness_ptr =
-            parse_masm_const::<usize>(&layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let kernel_witness_end = kernel_witness_ptr
-            .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
-            })?;
-        if ood_scatter_table_ptr < kernel_witness_end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
-                     kernel digest witness, which ends at {kernel_witness_end}"
-                ),
-            ));
-        }
-
         let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta)?;
         let ood_index =
             require_input_index(input_layout, InputKey::Preprocessed { offset: 0, index: 0 })?;
@@ -813,6 +805,7 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(VM_LAYOUT_PATH, &artifact.vm_layout)?;
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
     write_file(VM_DEEP_QUERIES_PATH, &artifact.vm_deep_queries)?;
+    write_file(VM_PUBLIC_INPUTS_PATH, &artifact.public_inputs)?;
     println!(
         "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
@@ -967,6 +960,7 @@ fn vm_geometry_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), Stri
         (VM_LAYOUT_PATH, artifact.vm_layout.as_str()),
         (VM_OOD_FRAMES_PATH, artifact.vm_ood_frames.as_str()),
         (VM_DEEP_QUERIES_PATH, artifact.vm_deep_queries.as_str()),
+        (VM_PUBLIC_INPUTS_PATH, artifact.public_inputs.as_str()),
     ] {
         let actual = read_file(path).map_err(|e| e.to_string())?;
         if actual != expected {
@@ -1024,8 +1018,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
-    let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS)
-        + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
+    let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS);
     if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
         return Err("the MVM composed-constraint count exceeds the estimator envelope".into());
     }
@@ -1063,7 +1056,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         return Err(format!("MAX_POW_BITS in {SECURITY_ESTIMATOR_PATH} is stale"));
     }
 
-    let descriptor_literals: [(&str, u64); 9] = [
+    let descriptor_literals: [(&str, u64); 8] = [
         ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
         ("MAX_MESSAGE_WIDTH", miden_air::security::LOOKUP_SHAPE.max_message_width as u64),
         (
@@ -1088,7 +1081,6 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             "LOOKUP_FRACTIONS_PER_ROW",
             miden_air::security::LOOKUP_SHAPE.fractions_per_row as u64,
         ),
-        ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
         ("LOG_HEIGHT_MAX", estimator_heights),
     ];
 
@@ -1271,6 +1263,7 @@ struct ComputedArtifacts {
     vm_layout: String,
     vm_ood_frames: String,
     vm_deep_queries: String,
+    public_inputs: String,
 }
 
 #[cfg(test)]

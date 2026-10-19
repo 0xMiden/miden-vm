@@ -66,7 +66,7 @@ impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         // Col 0: the centered running sum from the empty LogUp column.
-        let (logup, normalized_sum) = build_logup_aux_trace(&AuxRegisterAir, main, challenges);
+        let (logup, normalized_sum) = build_logup_aux_trace(&AuxRegisterAir, main, &[], challenges);
         let n = main.height();
         let beta = challenges[1];
 

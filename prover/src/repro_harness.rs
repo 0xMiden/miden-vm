@@ -31,6 +31,7 @@ pub struct ReproTrace {
     program_info: miden_processor::ProgramInfo,
     init_stack: miden_processor::StackInputs,
     precompile_root: miden_core::deferred::DeferredRoot,
+
     outputs: StackOutputs,
 }
 
@@ -47,6 +48,7 @@ impl ReproTrace {
             program_info: trace.program_info().clone(),
             init_stack: trace.init_stack_state(),
             precompile_root: trace.precompile_root(),
+
             outputs: *trace.stack_outputs(),
         }
     }

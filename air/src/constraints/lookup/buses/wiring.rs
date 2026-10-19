@@ -41,6 +41,8 @@
 //!   `[block(8), cv_in(4), cv_out(4)]`.
 //! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
 //!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
+//! - **Kernel leaf compression** (kernel ROM rows, multiplicity `+1`): `[procedure_digest(4),
+//!   zero(4), kernel_leaf_cv(4), leaf(4)]`.
 //!
 //! The Eidos compression AIR emits the matching receive on the final footer row of the
 //! standalone block.
@@ -53,6 +55,9 @@
 //! [`super::super::operations::merkle`].
 
 use core::{array, borrow::Borrow};
+
+use miden_core::{field::PrimeCharacteristicRing, program::domain::KERNEL_LEAF};
+use miden_crypto::hash::eidos::Eidos;
 
 use super::super::operations::{aead_stream, merkle};
 use crate::{
@@ -74,9 +79,10 @@ use crate::{
 /// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
 ///   when the outer `ace_flag` fires).
 /// - **Hasher compression link** on controller rows: 1 fraction.
+/// - **Kernel leaf compression link** on kernel ROM rows: 1 fraction.
 /// - **AEAD stream** rows: at most 2 fractions.
 ///
-/// Per-row max is therefore `max(3, 1, 2) = 3`.
+/// Per-row max is therefore `max(3, 1, 1, 2) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the `v_wiring` shared column.
@@ -128,7 +134,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     builder.next_column(
         |col| {
-            // ACE, controller, and AEAD stream rows are mutually exclusive. A single group
+            // ACE, controller, kernel ROM, and AEAD stream rows are mutually exclusive. A group
             // takes the maximum branch degree rather than multiplying sibling `(V_g, U_g)`
             // pairs, keeping the transition inside the degree-9 budget.
             col.group(
@@ -194,6 +200,24 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                     );
 
                     merkle::emit_compression::<LB, _>(g, ctx);
+
+                    // Bind the original syscall digest to the authenticated Merkle leaf.
+                    g.add(
+                        "kernel_leaf_compression",
+                        ctx.chiplet_active.kernel_rom.clone(),
+                        || {
+                            let kernel = local.kernel_rom();
+                            let block = array::from_fn(|i| {
+                                if i < 4 { kernel.root[i].into() } else { LB::Expr::ZERO }
+                            });
+                            let cv_in = Eidos::init_chaining_word(KERNEL_LEAF, 4)
+                                .into_elements()
+                                .map(LB::Expr::from);
+                            let cv_out = kernel.leaf.map(LB::Expr::from);
+                            HasherCompressionLinkMsg { block, cv_in, cv_out }
+                        },
+                        Deg { v: 5, u: 6 },
+                    );
 
                     aead_stream::emit_wiring::<LB, _>(g, ctx, &aead_phase);
                 },

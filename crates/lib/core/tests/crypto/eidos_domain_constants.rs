@@ -2,7 +2,7 @@ use miden_core::{
     Felt, Word,
     program::domain::{
         DEFERRED_CHUNKS, EXECUTION_CLAIM, FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN,
-        KERNEL_COMMITMENT, PROOF_REQUEST, STARK_TRANSCRIPT, domain_tag,
+        PROOF_REQUEST, STARK_TRANSCRIPT, domain_tag,
     },
 };
 use miden_crypto::hash::eidos::{
@@ -33,7 +33,6 @@ const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
 const SHA512: &str = include_str!("../../asm/precompiles/hashes/sha512.masm");
 const RANDOM_COIN: &str = include_str!("../../asm/stark/random_coin.masm");
 const SYS: &str = include_str!("../../asm/sys/mod.masm");
-const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
 const CLAIM: &str = include_str!("../../asm/sys/vm/claim.masm");
 const FRI: &str = include_str!("../../asm/pcs/fri/frie2f4.masm");
 const VM_DEEP_QUERIES: &str = include_str!("../../asm/sys/vm/deep_queries.masm");
@@ -118,10 +117,6 @@ fn masm_domain_tags_match_rust_registries() {
     assert_eq!(
         masm_scalar(PRECOMPILES, "DEFERRED_CHUNKS_DOMAIN"),
         domain_tag(DEFERRED_CHUNKS).as_canonical_u64(),
-    );
-    assert_eq!(
-        masm_scalar(VM, "KERNEL_DOMAIN_TAG"),
-        domain_tag(KERNEL_COMMITMENT).as_canonical_u64(),
     );
     assert_eq!(
         masm_scalar(KECCAK, "DOMAIN_TAG"),

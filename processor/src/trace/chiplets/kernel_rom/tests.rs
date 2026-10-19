@@ -28,18 +28,8 @@ fn kernel_rom_invalid_access() {
 
 #[test]
 fn kernel_rom_no_access() {
-    // Each declared procedure gets one row with multiplicity 0 when never called; the INIT
-    // side of the chiplets bus still matches the public-input-injected remove.
-    let kernel = build_kernel();
-    let rom = KernelRom::new(kernel);
-
-    let expected_trace_len = 2;
-    assert_eq!(expected_trace_len, rom.trace_len());
-
-    let trace = build_trace(rom, expected_trace_len);
-
-    assert_row(&trace, 0, ZERO, PROC1_HASH);
-    assert_row(&trace, 1, ZERO, PROC2_HASH);
+    let rom = KernelRom::new(build_kernel());
+    assert_eq!(rom.trace_len(), 0);
 }
 
 #[test]
@@ -72,13 +62,44 @@ fn kernel_rom_with_single_access() {
     rom.access_proc(PROC1_HASH.into()).unwrap();
     rom.access_proc(PROC1_HASH.into()).unwrap();
 
-    let expected_trace_len = 2;
+    let expected_trace_len = 1;
     assert_eq!(expected_trace_len, rom.trace_len());
 
     let trace = build_trace(rom, expected_trace_len);
 
     assert_row(&trace, 0, Felt::from_u64(2), PROC1_HASH);
-    assert_row(&trace, 1, ZERO, PROC2_HASH);
+}
+
+#[test]
+fn unused_exports_keep_canonical_leaf_indices() {
+    let mut rom = KernelRom::new(build_kernel());
+    rom.access_proc(PROC2_HASH.into()).unwrap();
+    let trace = build_trace(rom, 1);
+    assert_row(&trace, 0, ONE, PROC2_HASH);
+    assert_eq!(trace[6][0], ONE);
+    assert_eq!(trace[7][0], ONE);
+}
+
+#[test]
+fn kernel_membership_rows_count_toward_both_hasher_limits() {
+    let tree = build_kernel().to_merkle_tree();
+    let mut baseline = KernelRom::new(build_kernel());
+    baseline.access_proc(PROC1_HASH.into()).unwrap();
+    let mut hasher = super::super::Hasher::default();
+    baseline.authenticate(&mut hasher, &tree, usize::MAX, usize::MAX).unwrap();
+    let controller_rows = hasher.trace_len();
+    let compression_rows = hasher.eidos_compression_trace_len();
+    for (controller_limit, compression_limit) in
+        [(controller_rows - 1, compression_rows), (controller_rows, compression_rows - 1)]
+    {
+        let mut rom = KernelRom::new(build_kernel());
+        rom.access_proc(PROC1_HASH.into()).unwrap();
+        let mut hasher = super::super::Hasher::default();
+        assert!(
+            rom.authenticate(&mut hasher, &tree, controller_limit, compression_limit)
+                .is_err()
+        );
+    }
 }
 
 // HELPER FUNCTIONS
@@ -91,7 +112,10 @@ fn build_kernel() -> KernelDescriptor {
 
 /// Builds a trace of the specified length and fills it with data from the provided KernelRom
 /// instance.
-fn build_trace(kernel_rom: KernelRom, num_rows: usize) -> Vec<Vec<Felt>> {
+fn build_trace(mut kernel_rom: KernelRom, num_rows: usize) -> Vec<Vec<Felt>> {
+    let tree = kernel_rom.kernel().to_merkle_tree();
+    let mut hasher = super::super::Hasher::default();
+    kernel_rom.authenticate(&mut hasher, &tree, usize::MAX, usize::MAX).unwrap();
     let mut band = Felt::zero_vec(KERNEL_ROM_TRACE_WIDTH * num_rows);
     let mut fragment = ChipletTraceFragment::row_major(
         &mut band,

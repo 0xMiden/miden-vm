@@ -16,7 +16,6 @@ pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
-use miden::core::mem
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -37,27 +36,17 @@ const LOG_HEIGHT_MIN = 6
 const LOG_HEIGHT_MAX = 29
 
 # Offset of K in the P | K | I | O claim encoding.
-const KERNEL_COMMITMENT_OFFSET = 4
 
 # Offset of D in the P | D boundary-input block.
 const DEFERRED_ROOT_OFFSET = 4
 
-# Domain tag for the kernel commitment:
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
-# Must match miden_core::program::KERNEL_DOMAIN_TAG.
-const KERNEL_DOMAIN_TAG = 0x01000001
-
-const FELTS_PER_KERNEL_DIGEST = 4
-
-# Must match KernelDescriptor::MAX_NUM_PROCEDURES.
-const MAX_NUM_KERNEL_PROCEDURES = 255
 const AND8_LOOKUP_LOG_HEIGHT = 16
 
 # RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
-const RELATION_DIGEST_0 = 9098509505774412735
-const RELATION_DIGEST_1 = 4737936789760532215
-const RELATION_DIGEST_2 = 1438664865551243811
-const RELATION_DIGEST_3 = 7897993217034479822
+const RELATION_DIGEST_0 = 5385606646253068207
+const RELATION_DIGEST_1 = 8536467475126843978
+const RELATION_DIGEST_2 = 8200072682202533822
+const RELATION_DIGEST_3 = 4894638424032058069
 
 # Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
 const AND8_PREPROCESSED_TRACE_COM_0 = 1070440981155119101
@@ -138,49 +127,11 @@ proc store_and8_preprocessed_trace_commitment
     dropw
 end
 
-#! Materializes and authenticates the kernel witness named by the staged claim.
-#!
-#! The digest list and its validated procedure count are stored for the kernel-ROM boundary check.
-#!
-#! Input:  [...]
-#! Output: [...]
-proc materialize_kernel_witness()
-    padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
-    # => [K, ...]
-    adv.push_mapvaln
-    adv_push
-    # => [num_kernel_felts, K, ...]   advice: [digest_0, .., digest_{n-1}]
-
-    u32assert.err="kernel witness length must fit in a u32"
-    dup u32mod.FELTS_PER_KERNEL_DIGEST
-    assertz.err="kernel witness length must be word-aligned"
-    div.FELTS_PER_KERNEL_DIGEST
-    dup u32lte.MAX_NUM_KERNEL_PROCEDURES
-    assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
-    # => [num_kernel_procedures, K, ...]
-
-    dup exec.layout::num_kernel_procedures_ptr mem_store
-    # => [num_kernel_procedures, K, ...]
-
-    exec.layout::kernel_witness_ptr swap
-    push.KERNEL_DOMAIN_TAG
-    exec.mem::pipe_words_to_memory_in_domain
-    # => [K', end_ptr, K, ...]
-
-    # Discard the end pointer, then authenticate the copied witness.
-    movup.4 drop
-    # => [K', K, ...]
-    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
-    # => [...]
-end
-
 #! Builds the common security descriptor from the four transcript-bound proof parameters returned
 #! by the generic STARK verifier and the MVM relation data.
 #!
 #! The AIR shape and per-row lookup count are fixed by this relation. The one-time lookup boundary
-#! count is `CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures`; the latter was derived from the
-#! kernel witness and authenticated against the claim's kernel commitment before proof
-#! verification.
+#! count is the fixed `CORE_BOUNDARY_LOOKUP_TERMS`. Kernel authentication is closed in trace.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
@@ -189,8 +140,7 @@ end
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
-    exec.layout::num_kernel_procedures_ptr mem_load
-    add.CORE_BOUNDARY_LOOKUP_TERMS
+    push.CORE_BOUNDARY_LOOKUP_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
     push.MAX_CONSTRAINT_DEGREE
@@ -211,8 +161,7 @@ end
 #!
 #! The four proof parameters are loaded from advice, structurally validated, and bound into the
 #! Fiat-Shamir transcript. The maximum trace height is likewise transcript-bound. The remaining
-#! descriptor fields are fixed by this verifier's relation, except for the boundary count derived
-#! from the kernel witness authenticated against the claim. The caller passes the returned twelve
+#! descriptor fields are fixed by this verifier's relation. The caller passes the returned twelve
 #! elements unchanged to `stark::security::compute_conjectured_security_level`, then applies its
 #! own acceptance policy. The estimation formula and policy remain outside this procedure.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
@@ -220,14 +169,14 @@ end
 #! procedure.
 #!
 #! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
-#! lookup grinding, 6..=29 for every AIR log trace height, and 0..=255 kernel procedures.
+#! lookup grinding, and 6..=29 for every AIR log trace height.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
 #!
-#! The verifier fetches the kernel digest list from the advice map under K, copies it to
-#! `layout::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
-#! claim commitment and checks the kernel-ROM boundary against this list.
+#! K is the public kernel Merkle root. Kernel rows bind callees to domain-separated leaf hashes
+#! and authenticate the leaves through the hasher controller, with private path depths.
+#! No kernel procedure list is supplied.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
 #! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
@@ -277,9 +226,6 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     # --- Prepare MVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
-    # => [scratch(16)]
-
-    exec.materialize_kernel_witness
     # => [scratch(16)]
 
     exec.public_inputs::stage_boundary_inputs

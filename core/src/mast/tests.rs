@@ -44,7 +44,7 @@ proptest! {
             })
             .collect();
         let kernel = KernelDescriptor::new(&kernel).unwrap();
-        let program_info = ProgramInfo::new(program_hash, kernel);
+        let program_info = ProgramInfo::new(program_hash, kernel.commitment());
         let bytes = program_info.to_bytes();
         let deser = ProgramInfo::read_from_bytes(&bytes).unwrap();
         assert_eq!(program_info, deser);

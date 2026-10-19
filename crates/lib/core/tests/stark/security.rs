@@ -24,27 +24,24 @@ fn vm_verify_proof_rejects_oversized_num_queries() {
 }
 
 /// The MVM lookup round must agree with the native estimator at every supported trace height and
-/// kernel size. Query inputs and DEEP grinding are maximized so lookup determines the returned
+/// shape. Query inputs and DEEP grinding are maximized so lookup determines the returned
 /// minimum at every cell. The common query calculation is covered separately over its complete
 /// input domain.
 #[test]
 fn vm_lookup_round_matches_native_exhaustively() {
-    use Axis::{Fixed, Inner, Outer};
-    use miden_core::program::KernelDescriptor;
+    use Axis::{Fixed, Outer};
 
     const LOG_HEIGHT_SPAN: u64 = LOG_HEIGHT_MAX - MVM_LOG_HEIGHT_MIN + 1;
-    const NUM_KERNEL_PROCEDURES_BOUND: u64 = KernelDescriptor::MAX_NUM_PROCEDURES as u64 + 1;
 
     vm_sweep(
         LOG_HEIGHT_SPAN,
-        NUM_KERNEL_PROCEDURES_BOUND,
+        1,
         [
             Fixed(NUM_QUERIES_MAX),
             Fixed(POW_BITS_MAX),
             Fixed(POW_BITS_MAX),
             Fixed(0),
             Outer(MVM_LOG_HEIGHT_MIN),
-            Inner(0),
         ],
     );
 }
@@ -133,23 +130,23 @@ fn run_sweep_grid(adapter: &str, push_args: &str, outer_bound: u64, inner_bound:
 /// Runs the estimator over an `outer_bound` by `inner_bound` grid in one VM execution and checks
 /// every cell against the native implementation.
 ///
-/// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
+/// `axes` supplies the procedure's five inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
-fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
+fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
     use miden_air::security;
 
-    let push_args = (0..6)
+    let push_args = (0..5)
         .rev()
-        .map(|position| axes[position].push(5 - position))
+        .map(|position| axes[position].push(4 - position))
         .collect::<Vec<_>>()
         .join(" ");
 
     let adapter = format!(
         "
         proc estimate
-            movup.5 add.{core_boundary_terms}
-            movup.5 swap
-            push.{fractions_per_row} swap
+            movup.4
+            push.{fractions_per_row}
+            push.{core_boundary_terms}
             push.{max_message_width}
             push.{num_deep_terms}
             push.{max_constraint_degree}
@@ -176,7 +173,6 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
                 axes[2].value(outer, inner),
                 axes[3].value(outer, inner),
                 axes[4].value(outer, inner),
-                axes[5].value(outer, inner),
             ));
             assert_eq!(
                 masm,
@@ -246,7 +242,6 @@ fn vm_security_descriptor(
     deep_pow_bits: u32,
     folding_pow_bits: u32,
     log_max_height: u32,
-    num_kernel_procedures: u32,
 ) -> [u64; 12] {
     use miden_air::security;
 
@@ -262,9 +257,7 @@ fn vm_security_descriptor(
         max_constraint_degree: u64::from(security::AIR_SHAPE.max_constraint_degree),
         num_deep_terms: u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
         lookup_fractions_per_row: u64::from(security::LOOKUP_SHAPE.fractions_per_row),
-        num_lookup_boundary_terms: u64::from(
-            security::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
-        ),
+        num_lookup_boundary_terms: u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS),
     }
     .into_stack()
 }
@@ -279,7 +272,6 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
     let mut params = security::proof_security_parameters(
         &config::pcs_params(),
         descriptor.log_max_height as u32,
-        0,
         security::COMMITMENT_ALIGNMENT,
         miden_core::proof::HashFunction::Eidos,
     );
@@ -614,7 +606,7 @@ fn common_security_estimator_preserves_the_caller_stack() {
     use miden_air::security;
     use miden_core::Felt;
 
-    let descriptor = vm_security_descriptor(27, 17, 12, 4, 22, 255);
+    let descriptor = vm_security_descriptor(27, 17, 12, 4, 22);
     let caller_values = [91_001, 91_002, 91_003, 91_004];
     let mut inputs = descriptor.to_vec();
     inputs.extend(caller_values);
@@ -625,7 +617,7 @@ fn common_security_estimator_preserves_the_caller_stack() {
             exec.security::compute_conjectured_security_level
         end
     ";
-    let expected_level = u64::from(security::conjectured_security_level(27, 17, 12, 4, 22, 255));
+    let expected_level = u64::from(security::conjectured_security_level(27, 17, 12, 4, 22));
     let mut expected = vec![expected_level];
     expected.extend(caller_values);
     let trace = build_test!(source, &inputs).execute().expect("the estimator must execute");
@@ -727,17 +719,17 @@ fn security_level_threshold_rejects_below_target() {
 
     // The deployed preset at a height below the lookup/query crossover computes to exactly the
     // target: the threshold assert must pass.
-    let at = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 18, 0));
+    let at = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 18));
     at.execute_for_output().expect("an at-target level must be accepted");
 
     // Fewer queries and less grinding computes a level below the target: the threshold assert
     // must fail.
-    let below = build_test!(source.as_str(), &vm_security_descriptor(22, 16, 12, 4, 20, 0));
+    let below = build_test!(source.as_str(), &vm_security_descriptor(22, 16, 12, 4, 20));
     assert!(below.execute_for_output().is_err(), "a below-target level must be rejected");
 
     // The same preset at the maximum supported height falls below the target on the lookup round
     // alone. This is why the computed level cannot be a property of the parameters by themselves.
-    let tall = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 29, 0));
+    let tall = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 29));
     assert!(tall.execute_for_output().is_err(), "a below-target level must be rejected");
 }
 

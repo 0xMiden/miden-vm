@@ -75,9 +75,7 @@ fn tx_proof_cache_key(
 ) -> String {
     let mut program_bytes = Vec::new();
     program_bytes.extend_from_slice(&program_info.program_hash().as_bytes());
-    for digest in program_info.kernel_procedures() {
-        program_bytes.extend_from_slice(&digest.as_bytes());
-    }
+    program_bytes.extend_from_slice(&program_info.kernel_root().as_bytes());
 
     let mut stack_bytes = Vec::with_capacity(stack_values.len() * 8);
     for value in stack_values {

@@ -44,7 +44,7 @@ use miden_core::{
 
 use super::{
     Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,
-    lookup_harness::InteractionLog,
+    lookup_harness::{InteractionLog, empty_kernel_inputs},
 };
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
@@ -295,6 +295,7 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
         &chip_matrix,
         None,
         &BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS),
+        &empty_kernel_inputs(),
         &log.challenges,
     );
     let eidos_compression_fractions = build_lookup_fractions(
@@ -302,6 +303,7 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
         &eidos_compression_matrix,
         None,
         &BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION),
+        &[],
         &log.challenges,
     );
     let matching_multiplicities = |fractions: &LookupFractions<Felt, QuadFelt>| {
@@ -371,6 +373,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
         &eidos_compression_matrix,
         None,
         &eidos_compression_periodic,
+        &[],
         &challenges,
     );
 
@@ -507,6 +510,7 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
         &eidos_compression_matrix,
         None,
         &eidos_compression_periodic,
+        &[],
         &challenges,
     );
     let (narrow_batch_columns, _) =
@@ -786,19 +790,28 @@ fn lookup_multiplicities(
         .preprocessed_trace()
         .expect("And8 lookup AIR declares a preprocessed table");
     let fractions = [
-        build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], challenges),
-        build_lookup_fractions(&MidenAir::CHIPLETS, chip_matrix, None, &chip_periodic, challenges),
+        build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], &[], challenges),
+        build_lookup_fractions(
+            &MidenAir::CHIPLETS,
+            chip_matrix,
+            None,
+            &chip_periodic,
+            &empty_kernel_inputs(),
+            challenges,
+        ),
         build_lookup_fractions(
             &MidenAir::EIDOS_COMPRESSION,
             eidos_compression_matrix,
             None,
             &eidos_compression_periodic,
+            &[],
             challenges,
         ),
         build_lookup_fractions(
             &MidenAir::AND8_LOOKUP,
             and8_matrix,
             Some(&and8_preprocessed),
+            &[],
             &[],
             challenges,
         ),
@@ -856,12 +869,9 @@ pub(super) fn assert_trace_constraints_reject(
     and8_matrix: RowMajorMatrix<Felt>,
 ) {
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-    let statement = Statement::<Felt, QuadFelt, _>::new(
-        MidenMultiAir::new(),
-        vec![(0, public_values)],
-        aux_inputs,
-    )
-    .expect("valid statement inputs");
+    let statement =
+        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .expect("valid statement inputs");
     let prover_statement = ProverStatement::new(
         statement,
         vec![core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix],
@@ -917,6 +927,7 @@ fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
         &and8_matrix,
         Some(&preprocessed),
         &[],
+        &[],
         &challenges,
     );
     assert_eq!(fractions.shape(), &AND8_COLUMN_SHAPE);
@@ -967,6 +978,7 @@ fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
         &honest_and8_matrix,
         Some(&preprocessed),
         &[],
+        &[],
         &challenges,
     );
     let (honest_aux, honest_sigma_prime) = accumulate(&honest_fractions);
@@ -985,6 +997,7 @@ fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
         &MidenAir::AND8_LOOKUP,
         &attacked_and8_matrix,
         Some(&preprocessed),
+        &[],
         &[],
         &challenges,
     );
@@ -1037,7 +1050,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
 
     // --- Core ---
     let core_fractions =
-        build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &challenges);
+        build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &[], &challenges);
     assert!(
         !core_fractions.fractions().is_empty(),
         "{label}: no Core fractions collected — trace is degenerate or emitters are broken",
@@ -1050,6 +1063,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
         &chip_matrix,
         None,
         &chip_periodic,
+        &empty_kernel_inputs(),
         &challenges,
     );
     assert!(
@@ -1064,6 +1078,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
         &eidos_compression_matrix,
         None,
         &eidos_compression_periodic,
+        &[],
         &challenges,
     );
     assert!(
@@ -1082,6 +1097,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
         &MidenAir::AND8_LOOKUP,
         &and8_matrix,
         Some(&and8_preprocessed),
+        &[],
         &[],
         &challenges,
     );

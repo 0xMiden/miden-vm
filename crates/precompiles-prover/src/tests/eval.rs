@@ -229,7 +229,7 @@ fn typed_relation_fold(row: Vec<Felt>, challenges: &Challenges<QuadFelt>) -> (Qu
     let air = TranscriptEvalAir;
     let main = RowMajorMatrix::new(row, NUM_MAIN_COLS);
     let periodic = air.periodic_columns();
-    let fractions = build_lookup_fractions(&air, &main, None, &periodic, challenges);
+    let fractions = build_lookup_fractions(&air, &main, None, &periodic, &[], challenges);
     fold_fractions(fractions_at(&fractions, 0, TYPED_RELATION_COL))
 }
 

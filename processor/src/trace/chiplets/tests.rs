@@ -124,7 +124,7 @@ fn stacked_chiplet_trace() {
 
     // After memory comes kernel ROM (2 entries from build_kernel) then padding
     let kernel_rom_start = memory_start + 1;
-    let kernel_rom_end = kernel_rom_start + 2; // 2 kernel procedures
+    let kernel_rom_end = kernel_rom_start; // no kernel procedures were accessed
     validate_kernel_rom_trace(&chiplets_trace, kernel_rom_start, kernel_rom_end);
 
     // Padding fills the remainder
@@ -321,7 +321,7 @@ fn validate_memory_trace(trace: &ChipletsTrace, start: usize, end: usize) {
 /// - Columns beyond kernel ROM trace width + selectors are zero
 fn validate_kernel_rom_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // Kernel ROM uses NUM_KERNEL_ROM_SELECTORS (5) chiplet selector columns +
-    // KERNEL_ROM_TRACE_WIDTH (5) internal columns = 10 columns total.
+    // KERNEL_ROM_TRACE_WIDTH (13) internal columns = 18 columns total.
     let kernel_rom_used_cols = NUM_KERNEL_ROM_SELECTORS + KERNEL_ROM_TRACE_WIDTH;
 
     for row in start..end {

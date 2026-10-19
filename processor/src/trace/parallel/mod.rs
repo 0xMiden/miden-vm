@@ -131,7 +131,8 @@ fn build_trace_inner(
     max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
     let VmWitness {
-        program_info,
+        program_root,
+        kernel,
         stack_inputs,
         stack_outputs,
         trace,
@@ -183,8 +184,11 @@ fn build_trace_inner(
         return Err(ExecutionError::Internal("no trace fragments provided in the trace witness"));
     }
 
+    let kernel_tree = kernel.to_merkle_tree();
+    let program_info = crate::ProgramInfo::new(program_root, kernel_tree.root());
     let chiplets = initialize_chiplets(
-        program_info.kernel().clone(),
+        kernel.clone(),
+        &kernel_tree,
         &core_trace_contexts,
         memory_writes,
         bitwise,
@@ -203,7 +207,7 @@ fn build_trace_inner(
 
     let mut core_trace_data = generate_core_trace_row_major(
         core_trace_contexts,
-        program_info.kernel().clone(),
+        kernel,
         fragment_size,
         &mast_forest_store,
         max_stack_depth,
@@ -613,6 +617,7 @@ fn initialize_range_checker(
 /// execution; this pass only needs the trace-recording side effects.
 fn initialize_chiplets(
     kernel: KernelDescriptor,
+    kernel_tree: &miden_core::crypto::merkle::MerkleTree,
     core_trace_contexts: &[CoreTraceFragmentContext],
     memory_writes: MemoryWritesReplay,
     bitwise: BitwiseReplay,
@@ -623,8 +628,9 @@ fn initialize_chiplets(
     mast_forest_store: &[Arc<SparseMastForest>],
     max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
+    let mut kernel_rom = build_kernel_rom_chiplet(kernel, kernel_replay, max_trace_len)?;
     let non_hasher_trace_len = non_hasher_trace_len(
-        &kernel,
+        kernel_rom.trace_len(),
         core_trace_contexts,
         &memory_writes,
         &bitwise,
@@ -642,7 +648,7 @@ fn initialize_chiplets(
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
-    let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = rayon::join(
+    let (hasher, (bitwise, (memory, ace))) = rayon::join(
         || match prebuilt_hasher {
             Some(hasher) => Ok(hasher),
             None => build_hasher_chiplet(
@@ -663,24 +669,21 @@ fn initialize_chiplets(
                 || {
                     rayon::join(
                         || build_memory_chiplet(memory_writes, core_trace_contexts, max_trace_len),
-                        || {
-                            rayon::join(
-                                || build_ace_chiplet(ace_replay, max_trace_len),
-                                || build_kernel_rom_chiplet(kernel, kernel_replay, max_trace_len),
-                            )
-                        },
+                        || build_ace_chiplet(ace_replay, max_trace_len),
                     )
                 },
             )
         },
     );
 
+    let mut hasher = hasher?;
+    kernel_rom.authenticate(&mut hasher, kernel_tree, max_hasher_trace_len, max_trace_len)?;
     let chiplets = Chiplets {
-        hasher: hasher?,
+        hasher,
         bitwise: bitwise?,
         memory: memory?,
         ace: ace?,
-        kernel_rom: kernel_rom?,
+        kernel_rom,
     };
     debug_assert_eq!(
         non_hasher_trace_len,
@@ -696,7 +699,7 @@ fn initialize_chiplets(
 }
 
 fn non_hasher_trace_len(
-    kernel: &KernelDescriptor,
+    kernel_rows: usize,
     core_trace_contexts: &[CoreTraceFragmentContext],
     memory_writes: &MemoryWritesReplay,
     bitwise: &BitwiseReplay,
@@ -714,7 +717,7 @@ fn non_hasher_trace_len(
         .ok_or_else(overflow)?;
     let ace_len = ace.trace_len().ok_or_else(overflow)?;
 
-    [1, kernel.proc_hashes().len(), bitwise_len, memory_len, ace_len]
+    [1, kernel_rows, bitwise_len, memory_len, ace_len]
         .into_iter()
         .try_fold(0usize, usize::checked_add)
         .filter(|&total| total <= max_trace_len)

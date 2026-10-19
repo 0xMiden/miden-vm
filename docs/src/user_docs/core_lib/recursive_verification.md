@@ -59,7 +59,8 @@ let stack_inputs = StackInputs::new(claim_commitment.as_elements())?;
 ```
 
 The adapter stores the MVM proof under `proof_request_key(verifier_root, claim_commitment)` and
-supplies the claim preimage, kernel procedure list, and advice data. MASM derives the same key
+supplies the claim preimage and advice data. The claim contains the kernel Merkle root; procedure
+digests and path depths stay in the private execution trace. MASM derives the same key
 with `procref.vm::verify_proof` and takes `claim_commitment` as public input. If `proof` includes
 a PVM proof, supply it through the separate PVM request described below.
 

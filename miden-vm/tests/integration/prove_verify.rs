@@ -4,15 +4,16 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
 use miden_core::{
-    Felt, program::ExecutionClaim, proof::ExecutionProof, utils::bytes_to_packed_u32_elements,
+    Felt, program::ExecutionClaim, proof::ExecutionProof, serde::Serializable,
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::CoreLibrary;
 use miden_utils_testing::{
     PrimeField64, recursive_verifier::generate_request_inputs, stack_inputs_from_ints,
 };
 use miden_vm::{
-    DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
-    StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
+    DefaultHost, ExecutionOptions, ExecutionWitness, FastProcessor, HashFunction, ProgramInfo,
+    Prover, StackInputs, StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
 };
 
 /// Applies the integration tests' policy to all STARK components in a verification outcome.
@@ -134,6 +135,50 @@ fn test_all_hash_functions_prove_verify() {
     ] {
         assert_prove_verify(source, hash_fn, hash_name, false, false);
     }
+}
+
+/// Native and recursive verification receive K alone; the path depth stays in the private trace.
+#[test]
+fn root_only_kernel_proof_verifies_without_descriptor() {
+    let test = crate::build_test!("begin syscall.called syscall.called end").with_kernel(
+        "
+        pub proc called push.1 drop end
+        pub proc unused_a push.2 drop end
+        pub proc unused_b push.3 drop end
+    ",
+    );
+    let (program, kernel, _) = test.compile().unwrap();
+    let mut host = DefaultHost::default();
+    host.load_library(kernel.unwrap().mast_forest()).unwrap();
+    let witness = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .execute_for_proving_sync(&program, &mut host)
+    .unwrap();
+    let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
+    let claim = witness.claim();
+    let proof = Prover::new().prove(witness).unwrap();
+    let proof = ExecutionProof::read_from_bytes(&proof.to_bytes()).unwrap();
+    assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());
+    assert_recursive_verify(
+        claim.to_program_info(),
+        *claim.stack_inputs(),
+        *claim.stack_outputs(),
+        &proof,
+    );
+
+    let mut other_root = claim.kernel_root().into_elements();
+    other_root[0] += Felt::new_unchecked(1);
+    let other_claim = ExecutionClaim::new(
+        claim.program_root(),
+        other_root.into(),
+        *claim.stack_inputs(),
+        *claim.stack_outputs(),
+    );
+    assert!(Verifier::new().verify(&other_claim, &proof).is_err());
 }
 
 #[test]

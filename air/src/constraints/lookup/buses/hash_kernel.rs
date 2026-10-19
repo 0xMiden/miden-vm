@@ -1,7 +1,8 @@
 //! Hash-kernel virtual table bus.
 //!
-//! Combines five row-disjoint interaction families on a single LogUp column:
+//! Combines six row-disjoint interaction families on a single LogUp column:
 //!
+//! 0. **Kernel membership** - two hasher requests authenticate each accessed kernel procedure.
 //! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings on controller rows; see
 //!    [`super::super::operations::merkle`].
 //! 2. **ACE memory reads** - on ACE chiplet rows, the block selector distinguishes word reads
@@ -38,7 +39,7 @@ use crate::{
         chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{BytePairLookupMsg, MemoryMsg, RangeMsg},
+            messages::{BytePairLookupMsg, HasherMsg, MemoryMsg, RangeMsg},
         },
         utils::BoolNot,
     },
@@ -48,7 +49,9 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Five row-type-disjoint interaction sets, mutually exclusive via chiplet active flags:
+/// Six row-type-disjoint interaction sets, mutually exclusive via chiplet active flags:
+/// - **Kernel membership** on kernel ROM rows: initialization and root-return requests -> 2
+///   fractions.
 /// - **Sibling-table** on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
 ///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
 ///   one of the four fires per row -> 1 fraction.
@@ -63,7 +66,7 @@ use crate::{
 ///   fractions.
 ///
 /// Row-type disjointness means only one set fires per row, so the per-row max is
-/// `max(1, 1, 1, 4, 5) = 5`.
+/// `max(2, 1, 1, 1, 4, 5) = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the hash-kernel virtual table bus.
@@ -74,6 +77,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
+    let kernel = local.kernel_rom();
+    let kernel_root: [LB::Expr; 4] = core::array::from_fn(|i| builder.public_values()[i].into());
+    let kernel_depth: LB::Expr = kernel.depth.into();
     let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
     let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
@@ -115,6 +121,35 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                 "sibling_ace_memory",
                 |g| {
                     merkle::emit_siblings::<LB, _>(g, ctx);
+
+                    // Authenticate the row digest once, independently of its syscall count.
+                    g.batch(
+                        "kernel_membership",
+                        ctx.chiplet_active.kernel_rom.clone(),
+                        |b| {
+                            let start: LB::Expr = kernel.hasher_start.into();
+                            b.remove(
+                                "kernel_merkle_init",
+                                HasherMsg::merkle_verify_init(
+                                    start.clone(),
+                                    kernel.leaf_index.into(),
+                                    kernel.direction_bit.into(),
+                                    kernel.leaf.map(LB::Expr::from),
+                                ),
+                                Deg { v: 5, u: 6 },
+                            );
+                            b.remove(
+                                "kernel_merkle_root",
+                                HasherMsg::return_merkle_root(
+                                    start + kernel_depth.clone() - LB::Expr::ONE,
+                                    kernel_depth.clone(),
+                                    kernel_root.clone(),
+                                ),
+                                Deg { v: 5, u: 6 },
+                            );
+                        },
+                        Deg { v: 6, u: 7 },
+                    );
 
                     // --- ACE MEMORY READS ---
                     // Word read on READ rows.
