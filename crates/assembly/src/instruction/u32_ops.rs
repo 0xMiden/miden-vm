@@ -917,7 +917,8 @@ pub fn u32min(block_builder: &mut BasicBlockBuilder) {
 ///
 /// This operation takes:
 /// - 7 cycles without immediate value.
-/// - 8 cycles with immediate value.
+/// - 8 cycles with an immediate value other than 1.
+/// - 9 cycles with immediate value 1, which is pushed using PAD INCR.
 pub fn u32max(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_ops([Dup1, Dup1, U32sub, Swap, Drop, CSwap, Drop]);
 }

@@ -130,7 +130,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `u32gt` <br /> `u32gt.b`   | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.    |
 | `u32gte` <br /> `u32gte.b` | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$. |
 | `u32min` <br /> `u32min.b` | `[b, a, ...]` | `[c, ...]`   | 8 <br /> 9  | $c = \min(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
-| `u32max` <br /> `u32max.b` | `[b, a, ...]` | `[c, ...]`   | 7 <br /> 8 | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
+| `u32max` <br /> `u32max.b` | `[b, a, ...]` | `[c, ...]`   | 7 <br /> 9 if b = 1, 8 otherwise | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                   |
 
 ## Stack Manipulation
 

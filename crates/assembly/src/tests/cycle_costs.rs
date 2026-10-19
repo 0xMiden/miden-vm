@@ -72,7 +72,10 @@ fn instruction_cycle_costs_match_docs() {
         ("is_odd", 6),
         ("eqw", 15),
         ("u32max", 7),
+        ("u32max.0", 8),
+        ("u32max.1", 9), // push.1 lowers to PAD INCR
         ("u32max.2", 8),
+        ("u32max.4294967295", 8),
         // Extension field operations
         ("ext2add", 5),
         ("ext2sub", 7),
