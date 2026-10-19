@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -8,6 +7,7 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core::{
     Felt, WORD_SIZE,
     field::{PrimeField64, QuotientMap},
+    serde::read_file_bounded,
 };
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
@@ -85,6 +85,11 @@ impl Default for InputFile {
 
 /// Helper methods to interact with the input file
 impl InputFile {
+    /// Maximum input JSON file size in bytes (64 MiB).
+    pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
+
+    /// Reads input JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
+    /// Symlinks to regular files are accepted.
     #[instrument(name = "read_input_file", skip_all)]
     pub fn read(inputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, Report> {
         // If inputs_path has been provided then use this as path. Alternatively we will
@@ -94,8 +99,11 @@ impl InputFile {
             None => program_path.with_extension("inputs"),
         };
 
-        // read input file to string
-        let inputs_file = fs::read_to_string(&path)
+        // Bound the file before deserializing any JSON collections.
+        let inputs_file = read_file_bounded(&path, Self::MAX_FILE_SIZE)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to open input file {}", path.display()))?;
+        let inputs_file = String::from_utf8(inputs_file)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to open input file {}", path.display()))?;
 
@@ -563,5 +571,52 @@ mod tests {
 
         assert_eq!(inputs.operand_stack, ["7"]);
         fs::remove_file(inputs_path).expect("remove input file");
+    }
+
+    #[test]
+    fn input_file_read_rejects_oversized_files_before_json_parsing() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file().set_len(InputFile::MAX_FILE_SIZE as u64 + 1).unwrap();
+        let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
+        let message = format!("{err:?}");
+        assert!(message.contains("size limit of 67108864 bytes"), "{message}");
+        assert!(message.contains(&file.path().display().to_string()), "{message}");
+
+        // The exact limit reaches the JSON parser, which rejects the sparse file's zero bytes.
+        file.as_file().set_len(InputFile::MAX_FILE_SIZE as u64).unwrap();
+        let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
+        assert!(err.to_string().contains("Failed to deserialize input data"));
+    }
+
+    #[test]
+    fn input_file_read_rejects_invalid_utf8_in_ignored_fields() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), b"{\"operand_stack\":[],\"ignored\":\"\xff\"}").unwrap();
+        let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
+        assert!(format!("{err:?}").contains("utf-8"));
+    }
+
+    #[test]
+    fn input_file_read_rejects_non_regular_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = InputFile::read(&Some(dir.path().to_path_buf()), dir.path()).unwrap_err();
+        assert!(format!("{err:?}").contains("expected a regular file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn input_file_read_accepts_symlinks_to_regular_files_and_rejects_sockets() {
+        // The default macOS temporary path can exceed the Unix socket path limit.
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let target = dir.path().join("target.inputs");
+        let link = dir.path().join("link.inputs");
+        fs::write(&target, br#"{"operand_stack":["7"]}"#).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(InputFile::read(&Some(link), &target).unwrap().operand_stack, ["7"]);
+
+        let socket = dir.path().join("socket.inputs");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let err = InputFile::read(&Some(socket), &target).unwrap_err();
+        assert!(format!("{err:?}").contains("expected a regular file"));
     }
 }

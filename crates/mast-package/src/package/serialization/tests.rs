@@ -275,6 +275,39 @@ fn package_deserialize_from_file_trusted_preserves_trusted_debug_sections() {
     assert!(deserialized.debug_info().unwrap().is_some());
 }
 
+#[cfg(feature = "std")]
+#[test]
+fn package_file_readers_reject_oversized_files_before_decoding() {
+    let path =
+        std::env::temp_dir().join(format!("miden-package-oversized-{}.masp", std::process::id()));
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(Package::MAX_FILE_SIZE as u64 + 1).unwrap();
+
+    for result in [
+        Package::deserialize_from_file(&path),
+        Package::deserialize_from_file_trusted(&path),
+    ] {
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("size limit of 536870912 bytes"), "{err}");
+        assert!(err.contains(&path.display().to_string()), "{err}");
+    }
+    drop(file);
+    fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn package_file_readers_reject_non_regular_files() {
+    let path = std::env::temp_dir();
+    for result in [
+        Package::deserialize_from_file(&path),
+        Package::deserialize_from_file_trusted(&path),
+    ] {
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("expected a regular file"), "{err}");
+    }
+}
+
 #[test]
 fn artifact_and_package_commitments_change_with_header_fields() {
     let package = build_package();

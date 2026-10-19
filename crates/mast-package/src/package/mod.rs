@@ -1409,6 +1409,9 @@ impl Package {
 
 /// Serialization
 impl Package {
+    /// Maximum size of a package read from a file, in bytes (512 MiB).
+    pub const MAX_FILE_SIZE: usize = 512 * 1024 * 1024;
+
     /// Write this package to `path`
     #[cfg(feature = "std")]
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
@@ -1436,7 +1439,9 @@ impl Package {
     #[cfg(feature = "std")]
     /// Reads a package file from an untrusted path.
     ///
-    /// This validates the embedded MAST forest and discards package-owned debug sections before
+    /// Accepts regular files (including symlink targets) up to [`Self::MAX_FILE_SIZE`] bytes.
+    ///
+    /// This validates the embedded MAST forest and package-owned debug sections before
     /// returning the package. Use this for user-provided paths or bytes received across a trust
     /// boundary.
     pub fn deserialize_from_file(
@@ -1448,6 +1453,8 @@ impl Package {
 
     #[cfg(feature = "std")]
     /// Reads a trusted local package file.
+    ///
+    /// Applies the same file type and size limits as [`Self::deserialize_from_file`].
     ///
     /// This skips embedded MAST and manifest cross-check validation, preserves package-owned debug
     /// sections, and should be used only for files/cache entries controlled by the same trusted
@@ -1464,7 +1471,7 @@ impl Package {
 #[cfg(feature = "std")]
 fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, DeserializationError> {
     let path = path.as_ref();
-    std::fs::read(path).map_err(|err| {
+    miden_core::serde::read_file_bounded(path, Package::MAX_FILE_SIZE).map_err(|err| {
         DeserializationError::InvalidValue(format!(
             "failed to open file at {}: {err}",
             path.to_string_lossy()
