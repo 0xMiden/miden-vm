@@ -444,11 +444,7 @@ fn render_constant(constant: &Constant, indent: usize, config: &Config) -> Strin
         return render_line_form(constant.syntax(), indent);
     };
 
-    let mut prefix_tokens = tokens_before_child(constant.syntax(), value.syntax());
-    if let Some(visibility) = constant.visibility() {
-        let visibility_comments = visibility_comment_tokens(&visibility);
-        prefix_tokens.retain(|token| !visibility_comments.contains(token));
-    }
+    let prefix_tokens = declaration_prefix_tokens(constant.syntax(), value.syntax());
     let header = render_declaration_prefix(&prefix_tokens, indent, config);
 
     let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
@@ -490,7 +486,7 @@ fn render_advice_map(advice_map: &AdviceMap, indent: usize, config: &Config) -> 
         return render_line_form(advice_map.syntax(), indent);
     };
 
-    let prefix_tokens = tokens_before_child(advice_map.syntax(), value.syntax());
+    let prefix_tokens = declaration_prefix_tokens(advice_map.syntax(), value.syntax());
     let header = render_declaration_prefix(&prefix_tokens, indent, config);
 
     let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
@@ -1510,14 +1506,34 @@ fn significant_tokens_from(tokens: impl IntoIterator<Item = SyntaxToken>) -> Vec
         .collect()
 }
 
-fn tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
+/// Collects tokens before `child`, excluding visibility comments as they are rendered separately.
+fn declaration_prefix_tokens(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
     let mut tokens = Vec::new();
+    let mut in_visibility_prologue = false;
 
     for element in node.children_with_tokens() {
         match element {
             NodeOrToken::Node(candidate) if candidate == *child => break,
-            NodeOrToken::Node(candidate) => tokens.extend(all_tokens(&candidate)),
-            NodeOrToken::Token(token) => tokens.push(token),
+            NodeOrToken::Node(candidate) => {
+                in_visibility_prologue = candidate.kind() == SyntaxKind::Visibility;
+                let candidate_tokens =
+                    candidate.descendants_with_tokens().filter_map(NodeOrToken::into_token);
+                tokens.extend(candidate_tokens.filter(|token| {
+                    !in_visibility_prologue
+                        || !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+                }));
+            },
+            NodeOrToken::Token(token) => {
+                if !token.kind().is_trivia() {
+                    in_visibility_prologue = false;
+                }
+                if in_visibility_prologue
+                    && matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+                {
+                    continue;
+                }
+                tokens.push(token);
+            },
         }
     }
 
@@ -2444,6 +2460,32 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn formats_comments_inside_constant_visibility_once() {
+        let source = "\
+pub # after pub
+( # qualifier open
+package # package scope
+) const X = 1
+";
+        let expected = "\
+# after pub
+# qualifier open
+# package scope
+pub(package) const X = 1
+";
+
+        assert_eq!(assert_format_idempotent(source, "constant visibility comments"), expected);
+    }
+
+    #[test]
+    fn preserves_constant_header_comments_matching_visibility_comments() {
+        let source = "pub # same\nconst X # same\n= 1\n";
+        let expected = "# same\npub\nconst X # same\n= 1\n";
+
+        assert_eq!(assert_format_idempotent(source, "matching constant comments"), expected);
     }
 
     #[test]
