@@ -17,8 +17,8 @@ pub type Frame = struct { domain_tag: u32, params: [u32; 3] }
 #! One deferred payload chunk in stack order.
 pub type Payload = struct { lo: word, hi: word }
 
-# Registered Eidos domain tag. This must match `miden_core::deferred`.
-const DEFERRED_CHUNKS_DOMAIN = 0x01000401
+# registered Eidos CHUNKS domain tag, matching `miden_core::deferred`.
+# DEFERRED_CHUNKS_DOMAIN = 0x01000401
 
 # Eidos initial-CV bases. Kept local so this package remains independent of `miden-core`; they
 # match `miden::core::crypto::eidos`.

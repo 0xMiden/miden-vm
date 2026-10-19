@@ -182,13 +182,21 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
         let private_prefix = alloc::format!("const {name} = ");
         let public_prefix = alloc::format!("pub const {name} = ");
+        let metadata_prefix = alloc::format!("# {name} = ");
+        let region_prefix = alloc::format!("### {name}: ");
         source
             .lines()
             .find_map(|line| {
                 let line = line.trim();
                 let value = line
                     .strip_prefix(&private_prefix)
-                    .or_else(|| line.strip_prefix(&public_prefix))?;
+                    .or_else(|| line.strip_prefix(&public_prefix))
+                    .or_else(|| line.strip_prefix(&metadata_prefix))
+                    .or_else(|| {
+                        let (_, range) =
+                            line.strip_prefix(&region_prefix)?.split_once(" felts at ")?;
+                        range.split_once("..").map(|(start, _)| start)
+                    })?;
                 value.split('#').next()?.trim().parse().ok()
             })
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))

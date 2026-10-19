@@ -3,8 +3,8 @@ use miden::core::precompiles
 # Pinned to the Rust-side Sha256Precompile constants. DOMAIN_TAG identifies the registered SHA-256
 # precompile domain; ASSERT_OP_ID identifies the assertion operation within that domain. The digest
 # occupies one CHUNKS block.
-const DOMAIN_TAG = 16780289
-const ASSERT_OP_ID = 0
+# DOMAIN_TAG = 16780289
+# ASSERT_OP_ID = 0
 const SHA256_DIGEST_EVENT = event("miden::precompiles::hashes::sha256::digest")
 
 # Fixed lanes of `init(DOMAIN_TAG, [ASSERT_OP_ID, len_bytes, 0])`.

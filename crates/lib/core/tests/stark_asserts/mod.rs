@@ -811,6 +811,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     /// Relation layout modules are address-only, so every numeric constant in them is included.
     /// Elsewhere, pointer-named constants are included at any address; other numeric constants
     /// are treated as addresses only in the verifier's high 32-bit address band.
+    /// Named allocation comments retain boundaries whose constants are unused by MASM.
     fn declarations(path: &Path) -> Vec<(String, u64)> {
         let address_only_module = path.file_name().is_some_and(|name| name == "layout.masm");
         let module_path: MasmPathBuf =
@@ -826,7 +827,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                 .map(|constant| (constant.name().as_str().to_string(), &constant.value))
                 .collect(),
         };
-        module
+        let mut declarations: Vec<_> = module
             .constants()
             .filter_map(|constant| {
                 let value = eval::expr(&constant.value, &mut env).unwrap_or_else(|err| {
@@ -852,7 +853,28 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                     ),
                 }
             })
-            .collect()
+            .collect();
+
+        let source = std::fs::read_to_string(path).expect("MASM module is readable");
+        for line in source.lines() {
+            let Some((name, description)) =
+                line.trim().strip_prefix("### ").and_then(|line| line.split_once(": "))
+            else {
+                continue;
+            };
+            let Some((_, range)) = description.split_once(" felts at ") else {
+                continue;
+            };
+            let (start, _) = range.split_once("..").expect("documented allocation has a range");
+            let address = start.parse::<u64>().expect("documented allocation has an address");
+            if let Some((_, declared)) = declarations.iter().find(|(declared, _)| declared == name)
+            {
+                assert_eq!(*declared, address, "documented address for {name} differs from MASM");
+            } else {
+                declarations.push((name.to_string(), address));
+            }
+        }
+        declarations
     }
 
     fn region(source: &str, name: String, address: u64, offset: i64, felts: u64) -> Region {

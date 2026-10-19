@@ -50,9 +50,17 @@ use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 pub(crate) fn pvm_layout_const(name: &str) -> u32 {
     let source = include_str!("../../asm/sys/pvm/layout.masm");
     let prefix = format!("const {name} = ");
+    let region_prefix = format!("### {name}: ");
     let value = source
         .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
+        .find_map(|line| {
+            let line = line.trim();
+            let value = line.strip_prefix(&prefix).or_else(|| {
+                let (_, range) = line.strip_prefix(&region_prefix)?.split_once(" felts at ")?;
+                range.split_once("..").map(|(start, _)| start)
+            })?;
+            value.parse::<u64>().ok()
+        })
         .unwrap_or_else(|| panic!("missing generated PVM layout constant {name}"));
     u32::try_from(value).expect("PVM layout pointer must fit in u32")
 }
