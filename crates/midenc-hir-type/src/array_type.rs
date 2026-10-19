@@ -68,6 +68,24 @@ impl ArrayType {
             },
         }
     }
+
+    /// Returns the size in bytes of this array type, or `None` if it does not fit in a `usize`.
+    ///
+    /// This is [Self::checked_size_in_bits] rounded up to whole bytes, computed in bytes so that
+    /// it does not overflow when only the bit count exceeds `usize`. Every element after the
+    /// first starts on a byte boundary, so only the first element's size needs rounding.
+    pub fn checked_size_in_bytes(&self) -> Option<usize> {
+        match self.len {
+            0 => Some(0),
+            1 => self.ty.checked_size_in_bytes(),
+            n => {
+                let element_size = self.ty.checked_size_in_bytes()?;
+                let padded_element_size =
+                    element_size.checked_next_multiple_of(self.ty.min_alignment())?;
+                padded_element_size.checked_mul(n - 1)?.checked_add(element_size)
+            },
+        }
+    }
 }
 
 impl core::fmt::Display for ArrayType {

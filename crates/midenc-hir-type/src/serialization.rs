@@ -916,7 +916,11 @@ impl Type {
                         None
                     };
                     let ty = Type::read_from_with_depth(source, next_depth)?;
-                    if u32::try_from(ty.size_in_bytes()).is_err() {
+                    if ty
+                        .checked_size_in_bytes()
+                        .and_then(|size| u32::try_from(size).ok())
+                        .is_none()
+                    {
                         return Err(DeserializationError::InvalidValue(
                             "invalid struct field: size exceeds u32::MAX bytes".to_string(),
                         ));
@@ -924,7 +928,11 @@ impl Type {
                     fields.push(NameAndType { name, ty });
                 }
                 if repr == TypeRepr::Transparent
-                    && fields.iter().filter(|field| field.ty.size_in_bytes() != 0).count() > 1
+                    && fields
+                        .iter()
+                        .filter(|field| field.ty.checked_size_in_bytes() != Some(0))
+                        .count()
+                        > 1
                 {
                     return Err(DeserializationError::InvalidValue(
                         "invalid transparent struct: expected at most one non-zero-sized field"
@@ -938,7 +946,10 @@ impl Type {
             18 => {
                 let arity = source.read_usize()?;
                 let ty = Type::read_from_with_depth(source, next_depth)?;
-                let element_size = u64::try_from(ty.size_in_bytes()).unwrap_or(u64::MAX);
+                let element_size = ty
+                    .checked_size_in_bytes()
+                    .and_then(|size| u64::try_from(size).ok())
+                    .unwrap_or(u64::MAX);
                 let element_align = u64::try_from(ty.min_alignment()).unwrap_or(u64::MAX);
                 let padded_element_size = element_size.checked_next_multiple_of(element_align);
                 let size_in_bytes = padded_element_size.and_then(|padded_size| {

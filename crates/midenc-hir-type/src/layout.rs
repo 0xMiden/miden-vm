@@ -476,9 +476,16 @@ impl Type {
     }
 
     /// Same as [Self::size_in_bytes], but returns `None` instead of overflowing `usize`.
+    ///
+    /// The size is computed in bytes throughout, so a type whose byte size fits in a `usize` is
+    /// sized even when its size in bits would not (e.g. a 2^29-byte array on a 32-bit target).
     pub fn checked_size_in_bytes(&self) -> Option<usize> {
-        let bits = self.checked_size_in_bits()?;
-        Some((bits / 8) + (!bits.is_multiple_of(8)) as usize)
+        match self {
+            Self::Struct(struct_ty) => Some(struct_ty.size()),
+            Self::Enum(enum_ty) => Some(enum_ty.size_in_bytes()),
+            Self::Array(array_ty) => array_ty.checked_size_in_bytes(),
+            ty => Some(ty.size_in_bytes()),
+        }
     }
 
     /// Same as `size_in_bytes`, but with sufficient padding to guarantee alignment of the value.
@@ -597,14 +604,21 @@ mod tests {
         Type::from(ArrayType::new(inner, 1 << 29))
     }
 
+    /// `[[u8; usize::MAX]; 2]` needs more bytes than any `usize` can hold.
+    fn array_whose_byte_size_overflows_usize() -> Type {
+        let inner = Type::from(ArrayType::new(Type::U8, usize::MAX));
+        Type::from(ArrayType::new(inner, 2))
+    }
+
     #[test]
     fn checked_size_reports_overflow_and_matches_unchecked_size_otherwise() {
         let ty = array_whose_size_overflows_usize();
         assert_eq!(ty.checked_size_in_bits(), None);
-        assert_eq!(ty.checked_size_in_bytes(), None);
+        assert_eq!(array_whose_byte_size_overflows_usize().checked_size_in_bytes(), None);
 
         for ty in [
             Type::I1,
+            Type::from(ArrayType::new(Type::I1, 5)),
             Type::Felt,
             Type::U256,
             Type::from(ArrayType::new(Type::U16, 3)),
@@ -625,6 +639,18 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err, InvalidStructTypeError::SizeOverflow, "{repr:?}");
         }
+    }
+
+    /// 2^29 bytes is 2^32 bits: the bit count overflows a 32-bit `usize` (such as on wasm32),
+    /// but the byte count fits both `usize` and `u32`, so the type has a valid size.
+    #[test]
+    fn checked_byte_size_does_not_go_through_the_bit_count() {
+        const LEN: usize = 1 << 29;
+        let ty = Type::from(ArrayType::new(Type::U8, LEN));
+        assert_eq!(ty.checked_size_in_bytes(), Some(LEN));
+
+        let struct_ty = StructType::try_from_parts(None, TypeRepr::Default, [ty]).unwrap();
+        assert_eq!(struct_ty.size(), LEN);
     }
 
     #[test]
