@@ -1,11 +1,8 @@
 #[test]
-fn mast_forest_public_api_is_immutable_after_creation() {
+fn public_api_contracts() {
+    // Keep the fixtures in one case so nextest cannot run separate processes that overwrite
+    // trybuild's shared Cargo manifest when its best-effort file lock expires under load.
     let tests = trybuild::TestCases::new();
     tests.compile_fail("tests/ui/mast_forest_immutable/index_node_mut.rs");
-}
-
-#[test]
-fn execution_proof_is_the_versioned_transport() {
-    let tests = trybuild::TestCases::new();
     tests.pass("tests/ui/execution_proof_transport/direct_serialize.rs");
 }
