@@ -589,8 +589,11 @@ impl PartialSmt {
         }
 
         for (position, leaf) in unique_nodes.leaves {
-            smt.num_entries += leaf.num_entries();
-            smt.leaves.insert(position, leaf);
+            let num_entries = leaf.num_entries();
+            if num_entries > 0 {
+                smt.num_entries += num_entries;
+                smt.leaves.insert(position, leaf);
+            }
         }
 
         smt.validate()?;

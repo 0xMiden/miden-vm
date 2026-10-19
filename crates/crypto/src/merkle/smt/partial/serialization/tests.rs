@@ -296,14 +296,10 @@ fn smt_witness_writes_leaf_positions_once_and_bounds_shared_reconstruction() {
     let bytes =
         witness_payload(empty_root, &[], &[SmtLeaf::new_empty(LeafIndex::new_max_depth(7))], &[]);
     assert!(SmtWitness::read_from_bytes(&bytes).unwrap().into_partial_smt(63).is_err());
-    assert_eq!(
-        SmtWitness::read_from_bytes(&bytes)
-            .unwrap()
-            .into_partial_smt(64)
-            .unwrap()
-            .root(),
-        empty_root
-    );
+    let partial = SmtWitness::read_from_bytes(&bytes).unwrap().into_partial_smt(64).unwrap();
+    assert_eq!(partial.root(), empty_root);
+    assert_eq!(partial.num_leaves(), 0);
+    assert!(!partial.tracks_leaves());
 }
 
 #[test]
