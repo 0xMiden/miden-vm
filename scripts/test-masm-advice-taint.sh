@@ -22,7 +22,7 @@ EOF
 check_result() {
     local name="$1" expected_status="$2" diagnostic="${3:-}" actual_status verbose_status
     if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
-        "$test_root/$name/miden-project.toml" > "$test_root/$name/output" 2>&1; then
+        "${@:4}" "$test_root/$name/miden-project.toml" > "$test_root/$name/output" 2>&1; then
         actual_status=0
     else
         actual_status=$?
@@ -34,7 +34,7 @@ check_result() {
         exit 1
     fi
     if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
-        --verbose "$test_root/$name/miden-project.toml" > "$test_root/$name/verbose-output" 2>&1; then
+        --verbose "${@:4}" "$test_root/$name/miden-project.toml" > "$test_root/$name/verbose-output" 2>&1; then
         verbose_status=0
     else
         verbose_status=$?
@@ -49,6 +49,13 @@ check_result() {
     grep '^midenc-masm-lint:' "$test_root/$name/verbose-output" > "$test_root/$name/verbose-counts"
     if ! cmp -s "$test_root/$name/counts" "$test_root/$name/verbose-counts"; then
         echo "$name: verbosity changed diagnostic or coverage counts" >&2
+        exit 1
+    fi
+    if [[ "$expected_status" -eq 0 ]] && ! grep -Fxq \
+        'midenc-masm-lint: 0 finding(s), 0 skipped procedure(s), analysis complete' \
+        "$test_root/$name/output"; then
+        cat "$test_root/$name/output" >&2
+        echo "$name: successful analysis must have zero findings and full coverage" >&2
         exit 1
     fi
     if grep -Fq 'MASM lint skipped procedure' "$test_root/$name/output"; then
@@ -84,6 +91,23 @@ check_error() {
 
 check_error invalid_arguments "unexpected argument: --unknown" \
     "usage: midenc-masm-lint" --unknown
+check_error missing_target_name "expected a target name after --target" \
+    "usage: midenc-masm-lint" --target
+
+for help_flag in --help -h; do
+    for mode in --verbose -v; do
+        bash "$repo_root/scripts/check-masm-advice-taint.sh" "$mode" "$help_flag" \
+            > "$test_root/help-output" 2>&1
+        grep -Fq 'usage: midenc-masm-lint' "$test_root/help-output"
+        grep -Fq -- '--target <name>' "$test_root/help-output"
+        if grep -Fq 'Gate ' "$test_root/help-output"; then
+            echo 'Help must exit without analyzing a project' >&2
+            exit 1
+        fi
+    done
+done
+echo 'help: passed'
+
 check_error missing_project "failed to analyze '$test_root/missing/miden-project.toml'" \
     "No such file or directory (os error 2)" \
     "$test_root/missing/miden-project.toml"
@@ -102,6 +126,68 @@ pub proc entry(value: u32) -> u32
 end
 EOF
 check_result clean 0
+
+# The default library and an explicit executable have different analysis results.
+write_project target_selection
+cat >> "$test_root/target_selection/miden-project.toml" <<'EOF'
+
+[[bin]]
+name = "unsafe"
+path = "unsafe.masm"
+EOF
+cat > "$test_root/target_selection/mod.masm" <<'EOF'
+#! Returns a constant without reading advice.
+#!
+#! Inputs:  []
+#! Outputs: [result]
+#!
+#! Where:
+#! - result is one.
+#!
+#! Invocation: exec
+pub proc entry() -> felt
+    push.1
+end
+EOF
+cat > "$test_root/target_selection/unsafe.masm" <<'EOF'
+begin
+    adv_push push.1 u32wrapping_add drop
+end
+EOF
+check_result target_selection 0
+grep -Fq "target 'advice_lint_test::target_selection'" "$test_root/target_selection/output"
+grep -Fq "target 'advice_lint_test::target_selection'" "$test_root/target_selection/verbose-output"
+check_result target_selection 1 'reaches operation requiring' --target unsafe
+grep -Fq "target 'unsafe'" "$test_root/target_selection/output"
+grep -Fq "target 'unsafe'" "$test_root/target_selection/verbose-output"
+check_result target_selection 0 '' --target advice_lint_test::target_selection
+check_error unknown_target "failed to analyze '$test_root/target_selection/miden-project.toml'" \
+    "project has no target named 'missing'" \
+    --target missing "$test_root/target_selection/miden-project.toml"
+
+mkdir -p "$test_root/executable_default"
+cat > "$test_root/executable_default/miden-project.toml" <<'EOF'
+[package]
+name = "executable_default"
+version = "0.0.0"
+
+[[bin]]
+name = "first"
+path = "first.masm"
+
+[[bin]]
+name = "unsafe"
+path = "unsafe.masm"
+EOF
+cat > "$test_root/executable_default/first.masm" <<'EOF'
+begin
+    push.1 drop
+end
+EOF
+cp "$test_root/target_selection/unsafe.masm" "$test_root/executable_default/unsafe.masm"
+check_result executable_default 0
+grep -Fq "target 'first'" "$test_root/executable_default/output"
+check_result executable_default 1 'reaches operation requiring' --target unsafe
 
 # A module-index file can also contain procedures. The gate must analyze them.
 write_project unconstrained

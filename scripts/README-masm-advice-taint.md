@@ -11,8 +11,11 @@ source files or creating an adapter project.
 ```sh
 make build-masm-advice-lint
 make test-masm-advice-lint
+make lint-masm-advice-lint
 make masm-advice-lint
 make masm-advice-lint args=--verbose
+make masm-advice-lint args='--target miden::core'
+bash scripts/check-masm-advice-taint.sh --help
 bash scripts/check-masm-advice-taint.sh --verbose
 bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 ```
@@ -26,8 +29,14 @@ Existing VM workspace dependencies and lockfiles are unchanged.
 Update the pin and tool lockfile together when adopting compiler changes.
 
 `make test-masm-advice-lint` runs the renderer test and CLI fixtures.
+`make lint-masm-advice-lint` checks Rust formatting and Clippy, then runs ShellCheck
+on the runner and test scripts.
 
-The runner accepts an optional manifest path. `MIDENC_MASM_LINT` can select
+The runner accepts an optional manifest path and defaults to core when none is given.
+Use `--target <name>` to select a target from that manifest. The default is the
+library target, or the first executable if there is no library. Each report names
+the manifest and selected target. `--help` or `-h` prints usage without analyzing code.
+`MIDENC_MASM_LINT` can select
 another already built copy of the tool. No installed Miden sysroot is required.
 The tool clears the implicit compiled core import before loading core from source.
 
@@ -49,6 +58,13 @@ Display detail does not change the counts or exit status.
 Public-return advisories remain fatal in this implementation. Any later change to
 that enforcement policy needs review and must preserve taint through callers.
 
+The pinned compiler has gaps in [stream and Horner memory propagation](https://github.com/0xMiden/compiler/issues/1469)
+and [assembled dependency coverage](https://github.com/0xMiden/compiler/issues/1470).
+It also adds [fresh advice origins during deferred-data registration](https://github.com/0xMiden/compiler/issues/1471).
+The `u32cast` and `eq.0` controls from the VM review currently produce false positives.
+The report's coverage counts describe procedures the compiler lifted, so those
+counts do not account for missing rules within a lifted procedure.
+
 ## Manual CI evidence
 
 `Core MASM advice evidence` runs only through `workflow_dispatch`. It builds the
@@ -67,7 +83,7 @@ triage before classification as MASM defects. The 117 root failures cause anothe
 242 callers to be skipped. Root failures include 46 analysis-size limits and
 67 stack/signature inference failures, with four unsupported constructs.
 
-Compact output has 26 lines and verbose output has 15,341. Local evidence is in
+Compact output has 27 lines and verbose output has 15,342. Local evidence is in
 `target/masm-advice-lint/evidence/core-taint-compact.txt` and
 `target/masm-advice-lint/evidence/core-taint-verbose.txt`.
 The CLI cases cover clean code, sink findings,
@@ -75,5 +91,7 @@ grouped returns, and advice passing through declared word and pointer arguments.
 They verify that skipped dependencies cause failure even when unrelated code is clean.
 An empty child module and budget exhaustion cannot return success.
 Argument errors and missing or malformed manifests must return status 2 in both modes.
+Target tests distinguish the default library from an executable with findings.
+They also cover the first executable default and reject unknown target names.
 The CLI passes formatting and Clippy with warnings denied. Both scripts pass
 ShellCheck, and the manual workflow passes Actionlint. Hosted CI has not run.
