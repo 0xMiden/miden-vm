@@ -343,26 +343,6 @@ impl Verifier {
                     config::BLAKE3_PREPROCESSED_COMMITMENT.into(),
                 )
             },
-            HashFunction::Rpo256 => {
-                let config = config::rpo_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::RPO_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
-            HashFunction::Rpx256 => {
-                let config = config::rpx_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::RPX_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
             HashFunction::Eidos => {
                 let config = config::eidos_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(
@@ -371,16 +351,6 @@ impl Verifier {
                     &aux_inputs,
                     proof_bytes,
                     config::EIDOS_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
-            HashFunction::Poseidon2 => {
-                let config = config::poseidon2_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::POSEIDON2_PREPROCESSED_COMMITMENT.into(),
                 )
             },
             HashFunction::Keccak => {

@@ -79,7 +79,7 @@ verifier, ensuring consistency across the system.
 
 ### Hash Function Selection
 
-The prover defaults to Eidos. BLAKE3, Keccak, RPO256, Poseidon2, and RPX256 are also selectable for
+The prover defaults to Eidos. BLAKE3 and Keccak are also selectable for
 non-recursive proofs. Recursive Miden VM verification accepts only Eidos proofs.
 
 ## Crate features

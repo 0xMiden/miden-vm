@@ -8,9 +8,8 @@
 //! before proving or verifying.
 
 pub use miden_air::config::{
-    Blake3Config, EidosConfig, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
-    blake3_256_config, eidos_config, keccak_config, observe_protocol_params, poseidon2_config,
-    rpo_config, rpx_config,
+    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, eidos_config,
+    keccak_config, observe_protocol_params,
 };
 use miden_core::Felt;
 use miden_crypto::{

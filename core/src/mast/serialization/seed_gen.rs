@@ -281,7 +281,7 @@ fn generate_fuzz_seeds() {
 
     // Execution proof seed (minimal complete proof with no precompile obligation).
     {
-        let stark = StarkProof::new(Vec::new(), HashFunction::Rpo256);
+        let stark = StarkProof::new(Vec::new(), HashFunction::Eidos);
         let vm = VmProof {
             proof: stark,
             precompile_root: TRUE_DIGEST,
@@ -299,7 +299,7 @@ fn generate_fuzz_seeds() {
     {
         let wire = singleton_witness();
         let vm = VmProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             precompile_root: wire.root_unchecked(),
         };
         let proof = ExecutionProof::from_parts(
@@ -314,11 +314,11 @@ fn generate_fuzz_seeds() {
     // Execution proof seed with a completed precompile proof.
     {
         let vm = VmProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             precompile_root: TRUE_DIGEST,
         };
         let precompile = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: vec![TRUE_DIGEST],
         };
         let proof = ExecutionProof::from_parts(
