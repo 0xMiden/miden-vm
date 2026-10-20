@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage,
@@ -10,7 +10,6 @@ use miden_mast_package::{
     Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
 
@@ -49,10 +48,7 @@ pub fn get_masm_program(
         let kernel_lib = match ext.as_str() {
             "masp" => {
                 // Load kernel from package file
-                let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
-                    format!("Failed to read kernel package `{}`", kernel_path.display())
-                })?;
-                Package::read_from_bytes(&bytes)
+                Package::deserialize_from_file(kernel_path)
                     .map(Arc::from)
                     .into_diagnostic()
                     .wrap_err_with(|| {

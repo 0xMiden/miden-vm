@@ -57,6 +57,22 @@
 - [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 - [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 
+## v0.36.2 (2026-10-20)
+
+#### Features
+
+#### Changes
+
+#### Fixes
+
+- Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
+- Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes per store while preserving compatibility with existing readers and payloads ([#4060](https://github.com/0xMiden/miden-vm/pull/4060)).
+- [BREAKING] Write CLI proofs and output JSON to sibling temporary files before replacing their destinations, preserving previous artifacts when writes fail. Replacements use the current user and normal file creation permissions instead of copying the previous file's access controls. Destination symlinks are replaced with artifact files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
+- Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
+
 ## v0.36.1 (2026-10-16)
 
 #### Features
@@ -67,7 +83,7 @@
 
 #### Fixes
 
-- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee.
+- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
 
 ## v0.36.0 (2026-10-14)
 

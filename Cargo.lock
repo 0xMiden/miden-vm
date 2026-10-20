@@ -2687,7 +2687,9 @@ version = "1.0.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "rustix",
  "serde-wincode",
+ "tempfile",
  "wincode",
 ]
 

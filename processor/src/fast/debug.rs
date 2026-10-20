@@ -77,20 +77,24 @@ struct FunctionRange {
     function: DebugFunctionIdx,
     start: u32,
     end: u32,
-    inherited_inline_calls: usize,
     signature: Signature,
+    /// Explicit inline boundaries retain ownership even when merging re-batches their padding.
+    explicit_boundary: bool,
 }
 
 impl FunctionRange {
     fn matches_source(&self, node: &DebugSourceNode) -> bool {
         let start = node.asm_ops.partition_point(|row| row.op_idx < self.start);
         let end = node.asm_ops.partition_point(|row| row.op_idx < self.end);
-        node.asm_ops[start..end]
-            .iter()
-            .map(|row| {
-                (row.op_idx - self.start, row.context_name_idx, row.op_name_idx, row.num_cycles)
-            })
-            .eq(self.signature.iter().copied())
+        let rows = &node.asm_ops[start..end];
+        rows.len() == self.signature.len()
+            && rows.iter().zip(&self.signature).all(
+                |(row, (offset, context, operation, cycles))| {
+                    (self.explicit_boundary || row.op_idx - self.start == *offset)
+                        && (row.context_name_idx, row.op_name_idx, row.num_cycles)
+                            == (*context, *operation, *cycles)
+                },
+            )
     }
 }
 
@@ -110,6 +114,29 @@ fn signature(node: &DebugSourceNode) -> Signature {
         .collect()
 }
 
+/// Active inline depth at every boundary. Build once per source node so many adjacent execs
+/// do not require scanning the entire inline table for each recovered range.
+fn inline_depths(node: &DebugSourceNode) -> BTreeMap<u32, (usize, usize)> {
+    let mut events = BTreeMap::<u32, (usize, usize, usize)>::new();
+    for row in &node.inline_calls {
+        if row.op_idx == row.op_end {
+            events.entry(row.op_idx).or_default().2 += 1;
+        } else {
+            events.entry(row.op_idx).or_default().0 += 1;
+            events.entry(row.op_end).or_default().1 += 1;
+        }
+    }
+    let mut active = 0;
+    events
+        .into_iter()
+        .map(|(position, (starts, ends, points))| {
+            active += starts;
+            active -= ends;
+            (position, (active, points))
+        })
+        .collect()
+}
+
 struct FunctionIndex {
     info: Arc<PackageDebugInfo>,
     forest: Arc<MastForest>,
@@ -118,6 +145,7 @@ struct FunctionIndex {
     ranges: BTreeMap<MastNodeId, Vec<FunctionRange>>,
     entry_inline_counts: BTreeMap<DebugFunctionIdx, usize>,
     entry_names: BTreeMap<DebugSourceNodeId, Option<DebugStringIdx>>,
+    inline_depths: BTreeMap<DebugSourceNodeId, BTreeMap<u32, (usize, usize)>>,
 }
 
 impl FunctionIndex {
@@ -130,6 +158,7 @@ impl FunctionIndex {
             ranges: BTreeMap::new(),
             entry_inline_counts: BTreeMap::new(),
             entry_names: BTreeMap::new(),
+            inline_depths: BTreeMap::new(),
         };
         let mut root_nodes = BTreeMap::<Word, MastNodeId>::new();
         for root in index.forest.procedure_roots() {
@@ -185,6 +214,7 @@ impl FunctionIndex {
             }
         }
         let mut signatures = BTreeMap::<Signature, Vec<DebugFunctionIdx>>::new();
+        let mut function_signatures = BTreeMap::<DebugFunctionIdx, Signature>::new();
         for (position, function) in index.info.functions().iter().enumerate() {
             let function_idx = DebugFunctionIdx::from(position as u32);
             if let Some(source) = function.source_node.into_option() {
@@ -215,7 +245,9 @@ impl FunctionIndex {
                     node.inline_calls.iter().filter(|row| row.op_idx == node.op_start).count(),
                 );
                 if canonical.is_some() && !node.asm_ops.is_empty() {
-                    signatures.entry(signature(node)).or_default().push(function_idx);
+                    let signature = signature(node);
+                    function_signatures.insert(function_idx, signature.clone());
+                    signatures.entry(signature).or_default().push(function_idx);
                 }
             }
         }
@@ -231,23 +263,56 @@ impl FunctionIndex {
                 function: *function,
                 start: node.op_start,
                 end: node.op_end,
-                inherited_inline_calls: node
-                    .inline_calls
-                    .iter()
-                    .filter(|row| row.op_idx == node.op_start)
-                    .count()
-                    .saturating_sub(index.entry_inline_counts.get(function).copied().unwrap_or(0)),
                 signature: signature(node),
+                explicit_boundary: false,
             };
             let ranges = index.ranges.entry(node.exec_node).or_default();
             if seen_ranges.insert((node.exec_node, range.function, range.start, range.end)) {
                 ranges.push(range);
             }
         }
+        // An optimized exec may retain only its inline boundary, without a separate source
+        // slice. Validate that explicit function identity against its complete executable
+        // signature before recovering it: source-language inline rows alone are not invocations.
+        // Re-batching may move padding inside that explicit boundary. Generic source slices still
+        // require exact offsets so a caller's generated prefix cannot become part of the callee.
+        for (position, node) in index.info.nodes().iter().enumerate() {
+            if !node.inline_calls.is_empty() {
+                index
+                    .inline_depths
+                    .insert(DebugSourceNodeId::from(position as u32), inline_depths(node));
+            }
+            for row in &node.inline_calls {
+                let Some(signature) = function_signatures.get(&row.callee_idx) else {
+                    continue;
+                };
+                let range = FunctionRange {
+                    function: row.callee_idx,
+                    start: row.op_idx,
+                    end: row.op_end,
+                    signature: signature.clone(),
+                    explicit_boundary: true,
+                };
+                if range.matches_source(node)
+                    && seen_ranges.insert((node.exec_node, range.function, range.start, range.end))
+                {
+                    index.ranges.entry(node.exec_node).or_default().push(range);
+                }
+            }
+        }
         for ranges in index.ranges.values_mut() {
             ranges.sort_by_key(|range| (range.start, core::cmp::Reverse(range.end)));
         }
         index
+    }
+
+    fn inline_depth_at(&self, source: DebugSourceNodeId, operation: u32) -> usize {
+        self.inline_depths
+            .get(&source)
+            .and_then(|depths| depths.range(..=operation).next_back())
+            .map_or(0, |(position, (active, points))| {
+                active + if *position == operation { *points } else { 0 }
+            })
     }
 
     fn source_function(&self, source: DebugSourceNodeId) -> Option<DebugFunctionIdx> {
@@ -494,7 +559,14 @@ impl DebugCallFrameResolver {
                         *source,
                         range.start,
                         activation.clone(),
-                        inherited + range.inherited_inline_calls,
+                        inherited
+                            + index.inline_depth_at(*source, range.start).saturating_sub(
+                                index
+                                    .entry_inline_counts
+                                    .get(&range.function)
+                                    .copied()
+                                    .unwrap_or(0),
+                            ),
                         DebugFrameOrigin::InferredRange,
                     ));
                 }
@@ -565,6 +637,29 @@ mod tests {
     use miden_mast_package::debug_info::PackageDebugInfoBuilder;
 
     use super::*;
+
+    #[test]
+    fn inline_depth_index_respects_adjacent_nested_and_point_ranges() {
+        use miden_mast_package::debug_info::{DebugLocIdx, DebugSourceInlineCall};
+        let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .assemble_program("program", "begin push.7 drop end")
+            .unwrap();
+        let info = package.debug_info().unwrap().unwrap();
+        let mut node = info.nodes().iter().next().unwrap().clone();
+        node.inline_calls = [(0, 10), (0, 5), (5, 10), (5, 5)]
+            .into_iter()
+            .map(|(op_idx, op_end)| DebugSourceInlineCall {
+                op_idx,
+                op_end,
+                callee_idx: DebugFunctionIdx::from(0_u32),
+                loc_idx: DebugLocIdx::from(0_u32),
+            })
+            .collect();
+        let depths = inline_depths(&node);
+        assert_eq!(depths[&0], (2, 0));
+        assert_eq!(depths[&5], (2, 1));
+        assert_eq!(depths[&10], (0, 0));
+    }
 
     #[test]
     fn frame_index_handles_many_sources_and_functions_sharing_an_execution_node() {
