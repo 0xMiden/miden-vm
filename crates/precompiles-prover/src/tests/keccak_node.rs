@@ -25,11 +25,7 @@ use crate::{
             self as chunk_cols,
             trace::{ChunkRequires, ChunkSeqId, generate_trace_padded_to as chunk_trace},
         },
-        chunk_node::NODE_COL_OFFSET,
-        chunk_node_sponge::{
-            ChunkNodeSpongeAir, NUM_MAIN_COLS as CNS_COLS, SPONGE_COL_OFFSET,
-            trace::generate_trace as cns_trace,
-        },
+        chunk_node_sponge::{ChunkNodeSpongeAir, trace::generate_trace as cns_trace},
         keccak::{
             node::{
                 COL_ABSORPTION_ID_CHUNKS, COL_ABSORPTION_ID_DIGEST_CHUNKS,
@@ -211,8 +207,9 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The eleven-column packing leaves columns 0, 8, and 10 as singletons and pairs the rest.
-    // Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
+    // The full-block range check shares the Eidos output column, keeping at most two linear
+    // fractions per column. The resulting degree-three closing constraints need two quotient
+    // chunks after division by the trace vanishing polynomial: log_quotient_degree = 1.
     let air = KeccakNodeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }
@@ -648,7 +645,7 @@ fn forged_keccak_side(msgs: [&[u8]; 3]) -> KeccakSide {
 
     let chunk_main = reorder_chunk_chains(chunk_main);
     let sponge_main = repin_sponge_chunk_ptrs(sponge_main);
-    let cns = assemble_cns(&chunk_main, &node_rows, &sponge_main);
+    let cns = super::chunk_node_sponge::assemble(&chunk_main, &node_rows, &sponge_main);
 
     let eval = eval_trace(eval, root);
     let round = round_trace(round, &mut bpl);
@@ -700,29 +697,8 @@ fn repin_sponge_chunk_ptrs(mut m: RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> 
     m
 }
 
-/// Interleave the chunk, forged node, and sponge bands into the merged chiplet's column layout.
-fn assemble_cns(
-    chunk: &RowMajorMatrix<Felt>,
-    node_rows: &[[Felt; NODE_W]],
-    sponge: &RowMajorMatrix<Felt>,
-) -> RowMajorMatrix<Felt> {
-    assert_eq!(NODE_COL_OFFSET, CHUNK_W);
-    assert_eq!(SPONGE_COL_OFFSET, CHUNK_W + NODE_W);
-    let height = sponge.height();
-    let mut vals = Vec::with_capacity(height * CNS_COLS);
-    for r in 0..height {
-        vals.extend_from_slice(&chunk.values[r * CHUNK_W..(r + 1) * CHUNK_W]);
-        match node_rows.get(r) {
-            Some(cells) => vals.extend_from_slice(cells),
-            None => vals.extend([Felt::ZERO; NODE_W]),
-        }
-        vals.extend_from_slice(&sponge.values[r * SPONGE_W..(r + 1) * SPONGE_W]);
-    }
-    RowMajorMatrix::new(vals, CNS_COLS)
-}
-
 fn node_cell(cns: &RowMajorMatrix<Felt>, row: usize, col: usize) -> Felt {
-    cns.values[row * CNS_COLS + NODE_COL_OFFSET + col]
+    super::chunk_node_sponge::read_node(cns, row)[col]
 }
 
 #[test]
@@ -792,7 +768,9 @@ fn multi_invocation_node_rows_cannot_read_another_invocations_digest() {
     // Control: the local check is not vacuous. The physical-order value n_sponge_perms = 1 on row 1
     // breaks the sponge-head continuity into row 2.
     let mut control = forged.cns.clone();
-    control.values[CNS_COLS + NODE_COL_OFFSET + COL_N_SPONGE_PERMS] = Felt::ONE;
+    let mut record = super::chunk_node_sponge::read_node(&control, 1);
+    record[COL_N_SPONGE_PERMS] = Felt::ONE;
+    super::chunk_node_sponge::write_node(&mut control, 1, &record);
     crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &control);
 
     // The out-of-range `Range16` values the forged rows request, predicted from their

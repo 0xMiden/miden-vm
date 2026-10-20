@@ -8,7 +8,8 @@ use miden_air::{
         debug::{ValidateLayout, ValidateLookupAir},
     },
     precompiles::hash::{
-        chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
+        chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
+        chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
     },
 };
 use miden_core::{
@@ -59,7 +60,10 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
     let traces = session.finish(root);
     traces.check();
     let mains = traces.mains();
-    assert_eq!(mains[0].values[NODE_COL_OFFSET + KECCAK_OUT_MULT], Felt::from_u32(5));
+    assert_eq!(
+        mains[0].values[(NODE_ROW_START + 6) * CNS_COLS + KECCAK_OUT_MULT],
+        Felt::from_u32(5)
+    );
 
     let mut rng = StdRng::seed_from_u64(3787);
     let alpha = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
@@ -74,7 +78,7 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
         .position(|row| row[COL_OUT_MULT] == Felt::from_u32(2))
         .unwrap();
     for (chip, offset) in [
-        (0, NODE_COL_OFFSET + KECCAK_OUT_MULT),
+        (0, (NODE_ROW_START + 6) * CNS_COLS + KECCAK_OUT_MULT),
         (4, shared_and * NUM_MAIN_COLS + COL_OUT_MULT),
     ] {
         for delta in [Felt::ONE, -Felt::ONE] {
@@ -100,7 +104,7 @@ fn shared_assertions_balance_actual_operand_uses() {
     use miden_precompiles::{K1_BASE_BOUND_PTR, K1_GROUP_PTR};
 
     use crate::{
-        hash::{chunk, keccak::node},
+        hash::{chunk_node, keccak::node},
         math::U256,
     };
 
@@ -141,11 +145,14 @@ fn shared_assertions_balance_actual_operand_uses() {
     assert_eq!(multiplicity(point_equal.hash()), Felt::from(2u32));
     assert_eq!(multiplicity(zero.hash()), Felt::from(3u32));
     // Two computation requests, three binding uses, one Keccak provider row.
-    assert_eq!(mains[0].values[chunk::NUM_MAIN_COLS + node::COL_OUT_MULT], Felt::from(3u32));
+    assert_eq!(
+        super::chunk_node_sponge::read_node(mains[0], 0)[node::COL_OUT_MULT],
+        Felt::from(3u32)
+    );
     let node_rows = mains[0]
         .values
-        .chunks_exact(mains[0].width)
-        .filter(|row| row[chunk::NUM_MAIN_COLS + node::COL_ACT] == Felt::ONE)
+        .chunks_exact(mains[0].width * 32)
+        .filter(|row| row[chunk_node::COL_NODE_ACT] == Felt::ONE)
         .count();
     assert_eq!(node_rows, 1);
 

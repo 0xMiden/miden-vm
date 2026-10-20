@@ -12,7 +12,7 @@
 //! 2. Consumes a `ChunkChain(chunk_seq_id_head, absorption_id_chunks)` provide from the chunk
 //!    chiplet and supplies the chain's length-bound initial CV.
 //! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round chiplet's perm-N
-//!    digest-output addresses, mult 2 (matching the round chiplet's `dst_mult`).
+//!    digest-output addresses, consuming one copy; the sponge consumes the other copy.
 //! 4. Drives one framed Eidos compression chain to hash `D[8 felts]` (block low = lanes 0-1, block
 //!    high = lanes 2-3) as one deferred CHUNKS block → `H_digest_chunks`.
 //! 5. Reads `H_input_chunks` from `EidosOut` at `absorption_id_chunks + n_chunks − 1` — the chunks
@@ -37,7 +37,7 @@ use core::array;
 use miden_core::{
     Felt,
     deferred::DEFERRED_CHUNKS_DOMAIN,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
@@ -166,8 +166,8 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Eleven aux columns, flattened via `frac_col!` so every closing
-/// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
+/// Ten auxiliary columns. Each column has at most two linear interactions, keeping the
+/// closing constraints within degree three (`log_quotient_degree = 1`):
 ///
 /// - col 0: `KeccakSponge` provide alone — the centered running-sum column.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
@@ -175,12 +175,12 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
 /// - col 5: digest-chunks block + initial CV.
 /// - col 6: `EidosOut(H_digest_chunks)` + byte-pair remainder check.
-/// - col 7/8: Keccak-node block + initial CV, then `EidosOut(H_keccak)`.
-/// - col 9/10: range checks of the last-block remainder `r`, of `135 - r`, and of `n_sponge_perms -
-///   1`.
-pub const NUM_AUX_COLS: usize = 11;
+/// - col 7: Keccak-node block + initial CV.
+/// - col 8: `EidosOut(H_keccak)` + range check of `n_sponge_perms - 1`.
+/// - col 9: range checks of the last-block remainder `r` and of `135 - r`.
+pub const NUM_AUX_COLS: usize = 10;
 
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 
 /// Bytes absorbed by one Keccak-256 sponge permutation.
 pub const SPONGE_RATE_BYTES: u32 = 136;
@@ -207,19 +207,19 @@ impl BaseAir<Felt> for KeccakNodeAir {
 /// Enforces the empty or nonempty length equation on each active row. The byte-pair lookup bounds
 /// the remainder; the bus-pinned head and tail cycle IDs exclude field-wrapped chunk counts at
 /// supported trace heights.
-pub(crate) fn eval_chunk_count<AB>(builder: &mut AB, local: &[AB::Var; NUM_MAIN_COLS])
-where
+pub(crate) fn eval_chunk_count<AB>(
+    builder: &mut AB,
+    act: AB::Expr,
+    len_bytes: AB::Expr,
+    n_chunks: AB::Expr,
+    n_chunks_inv: AB::Expr,
+    remainder: AB::Expr,
+) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let act: AB::Expr = local[COL_ACT].into();
-    let len_bytes: AB::Expr = local[COL_LEN_BYTES].into();
-    let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
-    let n_chunks_inv: AB::Expr = local[COL_N_CHUNKS_INV].into();
-    let remainder: AB::Expr = local[COL_LAST_CHUNK_REM].into();
-    let is_empty = AB::Expr::from(Felt::from(32u8)) * (n_chunks.clone() - AB::Expr::ONE)
-        + remainder.clone()
-        + AB::Expr::ONE
-        - len_bytes.clone();
+    let is_empty =
+        (n_chunks.clone() - AB::Expr::ONE) * Felt::from_u8(32) + remainder.clone() + AB::Expr::ONE
+            - len_bytes.clone();
 
     builder.assert_zero(act.clone() * is_empty.clone() * (is_empty.clone() - AB::Expr::ONE));
     builder.assert_zero(act.clone() * is_empty.clone() * len_bytes);
@@ -286,7 +286,14 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         builder
             .when_transition()
             .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
-        eval_chunk_count(builder, &local);
+        eval_chunk_count(
+            builder,
+            local[COL_ACT].into(),
+            local[COL_LEN_BYTES].into(),
+            local[COL_N_CHUNKS].into(),
+            local[COL_N_CHUNKS_INV].into(),
+            local[COL_LAST_CHUNK_REM].into(),
+        );
 
         // out_mult on inactive rows --------------------------------
         // Pin `out_mult = 0` on dead rows so the `Binding` provide
@@ -325,48 +332,31 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
 // LOOKUP AIR — bus interactions
 // ================================================================================================
 
-/// Emits the `Range16` checks that pin `n_sponge_perms` to `floor(len_bytes / 136) + 1` on each
-/// active row. With `n_sponge_perms − 1 ∈ [0, 2^16)` and the last-block remainder
+/// Constructs the `Range16` messages for the last-block remainder, rate gap, and full-block
+/// count, in that order. Consuming all three on each active row pins `n_sponge_perms` to
+/// `floor(len_bytes / 136) + 1`. With `n_sponge_perms − 1 ∈ [0, 2^16)` and the last-block remainder
 /// `r = len_bytes − 136·(n_sponge_perms − 1)` satisfying `r, 135 − r ∈ [0, 2^16)`, the length
 /// equation `len_bytes = 136·(n_sponge_perms − 1) + r` holds over the integers with
 /// `r ∈ [0, 135]`.
 ///
 /// That count is the block count of this node's own sponge invocation. The invocation's first
 /// sponge row consumes this node's `KeccakSponge` request, which pins its starting `bytes_left` to
-/// `len_bytes`. The sponge's `bytes_left` decrement chain, pad-lane tie-down and pad-must-fire
-/// constraints then end the invocation on the block that absorbs the padding, its
+/// `len_bytes`. The sponge's byte-count, padding, and invocation-boundary constraints then end
+/// the invocation on the block that absorbs the padding, its
 /// `floor(len_bytes / 136) + 1`-th. The digest address therefore reads this invocation's final
 /// permutation, and the sponge-head continuity steps to the first row of the next invocation.
-pub(crate) fn eval_sponge_perm_count<LB>(builder: &mut LB, local: &[LB::Var; NUM_MAIN_COLS])
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    let act: LB::Expr = local[COL_ACT].into();
-    let len_bytes: LB::Expr = local[COL_LEN_BYTES].into();
-    let n_sponge_perms: LB::Expr = local[COL_N_SPONGE_PERMS].into();
-    let full_blocks = n_sponge_perms - LB::Expr::ONE;
-    let remainder = len_bytes - LB::Expr::from(Felt::from(SPONGE_RATE_BYTES)) * full_blocks.clone();
-    let rate_gap = LB::Expr::from(Felt::from(SPONGE_RATE_BYTES - 1)) - remainder.clone();
-
-    let interaction_deg = Deg { v: 1, u: 1 };
-    frac_col!(
-        builder,
-        "sponge-perm-count",
-        Deg { v: 2, u: 2 },
-        (
-            "last-block-remainder",
-            act.clone(),
-            Range16Msg { w: remainder },
-            interaction_deg
-        ),
-        ("last-block-rate-gap", act.clone(), Range16Msg { w: rate_gap }, interaction_deg),
-    );
-    frac_col!(
-        builder,
-        "sponge-perm-count",
-        Deg { v: 1, u: 1 },
-        ("full-blocks", act, Range16Msg { w: full_blocks }, interaction_deg),
-    );
+pub(crate) fn sponge_perm_count_messages<E: Algebra<Felt>>(
+    len_bytes: E,
+    n_sponge_perms: E,
+) -> [Range16Msg<E>; 3] {
+    let full_blocks = n_sponge_perms - E::ONE;
+    let remainder = len_bytes - E::from(Felt::from(SPONGE_RATE_BYTES)) * full_blocks.clone();
+    let rate_gap = E::from(Felt::from(SPONGE_RATE_BYTES - 1)) - remainder.clone();
+    [
+        Range16Msg { w: remainder },
+        Range16Msg { w: rate_gap },
+        Range16Msg { w: full_blocks },
+    ]
 }
 
 impl<LB> LookupAir<LB> for KeccakNodeAir
@@ -395,6 +385,8 @@ where
         let n_chunks: LB::Expr = local[COL_N_CHUNKS].into();
         let absorption_id_chunks: LB::Expr = local[COL_ABSORPTION_ID_CHUNKS].into();
         let len_bytes: LB::Expr = local[COL_LEN_BYTES].into();
+        let [last_block_remainder, last_block_rate_gap, full_blocks] =
+            sponge_perm_count_messages(len_bytes.clone(), n_sponge_perms.clone());
         let absorption_id_digest_chunks: LB::Expr = local[COL_ABSORPTION_ID_DIGEST_CHUNKS].into();
         let absorption_id_keccak: LB::Expr = local[COL_ABSORPTION_ID_KECCAK].into();
 
@@ -409,7 +401,7 @@ where
         // Multiplicities.
         let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
         let pos_act: LB::Expr = act.clone();
-        let pos_act_x2: LB::Expr = LB::Expr::from(Felt::from(2u8)) * act;
+        let digest_mult: LB::Expr = act;
         let out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
 
@@ -424,8 +416,7 @@ where
         // 100·sponge_seq_id − 99·p_idx + 3072` at the last block's
         // digest rows (`p_idx ∈ [0, 4)` of the last period) reduces to
         // `100·sponge_seq_id_head + 3200·n_sponge_perms − 128 + j`. The
-        // round chiplet provides these lanes at `dst_mult = 2`; we are
-        // the sole consumer, so the consume mult is `2·act`.
+        // round chiplet provides two copies of each lane; the node and sponge each consume one.
         let digest_addr_base: LB::Expr = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id_head
             + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
             - LB::Expr::from(Felt::from(128u8));
@@ -529,7 +520,7 @@ where
             pair_deg,
             (
                 "d-lane-0",
-                pos_act_x2.clone(),
+                digest_mult.clone(),
                 Memory64Msg {
                     addr: addr_lane(0),
                     lo: d[0].clone(),
@@ -539,7 +530,7 @@ where
             ),
             (
                 "d-lane-1",
-                pos_act_x2.clone(),
+                digest_mult.clone(),
                 Memory64Msg {
                     addr: addr_lane(1),
                     lo: d[2].clone(),
@@ -554,7 +545,7 @@ where
             pair_deg,
             (
                 "d-lane-2",
-                pos_act_x2.clone(),
+                digest_mult.clone(),
                 Memory64Msg {
                     addr: addr_lane(2),
                     lo: d[4].clone(),
@@ -564,7 +555,7 @@ where
             ),
             (
                 "d-lane-3",
-                pos_act_x2,
+                digest_mult,
                 Memory64Msg {
                     addr: addr_lane(3),
                     lo: d[6].clone(),
@@ -657,11 +648,11 @@ where
         );
         frac_col!(
             builder,
-            "keccak-eidos",
-            provides_deg,
+            "keccak-eidos-and-count",
+            pair_deg,
             (
                 "eidos-out",
-                pos_act,
+                pos_act.clone(),
                 EidosOutMsg {
                     chain_head_id: absorption_id_keccak.clone(),
                     compression_id: absorption_id_keccak,
@@ -669,9 +660,16 @@ where
                 },
                 interaction_deg
             ),
+            ("full-blocks", pos_act.clone(), full_blocks, interaction_deg),
         );
 
-        // ---- col 9/10: sponge-permutation count range checks ----
-        eval_sponge_perm_count(builder, &local);
+        // ---- col 9: last-block remainder and rate gap ----
+        frac_col!(
+            builder,
+            "sponge-perm-count",
+            pair_deg,
+            ("last-block-remainder", pos_act.clone(), last_block_remainder, interaction_deg),
+            ("last-block-rate-gap", pos_act, last_block_rate_gap, interaction_deg),
+        );
     }
 }

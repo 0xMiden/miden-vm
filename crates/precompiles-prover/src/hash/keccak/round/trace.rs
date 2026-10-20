@@ -63,47 +63,8 @@ fn bytes_le(x: u64) -> [Felt; 8] {
     x.to_le_bytes().map(Felt::from)
 }
 
-/// `rot_limbs` for rotating `r` by the *reduced* shift `2^shift` (`shift
-/// ≤ 30` — see [`program::rol_decompose`]): 16-bit limbs of
-/// `(r_half + 2^32)·k`, low half first, with each half's known-zero limb omitted.
-/// Returned as raw `u16`s (for driving the
-/// `Range16` requires) alongside their `Felt` form (for the trace row).
-fn rot_limbs_for(r: u64, shift: u32) -> [u16; 6] {
-    assert!((1..=30).contains(&shift), "the biased half decomposition requires shifts 1..30");
-    let k = 1u64 << shift;
-    let r_lo = r & 0xffff_ffff;
-    let r_hi = r >> 32;
-    let lo_offset_k = (r_lo + (1u64 << 32)).wrapping_mul(k);
-    let hi_offset_k = (r_hi + (1u64 << 32)).wrapping_mul(k);
-    let lo_limbs = u64_as_four_u16_limbs(lo_offset_k);
-    let hi_limbs = u64_as_four_u16_limbs(hi_offset_k);
-    // Below 16, the highest limb is zero. At least 16, the lowest limb is zero.
-    let first = usize::from(shift >= 16);
-    let omitted = if first == 0 { 3 } else { 0 };
-    debug_assert_eq!(lo_limbs[omitted], 0);
-    debug_assert_eq!(hi_limbs[omitted], 0);
-    [
-        lo_limbs[first],
-        lo_limbs[first + 1],
-        lo_limbs[first + 2],
-        hi_limbs[first],
-        hi_limbs[first + 1],
-        hi_limbs[first + 2],
-    ]
-}
-
-/// Decompose a `u64` into four 16-bit limbs LSB-first.
-fn u64_as_four_u16_limbs(x: u64) -> [u16; 4] {
-    [
-        (x & 0xffff) as u16,
-        ((x >> 16) & 0xffff) as u16,
-        ((x >> 32) & 0xffff) as u16,
-        ((x >> 48) & 0xffff) as u16,
-    ]
-}
-
 /// Build one row's `LANE_WIDTH` field elements and drive the
-/// `BytePairLutRequires` ledger for its byte/limb checks. `spec` is the
+/// `BytePairLutRequires` ledger for its byte checks. `spec` is the
 /// slot's program entry; `a`, `b` are the (already-read) source operand
 /// values; `act` gates whether this row's bus interactions fire.
 fn push_row(
@@ -122,7 +83,6 @@ fn push_row(
     // reduces to `act && reads_a` (NOP is the only op that reads nothing).
     let reads_a = !matches!(spec.op, Op::Nop);
     let b_eff = if logic_active { b } else { 0 };
-    let r = simulate_logic(spec.op, a, b_eff);
     // The lookup-facing byte band always stores the canonical XOR relation. ANDNOT is recovered
     // from `(a, b, a xor b)` by an affine identity in the AIR.
     let x = a ^ b_eff;
@@ -131,14 +91,21 @@ fn push_row(
         require_logic64(bpl_req, bpl_op, a, b_eff);
     }
 
-    let mut rot_limbs = [0u16; 6];
+    let mut mask_xors = [0u8; 2];
     if let Op::Rol(s) | Op::XorRol(s) = spec.op {
-        let (shift, _swap) = program::rol_decompose(s);
-        rot_limbs = rot_limbs_for(r, shift);
-        if act {
-            for limb in rot_limbs {
-                bpl_req.require_range16(limb);
-            }
+        let (shift, _) = program::rol_decompose(s);
+        let (index, mask) = program::rotation_mask_parameters(shift);
+        for (half, mask_xor) in mask_xors.iter_mut().enumerate() {
+            let byte = if mask == 0 {
+                0
+            } else {
+                (x >> (32 * half + 8 * index)) as u8
+            };
+            *mask_xor = if act {
+                bpl_req.require(BytePairOp::Xor, byte, mask)
+            } else {
+                byte ^ mask
+            };
         }
     }
 
@@ -146,7 +113,7 @@ fn push_row(
     trace.extend(bytes_le(a));
     trace.extend(bytes_le(b_eff));
     trace.extend(bytes_le(x));
-    trace.extend(rot_limbs.map(Felt::from));
+    trace.extend(mask_xors.map(Felt::from));
     trace.push(Felt::from(act as u8));
 }
 
@@ -162,7 +129,7 @@ fn push_row(
 /// incrementing) but carry `act = 0`, zeroing their bus contribution.
 ///
 /// Standalone-test entry point: unlike [`generate_trace`], this does not
-/// drive a [`BytePairLutRequires`] ledger — the byte/limb columns are
+/// drive a [`BytePairLutRequires`] ledger — the byte columns are
 /// populated directly from the computed values, sufficient for row-local
 /// `check_constraints` (the `BytePairLut` interaction is a cross-AIR bus
 /// concern, checked separately by the session-level bus-balance tests).
@@ -400,7 +367,7 @@ impl RoundRequires {
 }
 
 /// Build the chiplet trace from a [`RoundRequires`] ledger, driving
-/// the supplied `bpl_req` accumulator for the byte/limb checks each
+/// the supplied `bpl_req` accumulator for the byte checks each
 /// active row makes.
 ///
 /// Internal `KECCAK_RC` is used; no RC parameter — sponge doesn't
@@ -508,27 +475,4 @@ pub fn generate_trace(
     });
 
     interleave_lanes(&lane_cells, height)
-}
-
-#[cfg(test)]
-mod compact_rotation_tests {
-    use super::rot_limbs_for;
-
-    #[test]
-    fn compact_limbs_preserve_biased_halves_at_every_shift() {
-        for shift in 1..=30 {
-            for word in [0, 1, u32::MAX as u64, u64::MAX, 0x0123_4567_89ab_cdef] {
-                let limbs = rot_limbs_for(word, shift);
-                let factor = if shift < 16 { 1 } else { 1u64 << 16 };
-                for (half, compact) in limbs.as_chunks::<3>().0.iter().enumerate() {
-                    let packed = compact
-                        .iter()
-                        .enumerate()
-                        .fold(0u64, |acc, (i, &limb)| acc + (u64::from(limb) << (16 * i)));
-                    let input_half = (word >> (32 * half)) & u32::MAX as u64;
-                    assert_eq!(packed * factor, (input_half + (1u64 << 32)) << shift);
-                }
-            }
-        }
-    }
 }

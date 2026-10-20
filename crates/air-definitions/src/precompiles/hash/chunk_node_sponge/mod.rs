@@ -1,9 +1,7 @@
-//! Composite AIR for the chunk and Keccak components.
+//! Composite AIR sharing idle sponge cells with chunk and Keccak-node records.
 //!
-//! The three components share a row range in disjoint column bands. Their
-//! base constraints delegate to offset-aware component evaluators. The
-//! Sponge lookup evaluator is shared with its standalone AIR; the chunk and
-//! node lookup fractions are repacked without changing their messages.
+//! Each sponge period carries one node and seven chunks. The component lookup messages
+//! retain their standalone meanings; periodic selectors separate the shared payloads.
 
 use alloc::{borrow::Cow, vec::Vec};
 
@@ -20,10 +18,10 @@ use crate::precompiles::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
 
-/// First main-trace column of the sponge band.
-pub const SPONGE_COL_OFFSET: usize = chunk_node::NUM_MAIN_COLS;
+/// First main-trace column of the sponge layout.
+pub const SPONGE_COL_OFFSET: usize = 0;
 
-pub const NUM_MAIN_COLS: usize = SPONGE_COL_OFFSET + sponge::NUM_MAIN_COLS;
+pub const NUM_MAIN_COLS: usize = chunk_node::NUM_MAIN_COLS;
 pub const NUM_AUX_COLS: usize = chunk_node::NUM_AUX_COLS + sponge::NUM_AUX_COLS;
 
 const fn column_shape() -> [usize; NUM_AUX_COLS] {
@@ -45,7 +43,11 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = column_shape();
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChunkNodeSpongeAir;
 
-static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| Vec::from(sponge_program()));
+static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
+    let mut columns = Vec::from(sponge_program());
+    columns.extend(chunk_node::periodic_columns());
+    columns
+});
 
 impl BaseAir<Felt> for ChunkNodeSpongeAir {
     fn width(&self) -> usize {
@@ -85,8 +87,8 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        chunk_node::eval_main(builder, 0);
-        sponge::eval_main(builder, SPONGE_COL_OFFSET);
+        chunk_node::eval_main(builder);
+        sponge::eval_main_with_shared_capacity(builder, SPONGE_COL_OFFSET);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -111,7 +113,7 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        chunk_node::eval_lookups(builder, 0);
+        chunk_node::eval_lookups(builder);
         sponge::eval_lookups(builder, SPONGE_COL_OFFSET);
     }
 }
