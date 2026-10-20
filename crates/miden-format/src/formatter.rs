@@ -4,8 +4,8 @@ use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
         AdviceMap, BeginBlock, Block, Constant, DoWhileOp, IfOp, Import, ImportKind,
-        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeBody,
-        TypeDecl, Visibility, WhileOp,
+        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeAnnotation,
+        TypeBody, TypeDecl, Visibility, WhileOp,
     },
     rowan::{Direction, NodeOrToken, ast::AstNode},
 };
@@ -445,13 +445,48 @@ fn render_constant(constant: &Constant, indent: usize, config: &Config) -> Strin
     };
 
     let prefix_tokens = declaration_prefix_tokens(constant.syntax(), value.syntax());
-    let header = render_declaration_prefix(&prefix_tokens, indent, config);
+    let header = if let Some(annotation) = constant.type_annotation()
+        && !has_comment_tokens(&prefix_tokens)
+    {
+        render_annotated_constant_prefix(&prefix_tokens, &annotation, indent, config)
+    } else {
+        render_declaration_prefix(&prefix_tokens, indent, config)
+    };
 
     let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
     if let Some(comment) = comment_after_child(value.syntax()) {
         append_inline_comment(&mut rendered, &comment);
     }
     rendered
+}
+
+fn render_annotated_constant_prefix(
+    tokens: &[SyntaxToken],
+    annotation: &TypeAnnotation,
+    indent: usize,
+    config: &Config,
+) -> String {
+    let tokens = significant_tokens_from(tokens.iter().cloned());
+    let annotation_range = annotation.syntax().text_range();
+    let type_start =
+        tokens.partition_point(|token| token.text_range().start() <= annotation_range.start());
+    let type_end =
+        tokens.partition_point(|token| token.text_range().start() < annotation_range.end());
+    let type_tokens = &tokens[type_start..type_end];
+
+    let head = format!("{}{}", indent_string(indent), render_token_sequence(&tokens[..type_start]));
+    let assignment = render_token_sequence(&tokens[type_end..]);
+    let compact_type = render_inline_type_body(type_tokens);
+    let compact = format!("{head} {compact_type} {assignment}");
+    if line_length(&compact) <= config.max_line_length() {
+        return compact;
+    }
+
+    let wrapped_type =
+        render_wrapped_braced_type_body(type_tokens, indent, config).unwrap_or_else(|| {
+            format!("\n{}{}", indent_string(indent + config.indent_size()), compact_type)
+        });
+    format!("{head}{wrapped_type} {assignment}")
 }
 
 fn render_declaration_prefix(tokens: &[SyntaxToken], indent: usize, config: &Config) -> String {
@@ -625,7 +660,8 @@ fn render_type_body(
         .filter_map(NodeOrToken::into_token)
         .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment));
 
-    let compact_body = render_inline_type_body(body);
+    let tokens = significant_tokens(body.syntax());
+    let compact_body = render_inline_type_body(&tokens);
     if !has_multiline_body
         && !has_comment
         && prefix_width + 1 + line_length(&compact_body) <= config.max_line_length()
@@ -634,7 +670,7 @@ fn render_type_body(
     }
 
     if !has_multiline_body && !has_comment {
-        if let Some(braced_body) = render_wrapped_braced_type_body(body, indent, config) {
+        if let Some(braced_body) = render_wrapped_braced_type_body(&tokens, indent, config) {
             return braced_body;
         }
         return format!("\n{}{}", indent_string(indent + config.indent_size()), compact_body);
@@ -1169,14 +1205,15 @@ fn render_compact_tokens(node: &SyntaxNode) -> String {
     render_token_sequence(&significant_tokens(node))
 }
 
+/// Renders a braced type body with one item per line. `tokens` contains significant tokens from
+/// a type declaration body or constant annotation.
 fn render_wrapped_braced_type_body(
-    body: &TypeBody,
+    tokens: &[SyntaxToken],
     indent: usize,
     config: &Config,
 ) -> Option<String> {
-    let tokens = significant_tokens(body.syntax());
     let (open_index, close_index) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
+        outer_group_indices(tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
 
     let prefix_tokens = &tokens[..=open_index];
     let suffix_tokens = &tokens[close_index..];
@@ -1205,12 +1242,13 @@ fn render_wrapped_braced_type_body(
     Some(rendered)
 }
 
-fn render_inline_type_body(body: &TypeBody) -> String {
-    let tokens = significant_tokens(body.syntax());
+/// Renders a type body inline. `tokens` contains significant tokens from a type declaration body
+/// or constant annotation.
+fn render_inline_type_body(tokens: &[SyntaxToken]) -> String {
     let Some((open_index, close_index)) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
+        outer_group_indices(tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
     else {
-        return render_token_sequence(&tokens);
+        return render_token_sequence(tokens);
     };
 
     let prefix = render_token_sequence(&tokens[..=open_index]);
@@ -2648,6 +2686,121 @@ const WORD : [
         ] {
             assert_eq!(assert_format_idempotent(source, source), expected);
         }
+    }
+
+    #[test]
+    fn keeps_short_struct_annotations_inline() {
+        let source = "pub const VALUE:struct{field:u32}=1\n";
+        let expected = "pub const VALUE : struct { field: u32 } = 1\n";
+
+        assert_eq!(assert_format_idempotent(source, "short struct annotation"), expected);
+    }
+
+    #[test]
+    fn wraps_long_struct_annotations_before_placing_initializers() {
+        let source = "const VALUE: struct { first_field: u32, second_field: u32, third_field: u32, fourth_field: u32, fifth_field: u32 } = 1\n";
+        let expected = "\
+const VALUE : struct {
+    first_field: u32,
+    second_field: u32,
+    third_field: u32,
+    fourth_field: u32,
+    fifth_field: u32,
+} = 1
+";
+        let formatted = assert_format_idempotent(source, "long struct annotation");
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= Config::default().max_line_length()));
+    }
+
+    #[test]
+    fn wraps_struct_annotations_with_custom_width_and_indent() {
+        let source =
+            "pub(package) const VALUE: struct { first: u32, second: u32, third: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(50),
+            indent_size: Some(2),
+            ..Config::default()
+        };
+        let expected = "\
+pub(package) const VALUE : struct {
+  first: u32,
+  second: u32,
+  third: u32,
+} = 1
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "custom struct annotation", &config);
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+    }
+
+    #[test]
+    fn includes_assignment_in_struct_annotation_width() {
+        let source = "const VALUE: struct { a: u32, b: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(40),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    a: u32,
+    b: u32,
+} = 1
+";
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "annotation assignment width", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn keeps_nested_type_commas_inside_wrapped_annotation_fields() {
+        let source = "const VALUE: struct { location: ptr<u8, addrspace(byte)>, other: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(60),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    location: ptr<u8, addrspace(byte)>,
+    other: u32,
+} = 1
+";
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "nested annotation type", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn wraps_large_initializers_after_wrapping_struct_annotations() {
+        let source = "const VALUE: struct { first_field: u32, second_field: u32, third_field: u32, fourth_field: u32, fifth_field: u32 } = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")\n";
+        let config = Config {
+            max_line_length: Some(78),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    first_field: u32,
+    second_field: u32,
+    third_field: u32,
+    fourth_field: u32,
+    fifth_field: u32,
+} =
+    word(
+        \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+    )
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "wrapped annotation and value", &config);
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
     }
 
     #[test]
