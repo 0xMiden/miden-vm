@@ -32,6 +32,8 @@ pub struct StoreNode {
 /// trees to live as long as necessary and without duplication, this allows the implementation of
 /// space efficient persistent data structures.
 ///
+/// Canonical empty-subtree nodes are omitted on write and restored on read.
+///
 /// Example usage:
 ///
 /// ```rust
@@ -592,9 +594,12 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.nodes.len() as u64);
+        let empty_nodes: Map<_, _> = empty_hashes().collect();
+        let nodes = self.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
 
-        for (k, v) in self.nodes.iter() {
+        target.write_u64(nodes.clone().count() as u64);
+
+        for (k, v) in nodes {
             k.write_into(target);
             v.write_into(target);
         }
