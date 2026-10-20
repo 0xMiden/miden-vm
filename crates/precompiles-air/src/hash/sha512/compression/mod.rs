@@ -157,7 +157,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha512CompressionAir {
         _: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace(self, main, challenges)
+        build_logup_aux_trace(self, main, &[], challenges)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         eval_main(builder, 0, 0);

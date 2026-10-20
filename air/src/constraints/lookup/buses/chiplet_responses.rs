@@ -29,7 +29,7 @@ use crate::{
         },
         utils::{BoolNot, pack_u32_bytes_le},
     },
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    lookup::{Deg, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -37,8 +37,7 @@ use crate::{
 /// All adds gate on per-chiplet `chiplet_active.*` flags which are mutually exclusive (at
 /// most one chiplet runs per row). Within the hasher branch, init variants are gated by
 /// mutually exclusive selector/start combinations. The kernel-ROM branch
-/// emits two fractions per active row: an INIT-labeled remove (multiplicity 1) plus a
-/// CALL-labeled add with multiplicity equal to the row's `multiplicity` column. Every
+/// emits one CALL-labeled add with multiplicity equal to the row's `multiplicity` column. Every
 /// other chiplet emits exactly one fraction when active. AEAD stream rows emit four
 /// byte-pair removals. Per-row max: 4.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
@@ -207,30 +206,13 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // Kernel ROM: two fractions per active row.
-                    // INIT remove (multiplicity 1) is balanced by the boundary correction.
-                    // CALL add carries the syscall multiplicity.
-                    let kernel_gate = ctx.chiplet_active.kernel_rom.clone();
-                    g.batch(
-                        "kernel_rom",
-                        kernel_gate,
-                        |b| {
-                            let krom_mult: LB::Expr = krom.multiplicity.into();
-                            let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
-
-                            b.remove(
-                                "kernel_rom_init",
-                                KernelRomMsg::init(digest.clone()),
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.insert(
-                                "kernel_rom_call",
-                                krom_mult,
-                                KernelRomMsg::call(digest),
-                                Deg { v: 6, u: 6 },
-                            );
-                        },
-                        Deg { v: 7, u: 7 }, // (V, U) = (2 + 5, 2 + 5); kernel_rom flag deg 5
+                    // One authenticated row supplies all calls to the same procedure.
+                    g.insert(
+                        "kernel_rom_call",
+                        ctx.chiplet_active.kernel_rom.clone(),
+                        krom.multiplicity.into(),
+                        || KernelRomMsg::call(krom.root.map(LB::Expr::from)),
+                        Deg { v: 6, u: 6 },
                     );
                 },
                 COLUMN_DEG,

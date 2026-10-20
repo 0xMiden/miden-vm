@@ -386,13 +386,11 @@ impl ProofSecurityParameters {
 
 /// Builds MVM security parameters from values obtained during proof verification.
 ///
-/// `log_max_height` and `alignment` must come from successful STARK verification,
-/// `num_kernel_procedures` from the authenticated execution claim, and `hash_fn`
+/// `log_max_height` and `alignment` must come from successful STARK verification, and `hash_fn`
 /// from the configuration used to verify the proof, including its challenger.
 pub fn proof_security_parameters(
     pcs_params: &PcsParams,
     log_max_height: u32,
-    num_kernel_procedures: u32,
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
@@ -400,7 +398,6 @@ pub fn proof_security_parameters(
         protocol_params(pcs_params),
         u32::from(pcs_params.log_final_degree()),
         log_max_height,
-        num_kernel_procedures,
         alignment,
         hash_fn,
     )
@@ -410,7 +407,6 @@ fn mvm_security_parameters_from_protocol(
     protocol_params: ProtocolParams,
     log_final_degree: u32,
     log_max_height: u32,
-    num_kernel_procedures: u32,
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
@@ -428,20 +424,19 @@ fn mvm_security_parameters_from_protocol(
             ..AIR_SHAPE
         },
         num_ood_points: NUM_OOD_POINTS,
-        num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+        num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS,
     }
 }
 
 /// Computes an Eidos Miden VM proof's conjectured security level, in whole bits.
 ///
-/// The Fiat-Shamir transcript binds the PCS parameters and AIR log heights. The authenticated
-/// kernel witness determines the kernel procedure count. The remaining inputs are fixed by the
-/// deployed AIR and commitment configuration. The result therefore describes the proof and claim
-/// that were verified rather than an independently supplied parameter preset.
+/// The Fiat-Shamir transcript binds the PCS parameters and AIR log heights. Other inputs are fixed
+/// by the deployed AIR and commitment configuration. The result therefore describes the proof and
+/// claim that were verified rather than an independently supplied parameter preset.
 ///
 /// Mirrored bit-for-bit by the common MASM estimator when supplied with the MVM descriptor. The
 /// recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed
-/// zero lookup grinding, log trace height in `6..=29`, and 0..=255 kernel procedures. This function
+/// zero lookup grinding and log trace height in `6..=29`. This function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
 /// estimator's contract.
 pub fn conjectured_security_level(
@@ -450,7 +445,6 @@ pub fn conjectured_security_level(
     deep_pow_bits: u32,
     folding_pow_bits: u32,
     log_max_height: u32,
-    num_kernel_procedures: u32,
 ) -> u32 {
     let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
@@ -466,7 +460,6 @@ pub fn conjectured_security_level(
         protocol,
         u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
-        num_kernel_procedures,
         COMMITMENT_ALIGNMENT,
         HashFunction::Eidos,
     )
@@ -490,7 +483,6 @@ pub fn conjectured_security_level_for_alignment(
     deep_pow_bits: u32,
     folding_pow_bits: u32,
     log_max_height: u32,
-    num_kernel_procedures: u32,
     alignment: usize,
     hash_fn: HashFunction,
 ) -> u32 {
@@ -508,7 +500,6 @@ pub fn conjectured_security_level_for_alignment(
         protocol,
         u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
-        num_kernel_procedures,
         alignment,
         hash_fn,
     )
@@ -540,13 +531,10 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 /// `log_max_height` is the largest AIR trace height in the proof; the Fiat-Shamir transcript binds
 /// every AIR's log height, so a prover cannot understate it to inflate the reported level.
 /// `hash_fn` selects the commitment collision bound and challenger sampling support.
-/// `num_kernel_procedures` is the proof's kernel procedure count, transcript-bound through the
-/// kernel witness.
 pub fn security_report(
     params: &ProtocolParams,
     log_max_height: u32,
     hash_fn: HashFunction,
-    num_kernel_procedures: u32,
 ) -> SecurityReport {
     let instance = InstanceShape {
         log_max_height,
@@ -555,7 +543,7 @@ pub fn security_report(
     };
     let report = security_report_with_hash(params, &instance, &AIR_SHAPE, hash_fn);
     let correction = lookup_boundary_correction(
-        CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+        CORE_BOUNDARY_LOOKUP_TERMS,
         LOOKUP_SHAPE.fractions_per_row,
         log_max_height,
     );
@@ -630,7 +618,7 @@ mod tests {
     fn full_field_challengers_preserve_their_security_bounds() {
         let params = protocol_params(&config::pcs_params());
         for hash_fn in [HashFunction::Blake3_256, HashFunction::Keccak] {
-            let parameters = proof_security_parameters(&config::pcs_params(), 20, 0, 8, hash_fn);
+            let parameters = proof_security_parameters(&config::pcs_params(), 20, 8, hash_fn);
             assert_eq!(parameters.hash_fn, hash_fn);
             assert_eq!(
                 parameters.instance_shape.collision_resistance,
@@ -676,17 +664,12 @@ mod tests {
     fn proof_security_parameters_match_mvm_security_report() {
         let pcs_params = config::pcs_params();
         let expected_protocol_params = protocol_params(&pcs_params);
-        let security_parameters = proof_security_parameters(
-            &pcs_params,
-            22,
-            255,
-            COMMITMENT_ALIGNMENT,
-            HashFunction::Eidos,
-        );
+        let security_parameters =
+            proof_security_parameters(&pcs_params, 22, COMMITMENT_ALIGNMENT, HashFunction::Eidos);
 
         assert_eq!(
             security_parameters.conjectured_security_report(),
-            security_report(&expected_protocol_params, 22, HashFunction::Eidos, 255)
+            security_report(&expected_protocol_params, 22, HashFunction::Eidos)
         );
         assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
@@ -705,7 +688,7 @@ mod tests {
             (24, 91, LOOKUP_LABEL),
             (29, 86, LOOKUP_LABEL),
         ] {
-            let report = security_report(&params, log_height, HashFunction::Eidos, 0);
+            let report = security_report(&params, log_height, HashFunction::Eidos);
             assert_eq!(
                 report.security_level(),
                 expected_level,
@@ -808,7 +791,7 @@ mod tests {
                 folding_pow_bits,
                 ..base
             };
-            let report = security_report(&params, log_height, HashFunction::Eidos, 0);
+            let report = security_report(&params, log_height, HashFunction::Eidos);
 
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
@@ -829,32 +812,11 @@ mod tests {
         let params = protocol_params(&config::pcs_params());
         let crossover = (6..=30)
             .find(|&log_height| {
-                security_report(&params, log_height, HashFunction::Eidos, 0)
-                    .binding_term()
-                    .label
+                security_report(&params, log_height, HashFunction::Eidos).binding_term().label
                     == LOOKUP_LABEL
             })
             .expect("the lookup round must bind at some supported height");
 
         assert_eq!(crossover, 19, "unexpected lookup/query crossover");
-    }
-
-    /// A proof with the maximum kernel witness reports a lower lookup-round bound than a bare one
-    /// at the same height, since `emit_chiplets_boundary` adds one lookup fraction per kernel
-    /// procedure digest on top of the per-row bus terms `AIR_SHAPE` counts.
-    #[test]
-    fn lookup_boundary_correction_lowers_the_lookup_term_with_a_full_kernel_witness() {
-        let lookup_bits = |report: SecurityReport| {
-            report.terms().iter().find(|term| term.label == LOOKUP_LABEL).unwrap().bits
-        };
-
-        let params = protocol_params(&config::pcs_params());
-        let bare = lookup_bits(security_report(&params, 6, HashFunction::Eidos, 0));
-        let full_kernel = lookup_bits(security_report(&params, 6, HashFunction::Eidos, 255));
-        assert!(
-            full_kernel < bare,
-            "a full kernel witness should lower the lookup round's bound, got {full_kernel} vs \
-             {bare}"
-        );
     }
 }

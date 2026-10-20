@@ -129,6 +129,7 @@ where
     type VarEF = AB::VarEF;
 
     type PeriodicVar = AB::PeriodicVar;
+    type PublicVar = AB::PublicVar;
 
     type MainWindow = AB::MainWindow;
     type PreprocessedWindow = AB::PreprocessedWindow;
@@ -145,6 +146,10 @@ where
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
         self.ab.preprocessed()
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.ab.public_values()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

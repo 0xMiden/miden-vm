@@ -157,8 +157,14 @@ fn lookup_challenges() -> Challenges<QuadFelt> {
 
 fn eidos_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
     let air = EidosCompressionAir;
-    let fractions =
-        build_lookup_fractions(&air, trace, None, &air.periodic_columns(), &lookup_challenges());
+    let fractions = build_lookup_fractions(
+        &air,
+        trace,
+        None,
+        &air.periodic_columns(),
+        &[],
+        &lookup_challenges(),
+    );
     lookup_balance(fractions.fractions())
 }
 
@@ -342,6 +348,7 @@ fn lookup_interaction_liveness_matches_the_packed_twenty_column_design() {
         &compression,
         None,
         &EidosCompressionAir.periodic_columns(),
+        &[],
         &lookup_challenges(),
     );
     let mut expected_shape = [2; NUM_AUX_COLS];
@@ -970,6 +977,7 @@ fn block_init_and_output_relations_fire_at_the_expected_chain_boundaries() {
         &compression,
         None,
         &EidosCompressionAir.periodic_columns(),
+        &[],
         &lookup_challenges(),
     );
 

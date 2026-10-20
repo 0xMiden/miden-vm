@@ -50,7 +50,14 @@ impl InteractionLog {
     pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
             trace.main_trace().clone_air_matrices();
-        Self::from_air_matrices(&core_matrix, &chip_matrix, &eidos_compression_matrix, &and8_matrix)
+        let (inputs, _) = trace.public_inputs().to_air_inputs();
+        Self::from_air_matrices_with_inputs(
+            &core_matrix,
+            &chip_matrix,
+            &eidos_compression_matrix,
+            &and8_matrix,
+            &inputs[1].1,
+        )
     }
 
     /// Drive the prover-path lookup emitters with caller-supplied per-AIR trace matrices.
@@ -59,6 +66,22 @@ impl InteractionLog {
         chip_matrix: &RowMajorMatrix<Felt>,
         eidos_compression_matrix: &RowMajorMatrix<Felt>,
         and8_matrix: &RowMajorMatrix<Felt>,
+    ) -> Self {
+        Self::from_air_matrices_with_inputs(
+            core_matrix,
+            chip_matrix,
+            eidos_compression_matrix,
+            and8_matrix,
+            &empty_kernel_inputs(),
+        )
+    }
+
+    fn from_air_matrices_with_inputs(
+        core_matrix: &RowMajorMatrix<Felt>,
+        chip_matrix: &RowMajorMatrix<Felt>,
+        eidos_compression_matrix: &RowMajorMatrix<Felt>,
+        and8_matrix: &RowMajorMatrix<Felt>,
+        chiplet_inputs: &[Felt],
     ) -> Self {
         // Core has no periodic columns.
         let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
@@ -76,12 +99,13 @@ impl InteractionLog {
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
         let core_fractions =
-            build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], &challenges);
+            build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], &[], &challenges);
         let chip_fractions = build_lookup_fractions(
             &MidenAir::CHIPLETS,
             chip_matrix,
             None,
             &chip_periodic,
+            chiplet_inputs,
             &challenges,
         );
         let eidos_compression_fractions = build_lookup_fractions(
@@ -89,12 +113,14 @@ impl InteractionLog {
             eidos_compression_matrix,
             None,
             &eidos_compression_periodic,
+            &[],
             &challenges,
         );
         let and8_fractions = build_lookup_fractions(
             &MidenAir::AND8_LOOKUP,
             and8_matrix,
             Some(&and8_preprocessed),
+            &[],
             &[],
             &challenges,
         );
@@ -239,4 +265,12 @@ fn merge_rows(airs: Vec<Vec<Vec<(Felt, QuadFelt)>>>) -> Vec<Vec<(Felt, QuadFelt)
             bag
         })
         .collect()
+}
+
+// Explicit statement values for raw-matrix tests without kernel calls.
+pub(super) fn empty_kernel_inputs() -> Vec<Felt> {
+    miden_core::program::KernelDescriptor::default()
+        .commitment()
+        .as_elements()
+        .to_vec()
 }

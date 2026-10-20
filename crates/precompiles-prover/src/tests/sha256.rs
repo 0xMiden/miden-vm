@@ -418,7 +418,8 @@ fn fold_lookup_balance<A>(
     let periodic = air.periodic_columns();
     let preprocessed = air.preprocessed_trace();
     for &(multiplicity, denominator) in
-        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges).fractions()
+        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, &[], challenges)
+            .fractions()
     {
         *net.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
     }

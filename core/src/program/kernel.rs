@@ -1,17 +1,27 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::{Word, hash::eidos::EidosDomain};
-
-use crate::{
-    chiplets::hasher,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use miden_crypto::{
+    Word,
+    hash::eidos::{Eidos, EidosDomain},
+    merkle::MerkleTree,
 };
+
+use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // CONSTANTS
 // ================================================================================================
 
-/// Registered domain tag for the kernel commitment.
+/// Reserved domain tag for the legacy sequential kernel commitment.
 pub const KERNEL_DOMAIN_TAG: crate::Felt = super::domain::KernelCommitmentDomain::TAG.as_felt();
+
+/// Hashes the identity export pair `procedure_root || procedure_root` under `KERNEL_EXPORT`.
+/// This separates authorized leaves from Merkle inner nodes, independently of the path depth.
+pub fn hash_kernel_leaf(procedure_root: Word) -> Word {
+    Eidos::hash_double_word_in_domain(
+        &[procedure_root, procedure_root],
+        super::domain::KERNEL_EXPORT,
+    )
+}
 
 // KERNEL
 // ================================================================================================
@@ -95,23 +105,21 @@ impl KernelDescriptor {
         &self.0
     }
 
-    /// Returns the canonical commitment to this kernel: the domain-tagged sequential hash of the
-    /// flattened procedure digests, `hash_elements_in_domain(flatten(procs), KERNEL_DOMAIN_TAG)`.
-    ///
-    /// This is the fixed-size identifier observed by the recursive verifier in place of the raw
-    /// digest list. The encoding is normative:
-    /// - element order is this descriptor's canonical procedure order (fixed at construction);
-    /// - Eidos initializes its chaining word from the registered domain and exact logical length,
-    ///   preventing ambiguity between a partial block and its zero-padded form.
+    /// Builds the kernel tree from sorted identity export-pair hashes, followed by zeros.
+    /// Empty and singleton kernels use two leaves; larger kernels use the next power of two.
+    pub fn to_merkle_tree(&self) -> MerkleTree {
+        let mut leaves: Vec<_> = self.0.iter().copied().map(hash_kernel_leaf).collect();
+        leaves.resize(leaves.len().next_power_of_two().max(2), Word::default());
+        MerkleTree::new(leaves).expect("kernel leaf count is a power of two and at least two")
+    }
+
+    /// Returns the root of the canonical kernel Merkle tree.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements_in_domain(
-            Word::words_as_elements(&self.0),
-            super::domain::KERNEL_COMMITMENT,
-        )
+        self.to_merkle_tree().root()
     }
 }
 
-// this is required by AIR as public inputs will be serialized with the proof
+// The full descriptor is retained in program artifacts and private execution witnesses.
 impl Serializable for KernelDescriptor {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // expect is OK here because the number of procedures is enforced by the constructor
@@ -143,31 +151,47 @@ pub enum KernelError {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::KernelDescriptor;
+    use super::{KernelDescriptor, hash_kernel_leaf};
     use crate::{
         Felt, Word,
-        program::domain,
         serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
 
     #[test]
-    fn empty_kernel_commitment_matches_known_vector() {
-        let expected = Word::from(
-            [
-                7_629_329_411_056_522_819,
-                2_158_594_640_249_218_307,
-                769_500_264_184_883_565,
-                419_898_756_627_082_940,
-            ]
-            .map(Felt::new_unchecked),
-        );
-        let empty = KernelDescriptor::default();
+    fn padded_kernel_tree_vectors() {
+        use crate::chiplets::hasher::merge;
+        let z = Word::default();
+        let a = Word::from([1_u32, 0, 0, 0]);
+        let b = Word::from([2_u32, 0, 0, 0]);
+        let c = Word::from([3_u32, 0, 0, 0]);
+        let [la, lb, lc] = [a, b, c].map(hash_kernel_leaf);
+        for (leaves, root, depth) in [
+            (vec![], merge(&[z, z]), 1),
+            (vec![a], merge(&[la, z]), 1),
+            (vec![a, b], merge(&[la, lb]), 1),
+            (vec![c, a, b], merge(&[merge(&[la, lb]), merge(&[lc, z])]), 2),
+        ] {
+            let kernel = KernelDescriptor::new(&leaves).unwrap();
+            assert_eq!(kernel.commitment(), root);
+            assert_eq!(kernel.to_merkle_tree().depth(), depth);
+        }
+        let leaves: Vec<_> = (1..=KernelDescriptor::MAX_NUM_PROCEDURES)
+            .map(|i| Word::from([i as u32, 0, 0, 0]))
+            .collect();
+        assert_eq!(KernelDescriptor::new(&leaves).unwrap().to_merkle_tree().depth(), 8);
+    }
 
-        assert_eq!(empty.commitment(), expected);
-        assert_eq!(
-            empty.commitment(),
-            crate::chiplets::hasher::hash_elements_in_domain(&[], domain::KERNEL_COMMITMENT)
-        );
+    #[test]
+    fn kernel_inner_nodes_cannot_be_reinterpreted_as_leaves() {
+        use crate::chiplets::hasher::merge;
+        let procedure = Word::from([1_u32, 2, 3, 4]);
+        let zero = Word::default();
+        let inner = merge(&[hash_kernel_leaf(procedure), zero]);
+        let authority = KernelDescriptor::new(&[inner]).unwrap();
+        // A two-level path for `procedure` reaches this root if the authority's leaf is raw.
+        let descendant_root = merge(&[inner, zero]);
+        assert_ne!(authority.commitment(), descendant_root);
+        assert!(!authority.contains_proc(procedure));
     }
 
     #[test]

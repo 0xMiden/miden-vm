@@ -1,10 +1,8 @@
 //! Boundary corrections and normalized committed-sum metadata for the Miden VM LogUp argument.
 
-use alloc::vec::Vec;
-
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
+use super::messages::{BlockHashMsg, LogDeferredMsg};
 use crate::{MIDEN_AIR_COUNT, lookup::BoundaryBuilder};
 
 // COMMITTED NORMALIZED SUM COUNT
@@ -27,7 +25,7 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // The core boundary's statement inputs arrive as the single var-len slice
     // `[program_hash (4) | deferred_root (4)]`. Absent inputs (debug walker on a bare trace)
-    // default to zero, mirroring `emit_chiplets_boundary`'s handling of an empty digest group.
+    // default to zero.
     let stmt = boundary.var_len_public_inputs().first().copied().unwrap_or_default();
     let program_hash: [B::F; 4] =
         core::array::from_fn(|i| stmt.get(i).copied().unwrap_or(B::F::ZERO));
@@ -63,29 +61,7 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     boundary.remove("log_deferred_final", LogDeferredMsg { state: final_state });
 }
 
-/// Emit boundary corrections for Chiplets lookup columns.
-pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
-    #[allow(clippy::chunks_exact_to_as_chunks)]
-    let kernel_digests: Vec<[B::F; 4]> = boundary
-        .var_len_public_inputs()
-        .first()
-        .map(|felts| {
-            felts
-                .as_chunks::<WORD_SIZE>()
-                .0
-                .iter()
-                .map(|d| [d[0], d[1], d[2], d[3]])
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Kernel ROM init: one contribution per kernel procedure digest.
-    for digest in kernel_digests {
-        boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
-    }
-}
-
-// TESTS
+// // TESTS
 // ================================================================================================
 
 #[cfg(all(test, feature = "std"))]
@@ -189,7 +165,7 @@ mod tests {
         let layout = ValidateLayout {
             preprocessed_width: 0,
             trace_width: NUM_CHIPLETS_COLS,
-            num_public_values: 0,
+            num_public_values: crate::NUM_CHIPLETS_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
             permutation_width: CHIPLET_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
@@ -265,7 +241,8 @@ mod tests {
             BusId::COUNT,
         );
 
-        let fractions = build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &challenges);
+        let fractions =
+            build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &[], &challenges);
 
         assert_eq!(fractions.shape(), &[1, 2, 2, 2]);
         assert_eq!(fractions.counts(), &[1, 2, 2, 2, 1, 2, 2, 2]);

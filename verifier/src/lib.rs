@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc, vec};
+use alloc::{boxed::Box, sync::Arc};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
@@ -311,8 +311,8 @@ impl Verifier {
     /// Verifies the Miden VM STARK proof and returns its authenticated security parameters.
     ///
     /// The returned parameters include the largest AIR trace height, the DEEP term count implied
-    /// by the commitment scheme's column alignment, and the lookup boundary terms implied by the
-    /// authenticated kernel. The PCS parameters and commitment collision resistance come from the
+    /// by the commitment scheme's column alignment, and the fixed lookup boundary count.
+    /// The PCS parameters and commitment collision resistance come from the
     /// configuration used to verify the proof.
     fn verify_vm(
         &self,
@@ -331,7 +331,6 @@ impl Verifier {
         let stark = &proof.proof;
         let proof_bytes = stark.bytes();
         let pcs_params = config::pcs_params();
-        let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
         match stark.hash_fn() {
             HashFunction::Blake3_256 => {
                 let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
@@ -369,7 +368,6 @@ impl Verifier {
             security::proof_security_parameters(
                 &pcs_params,
                 log_max_height,
-                num_kernel_procedures,
                 alignment,
                 stark.hash_fn(),
             )
@@ -380,12 +378,12 @@ impl Verifier {
     /// AIR log height and the LMCS's column alignment for grading.
     ///
     /// Pre-seeds the challenger with protocol parameters, AIR public values, and statement
-    /// `aux_inputs` (program hash, final deferred root, and kernel-procedure digests). Then
+    /// `aux_inputs` (program hash and final deferred root). Then
     /// delegates to the lifted multi-AIR verifier.
     fn verify_stark_proof<SC>(
         &self,
         config: &SC,
-        public_values: &[Felt],
+        public_values: &miden_air::AirPublicInputs,
         aux_inputs: &[Felt],
         proof_bytes: &[u8],
         preprocessed_commitment: PreprocessedCommitment<SC>,
@@ -417,7 +415,7 @@ impl Verifier {
         // from the proof's per-AIR trace heights.
         let statement = Statement::<Felt, QuadFelt, _>::new(
             MidenMultiAir::new(),
-            vec![(0, public_values.to_vec())],
+            public_values.to_vec(),
             aux_inputs.to_vec(),
         )
         .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
@@ -848,7 +846,10 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![
+                (0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES]),
+                (1, vec![Felt::ZERO; miden_air::NUM_CHIPLETS_PUBLIC_VALUES]),
+            ],
             Vec::new(),
         )
         .unwrap();

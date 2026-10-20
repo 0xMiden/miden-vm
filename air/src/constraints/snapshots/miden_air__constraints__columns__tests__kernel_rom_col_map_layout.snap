@@ -10,4 +10,14 @@ KernelRomCols {
         3,
         4,
     ],
+    hasher_start: 5,
+    leaf_index: 6,
+    direction_bit: 7,
+    depth: 8,
+    leaf: [
+        9,
+        10,
+        11,
+        12,
+    ],
 }

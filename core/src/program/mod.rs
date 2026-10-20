@@ -18,7 +18,7 @@ mod request;
 pub use request::{PROOF_REQUEST_DOMAIN_TAG, proof_request_key};
 
 mod kernel;
-pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError};
+pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError, hash_kernel_leaf};
 
 mod stack;
 pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutputs};
@@ -128,7 +128,7 @@ impl Program {
 
     /// Returns basic information about this program (i.e., program hash and kernel).
     pub fn to_info(&self) -> ProgramInfo {
-        ProgramInfo::new(self.hash(), self.kernel().clone())
+        ProgramInfo::new(self.hash(), self.kernel().commitment())
     }
 }
 
@@ -211,123 +211,74 @@ impl fmt::Display for Program {
 // PROGRAM INFO
 // ===============================================================================================
 
-/// A program information set consisting of its MAST root and set of kernel procedure roots used
-/// for its compilation.
-///
-/// This will be used as public inputs of the proof so we bind its verification to the kernel and
-/// root used to execute the program. This way, we extend the correctness of the proof to the
-/// security guarantees provided by the kernel. We also allow the user to easily prove the
-/// membership of a given kernel procedure for a given proof, without compromising its
-/// zero-knowledge properties.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Public program identity: its MAST root and the authorized kernel Merkle root.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
 pub struct ProgramInfo {
     program_hash: Word,
-    kernel: KernelDescriptor,
+    kernel_root: Word,
 }
 
 impl ProgramInfo {
-    /// Creates a new instance of a program info.
-    pub const fn new(program_hash: Word, kernel: KernelDescriptor) -> Self {
-        Self { program_hash, kernel }
+    /// Creates public program identity from the expected program and kernel roots.
+    pub const fn new(program_hash: Word, kernel_root: Word) -> Self {
+        Self { program_hash, kernel_root }
     }
 
-    /// Returns the program hash computed from its code block root.
+    /// Returns the program's MAST root.
     pub const fn program_hash(&self) -> &Word {
         &self.program_hash
     }
 
-    /// Returns the program kernel used during the compilation.
-    pub const fn kernel(&self) -> &KernelDescriptor {
-        &self.kernel
+    /// Returns the authorized kernel Merkle root.
+    pub const fn kernel_root(&self) -> Word {
+        self.kernel_root
     }
 
-    /// Returns the list of procedures of the kernel used during the compilation.
-    pub fn kernel_procedures(&self) -> &[Word] {
-        self.kernel.proc_hashes()
+    /// Splits this identity into its program and kernel roots.
+    pub fn into_parts(self) -> (Word, Word) {
+        (self.program_hash, self.kernel_root)
     }
+}
 
-    /// Returns the canonical commitment to the kernel used during the compilation.
-    ///
-    /// This is the fixed-size identifier the recursive verifier observes in place of the raw
-    /// kernel-procedure digest list. See [`KernelDescriptor::commitment`].
-    pub fn kernel_commitment(&self) -> Word {
-        self.kernel.commitment()
-    }
-
-    /// Splits this program info into its program hash and kernel descriptor.
-    pub fn into_parts(self) -> (Word, KernelDescriptor) {
-        (self.program_hash, self.kernel)
+impl Default for ProgramInfo {
+    fn default() -> Self {
+        Self::new(Word::default(), KernelDescriptor::default().commitment())
     }
 }
 
 impl From<Program> for ProgramInfo {
     fn from(program: Program) -> Self {
-        let program_hash = program.hash();
-        let kernel = program.kernel().clone();
-
-        Self { program_hash, kernel }
+        program.to_info()
     }
 }
-
-// ------------------------------------------------------------------------------------------------
-// Serialization
 
 impl Serializable for ProgramInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.program_hash.write_into(target);
-        self.kernel.write_into(target);
+        self.kernel_root.write_into(target);
     }
 }
 
 impl Deserializable for ProgramInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let program_hash = source.read()?;
-        let kernel = source.read()?;
-        Ok(Self { program_hash, kernel })
+        Ok(Self::new(source.read()?, source.read()?))
     }
 }
-
-// ------------------------------------------------------------------------------------------------
-// ToElements implementation
 
 impl ToElements for ProgramInfo {
     fn to_elements(&self) -> Vec<Felt> {
-        let num_kernel_proc_elements = self.kernel.proc_hashes().len() * WORD_SIZE;
-        let mut result = Vec::with_capacity(2 * WORD_SIZE + num_kernel_proc_elements);
-
-        // append program hash elements where we pad with zero so as to make the fixed length
-        // public inputs section of the public inputs of length a multiple of 8 i.e., double-word
-        // aligned
-        result.extend_from_slice(self.program_hash.as_elements());
-        result.extend_from_slice(&[Felt::ZERO; 4]);
-
-        // append kernel procedure hash elements
-        // we reverse the digests in order to make reducing them using auxiliary randomness easier
-        // we also pad them to the next multiple of 8
-        for proc_hash in self.kernel.proc_hashes() {
-            let mut proc_hash_elements = proc_hash.as_elements().to_vec();
-            pad_next_mul_8(&mut proc_hash_elements);
-            proc_hash_elements.reverse();
-            result.extend_from_slice(&proc_hash_elements);
-        }
-        result
+        let mut elements = Vec::with_capacity(2 * WORD_SIZE);
+        elements.extend_from_slice(self.program_hash.as_elements());
+        elements.extend_from_slice(self.kernel_root.as_elements());
+        elements
     }
 }
 
-// HELPER
-// ===============================================================================================
-
-/// Pads a vector of field elements using zeros to the next multiple of 8.
-fn pad_next_mul_8(input: &mut Vec<Felt>) {
-    let output_len = input.len().next_multiple_of(8);
-    input.resize(output_len, Felt::ZERO);
-}
-
-// ARBITRARY (proptest)
+// // ARBITRARY (proptest)
 // ================================================================================================
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -345,7 +296,9 @@ mod arbitrary {
             // KernelDescriptor's own strategy already produces normalized, valid kernels
             // (distinct words below `MAX_NUM_PROCEDURES`), and any word is a valid program hash.
             (any::<Word>(), any::<KernelDescriptor>())
-                .prop_map(|(program_hash, kernel)| ProgramInfo::new(program_hash, kernel))
+                .prop_map(|(program_hash, kernel)| {
+                    ProgramInfo::new(program_hash, kernel.commitment())
+                })
                 .boxed()
         }
     }

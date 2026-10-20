@@ -119,6 +119,9 @@ pub trait LookupBuilder: Sized {
     /// Periodic column value at the current row.
     type PeriodicVar: Into<Self::Expr> + Copy;
 
+    /// AIR-local public-input variables.
+    type PublicVar: Into<Self::Expr> + Copy;
+
     /// Two-row window over the main trace, returned as-is from the
     /// underlying builder. Pinned to [`WindowAccess`] + `Clone` so a
     /// lookup author can split it into `current_slice()` / `next_slice()`
@@ -146,6 +149,9 @@ pub trait LookupBuilder: Sized {
 
     /// Periodic column values at the current row.
     fn periodic_values(&self) -> &[Self::PeriodicVar];
+
+    /// Public values belonging to the AIR being evaluated.
+    fn public_values(&self) -> &[Self::PublicVar];
 
     // ---- per-column scoping ----
 

@@ -4,7 +4,6 @@ use miden_air::{
     config,
     security::{self, ProofSecurityParameters},
 };
-use miden_core::program::KernelDescriptor;
 use p3_security::{
     budget::{
         AirShape, LookupShape, ProtocolParams, SecurityReport,
@@ -25,7 +24,6 @@ fn security_parameters(
     let mut parameters = security::proof_security_parameters(
         &config::pcs_params(),
         log_max_height,
-        0,
         security::COMMITMENT_ALIGNMENT,
         miden_core::proof::HashFunction::Eidos,
     );
@@ -92,19 +90,14 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         (u64::from(mvm_shape.max_message_width) + 2) * u64::from(mvm_shape.fractions_per_row);
     let (_, _, mvm_bound) = bound(mvm_coefficient);
     for log_height in 6..=29 {
-        for num_kernel_procedures in 0..=KernelDescriptor::MAX_NUM_PROCEDURES as u64 {
-            let boundary_terms =
-                u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures;
-            let correction = (boundary_terms * security::LOG2_E)
-                .div_ceil(u64::from(mvm_shape.fractions_per_row))
-                .div_ceil(1 << log_height);
-            let remainder = correction % security::FIXED_POINT_ONE;
-            assert!(
-                mvm_bound >= remainder,
-                "MVM lookup decision is inconclusive at height {log_height} with \
-                 {num_kernel_procedures} kernel procedures"
-            );
-        }
+        let correction = (u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) * security::LOG2_E)
+            .div_ceil(u64::from(mvm_shape.fractions_per_row))
+            .div_ceil(1 << log_height);
+        let remainder = correction % security::FIXED_POINT_ONE;
+        assert!(
+            mvm_bound >= remainder,
+            "MVM lookup decision is inconclusive at height {log_height}"
+        );
     }
 
     let pvm_shape = pvm::LOOKUP_SHAPE;
@@ -243,7 +236,6 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
         },
         29,
         miden_core::proof::HashFunction::Eidos,
-        255,
     );
     let zero_deep = term_bits(&zero, DEEP_COMPOSITION_LABEL);
     let zero_folding = term_bits(&zero, FOLDING_LABEL);
@@ -257,7 +249,6 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
             },
             29,
             miden_core::proof::HashFunction::Eidos,
-            255,
         );
         assert_eq!(
             term_bits(&deep, DEEP_COMPOSITION_LABEL),
@@ -273,7 +264,6 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
             },
             29,
             miden_core::proof::HashFunction::Eidos,
-            255,
         );
         assert_eq!(
             term_bits(&folding, FOLDING_LABEL),

@@ -76,8 +76,9 @@ pub use prover::{Prover, ProverError, prove_sync};
 /// Generates a multi-AIR STARK proof for the Miden trace set and public values.
 ///
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
-/// statement `aux_inputs` (program hash, final deferred root, and the concatenated kernel-procedure
-/// digests). Then delegates to the lifted multi-AIR prover.
+/// statement `aux_inputs` (program hash and final deferred root). Kernel root belongs to Chiplets
+/// public inputs; path depth remains in the private trace. Then delegates to the
+/// lifted multi-AIR prover.
 #[instrument("prove_stark", skip_all)]
 fn prove_stark<SC>(
     config: &SC,
@@ -85,7 +86,7 @@ fn prove_stark<SC>(
     chiplets_trace: RowMajorMatrix<Felt>,
     eidos_compression_trace: RowMajorMatrix<Felt>,
     and8_trace: RowMajorMatrix<Felt>,
-    public_values: &[Felt],
+    public_values: &miden_air::AirPublicInputs,
     aux_inputs: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
 where
@@ -98,12 +99,9 @@ where
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
     // statement inputs read during observation/boundary correction.
-    let statement = Statement::new(
-        MidenMultiAir::new(),
-        vec![(0, public_values.to_vec())],
-        aux_inputs.to_vec(),
-    )
-    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let statement =
+        Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let prover_statement = ProverStatement::new(
         statement,
         vec![core_trace, chiplets_trace, eidos_compression_trace, and8_trace],

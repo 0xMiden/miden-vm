@@ -394,7 +394,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::logup::build_logup_aux_trace(&TranscriptEvalAir, main, challenges)
+        crate::logup::build_logup_aux_trace(&TranscriptEvalAir, main, &[], challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

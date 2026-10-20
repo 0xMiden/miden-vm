@@ -29,6 +29,9 @@ pub struct VerifyCmd {
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
+    /// Expected kernel Merkle root (hex); omitted means the canonical empty kernel.
+    #[arg(long = "kernel-root", conflicts_with = "kernel_file")]
+    kernel_root: Option<String>,
 }
 
 impl VerifyCmd {
@@ -65,18 +68,20 @@ impl VerifyCmd {
         let now = Instant::now();
 
         // Load kernel if provided, otherwise use default
-        let kernel = if let Some(ref kernel_path) = self.kernel_file {
+        let kernel_root = if let Some(ref root) = self.kernel_root {
+            ProgramHash::read(root).map_err(Report::msg)?
+        } else if let Some(ref kernel_path) = self.kernel_file {
             if !kernel_path.is_file() {
                 return Err(Report::msg(format!(
                     "Kernel file `{}` must be a file.",
                     kernel_path.display()
                 )));
             }
-            load_kernel_descriptor(kernel_path)?
+            load_kernel_descriptor(kernel_path)?.commitment()
         } else {
-            KernelDescriptor::default()
+            KernelDescriptor::default().commitment()
         };
-        let program_info = ProgramInfo::new(program_hash, kernel);
+        let program_info = ProgramInfo::new(program_hash, kernel_root);
 
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
@@ -207,6 +212,7 @@ mod tests {
             proof_file: proof_path.clone(),
             program_hash: "00".to_string(),
             kernel_file: None,
+            kernel_root: None,
         };
 
         // exercise
@@ -231,6 +237,7 @@ mod tests {
             proof_file: PathBuf::from("/nonexistent/does-not-exist.proof"),
             program_hash: "00".to_string(),
             kernel_file: Some(PathBuf::from("kernel.txt")),
+            kernel_root: None,
         };
 
         let err = cmd.execute().expect_err("expected the bad kernel extension to be rejected");

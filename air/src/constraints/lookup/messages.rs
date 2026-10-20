@@ -58,8 +58,8 @@ const _: () = assert!(
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
     // --- Out-of-circuit (boundary correction / reduced_aux_values) ---
-    /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
-    KernelRomInit = 0,
+    /// Reserved bus ID for the retired kernel-list initialization boundary.
+    ReservedKernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.
     BlockHashTable = 1,
     /// Log-deferred state: initial/final deferred-root boundary correction.
@@ -127,12 +127,14 @@ pub enum BusId {
     AeadEidosCompressionInput = 37,
     /// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
     AeadEidosCompressionOutputPair = 38,
+    /// Merkle root return: `[terminal_addr, depth, root[4]]`.
+    HasherReturnMerkleRoot = 39,
 }
 
 impl BusId {
     /// Number of bus-prefix slots through the highest assigned discriminant. Reserved slots remain
     /// part of this prefix layout.
-    pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
+    pub const COUNT: usize = Self::HasherReturnMerkleRoot as usize + 1;
 }
 
 // Per-variant discriminant locks. `BusId::COUNT` records only the high watermark; a reorder below
@@ -141,7 +143,7 @@ impl BusId {
 //
 // If a new bus is added: append it after the current tail and add a matching assert for the new
 // variant. Renumbering existing entries is a protocol change and requires regenerated bindings.
-const _: () = assert!(BusId::KernelRomInit as usize == 0);
+const _: () = assert!(BusId::ReservedKernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
 const _: () = assert!(BusId::LogDeferredRoot as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
@@ -180,6 +182,7 @@ const _: () = assert!(BusId::EidosCompressionMessageWord as usize == 35);
 const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
 const _: () = assert!(BusId::AeadEidosCompressionInput as usize == 37);
 const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);
+const _: () = assert!(BusId::HasherReturnMerkleRoot as usize == 39);
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -192,6 +195,7 @@ const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);
 pub struct HasherMsg<E> {
     pub kind: BusId,
     pub addr: E,
+    /// Leaf index on Merkle init messages; path depth on Merkle root returns; zero otherwise.
     pub node_index: E,
     pub payload: HasherPayload<E>,
 }
@@ -299,12 +303,26 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Return one four-Felt hash result or updated chaining value (`node_index = 0`).
     ///
     /// `COMPRESS` returns an updated CV; the framed hash operations return completed digests.
-    /// Used by: COMPRESS output, LOGDEFERRED output, END, MPVERIFY output, MRUPDATE output.
+    /// Used by: COMPRESS output, LOGDEFERRED output, END.
     pub fn return_hash(addr: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherReturnHash,
             addr,
             node_index: E::ZERO,
+            payload: HasherPayload::Word(word),
+        }
+    }
+
+    /// Returns a Merkle root together with the controller's actual path depth.
+    ///
+    /// A dedicated bus separates Merkle returns from ordinary hash outputs. The depth uses
+    /// the otherwise-zero `node_index` slot. Binding it here, together with
+    /// `addr = start + depth - 1`, prevents pairing one path's input with another path's output.
+    pub fn return_merkle_root(addr: E, depth: E, word: WordFields<E>) -> Self {
+        Self {
+            kind: BusId::HasherReturnMerkleRoot,
+            addr,
+            node_index: depth,
             payload: HasherPayload::Word(word),
         }
     }
@@ -584,7 +602,7 @@ pub struct StackOverflowMsg<E> {
 
 /// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
 ///
-/// Binds one hasher controller row to one Eidos compression block.
+/// Binds a hasher controller or kernel-leaf row to one Eidos compression block.
 #[derive(Clone, Debug)]
 pub struct HasherCompressionLinkMsg<E> {
     pub block: [E; 8],
@@ -680,9 +698,8 @@ pub struct AeadEidosCompressionOutputPairMsg<E> {
 
 /// Kernel ROM message (4 elements): `bus_prefix[bus] + [digest[4]]`.
 ///
-/// Two bus domains: INIT (one remove per declared procedure, balanced by the boundary
-/// correction from public inputs) and CALL (one insert per SYSCALL, carrying the
-/// multiplicity from kernel ROM column 0; balanced by decoder-emitted SYSCALL removes).
+/// Kernel procedure call responses, balanced against SYSCALL requests. Membership is checked
+/// separately on the hasher bus; the former initialization bus ID remains reserved.
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     bus: BusId,
@@ -693,11 +710,6 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     /// Kernel procedure call message (SYSCALL request side + chiplet CALL response).
     pub fn call(digest: WordFields<E>) -> Self {
         Self { bus: BusId::KernelRomCall, digest }
-    }
-
-    /// Kernel procedure init message (public-input boundary + chiplet INIT response).
-    pub fn init(digest: WordFields<E>) -> Self {
-        Self { bus: BusId::KernelRomInit, digest }
     }
 }
 

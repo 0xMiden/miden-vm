@@ -60,10 +60,10 @@ where
                     ),
                     Deg { v: 5, u: 6 },
                 );
-                let return_addr = helper0 + mp_depth * cycle_len - LB::Expr::ONE;
+                let return_addr = helper0 + mp_depth.clone() * cycle_len - LB::Expr::ONE;
                 b.remove(
                     "mpverify_return",
-                    HasherMsg::return_hash(return_addr, old_root),
+                    HasherMsg::return_merkle_root(return_addr, mp_depth, old_root),
                     Deg { v: 5, u: 6 },
                 );
                 b.remove(
@@ -103,7 +103,7 @@ where
                     helper0.clone() + mr_depth.clone() * cycle_len.clone() - LB::Expr::ONE;
                 b.remove(
                     "mrupdate_old_return",
-                    HasherMsg::return_hash(old_return_addr, old_root),
+                    HasherMsg::return_merkle_root(old_return_addr, mr_depth.clone(), old_root),
                     Deg { v: 4, u: 5 },
                 );
                 let new_init_addr = helper0.clone() + mr_depth.clone() * cycle_len.clone();
@@ -118,10 +118,10 @@ where
                     Deg { v: 4, u: 5 },
                 );
                 let new_return_addr =
-                    helper0 + mr_depth * (cycle_len.clone() + cycle_len) - LB::Expr::ONE;
+                    helper0 + mr_depth.clone() * (cycle_len.clone() + cycle_len) - LB::Expr::ONE;
                 b.remove(
                     "mrupdate_new_return",
-                    HasherMsg::return_hash(new_return_addr, stk_next_word_0),
+                    HasherMsg::return_merkle_root(new_return_addr, mr_depth, stk_next_word_0),
                     Deg { v: 4, u: 5 },
                 );
             },
@@ -391,7 +391,13 @@ where
     g.add(
         "merkle_return",
         merkle_return,
-        || HasherMsg::return_hash(addr.clone(), merkle_digest.map(LB::Expr::from)),
+        || {
+            HasherMsg::return_merkle_root(
+                addr.clone(),
+                Into::<LB::Expr>::into(ctrl.merkle_level()) + LB::Expr::ONE,
+                merkle_digest.map(LB::Expr::from),
+            )
+        },
         Deg { v: 3, u: 4 },
     );
 }

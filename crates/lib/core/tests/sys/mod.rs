@@ -54,7 +54,7 @@ fn masm_claim_commitment_matches_native() {
 
     let kernel =
         KernelDescriptor::from_hashes(vec![word(11, 12, 13, 14), word(21, 22, 23, 24)]).unwrap();
-    let program_info = ProgramInfo::new(word(1, 2, 3, 4), kernel);
+    let program_info = ProgramInfo::new(word(1, 2, 3, 4), kernel.commitment());
     let stack_inputs =
         StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6), Felt::new_unchecked(7)])
             .unwrap();

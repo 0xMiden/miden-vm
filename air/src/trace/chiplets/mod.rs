@@ -18,4 +18,4 @@ pub const NUM_ACE_SELECTORS: usize = 4;
 pub const NUM_KERNEL_ROM_SELECTORS: usize = 5;
 
 /// Number of columns needed to record an execution trace of the kernel ROM chiplet.
-pub const KERNEL_ROM_TRACE_WIDTH: usize = 5;
+pub const KERNEL_ROM_TRACE_WIDTH: usize = 13;

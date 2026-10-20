@@ -151,8 +151,9 @@ fn assert_lookup_delta(
         BusId::COUNT,
     );
     let (core, chiplets, compression, and8) = trace.main_trace().clone_air_matrices();
+    let (public_inputs, _) = trace.public_inputs().to_air_inputs();
     let mut delta = HashMap::new();
-    for ((air, honest), forged) in [
+    for (index, ((air, honest), forged)) in [
         MidenAir::CORE,
         MidenAir::CHIPLETS,
         MidenAir::EIDOS_COMPRESSION,
@@ -161,12 +162,19 @@ fn assert_lookup_delta(
     .into_iter()
     .zip([&core, &chiplets, &compression, &and8])
     .zip(forged)
+    .enumerate()
     {
         let preprocessed = air.preprocessed_trace();
         let periodic = BaseAir::<Felt>::periodic_columns(&air);
         for (matrix, sign) in [(honest, -Felt::ONE), (forged, Felt::ONE)] {
-            let fractions =
-                build_lookup_fractions(&air, matrix, preprocessed.as_ref(), &periodic, &challenges);
+            let fractions = build_lookup_fractions(
+                &air,
+                matrix,
+                preprocessed.as_ref(),
+                &periodic,
+                if index < 2 { &public_inputs[index].1 } else { &[] },
+                &challenges,
+            );
             for &(multiplicity, denominator) in fractions.fractions() {
                 *delta.entry(denominator).or_insert(Felt::ZERO) += sign * multiplicity;
             }

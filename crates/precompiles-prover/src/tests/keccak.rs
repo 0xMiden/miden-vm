@@ -272,7 +272,7 @@ fn pure_rol_raw_b_affects_every_byte_and_lane() {
     let periodic: Vec<Vec<Felt>> =
         periodic_columns.iter().map(|column| vec![column[row % column.len()]]).collect();
     let challenges = lookup_challenges();
-    let baseline = build_lookup_fractions(&air, &one_row, None, &periodic, &challenges);
+    let baseline = build_lookup_fractions(&air, &one_row, None, &periodic, &[], &challenges);
 
     for lane in 0..NUM_LANES {
         let lane_base = lane_base(lane);
@@ -285,7 +285,7 @@ fn pure_rol_raw_b_affects_every_byte_and_lane() {
             let mut attacked = one_row.clone();
             attacked.values[cell] = Felt::ONE;
             let attacked_fractions =
-                build_lookup_fractions(&air, &attacked, None, &periodic, &challenges);
+                build_lookup_fractions(&air, &attacked, None, &periodic, &[], &challenges);
             let target_col = lane * (NUM_AUX_COLS / NUM_LANES) + 2 + byte / 4;
             let source_col = lane * (NUM_AUX_COLS / NUM_LANES) + 1;
 

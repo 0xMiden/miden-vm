@@ -78,8 +78,8 @@ to the memory region, keeping the selector degree at three as shown [below](#chi
 **In the ACE chiplet:** first-row, intra-chiplet transition, and last-row flags gate the
 corresponding constraints, as described under [flags and boundary constraints](./ace.md#flags).
 
-**In the kernel ROM chiplet:** typed initialization and call messages bind each declared procedure
-digest and its call multiplicity.
+**In the kernel ROM chiplet:** membership requests authenticate each accessed procedure digest
+against the public kernel Merkle root. Call messages bind that digest to its syscall multiplicity.
 
 ## Operation labels
 
@@ -139,8 +139,8 @@ In the above:
 - the memory selector uses $s'_2$ to select transitions whose next row belongs to the memory region,
   as described [above](#additional-requirements-for-stacking-execution-traces).
 
-The Kernel ROM selector gates its `KernelRomInit` and `KernelRomCall` messages, described
-[below](#chiplets-bus).
+The Kernel ROM selector gates its hasher membership requests and `KernelRomCall` responses; see
+the [kernel ROM constraints](./kernel_rom.md#constraints).
 
 ### Chiplet selector constraints
 
@@ -199,7 +199,7 @@ columns do not use explicit last-row boundary constraints.
 
 ## Hash-kernel lookup column {#chiplets-virtual-table}
 
-The hash-kernel LogUp column multiplexes row-disjoint relations for Merkle siblings, ACE memory
+The hash-kernel LogUp column multiplexes row-disjoint relations for kernel membership, Merkle siblings, ACE memory
 reads, AEAD memory I/O, ordinary bitwise AND8 lookups, and memory range checks. Each relation uses
 its own `BusId`.
 

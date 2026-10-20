@@ -1,8 +1,7 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_air::{
-    MidenAir,
-    lookup::build_logup_aux_trace,
+    BaseAir, MidenAir,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
@@ -429,6 +428,7 @@ fn test_trace_generation_at_fragment_boundaries(
     );
     assert_eq!(and8_from_fragments, and8_from_single, "And8 main trace mismatch");
 
+    let (indexed_inputs, _) = trace_from_fragments.public_inputs().to_air_inputs();
     for (label, air, air_frag, air_single) in [
         ("Core", MidenAir::CORE, &core_from_fragments, &core_from_single),
         ("Chiplets", MidenAir::CHIPLETS, &chip_from_fragments, &chip_from_single),
@@ -440,8 +440,26 @@ fn test_trace_generation_at_fragment_boundaries(
         ),
         ("And8Lookup", MidenAir::AND8_LOOKUP, &and8_from_fragments, &and8_from_single),
     ] {
-        let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
-        let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
+        let inputs = indexed_inputs
+            .iter()
+            .find(|(i, _)| *i == air.instance_index())
+            .map_or(&[][..], |(_, values)| values.as_slice());
+        let preprocessed = air.preprocessed_trace();
+        let (aux_frag, committed_frag) = miden_air::lookup::build_logup_aux_trace_with_preprocessed(
+            &air,
+            air_frag,
+            preprocessed.as_ref(),
+            inputs,
+            &challenges,
+        );
+        let (aux_single, committed_single) =
+            miden_air::lookup::build_logup_aux_trace_with_preprocessed(
+                &air,
+                air_single,
+                preprocessed.as_ref(),
+                inputs,
+                &challenges,
+            );
         assert_eq!(
             aux_frag.values, aux_single.values,
             "{label} LogUp aux trace mismatch between fragments and single fragment"
@@ -1106,13 +1124,12 @@ fn chiplet_preflight_caps_combined_trace_len() {
     let mut memory_writes = MemoryWritesReplay::default();
     memory_writes.record_write_element(ZERO, ZERO, ContextId::root(), RowIndex::from(0));
 
-    let kernel = KernelDescriptor::default();
     let ace = AceReplay::default();
     let combined_len = bitwise.trace_len().expect("single bitwise operation length fits") + 2;
 
     assert!(matches!(
         non_hasher_trace_len(
-            &kernel,
+            0,
             &[],
             &memory_writes,
             &bitwise,
@@ -1122,7 +1139,7 @@ fn chiplet_preflight_caps_combined_trace_len() {
         Err(ExecutionError::TraceLenExceeded(limit)) if limit == combined_len - 1
     ));
     assert_eq!(
-        non_hasher_trace_len(&kernel, &[], &memory_writes, &bitwise, &ace, combined_len).unwrap(),
+        non_hasher_trace_len(0, &[], &memory_writes, &bitwise, &ace, combined_len).unwrap(),
         combined_len
     );
 }

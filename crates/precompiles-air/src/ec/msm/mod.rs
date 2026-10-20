@@ -342,7 +342,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::logup::build_logup_aux_trace(&EcMsmAir, main, challenges)
+        crate::logup::build_logup_aux_trace(&EcMsmAir, main, &[], challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

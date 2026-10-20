@@ -735,7 +735,7 @@ impl FastProcessor {
         tracer: ExecutionTracer,
     ) -> ExecutionWitness {
         ExecutionWitness::from_execution(
-            program.to_info(),
+            program,
             stack_inputs,
             execution_output,
             tracer.into_trace_replay(),

@@ -18,12 +18,11 @@
 //! and claim commitments. The consumer fetches it before calling `vm::verify_proof`. The consumer
 //! also supplies the claim commitment; the advice map stores its 40-felt preimage under that
 //! commitment, and `vm::verify_proof` authenticates the preimage before using it. The advice map
-//! stores the flattened kernel procedure digests under the kernel commitment as well. Query rows,
-//! the Merkle store, and the ACE circuit are content-addressed too.
+//! supplies no kernel procedure list. Query rows, the Merkle store, and the ACE circuit are
+//! content-addressed too.
 
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
@@ -139,12 +138,6 @@ fn build_verifier_inputs(
     inputs.advice = core::mem::take(&mut inputs.advice)
         .with_map([(claim_commitment, claim.to_elements().to_vec())]);
 
-    let kernel = claim.kernel();
-    // The MASM verifier derives the procedure count from the value length.
-    let kernel_witness = Word::words_as_elements(kernel.proc_hashes()).to_vec();
-    inputs.advice =
-        core::mem::take(&mut inputs.advice).with_map([(kernel.commitment(), kernel_witness)]);
-
     Ok(inputs)
 }
 
@@ -191,12 +184,9 @@ fn build_from_proof_bytes(
     let mut challenger = config.challenger();
     config::observe_protocol_params(config.pcs(), &mut challenger);
 
-    let statement = Statement::<Felt, Challenge, _>::new(
-        MidenMultiAir::new(),
-        vec![(0, public_values)],
-        aux_inputs,
-    )
-    .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
+    let statement =
+        Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
     let preprocessed_commitment = Some(config::EIDOS_PREPROCESSED_COMMITMENT.into());
     let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
@@ -254,9 +244,8 @@ fn build_advice(
         ));
     }
 
-    // This stream contains the verifier inputs derived from the proof. The claim preimage and
-    // kernel witness live in the advice map and are authenticated by the verifier against
-    // commitments supplied by the consumer.
+    // This stream contains the verifier inputs derived from the proof, without a kernel descriptor.
+    // The advice map supplies the claim preimage authenticated against the consumer commitment.
     //
     // The section order below mirrors the consumption-order list in the module doc; both are
     // pinned against the MASM verifier by the stark e2e differential tests.
@@ -495,7 +484,7 @@ mod tests {
 
     use miden_core::{
         crypto::merkle::InnerNodeInfo,
-        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+        program::{ProgramInfo, StackInputs, StackOutputs},
         proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
     use miden_crypto::stark::Preprocessed;
@@ -513,7 +502,7 @@ mod tests {
             PrecompileStatus::Empty,
         );
         let claim = ExecutionClaim::from_program_info(
-            ProgramInfo::new(Word::default(), KernelDescriptor::default()),
+            ProgramInfo::default(),
             StackInputs::default(),
             StackOutputs::default(),
         );
@@ -549,7 +538,10 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![
+                (0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES]),
+                (1, vec![Felt::ZERO; miden_air::NUM_CHIPLETS_PUBLIC_VALUES]),
+            ],
             vec![],
         )
         .expect("valid Miden statement shape");

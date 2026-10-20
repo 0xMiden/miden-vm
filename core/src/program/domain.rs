@@ -25,7 +25,7 @@ miden_crypto::eidos_domain_registry! {
                 local_id: 0x0000,
                 version: DomainVersion::numbered(1),
                 encoding: FeltSequence,
-                description: "Miden VM kernel commitment.",
+                description: "Reserved legacy sequential kernel commitment.",
                 schema: "param0 = number of Felts; param1 = 0; param2 = 0; payload = procedure digests in canonical order",
             }
             pub EXECUTION_CLAIM: ExecutionClaimDomain {
@@ -111,6 +111,13 @@ miden_crypto::eidos_domain_registry! {
                 encoding: Custom,
                 description: "SHA-256 deferred precompile nodes.",
                 schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
+            }
+            pub KERNEL_EXPORT: KernelExportDomain {
+                local_id: 0x000d,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "Kernel export Merkle leaf.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = export key (4 Felts) || implementation MAST root (4 Felts)",
             }
         }
     }

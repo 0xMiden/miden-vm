@@ -47,7 +47,8 @@ fn fold_balance<A>(
 {
     let periodic = air.periodic_columns();
     let preprocessed = air.preprocessed_trace();
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
+    let fractions =
+        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, &[], challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
