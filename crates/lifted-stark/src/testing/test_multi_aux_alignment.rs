@@ -116,9 +116,12 @@ fn padding_prover_statement(
     let air = PaddingAir::new(width, aux_width);
     let t0 = generate_trace(start, 8, width);
     let t1 = generate_trace(start, 16, width);
-    let statement =
-        Statement::new(PaddingMultiAir { airs: vec![air.clone(), air] }, vec![start], Vec::new())
-            .unwrap();
+    let statement = Statement::new(
+        PaddingMultiAir { airs: vec![air.clone(), air] },
+        vec![(0, vec![start]), (1, vec![start])],
+        Vec::new(),
+    )
+    .unwrap();
     ProverStatement::new(statement, vec![t0, t1]).unwrap()
 }
 

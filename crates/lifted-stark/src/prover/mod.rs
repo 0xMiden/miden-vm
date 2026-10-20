@@ -202,7 +202,7 @@ where
 /// from your test harness to enforce it in debug builds.
 ///
 /// ## Validated
-/// - per AIR: `air.num_public_values() == statement.air_inputs().len()`
+/// - per AIR: `air.num_public_values() == statement.air_inputs()[i].len()`
 /// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
 /// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
 /// - per AIR: `trace.width() == air.width()`
@@ -220,8 +220,8 @@ where
 ///   shapes.
 ///
 /// # Arguments
-/// - `instance`: the config, the validated prover statement (AIRs, shared `air_inputs`, and per-AIR
-///   traces, all in instance order), and the optional preprocessed bundle
+/// - `instance`: the config, the validated prover statement (AIRs, per-AIR `air_inputs`, and
+///   per-AIR traces, all in instance order), and the optional preprocessed bundle
 /// - `challenger`: Fiat-Shamir challenger pre-bound to protocol parameters and AIR configurations
 ///
 /// # Returns
@@ -368,7 +368,7 @@ where
                     let (trace, values) = air.build_aux_trace_with_preprocessed(
                         main,
                         preprocessed_trace,
-                        air_inputs,
+                        &air_inputs[air_index],
                         aux_inputs,
                         &randomness[..num_randomness],
                     );
@@ -508,7 +508,7 @@ where
                     &this_quotient_eval_domain,
                     alpha,
                     &randomness[..air.num_randomness()],
-                    air_inputs,
+                    &air_inputs[trace_order.instance_indices()[i] as usize],
                     &periodic_lde,
                     &layouts[i],
                     aux_values_i,

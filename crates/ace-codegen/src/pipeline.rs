@@ -152,6 +152,7 @@ fn max_period<F>(periodic_columns: &[Vec<F>]) -> usize {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct TraceOffsets {
+    public: usize,
     preprocessed: usize,
     main: usize,
     aux: usize,
@@ -177,6 +178,7 @@ fn reemit_air_root(
         let id = match *node {
             NodeKind::Input(key) => {
                 let key = match key {
+                    InputKey::Public(index) => InputKey::Public(index + offsets.public),
                     InputKey::Preprocessed { offset, index } => InputKey::Preprocessed {
                         offset,
                         index: index + offsets.preprocessed,
@@ -242,10 +244,11 @@ where
 
 /// Builds one order-invariant ACE circuit for a nonempty AIR set.
 ///
-/// Each AIR reads trace inputs at its canonical instance offset and its fold coefficient from
-/// [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to those
-/// offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N = airs.len()`.
-/// Trace widths are padded to `trace_width_alignment` base-field elements before concatenation.
+/// Each AIR reads public and trace inputs at its canonical instance offset and its fold coefficient
+/// from [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to
+/// those offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N =
+/// airs.len()`. Trace widths are padded to `trace_width_alignment` base-field elements before
+/// concatenation.
 pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,
@@ -268,11 +271,6 @@ where
 
     let artifacts = build_ace_dags_for_airs(airs, config)?;
     let shared = artifacts[0].layout.counts;
-    if artifacts.iter().any(|air| air.layout.counts.num_public != shared.num_public) {
-        return Err(AceError::InvalidInputLayout {
-            message: "all AIRs must use the same public-value window".into(),
-        });
-    }
 
     let mut offsets = Vec::with_capacity(num_airs);
     let mut totals = TraceOffsets::default();
@@ -285,6 +283,7 @@ where
             });
         }
         offsets.push(totals);
+        totals.public += counts.num_public;
         totals.preprocessed += counts.preprocessed_width.next_multiple_of(trace_width_alignment);
         totals.main += counts.width.next_multiple_of(trace_width_alignment);
         totals.aux += aligned_aux / EXT_DEGREE;
@@ -296,7 +295,7 @@ where
         width: totals.main,
         aux_width: totals.aux,
         num_aux_boundary: totals.boundary,
-        num_public: shared.num_public,
+        num_public: totals.public,
         num_randomness: shared.num_randomness,
         num_quotient_chunks: shared.num_quotient_chunks,
     };

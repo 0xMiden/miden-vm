@@ -32,7 +32,7 @@ use crate::{
         COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
         NUM_MAIN_COLS as MSM_COLS,
     },
-    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
         EcNode, Session,
@@ -41,7 +41,7 @@ use crate::{
             wnaf_table_endo,
         },
     },
-    tests::{SessionTracesTestExt, check_local_inputs, verify_deferred},
+    tests::{SessionTracesTestExt, check_local, check_local_inputs, verify_deferred},
     transcript::eval::{
         COL_FRAME_PARAM1, COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir,
     },
@@ -117,7 +117,7 @@ fn shape_and_degree_match_design() {
         ValidateLayout {
             preprocessed_width: air.preprocessed_width(),
             trace_width: air.width(),
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: air.periodic_columns().len(),
             permutation_width: air.aux_width(),
             num_permutation_challenges: NUM_RANDOMNESS,
@@ -152,7 +152,7 @@ fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
     main.values[offset + COL_A_DIFF_HI] = Felt::ZERO;
     main.values[offset + COL_LAMBDA_PTR] = main.values[offset + COL_SCALAR];
 
-    crate::tests::check_local(EcMsmAir, &main);
+    check_local(EcMsmAir, &main);
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn shared_mint_flag_rejected_on_intro() {
     // intro_endo. On an intro row no other native constraint reads this cell.
     main.values[row * width + COL_NEG_MINTED] = Felt::ONE;
 
-    crate::tests::check_local(EcMsmAir, &main);
+    check_local(EcMsmAir, &main);
 }
 
 #[test]
@@ -1064,7 +1064,7 @@ fn msm_main_and_minting_row(
                 && main.values[r * MSM_COLS + COL_IS_BOUNDARY] == Felt::ONE
         })
         .expect("the session mints a certified point");
-    check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+    check_local(EcMsmAir, &main);
     (main, row)
 }
 
@@ -1076,7 +1076,7 @@ fn intro_endo_cannot_certify_its_own_base() {
     let traces = msm_intro_endo_traces();
     let (mut main, row) = msm_main_and_minting_row(&traces, COL_ENDO_MINTED);
     main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_BASE];
-    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
 }
 
 #[test]
@@ -1085,7 +1085,7 @@ fn neg_cannot_certify_its_own_operand_value() {
     let traces = msm_intro_neg_traces();
     let (mut main, row) = msm_main_and_minting_row(&traces, COL_NEG_MINTED);
     main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_VAL_A];
-    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
 }
 
 #[test]
@@ -1120,7 +1120,7 @@ fn certificate_ordering_limbs_are_range_checked() {
         main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + source];
         main.values[row * MSM_COLS + COL_B_DIFF_LO] = -Felt::ONE;
         main.values[row * MSM_COLS + COL_B_DIFF_HI] = Felt::ZERO;
-        check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+        check_local(EcMsmAir, &main);
 
         let mut net = HashMap::new();
         fold_balance(&EcMsmAir, &main, &challenges, &mut net);
@@ -1300,7 +1300,7 @@ fn is_claimed_must_be_boolean() {
     // `{(G, 1), (Q, 1)}`. An `is_claimed` value above one must be rejected.
     let traces = msm_two_term_ordered(false);
     let mut main = traces.mains()[9].clone();
-    check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+    check_local(EcMsmAir, &main);
     let mut forged_rows = 0;
     for row in main.values.chunks_mut(MSM_COLS) {
         if row[COL_IS_CLAIMED] == Felt::ONE {
@@ -1309,5 +1309,5 @@ fn is_claimed_must_be_boolean() {
         }
     }
     assert_eq!(forged_rows, 2, "the claimed expression spans two term rows");
-    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
 }

@@ -20,8 +20,7 @@ pub use program::{
 use crate::{
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        build_logup_aux_trace,
+        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -117,9 +116,6 @@ static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> =
 impl BaseAir<Felt> for Sha256CompressionAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         Cow::Borrowed(PERIODIC_COLUMNS.as_slice())

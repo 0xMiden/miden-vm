@@ -189,7 +189,7 @@ mod tests {
         let layout = ValidateLayout {
             preprocessed_width: 0,
             trace_width: NUM_CHIPLETS_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: num_periodic,
             permutation_width: CHIPLET_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
@@ -204,7 +204,7 @@ mod tests {
         let layout = ValidateLayout {
             preprocessed_width: 0,
             trace_width: NUM_EIDOS_COMPRESSION_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: num_periodic,
             permutation_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
@@ -220,7 +220,7 @@ mod tests {
             preprocessed_width:
                 crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS,
             trace_width: crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: 0,
             permutation_width:
                 crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len(),

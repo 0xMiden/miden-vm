@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
@@ -417,7 +417,7 @@ impl Verifier {
         // from the proof's per-AIR trace heights.
         let statement = Statement::<Felt, QuadFelt, _>::new(
             MidenMultiAir::new(),
-            public_values.to_vec(),
+            vec![(0, public_values.to_vec())],
             aux_inputs.to_vec(),
         )
         .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
@@ -848,7 +848,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
             MidenMultiAir::new(),
-            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
+            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
             Vec::new(),
         )
         .unwrap();

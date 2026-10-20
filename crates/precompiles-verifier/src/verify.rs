@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -12,7 +12,7 @@ use miden_lifted_stark::{
     lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
 };
 use miden_precompiles_air::{
-    ChipletMultiAir, preprocessed,
+    ChipletAir, ChipletMultiAir, preprocessed,
     security::{self, ProofSecurityParameters},
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
@@ -89,9 +89,12 @@ where
         proof_encoding_config,
     )?;
 
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+    let statement = Statement::new(
+        ChipletMultiAir::new(),
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, public_root.as_array().to_vec())],
+        Vec::new(),
+    )
+    .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);

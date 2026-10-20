@@ -15,7 +15,7 @@ use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 use miden_precompiles_air::primitives::byte_pair_lut::eidos;
 
 use crate::{
-    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_lookup_fractions},
+    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, build_lookup_fractions},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     transcript::eidos::{
@@ -294,7 +294,7 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
         <EidosCompressionAir as LiftedAir<Felt, QuadFelt>>::air_layout(&EidosCompressionAir);
     assert_eq!(layout.preprocessed_width, 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
-    assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
+    assert_eq!(layout.num_public_values, 0);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, 1);
@@ -321,7 +321,7 @@ fn lookup_degree_annotations_match_the_unified_layout() {
         .validate(ValidateLayout {
             preprocessed_width: 0,
             trace_width: NUM_MAIN_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: 14,
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,

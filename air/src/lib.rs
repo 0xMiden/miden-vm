@@ -180,7 +180,7 @@ impl PublicInputs {
 
     /// Returns the AIR public values (`air_inputs`) and statement inputs (`aux_inputs`).
     ///
-    /// `air_inputs` (the values read by the AIR constraints) layout:
+    /// `air_inputs` (read by Core; all other AIRs have empty slices) layout:
     ///   [0..16]  stack inputs
     ///   [16..32] stack outputs
     ///
@@ -277,7 +277,7 @@ impl Deserializable for PublicInputs {
 // PROCESSOR AIR
 // ================================================================================================
 
-/// Number of public values read by the Miden VM AIRs: the `air_inputs` shared by every AIR.
+/// Number of public values read by Core; the other Miden VM AIRs have no public values.
 ///
 /// Layout (32 Felts total):
 ///   [0..16]  stack inputs
@@ -329,7 +329,6 @@ impl CoreAir {
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
-        public_values: &[Felt],
         boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
         if boundary_inputs.len() != 1 {
@@ -350,7 +349,6 @@ impl CoreAir {
 
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
-            public_values,
             var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
@@ -426,7 +424,6 @@ impl ChipletsAir {
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
-        public_values: &[Felt],
         boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
         if boundary_inputs.len() != 1 {
@@ -447,7 +444,6 @@ impl ChipletsAir {
 
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
-            public_values,
             var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
@@ -519,7 +515,6 @@ impl EidosCompressionAir {
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         _challenges: &Challenges<EF>,
-        _public_values: &[Felt],
         boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
         if !boundary_inputs.is_empty() {
@@ -604,7 +599,6 @@ impl And8LookupAir {
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         _challenges: &Challenges<EF>,
-        _public_values: &[Felt],
         boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
         if !boundary_inputs.is_empty() {
@@ -709,7 +703,6 @@ impl MidenAir {
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
-        public_values: &[Felt],
         aux_inputs: &[Felt],
     ) -> Result<EF, ReductionError> {
         if aux_inputs.len() < AUX_KERNEL_DIGESTS {
@@ -721,20 +714,14 @@ impl MidenAir {
         }
 
         match self {
-            Self::Core => CoreAir.boundary_correction(
-                challenges,
-                public_values,
-                &[&aux_inputs[..AUX_KERNEL_DIGESTS]],
-            ),
-            Self::Chiplets => ChipletsAir.boundary_correction(
-                challenges,
-                public_values,
-                &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
-            ),
-            Self::EidosCompression => {
-                EidosCompressionAir.boundary_correction(challenges, public_values, &[])
+            Self::Core => {
+                CoreAir.boundary_correction(challenges, &[&aux_inputs[..AUX_KERNEL_DIGESTS]])
             },
-            Self::And8Lookup => And8LookupAir.boundary_correction(challenges, public_values, &[]),
+            Self::Chiplets => {
+                ChipletsAir.boundary_correction(challenges, &[&aux_inputs[AUX_KERNEL_DIGESTS..]])
+            },
+            Self::EidosCompression => EidosCompressionAir.boundary_correction(challenges, &[]),
+            Self::And8Lookup => And8LookupAir.boundary_correction(challenges, &[]),
         }
     }
 
@@ -859,7 +846,10 @@ impl BaseAir<Felt> for MidenAir {
     }
 
     fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
+        match self {
+            Self::Core => NUM_PUBLIC_VALUES,
+            Self::Chiplets | Self::EidosCompression | Self::And8Lookup => 0,
+        }
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
@@ -1033,10 +1023,6 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         &AIRS
     }
 
-    fn num_air_inputs(&self) -> usize {
-        NUM_PUBLIC_VALUES
-    }
-
     fn max_aux_inputs(&self) -> usize {
         // aux_inputs = program hash (1 word) + deferred root (1 word) + the var-len
         // kernel-digest group: one `Word` per kernel procedure, capped at
@@ -1058,11 +1044,12 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn observe<C: CanObserve<Felt>>(
         &self,
         challenger: &mut C,
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         _log_trace_heights: &[u8],
     ) {
-        assert_eq!(air_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
+        let core_inputs = &air_inputs[0];
+        assert_eq!(core_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
         assert!(
             aux_inputs.len() >= AUX_KERNEL_DIGESTS,
             "aux inputs shorter than the fixed program-hash + deferred-root prefix"
@@ -1077,7 +1064,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         let mut claim = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
         claim[0..WORD_SIZE].copy_from_slice(program_hash);
         claim[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&kernel_h);
-        claim[2 * WORD_SIZE..].copy_from_slice(air_inputs);
+        claim[2 * WORD_SIZE..].copy_from_slice(core_inputs);
         let claim_hash = miden_core::program::claim_commitment(&claim);
 
         for &v in claim_hash.as_elements().iter().chain(deferred_root) {
@@ -1093,7 +1080,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn eval_external(
         &self,
         challenges: &[EF],
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
         log_trace_heights: &[u8],
@@ -1122,10 +1109,10 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             )
             .into());
         }
-        if air_inputs.len() != NUM_PUBLIC_VALUES {
+        if air_inputs[0].len() != NUM_PUBLIC_VALUES {
             return Err(format!(
                 "expected {NUM_PUBLIC_VALUES} public values, got {}",
-                air_inputs.len()
+                air_inputs[0].len()
             )
             .into());
         }
@@ -1156,7 +1143,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         for ((air, values), &log_height) in
             AIRS.iter().copied().zip(aux_values.iter()).zip(log_trace_heights)
         {
-            boundary_correction += air.boundary_correction(&challenges, air_inputs, aux_inputs)?;
+            boundary_correction += air.boundary_correction(&challenges, aux_inputs)?;
             let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
             if values.len() != expected {
                 return Err(format!(
@@ -1228,7 +1215,6 @@ fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
 /// [`ReductionError`] to the verifier rather than panicking.
 struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
     challenges: &'a Challenges<EF>,
-    public_values: &'a [Felt],
     var_len_public_inputs: &'a [&'a [Felt]],
     sum: EF,
     error: Option<ReductionError>,
@@ -1246,10 +1232,6 @@ impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
 impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a, EF> {
     type F = Felt;
     type EF = EF;
-
-    fn public_values(&self) -> &[Felt] {
-        self.public_values
-    }
 
     fn var_len_public_inputs(&self) -> &[&[Felt]] {
         self.var_len_public_inputs
@@ -1329,7 +1311,7 @@ mod tests {
     fn eval_external_weights_normalized_sums_by_trace_length() {
         let multi_air = MidenMultiAir::new();
         let raw_challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
-        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
         let aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
         let normalized_sums = [
             QuadFelt::from_u32(13),
@@ -1354,7 +1336,7 @@ mod tests {
         let mut boundary_correction = QuadFelt::ZERO;
         for air in AIRS {
             boundary_correction +=
-                air.boundary_correction(&lookup_challenges, &air_inputs, &aux_inputs).unwrap();
+                air.boundary_correction(&lookup_challenges, &aux_inputs).unwrap();
         }
 
         let result = <MidenMultiAir as MultiAir<Felt, QuadFelt>>::eval_external(
@@ -1379,7 +1361,7 @@ mod tests {
     fn eval_external_rejects_partial_kernel_digest() {
         let challenges =
             [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
-        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
         let mut aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
         aux_inputs.push(Felt::ONE);
         let zero = QuadFelt::from(Felt::ZERO);
@@ -1405,7 +1387,7 @@ mod tests {
     fn eval_external_rejects_too_many_kernel_digests() {
         let challenges =
             [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
-        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
         let max_aux_inputs = AUX_KERNEL_DIGESTS + KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE;
         let actual_aux_inputs = max_aux_inputs + WORD_SIZE;
         let aux_inputs = vec![Felt::ZERO; actual_aux_inputs];
@@ -1502,6 +1484,7 @@ mod tests {
         let mut air_inputs = [Felt::ZERO; NUM_PUBLIC_VALUES];
         air_inputs[0..MIN_STACK_DEPTH].copy_from_slice(&stack_inputs[..]);
         air_inputs[MIN_STACK_DEPTH..].copy_from_slice(&stack_outputs[..]);
+        let air_inputs = [air_inputs.to_vec(), vec![], vec![], vec![]];
         let mut aux_inputs: Vec<Felt> = Vec::new();
         aux_inputs.extend(program_hash.as_elements());
         aux_inputs.extend(deferred_root.as_elements());
@@ -1538,7 +1521,7 @@ mod tests {
         }
 
         let mut challenger = FeltSink::default();
-        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
         let multi_air = MidenMultiAir::new();
 
         <MidenMultiAir as MultiAir<Felt, QuadFelt>>::observe(
