@@ -712,8 +712,8 @@ impl Sub<Point> for PointAffine {
 
     #[inline(always)]
     fn sub(self, other: Point) -> Point {
-        let mut r = other;
-        r.set_sub_affine(&self);
+        let mut r = -other;
+        r.set_add_affine(&self);
         r
     }
 }
@@ -723,8 +723,8 @@ impl Sub<&Point> for PointAffine {
 
     #[inline(always)]
     fn sub(self, other: &Point) -> Point {
-        let mut r = *other;
-        r.set_sub_affine(&self);
+        let mut r = -other;
+        r.set_add_affine(&self);
         r
     }
 }
@@ -734,8 +734,8 @@ impl Sub<Point> for &PointAffine {
 
     #[inline(always)]
     fn sub(self, other: Point) -> Point {
-        let mut r = other;
-        r.set_sub_affine(self);
+        let mut r = -other;
+        r.set_add_affine(self);
         r
     }
 }
@@ -745,8 +745,8 @@ impl Sub<&Point> for &PointAffine {
 
     #[inline(always)]
     fn sub(self, other: &Point) -> Point {
-        let mut r = *other;
-        r.set_sub_affine(self);
+        let mut r = -other;
+        r.set_add_affine(self);
         r
     }
 }
@@ -1124,6 +1124,26 @@ mod tests {
 
         let P2a = PointAffine { x: P2.X / P2.Z, u: P2.U / P2.T };
         assert!((P1 + P2a).equals(P1 + P2) == 0xffffffffffffffff);
+    }
+
+    #[test]
+    #[allow(clippy::op_ref)]
+    fn ecgfp5_affine_subtraction() {
+        let points =
+            [Point::NEUTRAL, Point::GENERATOR, Point::GENERATOR.double(), -Point::GENERATOR];
+        let mut affine = [PointAffine::NEUTRAL; 4];
+        Point::to_affine_array(&points, &mut affine);
+
+        for (lhs, lhs_affine) in points.iter().zip(&affine) {
+            for rhs in points {
+                let expected = (*lhs + -rhs).encode();
+                for difference in
+                    [*lhs_affine - rhs, *lhs_affine - &rhs, lhs_affine - rhs, lhs_affine - &rhs]
+                {
+                    assert!(difference.encode().equals(expected) != 0);
+                }
+            }
+        }
     }
 
     #[test]
