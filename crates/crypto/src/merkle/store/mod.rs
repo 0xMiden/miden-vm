@@ -3,6 +3,8 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+use once_cell::sync::Lazy;
+
 use super::{
     EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree, NodeIndex,
     PartialMerkleTree, Poseidon2, RootPath, Word,
@@ -31,6 +33,8 @@ pub struct StoreNode {
 /// This is a in memory data store for Merkle trees, this store allows all the nodes of multiple
 /// trees to live as long as necessary and without duplication, this allows the implementation of
 /// space efficient persistent data structures.
+///
+/// Canonical empty-subtree nodes are omitted on write and restored on read.
 ///
 /// Example usage:
 ///
@@ -592,11 +596,21 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.nodes.len() as u64);
+        static EMPTY_NODES: Lazy<Map<Word, StoreNode>> = Lazy::new(|| empty_hashes().collect());
+        // Count omissions with a fixed number of lookups, without scanning the entire store.
+        let omitted = EMPTY_NODES
+            .iter()
+            .filter(|(key, node)| self.nodes.get(*key) == Some(*node))
+            .count();
 
-        for (k, v) in self.nodes.iter() {
-            k.write_into(target);
-            v.write_into(target);
+        target.write_u64((self.nodes.len() - omitted) as u64);
+
+        for (key, node) in &self.nodes {
+            // Only nodes with equal children can be canonical empty nodes.
+            if node.left != node.right || EMPTY_NODES.get(key) != Some(node) {
+                key.write_into(target);
+                node.write_into(target);
+            }
         }
     }
 }
