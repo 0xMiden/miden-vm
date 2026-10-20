@@ -72,7 +72,15 @@ fn cli_precompile_policy_errors_precede_input_loading() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--complete"))
-        .stdout(predicate::str::contains("By default, prove only the VM STARK"));
+        .stdout(predicate::str::contains("--deferred"))
+        .stdout(predicate::str::contains("private advice"))
+        .stdout(predicate::str::contains("when that disclosure is intended"));
+    bin_under_test(dir.path())
+        .args(["prove", "missing.masm", "--complete", "--deferred"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"))
+        .stdout(predicate::str::is_empty());
     bin_under_test(dir.path())
         .args(["verify", "--help"])
         .assert()
@@ -111,6 +119,52 @@ fn cli_precompile_policy_errors_precede_input_loading() {
 }
 
 #[test]
+fn cli_private_precompile_witness_export_requires_opt_in() {
+    let dir = TempDir::new().unwrap();
+    let value = UintPrecompile::value_frame(UintDomain::U256).initial_chaining_word();
+    let eq = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID).initial_chaining_word();
+    // Register the private advice value, then assert its equality with itself. The public
+    // program and outputs contain neither the value nor its raw limbs.
+    let source = format!(
+        "begin adv_pushw adv_pushw push.{} adv.register_deferred movdnw.2 compress dropw dropw \
+         dupw push.{} adv.register_deferred movdnw.2 compress dropw dropw log_deferred dropw end",
+        word_literal(value),
+        word_literal(eq),
+    );
+    write_program(dir.path(), &source);
+    fs::write(
+        dir.path().join("program.inputs"),
+        r#"{"operand_stack":[],"advice_stack":["42","42","42","42","42","42","42","42"]}"#,
+    )
+    .unwrap();
+
+    bin_under_test(dir.path())
+        .args(["prove", "program.masm"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Proof status: complete"))
+        .stdout(predicate::str::contains("Precompile witness: exported").not());
+    // The default artifact carries a precompile STARK, with no portable witness to disclose.
+    assert!(matches!(read_proof(dir.path()).precompile(), PrecompileStatus::Proven(_)));
+
+    bin_under_test(dir.path())
+        .args(["prove", "program.masm", "--deferred"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Proof status: deferred"))
+        .stdout(predicate::str::contains("may reveal private advice inputs"));
+    let proof = read_proof(dir.path());
+    let PrecompileStatus::Deferred(witness) = proof.precompile() else {
+        panic!("explicit opt-in must export the deferred witness")
+    };
+    let private_limbs = [Felt::from_u32(42); 8];
+    assert!(witness.entries().iter().any(|entry| matches!(
+        entry,
+        PrecompileWitnessEntry::Data { chunks, .. } if chunks.contains(&private_limbs)
+    )));
+}
+
+#[test]
 fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
     let dir = TempDir::new().unwrap();
     let eq = Node::join(
@@ -146,6 +200,9 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
                     .arg(format!("program.{extension}"))
                     .arg("--max-precompile-elements")
                     .arg(boundary.to_string());
+                if action == "prove" {
+                    command.arg("--deferred");
+                }
                 command.assert().success();
                 let mut command = bin_under_test(dir.path());
                 command
@@ -153,6 +210,9 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
                     .arg(format!("program.{extension}"))
                     .arg("--max-precompile-elements")
                     .arg((boundary - 1).to_string());
+                if action == "prove" {
+                    command.arg("--deferred");
+                }
                 command
                     .assert()
                     .failure()
@@ -167,7 +227,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
     let dir = TempDir::new().unwrap();
     let program = write_program(dir.path(), &precompile_source(1, 1));
     bin_under_test(dir.path())
-        .args(["prove", "program.masm"])
+        .args(["prove", "program.masm", "--deferred"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: deferred"));
@@ -214,7 +274,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
         .stdout(predicate::str::contains("Proof status:").not());
 
     bin_under_test(dir.path())
-        .args(["prove", "program.masm", "--complete"])
+        .args(["prove", "program.masm"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: complete"));
@@ -296,7 +356,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
 
     // Deferring the precompile STARK must not bypass native execution checks in either mode.
     let program = write_program(dir.path(), &precompile_source(1, 2));
-    for args in [vec![], vec!["--complete"]] {
+    for args in [vec![], vec!["--complete"], vec!["--deferred"]] {
         bin_under_test(dir.path())
             .args(["prove", "program.masm"])
             .args(args)
@@ -318,7 +378,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
 fn cli_precompile_empty_proof_is_complete() {
     let dir = TempDir::new().unwrap();
     let program = write_program(dir.path(), "begin push.1 drop end");
-    for prove_args in [vec![], vec!["--complete"]] {
+    for prove_args in [vec![], vec!["--complete"], vec!["--deferred"]] {
         bin_under_test(dir.path())
             .args(["prove", "program.masm"])
             .args(prove_args)

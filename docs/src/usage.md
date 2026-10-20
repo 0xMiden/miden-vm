@@ -154,7 +154,8 @@ ceilings, or combine different work classes into an aggregate budget.
 ### Prover memory budgets
 
 For `prove`, `--max-prover-memory SIZE` sets the modelled peak-memory budget for each enabled
-proving stage. Default proving runs only the VM stage; `--complete` also proves precompile work.
+proving stage. Default proving includes the VM and any precompile STARK; `--deferred` runs only
+the VM proving stage and exports the precompile witness.
 The explicit option sets the same budget for both stages. When omitted, each stage uses its own
 library default (`Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES` and
 `Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES`). The option uses the byte suffixes
@@ -168,12 +169,20 @@ STARK.
 
 ### Complete and deferred proofs
 
-`prove` follows the library's `Prover::prove` workflow by default: it generates the VM STARK and
-carries a deferred precompile witness for later proving. Use `prove --complete` to follow
-`Prover::prove_full` and also generate a precompile STARK. Without precompile work, the VM STARK
-alone is already complete in either mode. Deferral applies to the precompile STARK; normal
-execution still checks precompile predicates natively. Proving reports the resulting proof status
-and, for a deferred proof, its missing precompile STARK and outstanding root.
+`prove` follows the library's `Prover::prove_full` workflow by default: it generates the VM STARK
+and any required precompile STARK, without exporting a raw precompile witness. `prove --complete`
+explicitly selects the same behavior.
+
+Use `prove --deferred` to opt into the library's `Prover::prove` workflow: generate only the VM
+STARK and include the raw precompile witness in the `.proof` file for later proving. That witness
+includes raw precompile inputs and can reveal inputs taken from private advice. Only use this
+option when that disclosure is intended; keep the default complete proof for publication without
+the raw witness. The two proving options cannot be combined.
+
+Without precompile work, the VM STARK alone is already complete in either mode. Deferral applies
+to the precompile STARK; normal execution still checks precompile predicates natively. Proving
+reports the resulting proof status and, for a deferred proof, the witness-export disclosure, its
+missing precompile STARK and outstanding root.
 
 `verify` accepts valid complete and deferred proofs by default. For a deferred proof, the
 verifier authenticates the VM STARK, checks the witness limits, binds its reconstructed root to

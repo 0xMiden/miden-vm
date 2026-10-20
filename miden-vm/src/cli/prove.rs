@@ -41,8 +41,8 @@ pub struct ProveCmd {
 
     /// Maximum modelled peak memory for each enabled proving stage (512M, 32Gi)
     ///
-    /// Sets the same budget for VM and precompile proving; the precompile stage runs only with
-    /// --complete. When omitted, each stage retains its library default. This is a modelled
+    /// Sets the same budget for VM and precompile proving; --deferred omits the precompile stage.
+    /// When omitted, each stage retains its library default. This is a modelled
     /// budget, not a total allocation cap; precompile witness preparation/import are excluded.
     #[arg(
         long = "max-prover-memory",
@@ -53,12 +53,20 @@ pub struct ProveCmd {
     #[command(flatten)]
     precompile_limits: PrecompileArgs,
 
-    /// Generate a complete proof, including a STARK for any precompile work
+    /// Generate a complete proof, including a STARK for any precompile work (the default)
     ///
-    /// By default, prove only the VM STARK and carry a deferred precompile witness for later
-    /// proving. Without precompile work, the VM STARK alone is already complete.
-    #[arg(long = "complete")]
+    /// Complete proofs do not export a raw precompile witness. Cannot be combined with --deferred.
+    #[arg(long = "complete", conflicts_with = "deferred")]
     complete: bool,
+
+    /// Export a deferred proof containing the raw precompile witness
+    ///
+    /// The witness includes raw precompile inputs and can reveal inputs from private advice.
+    /// Use this option only when that disclosure is intended. By default, generate a complete
+    /// STARK-backed proof without exporting the witness. Without precompile work, either mode
+    /// produces a complete proof.
+    #[arg(long = "deferred", conflicts_with = "complete")]
+    deferred: bool,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -206,7 +214,7 @@ impl ProveCmd {
         };
         let stack_outputs = *witness.claim().stack_outputs();
         let prover = self.prover(hash_fn, verification_limits);
-        let proof = if self.complete {
+        let proof = if self.complete || !self.deferred {
             prover.prove_full(witness)
         } else {
             prover.prove(witness)
@@ -216,6 +224,7 @@ impl ProveCmd {
         println!("Program proved in {} ms", now.elapsed().as_millis());
         if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
             println!("Proof status: deferred");
+            println!("Precompile witness: exported; may reveal private advice inputs");
             println!("Precompile STARK: not supplied");
             println!("Outstanding precompile root: {}", proof.vm().precompile_root);
         } else {
