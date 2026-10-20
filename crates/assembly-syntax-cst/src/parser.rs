@@ -13,7 +13,7 @@ use crate::{
 
 mod attribute_lookahead;
 
-use self::attribute_lookahead::{AttributeLookahead, DeclarationCandidate};
+use self::attribute_lookahead::AttributeLookahead;
 
 /// The result of parsing a MASM source file into a lossless CST.
 ///
@@ -136,14 +136,25 @@ pub fn parse_inline_masm_text(input: &str, bounds: Option<core::ops::Range<usize
 
 struct Parser<'input> {
     tokens: Vec<Token<'input>>,
-    attribute_lookahead: Option<AttributeLookahead>,
     pos: usize,
+    /// Lazily indexes attribute sequences to avoid rescanning them during declaration recovery.
+    attribute_lookahead: Option<AttributeLookahead>,
+    /// Caches context-independent classifications.
+    cached_declaration_candidates: Option<Vec<Option<DeclarationCandidate>>>,
     /// Caches (start, next non-trivia index) to avoid rescanning suffixes of a trivia run.
     /// The next index is `tokens.len()` when the run reaches EOF.
     cached_block_trivia_run: Option<(usize, usize)>,
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
     eof_span: SourceSpan,
+}
+
+/// Whether a candidate starts a declaration, before applying attribute restrictions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeclarationCandidate {
+    NotDeclaration,
+    Procedure,
+    OtherDeclaration,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -244,6 +255,7 @@ impl<'input> Parser<'input> {
         Self {
             tokens: tokenize(source),
             attribute_lookahead: None,
+            cached_declaration_candidates: None,
             cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
@@ -259,6 +271,7 @@ impl<'input> Parser<'input> {
         Self {
             tokens: tokenize(source),
             attribute_lookahead: None,
+            cached_declaration_candidates: None,
             cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
@@ -1503,16 +1516,22 @@ impl<'input> Parser<'input> {
         let Some((index, has_attributes)) = self.peek_declaration_after_attributes() else {
             return false;
         };
-        let classify = || Self::classify_declaration_candidate(&self.tokens, index);
-        let candidate = match self.attribute_lookahead.as_mut() {
-            Some(lookahead) => lookahead.classify_candidate(index, classify),
-            None => classify(),
-        };
+        let candidate = self.classify_candidate(index);
         match candidate {
             DeclarationCandidate::NotDeclaration => false,
             DeclarationCandidate::Procedure => true,
             DeclarationCandidate::OtherDeclaration => !has_attributes,
         }
+    }
+
+    /// Caches candidate classifications, including negative results, independently of attributes.
+    fn classify_candidate(&mut self, index: usize) -> DeclarationCandidate {
+        let tokens = &self.tokens;
+        let classifications = self
+            .cached_declaration_candidates
+            .get_or_insert_with(|| vec![None; tokens.len()]);
+        *classifications[index]
+            .get_or_insert_with(|| Self::classify_declaration_candidate(tokens, index))
     }
 
     fn classify_declaration_candidate(tokens: &[Token<'_>], index: usize) -> DeclarationCandidate {
@@ -2524,6 +2543,13 @@ end
                 annotation_tokens
             );
         }
+    }
+
+    #[test]
+    fn doc_comments_around_struct_field_preserve_initializer() {
+        let comments = "#! field documentation\n".repeat(256);
+        let source = format!("const X: struct {{\n{comments}field\n{comments}: u8 }} = 1\n");
+        assert_constant_annotation(&source, "1");
     }
 
     #[test]
