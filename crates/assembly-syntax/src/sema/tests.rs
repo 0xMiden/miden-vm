@@ -716,7 +716,7 @@ fn constant_annotation_marks_item_import_used() {
             "\
 namespace test
 use {ForeignType} from some::module
-const N: ForeignType = 42
+pub const N: ForeignType = 42
 ",
         )
         .expect("type import used in a constant annotation should pass analysis");
@@ -732,7 +732,7 @@ fn constant_annotation_marks_renamed_import_used() {
             "\
 namespace test
 use {ForeignType as LocalType} from some::module
-const N: LocalType = 42
+pub const N: LocalType = 42
 ",
         )
         .expect("renamed type import used in a constant annotation should pass analysis");
@@ -748,7 +748,7 @@ fn constant_annotation_marks_module_import_used() {
             "\
 namespace test
 use some::module as sm
-const N: sm::ForeignType = 42
+pub const N: sm::ForeignType = 42
 ",
         )
         .expect("module import used in a constant annotation should pass analysis");
@@ -764,7 +764,7 @@ fn constant_annotation_marks_nested_type_import_used() {
             "\
 namespace test
 use {ForeignType} from some::module
-const N: [ForeignType; 1] = 42
+pub const N: [ForeignType; 1] = 42
 ",
         )
         .expect("type import nested in a constant annotation should pass analysis");
