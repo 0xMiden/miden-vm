@@ -467,7 +467,7 @@ mod tests {
         use miden_lifted_air::{BaseAir, MultiAir};
         use miden_precompiles_air::ChipletMultiAir;
 
-        use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
+        use crate::ace_constants::PVM_EIDOS_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
@@ -481,7 +481,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "MAX_AUX_INPUTS"), multi_air.max_aux_inputs() as u64);
         assert_eq!(masm_const(HOOK_PATH, "NUM_AUX_INPUTS"), 0);
         assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
-        for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
+        for (i, expected) in PVM_EIDOS_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
                 masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
                 expected,
