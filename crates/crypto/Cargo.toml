@@ -76,6 +76,11 @@ required-features = ["std"]
 
 [[bench]]
 harness           = false
+name              = "merkle_witness"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "dsa"
 required-features = ["std"]
 
