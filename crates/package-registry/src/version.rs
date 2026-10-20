@@ -51,7 +51,11 @@ impl Arbitrary for InvalidVersionError {
 /// * Satisfy requirements for a package that has a specific digest
 /// * Record the exact published identity of a canonical package artifact as `semver#digest`
 /// * Provide a total ordering for package versions that may or may not include a specific digest
-#[derive(Debug, Clone, Eq, PartialEq)]
+///
+/// Semantic-version comparisons follow SemVer precedence and intentionally ignore build metadata.
+/// Build metadata is retained for display, but versions that differ only in build metadata compare
+/// equal unless their content digests differ.
+#[derive(Debug, Clone)]
 pub struct Version {
     /// The semantic version information
     ///
@@ -178,6 +182,14 @@ impl fmt::Display for Version {
     }
 }
 
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        self.version.cmp_precedence(&other.version).is_eq() && self.digest == other.digest
+    }
+}
+
+impl Eq for Version {}
+
 impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -195,5 +207,40 @@ impl Ord for Version {
                 (Some(_), None) => Ordering::Greater,
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cmp::Ordering;
+
+    use miden_core::{Felt, Word};
+
+    use super::Version;
+
+    #[test]
+    fn equality_and_ordering_ignore_build_metadata() {
+        let plain = "1.0.0".parse::<Version>().unwrap();
+        let first = "1.0.0+first".parse::<Version>().unwrap();
+        let second = "1.0.0+second".parse::<Version>().unwrap();
+
+        assert_eq!(plain, first);
+        assert_eq!(first, second);
+        assert_eq!(plain.cmp(&first), Ordering::Equal);
+        assert_eq!(first.cmp(&second), Ordering::Equal);
+    }
+
+    #[test]
+    fn equality_and_ordering_use_digest_after_semver_precedence() {
+        let first_digest = Word::new([Felt::new_unchecked(1); 4]);
+        let second_digest = Word::new([Felt::new_unchecked(2); 4]);
+        let first = Version::new("1.0.0+first".parse().unwrap(), first_digest);
+        let same = Version::new("1.0.0+second".parse().unwrap(), first_digest);
+        let different = Version::new("1.0.0+second".parse().unwrap(), second_digest);
+
+        assert_eq!(first, same);
+        assert_eq!(first.cmp(&same), Ordering::Equal);
+        assert_ne!(first, different);
+        assert_ne!(first.cmp(&different), Ordering::Equal);
     }
 }

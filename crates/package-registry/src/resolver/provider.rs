@@ -681,6 +681,35 @@ mod tests {
     }
 
     #[test]
+    fn registry_rejects_versions_that_only_differ_in_build_metadata() {
+        let mut index = InMemoryPackageRegistry::default();
+        let package = PackageId::from("dep");
+
+        index
+            .insert(
+                package.clone(),
+                "1.0.0+first".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect("first semantic version should register");
+        let error = index
+            .insert(
+                package.clone(),
+                "1.0.0+second".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect_err("build metadata must not define another canonical semantic version");
+
+        assert!(matches!(
+            error,
+            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: duplicate,
+                version,
+            } if duplicate == package && version == "1.0.0+second".parse().unwrap()
+        ));
+    }
+
+    #[test]
     fn resolver_prefers_compatible_shared_digest_version() {
         let digest = Eidos::hash(b"shared");
         let index = InMemoryPackageRegistry::from_iter([
