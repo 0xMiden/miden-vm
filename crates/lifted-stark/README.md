@@ -189,6 +189,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and statement observation hooks |
 | `verifier::verify` | Verify a multi-trace proof |
 | `MultiAir::eval_external` | Cross-AIR assertion hook: returns assertion expression values to be checked for zero (default: no assertions) |
+| `Statement::air_inputs` | Public-input vectors in AIR instance order; only AIRs with no public inputs may be omitted |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
 | `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` exposes instance-order heights and `air_order()` exposes the derived proof-order mapping |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |

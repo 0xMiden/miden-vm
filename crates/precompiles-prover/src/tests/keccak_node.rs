@@ -53,7 +53,7 @@ use crate::{
             },
         },
     },
-    logup::{LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutRequires, BytePairOp, Range16Msg, generate_trace as bpl_trace,
     },
@@ -202,7 +202,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
     let layout = <KeccakNodeAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
     assert_eq!(layout.preprocessed_width, 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
-    assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
+    assert_eq!(layout.num_public_values, 0);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
