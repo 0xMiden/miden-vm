@@ -59,6 +59,7 @@ default = ["std"]
 executable = [
     "dep:clap",
     "dep:hex",
+    "dep:tempfile",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -94,6 +95,7 @@ clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }

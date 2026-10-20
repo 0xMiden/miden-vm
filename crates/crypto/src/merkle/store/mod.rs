@@ -3,6 +3,8 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+use once_cell::sync::Lazy;
+
 use super::{
     Eidos, EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree,
     NodeIndex, PartialMerkleTree, RootPath, Word,
@@ -37,6 +39,8 @@ pub struct StoreNode {
 ///
 /// Serialization uses format version 1; unversioned encodings and other versions are rejected.
 /// Deserialization does not verify parent hashes against their children.
+///
+/// Canonical empty-subtree nodes are omitted on write and restored on read.
 ///
 /// Example usage:
 ///
@@ -314,7 +318,7 @@ impl MerkleStore {
         if tree_depth > MAX_DEPTH {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
-        let empty = EmptySubtreeRoots::empty_hashes(MAX_DEPTH);
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
 
         let mut node = root;
         if !self.nodes.contains_key(&node) {
@@ -608,11 +612,21 @@ impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_bytes(&Self::FORMAT_MAGIC);
         target.write_u8(Self::FORMAT_VERSION);
-        target.write_u64(self.nodes.len() as u64);
+        static EMPTY_NODES: Lazy<Map<Word, StoreNode>> = Lazy::new(|| empty_hashes().collect());
+        // Count omissions with a fixed number of lookups, without scanning the entire store.
+        let omitted = EMPTY_NODES
+            .iter()
+            .filter(|(key, node)| self.nodes.get(*key) == Some(*node))
+            .count();
 
-        for (k, v) in self.nodes.iter() {
-            k.write_into(target);
-            v.write_into(target);
+        target.write_u64((self.nodes.len() - omitted) as u64);
+
+        for (key, node) in &self.nodes {
+            // Only nodes with equal children can be canonical empty nodes.
+            if node.left != node.right || EMPTY_NODES.get(key) != Some(node) {
+                key.write_into(target);
+                node.write_into(target);
+            }
         }
     }
 }
