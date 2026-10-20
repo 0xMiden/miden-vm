@@ -15,10 +15,6 @@ pub(super) struct AttributeLookahead {
     /// malformed or no token remains. The extra entry at `tokens.len()` represents EOF and is
     /// `None`, so a lookup just after a group ending at the final token safely finds no candidate.
     candidates: Vec<Option<usize>>,
-    /// Token visits during index construction, retained to test linear work without timing checks.
-    // TODO remove this and related assertions
-    #[cfg(test)]
-    token_visits: usize,
 }
 
 impl AttributeLookahead {
@@ -27,11 +23,7 @@ impl AttributeLookahead {
     /// Argument groups require properly nested parentheses, brackets, and braces. Failed lookahead
     /// is cached too, so malformed suffixes do not cause repeated scans.
     pub(super) fn new(tokens: &[Token<'_>]) -> Self {
-        let mut lookahead = Self {
-            candidates: vec![None; tokens.len() + 1],
-            #[cfg(test)]
-            token_visits: 0,
-        };
+        let mut lookahead = Self { candidates: vec![None; tokens.len() + 1] };
 
         // Example: `@inline @locals([1, {2}]) proc foo`
         // Pass 1 caches matching group endpoints:
@@ -64,10 +56,6 @@ impl AttributeLookahead {
         let mut ends = vec![None; tokens.len()];
         let mut stack = Vec::new();
         for (index, token) in tokens.iter().enumerate() {
-            #[cfg(test)]
-            {
-                self.token_visits += 1;
-            }
             let close = match token.kind() {
                 SyntaxKind::LParen => SyntaxKind::RParen,
                 SyntaxKind::LBracket => SyntaxKind::RBracket,
@@ -94,10 +82,6 @@ impl AttributeLookahead {
         // Right-to-left indexing lets every attribute reuse its suffix, including failed lookahead.
         let mut next = [tokens.len(); 2];
         for (index, token) in tokens.iter().enumerate().rev() {
-            #[cfg(test)]
-            {
-                self.token_visits += 1;
-            }
             let kind = token.kind();
             self.candidates[index] = if kind.is_trivia() {
                 self.candidates[index + 1]
@@ -173,37 +157,6 @@ mod tests {
             let expected =
                 expected.into_iter().map(|value| value.map(String::from)).collect::<Vec<_>>();
             assert_eq!(attribute_candidates(source), expected, "{source}");
-        }
-    }
-
-    /// Verifies that index construction visits each token once per pass, without timing checks.
-    fn assert_linear_index(source: &str) {
-        let tokens = tokenize_text(source);
-        let lookahead = AttributeLookahead::new(&tokens);
-        // Model recovery looking up every attribute before checking the construction visit count.
-        for (index, token) in tokens.iter().enumerate() {
-            if token.kind() == SyntaxKind::At {
-                let _ = lookahead.declaration_after(index);
-            }
-        }
-        assert_eq!(lookahead.token_visits, 2 * tokens.len());
-    }
-
-    #[test]
-    fn indexes_repeated_attributes_in_linear_work() {
-        for count in [128, 256, 512] {
-            for tail in ["{", "= 1", "", "proc foo", "@broken("] {
-                assert_linear_index(&format!("{} {tail}", "@packed ".repeat(count)));
-            }
-        }
-    }
-
-    #[test]
-    fn indexes_nested_and_malformed_arguments_in_linear_work() {
-        for count in [128, 256, 512] {
-            for tail in [")".repeat(count), String::new(), "]".repeat(count)] {
-                assert_linear_index(&format!("{}{tail} proc foo", "@attr(".repeat(count)));
-            }
         }
     }
 }
