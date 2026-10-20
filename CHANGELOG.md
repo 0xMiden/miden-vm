@@ -18,11 +18,12 @@
 
 #### Changes
 
-- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#3410](https://github.com/0xMiden/miden-vm/issues/3410)).
+- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 - [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#4041](https://github.com/0xMiden/miden-vm/pull/4041)).
-- [BREAKING] Removed RPO, RPX, and Poseidon2 hash implementations from the crypto crate and their VM and precompile proof configurations. Eidos, BLAKE3, and Keccak remain supported; proofs using the removed hashes are rejected ([#3504](https://github.com/0xMiden/miden-vm/issues/3504)).
+- [BREAKING] Removed RPO and RPX hashing APIs from the crypto crate and removed RPO, RPX, and Poseidon2 proof configurations from the VM and precompile VM. Eidos, BLAKE3, and Keccak remain supported for proofs. Proofs selecting the removed configurations are rejected ([#4032](https://github.com/0xMiden/miden-vm/pull/4032)).
+- Restored the standalone `miden_crypto::hash::poseidon2` API for applications with existing Poseidon2 commitments, preserving its original digest format, Plonky3 adapters, and SIMD implementations. The VM uses Eidos natively. Poseidon2 remains unsupported for VM and precompile proofs ([#4063](https://github.com/0xMiden/miden-vm/pull/4063)).
 
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
@@ -71,7 +72,7 @@
 - [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
 - Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
 - Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
-- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4037](https://github.com/0xMiden/miden-vm/pull/4037)).
 
 ## v0.36.1 (2026-10-16)
 
@@ -83,7 +84,7 @@
 
 #### Fixes
 
-- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
 
 ## v0.36.0 (2026-10-14)
 
