@@ -1,0 +1,238 @@
+#! Encrypts a Felt message with the recipient's EcGFp5 public key.
+#! The context is authenticated but not encrypted.
+#!
+#! For generator G, recipient point Q, and ephemeral scalar r, compute `R = rG` and `S = rQ`.
+#! Extract a secret from S, R, and Q, then expand it with the context digest into the AEAD key
+#! and nonce. Encrypt plaintext and authenticate the ciphertext together with the full context.
+#!
+#! Supply a fresh random scalar for each encryption through private advice. This module checks
+#! its range but does not generate it. Keep the scalar, plaintext, and execution witness private;
+#! witness privacy also requires zero-knowledge.
+#!
+#! Matches `miden_crypto::ies::ecgfp5_eidos`. Sender authentication and replay protection belong
+#! to the application.
+
+use miden::core::crypto::aead_eidos
+use miden::core::crypto::ecdh::ecgfp5
+use miden::core::crypto::hashes::eidos
+
+# Eidos::init_chaining_word(ECGFP5_SEAL_EXTRACT, 24).
+const EXTRACT_INIT_CV = [
+    13503953893947608833, 11912009168875159576, 11170449401267093504, 6620516959492505600
+]
+# Eidos::init_chaining_word(ECGFP5_SEAL_KEY, 8).
+const KEY_INIT_CV = [
+    13503953893947608065, 11912009168875159560, 11170449401267093504, 6620516959492505600
+]
+# Eidos::init_chaining_word(ECGFP5_SEAL_NONCE, 8).
+const NONCE_INIT_CV = [
+    13503953893947608321, 11912009168875159560, 11170449401267093504, 6620516959492505600
+]
+const ECGFP5_SEAL_CONTEXT = 0x00000e01
+const MAX_AUTHENTICATED_INPUT_FELTS = 268435456
+
+# seal locals; offsets 0..24 hold the extraction input:
+# loc[ 0.. 8] = [S(5), 0, 0, 0]
+# loc[ 8..16] = [R(5), 0, 0, 0]
+# loc[16..24] = [Q(5), 0, 0, 0]
+# loc[24..28] = context_digest(4)
+# loc[28..32] = [src_ptr, plaintext_len, context_ptr, context_len]
+# loc[32]     = dst_ptr
+# loc[33]     = preprocessed
+const SHARED_POINT_LOC = 0
+const SHARED_POINT_TAIL_LOC = SHARED_POINT_LOC + 4
+const EPHEMERAL_POINT_LOC = 8
+const EPHEMERAL_POINT_TAIL_LOC = EPHEMERAL_POINT_LOC + 4
+const RECIPIENT_POINT_LOC = 16
+const RECIPIENT_POINT_TAIL_LOC = 20
+const CONTEXT_DIGEST_LOC = 24
+const SOURCE_PTR_LOC = 28
+const PLAINTEXT_LEN_LOC = 29
+const CONTEXT_PTR_LOC = 30
+const CONTEXT_LEN_LOC = 31
+const DESTINATION_PTR_LOC = 32
+const PREPROCESSED_LOC = 33
+
+#! Encrypts a Felt message with the recipient's public key.
+#! Writes `[R(5), tag(2), plaintext_len, ciphertext(2*plaintext_len)]` to destination.
+#!
+#! Input:  [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
+#! Output: [...]
+#!
+#! `public_key` is the commitment returned by Rust's `PublicKey::to_commitment`.
+#! The DH procedure reads Q from advice and checks it against that commitment.
+#! Prepare the advice with `PublicKey::advise`.
+#!
+#! Pointers must be word-aligned u32 values, and lengths must fit in u32. Non-empty ranges must
+#! end below the local frame without overflowing u32. The destination spans `8 + 2*plaintext_len`
+#! Felts and must not overlap either input. Plaintext and context may overlap each other.
+#! The padded MAC stream `nonce(4) || context || ciphertext || lengths(2)` must fit in 2^28 Felts.
+#! These conditions are checked before writing memory or consuming advice.
+#!
+#! Writes only the envelope below the local frame. On successful return, this frame's shared-point
+#! locals, the MAC locals, and encryption-tail scratch are cleared. The key and nonce are removed
+#! from the operand stack. Caller-owned plaintext and the private execution trace are not erased.
+#! Invalid public keys, scalars, or DH witnesses fail execution.
+#!
+#! Invocation: exec
+pub proc seal(
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+)
+    push.0 exec.seal_inner
+end
+
+#! Encrypts with a preprocessed public-key commitment.
+#! Writes `[R(5), tag(2), plaintext_len, ciphertext(2*plaintext_len)]` to destination.
+#!
+#! Input:  [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
+#! Output: [...]
+#!
+#! `public_key` is the commitment returned by Rust's `PreparedPublicKey::to_commitment`.
+#! The DH procedure authenticates Q and the selected entries supplied through advice against
+#! this commitment. It assumes the issuer generated the tables correctly.
+#!
+#! Prepare the advice with Rust's `PreparedPublicKey::advise`. The memory and length requirements,
+#! range checks, and cleanup are the same as `seal`.
+#! Invalid scalar or DH witnesses fail execution.
+#!
+#! Invocation: exec
+pub proc seal_preprocessed(
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+)
+    push.1 exec.seal_inner
+end
+
+# The public entry points differ only in the DH strategy. Both fill the three point blocks
+# before the common key derivation and AEAD operations.
+# Input:  [preprocessed, public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
+# Output: [...]
+@locals(36)
+proc seal_inner(
+    preprocessed: i1,
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+)
+    # Keep the strategy below the arguments until all public ranges have been checked.
+    movdn.9
+    dup.5 u32assert.err="EcGFp5-Eidos plaintext length must fit in a u32"
+    dup.8 u32assert.err="EcGFp5-Eidos context length must fit in a u32"
+    swap mul.2 add add.6 push.MAX_AUTHENTICATED_INPUT_FELTS lte
+    assert.err="EcGFp5-Eidos authentication input exceeds its supported length"
+
+    locaddr.0 dup.6 dup.6 exec.assert_range
+    locaddr.0 dup.8 dup.8 exec.assert_range
+    locaddr.0 dup.6 mul.2 add.8 dup.10 exec.assert_range
+    dup.5 mul.2 add.8 dup.9 dup.7 dup.7 exec.assert_disjoint
+    dup.5 mul.2 add.8 dup.9 dup.9 dup.9 exec.assert_disjoint
+
+    # Q's slot holds the commitment until agreement returns the authenticated point.
+    padw loc_storew_le.RECIPIENT_POINT_TAIL_LOC dropw
+    loc_storew_le.RECIPIENT_POINT_LOC dropw
+    loc_storew_le.SOURCE_PTR_LOC dropw loc_store.DESTINATION_PTR_LOC
+    loc_store.PREPROCESSED_LOC
+    padw loc_storew_le.SHARED_POINT_TAIL_LOC dropw
+    padw loc_storew_le.EPHEMERAL_POINT_TAIL_LOC dropw
+    # Hash the context for key expansion; the AEAD will also authenticate it in full.
+    loc_load.CONTEXT_LEN_LOC loc_load.CONTEXT_PTR_LOC push.ECGFP5_SEAL_CONTEXT
+    exec.eidos::hash_elements_in_domain
+    loc_storew_le.CONTEXT_DIGEST_LOC dropw
+
+    # Fill the point blocks with R = rG and S = rQ.
+    padw loc_loadw_le.RECIPIENT_POINT_LOC
+    loc_load.PREPROCESSED_LOC
+    if.true
+        exec.ecgfp5::agree_preprocessed
+    else
+        exec.ecgfp5::agree
+    end
+    # => [R(5), S(5), Q(5), ...]
+    repeat.5 movup.14 end
+    loc_storew_le.RECIPIENT_POINT_LOC dropw loc_store.RECIPIENT_POINT_TAIL_LOC
+    # => [R(5), S(5), ...]; Q is already in its extraction block.
+    loc_storew_le.EPHEMERAL_POINT_LOC dropw loc_store.EPHEMERAL_POINT_TAIL_LOC
+    loc_storew_le.SHARED_POINT_LOC dropw loc_store.SHARED_POINT_TAIL_LOC
+    padw loc_loadw_le.CONTEXT_DIGEST_LOC
+    locaddr.SHARED_POINT_LOC exec.derive_key_nonce
+    # => [key(4), nonce(4), ...]
+    loc_load.DESTINATION_PTR_LOC add.8 movdn.8
+    padw loc_loadw_le.SOURCE_PTR_LOC movdnw.2
+    # => [key(4), nonce(4), src_ptr, plaintext_len, context_ptr, context_len, ct_ptr, ...]
+    exec.aead_eidos::encrypt_with_ad
+    # Header words: [R0, R1, R2, R3] and [R4, tag0, tag1, plaintext_len].
+    loc_load.PLAINTEXT_LEN_LOC movdn.2 loc_load.EPHEMERAL_POINT_TAIL_LOC
+    # => [R4, tag0, tag1, plaintext_len, ...]
+    loc_load.DESTINATION_PTR_LOC add.4 mem_storew_le
+    loc_loadw_le.EPHEMERAL_POINT_LOC loc_load.DESTINATION_PTR_LOC mem_storew_le dropw
+
+    # The key and nonce are no longer on the stack; clear the shared-point copy in memory.
+    padw loc_storew_le.SHARED_POINT_LOC loc_storew_le.SHARED_POINT_TAIL_LOC dropw
+end
+
+# Extracts prk = H_extract(enc8(S) || enc8(R) || enc8(Q)), then derives
+# key = H_key(prk || c) and nonce = H_nonce(prk || c), where c is the context digest.
+# Each enc8 contains the five-Felt point and three zeros.
+# The caller supplies the three padded points as 24 readable Felts.
+#
+# Input:  [payload_ptr, c(4), ...]
+# Output: [key(4), nonce(4), ...]
+proc derive_key_nonce
+    push.EXTRACT_INIT_CV padw padw
+    repeat.3 mem_stream compress end
+    dropw dropw movup.4 drop
+    # => [prk(4), c(4), ...]
+
+    # Keep one copy of prk || c for each one-block expansion.
+    dupw.1 dupw.1
+    push.NONCE_INIT_CV movdnw.2 compress dropw dropw
+    # => [nonce(4), prk(4), c(4), ...]
+    movdnw.2
+    push.KEY_INIT_CV movdnw.2 compress dropw dropw
+    # => [key(4), nonce(4), ...]
+end
+
+# Checks a word-aligned u32 pointer and, for a non-empty range, that its last address fits in u32
+# and is below local_start. The caller has already checked the length.
+#
+# Input:  [ptr, len, local_start, ...]
+# Output: [...]
+proc assert_range
+    u32assert.err="EcGFp5-Eidos pointer must fit in a u32"
+    dup u32mod.4 assertz.err="EcGFp5-Eidos pointer must be word-aligned"
+    dup.1 neq.0
+    if.true
+        swap sub.1 u32overflowing_add
+        assertz.err="EcGFp5-Eidos memory range exceeds the u32 address space"
+        u32gt assert.err="EcGFp5-Eidos memory ranges must stay below the local frame"
+    else
+        drop drop drop
+    end
+end
+
+# Checks that the output does not overlap a non-empty input. Both ranges are already validated.
+#
+# Input:  [input_ptr, input_len, output_ptr, output_len, ...]
+# Output: [...]
+proc assert_disjoint
+    dup.1 neq.0
+    if.true
+        dup dup.2 add dup.3 lte movdn.4
+        movup.2 movup.3 add swap lte
+        swap drop or assert.err="EcGFp5-Eidos destination overlaps an input"
+    else
+        dropw
+    end
+end

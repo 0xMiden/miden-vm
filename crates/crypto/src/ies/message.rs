@@ -16,7 +16,7 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 pub struct SealedMessage {
     /// Ephemeral public key (determines scheme and provides key material)
     pub(super) ephemeral_key: EphemeralPublicKey,
-    /// Encrypted ciphertext with authentication tag and nonce
+    /// Scheme-specific ciphertext encoding, including its authentication tag.
     pub(super) ciphertext: Vec<u8>,
 }
 

@@ -108,7 +108,9 @@ fn aead_stream_trace() {
     let src_ptr = Felt::from_u32(100);
     let dst_ptr = Felt::from_u32(200);
     let lane_base = Felt::from_u32(40);
-    bitwise.aead_stream(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext);
+    bitwise
+        .aead_stream(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext)
+        .expect("consistent AEAD stream entry");
     assert_eq!(bitwise.trace_len(), super::AEAD_STREAM_CYCLE_LEN);
 
     let (trace, and8_counts) =
@@ -219,16 +221,18 @@ fn record_test_aead_stream(bitwise: &mut Bitwise) {
         Felt::from_u32(plaintext_limbs[idx] ^ keystream[idx].as_canonical_u64() as u32)
     });
 
-    bitwise.aead_stream(
-        Felt::from_u32(3),
-        Felt::from_u32(11),
-        Felt::from_u32(100),
-        Felt::from_u32(200),
-        Felt::from_u32(40),
-        plaintext,
-        keystream,
-        ciphertext,
-    );
+    bitwise
+        .aead_stream(
+            Felt::from_u32(3),
+            Felt::from_u32(11),
+            Felt::from_u32(100),
+            Felt::from_u32(200),
+            Felt::from_u32(40),
+            plaintext,
+            keystream,
+            ciphertext,
+        )
+        .expect("consistent AEAD stream entry");
 }
 
 fn check_bitwise_row(trace: &[Vec<Felt>], row: usize, op: Felt, a: Felt, b: Felt, result: Felt) {

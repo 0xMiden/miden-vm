@@ -777,16 +777,18 @@ fn build_bitwise_chiplet(
                 bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
             },
             BitwiseReplayEntry::AeadStream(entry) => {
-                bitwise.aead_stream(
-                    entry.ctx,
-                    entry.clk,
-                    entry.src_ptr,
-                    entry.dst_ptr,
-                    entry.lane_base,
-                    entry.plaintext,
-                    entry.keystream,
-                    entry.ciphertext,
-                );
+                bitwise
+                    .aead_stream(
+                        entry.ctx,
+                        entry.clk,
+                        entry.src_ptr,
+                        entry.dst_ptr,
+                        entry.lane_base,
+                        entry.plaintext,
+                        entry.keystream,
+                        entry.ciphertext,
+                    )
+                    .map_exec_err_no_ctx()?;
             },
         }
         if bitwise.trace_len() > max_trace_len {

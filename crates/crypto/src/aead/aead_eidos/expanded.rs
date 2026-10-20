@@ -303,30 +303,35 @@ mod tests {
     }
 
     #[test]
-    fn expanded_limb_encryption_roundtrips_edge_felts() {
-        let plaintext = vec![
-            Felt::ZERO,
-            Felt::new_unchecked(1 << 63),
-            Felt::new(Felt::ORDER - 1).unwrap(),
-            Felt::new_unchecked(0x0123_4567_89ab_cdef),
-            Felt::new_unchecked(42),
-        ];
-
-        let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
-        let decrypted = decrypt_felts_expanded(key(), nonce(), &ciphertext).unwrap();
-
-        assert_eq!(ciphertext.len(), plaintext.len() * 2);
-        assert!(ciphertext.iter().all(|&limb| u32_limb(limb).is_some()));
-        assert_eq!(decrypted, plaintext);
-    }
-
-    #[test]
     fn expanded_limb_decryption_rejects_malformed_ciphertext() {
         let odd_len = vec![Felt::from_u32(1)];
         assert!(decrypt_felts_expanded(key(), nonce(), &odd_len).is_none());
 
         let non_u32_limb = vec![Felt::new_unchecked(1u64 << 40), Felt::ZERO];
         assert!(decrypt_felts_expanded(key(), nonce(), &non_u32_limb).is_none());
+    }
+
+    #[test]
+    fn authenticated_decryption_checks_plaintext_canonicality() {
+        let keystream = keystream_block(derive_ctr_key(key(), nonce()), 0);
+        let largest_felt = Felt::new(Felt::ORDER - 1).unwrap();
+
+        for (raw_plaintext, expected) in
+            [(Felt::ORDER - 1, Some(largest_felt)), (Felt::ORDER, None), (u64::MAX, None)]
+        {
+            let ciphertext = [
+                Felt::from_u32(raw_plaintext as u32 ^ keystream[0]),
+                Felt::from_u32((raw_plaintext >> 32) as u32 ^ keystream[1]),
+            ];
+            // Supply a valid tag so rejection tests plaintext canonicality, not MAC validation.
+            let tag = auth_tag_expanded(key(), nonce(), &[], &ciphertext);
+
+            assert_eq!(
+                decrypt_felts_expanded_authenticated(key(), nonce(), &[], &ciphertext, tag),
+                expected.map(|felt| vec![felt]),
+                "decrypted word: {raw_plaintext:#x}",
+            );
+        }
     }
 
     #[test]
@@ -376,6 +381,8 @@ mod tests {
         ];
 
         assert_eq!(ciphertext, expected);
+        assert_eq!(ciphertext.len(), plaintext.len() * 2);
+        assert!(ciphertext.iter().all(|&limb| u32_limb(limb).is_some()));
         assert_eq!(decrypt_felts_expanded(key(), nonce(), &ciphertext).unwrap(), plaintext);
     }
 

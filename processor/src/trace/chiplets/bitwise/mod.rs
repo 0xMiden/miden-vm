@@ -172,6 +172,9 @@ impl Bitwise {
     }
 
     /// Records one 8-row AEAD stream entry.
+    ///
+    /// Entries may come from deserialized witnesses. Checks that keystream and ciphertext lanes
+    /// are u32 values and that each ciphertext lane is the plaintext lane XOR its keystream lane.
     pub(crate) fn aead_stream(
         &mut self,
         ctx: Felt,
@@ -182,7 +185,18 @@ impl Bitwise {
         plaintext: [Felt; 4],
         keystream: [Felt; 8],
         ciphertext: [Felt; 8],
-    ) {
+    ) -> Result<(), OperationError> {
+        let limbs = plaintext.map(eidos_compression::unpack);
+        for (idx, (&ks, &c)) in keystream.iter().zip(&ciphertext).enumerate() {
+            let (lo, hi) = limbs[idx / 2];
+            let plaintext_limb = if idx % 2 == 0 { lo } else { hi };
+            if plaintext_limb ^ assert_u32(ks)? != assert_u32(c)? {
+                return Err(OperationError::Internal(
+                    "AEAD stream ciphertext does not match plaintext XOR keystream",
+                ));
+            }
+        }
+
         self.entries.push(Entry::AeadStream(Box::new(AeadStreamOp {
             ctx,
             clk,
@@ -194,6 +208,7 @@ impl Bitwise {
             ciphertext,
         })));
         self.trace_len += AEAD_STREAM_CYCLE_LEN;
+        Ok(())
     }
 
     // EXECUTION TRACE GENERATION

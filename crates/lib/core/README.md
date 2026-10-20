@@ -104,10 +104,12 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::crypto::dsa::ecdsa_p256_sha256](./docs/crypto/dsa/ecdsa_p256_sha256.md)
 - [miden::core::crypto::dsa::eddsa_25519_sha512](./docs/crypto/dsa/eddsa_25519_sha512.md)
 - [miden::core::crypto::dsa::falcon512_eidos](./docs/crypto/dsa/falcon512_eidos.md)
+- [miden::core::crypto::ecdh::ecgfp5](./docs/crypto/ecdh/ecgfp5.md)
 - [miden::core::crypto::hashes::eidos](./docs/crypto/hashes/eidos.md)
 - [miden::core::crypto::hashes::blake3](./docs/crypto/hashes/blake3.md)
 - [miden::core::crypto::hashes::keccak256](./docs/crypto/hashes/keccak256.md)
 - [miden::core::crypto::hashes::sha256](./docs/crypto/hashes/sha256.md)
+- [miden::core::crypto::ies::ecgfp5_eidos](./docs/crypto/ies/ecgfp5_eidos.md)
 - [miden::core::math::u256](./docs/math/u256.md)
 - [miden::core::math::u64](./docs/math/u64.md)
 - [miden::core::mem](./docs/mem.md)
@@ -124,8 +126,8 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::sys](./docs/sys.md)
 - [miden::core::word](./docs/word.md)
 
-
 ## Status
+
 At this point, all implementations listed above are considered to be experimental and are subject to change.
 
 ## License

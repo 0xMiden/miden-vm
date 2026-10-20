@@ -5,6 +5,10 @@
 //! It exposes a simple API via [`SealingKey`], [`UnsealingKey`], [`SealedMessage`], and
 //! [`IesError`].
 //!
+//! [`IesScheme::Ecgfp5Eidos`] uses EcGFp5 agreement and Eidos extract/expand. Its
+//! [`ecgfp5_eidos`] module also provides the Felt envelope used by the core library's MASM
+//! procedures. Convert that envelope into [`SealedMessage`] to open it with [`UnsealingKey`].
+//!
 //! # Examples
 //!
 //! ```
@@ -28,6 +32,7 @@
 //! ```
 
 mod crypto_box;
+pub mod ecgfp5_eidos;
 mod keys;
 mod message;
 
@@ -52,6 +57,7 @@ pub enum IesScheme {
     X25519XChaCha20Poly1305 = 1,
     K256AeadEidos = 4,
     X25519AeadEidos = 5,
+    Ecgfp5Eidos = 6,
 }
 
 impl TryFrom<u8> for IesScheme {
@@ -62,6 +68,7 @@ impl TryFrom<u8> for IesScheme {
             1 => Ok(IesScheme::X25519XChaCha20Poly1305),
             4 => Ok(IesScheme::K256AeadEidos),
             5 => Ok(IesScheme::X25519AeadEidos),
+            6 => Ok(IesScheme::Ecgfp5Eidos),
             _ => Err(IesError::UnsupportedScheme),
         }
     }
@@ -86,6 +93,7 @@ impl IesScheme {
             IesScheme::X25519XChaCha20Poly1305 => "X25519+XChaCha20-Poly1305",
             IesScheme::K256AeadEidos => "K256+AeadEidos",
             IesScheme::X25519AeadEidos => "X25519+AeadEidos",
+            IesScheme::Ecgfp5Eidos => "EcGFp5+Eidos",
         }
     }
 }

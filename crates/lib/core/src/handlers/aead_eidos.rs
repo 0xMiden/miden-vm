@@ -3,24 +3,22 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{Word, advice::AdviceStack, events::EventName};
-use miden_crypto::aead::aead_eidos::expanded::{
-    checked_mac_input_len, decrypt_felts_expanded_authenticated,
-};
+use miden_crypto::aead::aead_eidos::expanded::{checked_mac_input_len, decrypt_felts_expanded};
 use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::read_uninitialized_memory_region;
 
-/// Event emitted when `aead_eidos::decrypt_empty_ad` needs a plaintext witness.
-pub const AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME: EventName =
-    EventName::new("miden::core::crypto::aead_eidos::decrypt_empty_ad");
+/// Event emitted after Eidos AEAD decryption has verified the authentication tag.
+pub const AEAD_EIDOS_DECRYPT_EVENT_NAME: EventName =
+    EventName::new("miden::core::crypto::aead_eidos::decrypt");
 
-/// Authenticates and decrypts expanded Eidos ciphertext and supplies the plaintext as advice.
+/// Decrypts Eidos ciphertext and supplies the plaintext as advice.
 ///
 /// The event payload, excluding the event ID, is
 /// `[key(4), nonce(4), src_ptr, dst_ptr, num_felts, scratch_ptr, ...]`. `src_ptr` addresses
-/// `2 * num_felts` ciphertext limbs followed by the two-Felt tag. The MASM procedure treats the
-/// returned plaintext as untrusted and binds it by re-encrypting it and comparing the ciphertext.
-pub fn handle_aead_eidos_decrypt_empty_ad(
+/// `2 * num_felts` ciphertext limbs. The MASM decryption procedure checks the tag before
+/// emitting this event, then re-encrypts the returned plaintext and compares every ciphertext limb.
+pub fn handle_aead_eidos_decrypt(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     const KEY_OFFSET: usize = 1;
@@ -37,7 +35,6 @@ pub fn handle_aead_eidos_decrypt_empty_ad(
     let ciphertext_len = num_felts.checked_mul(2).ok_or(AeadEidosDecryptError::SizeOverflow)?;
     checked_mac_input_len(0, ciphertext_len)
         .ok_or(AeadEidosDecryptError::AuthenticationInputTooLong)?;
-    let input_len = ciphertext_len.checked_add(2).ok_or(AeadEidosDecryptError::SizeOverflow)?;
 
     let plaintext_bytes = num_felts
         .checked_mul(Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS)
@@ -50,14 +47,12 @@ pub fn handle_aead_eidos_decrypt_empty_ad(
     }
 
     let input_len_u64 =
-        u64::try_from(input_len).map_err(|_| AeadEidosDecryptError::SizeOverflow)?;
-    let input = read_uninitialized_memory_region(process, src_ptr, input_len_u64)
+        u64::try_from(ciphertext_len).map_err(|_| AeadEidosDecryptError::SizeOverflow)?;
+    let ciphertext = read_uninitialized_memory_region(process, src_ptr, input_len_u64)
         .ok_or(AeadEidosDecryptError::InvalidInputRange { src_ptr, input_len: input_len_u64 })?;
-    let ciphertext = &input[..ciphertext_len];
-    let tag = [input[ciphertext_len], input[ciphertext_len + 1]];
 
-    let plaintext = decrypt_felts_expanded_authenticated(key, nonce, &[], ciphertext, tag)
-        .ok_or(AeadEidosDecryptError::AuthenticationFailed)?;
+    let plaintext = decrypt_felts_expanded(key, nonce, &ciphertext)
+        .ok_or(AeadEidosDecryptError::InvalidCiphertext)?;
     debug_assert_eq!(plaintext.len(), num_felts);
 
     let advice_stack = AdviceStack::from(plaintext);
@@ -79,6 +74,6 @@ enum AeadEidosDecryptError {
     },
     #[error("invalid Eidos AEAD input range at address {src_ptr} with length {input_len}")]
     InvalidInputRange { src_ptr: u64, input_len: u64 },
-    #[error("Eidos AEAD authentication failed")]
-    AuthenticationFailed,
+    #[error("invalid Eidos AEAD ciphertext")]
+    InvalidCiphertext,
 }

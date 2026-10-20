@@ -1,0 +1,63 @@
+#! EcGFp5 Diffie-Hellman key agreement.
+#!
+#! For generator G, recipient public key Q, and private scalar r, the agreement computes
+#! the ephemeral point R = rG and shared point S = rQ.
+#!
+#! Keep the scalar, shared point, and advice private. Advice generation and execution are
+#! variable-time and need a trusted environment; witness privacy also requires zero-knowledge.
+#! Derive encryption keys from the shared point with a KDF.
+
+mod arithmetic
+mod direct
+mod preprocessed
+mod scalar
+mod tables
+
+use miden::core::crypto::hashes::eidos
+
+#! Canonical EcGFp5 encoding w, with coefficients in increasing polynomial degree order.
+pub type PointEncoding = struct { c0: felt, c1: felt, c2: felt, c3: felt, c4: felt }
+
+#! Computes the ephemeral point R = rG and shared point S = rQ, and returns the recipient point Q.
+#!
+#! Input:  [public_key(4), ...]
+#! Advice: [Q(5), scalar and multiplication witnesses, ...]
+#! Output: [R(5), S(5), Q(5), ...]
+#!
+#! `public_key` is the commitment returned by Rust's `PublicKey::to_commitment`.
+#! Prepare the advice with `PublicKey::advise`.
+#! The inner `call` isolates scratch memory from the caller.
+#! Fails if Q does not match the commitment, Q is not a valid nonidentity point, the scalar is
+#! zero or out of range, or a multiplication witness or output encoding is invalid.
+#!
+#! Invocation: exec
+pub proc agree(public_key: eidos::Digest) -> (PointEncoding, PointEncoding, PointEncoding)
+    padw padw padw swapw.3
+    # => [public_key(4), pad(12), ...]
+    call.direct::agree_inner
+    movup.15 drop
+end
+
+#! Computes R = rG and S = rQ, and returns the recipient point Q from its preprocessed public key.
+#!
+#! Input:  [public_key(4), ...]
+#! Output: [R(5), S(5), Q(5), ...]
+#!
+#! `public_key` is the commitment returned by Rust's `PreparedPublicKey::to_commitment`.
+#! This procedure authenticates entries supplied through advice against that commitment.
+#! It assumes the issuer generated the tables correctly.
+#!
+#! Prepare the advice with Rust's `PreparedPublicKey::advise`.
+#! The inner `call` isolates scratch memory from the caller.
+#! Fails if the scalar is zero or out of range, or a table opening, slope, or encoding is invalid.
+#!
+#! Invocation: exec
+pub proc agree_preprocessed(public_key: eidos::Digest) -> (PointEncoding, PointEncoding, PointEncoding)
+    # Reserve an isolated 16-element argument/result window above the caller's live stack.
+    padw padw padw
+    swapw.3
+    # => [public_key(4), pad(12), ...]
+    call.preprocessed::agree_inner
+    # => [R(5), S(5), Q(5), scratch(1), ...]
+    movup.15 drop
+end

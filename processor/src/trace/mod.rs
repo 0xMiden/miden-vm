@@ -514,9 +514,13 @@ mod wire_tests {
         operations::Operation,
         program::Program,
     };
+    use rstest::rstest;
 
-    use super::{ExecutionWitness, Serializable, build_trace};
-    use crate::{DefaultHost, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use super::{
+        ExecutionWitness, Serializable, build_trace,
+        trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
+    };
+    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -642,6 +646,58 @@ mod wire_tests {
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
         assert_eq!(restored_trace.clone_air_matrices(), original_trace.clone_air_matrices());
+    }
+
+    #[rstest]
+    #[case::keystream_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.keystream[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_mismatch(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] =
+                Felt::new_unchecked(entry.ciphertext[lane].as_canonical_u64() ^ 1);
+        },
+        "AEAD stream ciphertext does not match plaintext XOR keystream"
+    )]
+    fn build_trace_rejects_inconsistent_aead_stream_replay(
+        #[case] tamper: fn(&mut AeadStreamReplayEntry, usize),
+        #[case] expected_error: &str,
+        #[values(0, 7)] lane: usize,
+    ) {
+        let mut witness = aead_stream_witness();
+        let replay = &mut witness.vm.trace_replay_mut().bitwise_replay;
+        let mut tampered = false;
+        for entry in core::mem::take(replay) {
+            match entry {
+                BitwiseReplayEntry::AeadStream(mut entry) => {
+                    if !tampered {
+                        tamper(&mut entry, lane);
+                        tampered = true;
+                    }
+                    replay.record_aead_stream(*entry);
+                },
+                BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => replay.record_u32and(a, b),
+                BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b) => replay.record_u32xor(a, b),
+            }
+        }
+        assert!(tampered, "the witness should contain an AEAD stream entry");
+
+        let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes())
+            .expect("the wire reader accepts Felt-valued replay lanes");
+        let Err(error) = build_trace(witness.into_parts().0) else {
+            panic!("invalid AEAD stream replay must return an error");
+        };
+        assert!(matches!(error, ExecutionError::OperationError { .. }));
+        assert!(format!("{error}").contains(expected_error), "unexpected error: {error}");
     }
 
     #[test]

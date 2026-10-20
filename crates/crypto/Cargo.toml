@@ -21,6 +21,11 @@ required-features = ["executable"]
 
 [[bench]]
 harness           = false
+name              = "ecdh"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "encryption"
 required-features = ["std"]
 
@@ -99,7 +104,7 @@ internal          = ["concurrent"]
 persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
-std               = ["blake3/std", "miden-serde-utils/std", "rand/std", "rand/thread_rng", "serde?/std"]
+std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["arbitrary"]
 
 [dependencies]
@@ -121,6 +126,7 @@ hkdf             = { workspace = true }
 k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
 num              = { features = ["alloc", "libm"], workspace = true }
 num-complex      = { features = ["libm"], workspace = true }
+once_cell        = { features = ["alloc", "critical-section"], workspace = true }
 proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { workspace = true }
 rand_chacha      = { workspace = true }
