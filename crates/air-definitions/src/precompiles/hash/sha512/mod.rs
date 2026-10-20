@@ -17,10 +17,9 @@ use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
     logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage,
+        NUM_LOGUP_VALUES, NUM_RANDOMNESS,
     },
-    primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
 };
@@ -36,7 +35,7 @@ const _: () = {
 };
 pub const COL_IO_ACT: usize = compression::NUM_MAIN_COLS;
 pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 1;
-pub const NUM_AUX_COLS: usize = io::NUM_AUX_COLS;
+pub const NUM_AUX_COLS: usize = 7;
 
 /// The block controller remains live on IO rows. All other compression cells are reused;
 /// only the IO activity selector needs an additional column.
@@ -53,7 +52,7 @@ pub const IO_COLUMNS: [usize; io::NUM_MAIN_COLS] = {
     }
     columns
 };
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = io::COLUMN_SHAPE;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 3, 2, 2, 2, 2, 2];
 
 /// Transport the IO state over the compression rows between consecutive blocks.
 /// Unique consecutive block ids also bind the first/final flags and invocation endpoints.
@@ -194,105 +193,30 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
         // The ownership equation makes these Boolean, disjoint activity flags. Inactive padding
         // enables neither batch, even though its compression controller continues advancing.
         let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
-        let opcode =
-            |index: usize| -> LB::Expr { comp_local[compression::COL_PROG_BEGIN + index].into() };
-        let byte_op = [
-            compression::program::T_IS_XOR,
-            compression::program::T_IS_AND,
-            compression::program::T_IS_ANDNOT,
-            compression::program::T_IS_ADD,
-            compression::program::T_IS_INPUT,
-        ]
-        .into_iter()
-        .map(opcode)
-        .sum::<LB::Expr>();
-        let rotate_op = opcode(compression::program::T_IS_ROL);
-        // IO, compression byte operations, and rotations are mutually exclusive. Keep their
-        // alternatives in one group so denominators are selected rather than multiplied.
-        for (index, kind) in compression::SHARED_BATCHES.into_iter().enumerate() {
-            let range = match kind {
-                compression::LookupKind::Byte(byte) if byte < 4 => {
-                    Some(compression::LookupKind::RangePair(byte))
-                },
-                _ => None,
-            };
-            let flag_degree = if range.is_some() { 2 } else { 1 };
-            let comp = compression::lookup_batch_degree(kind, 0);
-            let io = io::lookup_batch_degree(index, 0);
-            let comp = Deg {
-                v: comp.v + flag_degree,
-                u: comp.u + flag_degree,
-            };
-            let io = Deg { v: io.v + 1, u: io.u + 1 };
-            let range_degree = range.map(|kind| {
-                let d = compression::lookup_batch_degree(kind, 0);
-                Deg { v: d.v + 2, u: d.u + 2 }
-            });
-            let mut degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
-            if let Some(d) = range_degree {
-                degree = Deg {
-                    v: degree.v.max(d.v),
-                    u: degree.u.max(d.u),
-                };
-            }
-            let comp_flag = if range.is_some() {
-                exec_act.clone() * byte_op.clone()
-            } else {
-                exec_act.clone()
-            };
+        for index in 0..NUM_AUX_COLS {
+            let comp = compression::lookup_column_degree(index);
+            let io = io::lookup_column_degree(index, true);
+            let degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
             builder.next_column(
                 |column| {
                     column.group(
                         "sha512-phases",
                         |group| {
-                            group.batch(
-                                "compression",
-                                comp_flag,
-                                |batch| {
-                                    compression::eval_lookup_batch(
-                                        batch,
-                                        kind,
-                                        &comp_local,
-                                        &comp_periods,
-                                        LB::Expr::ONE,
-                                        0,
-                                    );
-                                },
-                                comp,
+                            compression::eval_lookup_group(
+                                group,
+                                index,
+                                &comp_local,
+                                &comp_periods,
+                                exec_act.clone(),
                             );
-                            if let Some(range) = range {
-                                group.batch(
-                                    "rotation",
-                                    exec_act.clone() * rotate_op.clone(),
-                                    |batch| {
-                                        compression::eval_lookup_batch(
-                                            batch,
-                                            range,
-                                            &comp_local,
-                                            &comp_periods,
-                                            LB::Expr::ONE,
-                                            0,
-                                        );
-                                    },
-                                    range_degree
-                                        .expect("rotation degree is defined with its batch"),
-                                );
-                            }
-                            group.batch(
-                                "io",
+                            io::eval_lookup_group(
+                                group,
+                                index,
+                                &io_local,
+                                &io_next,
+                                &io_periods,
                                 io_act.clone(),
-                                |batch| {
-                                    io::eval_lookup_batch(
-                                        batch,
-                                        index,
-                                        &io_local,
-                                        &io_next,
-                                        &io_periods,
-                                        LB::Expr::ONE,
-                                        0,
-                                    );
-                                },
-                                io,
+                                true,
                             );
                         },
                         degree,
@@ -301,67 +225,6 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                 degree,
             );
         }
-
-        let v = |column: usize| -> LB::Expr { io_local[column].into() };
-        let last = io_act.clone() * io_periods[io::program::P_LAST].clone();
-        let final_block = v(io::COL_FINAL_BLOCK);
-        // Non-final blocks provide their post-input state under the next block's ID. Non-first
-        // blocks must consume it at row 0. Unique consecutive IDs force these endpoints to pair:
-        // block zero must be first, and the last active block must be final.
-        let provide = last * (LB::Expr::ONE - final_block.clone());
-        let consume = io_act.clone()
-            * io_periods[io::program::P_FIRST].clone()
-            * (LB::Expr::ONE - v(io::COL_FIRST_BLOCK));
-        let degree = Deg { v: 3, u: 4 };
-        // Final length validation and the two continuation endpoints are mutually exclusive.
-        // This column is a fraction column, so its degree-four denominator closes at degree five.
-        builder.next_column(
-            |column| {
-                column.group(
-                    "sha512-io-boundary",
-                    |group| {
-                        group.add(
-                            "length-high",
-                            io_act.clone()
-                                * io_periods[io::program::P_RAW_LAST].clone()
-                                * final_block,
-                            || Range16Msg { w: v(io::COL_WORD_HI) },
-                            degree,
-                        );
-                        group.remove(
-                            "continue",
-                            provide,
-                            || Sha512IoContinuation {
-                                block_id: v(io::COL_BLOCK_ID) + LB::Expr::ONE,
-                                len: v(io::COL_LEN),
-                                left: v(io::COL_LEFT),
-                                before: v(io::COL_BEFORE),
-                                input_eidos: v(io::COL_INPUT_EIDOS),
-                                input_head: v(io::COL_INPUT_HEAD),
-                            },
-                            degree,
-                        );
-                        group.add(
-                            "resume",
-                            consume,
-                            || Sha512IoContinuation {
-                                block_id: v(io::COL_BLOCK_ID),
-                                len: v(io::COL_LEN),
-                                left: v(io::COL_LEFT),
-                                before: v(io::COL_BEFORE),
-                                // An active chunk advances the ID on entry to this block;
-                                // compare with the preceding block's last chunk ID.
-                                input_eidos: v(io::COL_INPUT_EIDOS) - v(io::COL_CHUNK_ACTIVE),
-                                input_head: v(io::COL_INPUT_HEAD),
-                            },
-                            degree,
-                        );
-                    },
-                    degree,
-                );
-            },
-            degree,
-        );
     }
 }
 

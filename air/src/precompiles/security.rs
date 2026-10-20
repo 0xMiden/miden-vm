@@ -305,10 +305,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_450_006;
-        const COMPOSITION_TERM_FP: u64 = 7_620_566;
+        const LOOKUP_BASE_FP: u64 = 7_458_501;
+        const COMPOSITION_TERM_FP: u64 = 7_621_921;
         const OOD_BASE_FP: u64 = 8_073_553;
-        const DEEP_BASE_FP: u64 = 7_622_492;
+        const DEEP_BASE_FP: u64 = 7_626_228;
         const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -338,8 +338,8 @@ mod tests {
             "the build-compiled full-relation shape must equal the pinned AIR_SHAPE"
         );
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 781, "unexpected Blake3 (alignment 1) DEEP term count");
-        assert_eq!(num_deep_terms(17), 1039, "unexpected Keccak (alignment 17) DEEP term count");
+        assert_eq!(num_deep_terms(1), 753, "unexpected Blake3 (alignment 1) DEEP term count");
+        assert_eq!(num_deep_terms(17), 1005, "unexpected Keccak (alignment 17) DEEP term count");
     }
 
     /// Parameters built for a PVM proof must reproduce the independent PVM security report.
@@ -396,32 +396,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_056_680, 7_620_566, 7_693_931, 7_819_100, 7_760_447, 6_335_399, 8_257_536],
+                [7_065_165, 7_621_921, 7_693_931, 7_822_836, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_401_429, 7_620_566, 7_039_549, 7_163_740, 7_105_087, 6_335_399, 8_257_536],
+                [6_409_924, 7_621_921, 7_039_549, 7_167_476, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_204_821, 7_620_566, 6_842_942, 6_967_132, 6_908_479, 6_335_399, 8_257_536],
+                [6_213_316, 7_621_921, 6_842_942, 6_970_868, 6_908_479, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_139_285, 7_620_566, 6_777_406, 6_901_596, 6_842_943, 6_335_399, 8_257_536],
+                [6_147_780, 7_621_921, 6_777_406, 6_905_332, 6_842_943, 6_335_399, 8_257_536],
                 93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_877_141, 7_620_566, 6_515_262, 6_639_452, 6_580_799, 6_335_399, 8_257_536],
+                [5_885_636, 7_621_921, 6_515_262, 6_643_188, 6_580_799, 6_335_399, 8_257_536],
                 89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_401_429, 7_620_566, 7_039_549, 6_377_308, 6_842_943, 1_353_667, 8_257_536],
+                [6_409_924, 7_621_921, 7_039_549, 6_381_044, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];

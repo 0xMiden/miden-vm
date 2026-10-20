@@ -224,7 +224,7 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
         "noncanonical length alias must be rejected through lookup constraints"
     );
     // A legal high-half Range16 value can still hide a non-u32 low half in the field equality.
-    // Only the compression band's byte-checked INPUT binds these halves to a real SHA word.
+    // The compression band's u16-bounded INPUT binds these halves to a real SHA word.
     let mut bad = main.clone();
     let bad_lo = Felt::from_u32(129 * 8) - Felt::new_unchecked(1u64 << 32);
     bad.values[(io::IO_PERIOD + 15) * io::NUM_MAIN_COLS + io::COL_WORD_LO] = bad_lo;
