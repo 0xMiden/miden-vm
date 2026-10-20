@@ -38,6 +38,10 @@ pub struct RunCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
+    /// Maximum combined logical advice size in bytes, also bounding witness loading
+    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
+    max_advice_size: usize,
+
     /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
     ///
     /// Excludes fixed preprocessed setup and precompile proving.
@@ -62,6 +66,16 @@ pub struct RunCmd {
 }
 
 impl RunCmd {
+    fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
+        ExecutionOptions::new(
+            Some(self.max_cycles),
+            self.expected_cycles,
+            ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        )
+        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
+        .map_err(|err| Report::msg(format!("{err}")))
+    }
+
     pub fn execute(&self) -> Result<(), Report> {
         println!("===============================================================================");
         println!("Run program: {}", self.program_file.display());
@@ -147,13 +161,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+    let exec_options = params.get_execution_options()?;
     let advice_inputs = input_data
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;
@@ -202,13 +211,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+    let exec_options = params.get_execution_options()?;
     let advice_inputs = input_data
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;

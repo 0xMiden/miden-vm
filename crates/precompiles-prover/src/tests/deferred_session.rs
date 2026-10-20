@@ -10,12 +10,12 @@ use miden_crypto::hash::{
     sha2::{Sha256, Sha512},
 };
 use miden_precompiles::{
-    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
-    UintDomain, UintPrecompile,
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, MSM_WORK, Sha256Precompile,
+    Sha512Precompile, UintDomain, UintPrecompile,
 };
 
 use crate::{
-    deferred::session::session_from_witnesses,
+    deferred::session::{import_witnesses, session_from_witnesses},
     math::{U256, from_hex, to_limbs32},
     session::SessionTraces,
     tests::batch_witness::WitnessFixture,
@@ -101,7 +101,10 @@ fn deferred_session_rejects_false_sha256_assertion() {
     assert!(
         matches!(
             error,
-            crate::SessionInputError::Invalid { reason: "false SHA-256 assertion", .. }
+            crate::PrecompileProvingError::Input(crate::SessionInputError::Invalid {
+                reason: "false SHA-256 assertion",
+                ..
+            })
         ),
         "deferred evaluation must reject a false SHA-256 claim: {error}"
     );
@@ -181,7 +184,14 @@ fn check_wire_session(state: WitnessFixture) -> SessionTraces {
     let witness = state.witness();
     let witness =
         PrecompileWitness::read_from_bytes(&witness.to_bytes()).expect("witness must decode");
-    assert_eq!(witness.root_unchecked(), state.root());
+    let prepared = witness
+        .clone()
+        .prepare(
+            alloc::sync::Arc::new(miden_precompiles::registry()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        )
+        .unwrap();
+    assert_eq!(prepared.root(), state.root());
     let traces = session_from_witnesses(vec![witness]).expect("shared DAG must lower").finish();
     traces.check();
     traces
@@ -514,10 +524,10 @@ fn deferred_session_inputs_reject_identity_base_msm() {
     let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
     assert!(matches!(
         error,
-        crate::SessionInputError::Invalid {
+        crate::PrecompileProvingError::Input(crate::SessionInputError::Invalid {
             reason: "MSM identity bases are unsupported",
             ..
-        }
+        })
     ));
 }
 
@@ -608,7 +618,16 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
             current = next;
         }
         register_curve_equality(&mut state, current.clone(), current);
-        session_from_witnesses(vec![state.witness()])
+        // This tests stack safety beyond the default admission workload, not policy calibration.
+        let limits = miden_precompiles::default_verification_precompile_limits().with_class(
+            MSM_WORK,
+            miden_core::deferred::WorkLimit {
+                max_count: 512,
+                max_total_size: 512,
+                max_size: 1,
+            },
+        );
+        import_witnesses(vec![state.witness()], &limits)
             .expect("deep nested MSM must lower without stack overflow");
     });
 }

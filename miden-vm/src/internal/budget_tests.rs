@@ -3,6 +3,36 @@ use std::collections::{BTreeMap, BTreeSet};
 use miden_processor::{ExecutionOptions, FastProcessor};
 
 use super::*;
+use crate::crypto::merkle::{MerkleStore, MerkleTree, PartialMerkleTree, SimpleSmt};
+
+// Keep an independent full-tree oracle for the streamed construction path.
+fn legacy_advice_inputs(inputs: &InputFile) -> Result<AdviceInputs, String> {
+    let mut store = MerkleStore::default();
+    for data in inputs.merkle_store.as_deref().unwrap_or_default() {
+        match data {
+            MerkleData::MerkleTree(data) => {
+                let tree = MerkleTree::new(InputFile::parse_merkle_tree(data)?)
+                    .map_err(|err| err.to_string())?;
+                store.extend(tree.inner_nodes());
+            },
+            MerkleData::SparseMerkleTree(data) => {
+                let tree = SimpleSmt::<SIMPLE_SMT_DEPTH>::with_leaves(
+                    InputFile::parse_sparse_merkle_tree(data)?,
+                )
+                .map_err(|err| err.to_string())?;
+                store.extend(tree.inner_nodes());
+            },
+            MerkleData::PartialMerkleTree(data) => {
+                let tree =
+                    PartialMerkleTree::with_leaves(InputFile::parse_partial_merkle_tree(data)?)
+                        .map_err(|err| err.to_string())?;
+                store.extend(tree.inner_nodes());
+            },
+            MerkleData::SmtWitness(_) => unreachable!("the legacy oracle has no witness inputs"),
+        }
+    }
+    Ok(inputs.parse_advice_inputs_base()?.with_merkle_store(store))
+}
 
 fn word_hex(value: u64) -> String {
     let mut bytes = [0u8; 32];
@@ -32,7 +62,7 @@ fn next_generated_u64(state: &mut u64) -> u64 {
 
 fn assert_matches_legacy_at_exact_and_short_budget(data: MerkleData, context: &str) {
     let inputs = inputs_with(data);
-    let expected = inputs.parse_advice_inputs().unwrap();
+    let expected = legacy_advice_inputs(&inputs).unwrap();
     let required = expected.store().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
     let exact = ExecutionOptions::default().with_max_advice_size_bytes(required);
     assert_eq!(
@@ -114,6 +144,42 @@ fn right_edge_depth_64_partition() -> Vec<((u8, u64), String)> {
 }
 
 #[test]
+fn witness_and_legacy_trees_share_the_same_budget() {
+    use crate::{
+        crypto::merkle::{PartialSmt, Smt},
+        serde::Serializable,
+    };
+
+    let key = Word::from([1, 2, 3, 7u32]);
+    let tree = Smt::with_entries([(key, Word::from([4u32; 4]))]).unwrap();
+    let partial = PartialSmt::from_proofs([tree.open(&key)]).unwrap();
+    let encoded = format!("0x{}", hex::encode(SmtWitness::from(&partial).to_bytes()));
+    let expected = inputs_with(MerkleData::SmtWitness(encoded.clone()))
+        .parse_advice_inputs()
+        .unwrap();
+    let required = expected.store().num_internal_nodes() * 96
+        + expected.map().total_element_count().unwrap() * 8;
+    let exact = ExecutionOptions::default().with_max_advice_size_bytes(required);
+
+    for witness_first in [false, true] {
+        let witness = MerkleData::SmtWitness(encoded.clone());
+        let legacy = MerkleData::SparseMerkleTree(vec![(7, tree.get_leaf(&key).hash().to_hex())]);
+        let inputs = InputFile {
+            merkle_store: Some(if witness_first {
+                vec![witness, legacy]
+            } else {
+                vec![legacy, witness]
+            }),
+            ..InputFile::default()
+        };
+        assert_eq!(inputs.parse_advice_inputs_with_options(&exact).unwrap(), expected);
+        let short = exact.clone().with_max_advice_size_bytes(required - 1);
+        let err = inputs.parse_advice_inputs_with_options(&short).unwrap_err();
+        assert!(err.contains("advice provider size budget exceeded"), "{err}");
+    }
+}
+
+#[test]
 fn construction_stops_at_the_first_unaffordable_final_node() {
     let cases = [
         MerkleData::MerkleTree((1..=8).map(word_hex).collect()),
@@ -122,9 +188,7 @@ fn construction_stops_at_the_first_unaffordable_final_node() {
     ];
     for data in cases {
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base_bytes() + 96);
-        let mut provider =
-            miden_processor::advice::AdviceProvider::new(AdviceInputs::default(), &options)
-                .unwrap();
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let mut parents_computed = 0;
         let err = merkle_builder::add_tree(&data, &mut |left, right| {
             parents_computed += 1;
@@ -140,7 +204,7 @@ fn construction_stops_at_the_first_unaffordable_final_node() {
             "the unaffordable node must not have been inserted"
         );
 
-        let complete = inputs_with(data).parse_advice_inputs().unwrap();
+        let complete = legacy_advice_inputs(&inputs_with(data)).unwrap();
         assert!(complete.store().num_internal_nodes() > store.num_internal_nodes());
     }
 }
@@ -183,12 +247,12 @@ fn exact_budget_preserves_dense_sparse_and_partial_inputs() {
         let mut inputs = inputs_with(data);
         inputs.advice_stack = Some(vec!["1".into(), "2".into(), "3".into()]);
         inputs.advice_map = Some(HashMap::from([(word_hex(7), vec![4, 5])]));
-        let expected = inputs.parse_advice_inputs().unwrap();
+        let expected = legacy_advice_inputs(&inputs).unwrap();
         let required = expected.store().num_internal_nodes() * 96 + 3 * 8 + 32 + 2 * 8;
         let options = ExecutionOptions::default().with_max_advice_size_bytes(required);
         let actual = inputs.parse_advice_inputs_with_options(&options).unwrap();
         assert_eq!(actual, expected);
-        FastProcessor::new_with_options(StackInputs::default(), actual, options).unwrap();
+        FastProcessor::new_with_options(StackInputs::default(), actual, options.clone()).unwrap();
         let options = options.with_max_advice_size_bytes(required - 1);
         assert!(inputs.parse_advice_inputs_with_options(&options).is_err());
     }
@@ -202,7 +266,7 @@ fn zero_sparse_entries_fit_the_empty_store_budget() {
     let options = ExecutionOptions::default().with_max_advice_size_bytes(base_bytes());
     assert_eq!(
         inputs.parse_advice_inputs_with_options(&options).unwrap(),
-        inputs.parse_advice_inputs().unwrap(),
+        legacy_advice_inputs(&inputs).unwrap(),
     );
 }
 
@@ -219,7 +283,7 @@ fn shared_and_repeated_trees_are_charged_once() {
         ]),
         ..InputFile::default()
     };
-    let expected = inputs.parse_advice_inputs().unwrap();
+    let expected = legacy_advice_inputs(&inputs).unwrap();
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(expected.store().num_internal_nodes() * 96);
     assert_eq!(inputs.parse_advice_inputs_with_options(&options).unwrap(), expected);
@@ -264,7 +328,7 @@ fn dense_empty_subtrees_match_legacy() {
     ];
     for data in cases {
         let inputs = inputs_with(data);
-        let expected = inputs.parse_advice_inputs().unwrap();
+        let expected = legacy_advice_inputs(&inputs).unwrap();
         let options = ExecutionOptions::default()
             .with_max_advice_size_bytes(expected.store().num_internal_nodes() * 96);
         assert_eq!(inputs.parse_advice_inputs_with_options(&options).unwrap(), expected);
@@ -278,7 +342,7 @@ fn partial_duplicate_indices_keep_the_last_value() {
         ((1, 1), word_hex(2)),
         ((1, 0), word_hex(3)),
     ]));
-    let expected = inputs.parse_advice_inputs().unwrap();
+    let expected = legacy_advice_inputs(&inputs).unwrap();
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(expected.store().num_internal_nodes() * 96);
     assert_eq!(inputs.parse_advice_inputs_with_options(&options).unwrap(), expected);
@@ -357,7 +421,7 @@ fn invalid_merkle_shapes_remain_rejected() {
     ];
     for data in cases {
         let inputs = inputs_with(data);
-        assert!(inputs.parse_advice_inputs().is_err());
+        assert!(legacy_advice_inputs(&inputs).is_err());
         assert!(inputs.parse_advice_inputs_with_options(&ExecutionOptions::default()).is_err());
     }
 }
@@ -376,7 +440,7 @@ fn empty_inputs_and_trees_fit_exact_base_budget() {
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base_bytes());
         assert_eq!(
             inputs.parse_advice_inputs_with_options(&options).unwrap(),
-            inputs.parse_advice_inputs().unwrap()
+            legacy_advice_inputs(&inputs).unwrap()
         );
         assert!(
             inputs
@@ -397,7 +461,7 @@ fn normalized_advice_map_keys_are_not_double_charged() {
         advice_map: Some(HashMap::from([(lower, vec![1]), (upper, vec![2, 3])])),
         ..InputFile::default()
     };
-    let expected = inputs.parse_advice_inputs().unwrap();
+    let expected = legacy_advice_inputs(&inputs).unwrap();
     assert_eq!(expected.map().len(), 1);
     let value_len = expected.map().iter().next().unwrap().1.len();
     let options =

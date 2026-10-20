@@ -12,10 +12,13 @@ use miden_core::{
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 
+#[cfg(test)]
+use crate::crypto::merkle::NodeIndex;
 use crate::{
-    StackInputs, Word, ZERO,
-    advice::{AdviceInputs, AdviceStack},
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
+    ExecutionOptions, StackInputs, Word, ZERO,
+    advice::{AdviceInputs, AdviceProvider, AdviceStack},
+    crypto::merkle::SmtWitness,
+    serde::{BudgetedReader, ByteReader, Deserializable, SliceReader},
 };
 
 mod merkle_builder;
@@ -46,6 +49,10 @@ pub enum MerkleData {
     /// byte hex string representing the value of the leaf.
     #[serde(rename = "partial_merkle_tree")]
     PartialMerkleTree(Vec<((u8, u64), String)>),
+    /// A `0x`-prefixed, hex-encoded versioned `SmtWitness`. Reconstructs shared Merkle nodes and
+    /// adds complete leaf preimages to the advice map. Multiple entries may carry different roots.
+    #[serde(rename = "smt_witness")]
+    SmtWitness(String),
 }
 
 // INPUT FILE
@@ -115,40 +122,24 @@ impl InputFile {
         Ok(inputs)
     }
 
-    /// Parse advice inputs without an execution budget.
-    ///
-    /// CLI execution should use [`Self::parse_advice_inputs_with_options`] so that Merkle-tree
-    /// construction is covered by the advice budget.
+    /// Parse advice inputs using the default execution advice-memory budget.
     pub fn parse_advice_inputs(&self) -> Result<AdviceInputs, String> {
-        let mut advice_inputs = self.parse_advice_inputs_base()?;
-        if let Some(merkle_store) = self
-            .parse_merkle_store()
-            .map_err(|e| format!("failed to parse advice provider: {e}"))?
-        {
-            advice_inputs = advice_inputs.with_merkle_store(merkle_store);
-        }
-        Ok(advice_inputs)
+        self.parse_advice_inputs_with_options(&ExecutionOptions::default())
     }
 
     /// Parse advice inputs under the execution advice-memory budget.
     ///
-    /// Final Merkle nodes are inserted through the advice provider as they are computed, rather
-    /// than materializing a full tree before checking its size. Shared nodes and empty subtrees
-    /// use the same accounting as execution. This bounds logical advice size, not JSON ingestion
-    /// or process-wide memory; sparse/partial input sorting still uses borrowed input metadata.
+    /// Final Merkle nodes are inserted through the advice provider as they are computed.
+    /// The budget also limits total encoded witness bytes and, separately for each witness,
+    /// reconstructed parents at 96 logical bytes per parent. Retained advice is charged after
+    /// deduplication, including shared nodes across different tree versions.
     pub fn parse_advice_inputs_with_options(
         &self,
-        options: &miden_processor::ExecutionOptions,
+        options: &ExecutionOptions,
     ) -> Result<AdviceInputs, String> {
-        let mut provider =
-            miden_processor::advice::AdviceProvider::new(self.parse_advice_inputs_base()?, options)
-                .map_err(|err| err.to_string())?;
-        for data in self.merkle_store.as_deref().unwrap_or_default() {
-            let root = merkle_builder::add_tree(data, &mut |left, right| {
-                provider.merge_roots(left, right).map_err(|err| err.to_string())
-            })?;
-            event!(Level::TRACE, "Added Merkle tree with root {} to the Merkle store", root);
-        }
+        let mut provider = AdviceProvider::new(self.parse_advice_inputs_base()?, options)
+            .map_err(|err| err.to_string())?;
+        self.parse_merkle_store(&mut provider, options)?;
         let (stack, map, store) = provider.into_parts();
         Ok(AdviceInputs::new(stack.into(), map, store))
     }
@@ -213,55 +204,74 @@ impl InputFile {
     }
 
     /// Parse merkle store data from the input file.
-    fn parse_merkle_store(&self) -> Result<Option<MerkleStore>, String> {
+    fn parse_merkle_store(
+        &self,
+        provider: &mut AdviceProvider,
+        options: &ExecutionOptions,
+    ) -> Result<(), String> {
         let merkle_data = match &self.merkle_store {
             Some(merkle_data) => merkle_data,
-            None => return Ok(None),
+            None => return Ok(()),
         };
 
-        let mut merkle_store = MerkleStore::default();
+        let mut remaining_witness_bytes = options.max_advice_size_bytes();
         for data in merkle_data {
             match data {
-                MerkleData::MerkleTree(data) => {
-                    let leaves = Self::parse_merkle_tree(data)?;
-                    let tree = MerkleTree::new(leaves)
-                        .map_err(|e| format!("failed to parse a Merkle tree: {e}"))?;
-                    merkle_store.extend(tree.inner_nodes());
+                MerkleData::MerkleTree(_)
+                | MerkleData::SparseMerkleTree(_)
+                | MerkleData::PartialMerkleTree(_) => {
+                    let root = merkle_builder::add_tree(data, &mut |left, right| {
+                        provider.merge_roots(left, right).map_err(|err| err.to_string())
+                    })?;
                     event!(
                         Level::TRACE,
                         "Added Merkle tree with root {} to the Merkle store",
-                        tree.root()
+                        root
                     );
                 },
-                MerkleData::SparseMerkleTree(data) => {
-                    let entries = Self::parse_sparse_merkle_tree(data)?;
-                    let tree = SimpleSmt::<SIMPLE_SMT_DEPTH>::with_leaves(entries)
-                        .map_err(|e| format!("failed to parse a Sparse Merkle Tree: {e}"))?;
-                    merkle_store.extend(tree.inner_nodes());
+                MerkleData::SmtWitness(data) => {
+                    let hex = data.strip_prefix("0x").ok_or("SMT witness requires a 0x prefix")?;
+                    // Bound binary input before allocating it, across all witnesses in the file.
+                    if hex.len() % 2 != 0 || hex.len() / 2 > remaining_witness_bytes {
+                        return Err("SMT witness is too large or has an odd hex length".into());
+                    }
+                    remaining_witness_bytes -= hex.len() / 2;
+                    let bytes =
+                        hex::decode(hex).map_err(|e| format!("invalid SMT witness hex: {e}"))?;
+                    let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
+                    let witness = SmtWitness::read_from(&mut reader).map_err(|e| e.to_string())?;
+                    if reader.has_more_bytes() {
+                        return Err("trailing bytes in SMT witness".into());
+                    }
+                    // Bound reconstruction work per witness. Previously loaded nodes may be
+                    // shared, so they must not reduce this independent work limit.
+                    let max_nodes = options.max_advice_size_bytes() / 96;
+                    let tree = witness.into_partial_smt(max_nodes).map_err(|e| e.to_string())?;
+                    provider.extend_merkle_store(tree.inner_nodes()).map_err(|e| e.to_string())?;
+                    for (_, leaf) in tree.leaves() {
+                        let hash = leaf.hash();
+                        let elements: Vec<_> = leaf.to_elements().collect();
+                        if let Some(existing) = provider.get_mapped_values(&hash)
+                            && existing != elements.as_slice()
+                        {
+                            return Err(format!("conflicting SMT leaf preimage for {hash}"));
+                        }
+                        provider.insert_into_map(hash, elements).map_err(|e| e.to_string())?;
+                    }
                     event!(
                         Level::TRACE,
-                        "Added Sparse Merkle tree with root {} to the Merkle store",
-                        tree.root()
-                    );
-                },
-                MerkleData::PartialMerkleTree(data) => {
-                    let entries = Self::parse_partial_merkle_tree(data)?;
-                    let tree = PartialMerkleTree::with_leaves(entries)
-                        .map_err(|e| format!("failed to parse a Partial Merkle Tree: {e}"))?;
-                    merkle_store.extend(tree.inner_nodes());
-                    event!(
-                        Level::TRACE,
-                        "Added Partial Merkle tree with root {} to the Merkle store",
+                        "Added SMT witness with root {} to the Merkle store",
                         tree.root()
                     );
                 },
             }
         }
 
-        Ok(Some(merkle_store))
+        Ok(())
     }
 
     /// Parse and return merkle tree leaves.
+    #[cfg(test)]
     fn parse_merkle_tree(tree: &[String]) -> Result<Vec<Word>, String> {
         tree.iter()
             .map(|v| {
@@ -272,6 +282,7 @@ impl InputFile {
     }
 
     /// Parse and return Sparse Merkle Tree entries.
+    #[cfg(test)]
     fn parse_sparse_merkle_tree(tree: &[(u64, String)]) -> Result<Vec<(u64, Word)>, String> {
         tree.iter()
             .map(|(index, v)| {
@@ -282,6 +293,7 @@ impl InputFile {
     }
 
     /// Parse and return Partial Merkle Tree entries.
+    #[cfg(test)]
     fn parse_partial_merkle_tree(
         tree: &[((u8, u64), String)],
     ) -> Result<Vec<(NodeIndex, Word)>, String> {
@@ -355,6 +367,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::crypto::merkle::MerkleStore;
 
     fn test_file_path(name: &str) -> PathBuf {
         let id = SystemTime::now()
@@ -389,8 +402,8 @@ mod tests {
             ]
         }";
         let inputs: InputFile = serde_json::from_str(program_with_pmt).unwrap();
-        let merkle_store = inputs.parse_merkle_store().unwrap();
-        assert!(merkle_store.is_some());
+        let advice = inputs.parse_advice_inputs().unwrap();
+        assert!(advice.store().num_internal_nodes() > 255);
 
         let program_with_smt = "
         {
@@ -415,8 +428,8 @@ mod tests {
             ]
           }";
         let inputs: InputFile = serde_json::from_str(program_with_smt).unwrap();
-        let merkle_store = inputs.parse_merkle_store().unwrap();
-        assert!(merkle_store.is_some());
+        let advice = inputs.parse_advice_inputs().unwrap();
+        assert!(advice.store().num_internal_nodes() > 255);
 
         let program_with_merkle_tree = "
         {
@@ -433,8 +446,216 @@ mod tests {
             ]
         }";
         let inputs: InputFile = serde_json::from_str(program_with_merkle_tree).unwrap();
-        let merkle_store = inputs.parse_merkle_store().unwrap();
-        assert!(merkle_store.is_some());
+        let advice = inputs.parse_advice_inputs().unwrap();
+        assert!(advice.store().num_internal_nodes() > 255);
+    }
+
+    #[test]
+    fn test_smt_witness_inputs_preserve_multiple_versions_and_leaf_preimages() {
+        use crate::{
+            crypto::merkle::{LeafIndex, PartialSmt, Smt},
+            serde::Serializable,
+        };
+
+        let key = Word::from([1, 2, 3, 7u32]);
+        let colliding_key = Word::from([4, 5, 6, 7u32]);
+        let absent = Word::from([8, 9, 10, 31u32]);
+        let value = Word::from([11, 12, 13, 14u32]);
+        let old = Smt::with_entries([(key, value), (colliding_key, value)]).unwrap();
+        let mut new = old.clone();
+        let updated_value = Word::from([15, 16, 17, 18u32]);
+        new.insert(key, updated_value).unwrap();
+        let trees = [old, new];
+        let witnesses: Vec<_> = trees.iter().map(|tree| {
+            let partial = PartialSmt::from_proofs([tree.open(&key), tree.open(&absent)]).unwrap();
+            serde_json::json!({"smt_witness": format!("0x{}", hex::encode(SmtWitness::from(&partial).to_bytes()))})
+        }).collect();
+        let mut inputs: InputFile = serde_json::from_value(serde_json::json!({
+            "operand_stack": [], "merkle_store": witnesses,
+        }))
+        .unwrap();
+        let advice = inputs.parse_advice_inputs().unwrap();
+        for (version, tree) in trees.iter().enumerate() {
+            for key in [key, colliding_key, absent] {
+                let index = NodeIndex::from(LeafIndex::<64>::from(key));
+                assert_eq!(
+                    advice.store().get_path(tree.root(), index).unwrap().path,
+                    tree.open(&key).path().clone()
+                );
+            }
+            let leaf = tree.get_leaf(&key);
+            let expected_value = if version == 0 { value } else { updated_value };
+            let expected: Vec<_> =
+                [key, expected_value, colliding_key, value].into_iter().flatten().collect();
+            assert_eq!(advice.map().get(&leaf.hash()).unwrap().as_ref(), expected);
+        }
+        // An explicit input-map entry must not silently replace an authenticated leaf preimage.
+        inputs.advice_map =
+            Some(HashMap::from([(trees[0].get_leaf(&key).hash().to_hex(), vec![1])]));
+        assert!(
+            inputs
+                .parse_advice_inputs()
+                .unwrap_err()
+                .contains("conflicting SMT leaf preimage")
+        );
+    }
+
+    #[test]
+    fn test_smt_witness_inputs_share_nodes_across_large_tree_versions() {
+        use crate::{
+            advice::AdviceProvider,
+            crypto::merkle::{PartialSmt, Smt},
+            serde::Serializable,
+        };
+
+        let step = u64::MAX / 2048;
+        let keys: Vec<_> = (0..2048u64)
+            .map(|i| Word::new([1, 2, 3, i * step].map(Felt::new_unchecked)))
+            .collect();
+        let old = Smt::with_entries(keys.iter().map(|&key| (key, Word::from([4u32; 4])))).unwrap();
+        let mut new = old.clone();
+        new.insert(keys[0], Word::from([5u32; 4])).unwrap();
+        let trees = [old, new];
+        let store: MerkleStore = trees.iter().flat_map(Smt::inner_nodes).collect();
+        let mut map = BTreeMap::new();
+        let witnesses = trees
+            .iter()
+            .map(|tree| {
+                let partial =
+                    PartialSmt::from_proofs(keys.iter().map(|key| tree.open(key))).unwrap();
+                for (_, leaf) in partial.leaves() {
+                    map.insert(leaf.hash(), leaf.to_elements().collect::<Vec<_>>());
+                }
+                MerkleData::SmtWitness(format!(
+                    "0x{}",
+                    hex::encode(SmtWitness::from(&partial).to_bytes())
+                ))
+            })
+            .collect();
+        let expected = AdviceInputs::default().with_merkle_store(store).with_map(map);
+        AdviceProvider::new(expected.clone(), &ExecutionOptions::default()).unwrap();
+
+        let mut inputs = InputFile {
+            merkle_store: Some(witnesses),
+            ..InputFile::default()
+        };
+        assert_eq!(inputs.parse_advice_inputs().unwrap(), expected);
+
+        // A disjoint third tree exceeds the default retained-advice budget. Raising the same
+        // options used for execution must also allow it through the loader.
+        let third_keys: Vec<_> = (0..2048u64)
+            .map(|i| Word::new([1, 2, 3, i * step + step / 2].map(Felt::new_unchecked)))
+            .collect();
+        let third =
+            Smt::with_entries(third_keys.iter().map(|&key| (key, Word::from([4u32; 4])))).unwrap();
+        let partial =
+            PartialSmt::from_proofs(third_keys.iter().map(|key| third.open(key))).unwrap();
+        inputs.merkle_store.as_mut().unwrap().push(MerkleData::SmtWitness(format!(
+            "0x{}",
+            hex::encode(SmtWitness::from(&partial).to_bytes()),
+        )));
+        assert!(
+            inputs
+                .parse_advice_inputs()
+                .unwrap_err()
+                .contains("advice provider size budget")
+        );
+        let options = ExecutionOptions::default()
+            .with_max_advice_size_bytes(2 * ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES);
+        let advice = inputs.parse_advice_inputs_with_options(&options).unwrap();
+        AdviceProvider::new(advice.clone(), &options).unwrap();
+        for tree in trees.iter().chain([&third]) {
+            assert!(advice.store().get_node(tree.root(), NodeIndex::root()).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_smt_witness_inputs_charge_the_combined_advice_budget() {
+        use crate::{
+            crypto::merkle::{PartialSmt, Smt},
+            serde::Serializable,
+        };
+
+        let key = Word::from([1, 2, 3, 7u32]);
+        let tree = Smt::with_entries([(key, Word::from([4u32; 4]))]).unwrap();
+        let partial = PartialSmt::from_proofs([tree.open(&key)]).unwrap();
+        let leaf = tree.get_leaf(&key);
+        let inputs = InputFile {
+            advice_stack: Some(vec!["1".into(), "2".into(), "3".into()]),
+            // The same authenticated leaf must only be charged once.
+            advice_map: Some(HashMap::from([(
+                leaf.hash().to_hex(),
+                leaf.to_elements().map(|value| value.as_canonical_u64()).collect(),
+            )])),
+            merkle_store: Some(vec![MerkleData::SmtWitness(format!(
+                "0x{}",
+                hex::encode(SmtWitness::from(&partial).to_bytes()),
+            ))]),
+            ..InputFile::default()
+        };
+        let expected = inputs.parse_advice_inputs().unwrap();
+        let required = expected.store().num_internal_nodes() * 96
+            + expected.map().total_element_count().unwrap() * 8
+            + 3 * 8;
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(required);
+        assert_eq!(inputs.parse_advice_inputs_with_options(&options).unwrap(), expected);
+        let options = options.with_max_advice_size_bytes(required - 1);
+        assert!(
+            inputs
+                .parse_advice_inputs_with_options(&options)
+                .unwrap_err()
+                .contains("advice provider size budget")
+        );
+    }
+
+    #[test]
+    fn test_smt_witness_inputs_limit_total_encoded_bytes() {
+        use crate::{crypto::merkle::PartialSmt, serde::Serializable};
+
+        let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
+        let copies = 600;
+        let inputs = InputFile {
+            merkle_store: Some(
+                (0..copies)
+                    .map(|_| MerkleData::SmtWitness(format!("0x{}", hex::encode(&bytes))))
+                    .collect(),
+            ),
+            ..InputFile::default()
+        };
+        let limit = copies * bytes.len();
+        assert!(limit > MerkleStore::default().num_internal_nodes() * 96);
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(limit);
+        inputs.parse_advice_inputs_with_options(&options).unwrap();
+        let options = options.with_max_advice_size_bytes(limit - 1);
+        assert!(
+            inputs
+                .parse_advice_inputs_with_options(&options)
+                .unwrap_err()
+                .contains("SMT witness is too large")
+        );
+    }
+
+    #[test]
+    fn test_smt_witness_inputs_reject_invalid_hex_and_trailing_bytes() {
+        use crate::{crypto::merkle::PartialSmt, serde::Serializable};
+
+        let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
+        let mut wrong_version = bytes.clone();
+        wrong_version[8] = 2;
+        for encoded in [
+            hex::encode(&bytes),
+            "0x0".into(),
+            "0xzz".into(),
+            format!("0x{}00", hex::encode(&bytes)),
+            format!("0x{}", hex::encode(wrong_version)),
+            format!("0x{}", "00".repeat(ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES + 1)),
+        ] {
+            let inputs = InputFile {
+                merkle_store: Some(vec![MerkleData::SmtWitness(encoded)]),
+                ..InputFile::default()
+            };
+            assert!(inputs.parse_advice_inputs().is_err());
+        }
     }
 
     #[test]

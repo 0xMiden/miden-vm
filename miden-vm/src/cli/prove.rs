@@ -34,6 +34,10 @@ pub struct ProveCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
+    /// Maximum combined logical advice size in bytes, also bounding witness loading
+    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
+    max_advice_size: usize,
+
     /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
     ///
     /// Excludes fixed preprocessed setup and precompile proving.
@@ -77,6 +81,7 @@ impl ProveCmd {
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
+        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
         .map_err(|err| Report::msg(format!("{err}")))
     }
 

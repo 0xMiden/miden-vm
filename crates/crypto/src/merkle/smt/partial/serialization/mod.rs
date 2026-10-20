@@ -261,6 +261,10 @@ impl Deserializable for UniqueNodes {
         unique_nodes.validate()?;
         Ok(unique_nodes)
     }
+
+    fn min_serialized_size() -> usize {
+        32 + 3 * 8 // root and three u64 collection counts
+    }
 }
 
 // ARBITRARY (proptest)

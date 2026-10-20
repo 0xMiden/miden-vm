@@ -16,6 +16,9 @@ pub(super) fn add_tree(
     merge: &mut impl FnMut(Word, Word) -> Result<Word, String>,
 ) -> Result<Word, String> {
     match data {
+        MerkleData::SmtWitness(_) => {
+            Err("SMT witnesses must be loaded with their leaf preimages".into())
+        },
         MerkleData::MerkleTree(leaves) => {
             let n = leaves.len();
             if n <= 1 {

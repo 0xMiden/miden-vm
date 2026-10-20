@@ -11,7 +11,10 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{
+    Keccak256Precompile, default_execution_precompile_limits,
+    default_verification_precompile_limits,
+};
 use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::verify_deferred;
 
@@ -54,7 +57,7 @@ fn run(mode: Mode) -> Result<(), String> {
     let state = fixture_state()?;
     let root = state.root();
     let witness = state
-        .into_witness()
+        .into_witness(&default_verification_precompile_limits())
         .map_err(|error| format!("open fixture witness: {error}"))?
         .ok_or("fixture state has deferred work")?;
     let proof = prove_precompiles(vec![witness], HashFunction::Eidos)
@@ -94,7 +97,8 @@ fn ensure_sequential_prover() -> Result<(), String> {
 fn fixture_state() -> Result<DeferredState, String> {
     let registry =
         Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
-    let mut state = DeferredState::new(registry).map_err(|error| error.to_string())?;
+    let mut state = DeferredState::new(registry, default_execution_precompile_limits())
+        .map_err(|error| error.to_string())?;
 
     let input = state
         .register(Node::chunks_from_bytes(INPUT))

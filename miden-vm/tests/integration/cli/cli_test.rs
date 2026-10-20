@@ -74,6 +74,22 @@ fn advice_budget_is_checked_before_merkle_loading_in_run_and_prove() {
 }
 
 #[test]
+fn cli_advice_budget_is_configurable_for_run_and_prove() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("advice-budget.masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    for command in ["run", "prove"] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg(command).arg(&program_path).args(["--max-advice-size", "0"]);
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("advice provider size budget"));
+    }
+}
+
+#[test]
 // The exact row counts and elapsed time can change, so this checks only the stable labels printed
 // by the `run` command.
 fn cli_run() {
