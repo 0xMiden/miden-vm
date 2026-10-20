@@ -59,10 +59,6 @@
 
 ## v0.36.2 (2026-10-20)
 
-#### Features
-
-#### Changes
-
 #### Fixes
 
 - Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
