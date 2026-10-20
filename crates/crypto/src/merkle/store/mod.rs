@@ -3,6 +3,8 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+use once_cell::sync::Lazy;
+
 use super::{
     EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree, NodeIndex,
     PartialMerkleTree, Poseidon2, RootPath, Word,
@@ -594,14 +596,21 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let empty_nodes: Map<_, _> = empty_hashes().collect();
-        let nodes = self.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+        static EMPTY_NODES: Lazy<Map<Word, StoreNode>> = Lazy::new(|| empty_hashes().collect());
+        // Count omissions with a fixed number of lookups, without scanning the entire store.
+        let omitted = EMPTY_NODES
+            .iter()
+            .filter(|(key, node)| self.nodes.get(*key) == Some(*node))
+            .count();
 
-        target.write_u64(nodes.clone().count() as u64);
+        target.write_u64((self.nodes.len() - omitted) as u64);
 
-        for (k, v) in nodes {
-            k.write_into(target);
-            v.write_into(target);
+        for (key, node) in &self.nodes {
+            // Only nodes with equal children can be canonical empty nodes.
+            if node.left != node.right || EMPTY_NODES.get(key) != Some(node) {
+                key.write_into(target);
+                node.write_into(target);
+            }
         }
     }
 }

@@ -974,6 +974,16 @@ fn test_serialization() -> Result<(), Box<dyn Error>> {
         let unique_nodes = mtree.inner_nodes().map(|node| node.value).collect::<crate::Set<_>>();
         assert_eq!(bytes.len(), 8 + unique_nodes.len() * 96);
 
+        // The optimization must preserve every byte emitted by the original canonical filter.
+        let empty_nodes: crate::Map<_, _> = super::empty_hashes().collect();
+        let nodes = store.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+        let mut expected_bytes = (nodes.clone().count() as u64).to_bytes();
+        for (key, node) in nodes {
+            key.write_into(&mut expected_bytes);
+            node.write_into(&mut expected_bytes);
+        }
+        assert_eq!(bytes, expected_bytes);
+
         // The reader also accepts older payloads that explicitly include empty nodes.
         let mut full_bytes = Vec::new();
         (store.num_internal_nodes() as u64).write_into(&mut full_bytes);
@@ -999,6 +1009,25 @@ fn test_serialization() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+#[test]
+fn serialization_preserves_noncanonical_children_at_empty_node_keys() {
+    use crate::utils::{ByteReader, SliceReader};
+
+    let key = *EmptySubtreeRoots::entry(64, 0);
+    for right in [VALUES4[0], VALUES4[1]] {
+        let node = super::StoreNode { left: VALUES4[0], right };
+        let mut store = MerkleStore::default();
+        store.nodes.insert(key, node);
+        let bytes = store.to_bytes();
+        assert_eq!(bytes, (1u64, key, node).to_bytes());
+        let mut reader = SliceReader::new(&bytes);
+        assert_eq!(reader.read_u64().unwrap(), 1);
+        assert_eq!(Word::read_from(&mut reader).unwrap(), key);
+        assert_eq!(super::StoreNode::read_from(&mut reader).unwrap(), node);
+        assert!(!reader.has_more_bytes());
+    }
 }
 
 #[test]
