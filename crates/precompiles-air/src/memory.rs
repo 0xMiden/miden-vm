@@ -175,14 +175,14 @@ mod tests {
         let params = precompile_pcs_params();
         // Current per-row trace costs before the safety multiplier, in `ChipletAir::all()` order,
         // are:
-        // 9_288, 10_872, 6_048, 1_080, 4_104, 7_056, 2_592, 2_304, 2_952, 4_248, 5_904, and
+        // 4_392, 10_872, 5_184, 1_080, 4_104, 7_056, 2_592, 2_304, 2_952, 4_248, 5_904, and
         // 4_464 bytes. The shared term uses the maximum quotient degree (4) across the full AIR
         // set. Each expectation also includes that quotient/tree peak, the preprocessed
         // bundle, and the 5/4 safety factor. Blake3 and Eidos add no leaf-hashing scratch
         // beyond the digest itself. Any AIR shape change must break this test rather than
         // silently drift the model.
         let expected = [
-            71_448_410, 71_450_390, 71_444_360, 71_438_150, 71_441_930, 71_445_620, 71_440_040,
+            71_442_290, 71_450_390, 71_443_280, 71_438_150, 71_441_930, 71_445_620, 71_440_040,
             71_439_680, 71_440_490, 71_442_110, 71_444_180, 71_442_380,
         ];
         for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos] {
@@ -198,7 +198,7 @@ mod tests {
             }
             assert_eq!(
                 prover_peak_bytes(&[1; NUM_CHIPLETS], &params, hash_fn),
-                Some(71_512_940),
+                Some(71_505_740),
                 "all chiplet AIRs at height 1 with {hash_fn:?}"
             );
         }

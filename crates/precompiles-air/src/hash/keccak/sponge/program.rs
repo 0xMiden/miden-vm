@@ -18,11 +18,10 @@
 //! - `p_capacity` — 1 iff `p_idx ∈ [17, 25)`; capacity rows.
 //! - `p_rc_active` — 1 iff `p_idx ∈ [0, 24)`; rows where the sponge provides `RC[p_idx]` to the
 //!   round chiplet (Keccak has only 24 RCs, so slot 24 — the last capacity lane — carries no RC).
-//! - `p_squeeze_active` — 1 iff `p_idx ∈ [4, 25)`; non-digest state-lane rows that consume the
-//!   last-perm output on last-block periods.
+//! - `p_squeeze_active` — 1 iff `p_idx ∈ [4, 25)`; state lanes outside the fixed Keccak digest.
 //! - `p_pad_0x80` — 1 iff `p_idx == 25`; the dedicated lane-16 0x80 row.
 //! - `p_extra` — 1 iff `p_idx ∈ [26, 29)`; extra chunk-consume rows where the last block mops up
-//!   overshoot lanes past the rate (gated to the last block by `b_sum` in the AIR; pure NOP
+//!   overshoot lanes past the rate (gated to the last block by `pad_block` in the AIR; pure NOP
 //!   otherwise).
 //! - `rc_val_lo`, `rc_val_hi` — the u32 halves of `RC[p_idx]` on `p_rc_active` rows, `0` elsewhere.
 //!   Provided to Memory64 at the round chiplet's RC slot IP.
