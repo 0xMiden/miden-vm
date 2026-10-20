@@ -65,10 +65,10 @@ use crate::{
             COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
             COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
             COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED,
-            COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR,
-            COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PIN_CLAIM_BOUND_PTR,
-            COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_UINT_VALUE_BOUND_PTR,
-            DIGEST_WIDTH, NUM_MAIN_COLS,
+            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
+            COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT,
+            COL_PIN_CLAIM_BOUND_PTR, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END,
+            COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -1211,6 +1211,8 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
         } => {
             write_children(&mut row, lhs, rhs);
             row[COL_IS_UINT_OP] = Felt::ONE;
+            row[COL_IS_UINT_ADD] = Felt::from(u8::from(*op == UintOpId::Add));
+            row[COL_IS_UINT_SUB] = Felt::from(u8::from(*op == UintOpId::Sub));
             if let Some(col) = uint_op_col(*op) {
                 row[col] = Felt::ONE;
             }

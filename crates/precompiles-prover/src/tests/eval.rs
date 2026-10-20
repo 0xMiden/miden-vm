@@ -4,7 +4,7 @@ use std::{vec, vec::Vec};
 
 use miden_air::{
     lookup::{
-        LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+        LookupAir, LookupMessage, ProverLookupBuilder,
         debug::{ValidateLayout, ValidateLookupAir},
     },
     precompiles::hash::{
@@ -22,25 +22,30 @@ use miden_lifted_stark::air::ConstraintDegrees;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::EcPointMsg,
+    ec::{EcPointMsg, add::EcGroupAddMsg},
     logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
-    tests::{assert_same_rational_fold, bus_balance::session_stack_residual},
+    tests::{
+        assert_same_rational_fold, bus_balance::session_stack_residual, lookup_column_folds,
+        lookup_fractions,
+    },
     transcript::{
         eidos::{EidosDigest, trace::EidosRequires},
         eval::{
-            COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
-            COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_PAI, COL_IS_IS,
-            COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN,
-            COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
-            NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CONTEXT_GROUP_PTR,
+            COL_EC_CREATE_GROUP_PTR, COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR,
+            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0, COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL, COL_IS_PINNED,
+            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
+            COL_LHS_BEGIN, COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR,
+            COL_RHS_BEGIN, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
     },
     uint::{
         UintValMsg,
+        add::UintAddMsg,
         mul::UintMulMsg,
         trace::{UintPtr, UintStoreRequires},
     },
@@ -205,13 +210,13 @@ const TYPED_RELATION_COL: usize = 3;
 fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
-    assert_eq!(air.width(), 37);
-    assert_eq!(air.aux_width(), 10);
+    assert_eq!(air.width(), 39);
+    assert_eq!(air.aux_width(), 8);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
             &air
         ),
-        &[2, 2, 2, 1, 1, 1, 1, 1, 2, 2]
+        &[2, 2, 2, 1, 1, 1, 2, 2]
     );
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -235,31 +240,9 @@ fn shape_and_degree_match_design() {
 }
 
 fn typed_relation_fold(row: Vec<Felt>, challenges: &Challenges<QuadFelt>) -> (QuadFelt, QuadFelt) {
-    let air = TranscriptEvalAir;
     let main = RowMajorMatrix::new(row, NUM_MAIN_COLS);
-    let periodic = air.periodic_columns();
-    let fractions = build_lookup_fractions(&air, &main, None, &periodic, challenges);
-    fold_fractions(fractions_at(&fractions, 0, TYPED_RELATION_COL))
-}
-
-fn fractions_at(
-    fractions: &LookupFractions<Felt, QuadFelt>,
-    row: usize,
-    column: usize,
-) -> &[(Felt, QuadFelt)] {
-    let count_idx = row * fractions.num_columns() + column;
-    let start = fractions.counts()[..count_idx].iter().sum::<usize>();
-    let end = start + fractions.counts()[count_idx];
-    &fractions.fractions()[start..end]
-}
-
-fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
-    fractions.iter().fold(
-        (QuadFelt::ZERO, QuadFelt::ONE),
-        |(numerator, denominator), &(multiplicity, encoded)| {
-            (numerator * encoded + denominator * multiplicity, denominator * encoded)
-        },
-    )
+    let fractions = lookup_fractions(&TranscriptEvalAir, &main, challenges);
+    lookup_column_folds(&fractions)[0][TYPED_RELATION_COL]
 }
 
 #[test]
@@ -306,6 +289,7 @@ fn typed_relation_column_preserves_each_selected_message() {
     assert_selected(uint_leaf, uint_leaf_denominator, "UintVal branch");
 
     let mut uint_mul = payload.clone();
+    uint_mul[COL_IS_UINT_OP] = Felt::ONE;
     uint_mul[COL_IS_MUL] = Felt::ONE;
     let uint_mul_denominator = UintMulMsg {
         kappa_a: Felt::ONE,
@@ -336,6 +320,44 @@ fn typed_relation_column_preserves_each_selected_message() {
         }
         .encode(&challenges);
         assert_selected(ec_point, denominator, context);
+    }
+
+    for is_sub in [false, true] {
+        let mut uint = payload.clone();
+        uint[COL_IS_UINT_OP] = Felt::ONE;
+        uint[COL_IS_SUB] = Felt::from(u8::from(is_sub));
+        uint[if is_sub { COL_IS_UINT_SUB } else { COL_IS_UINT_ADD }] = Felt::ONE;
+        let (a_ptr, b_ptr, c_ptr) = if is_sub {
+            (uint[COL_B_PTR], uint[COL_PTR], uint[COL_A_PTR])
+        } else {
+            (uint[COL_A_PTR], uint[COL_B_PTR], uint[COL_PTR])
+        };
+        let denominator = UintAddMsg {
+            bound_ptr: uint[COL_BOUND_PTR],
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            nz: Felt::ZERO,
+        }
+        .encode(&challenges);
+        assert_selected(uint, denominator, "Uint add/sub branch");
+
+        let mut ec = payload.clone();
+        ec[COL_IS_EC_OP] = Felt::ONE;
+        ec[COL_IS_SUB] = Felt::from(u8::from(is_sub));
+        let (p_ptr, r_ptr) = if is_sub {
+            (ec[COL_PTR], ec[COL_A_PTR])
+        } else {
+            (ec[COL_A_PTR], ec[COL_PTR])
+        };
+        let denominator = EcGroupAddMsg {
+            group_ptr: ec[COL_EC_CONTEXT_GROUP_PTR],
+            p_ptr,
+            q_ptr: ec[COL_B_PTR],
+            r_ptr,
+        }
+        .encode(&challenges);
+        assert_selected(ec, denominator, "EC add/sub branch");
     }
 
     assert_same_rational_fold(

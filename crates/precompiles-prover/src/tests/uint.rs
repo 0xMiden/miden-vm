@@ -2,10 +2,10 @@
 //! `UintVal` bus (3b-1), and `Range16` limb checks balanced against the
 //! byte-pair LUT (3b-2).
 
-use std::{collections::HashMap, vec::Vec};
+use std::collections::HashMap;
 
 use miden_air::lookup::{
-    Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+    Challenges, LookupAir, LookupMessage, ProverLookupBuilder,
     debug::{ValidateLayout, ValidateLookupAir},
 };
 use miden_core::{
@@ -20,13 +20,21 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use crate::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
-    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    primitives::byte_pair_lut::{
+        BytePairLutAir, BytePairLutRequires, Range16Msg, generate_trace as bpl_trace,
+    },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::{add_rational_folds, assert_same_rational_fold, utils::extract_band},
+    tests::{
+        add_rational_folds, assert_same_rational_fold, lookup_column_folds, lookup_fractions,
+        sum_rational_folds, utils::extract_band,
+    },
     uint::{
         CARRY_HI_BEGIN, CARRY_LO_BEGIN, COL_PTR, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
         UintStoreAir,
-        mul::{NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, UintMulAir, trace::UintMulRequires},
+        mul::{
+            COL_ACT as MUL_COL_ACT, COL_KAPPA_A as MUL_COL_KAPPA_A,
+            NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, UintMulAir, trace::UintMulRequires,
+        },
         store_mul::{
             AUX_WIDTH as STORE_MUL_AUX_WIDTH, NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS,
             NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
@@ -101,48 +109,6 @@ fn fold_balance<A>(
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
-}
-
-fn lookup_fractions<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-) -> LookupFractions<Felt, QuadFelt>
-where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-{
-    let periodic = air.periodic_columns();
-    let preprocessed = air.preprocessed_trace();
-    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges)
-}
-
-/// Cross-multiply every row-local lookup column from the prover's raw fractions.
-fn lookup_column_folds(
-    fractions: &LookupFractions<Felt, QuadFelt>,
-) -> Vec<Vec<(QuadFelt, QuadFelt)>> {
-    let num_columns = fractions.num_columns();
-    let mut cursor = 0;
-    let mut rows = Vec::with_capacity(fractions.num_rows());
-
-    for row_counts in fractions.counts().chunks(num_columns) {
-        let mut row = Vec::with_capacity(num_columns);
-        for &count in row_counts {
-            let mut numerator = QuadFelt::ZERO;
-            let mut denominator = QuadFelt::ONE;
-            for &(multiplicity, encoded) in &fractions.fractions()[cursor..cursor + count] {
-                let multiplicity = QuadFelt::new([multiplicity, Felt::ZERO]);
-                numerator = numerator * encoded + multiplicity * denominator;
-                denominator *= encoded;
-            }
-            cursor += count;
-            row.push((numerator, denominator));
-        }
-        rows.push(row);
-    }
-
-    assert_eq!(cursor, fractions.fractions().len());
-    rows
 }
 
 #[test]
@@ -375,10 +341,11 @@ fn uint_store_mul_shape_and_degree_match_design() {
     let air = UintStoreMulAir;
 
     assert_eq!(air.width(), 44);
-    assert_eq!(air.aux_width(), 27);
-    assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 24);
-    let mut expected_shape = [2usize; 24];
+    assert_eq!(air.aux_width(), 24);
+    assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 21);
+    let mut expected_shape = [2usize; 21];
     expected_shape[0] = 1;
+    expected_shape[1] = 1;
     assert_eq!(crate::tests::lookup_column_shape(&air), &expected_shape);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -427,49 +394,51 @@ fn uint_store_mul_lookup_matches_its_standalone_components() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
-    // Compare the two repacked columns against the exact rational sums of their standalone source
-    // columns. This checks every row and does not erase interactions that happen to balance.
-    const STORE_RAW_PROVIDE_COL: usize = 10;
-    const MUL_PROVIDE_COL: usize = 0;
-    const MUL_BOUND_RAW_COL: usize = 2;
-    const MUL_TAIL_RANGE16_COL: usize = 12;
-    const COMPOSITE_PROVIDES_COL: usize = 10;
-    const COMPOSITE_BOUND_RANGE16_COL: usize = 21;
-
+    // Compare each row before cancellation across rows. Both schedules, including their
+    // inactive tails, must contribute the same rational sum as the standalone components.
     let composite_folds =
         lookup_column_folds(&lookup_fractions(&UintStoreMulAir, &composite_main, &challenges));
     let store_folds =
         lookup_column_folds(&lookup_fractions(&UintStoreAir, &store_main, &challenges));
     let mul_folds = lookup_column_folds(&lookup_fractions(&UintMulAir, &mul_main, &challenges));
-
+    let range16 = |multiplicity: Felt, w: Felt| {
+        (QuadFelt::new([multiplicity, Felt::ZERO]), Range16Msg { w }.encode(&challenges))
+    };
     for row in 0..composite_main.height() {
+        let mul_local = &mul_main.values[row * MUL_NUM_MAIN_COLS..][..MUL_NUM_MAIN_COLS];
+        // Check the two selected columns separately so errors cannot cancel against another
+        // column in the same row. Range16 terms are split out of paired standalone columns.
+        let store_and_kappa = match row % 8 {
+            0 | 4 => store_folds[row][0], // UintVal provide
+            2 | 6 => range16(Felt::ONE, store_main.values[row * NUM_MAIN_COLS + 8]),
+            7 => range16(mul_local[MUL_COL_ACT], mul_local[MUL_COL_KAPPA_A]),
+            _ => (QuadFelt::ZERO, QuadFelt::ONE),
+        };
         assert_same_rational_fold(
-            composite_folds[row][COMPOSITE_PROVIDES_COL],
-            add_rational_folds(
-                store_folds[row][STORE_RAW_PROVIDE_COL],
-                mul_folds[row][MUL_PROVIDE_COL],
-            ),
-            "packed store/mul provide column must preserve both source fractions",
+            composite_folds[row][0],
+            store_and_kappa,
+            "selected store/kappa column must preserve its source term",
+        );
+        let mul_relation = match row % 8 {
+            0 | 1 => mul_folds[row][1], // UintLimbs a/b consume
+            2 => mul_folds[row][2],     // UintLimbs bound consume
+            3 | 5 | 6 => range16(mul_local[MUL_COL_ACT], mul_local[0]),
+            4 => mul_folds[row][14], // UintVal r consume
+            7 => mul_folds[row][0],  // UintMul provide
+            _ => unreachable!(),
+        };
+        assert_same_rational_fold(
+            composite_folds[row][1],
+            mul_relation,
+            "selected mul relation column must preserve its source term",
         );
         assert_same_rational_fold(
-            composite_folds[row][COMPOSITE_BOUND_RANGE16_COL],
+            sum_rational_folds(composite_folds[row].iter().copied()),
             add_rational_folds(
-                mul_folds[row][MUL_BOUND_RAW_COL],
-                mul_folds[row][MUL_TAIL_RANGE16_COL],
+                sum_rational_folds(store_folds[row].iter().copied()),
+                sum_rational_folds(mul_folds[row].iter().copied()),
             ),
-            "packed bound/Range16 column must preserve both source fractions",
-        );
-    }
-
-    for (name, folds, column) in [
-        ("store raw provide", &store_folds, STORE_RAW_PROVIDE_COL),
-        ("mul provide", &mul_folds, MUL_PROVIDE_COL),
-        ("mul bound raw consume", &mul_folds, MUL_BOUND_RAW_COL),
-        ("mul tail Range16", &mul_folds, MUL_TAIL_RANGE16_COL),
-    ] {
-        assert!(
-            folds.iter().any(|row| row[column].0 != QuadFelt::ZERO),
-            "fixture must activate {name}",
+            "packed store/mul row must preserve every source fraction",
         );
     }
 

@@ -301,10 +301,10 @@ mod tests {
         let geometry = live_geometry();
         assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(geometry.main, vec![48, 112, 56, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
-        assert_eq!(geometry.aux, vec![16, 40, 16, 8, 24, 56, 8, 8, 24, 24, 16, 8]);
+        assert_eq!(geometry.aux, vec![16, 40, 16, 8, 16, 48, 8, 8, 16, 24, 16, 8]);
         assert_eq!(geometry.quotient, 8);
-        assert_eq!(geometry.row_felts(), 1_584);
-        assert_eq!(geometry.row_blocks(), 198);
+        assert_eq!(geometry.row_felts(), 1_536);
+        assert_eq!(geometry.row_blocks(), 192);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
         assert_eq!(plan.segment_count(), 26, "one segment per occupied per-chiplet block");

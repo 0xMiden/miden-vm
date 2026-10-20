@@ -96,7 +96,7 @@ use crate::precompiles::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 37 main witness columns:
+// 39 main witness columns:
 //
 // - Structural (2): act, absorption_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
@@ -131,7 +131,7 @@ pub const COL_H_END: usize = COL_H_BEGIN + DIGEST_WIDTH;
 
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
 /// parents that consume it (DAG sharing / dedup, mirroring the
-/// Keccak-node band's `out_mult`). A plain count pinned to the consumer
+/// Keccak node's `out_mult`). A plain count pinned to the consumer
 /// count by `Binding` bus balance — not range-checked (see the design
 /// notes); `0` on the root (no parent) and on inactive rows.
 pub const COL_OUT_MULT: usize = COL_H_END;
@@ -296,8 +296,13 @@ pub const COL_MSM_EXPR: usize = COL_MSM_IDX + 1;
 /// the curve MSM frame; continuation rows inherit the chaining value inside Eidos.
 pub const COL_MSM_IS_HEAD: usize = COL_MSM_EXPR + 1;
 
+/// Uint addition selector, equal to `is_uint_op * is_add`.
+pub const COL_IS_UINT_ADD: usize = COL_MSM_IS_HEAD + 1;
+/// Uint subtraction selector, equal to `is_uint_op * is_sub`.
+pub const COL_IS_UINT_SUB: usize = COL_IS_UINT_ADD + 1;
+
 /// Total number of main witness columns.
-pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
+pub const NUM_MAIN_COLS: usize = COL_IS_UINT_SUB + 1;
 
 /// ZERO_HASH is the remaining active family. Its boolean constraint enforces the family one-hot.
 pub fn zero_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
@@ -335,24 +340,21 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// 10 aux columns. Simultaneous interactions are product-batched; the
-// mutually exclusive typed relations in col 3 share a direct group. Every
-// closing constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
+// Eight aux columns. Simultaneous interactions are product-batched; the typed relation
+// consumes share a selected group because their node/operation selectors are mutually exclusive.
+// The two uint-operation witness selectors keep its denominator degree two. Every closing
+// constraint has degree at most three (`log_quotient_degree = 1`).
 //
-// - col 0: Binding bus child pair for AND, uint op, EC create, and EC op rows — `consume-lhs` +
-//   `consume-rhs`.
-// - col 1: The linear, head-aware terminal `EidosOut` + `provide-h` (the True-binding provide).
-// - col 2: Eidos block + initial CV.
-// - col 3: Typed value relations — one of `consume-uint`, `consume-uintmul`, or `consume-ecpoint`
-//   on their mutually exclusive row families.
-// - col 4: `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
-// - col 5: `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 6: `provide-group`, alone (heavy).
-// - col 7: `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 8: EcMsm continuation — `consume-base-group` + `consume-scalar-uint`.
-// - col 9: EcMsm continuation — `consume-msmclaimterm` + `consume-msmexpr`.
-pub const NUM_AUX_COLS: usize = 10;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 2, 2, 1, 1, 1, 1, 1, 2, 2];
+// - col 0: Binding child pair for AND, uint op, EC create, and EC op rows.
+// - col 1: Terminal Eidos output and True binding.
+// - col 2: Eidos block and initial CV.
+// - col 3: UintVal, UintMul, EcPoint, or one uint/EC addition/subtraction relation.
+// - col 4: Uint value binding, with a transient-scaled degree-two message.
+// - col 5: Group value binding.
+// - col 6: EcMsm base and scalar bindings.
+// - col 7: EcMsm claim term and expression.
+pub const NUM_AUX_COLS: usize = 8;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 2, 2, 1, 1, 1, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -471,6 +473,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let is_mul: AB::Expr = local[COL_IS_MUL].into();
         let is_is: AB::Expr = local[COL_IS_IS].into();
         builder.assert_bool(is_add.clone());
+        builder.assert_eq(local[COL_IS_UINT_ADD], is_uint_op.clone() * is_add.clone());
+        builder.assert_eq(local[COL_IS_UINT_SUB], is_uint_op.clone() * is_sub.clone());
         for col in [COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
             builder.assert_bool(local[col]);
         }
@@ -778,7 +782,6 @@ where
         let selected_mult_deg = Deg { v: 2, u: 1 };
         let selected_relation_deg = Deg { v: 1, u: 2 };
         let value_provide_deg = Deg { v: 3, u: 2 };
-        let mixed_relation_deg = Deg { v: 2, u: 2 };
         let group_provide_deg = Deg { v: 3, u: 1 };
         let linear_pair_deg = Deg { v: 2, u: 2 };
         let selected_pair_deg = Deg { v: 3, u: 2 };
@@ -787,7 +790,7 @@ where
         // These canonical fields permit one linear child pair for all three families.
         // PAI has no children; MSM needs a separate Group child with a zero bound.
         let child_gate = is_and + is_uint_op.clone() + is_ec_create.clone() + is_ec_op.clone();
-        let child_tag = (is_uint_op.clone() + is_ec_create)
+        let child_tag = (is_uint_op + is_ec_create)
             * LB::Expr::from(Felt::from(ValueTag::Uint as u8))
             + is_ec_op.clone() * LB::Expr::from(Felt::from(ValueTag::Group as u8));
         frac_col!(
@@ -860,10 +863,12 @@ where
             ),
         );
 
-        // col 3: one typed relation consume. The node-family and operation
-        // one-hots make the UintVal, UintMul, and EcPoint selectors mutually
-        // exclusive, so their direct group preserves the selected fraction
-        // without product-batching the three denominators.
+        // Each row selects at most one relation. Splitting add/sub keeps payloads affine;
+        // the witnessed uint selectors and their EC complements keep all selectors affine too.
+        let uint_add: LB::Expr = local[COL_IS_UINT_ADD].into();
+        let uint_sub: LB::Expr = local[COL_IS_UINT_SUB].into();
+        let ec_add = is_add - uint_add.clone();
+        let ec_sub = is_sub - uint_sub.clone();
         builder.next_column(
             |col| {
                 col.group(
@@ -908,6 +913,41 @@ where
                             },
                             selected_relation_deg,
                         );
+                        // For subtraction, UintAdd checks b + result = a.
+                        // The EC relation below checks result + Q = P.
+                        for (flag, a, b, c) in [
+                            (uint_add, a_ptr.clone(), b_ptr.clone(), ptr.clone()),
+                            (uint_sub, b_ptr.clone(), ptr.clone(), a_ptr.clone()),
+                        ] {
+                            g.add(
+                                "consume-uintadd",
+                                flag,
+                                || UintAddMsg {
+                                    bound_ptr: bound_ptr.clone(),
+                                    a_ptr: a,
+                                    b_ptr: b,
+                                    c_ptr: c,
+                                    nz: LB::Expr::ZERO,
+                                },
+                                selected_relation_deg,
+                            );
+                        }
+                        for (flag, p, r) in [
+                            (ec_add, a_ptr.clone(), ptr.clone()),
+                            (ec_sub, ptr.clone(), a_ptr.clone()),
+                        ] {
+                            g.add(
+                                "consume-ecgroupadd",
+                                flag,
+                                || EcGroupAddMsg {
+                                    group_ptr: local[COL_EC_CONTEXT_GROUP_PTR].into(),
+                                    p_ptr: p,
+                                    q_ptr: b_ptr.clone(),
+                                    r_ptr: r,
+                                },
+                                selected_relation_deg,
+                            );
+                        }
                     },
                     selected_relation_deg,
                 );
@@ -934,33 +974,10 @@ where
             ),
         );
 
-        // col 5: the UintAdd relation consume, alone (heavy — a role-mixed
-        // degree-2 message). Serves add / sub with the roles mixed per-op
-        // (sub is the arrangement b + r = a).
-        frac_col!(
-            builder,
-            "uint-relations",
-            mixed_relation_deg,
-            (
-                "consume-uintadd",
-                is_uint_op.clone() * (is_add.clone() + is_sub.clone()),
-                UintAddMsg {
-                    bound_ptr: bound_ptr.clone(),
-                    a_ptr: is_add.clone() * a_ptr.clone() + is_sub.clone() * b_ptr.clone(),
-                    b_ptr: is_add.clone() * b_ptr.clone() + is_sub.clone() * ptr.clone(),
-                    c_ptr: is_add.clone() * ptr.clone() + is_sub.clone() * a_ptr.clone(),
-                    nz: LB::Expr::ZERO,
-                },
-                mixed_relation_deg
-            ),
-        );
         // The EC columns read their fields fresh from `local` (cheap Copy
         // reads), so the earlier columns are free to move their copies.
         let g_h: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
         let ec_value_ptr: LB::Expr = local[COL_PTR].into();
-        let ec_op_lhs_ptr: LB::Expr = local[COL_A_PTR].into();
-        let ec_op_rhs_ptr: LB::Expr = local[COL_B_PTR].into();
-        let ec_context_group_ptr: LB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
         // An EcMsm boundary binds its value point as a `Group` node — it
         // rides the same Group provide as create / result ops.
         let g_is_msm_last: LB::Expr = local[COL_IS_MSM_LAST].into();
@@ -973,7 +990,7 @@ where
         let g_out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let g_neg_out_mult: LB::Expr = LB::Expr::ZERO - g_out_mult;
 
-        // col 6: provide the created / result point's `Group` binding
+        // col 5: provide the created / result point's `Group` binding
         // (create ∪ add/sub), alone (heavy). Create / pai / result-binding
         // ec ops (not Is, which binds True) provide their result binding.
         frac_col!(
@@ -988,34 +1005,7 @@ where
             ),
         );
 
-        // col 7: EcGroupAdd ties an EcBinOp Add/Sub's operands and result,
-        // alone (heavy — a role-mixed degree-2 message).
-        // COL_EC_CONTEXT_GROUP_PTR is only live for the binop/MSM paths.
-        frac_col!(
-            builder,
-            "ec-relations",
-            mixed_relation_deg,
-            (
-                "consume-ecgroupadd",
-                ec_result.clone(),
-                EcGroupAddMsg {
-                    group_ptr: ec_context_group_ptr.clone(),
-                    // The consume's `ec_result` gate already pins
-                    // an add/sub row, so the slot compression rides the bare
-                    // op flags (degree-1). Add: (P, Q, R) — P + Q = R.
-                    // Sub: (R, Q, P) — R + Q = P, R (ptr) the first
-                    // operand, P (a_ptr) the result.
-                    p_ptr: is_add.clone() * ec_op_lhs_ptr.clone()
-                        + is_sub.clone() * ec_value_ptr.clone(),
-                    q_ptr: (is_add.clone() + is_sub.clone()) * ec_op_rhs_ptr.clone(),
-                    r_ptr: is_add.clone() * ec_value_ptr.clone()
-                        + is_sub.clone() * ec_op_lhs_ptr.clone(),
-                },
-                mixed_relation_deg
-            ),
-        );
-
-        // col 8/9: the EcMsm continuation-run consumes. Per row: the
+        // col 6/7: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
         // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
         // (positionless — tying to the chiplet's term *multiset*, so the absorb
