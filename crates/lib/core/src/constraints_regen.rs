@@ -179,9 +179,12 @@ struct PreprocessedCommitments {
 type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 
 fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
-    let statement =
-        Statement::<Felt, QuadFelt, MidenMultiAir>::new(MidenMultiAir::new(), vec![], vec![])
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+        MidenMultiAir::new(),
+        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![],
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let params = config::pcs_params();
     Ok(PreprocessedCommitments {
         blake3: compute_preprocessed_commitment(

@@ -163,7 +163,7 @@ fn trace_of_height(height: usize) -> RowMajorMatrix<Felt> {
 }
 
 #[test]
-fn statement_inputs_are_indexed_and_zero_filled() {
+fn statement_inputs_are_indexed_and_required() {
     let cases = [
         (
             vec![0, 1, 0, 2, 0],
@@ -172,11 +172,12 @@ fn statement_inputs_are_indexed_and_zero_filled() {
         ),
         (
             vec![1, 2, 1],
-            vec![(2, vec![7]), (0, vec![3])],
+            vec![(2, vec![7]), (0, vec![3]), (1, vec![0, 0])],
             vec![vec![3], vec![0, 0], vec![7]],
         ),
         (vec![0, 0], vec![], vec![vec![], vec![]]),
-        (vec![2], vec![], vec![vec![0, 0]]),
+        (vec![2], vec![(0, vec![0, 0])], vec![vec![0, 0]]),
+        (vec![0, 0], vec![(1, vec![])], vec![vec![], vec![]]),
     ];
     for (counts, entries, expected) in cases {
         let airs = counts
@@ -208,14 +209,25 @@ fn statement_inputs_are_indexed_and_zero_filled() {
             Vec::new(),
         )
     };
+    for (entries, expected, actual) in [
+        (vec![], 2, 0),
+        (vec![(1, vec![])], 2, 0),
+        (vec![(0, vec![])], 2, 0),
+        (vec![(0, vec![Felt::ZERO])], 2, 1),
+        (vec![(0, vec![Felt::ZERO; 3])], 2, 3),
+        (vec![(0, vec![Felt::ZERO; 2]), (1, vec![Felt::ZERO])], 0, 1),
+    ] {
+        assert!(matches!(
+            statement(entries),
+            Err(InstanceError::PublicValuesLengthMismatch { expected: e, actual: a })
+                if e == expected && a == actual
+        ));
+    }
     for entries in [
-        vec![(0, vec![])],
-        vec![(0, vec![Felt::ZERO])],
-        vec![(0, vec![Felt::ZERO; 3])],
-        vec![(1, vec![Felt::ZERO])],
         vec![(2, vec![])],
         vec![(usize::MAX, vec![])],
         vec![(1, vec![]), (1, vec![])],
+        vec![(0, vec![Felt::ZERO; 2]), (0, vec![Felt::ZERO; 2])],
     ] {
         assert!(matches!(statement(entries), Err(InstanceError::InvalidPublicInputs)));
     }
@@ -389,8 +401,11 @@ fn air_order_reflects_caller_order() {
         TinyAir::new([]),
         TinyAir::new([]),
     ];
-    let inputs =
-        vec![(2, vec![Felt::from_u64(11)]), (0, vec![Felt::from_u64(3), Felt::from_u64(4)])];
+    let inputs = vec![
+        (2, vec![Felt::from_u64(11)]),
+        (0, vec![Felt::from_u64(3), Felt::from_u64(4)]),
+        (1, vec![Felt::ZERO]),
+    ];
     let traces = [(7, 16), (0, 8), (11, 4)]
         .map(|(start, height)| generate_pow4_trace(Felt::from_u64(start), height));
     let prover_statement = tiny_prover_statement(airs.clone(), traces.to_vec(), inputs).unwrap();
@@ -422,8 +437,16 @@ fn air_order_reflects_caller_order() {
     .unwrap();
     assert_eq!(trace_order.instance_indices(), &[2, 1, 0]);
     for bad_inputs in [
-        vec![(0, vec![Felt::from_u64(3), Felt::from_u64(5)]), (2, vec![Felt::from_u64(11)])],
-        vec![(0, vec![Felt::from_u64(11), Felt::from_u64(3)]), (2, vec![Felt::from_u64(4)])],
+        vec![
+            (0, vec![Felt::from_u64(3), Felt::from_u64(5)]),
+            (2, vec![Felt::from_u64(11)]),
+            (1, vec![Felt::ZERO]),
+        ],
+        vec![
+            (0, vec![Felt::from_u64(11), Felt::from_u64(3)]),
+            (2, vec![Felt::from_u64(4)]),
+            (1, vec![Felt::ZERO]),
+        ],
     ] {
         let statement =
             Statement::new(TestMultiAir::new(airs.clone()), bad_inputs, Vec::new()).unwrap();

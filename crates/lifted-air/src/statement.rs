@@ -2,7 +2,7 @@
 //! holds per-proof caller inputs, and [`ProverStatement`] adds per-AIR main
 //! traces.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use p3_challenger::CanObserve;
@@ -45,9 +45,9 @@ where
 {
     /// Construct a [`Statement`] from `(AIR instance index, public inputs)` entries.
     ///
-    /// Entries may appear in any order. Omitted AIRs receive zeros sized to their
-    /// declared public-input count. Duplicate indices, indices outside `multi_air.airs()`,
-    /// and entries whose lengths differ from the AIR's declaration are rejected.
+    /// Entries may appear in any order. Only AIRs with no public inputs may be omitted.
+    /// Duplicate indices, indices outside `multi_air.airs()`, and entries whose lengths
+    /// differ from the AIR's declaration are rejected.
     ///
     /// This assumes `multi_air` satisfies the structural contract checked by
     /// [`crate::debug::assert_multi_air_valid`]; malformed AIR definitions (for
@@ -62,20 +62,30 @@ where
         let mut inputs: Vec<_> = (0..airs.len()).map(|_| None).collect();
         for (air_index, values) in air_inputs {
             let slot = inputs.get_mut(air_index).ok_or(InstanceError::InvalidPublicInputs)?;
-            if slot.is_some() || values.len() != airs[air_index].num_public_values() {
+            if slot.is_some() {
                 return Err(InstanceError::InvalidPublicInputs);
             }
             *slot = Some(values);
         }
+        let air_inputs = inputs
+            .into_iter()
+            .zip(airs)
+            .map(|(values, air)| {
+                let values = values.unwrap_or_default();
+                let expected = air.num_public_values();
+                if values.len() != expected {
+                    return Err(InstanceError::PublicValuesLengthMismatch {
+                        expected,
+                        actual: values.len(),
+                    });
+                }
+                Ok(values)
+            })
+            .collect::<Result<_, _>>()?;
         let max = multi_air.max_aux_inputs();
         if aux_inputs.len() > max {
             return Err(InstanceError::AuxInputsTooLong { actual: aux_inputs.len(), max });
         }
-        let air_inputs = inputs
-            .into_iter()
-            .zip(airs)
-            .map(|(values, air)| values.unwrap_or_else(|| vec![F::ZERO; air.num_public_values()]))
-            .collect();
         Ok(Self {
             multi_air,
             air_inputs,
@@ -92,7 +102,7 @@ where
         self.multi_air.airs()
     }
 
-    /// Public inputs for every AIR in instance order, including zero-filled omitted entries.
+    /// Public inputs for every AIR in instance order, including empty slices for omitted AIRs.
     pub fn air_inputs(&self) -> &[Vec<F>] {
         &self.air_inputs
     }
@@ -327,6 +337,9 @@ where
 /// trust boundary on caller-supplied inputs.
 #[derive(Debug, Error)]
 pub enum InstanceError {
+    #[error("expected {expected} public inputs, but got {actual}")]
+    PublicValuesLengthMismatch { expected: usize, actual: usize },
+
     #[error("invalid public inputs")]
     InvalidPublicInputs,
 

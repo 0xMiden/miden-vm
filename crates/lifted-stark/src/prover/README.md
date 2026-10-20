@@ -30,7 +30,8 @@ and framed observation of the total public-input count, flattened `air_inputs`, 
 
 A `Statement` wraps a `MultiAir` with per-AIR `air_inputs` and optional `aux_inputs`.
 `Statement::new` accepts `(AIR instance index, public inputs)` entries, validates each
-entry against its AIR, and fills omitted entries with zeros. A `ProverStatement` wraps a `Statement`
+entry against its AIR, and permits omission only for AIRs with no public inputs.
+A `ProverStatement` wraps a `Statement`
 with `traces()` (per-AIR main witness traces in instance order); `ProverStatement::new`
 validates the trace shape. The same `MultiAir` drives both proving and
 verification — the verifier takes the `Statement`, the prover the `ProverStatement`.

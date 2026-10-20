@@ -16,12 +16,12 @@
 
 #### Changes
 
+- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#3410](https://github.com/0xMiden/miden-vm/issues/3410)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 - [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#4041](https://github.com/0xMiden/miden-vm/pull/4041)).
 - [BREAKING] Removed RPO, RPX, and Poseidon2 hash implementations from the crypto crate and their VM and precompile proof configurations. Eidos, BLAKE3, and Keccak remain supported; proofs using the removed hashes are rejected ([#3504](https://github.com/0xMiden/miden-vm/issues/3504)).
 
-- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and zero-fills omitted AIRs; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#3410](https://github.com/0xMiden/miden-vm/issues/3410)).
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).

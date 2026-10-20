@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn external_assertion_matches_the_protocol_version() {
         use miden_lifted_air::Statement;
-        use miden_precompiles_air::ChipletMultiAir;
+        use miden_precompiles_air::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
@@ -845,8 +845,15 @@ mod tests {
             .collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
-        let statement =
-            Statement::new(ChipletMultiAir::new(), alloc::vec![], alloc::vec![]).unwrap();
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            alloc::vec![(
+                ChipletAir::TRANSCRIPT_EVAL_INDEX,
+                alloc::vec![Felt::ZERO; NUM_PUBLIC_VALUES]
+            )],
+            alloc::vec![],
+        )
+        .unwrap();
         let actual = statement
             .eval_external(&challenges, &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
