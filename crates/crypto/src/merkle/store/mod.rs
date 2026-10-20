@@ -304,7 +304,7 @@ impl MerkleStore {
         if tree_depth > MAX_DEPTH {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
-        let empty = EmptySubtreeRoots::empty_hashes(MAX_DEPTH);
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
 
         let mut node = root;
         if !self.nodes.contains_key(&node) {
