@@ -549,10 +549,9 @@ fn prove_precompiles_with_budget_corner_cases() {
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
 /// (`miden_air::precompiles::preprocessed`, keyed by LMCS type). Proving and
-/// verifying twice per hash function exercises both the cold path (first
-/// call in the process, builds and caches the bundle) and the warm path
-/// (later calls, reused from cache) for every slot, guarding against a
-/// mismatched or stale cached bundle being reused across hash functions.
+/// verifying twice per hash function exercises bundle reuse and agreement
+/// with the verifier's pinned commitment for every slot, guarding against
+/// a mismatched or stale bundle being reused across hash functions.
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn prove_deferred_state_round_trips_for_every_hash_function() {

@@ -9,7 +9,7 @@ use crate::{
     shared::security::{AirShape, LookupShape},
 };
 
-/// Pinned identity of the precompile relation (raw canonical u64 limbs).
+/// Pinned relation identity and setup commitments for the supported proof configurations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RelationPins {
     /// `Eidos(PROTOCOL_ID || ace_circuit_digest)`, binding the relation's circuit into the
@@ -21,6 +21,10 @@ pub struct RelationPins {
     /// trusted verifier input, not proof data: an in-VM verifier cannot rebuild the bundle, so it
     /// observes this pinned value into the transcript.
     pub preprocessed_commitment: [u64; 4],
+    /// Setup commitment for native proofs using Blake3.
+    pub blake3_preprocessed_commitment: [u8; 32],
+    /// Setup commitment for native proofs using Keccak.
+    pub keccak_preprocessed_commitment: [u64; 4],
 }
 
 /// Pinned identity of the canonical precompile relation.
@@ -44,6 +48,16 @@ pub const PINS: RelationPins = RelationPins {
         6941685244114430330,
         5172579525468662096,
     ],
+    blake3_preprocessed_commitment: [
+        237, 165, 181, 150, 170, 183, 11, 117, 116, 34, 106, 27, 89, 68, 113, 212,
+        124, 97, 90, 201, 199, 30, 220, 145, 185, 5, 104, 155, 67, 55, 138, 126,
+    ],
+    keccak_preprocessed_commitment: [
+        8953595915908445159,
+        18286975921588085812,
+        1662605580119539545,
+        8308041584975270064,
+    ],
 };
 
 /// Relation digest of the precompile relation.
@@ -52,8 +66,14 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = PINS.relation_digest;
 /// ACE circuit digest of the precompile relation.
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = PINS.ace_circuit_digest;
 
-/// Setup commitment of the precompile relation.
+/// Setup commitment of the precompile relation under the Eidos config.
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = PINS.preprocessed_commitment;
+
+/// Setup commitment for native precompile proofs using Blake3.
+pub const PVM_BLAKE3_PREPROCESSED_COMMITMENT: [u8; 32] = PINS.blake3_preprocessed_commitment;
+
+/// Setup commitment for native precompile proofs using Keccak.
+pub const PVM_KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = PINS.keccak_preprocessed_commitment;
 
 /// Pinned identity of the precompile relation.
 pub fn pins() -> &'static RelationPins {
@@ -115,7 +135,7 @@ static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::precompiles::policy;
+    use crate::precompiles::{policy, stark_config};
 
     const UPDATE_HINT: &str = "an intentional relation change must update PINS in air/src/precompiles/protocol.rs and CURRENT_PVM_VERIFIER_ROOT in core/src/proof.rs";
 
@@ -157,10 +177,30 @@ mod tests {
             vec![],
         )
         .unwrap();
-        let config = crate::precompiles::stark_config::eidos_config(
-            policy::precompile_pcs_params(),
-            PINS.relation_digest.map(Felt::new_unchecked),
+        let relation_digest = PINS.relation_digest.map(Felt::new_unchecked);
+        let blake3_config =
+            stark_config::blake3_256_config(policy::precompile_pcs_params(), relation_digest);
+        assert_eq!(
+            <[u8; 32]>::from(
+                miden_lifted_stark::Preprocessed::build(&statement, &blake3_config)
+                    .unwrap()
+                    .commitment(),
+            ),
+            PVM_BLAKE3_PREPROCESSED_COMMITMENT,
+            "{UPDATE_HINT}"
         );
+        let keccak_config =
+            stark_config::keccak_config(policy::precompile_pcs_params(), relation_digest);
+        assert_eq!(
+            <[u64; 4]>::from(
+                miden_lifted_stark::Preprocessed::build(&statement, &keccak_config)
+                    .unwrap()
+                    .commitment(),
+            ),
+            PVM_KECCAK_PREPROCESSED_COMMITMENT,
+            "{UPDATE_HINT}"
+        );
+        let config = stark_config::eidos_config(policy::precompile_pcs_params(), relation_digest);
         let commitment = <[u64; 4]>::from(
             miden_lifted_stark::Preprocessed::build(&statement, &config)
                 .unwrap()

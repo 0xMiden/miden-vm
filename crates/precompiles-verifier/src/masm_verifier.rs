@@ -11,7 +11,8 @@ use alloc::{
 };
 
 use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
+    protocol::PVM_PREPROCESSED_COMMITMENT,
     stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
 };
 use miden_core::{
@@ -152,7 +153,6 @@ fn build_verifier_advice(
         precompile_pcs_params(),
         crate::ace_constants::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed::eidos();
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
@@ -170,7 +170,7 @@ fn build_verifier_advice(
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(preprocessed.commitment()))?;
+        VerifierInstance::new(&config, &statement, Some(PVM_PREPROCESSED_COMMITMENT.into()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;
