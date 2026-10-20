@@ -58,7 +58,7 @@ fn sha512_program_has_the_frozen_shape() {
     assert_eq!(<Sha512CompressionAir as BaseAir<Felt>>::width(&Sha512CompressionAir), 53);
     assert_eq!(Sha512CompressionAir.periodic_columns().len(), program::NUM_PERIODIC_COLS);
     assert_eq!(Sha512CompressionAir.periodic_columns()[0].len(), program::MAX_PERIODIC_LENGTH);
-    assert_eq!(Sha512CompressionAir.aux_width(), 13);
+    assert_eq!(Sha512CompressionAir.aux_width(), 7);
 }
 
 #[test]
@@ -139,8 +139,9 @@ fn assert_add_equations_hold(main: &RowMajorMatrix<Felt>, row_idx: usize) {
     let a_hi = pack_test_bytes(&row[COL_A_BEGIN + 4..COL_A_BEGIN + 8]);
     let b_lo = pack_test_bytes(&row[COL_A_BEGIN + 8..COL_A_BEGIN + 12]);
     let b_hi = pack_test_bytes(&row[COL_A_BEGIN + 12..COL_A_BEGIN + 16]);
-    let r_lo = pack_test_bytes(&row[COL_R_BEGIN..COL_R_BEGIN + 4]);
-    let r_hi = pack_test_bytes(&row[COL_R_BEGIN + 4..COL_R_BEGIN + 8]);
+    let two16 = Felt::from_u32(1 << 16);
+    let r_lo = row[COL_R_BEGIN] + two16 * row[COL_R_BEGIN + 1];
+    let r_hi = row[COL_R_BEGIN + 2] + two16 * row[COL_R_BEGIN + 3];
     assert_eq!(a_lo + b_lo, r_lo + two32 * row[COL_CARRY_LO]);
     assert_eq!(a_hi + b_hi + row[COL_CARRY_LO], r_hi + two32 * row[COL_CARRY_HI]);
 }
@@ -161,11 +162,11 @@ fn sha512_rejects_non_boolean_carries_independently() {
         let base = row * NUM_MAIN_COLS;
         let delta = -Felt::new(1u64 << 32).unwrap().inverse();
         if high {
-            main.values[base + COL_R_BEGIN + 4] += Felt::ONE;
+            main.values[base + COL_R_BEGIN + 2] += Felt::ONE;
             main.values[base + COL_CARRY_HI] += delta;
         } else {
             main.values[base + COL_R_BEGIN] += Felt::ONE;
-            main.values[base + COL_R_BEGIN + 4] += delta;
+            main.values[base + COL_R_BEGIN + 2] += delta;
             main.values[base + COL_CARRY_LO] += delta;
         }
         assert_add_equations_hold(&main, row);
@@ -179,7 +180,7 @@ fn sha512_rejects_non_boolean_carries_independently() {
 #[test]
 fn sha512_rejects_wrong_constant_in_low_and_high_halves() {
     let row = first_slot(program::Op::Const(0x03ff_ffff_ffff_ffff));
-    for offset in [0, 4] {
+    for offset in [0, 2] {
         assert_local_rejects(|main| {
             main.values[row * NUM_MAIN_COLS + COL_R_BEGIN + offset] += Felt::ONE;
         });
@@ -199,7 +200,7 @@ fn sha512_rejects_wrong_rotation_decomposition_in_low_and_high_limbs() {
 #[test]
 fn sha512_rejects_wrong_add_result_in_low_and_high_halves() {
     let row = first_slot(program::Op::Add);
-    for offset in [0, 4] {
+    for offset in [0, 2] {
         assert_local_rejects(|main| {
             main.values[row * NUM_MAIN_COLS + COL_R_BEGIN + offset] += Felt::ONE;
         });
@@ -276,9 +277,50 @@ fn sha512_arithmetic_edges_cover_rotations_and_all_carry_combinations() {
 }
 
 fn trace_word(main: &RowMajorMatrix<Felt>, row: usize, col_begin: usize) -> u64 {
-    u64::from_le_bytes(core::array::from_fn(|i| {
-        main.values[row * NUM_MAIN_COLS + col_begin + i].as_canonical_u64() as u8
-    }))
+    let cells = &main.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS];
+    let bytes = |begin: usize| {
+        u64::from_le_bytes(core::array::from_fn(|i| {
+            cells[begin + i].as_canonical_u64().try_into().expect("byte")
+        }))
+    };
+    if col_begin != COL_R_BEGIN {
+        return bytes(col_begin);
+    }
+    match program::slots()[row % program::COMPRESSION_PERIOD].op {
+        program::Op::Xor => bytes(COL_R_BEGIN),
+        program::Op::And | program::Op::AndNot => {
+            let a = u128::from(bytes(COL_A_BEGIN));
+            let b = u128::from(bytes(COL_A_BEGIN + 8));
+            let x = u128::from(bytes(COL_R_BEGIN));
+            let twice = if matches!(
+                program::slots()[row % program::COMPRESSION_PERIOD].op,
+                program::Op::And
+            ) {
+                a + b - x
+            } else {
+                x + b - a
+            };
+            assert_eq!(twice % 2, 0);
+            (twice / 2).try_into().expect("u64 result")
+        },
+        program::Op::Rol(shift) => {
+            let limbs: [u64; 8] =
+                core::array::from_fn(|i| cells[COL_ROT_BEGIN + i].as_canonical_u64());
+            let k = 1u64 << (shift % 32);
+            let lo = limbs[0] + limbs[6] + ((limbs[1] + limbs[7]) << 16) - k;
+            let hi = limbs[2] + limbs[4] + ((limbs[3] + limbs[5]) << 16) - k;
+            assert!(u32::try_from(lo).is_ok() && u32::try_from(hi).is_ok());
+            let output = lo | (hi << 32);
+            if shift >= 32 { output.rotate_left(32) } else { output }
+        },
+        _ => (0..4)
+            .map(|i| {
+                let limb: u16 =
+                    cells[COL_R_BEGIN + i].as_canonical_u64().try_into().expect("u16 limb");
+                u64::from(limb) << (16 * i)
+            })
+            .sum(),
+    }
 }
 
 #[test]
@@ -296,7 +338,7 @@ fn sha512_expansion_rotation_and_shift_slots_match_native_words() {
     let rotr1_second = rotr1_first + 1;
     assert_eq!(slots[rotr1_second].op, program::Op::Rol(33));
     let w1 = trace_word(&main, 32 + 16 + 15, COL_R_BEGIN);
-    assert_eq!(trace_word(&main, rotr1_second, COL_R_BEGIN), w1.rotate_left(30));
+    assert_eq!(trace_word(&main, rotr1_second, COL_R_BEGIN), w1.rotate_right(1));
     let rotr1_consumer = slots
         .iter()
         .position(|s| matches!(s.op, program::Op::Xor) && s.src_a == rotr1_second as u32)
@@ -383,11 +425,10 @@ fn sha512_compression_records_all_byte_pair_and_range16_demands() {
             *count += usize::try_from(value.as_canonical_u64()).unwrap();
         }
     }
-    // AND and ANDNOT consume the canonical XOR relation through their affine result encodings.
-    // CONST halves are fixed; ROL halves inherit the source word's bounds. Neither needs
-    // another byte lookup, while every rotation still needs its eight u16 limb checks.
-    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (368 + 80 + 24 + 816 + 760) * 8);
-    assert_eq!(counts[COL_MULT_RANGE16], 928 * 8);
+    // Logic rows request eight canonical XOR tuples. INPUT and ADD request four u16 bounds;
+    // each rotation requests eight. CONST halves are fixed by the local constraints.
+    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (368 + 80 + 816) * 8);
+    assert_eq!(counts[COL_MULT_RANGE16], 928 * 8 + (24 + 760) * 4);
     crate::tests::check_local(BytePairLutAir, &bpl_main);
     crate::tests::check_local(Sha512CompressionAir, &main);
 }
@@ -589,17 +630,17 @@ fn sha512_two_block_bus_ranges_logic_inputs_and_add_outputs() {
         let offset = first_slot(op) * NUM_MAIN_COLS + column;
         assert!(
             two_block_bus_residual(|main| {
-                // Keep the packed word unchanged so word lookups and ADD equations cannot
-                // reject this non-byte representation; the byte-pair LUT must do so.
-                let original = pack_test_bytes(&main.values[offset..offset + 4]);
-                let two8 = Felt::from_u32(256);
-                let compensation = (main.values[offset] - two8) * two8.inverse();
+                // Preserve the packed value so only the digit range lookup rejects the alias.
+                let radix =
+                    Felt::from_u32(if matches!(op, program::Op::Add) { 1 << 16 } else { 256 });
+                let original = main.values[offset] + radix * main.values[offset + 1];
+                let compensation = (main.values[offset] - radix) * radix.inverse();
                 main.values[offset + 1] += compensation;
-                main.values[offset] = two8;
-                assert_eq!(pack_test_bytes(&main.values[offset..offset + 4]), original);
+                main.values[offset] = radix;
+                assert_eq!(main.values[offset] + radix * main.values[offset + 1], original);
                 crate::tests::check_local(Sha512CompressionAir, main);
             }) > 0,
-            "{op:?} must reject a non-byte digit"
+            "{op:?} must reject an out-of-range digit"
         );
     }
 }

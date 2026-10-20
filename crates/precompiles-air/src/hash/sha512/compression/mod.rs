@@ -1,9 +1,10 @@
 //! Fixed-program SHA-512 compression AIR.
 //!
 //! Each row executes one instruction from [`program`]. Operands and ordinary results use eight
-//! little-endian bytes; [`Sha512WordMsg`] carries their packed u32 halves between producer and
-//! consumer rows. A phase/cycle controller selects short periodic instruction templates instead
-//! of committing a full 4096-row program table.
+//! little-endian bytes on logic rows. Logic results store XOR bytes; ADD, INPUT, and CONST
+//! store four u16 limbs. [`Sha512WordMsg`] carries the semantic result as two u32 halves. A
+//! phase/cycle controller selects short periodic instruction templates instead of committing a full
+//! 4096-row program table.
 
 pub mod program;
 
@@ -33,8 +34,8 @@ use crate::{
 };
 
 pub const NUM_MAIN_COLS: usize = 53;
-pub const NUM_AUX_COLS: usize = 13;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1];
+pub const NUM_AUX_COLS: usize = 7;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 3, 2, 2, 2, 2, 2];
 pub const COL_BLOCK_ID: usize = 0;
 pub const COL_ACT: usize = 1;
 pub const COL_PHASE_BEGIN: usize = 2;
@@ -55,6 +56,7 @@ pub const COL_ROL_K: usize = 27;
 pub const COL_SWAP: usize = 28;
 pub const COL_A_BEGIN: usize = 29;
 pub const COL_B_BEGIN: usize = 37;
+/// XOR bytes on logic rows; four little-endian u16 limbs on ADD, INPUT, and CONST rows.
 pub const COL_R_BEGIN: usize = 45;
 // ROL has no second operand; ADD has no rotation parameters.
 pub const COL_ROT_BEGIN: usize = COL_B_BEGIN;
@@ -267,6 +269,11 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let hash_phase = phases[program::PHASE_HASH].clone();
     let round: AB::Expr = local[COL_META_T].into();
     let input_word: AB::Expr = local[COL_META_INPUT_WORD].into();
+    // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
+    // IO uses this cell only in the padding phase, where word_phase is zero.
+    builder.assert_zero(
+        word_phase.clone() * input_word.clone() * (input_word.clone() - AB::Expr::ONE),
+    );
     // A word-schedule cycle contains rounds 2*cycle and 2*cycle+1; a hash cycle contains one
     // round. Binding t to these counters prevents substituting another round's constants/fanout.
     builder.assert_zero(
@@ -358,11 +365,11 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let limbs: [AB::Var; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
     let [a_lo, a_hi] = halves_le(&a, 256);
     let [b_lo, b_hi] = halves_le(&b, 256);
-    let [r_lo, r_hi] = halves_le(&r, 256);
+    let [r_lo, r_hi] = value_halves(&r);
     let carry_lo: AB::Expr = local[COL_CARRY_LO].into();
     let carry_hi: AB::Expr = local[COL_CARRY_HI].into();
     // ADD reuses the two ROL-parameter cells as Boolean carries. Its operand halves are bound
-    // to prior u32 results by source lookups; the byte table range-checks its result bytes.
+    // to prior u32 results by source lookups; Range16 bounds the four result limbs.
     builder
         .when(program_gate.clone() * is_add.clone())
         .assert_bool(local[COL_CARRY_LO]);
@@ -419,71 +426,101 @@ fn rotated_halves<E: Algebra<Felt>, V: Copy + Into<E>>(limbs: &[V; 8], k: E, swa
     ]
 }
 
+/// Pack four u16 limbs as two u32 halves. Other result cells are unused on value rows.
+fn value_halves<E: Algebra<Felt>, V: Copy + Into<E>>(r: &[V; 8]) -> [E; 2] {
+    [pack_le(&r[..2], 1 << 16), pack_le(&r[2..4], 1 << 16)]
+}
+
 #[derive(Copy, Clone)]
 pub(super) enum LookupKind {
     Input,
     Destination,
     Sources,
-    Byte(usize),
-    BytePair(usize),
+    LogicPair(usize),
+    ValuePair(usize),
     RangePair(usize),
     MetadataProvider,
     MetadataConsumer,
 }
 
-pub(super) const SHARED_BATCHES: [LookupKind; 13] = [
-    LookupKind::Input,
-    LookupKind::Destination,
-    LookupKind::Sources,
-    LookupKind::Byte(0),
-    LookupKind::Byte(1),
-    LookupKind::Byte(2),
-    LookupKind::Byte(3),
-    LookupKind::Byte(4),
-    LookupKind::Byte(5),
-    LookupKind::Byte(6),
-    LookupKind::Byte(7),
-    LookupKind::MetadataProvider,
-    LookupKind::MetadataConsumer,
-];
-
-pub(super) const fn lookup_batch_degree(kind: LookupKind, activity_degree: usize) -> Deg {
-    match kind {
-        LookupKind::Destination => Deg { v: 3 + activity_degree, u: 3 },
-        LookupKind::Sources => Deg { v: 2 + activity_degree, u: 2 },
-        LookupKind::Input => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::Byte(_) => Deg { v: 1 + activity_degree, u: 2 },
-        LookupKind::BytePair(_) => Deg { v: 3 + activity_degree, u: 4 },
-        LookupKind::RangePair(_) => Deg { v: 2 + activity_degree, u: 2 },
-        LookupKind::MetadataProvider | LookupKind::MetadataConsumer => {
-            Deg { v: 2 + activity_degree, u: 1 }
-        },
+/// Degree including the compression activity and opcode selectors.
+pub(super) const fn lookup_column_degree(index: usize) -> Deg {
+    match index {
+        0 | 1 => Deg { v: 4, u: 4 },
+        2 => Deg { v: 4, u: 3 },
+        3..=6 => Deg { v: 3, u: 4 },
+        _ => panic!("invalid SHA-512 lookup column"),
     }
 }
 
-fn lookup_entry_degree(kind: LookupKind, activity_degree: usize) -> Deg {
-    match kind {
-        LookupKind::Destination => lookup_batch_degree(kind, activity_degree),
-        LookupKind::Sources => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::Input | LookupKind::Byte(_) => lookup_batch_degree(kind, activity_degree),
-        LookupKind::BytePair(_) => Deg { v: 1 + activity_degree, u: 2 },
-        LookupKind::RangePair(_) => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::MetadataProvider | LookupKind::MetadataConsumer => {
-            lookup_batch_degree(kind, activity_degree)
+/// Add compression fractions to a group whose other alternatives use disjoint IO rows.
+pub(super) fn eval_lookup_group<G, V>(
+    group: &mut G,
+    index: usize,
+    local: &[V; NUM_MAIN_COLS],
+    periodic: &[G::Expr; NUM_PERIODIC_COLS],
+    act: G::Expr,
+) where
+    G: LookupGroup,
+    G::Expr: Algebra<Felt>,
+    V: Copy + Into<G::Expr>,
+{
+    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].into() };
+    let emit = |group: &mut G, flag: G::Expr, kinds: &[LookupKind], degree| {
+        group.batch(
+            "compression",
+            flag,
+            |batch| {
+                for &kind in kinds {
+                    eval_lookup_batch(batch, kind, local, periodic);
+                }
+            },
+            degree,
+        );
+    };
+    match index {
+        0 => emit(group, act, &[LookupKind::Destination], lookup_column_degree(index)),
+        1 => emit(
+            group,
+            act,
+            &[LookupKind::Sources, LookupKind::Input],
+            lookup_column_degree(index),
+        ),
+        2 => emit(
+            group,
+            act,
+            &[LookupKind::MetadataProvider, LookupKind::MetadataConsumer],
+            lookup_column_degree(index),
+        ),
+        3..=6 => {
+            let pair = index - 3;
+            let degree = lookup_column_degree(index);
+            let logic = opcode(program::T_IS_XOR)
+                + opcode(program::T_IS_AND)
+                + opcode(program::T_IS_ANDNOT);
+            emit(group, act.clone() * logic, &[LookupKind::LogicPair(pair)], degree);
+            if pair < 2 {
+                emit(
+                    group,
+                    act.clone() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
+                    &[LookupKind::ValuePair(pair)],
+                    degree,
+                );
+            }
+            emit(group, act * opcode(program::T_IS_ROL), &[LookupKind::RangePair(pair)], degree);
         },
+        _ => unreachable!(),
     }
 }
 
 /// Emit one compression lookup batch into an already-opened lookup batch.
 /// Negative multiplicities provide words/table entries; positive multiplicities consume them.
-/// The caller either supplies `act` here or gates the enclosing batch in the composite AIR.
+/// The enclosing group supplies the activity and, for logic/range checks, opcode selectors.
 pub(super) fn eval_lookup_batch<B, V>(
     batch: &mut B,
     kind: LookupKind,
     local: &[V; NUM_MAIN_COLS],
     periodic: &[B::Expr; NUM_PERIODIC_COLS],
-    act: B::Expr,
-    activity_degree: usize,
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
@@ -491,7 +528,13 @@ pub(super) fn eval_lookup_batch<B, V>(
 {
     let v = |index: usize| -> B::Expr { local[index].into() };
     let p = |index: usize| -> B::Expr { periodic[index].clone() };
-    let entry_degree = lookup_entry_degree(kind, activity_degree);
+    let act = B::Expr::ONE;
+    let entry_degree = match kind {
+        LookupKind::Destination => Deg { v: 3, u: 3 },
+        LookupKind::Sources | LookupKind::Input => Deg { v: 1, u: 1 },
+        LookupKind::MetadataProvider | LookupKind::MetadataConsumer => Deg { v: 2, u: 1 },
+        _ => Deg { v: 0, u: 1 },
+    };
 
     match kind {
         LookupKind::Destination => {
@@ -528,12 +571,31 @@ pub(super) fn eval_lookup_batch<B, V>(
                 + p(program::COL_LANE);
             let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
             let limbs: [V; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-            let [r_lo, r_hi] = halves_le(&r, 256);
-            // ROL publishes the reconstructed rotation, not the unrotated bytes in R.
+            let [r_lo, r_hi] = value_halves(&r);
+            let [x_lo, x_hi] = halves_le(&r, 256);
+            let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
+            let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
+            let [a_lo, a_hi] = halves_le(&a, 256);
+            let [b_lo, b_hi] = halves_le(&b, 256);
             let [c_lo, c_hi] = rotated_halves(&limbs, v(COL_ROL_K), v(COL_SWAP));
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            let out_lo = r_lo.clone() + is_rol.clone() * (c_lo - r_lo);
-            let out_hi = r_hi.clone() + is_rol * (c_hi - r_hi);
+            let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
+            let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
+            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.clone() + is_andnot.clone();
+            let half = B::Expr::from(Felt::new_unchecked(0x7fff_ffff_8000_0001));
+            // X is the bytewise XOR. AND=(A+B-X)/2 and ANDNOT=(X-A+B)/2 as integers.
+            // Keep the ROL term separate: nesting it around the logic correction raises degree.
+            let output = |r: B::Expr, x: B::Expr, a: B::Expr, b: B::Expr, rotated: B::Expr| {
+                r.clone()
+                    + logic.clone() * (x.clone() - r.clone())
+                    + is_and.clone()
+                        * (a.clone() + b.clone() - x.clone() * Felt::from_u8(3))
+                        * half.clone()
+                    + is_andnot.clone() * (b - a - x) * half.clone()
+                    + is_rol.clone() * (rotated - r)
+            };
+            let out_lo = output(r_lo, x_lo, a_lo, b_lo, c_lo);
+            let out_hi = output(r_hi, x_hi, a_hi, b_hi, c_hi);
             batch.insert(
                 "dst",
                 -act * dst_mult,
@@ -591,7 +653,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             // instruction slots, so an internal result cannot stand in for a message/state word.
             let bid = v(COL_BLOCK_ID);
             let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-            let [r_lo, r_hi] = halves_le(&r, 256);
+            let [r_lo, r_hi] = value_halves(&r);
             let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
             let ext_addr = B::Expr::from(Felt::from(INPUT_ADDR_BASE)) + v(COL_SRC_A);
             batch.insert(
@@ -606,66 +668,30 @@ pub(super) fn eval_lookup_batch<B, V>(
                 entry_degree,
             );
         },
-        LookupKind::Byte(index) | LookupKind::BytePair(index) => {
-            // A single XOR-table tuple covers each byte's logic and range constraints:
-            // - XOR checks (a, b, r) directly; AND/ANDNOT convert r to an XOR result below.
-            // - ADD/INPUT/CONST check (0, r, r), which range-checks the result byte.
-            // CONST is fixed and ROL inherits source bounds; neither needs byte requests.
-            let bid_kind = matches!(kind, LookupKind::BytePair(_));
-            let pair_indices = if bid_kind {
-                [index * 2, index * 2 + 1]
-            } else {
-                [index, index]
-            };
-            let is_xor = v(COL_PROG_BEGIN + program::T_IS_XOR);
-            let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
-            let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
-            let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
-            let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
-            let logic = is_xor.clone() + is_and.clone() + is_andnot.clone();
-            let value = is_add.clone() + is_input.clone();
-            let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
-            let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
-            let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-            for i in pair_indices {
-                let lut_a = (is_xor.clone() + is_andnot.clone()) * v_at(&a, i)
-                    + is_and.clone() * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i));
-                let b_value = logic.clone() * v_at(&b, i) + value.clone() * v_at(&r, i);
-                // The table stores `lut_a xor b_value`. ANDNOT results map through
-                // `a - b + 2r`; AND reads `lut_a = 255 - a`, so it uses the same identity.
-                let r_i = v_at(&r, i);
-                let x = r_i.clone()
-                    + is_andnot.clone() * (v_at(&a, i) - v_at(&b, i) + r_i.clone())
-                    + is_and.clone()
-                        * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i) - v_at(&b, i) + r_i);
+        LookupKind::LogicPair(index) => {
+            // The canonical XOR table also bounds both source bytes. AND and ANDNOT use the
+            // same tuple; only the semantic destination word depends on the opcode.
+            for i in [2 * index, 2 * index + 1] {
                 batch.insert(
                     "byte",
-                    act.clone()
-                        * (is_xor.clone()
-                            + is_and.clone()
-                            + is_andnot.clone()
-                            + is_add.clone()
-                            + is_input.clone()),
-                    BytePairLutMsg::from_xor(lut_a, b_value, x),
+                    B::Expr::ONE,
+                    BytePairLutMsg::from_xor(
+                        v(COL_A_BEGIN + i),
+                        v(COL_B_BEGIN + i),
+                        v(COL_R_BEGIN + i),
+                    ),
                     entry_degree,
                 );
-                if !bid_kind {
-                    break;
-                }
             }
         },
-        LookupKind::RangePair(index) => {
-            // These u16 bounds turn the ROL decomposition equations into bounded integer
-            // decompositions. They are inactive when B holds ordinary second-operand bytes.
-            let limbs: [V; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-            let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            for i in [index * 2, index * 2 + 1] {
-                batch.insert(
-                    "limb",
-                    act.clone() * is_rol.clone(),
-                    Range16Msg { w: v_at(&limbs, i) },
-                    entry_degree,
-                );
+        LookupKind::ValuePair(index) | LookupKind::RangePair(index) => {
+            let begin = if matches!(kind, LookupKind::ValuePair(_)) {
+                COL_R_BEGIN
+            } else {
+                COL_ROT_BEGIN
+            };
+            for i in [2 * index, 2 * index + 1] {
+                batch.insert("limb", B::Expr::ONE, Range16Msg { w: v(begin + i) }, entry_degree);
             }
         },
         LookupKind::MetadataProvider => {
@@ -721,50 +747,22 @@ pub(super) fn eval_lookup_batch<B, V>(
     }
 }
 
-fn v_at<E, V: Copy + Into<E>>(values: &[V; 8], index: usize) -> E {
-    values[index].into()
-}
-
 pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let periods = builder.periodic_values();
-    let periodic: [LB::Expr; NUM_PERIODIC_COLS] =
-        array::from_fn(|i| periods[periodic_col_offset + i].into());
+    let local = current_main(builder.main(), main_col_offset);
+    let periodic = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
     let act: LB::Expr = local[COL_ACT].into();
-    let batches = [
-        LookupKind::Destination,
-        LookupKind::Sources,
-        LookupKind::Input,
-        LookupKind::BytePair(0),
-        LookupKind::BytePair(1),
-        LookupKind::BytePair(2),
-        LookupKind::BytePair(3),
-        LookupKind::RangePair(0),
-        LookupKind::RangePair(1),
-        LookupKind::RangePair(2),
-        LookupKind::RangePair(3),
-        LookupKind::MetadataProvider,
-        LookupKind::MetadataConsumer,
-    ];
-    for kind in batches {
-        let degree = lookup_batch_degree(kind, 1);
+    for index in 0..NUM_AUX_COLS {
+        let degree = lookup_column_degree(index);
         builder.next_column(
             |column| {
                 column.group(
                     "sha512",
                     |group| {
-                        group.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |batch| {
-                                eval_lookup_batch(batch, kind, &local, &periodic, act.clone(), 1);
-                            },
-                            degree,
-                        );
+                        eval_lookup_group(group, index, &local, &periodic, act.clone());
                     },
                     degree,
                 );
