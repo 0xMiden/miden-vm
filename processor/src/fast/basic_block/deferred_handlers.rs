@@ -9,7 +9,7 @@ use miden_core::{
     Felt, Word, ZERO,
     deferred::{
         DEFERRED_AND_FRAME, DEFERRED_CHUNKS_DOMAIN, DataChunk, DeferredError, Digest, EidosFrame,
-        MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError, TRUE_DIGEST,
+        MAX_DEFERRED_WIRE_ELEMENTS, Node, NodeType, PrecompileError, TRUE_DIGEST,
     },
     serde::Serializable,
     utils::bytes_to_packed_u32_elements,
@@ -80,7 +80,7 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
 /// containing two 4-felt child digests, a framework AND, or a one-pair pair-list payload containing
 /// `lhs || rhs`. TRUE nodes are not accepted. Frames that semantically require more than
 /// one data chunk or pair still form a one-chunk or one-pair node here; precompile-specific
-/// evaluation rejects the semantic length mismatch.
+/// payload validation rejects the length mismatch before registration.
 /// Registration is delegated to [`miden_core::deferred::DeferredState::register`], so
 /// semantic failures, including false predicates, surface immediately. The stack arguments are
 /// part of the VM execution trace, but the event does not constrain the host-side registration.
@@ -187,8 +187,7 @@ pub(super) fn handle_deferred_export_witness(
     }
     let witness = processor
         .deferred_state()
-        .witness_for(digest)
-        .map_err(|_| PrecompileError::InvalidNode)?;
+        .witness_for(digest, processor.execution_options().verification_precompile_limits())?;
     let bytes = witness.to_bytes();
 
     let mut values = bytes_to_packed_u32_elements(&bytes);
@@ -228,9 +227,9 @@ fn push_evaluated_payload(
 /// `n_chunks` [`DataChunk`] values (8 field elements each). Pair-list nodes interpret chunks as
 /// `lhs || rhs` pairs. Precompile-owned join nodes require `n_chunks == 1` and interpret the one
 /// chunk as `lhs || rhs`. Framework-owned AND and TRUE nodes are not accepted. After checking word
-/// alignment, address bounds, and a cheap state-size precheck, registration and semantic evaluation
-/// are delegated to [`miden_core::deferred::DeferredState::register`], so registration failures
-/// surface during this event.
+/// alignment, address bounds, and a hard allocation-size precheck, registration and semantic
+/// evaluation are delegated to [`miden_core::deferred::DeferredState::register`], so registration
+/// failures surface during this event.
 ///
 /// The stack-supplied CV, pointer, and chunk count are visible in the VM execution trace, but the
 /// direct host memory reads below do not add AIR memory constraints. Thus, the event alone does not
@@ -249,7 +248,7 @@ pub(super) fn handle_deferred_register_data(
     }
 
     // Decode the frame before any memory reads. The precompile is the source of truth for payload
-    // shape, but data/pair-list lengths are semantic and checked during registration/evaluation.
+    // shape, and payload lengths are checked during registration before evaluation.
     let node_type = processor.deferred_state().decode(frame)?;
     match node_type {
         NodeType::Data | NodeType::PairList => {},
@@ -259,15 +258,14 @@ pub(super) fn handle_deferred_register_data(
         },
     }
 
-    // Reject nodes that can never fit in the fixed deferred-state budget before
-    // reading memory. Remaining-budget accounting still belongs to `DeferredState::register`,
-    // because only inserting the node into `nodes` tells us whether this registration is an
-    // idempotent duplicate (which must remain free).
+    // Reject a payload exceeding the hard allocation ceiling before reading guest memory. The
+    // configurable execution-work policy is enforced by `DeferredState::register` after the node
+    // and its declared work have been decoded.
     let num_elements = payload_node_num_elements(n);
-    if num_elements > MAX_DEFERRED_ELEMENTS {
+    if num_elements > MAX_DEFERRED_WIRE_ELEMENTS {
         return Err(PrecompileError::from(DeferredError::DeferredStateTooLarge {
             num_elements,
-            max: MAX_DEFERRED_ELEMENTS,
+            max: MAX_DEFERRED_WIRE_ELEMENTS,
         })
         .into());
     }

@@ -188,7 +188,7 @@ fn exact_budget_preserves_dense_sparse_and_partial_inputs() {
         let options = ExecutionOptions::default().with_max_advice_size_bytes(required);
         let actual = inputs.parse_advice_inputs_with_options(&options).unwrap();
         assert_eq!(actual, expected);
-        FastProcessor::new_with_options(StackInputs::default(), actual, options).unwrap();
+        FastProcessor::new_with_options(StackInputs::default(), actual, options.clone()).unwrap();
         let options = options.with_max_advice_size_bytes(required - 1);
         assert!(inputs.parse_advice_inputs_with_options(&options).is_err());
     }

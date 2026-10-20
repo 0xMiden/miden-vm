@@ -24,6 +24,17 @@ fn run_precompile_program(
     run_raw(&format!("{body} exec.::miden::core::sys::truncate_stack end {tail}"))
 }
 
+fn witness_root(witness: &PrecompileWitness) -> Word {
+    witness
+        .clone()
+        .prepare(
+            std::sync::Arc::new(miden_precompiles::registry()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        )
+        .unwrap()
+        .root()
+}
+
 fn and_count(witness: &PrecompileWitness) -> usize {
     witness.entries().iter().filter(|entry| {
         matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
@@ -69,7 +80,7 @@ fn manual_uint_evaluation_and_predicates_bind_the_complete_graph() {
         );
         let output = run_precompile_program(&source).unwrap();
         let witness = assert_exported_manual_root(&output, 0);
-        assert_eq!(witness.root_unchecked(), expected);
+        assert_eq!(witness_root(&witness), expected);
         assert_eq!(
             &read_stack_felts(&output, 16)[4..12],
             &[2, 0, 0, 0, 0, 0, 0, 0].map(Felt::from_u32)
@@ -153,7 +164,7 @@ fn manual_uint_equality_preserves_canonical_bindings_and_high_limb_inequality() 
             );
             let output = run_precompile_program(&source).unwrap();
             let witness = assert_exported_manual_root(&output, 0);
-            assert_eq!(witness.root_unchecked(), expected, "{module}: binding order");
+            assert_eq!(witness_root(&witness), expected, "{module}: binding order");
             assert!(output.advice.get_mapped_values(&comparison).is_some());
             assert_eq!(and_count(&witness), 3);
             assert_eq!(output.stack.get_element(4), Some(Felt::from_u32(u32::from(equal))));
@@ -248,7 +259,7 @@ fn manual_curve_calls_bind_values_and_allow_false_predicates() {
             generator.digest(),
         )
         .unwrap();
-        assert_eq!(witness.root_unchecked(), binding.digest());
+        assert_eq!(witness_root(&witness), binding.digest());
         assert_eq!(read_memory_felts(&output, 68, 4), generator.digest().as_elements());
         assert_eq!(read_memory_felts(&output, 72, 4), x.as_elements());
         assert_eq!(read_memory_felts(&output, 76, 4), y.as_elements());
@@ -275,7 +286,7 @@ fn independent_manual_roots_can_be_composed_without_logging() {
     let lhs = Word::new(read_memory_felts(&output, 0, 4).try_into().unwrap());
     let rhs = Word::new(read_memory_felts(&output, 4, 4).try_into().unwrap());
     let witness = assert_exported_manual_root(&output, 0);
-    assert_eq!(witness.root_unchecked(), Node::and(rhs, lhs).digest());
+    assert_eq!(witness_root(&witness), Node::and(rhs, lhs).digest());
     assert_eq!(and_count(&witness), 1);
     assert!(output.advice.get_mapped_values(&lhs).is_some());
     assert!(output.advice.get_mapped_values(&rhs).is_some());
@@ -317,7 +328,7 @@ fn stored_roots_compose_in_place_preserving_neighbors_and_tail() {
         let output = run_precompile_program(&source).unwrap();
         let witness = assert_exported_manual_root(&output, 0);
         let expected = Node::and(Node::and(seed, first).digest(), second).digest();
-        assert_eq!(witness.root_unchecked(), expected);
+        assert_eq!(witness_root(&witness), expected);
         assert_eq!(read_memory_felts(&output, 64, 4), expected.as_elements());
         assert_eq!(and_count(&witness), seed_ands + 2);
         assert_eq!(read_memory_felts(&output, 60, 4), guards);
@@ -359,7 +370,7 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
                 );
                 let output = run_precompile_program(&source).unwrap();
                 let witness = assert_exported_manual_root(&output, 0);
-                assert_eq!(witness.root_unchecked(), assertion.digest());
+                assert_eq!(witness_root(&witness), assertion.digest());
                 assert_eq!(and_count(&witness), 0, "hash roots must be bare assertions");
                 assert_eq!(
                     &read_stack_felts(&output, 8)[4..],
@@ -372,7 +383,7 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
                 let native = run_precompile_program(&native).unwrap();
                 assert_eq!(
                     native.precompile_root(),
-                    Node::and(TRUE_DIGEST, witness.root_unchecked()).digest()
+                    Node::and(TRUE_DIGEST, witness_root(&witness)).digest()
                 );
                 // Explicit composition must retain the exact hash assertion and caller root.
                 let composed = source.replace(
@@ -381,7 +392,7 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
                 );
                 let composed = run_precompile_program(&composed).unwrap();
                 assert_eq!(
-                    assert_exported_manual_root(&composed, 0).root_unchecked(),
+                    witness_root(&assert_exported_manual_root(&composed, 0)),
                     native.precompile_root()
                 );
                 assert_eq!(read_memory_felts(&composed, 256, expected.len()), expected);
@@ -428,7 +439,7 @@ fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
     "#;
     let output = run_precompile_program(source).unwrap();
     let witness = assert_exported_manual_root(&output, 0);
-    assert_eq!(witness.root_unchecked(), expected);
+    assert_eq!(witness_root(&witness), expected);
     assert_eq!(and_count(&witness), 2);
     assert!(output.advice.get_mapped_values(&sha256.digest()).is_some());
     assert!(output.advice.get_mapped_values(&sha512.digest()).is_some());
