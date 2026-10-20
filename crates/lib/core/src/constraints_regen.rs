@@ -194,7 +194,10 @@ type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commi
 fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![
+            (0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES]),
+            (1, vec![Felt::ZERO; miden_air::NUM_CHIPLETS_PUBLIC_VALUES]),
+        ],
         vec![],
     )
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;

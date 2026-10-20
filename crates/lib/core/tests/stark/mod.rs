@@ -1081,7 +1081,10 @@ fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![
+            (0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES]),
+            (1, vec![Felt::ZERO; miden_air::NUM_CHIPLETS_PUBLIC_VALUES]),
+        ],
         vec![],
     )
     .expect("zero public inputs satisfy the Miden statement shape");
