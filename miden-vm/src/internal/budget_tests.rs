@@ -188,9 +188,7 @@ fn construction_stops_at_the_first_unaffordable_final_node() {
     ];
     for data in cases {
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base_bytes() + 96);
-        let mut provider =
-            miden_processor::advice::AdviceProvider::new(AdviceInputs::default(), &options)
-                .unwrap();
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let mut parents_computed = 0;
         let err = merkle_builder::add_tree(&data, &mut |left, right| {
             parents_computed += 1;
