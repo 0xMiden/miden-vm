@@ -10,12 +10,12 @@ use miden_crypto::hash::{
     sha2::{Sha256, Sha512},
 };
 use miden_precompiles::{
-    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
-    UintDomain, UintPrecompile,
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, MSM_WORK, Sha256Precompile,
+    Sha512Precompile, UintDomain, UintPrecompile,
 };
 
 use crate::{
-    deferred::session::session_from_witnesses,
+    deferred::session::{import_witnesses, session_from_witnesses},
     math::{U256, from_hex, to_limbs32},
     session::SessionTraces,
     tests::batch_witness::WitnessFixture,
@@ -618,7 +618,16 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
             current = next;
         }
         register_curve_equality(&mut state, current.clone(), current);
-        session_from_witnesses(vec![state.witness()])
+        // This tests stack safety beyond the default admission workload, not policy calibration.
+        let limits = miden_precompiles::default_verification_precompile_limits().with_class(
+            MSM_WORK,
+            miden_core::deferred::WorkLimit {
+                max_count: 512,
+                max_total_size: 512,
+                max_size: 1,
+            },
+        );
+        import_witnesses(vec![state.witness()], &limits)
             .expect("deep nested MSM must lower without stack overflow");
     });
 }

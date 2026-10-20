@@ -175,10 +175,29 @@ The standard registry exposes `default_execution_precompile_limits()` and
 `default_verification_precompile_limits()`. They use the same private construction today but remain
 separate policies and configuration surfaces. `ExecutionOptions` configures both execution and
 export policy independently; prover and verifier callers configure verification policy with
-`with_verification_precompile_limits`. Default calibration is separate follow-up work: measure
-preparation, import, and proving for realistic hash, arithmetic, curve, mixed, and worst-case MSM
-workloads, with both little sharing and repeated/shared inputs. The defaults are not
-evidence that 128 maximal inputs are practical.
+`with_verification_precompile_limits`. The default structural allowance is 1,048,576 elements, with
+the following work-class bounds in each policy:
+
+| Work class | Maximum count | Maximum item size | Maximum total size |
+| --- | ---: | ---: | ---: |
+| Hash | 256 | 128 KiB | 256 KiB |
+| Uint | 4,096 | 1 | 4,096 |
+| Non-MSM curve | 512 | 1 | 512 |
+| MSM | 64 | 32 terms | 256 terms |
+
+Hash limits combine all hash algorithms in the class, including hashes used inside signature
+verification. Counts independently bound empty and short hashes. MSM totals include zero scalars
+and repeated bases: 64 four-term MSMs exhaust the total allowance, while 64 thirty-two-term MSMs
+do not fit. These are configurable admission policies, not hard supported-input ceilings of a
+precompile or its selected proving relation. Their structural default is specified independently
+of the transport ceiling even though the two currently have equal values.
+
+These defaults target headroom for 16 secp256k1 ECDSA verifications and application hashes sharing
+the per-witness hash allowance. Estimates for the earlier Keccak/secp256k1 proving configuration
+informed the hash and MSM allowances; they do not establish the memory needs of every supported
+algorithm or guarantee that maximal admitted work fits the memory budget. Actual peak-memory
+measurements and broader workload calibration remain follow-up work; the defaults do not establish
+that 128 maximal inputs are practical.
 
 `MAX_DEFERRED_WIRE_ELEMENTS` remains a separate hard transport/allocation ceiling. The proving
 Session accepts only `PreparedWitness` values and never reapplies logical-work admission. The

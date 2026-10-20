@@ -39,8 +39,8 @@ use crate::{
 /// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV
 /// four-base MSMs.
 const MSM_WNAF_WINDOW: usize = 5;
-// The default hash-byte policy is bounded by the wire payload capacity. Every input it admits
-// stays within the Keccak-node AIR's sponge permutation bound.
+// The hard wire payload ceiling fits within the Keccak-node AIR's sponge permutation bound,
+// independently of configurable admission policy.
 const _: () = assert!(
     (miden_core::deferred::MAX_DEFERRED_WIRE_ELEMENTS * size_of::<u32>()
         / SPONGE_RATE_BYTES as usize)
