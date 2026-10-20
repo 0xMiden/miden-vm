@@ -3,7 +3,7 @@ use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::{
-    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols, config, memory,
+    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, StackCols, SystemCols, config,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
         SYS_TRACE_WIDTH,
@@ -13,12 +13,13 @@ use miden_air::{
 };
 use miden_core::{
     ONE, Word, ZERO,
-    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    field::{PrimeCharacteristicRing, QuadFelt, batch_inversion_allow_zeros},
     mast::{MastForestId, SparseMastForest},
     operations::opcodes,
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
+use miden_crypto::stark::memory;
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -105,7 +106,7 @@ pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
 }
 
 /// Same as [`build_trace`], but with an explicit modelled peak-memory budget instead of the
-/// default. See [`miden_air::memory`] for the model's scope and exclusions.
+/// default. See [`memory`] for the model's scope and exclusions.
 pub fn build_trace_with_budget(
     witness: VmWitness,
     max_prover_memory_bytes: u64,
@@ -156,8 +157,11 @@ fn build_trace_inner(
     // Tier 1: a permissive per-AIR row cap derived from the cheapest AIR's marginal cost, so it
     // never rejects a shape that the exact budget check below would accept. `MAX_TRACE_LEN` is a
     // hard ceiling independent of the budget (row indices are `u32`-backed).
-    let max_trace_len =
-        MAX_TRACE_LEN.min(memory::max_any_height_for_budget(max_prover_memory_bytes, &pcs_params));
+    let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget::<Felt, QuadFelt, _>(
+        &MidenMultiAir::new(),
+        max_prover_memory_bytes,
+        &pcs_params,
+    ));
 
     // Before any trace generation, check that the core trace buffer `generate_core_trace_row_major`
     // is about to allocate (`core_trace_contexts.len() * fragment_size` rows, before any padding or
@@ -230,12 +234,15 @@ fn build_trace_inner(
     let heights: [usize; MIDEN_AIR_COUNT] =
         [core_height, chiplets_height, eidos_compression_height, byte_pair_lookup_rows];
     validate_heights_within_max_trace_len(&heights)?;
-    let estimated_bytes = memory::prover_peak_bytes(&heights, &pcs_params).ok_or(
-        ExecutionError::ProverMemoryExceeded {
-            estimated_bytes: u64::MAX,
-            budget_bytes: max_prover_memory_bytes,
-        },
-    )?;
+    let estimated_bytes = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &MidenMultiAir::new(),
+        &heights,
+        &pcs_params,
+    )
+    .ok_or(ExecutionError::ProverMemoryExceeded {
+        estimated_bytes: u64::MAX,
+        budget_bytes: max_prover_memory_bytes,
+    })?;
     if estimated_bytes > max_prover_memory_bytes {
         return Err(ExecutionError::ProverMemoryExceeded {
             estimated_bytes,
