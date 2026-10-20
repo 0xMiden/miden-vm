@@ -14,7 +14,7 @@
 - [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
 - Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
 - Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
-- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls.
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
 
 ## v0.36.1 (2026-10-16)
 
@@ -26,7 +26,7 @@
 
 #### Fixes
 
-- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee.
+- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
 
 ## v0.36.0 (2026-10-14)
 
