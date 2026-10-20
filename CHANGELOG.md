@@ -8,6 +8,7 @@
 
 #### Fixes
 
+- Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
 - Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes per store while preserving compatibility with existing readers and payloads ([#4060](https://github.com/0xMiden/miden-vm/pull/4060)).
 - [BREAKING] Write CLI proofs and output JSON to sibling temporary files before replacing their destinations, preserving previous artifacts when writes fail. Replacements use the current user and normal file creation permissions instead of copying the previous file's access controls. Destination symlinks are replaced with artifact files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
 - [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).

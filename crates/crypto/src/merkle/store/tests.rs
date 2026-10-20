@@ -905,6 +905,44 @@ fn find_lone_leaf() {
     assert_eq!(res, None);
 }
 
+#[test]
+fn find_lone_leaf_in_trees_shallower_than_64() {
+    for tree_depth in [1u8, 2, 8, 16, 63] {
+        let mut store = MerkleStore::new();
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
+        let mut root: Word = empty[0];
+
+        // a single leaf at the bottom of the tree is a lone leaf for every one of its ancestors
+        let key = (0b0101_0110_u64 << 8 | 0b1010_0101) & ((1u64 << tree_depth) - 1);
+        let idx = NodeIndex::make(tree_depth, key);
+        let val = Word::from([ONE, ONE, ONE, ONE]);
+        root = store.set_node(root, idx, val).unwrap().root;
+
+        for depth in 0..tree_depth {
+            let parent_index = NodeIndex::make(depth, key >> (tree_depth - depth));
+            let parent = store.get_node(root, parent_index).unwrap();
+            let res = store.find_lone_leaf(parent, parent_index, tree_depth).unwrap();
+            assert_eq!(res, Some((idx, val)), "tree_depth {tree_depth}, depth {depth}");
+        }
+    }
+
+    // a second leaf below the root makes the root's lone-leaf lookup return None
+    let mut store = MerkleStore::new();
+    let empty = EmptySubtreeRoots::empty_hashes(8);
+    let mut root: Word = empty[0];
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b0000_0001), Word::from([ONE, ONE, ONE, ONE]))
+        .unwrap()
+        .root;
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b1000_0001), Word::from([ONE, ONE, ONE, ZERO]))
+        .unwrap()
+        .root;
+    let root_index = NodeIndex::make(0, 0);
+    let node = store.get_node(root, root_index).unwrap();
+    assert_eq!(store.find_lone_leaf(node, root_index, 8).unwrap(), None);
+}
+
 // SUBSET EXTRACTION
 // ================================================================================================
 
