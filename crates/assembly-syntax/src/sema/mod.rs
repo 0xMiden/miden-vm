@@ -280,7 +280,7 @@ pub fn analyze(
 
     for constant in module.constants() {
         if !analyzer.is_constant_used(constant) {
-            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
+            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span() });
         }
     }
 
@@ -525,7 +525,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                         &mut used_aliases,
                         None,
                     );
-                    visitor.set_current_constant(Some(constant.name.clone()));
+                    visitor.set_current_constant(Some(constant.name().clone()));
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 if let Err(err) = module.push_export(Item::Constant(constant)) {

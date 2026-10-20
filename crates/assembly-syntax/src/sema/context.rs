@@ -457,8 +457,8 @@ mod tests {
     use crate::{
         Path, PathBuf,
         ast::{
-            ConstantDecl, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module, ModuleImport,
-            ModuleKind, Visibility,
+            ConstantDecl, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module,
+            ModuleImport, ModuleKind, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
         debuginfo::{
