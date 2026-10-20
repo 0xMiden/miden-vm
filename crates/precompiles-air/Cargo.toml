@@ -38,8 +38,10 @@ miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
 miden-precompiles.workspace = true
 miden-utils-sync.workspace = true
+p3-field.workspace = true
 p3-security.workspace = true
 ruint.workspace = true
 
 [dev-dependencies]
 miden-air = { workspace = true, features = ["testing"] }
+miden-constraint-compiler = { workspace = true, features = ["testing"] }

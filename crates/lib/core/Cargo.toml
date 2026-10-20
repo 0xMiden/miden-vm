@@ -35,7 +35,13 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
+constraints-tools = [
+    "std",
+    "dep:miden-air",
+    "dep:miden-ace-codegen",
+    "dep:miden-constraint-compiler",
+    "dep:miden-precompiles-air",
+]
 
 [dependencies]
 # Miden dependencies
@@ -48,6 +54,7 @@ miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
 miden-constraint-compiler = { workspace = true, optional = true }
+miden-precompiles-air = { workspace = true, optional = true }
 
 # External dependencies
 p256 = { workspace = true, features = ["ecdsa"] }

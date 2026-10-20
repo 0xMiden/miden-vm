@@ -26,7 +26,7 @@ use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{
-    ChipletAir,
+    ChipletAir, HandwrittenChipletAir,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{
         chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
@@ -66,7 +66,7 @@ pub const LOOKUP_SHAPE: LookupShape = LookupShape {
     max_message_width: 18,
 };
 
-/// Computes the AIR shape by symbolically evaluating every chiplet AIR.
+/// Computes the AIR shape by symbolically evaluating each handwritten chiplet AIR.
 ///
 /// This allocating pass supports validation and tooling. [`security_report`] uses the stored
 /// [`AIR_SHAPE`] constant.
@@ -80,9 +80,10 @@ pub fn derive_air_shape() -> AirShape {
     let mut fractions_per_row = 0;
 
     for air in airs {
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
-        max_constraint_degree =
-            max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
+        let handwritten = HandwrittenChipletAir(air.clone());
+        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&handwritten).total();
+        max_constraint_degree = max_constraint_degree
+            .max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&handwritten).max());
         num_columns += column_count(&air, COMMITMENT_ALIGNMENT);
         fractions_per_row += fractions_per_row_of(air);
     }

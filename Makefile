@@ -20,9 +20,9 @@ help:
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
-	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
+	@printf "  make check-constraints           # Check MVM/PVM constraint artifacts\n"
 	@printf "  make check-pvm-constants         # Check PVM ACE constants and MASM artifacts\n"
-	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
+	@printf "  make regenerate-constraints      # Regenerate MVM ACE and MVM/PVM native evaluators\n"
 	@printf "  make regenerate-pvm-constants    # Regenerate PVM ACE constants and MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
@@ -337,14 +337,17 @@ exec-avx2: ## Builds an executable with AVX2 acceleration enabled
 exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
-.PHONY: regenerate-constraints
-regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
-	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+.PHONY: regenerate-native-evaluators
+regenerate-native-evaluators: ## Regenerate MVM and PVM native evaluators
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
+
+.PHONY: regenerate-constraints
+regenerate-constraints: regenerate-native-evaluators ## Regenerate MVM ACE and MVM/PVM native evaluators
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: regenerate-pvm-constants
-regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
+regenerate-pvm-constants: regenerate-native-evaluators ## Regenerate PVM artifacts (protocol break)
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
 	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff

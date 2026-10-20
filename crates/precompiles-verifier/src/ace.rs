@@ -16,7 +16,7 @@ use miden_ace_codegen::{
     AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
 };
 use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
+use miden_precompiles_air::{ChipletAir, HandwrittenChipletAir, NUM_CHIPLETS};
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
@@ -31,8 +31,9 @@ const LMCS_ALIGNMENT: usize = 8;
 /// the same implementation keeps the ACE circuit's READ layout coupled to the proof protocol.
 fn num_quotient_chunks() -> usize {
     let max_log_quotient_degree = ChipletAir::all()
+        .map(HandwrittenChipletAir)
         .iter()
-        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
+        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, HandwrittenChipletAir>)
         .max()
         .expect("the chiplet stack is non-empty");
     1usize << max_log_quotient_degree
@@ -53,7 +54,7 @@ fn precompile_ace_config() -> AceConfig {
 /// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
 /// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
 pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = ChipletAir::all();
+    let airs = ChipletAir::all().map(HandwrittenChipletAir);
     build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
 }
 
