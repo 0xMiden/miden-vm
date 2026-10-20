@@ -40,6 +40,12 @@ Eidos produces sixteen raw output lanes:
 stream_i = compress_xof_lanes(K_ctr, [i, 0, 0, 0, 0, 0, 0, 0])
 ```
 
+The joint PRF assumption covers both session-key derivation and the stream keyed by `K_ctr`:
+the stream lanes must be pseudorandom and the MAC key independent of them, even with a public
+nonce and public access to Eidos. The ideal session keys are uniform on
+`D = {0, ..., 2^63 - 1}^4`, matching Eidos's 252-bit output set. The assumption is joint because
+compression and XOF share the same core and have related outputs at identical inputs.
+
 The plaintext limbs are XORed with these lanes. One compression encrypts eight field elements. The
 ciphertext stores each `u32` result as one field element, so ciphertext has twice as many elements
 as plaintext.
@@ -126,10 +132,9 @@ reservation of 65. With `B = 267911168`, stop after 4,121,710 failed tag checks;
 release their reservations. Reserving the library's maximum degree for every check instead
 requires stopping after the first failed tag check at this security target.
 
-The concrete bound adds the Eidos PRF distinguishing advantage for replacing the joint session-key
-derivation with the independent ideal values above. If nonce uniqueness is probabilistic, add the
-nonce-collision probability separately. Successful traffic still affects these terms. The
-polynomial-MAC bound does not establish them.
+The concrete bound adds the joint Eidos distinguishing term described under [Encryption](#encryption).
+If nonce uniqueness is probabilistic, add the nonce-collision probability separately. Successful
+traffic still affects these terms. The polynomial-MAC bound does not establish them.
 
 Protocols using ChaCha20-Poly1305 also limit authentication failures.
 [TLS 1.3, Section 5.2](https://www.rfc-editor.org/rfc/rfc8446.html#section-5.2)

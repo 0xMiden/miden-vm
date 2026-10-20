@@ -11,6 +11,7 @@ use super::{
     multab::{G0, G40, G80, G120, G160, G200, G240, G280},
     scalar::Scalar,
 };
+use crate::utils::zeroize::Zeroizing;
 
 // ========================================================================
 
@@ -354,8 +355,8 @@ impl Point {
     fn set_mul(&mut self, s: &Scalar) {
         // Make a window with affine points.
         let win = self.make_window_affine();
-        let mut ss = [0i32; (319 + Self::WINDOW) / Self::WINDOW];
-        s.recode_signed(&mut ss, Self::WINDOW as i32);
+        let mut ss = Zeroizing::new([0i32; (319 + Self::WINDOW) / Self::WINDOW]);
+        s.recode_signed(&mut ss[..], Self::WINDOW as i32);
         let n = ss.len() - 1;
         *self = PointAffine::lookup(&win, ss[n]).to_point();
         for i in (0..n).rev() {
@@ -370,8 +371,8 @@ impl Point {
     pub fn mulgen(s: Scalar) -> Self {
         // Precomputed tables are for j*(2^(80*i))*G, for i = 0 to 3
         // and j = 1 to 16, i.e. 5-bit windows.
-        let mut ss = [0i32; 64];
-        s.recode_signed(&mut ss, 5);
+        let mut ss = Zeroizing::new([0i32; 64]);
+        s.recode_signed(&mut ss[..], 5);
         let mut P = PointAffine::lookup(&G0, ss[7]).to_point();
         P += PointAffine::lookup(&G40, ss[15]);
         P += PointAffine::lookup(&G80, ss[23]);

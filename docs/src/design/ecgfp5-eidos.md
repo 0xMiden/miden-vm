@@ -36,6 +36,23 @@ Each expansion input is one eight-Felt block. All three outputs are four-Felt wo
 
 The recipient computes the same shared point as `S = dR` and runs the same schedule.
 
+### Security assumptions
+
+The DH assumption is Gap-DH: computing `S` from `Q` and `R` remains hard even with an oracle
+that recognizes valid DH triples. Extraction and the two expansion roles are modeled as
+independent random functions with outputs uniform on `D = {0, ..., 2^63 - 1}^4`.
+This is Eidos's 252-bit output set, rather than the full space of four field elements.
+
+In this model, a fresh extraction output is a uniform secret `prk`. Until an attacker obtains
+or guesses it, the separate expansion roles give independent key and nonce outputs, so disclosing
+the nonce does not disclose the key. Domain separation identifies these roles; their joint
+pseudorandomness is an assumption about Eidos.
+
+For one independent hidden `prk`, `q` guesses succeed with probability at most `q / 2^252`.
+Among `m` distinct extraction inputs, the probability of any PRK collision is at most
+`m * (m - 1) / 2^253`, by counting pairs of uniform outputs. These PRK terms are additional to
+the DH, Eidos, and [AEAD security terms](./eidos-aead.md#usage-limits).
+
 ### Public-key commitments
 
 The MASM `agree` and `seal` procedures take the four-Felt commitment returned by Rust's

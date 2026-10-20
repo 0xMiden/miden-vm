@@ -209,20 +209,60 @@ fn direct_agreement_rejects_invalid_points_scalars_and_witnesses() {
         );
         assert_failure(&test, message);
     }
+    // Invalid encodings from the reference implementation's point-validation vectors.
     let invalid = [
-        13557832913345268708,
-        15669280705791538619,
-        8534654657267986396,
-        12533218303838131749,
-        5058070698878426028,
+        [
+            13557832913345268708,
+            15669280705791538619,
+            8534654657267986396,
+            12533218303838131749,
+            5058070698878426028,
+        ],
+        [
+            135036726621282077,
+            17283229938160287622,
+            13113167081889323961,
+            1653240450380825271,
+            520025869628727862,
+        ],
+        [
+            6727960962624180771,
+            17240764188796091916,
+            3954717247028503753,
+            1002781561619501488,
+            4295357288570643789,
+        ],
+        [
+            4578929270179684956,
+            3866930513245945042,
+            7662265318638150701,
+            9503686272550423634,
+            12241691520798116285,
+        ],
+        [
+            16890297404904119082,
+            6169724643582733633,
+            9725973298012340311,
+            5977049210035183790,
+            11379332130141664883,
+        ],
+        [
+            13777379982711219130,
+            14715168412651470168,
+            17942199593791635585,
+            6188824164976547520,
+            15461469634034461986,
+        ],
     ]
-    .map(Felt::new_unchecked);
-    assert!(PublicKey::from_elements(invalid).is_err());
-    for (point, message) in [
+    .map(|point| point.map(Felt::new_unchecked));
+    for point in invalid {
+        assert!(PublicKey::from_elements(point).is_err());
+    }
+    let points = invalid.into_iter().map(|point| (point, "public key")).chain([
         ([Felt::ZERO; 5], "nonzero public key"),
-        (invalid, "public key"),
         (secret.public_key().to_elements(), "public key"),
-    ] {
+    ]);
+    for (point, message) in points {
         // A matching commitment does not replace point or multiplication-witness validation.
         let commitment = Eidos::hash_elements_in_domain(&point, ECGFP5_PUBLIC_KEY);
         let mut changed = elements.clone();
