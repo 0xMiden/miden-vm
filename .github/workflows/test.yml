@@ -268,8 +268,8 @@ jobs:
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
 
-  check-pvm-artifacts:
-    name: check PVM artifacts
+  pvm-checks:
+    name: PVM checks
     runs-on: warp-ubuntu-latest-x64-8x
     timeout-minutes: 45
     steps:
@@ -285,36 +285,6 @@ jobs:
         run: rustup update --no-self-update
       - name: Check PVM and precompile artifacts for drift
         run: make check-pvm-artifacts
-
-  pvm-checks:
-    name: PVM checks
-    needs: [check-constraints, check-pvm-artifacts]
-    if: ${{ always() }}
-    runs-on: ubuntu-slim
-    permissions: {}
-    steps:
-      - name: Require successful artifact checks
-        env:
-          PASSED: ${{ needs.check-constraints.result == 'success' && needs.check-pvm-artifacts.result == 'success' }}
-        run: test "${PASSED}" = true
-
-  # Keep the deployed required status names until both branches require PVM checks.
-  legacy-pvm-status:
-    name: ${{ matrix.status }}
-    needs: [check-constraints, check-pvm-artifacts]
-    if: ${{ always() }}
-    runs-on: ubuntu-slim
-    permissions: {}
-    strategy:
-      matrix:
-        status:
-          - check PVM registry and MASM artifacts
-          - check recursive constraint and PVM ACE artifacts
-    steps:
-      - name: Require successful artifact checks
-        env:
-          PASSED: ${{ needs.check-constraints.result == 'success' && needs.check-pvm-artifacts.result == 'success' }}
-        run: test "${PASSED}" = true
 
   run-examples:
     name: run masm examples
