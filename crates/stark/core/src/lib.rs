@@ -138,7 +138,7 @@ pub mod air {
 
 /// Stateful hasher primitives for LMCS construction.
 pub mod hasher {
-    pub use miden_stateful_hasher::{
+    pub use miden_crypto::hash::stateful::{
         Alignable, ChainingHasher, SerializingStatefulSponge, StatefulHasher, StatefulSponge,
     };
 }

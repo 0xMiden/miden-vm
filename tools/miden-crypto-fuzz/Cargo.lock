@@ -549,12 +549,12 @@ dependencies = [
  "miden-crypto-derive",
  "miden-field",
  "miden-serde-utils",
- "miden-stateful-hasher",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
  "p3-challenger",
+ "p3-field",
  "p3-goldilocks",
  "p3-keccak",
  "p3-maybe-rayon",
@@ -612,14 +612,6 @@ dependencies = [
  "p3-goldilocks",
  "rustix",
  "wincode",
-]
-
-[[package]]
-name = "miden-stateful-hasher"
-version = "1.0.0"
-dependencies = [
- "p3-field",
- "p3-symmetric",
 ]
 
 [[package]]

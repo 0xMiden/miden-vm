@@ -2,7 +2,7 @@
 
 use alloc::vec;
 
-use miden_stateful_hasher::{SerializingStatefulSponge, StatefulSponge};
+use miden_crypto::hash::stateful::{SerializingStatefulSponge, StatefulSponge};
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_keccak::{Keccak256Hash, KeccakF};
 use p3_symmetric::{CompressionFunctionFromHasher, Hash, PaddingFreeSponge};
