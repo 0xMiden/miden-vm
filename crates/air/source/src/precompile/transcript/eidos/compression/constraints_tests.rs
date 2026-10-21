@@ -13,9 +13,9 @@ use super::{
     testing::generate_felt_trace_block_with_cycle_id,
     trace::EidosCompressionFeltRow,
 };
-use crate::shared::eidos_compression::{
-    core::{EidosCompressionSelectors, get_periodic_column_values},
-    testing as mvm,
+use crate::{
+    shared::eidos::{EidosCompressionSelectors, get_periodic_column_values},
+    vm::eidos_compression::testing as mvm,
 };
 
 struct ConstraintEvalBuilder {

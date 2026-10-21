@@ -15,7 +15,7 @@ use super::{
     },
     views::{FooterOverlayRow, FusedGRow, LookupSlot},
 };
-use crate::shared::eidos_lookup::{self as eidos_lookup, Rotation};
+use crate::shared::eidos::rotation_lookup::{self as eidos_lookup, Rotation};
 
 fn test_block() -> [u32; 16] {
     [

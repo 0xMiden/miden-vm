@@ -1,8 +1,8 @@
 //! PVM bus mapping for the shared Eidos byte-pair rotation relations.
 
 use crate::precompile::relations::BusId;
-pub(super) use crate::shared::eidos_compression::core::rotation_lookup::provider_values;
-pub use crate::shared::eidos_compression::core::rotation_lookup::{
+pub(super) use crate::shared::eidos::rotation_lookup::provider_values;
+pub use crate::shared::eidos::rotation_lookup::{
     BytePairRelation as Relation, NUM_RELATIONS, Rotation, contribution, denormalize, normalize,
 };
 

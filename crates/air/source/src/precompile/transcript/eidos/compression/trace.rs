@@ -4,15 +4,13 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::layout::{NUM_COLS, footer_digest_col};
 #[doc(hidden)]
-pub use crate::shared::eidos_compression::core::trace::{
+pub use crate::shared::eidos::trace::{
     ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
     retag_felt_trace_block_cycle_id,
 };
 #[cfg(any(test, feature = "testing"))]
-use crate::shared::eidos_compression::core::{
-    layout::FOOTER_START, trace::write_core_felt_footer_rows,
-};
-use crate::shared::eidos_compression::core::{
+use crate::shared::eidos::{layout::FOOTER_START, trace::write_core_felt_footer_rows};
+use crate::shared::eidos::{
     layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
     trace::write_core_felt_trace_block_into_zeroed_with_lookups,
 };
@@ -133,7 +131,7 @@ pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
 mod tests {
     use super::*;
     use crate::{
-        shared::eidos_compression::core::{layout::F_CV_STORAGE_COLS, universal_cv_word},
+        shared::eidos::{layout::F_CV_STORAGE_COLS, universal_cv_word},
         vm::trace::eidos_compression::{
             F_COMPRESSION_MULTIPLICITY_COL, TraceMode,
             write_felt_trace_block as write_mvm_trace_block,

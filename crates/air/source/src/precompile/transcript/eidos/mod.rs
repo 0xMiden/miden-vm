@@ -39,9 +39,7 @@ use crate::{
         relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
         utils::{current_main, next_main},
     },
-    shared::eidos_compression::core::{
-        EidosCompressionSelectors, get_periodic_column_values, universal_cv_word,
-    },
+    shared::eidos::{EidosCompressionSelectors, get_periodic_column_values, universal_cv_word},
 };
 
 // MAIN COLUMN LAYOUT
