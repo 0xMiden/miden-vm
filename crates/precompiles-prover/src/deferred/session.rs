@@ -6,11 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{
-    ChipletMultiAir,
-    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
-    stark_config::precompile_pcs_params,
-};
+use miden_air::precompile::{ChipletMultiAir, stark_config::precompile_pcs_params};
+use miden_air_source::precompile::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
 use miden_core::{
     Felt,
     deferred::{

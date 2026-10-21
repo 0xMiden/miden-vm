@@ -1,1 +1,1 @@
-pub use miden_air::precompiles::fixed::*;
+pub use miden_air_source::precompile::fixed::*;

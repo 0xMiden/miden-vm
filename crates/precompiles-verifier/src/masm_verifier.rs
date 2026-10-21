@@ -10,7 +10,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{
+use miden_air::precompile::{
     ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
     protocol::PVM_PREPROCESSED_COMMITMENT,
     stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},

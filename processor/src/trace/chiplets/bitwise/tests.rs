@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 use core::{mem::size_of, ops::Range};
 
-use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
+use miden_air_source::vm::trace::chiplets::bitwise::{
+    BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH,
+};
 use miden_core::{ONE, chiplets::eidos_compression, field::PrimeCharacteristicRing};
 
 use super::{Bitwise, ChipletTraceFragment, Felt};

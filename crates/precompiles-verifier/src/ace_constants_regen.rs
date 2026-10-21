@@ -4,7 +4,7 @@
 //! the captured chiplet AIRs and emits the memory layout, the out-of-domain ingest hook, and the
 //! constraint evaluator from the same relation geometry. Both modes first compare the circuit
 //! digest, relation digest, and circuit shape against the identity pinned in
-//! `miden_air::precompiles::protocol`; generation never accepts a new identity. `--check` then
+//! `miden_air::precompile::protocol`; generation never accepts a new identity. `--check` then
 //! byte-compares every rendered file against its checked-in copy. The relation wrapper and query
 //! loaders import generated parameters; their procedure bodies are not regeneration inputs.
 
@@ -19,8 +19,8 @@ use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, render_masm_constraints_eval,
 };
-use miden_air::precompiles::{NUM_CHIPLETS, security as pvm_security};
-use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation, HeightRule};
+use miden_air::precompile::{NUM_CHIPLETS, security as pvm_security};
+use miden_air_source::precompile::relation::{self, CapturedPvmRelation, HeightRule};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
@@ -243,7 +243,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -254,7 +254,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     };
     let circuit_digest = circuit.commitment;
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
-    // The setup commitment is a trusted verifier input pinned in `miden_air::precompiles`, whose
+    // The setup commitment is a trusted verifier input pinned in `miden_air::precompile`, whose
     // tests rebuild it from the authored setup trace.
     let preprocessed_commitment = Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked));
     let protocol = relation::protocol();
@@ -559,7 +559,7 @@ fn render_pvm_parameters(
             writeln!(output, "pub const {prefix}_{index} = {}", felt.as_canonical_u64()).unwrap();
         }
     }
-    output.push_str("\n# Security descriptor from miden_air::precompiles::security.\n");
+    output.push_str("\n# Security descriptor from miden_air::precompile::security.\n");
     for (name, value) in [
         ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
         (
@@ -590,19 +590,19 @@ fn render_pvm_parameters(
 
     output.push_str("\n# Bus-domain scale factors: BusId + 1 from the native relation registry.\n");
     for (name, bus) in [
-        ("UINT_VAL_BUS_SCALE", miden_air::precompiles::relations::BusId::UintVal),
-        ("EC_GROUP_BUS_SCALE", miden_air::precompiles::relations::BusId::EcGroup),
+        ("UINT_VAL_BUS_SCALE", miden_air::precompile::relations::BusId::UintVal),
+        ("EC_GROUP_BUS_SCALE", miden_air::precompile::relations::BusId::EcGroup),
     ] {
         writeln!(output, "pub const {name} = {}", bus as usize + 1).unwrap();
     }
 
-    let setup_height = miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
+    let setup_height = miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
     if !setup_height.is_power_of_two() {
         return Err("BytePairLut setup height must be a power of two".into());
     }
     let log_height = setup_height.ilog2();
     let depth = log_height
-        + u32::from(miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup());
+        + u32::from(miden_air::precompile::stark_config::precompile_pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(depth)
         .and_then(|size| u32::try_from(size - 1).ok())
@@ -726,7 +726,7 @@ fn masm_word_literal(word: Word) -> String {
 #[cfg(test)]
 mod tests {
     use miden_ace::LayoutKind;
-    use miden_air_definitions::precompiles::relation::CapturedPvmRelation;
+    use miden_air_source::precompile::relation::CapturedPvmRelation;
 
     use super::{
         NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PvmReadLayout, pvm_scratch_allocation,
@@ -738,7 +738,7 @@ mod tests {
         let compiled = captured.compile().unwrap();
         let canonical = compiled.build_circuit(LayoutKind::Masm).unwrap();
         let read_layout = PvmReadLayout::from_input_layout(canonical.layout()).unwrap();
-        let circuit = miden_air::precompiles::protocol::recursive_circuit();
+        let circuit = miden_air::precompile::protocol::recursive_circuit();
         let stream_len = u32::try_from(circuit.stream_len).unwrap();
         let scratch = pvm_scratch_allocation(&read_layout, stream_len).unwrap();
 
@@ -751,7 +751,7 @@ mod tests {
         );
         assert_eq!(
             scratch.allocation_end - scratch.proof_order_ids_ptr,
-            miden_air::precompiles::NUM_CHIPLETS as u32,
+            miden_air::precompile::NUM_CHIPLETS as u32,
             "id_by_pos must reserve exactly one cell per chiplet"
         );
         assert!(scratch.allocation_end <= NEXT_VM_REGION_START);

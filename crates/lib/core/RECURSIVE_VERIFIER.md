@@ -19,7 +19,7 @@ integers and elliptic-curve parameters.
 | VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/precompiles-verifier/src/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
-| Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
+| Fixed-environment bus message catalogue | `crates/air/source/src/precompile/fixed.rs` | `pvm/fixed_boundary.masm` |
 | Fixed-boundary instructions | Templates in `crates/precompiles-verifier/src/masm/` | `pvm/fixed_boundary.masm` |
 | OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
 | Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
@@ -55,7 +55,7 @@ These must match the native bus identifiers plus one, `MIDEN_AIR_COUNT`, and `NU
 respectively. The constants are maintained manually; `make check-constraints` checks the AIR count.
 
 The module's `compute_bus_gamma` routine is specialized to `gamma = beta^16`. The assertion in
-`crates/air/source/src/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
+`crates/air/source/src/vm/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
 requires updating both the routine and the assertion.
 
 Generation requires `MAX_MESSAGE_WIDTH == 18`, matching the PVM gamma addition chain for `beta^18`.

@@ -460,9 +460,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
     // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
     // wrapper overrides that method to inject the corruption.
-    use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_stark::air::{LiftedAir, LiftedAirBuilder};
+    use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
     use crate::hash::keccak::sponge::NUM_AUX_COLS;
 

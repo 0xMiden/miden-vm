@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::{
+use miden_air_source::vm::{
     MidenAir,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
@@ -1324,11 +1324,11 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
     let heights = *summary.padded_heights().expect("build_trace records padded heights");
-    let eidos_compression_height = heights[MidenAir::EidosCompression.instance_index()];
+    let eidos_compression_height = heights[MidenAir::EIDOS_COMPRESSION.instance_index()];
     assert!(
-        eidos_compression_height > heights[MidenAir::Core.instance_index()]
-            && eidos_compression_height > heights[MidenAir::Chiplets.instance_index()]
-            && eidos_compression_height > heights[MidenAir::And8Lookup.instance_index()],
+        eidos_compression_height > heights[MidenAir::CORE.instance_index()]
+            && eidos_compression_height > heights[MidenAir::CHIPLETS.instance_index()]
+            && eidos_compression_height > heights[MidenAir::AND8_LOOKUP.instance_index()],
         "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
     let exact_peak = memory::prover_peak_bytes::<Felt, QuadFelt, _>(

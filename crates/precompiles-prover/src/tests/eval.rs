@@ -2,7 +2,7 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::precompiles::hash::{
+use miden_air_source::precompile::hash::{
     chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
     chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
 };

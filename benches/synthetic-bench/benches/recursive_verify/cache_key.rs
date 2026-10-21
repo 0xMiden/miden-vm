@@ -1,6 +1,6 @@
 //! Cache identity for transaction proofs used by recursive benchmarks.
 
-use miden_air::config::RELATION_DIGEST;
+use miden_air::vm::config::RELATION_DIGEST;
 use miden_core::{
     crypto::hash::Blake3_256, proof::ExecutionProofCompatibility, serde::Serializable,
     utils::to_hex,
@@ -40,7 +40,7 @@ pub(super) fn tx_proof_cache_key(
     compatibility.vm_verifier_roots().write_into(&mut compatibility_bytes);
     compatibility.pvm_verifier_roots().write_into(&mut compatibility_bytes);
     let hash_fn_byte = [INNER_PROOF_HASH as u8];
-    let parameters = pcs_params_bytes(&miden_air::config::pcs_params());
+    let parameters = pcs_params_bytes(&miden_air::vm::config::pcs_params());
     let digest: [u8; 32] = Blake3_256::hash_iter(
         [
             TX_PROOF_CACHE_KEY_VERSION,

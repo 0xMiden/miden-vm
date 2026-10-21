@@ -1,19 +1,19 @@
 //! Whole-AIR invariant tests over the real Miden AIRs.
 //!
-//! Capture uses the authored [`miden_air_definitions::MidenAir`] directly, exercising the
+//! Capture uses the authored [`miden_air_source::vm::MidenAir`] directly, exercising the
 //! hand-written definitions (`miden-constraint-compiler` crate invariant 1).
 //!
 //! Lives here rather than in the compiler crate so `miden-constraint-compiler`
 //! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
 //! `miden-constraint-compiler` → `miden-ace` → `miden-air`.
 
-use miden_air_definitions::{AIRS, BaseAir, Felt};
+use miden_air_source::vm::{AIRS, BaseAir, Felt};
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
 
 #[test]
 fn generated_adapter_preserves_authored_air_layout() {
     for handwritten in AIRS {
-        let air = miden_air::MidenAir::from_definition(handwritten);
+        let air = miden_air::vm::MidenAir(handwritten);
         assert_eq!(
             BaseAir::<Felt>::preprocessed_width(&handwritten),
             BaseAir::<Felt>::preprocessed_width(&air),

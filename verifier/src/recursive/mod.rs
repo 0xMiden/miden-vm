@@ -27,7 +27,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, config};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -40,6 +40,7 @@ use miden_crypto::field::BasedVectorSpace;
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance,
+    air::Statement,
     lmcs::{Lmcs, proof::BatchProofView},
     pcs::{PcsParams, PcsProof},
     proof::{StarkProof, StarkProofData},
@@ -391,12 +392,12 @@ fn build_merkle_data(
     // pinned circuit digest.
     #[cfg(feature = "std")]
     {
-        let circuit = miden_air::ace::shared_recursive_circuit();
+        let circuit = miden_air::vm::ace::shared_recursive_circuit();
         advice_map.push((circuit.commitment, circuit.instructions.clone()));
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::ace::compiled_recursive_circuit();
+        let circuit = miden_air::vm::ace::compiled_recursive_circuit();
         advice_map.push((circuit.commitment, circuit.instructions));
     }
 
@@ -533,7 +534,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
             vec![],
         )
         .expect("valid Miden statement shape");

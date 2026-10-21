@@ -9,7 +9,7 @@
 //!
 //! Evaluators are rebuilt automatically from the handwritten definitions.
 
-use miden_air::precompiles::ChipletAir;
+use miden_air::precompile::ChipletAir;
 use miden_constraint_compiler::{
     ir::{Graph, capture, capture_into},
     testing::{assert_concrete_evaluation, constraint_degrees, eval_graph},

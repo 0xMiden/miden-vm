@@ -33,7 +33,7 @@ mod lifted;
 use std::{fmt, time::Instant};
 
 use clap::Parser;
-use miden_air::config::eidos_config;
+use miden_air::vm::config::eidos_config;
 use miden_core::Felt as MidenFelt;
 use miden_stark::{
     GenericStarkConfig,

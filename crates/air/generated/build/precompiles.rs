@@ -1,7 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
 use miden_ace::{LayoutKind, RecursiveAceCircuit};
-use miden_air_definitions::precompiles::{
+use miden_air_source::precompile::{
     fixed, geometry,
     relation::{AIRS, CapturedPvmRelation},
 };

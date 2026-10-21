@@ -310,7 +310,7 @@ impl FoldRelation {
     fn vm() -> Self {
         Self {
             relation: "vm",
-            num_airs: miden_air::MIDEN_AIR_COUNT,
+            num_airs: miden_air::vm::MIDEN_AIR_COUNT,
             stark_vars_ptr: crate::stark::vm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!("../../asm/sys/vm/constraints_eval.masm"),
         }
@@ -319,7 +319,7 @@ impl FoldRelation {
     fn pvm() -> Self {
         Self {
             relation: "pvm",
-            num_airs: miden_air::precompiles::NUM_CHIPLETS,
+            num_airs: miden_air::precompile::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!("../../asm/sys/pvm/constraints_eval.masm"),
         }

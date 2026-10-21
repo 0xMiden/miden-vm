@@ -1,6 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_air::MidenMultiAir;
+use miden_air::vm::MidenMultiAir;
 use miden_core::{
     Felt, Word,
     deferred::PrecompileLimits,

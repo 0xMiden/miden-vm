@@ -5,6 +5,11 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
+#[cfg(feature = "std")]
+use miden_stark::lookup::debug::{ValidateLayout, ValidateLookupAir};
+use miden_stark::lookup::{
+    Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow, build_lookup_fractions,
+};
 
 use super::{
     algebra::{cv_storage_coefficient, universal_cv_word},
@@ -24,9 +29,7 @@ use super::{
     },
     trace::{TraceMode, generate_felt_trace_block_with_cycle_id},
 };
-#[cfg(feature = "std")]
-use crate::lookup::debug::{ValidateLayout, ValidateLookupAir};
-use crate::{
+use crate::vm::{
     constraints::{
         and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation},
         lookup::messages::{
@@ -34,10 +37,6 @@ use crate::{
         },
     },
     logup::BusId,
-    lookup::{
-        Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow,
-        build_lookup_fractions,
-    },
 };
 
 fn test_block() -> [u32; 16] {

@@ -9,7 +9,7 @@
 //!
 //! Evaluators are rebuilt automatically from the handwritten definitions.
 
-use miden_air::AIRS;
+use miden_air::vm::AIRS;
 use miden_constraint_compiler::{
     ir::{Graph, capture, capture_into},
     testing::{assert_concrete_evaluation, constraint_degrees, eval_graph},
@@ -30,7 +30,7 @@ const SEEDS: [u64; 4] =
 fn handwritten_and_generated_are_distinct_captures() {
     for air in AIRS {
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&air.definition(), &mut builder);
+        let handwritten = capture_into(&air.0, &mut builder);
         let generated = capture_into(&air, &mut builder);
         let _ = builder.freeze();
         let differs = handwritten.base_roots != generated.base_roots
@@ -47,12 +47,12 @@ fn handwritten_and_generated_are_distinct_captures() {
 #[test]
 fn generated_evaluators_match_handwritten_values() {
     for air in AIRS {
-        let (hand_graph, hand) = capture(&air.definition());
+        let (hand_graph, hand) = capture(&air.0);
         let (gen_graph, generated) = capture(&air);
         assert_eq!(hand.base_global_indices, generated.base_global_indices);
         assert_eq!(hand.ext_global_indices, generated.ext_global_indices);
         assert_eq!(
-            constraint_degrees(&air.definition()),
+            constraint_degrees(&air.0),
             constraint_degrees(&air),
             "{} constraint degrees",
             air.name(),
@@ -92,8 +92,7 @@ fn evaluator_timing() {
         .unwrap_or(256);
     assert!(iterations > 0);
     for air in AIRS {
-        let handwritten =
-            miden_constraint_compiler::testing::time_evaluation(&air.definition(), iterations);
+        let handwritten = miden_constraint_compiler::testing::time_evaluation(&air.0, iterations);
         let generated = miden_constraint_compiler::testing::time_evaluation(&air, iterations);
         std::eprintln!(
             "{}: {iterations} evaluations, handwritten scalar={:?} packed={:?}, generated scalar={:?} packed={:?}",
@@ -111,8 +110,8 @@ fn generated_degrees_match_handwritten() {
     use miden_stark::air::{ConstraintDegrees, LiftedAir};
     for air in AIRS {
         assert_eq!(
-            <miden_air::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.definition())
+            <miden_air::vm::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
+            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.0)
         );
     }
 }

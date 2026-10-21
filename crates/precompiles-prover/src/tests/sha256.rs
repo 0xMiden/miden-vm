@@ -5,7 +5,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_air::precompiles::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
+use miden_air_source::precompile::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
 use miden_core::{
     Felt,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},

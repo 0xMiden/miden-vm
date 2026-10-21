@@ -2,7 +2,7 @@
 
 #![allow(dead_code, reason = "each benchmark uses a subset of the configuration helpers")]
 
-use miden_air::config::{EidosConfig, eidos_config};
+use miden_air::vm::config::{EidosConfig, eidos_config};
 pub use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{StarkConfig, pcs::PcsParams};
 

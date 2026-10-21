@@ -8,9 +8,8 @@ use std::{
 };
 
 use miden_air::{
-    MidenMultiAir,
-    config::pcs_params,
-    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
+    precompile::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
+    vm::{MidenMultiAir, config::pcs_params},
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::memory;

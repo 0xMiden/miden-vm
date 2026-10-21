@@ -16,8 +16,9 @@
 use alloc::{boxed::Box, vec::Vec};
 use std::collections::HashMap;
 
-use miden_air::{
-    BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_source::vm::{
+    MidenAir,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
@@ -40,8 +41,11 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::lookup::{
-    Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions,
+use miden_stark::{
+    StarkConfig,
+    air::{BaseAir, ProverStatement, Statement},
+    debug,
+    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
 };
 
 use super::{

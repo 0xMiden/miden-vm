@@ -6,7 +6,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::hash::sha512::compression::{
+use miden_air_source::precompile::hash::sha512::compression::{
     self,
     program::{self, Op},
 };

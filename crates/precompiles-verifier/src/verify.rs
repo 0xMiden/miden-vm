@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{
+use miden_air::precompile::{
     ChipletAir, ChipletMultiAir,
     protocol::{
         PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,

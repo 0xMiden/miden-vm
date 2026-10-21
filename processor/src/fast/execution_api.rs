@@ -161,7 +161,7 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         max_prover_memory_bytes: u64,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use miden_air::{MidenMultiAir, config};
+        use miden_air::vm::{MidenMultiAir, config};
         use miden_core::field::QuadFelt;
         use miden_stark::memory;
 

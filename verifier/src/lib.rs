@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::{boxed::Box, sync::Arc, vec};
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
+use miden_air::vm::{MidenMultiAir, PublicInputs, config, security};
 use miden_core::{
     Felt,
     deferred::{
@@ -19,8 +19,8 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData,
-    verifier::VerifierError,
+    PreprocessedValidationError, StarkConfig, VerifierInstance, air::Statement, lmcs::Lmcs,
+    proof::StarkProofData, verifier::VerifierError,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
@@ -43,7 +43,7 @@ mod exports {
     }
 }
 pub use exports::*;
-pub use miden_air::security::{
+pub use miden_air::vm::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
@@ -871,7 +871,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
             Vec::new(),
         )
         .unwrap();

@@ -2,8 +2,9 @@ use alloc::{format, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-use miden_air::{
-    MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_source::vm::{
+    PublicInputs,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
@@ -13,6 +14,11 @@ use miden_core::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
     },
+};
+use miden_stark::{
+    StarkConfig,
+    air::{ProverStatement, Statement},
+    debug,
 };
 
 use crate::{
@@ -39,7 +45,7 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air::trace::RowIndex;
+pub use miden_air_source::vm::trace::RowIndex;
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{
     CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,

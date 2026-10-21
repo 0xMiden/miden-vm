@@ -12,8 +12,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use serde::Deserialize;
 
-/// Mirrors `miden_air::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum padded
-/// length changes.
+/// Mirrors `miden_air_source::vm::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum
+/// padded length changes.
 const MIN_TRACE_LEN: u64 = 64;
 
 /// One Eidos compression cycle occupies 32 rows.

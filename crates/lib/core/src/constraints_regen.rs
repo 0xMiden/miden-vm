@@ -10,11 +10,11 @@ use miden_ace::{
     LayoutKind, MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig,
     RecursiveAceCircuit, RelationGeometry, render_masm_constraints_eval, render_proof_order_maps,
 };
-use miden_air::{
+use miden_air::vm::{
     MIDEN_AIR_COUNT,
     config::{self, PROTOCOL_ID, relation_digest},
 };
-use miden_air_definitions::AIRS;
+use miden_air_source::vm::AIRS;
 use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
@@ -59,7 +59,7 @@ pub fn run(mode: Mode) -> Result<(), String> {
 
 /// Runs the full regeneration flow.
 ///
-/// Generation never accepts a new relation identity: the pinned digests in `miden_air::config`
+/// Generation never accepts a new relation identity: the pinned digests in `miden_air::vm::config`
 /// must already name the circuit the authored AIRs compile to.
 fn write() -> io::Result<()> {
     let artifact = compute_artifacts()?;
@@ -126,8 +126,8 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     )?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
 
-    // The setup commitment is a trusted verifier input pinned in `miden_air::config`, whose tests
-    // rebuild it from the authored setup trace.
+    // The setup commitment is a trusted verifier input pinned in `miden_air::vm::config`, whose
+    // tests rebuild it from the authored setup trace.
     let vm_parameters = render_vm_parameters(
         &vm_geometry,
         &relation_digest,
@@ -463,26 +463,32 @@ fn render_vm_parameters(
             writeln!(output, "pub const {prefix}_{index} = {value}").unwrap();
         }
     }
-    output.push_str("\n# Security descriptor from miden_air::security.\n");
+    output.push_str("\n# Security descriptor from miden_air::vm::security.\n");
     for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", miden_air::security::LOOKUP_SHAPE.max_message_width),
+        ("MAX_MESSAGE_WIDTH", miden_air::vm::security::LOOKUP_SHAPE.max_message_width),
         (
             "NUM_COMPOSED_CONSTRAINTS",
-            miden_air::security::AIR_SHAPE.num_composed_constraints,
+            miden_air::vm::security::AIR_SHAPE.num_composed_constraints,
         ),
-        ("MAX_CONSTRAINT_DEGREE", miden_air::security::AIR_SHAPE.max_constraint_degree),
+        (
+            "MAX_CONSTRAINT_DEGREE",
+            miden_air::vm::security::AIR_SHAPE.max_constraint_degree,
+        ),
         (
             "NUM_DEEP_TERMS",
-            miden_air::security::AIR_SHAPE
+            miden_air::vm::security::AIR_SHAPE
                 .num_deep_terms
                 .expect("the VM uses DEEP composition"),
         ),
-        ("LOOKUP_FRACTIONS_PER_ROW", miden_air::security::LOOKUP_SHAPE.fractions_per_row),
+        (
+            "LOOKUP_FRACTIONS_PER_ROW",
+            miden_air::vm::security::LOOKUP_SHAPE.fractions_per_row,
+        ),
     ] {
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
 
-    let and8_log_height = miden_air::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT;
+    let and8_log_height = miden_air_source::vm::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT;
     let tree_depth = u32::from(and8_log_height) + u32::from(config::pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(tree_depth)
@@ -558,8 +564,8 @@ fn render_vm_parameters(
     writeln!(
         output,
         "# Stack I/O: {} public values in {} base-field cells immediately before AUX_RAND_ELEM_PTR.",
-        miden_air::NUM_PUBLIC_VALUES,
-        miden_air::NUM_PUBLIC_VALUES * EXT_DEGREE,
+        miden_air::vm::NUM_PUBLIC_VALUES,
+        miden_air::vm::NUM_PUBLIC_VALUES * EXT_DEGREE,
     )
     .unwrap();
     writeln!(
@@ -891,21 +897,24 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // These literals define the shared fixed-point format and the PCS values used to bound the
     // terms omitted by the MASM estimator. The remaining limits are checked below against the MVM
     // relation and the generic verifier.
-    let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
-    let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
-    let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let fractional_bits = miden_air::vm::security::FIXED_POINT_FRACTIONAL_BITS;
+    let fixed_point_one = miden_air::vm::security::FIXED_POINT_ONE;
+    let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     let shared_literals: [(&str, u64); 9] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
-        ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
+        ("BITS_PER_QUERY_FP", miden_air::vm::security::BITS_PER_QUERY),
         ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
-        ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
+        ("SECURITY_CAP_BITS", miden_air::vm::security::SECURITY_CAP >> fractional_bits),
         (
             "DEEP_FIELD_BASE_BITS",
             (sample_bits >> fractional_bits) - u64::from(config::pcs_params().log_blowup()),
         ),
-        ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
-        ("LOG2_E_FP", miden_air::security::LOG2_E),
+        (
+            "FRI_FOLDING_BASE_BITS",
+            miden_air::vm::security::FOLDING_BASE >> fractional_bits,
+        ),
+        ("LOG2_E_FP", miden_air::vm::security::LOG2_E),
         ("MAX_CONSTRAINT_DEGREE", (1u64 << config::pcs_params().log_blowup()) + 1),
     ];
 
@@ -922,12 +931,12 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // estimator envelope. This function also pins the generic verifier bounds directly.
     let wrapper = read_file(VM_WRAPPER_PATH).map_err(|e| e.to_string())?;
     let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
-    let air_shape = miden_air::security::AIR_SHAPE;
+    let air_shape = miden_air::vm::security::AIR_SHAPE;
     let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
     let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
-    let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS)
+    let max_boundary_terms = u64::from(miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS)
         + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
     if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
         return Err("the MVM composed-constraint count exceeds the estimator envelope".into());
@@ -970,38 +979,42 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let wrapper_source = (&wrapper, VM_WRAPPER_PATH);
     let parameters_source = (&parameters, VM_PARAMETERS_PATH);
     for (name, (source, path), expected) in [
-        ("LOOKUP_POW_BITS", wrapper_source, miden_air::security::LOOKUP_POW_BITS as u64),
+        (
+            "LOOKUP_POW_BITS",
+            wrapper_source,
+            miden_air::vm::security::LOOKUP_POW_BITS as u64,
+        ),
         (
             "MAX_MESSAGE_WIDTH",
             parameters_source,
-            miden_air::security::LOOKUP_SHAPE.max_message_width as u64,
+            miden_air::vm::security::LOOKUP_SHAPE.max_message_width as u64,
         ),
         (
             "NUM_COMPOSED_CONSTRAINTS",
             parameters_source,
-            miden_air::security::AIR_SHAPE.num_composed_constraints as u64,
+            miden_air::vm::security::AIR_SHAPE.num_composed_constraints as u64,
         ),
         (
             "MAX_CONSTRAINT_DEGREE",
             parameters_source,
-            miden_air::security::AIR_SHAPE.max_constraint_degree as u64,
+            miden_air::vm::security::AIR_SHAPE.max_constraint_degree as u64,
         ),
         (
             "NUM_DEEP_TERMS",
             parameters_source,
-            miden_air::security::AIR_SHAPE
+            miden_air::vm::security::AIR_SHAPE
                 .num_deep_terms
                 .expect("the MVM uses DEEP composition") as u64,
         ),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
             wrapper_source,
-            miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
+            miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
             parameters_source,
-            miden_air::security::LOOKUP_SHAPE.fractions_per_row as u64,
+            miden_air::vm::security::LOOKUP_SHAPE.fractions_per_row as u64,
         ),
         (
             "MAX_NUM_KERNEL_PROCEDURES",
