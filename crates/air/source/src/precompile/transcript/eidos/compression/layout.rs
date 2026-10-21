@@ -1,6 +1,6 @@
 //! PVM interface aliases for the shared 32-row Eidos compression layout.
 
-pub use crate::shared::eidos_compression::core::layout::*;
+pub use crate::shared::eidos::layout::*;
 
 /// Number of auxiliary columns used by the shared narrow lookup core.
 pub const AUX_COLS: usize = 18;

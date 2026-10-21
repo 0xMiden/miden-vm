@@ -12,7 +12,8 @@ protocol design or a request to implement every future idea now.
 - Signed discussion checkpoint: `814579e00` (`refactor(air): separate
   authored relations from production adapters`).
 - The AIR follow-up below was authorized after discussion and implemented
-  on top of this checkpoint.
+  as `07a41aec6` on top of this checkpoint. The subsequent shared Eidos tranche
+  follows that commit.
 
 ## Agreed decisions since the checkpoint
 
@@ -169,11 +170,13 @@ removal with the agreed statement direction: source owns semantic functions,
 while production owns concrete `MultiAir` adapters. Its scope was explained before
 implementation started; it does not move semantic function bodies to production.
 
-The subsequent ownership tranche is neutral shared Eidos, reusing #4069's
-separation of common equations/layout/encoding from VM/PVM interface bindings.
-Preserve #4040's captured expression forms, instruction identities, and existing
-checks. Raise any genuine conflict with generation or identity preservation
-before choosing a different design.
+Neutral shared Eidos is now implemented, reusing #4069's separation of common
+equations/layout/encoding from VM/PVM interface bindings. The extraction preserves
+#4040's captured expression forms, instruction identities, and existing checks;
+no design deviation required a new decision. This completes the remaining
+substantial implemented ownership delta from #4069. Test execution and final
+stack validation remain deferred; this is not a claim that integration has been
+fully tested.
 
 The checked-in AIR summary is deferred. Expanded artifact generation, changes to
 identity acceptance, and automatic binding of statement semantics are outside
@@ -204,6 +207,44 @@ realize the future summary. Backend decisions remain deferred as listed below.
 
 These are compilation, lint, dependency, artifact, and static review checks.
 Tests have not been executed; execution remains deferred until the stack ends.
+
+## Shared Eidos tranche
+
+`shared::eidos` owns the common compression equations, physical layout, narrow
+lookup encoding, rotation relations, and callback-based trace writer. Its code
+does not import VM or precompile modules. Both relation adapters use this layer
+directly, replacing the previous facade over a shared module that still contained
+VM interface code.
+
+The VM adapter owns its controller/AEAD bus messages, two footer lookup columns,
+mode and multiplicity columns, footer interface constraints, mode validation, and
+mode-aware trace helpers. Its public trace API remains available at the existing
+VM paths used by the processor. The existing VM-oriented tests and support move
+with this adapter, including PVM's cross-interface constraint checks.
+
+This is an ownership extraction and import migration. Constraint, lookup, and
+trace function bodies retain their arithmetic and call order. In particular:
+
+- VM narrow lookups retain negative table multiplicities and `DoubleAnd` XOR;
+  PVM retains positive multiplicities and `RepeatedSubtraction` XOR.
+- VM keeps its original full-footer assertion order, narrow columns followed by
+  footer columns 18 and 19, and inactive auxiliary-column constraints.
+- Trace validation and footer callback placement are unchanged. Shared helpers
+  reused by the VM adapter become crate-visible rather than being duplicated.
+
+Neither generator nor production adapter requires an interface rewrite. The
+canonical authored AIR lists, generated VM/PVM evaluators, build-derived metadata,
+precompiled ACE delivery, accepted pins, and tracked verifier artifacts retain
+their existing owners.
+
+Validation: `make lint` passes, including all-feature/all-target workspace Clippy,
+pinned-nightly formatting, and cargo-shear's 25 nonfatal advisory warnings. All ten
+saved generated outputs are byte-identical to `07a41aec6`, including both evaluator
+modules, both ACE instruction streams, degree tables, shapes, raw widths, and PVM
+protocol metadata. Static comparisons preserve the extracted bodies and moved
+test fixtures. No-default-feature library checks also pass for source AIR,
+production AIR, processor, prover, verifier, precompile prover, and precompile
+verifier. Test execution remains deferred as requested.
 
 If statement ownership is reconsidered, preserve observation order, input
 validation, trace-length weighting, once-per-proof boundary corrections, native

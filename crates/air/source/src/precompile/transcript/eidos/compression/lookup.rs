@@ -9,7 +9,7 @@ use crate::{
         primitives::byte_pair_lut::eidos::{self, Relation},
         relations::BusId,
     },
-    shared::eidos_compression::core::{
+    shared::eidos::{
         EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign,
         NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
     },

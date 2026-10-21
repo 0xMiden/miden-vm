@@ -3,8 +3,10 @@
 This crate contains the handwritten constraints and trace schemas used to author Miden AIRs.
 The `vm` module describes the VM's four AIRs, public inputs, typed LogUp messages, and
 auxiliary-trace construction. The `precompile` module describes the precompile VM's AIRs,
-trace schemas, lookup messages, and fixed boundary contributions. Shared Eidos equations and
-common geometry helpers live in `shared`.
+trace schemas, lookup messages, and fixed boundary contributions. `shared::eidos` owns the
+common compression equations, physical layout, lookup encoding, and trace coordinates. VM and
+precompile adapters supply their bus mappings and controller, AEAD, or transcript interfaces.
+Common geometry helpers also live in `shared`.
 
 `vm::MidenAir` evaluates handwritten constraints directly. The constraint compiler captures
 these definitions to generate the evaluators consumed by `miden-air`; independent checks

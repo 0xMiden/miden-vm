@@ -19,7 +19,7 @@ pub mod chiplets;
 pub mod columns;
 pub mod constants;
 pub mod decoder;
-pub use crate::shared::eidos_compression;
+pub mod eidos_compression;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;

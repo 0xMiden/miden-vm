@@ -14,7 +14,7 @@ use miden_stark::air::{ReductionError, WindowAccess};
 use proptest::prelude::*;
 
 pub mod ace;
-pub(crate) mod constraints;
+mod constraints;
 pub mod geometry;
 use miden_stark::lookup;
 #[cfg(test)]

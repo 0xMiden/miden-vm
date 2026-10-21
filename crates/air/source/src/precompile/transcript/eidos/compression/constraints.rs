@@ -4,7 +4,7 @@ use miden_core::Felt;
 use miden_stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::layout::footer_digest_col;
-use crate::shared::eidos_compression::core::{self as shared, EidosCompressionSelectors};
+use crate::shared::eidos::{self as shared, EidosCompressionSelectors};
 
 /// Enforces the shared constraints active on the 28 fused compression rows.
 pub(crate) fn enforce_fused_rows<AB>(

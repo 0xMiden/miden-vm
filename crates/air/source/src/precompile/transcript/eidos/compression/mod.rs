@@ -20,4 +20,4 @@ pub mod trace;
 
 pub(super) use lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, emit_lookup_columns};
 
-pub(super) use crate::shared::eidos_compression::core::EidosCompressionCols;
+pub(super) use crate::shared::eidos::EidosCompressionCols;

@@ -4,9 +4,6 @@
 pub const NUM_COLS: usize = 108;
 /// Number of auxiliary columns used by the shared narrow lookup core.
 pub const NARROW_AUX_COLS: usize = 18;
-/// Number of auxiliary columns used by the complete MVM compression AIR.
-pub const AUX_COLS: usize = 20;
-const _: () = assert!(AUX_COLS == NARROW_AUX_COLS + 2);
 
 pub const ROUNDS: usize = 7;
 pub const FUSED_G_ROWS_PER_ROUND: usize = 4;
@@ -63,9 +60,6 @@ pub const F_CV_B_STORAGE_BYTES: [usize; NUM_G] = [2, 0, 3, 2];
 
 /// Four physical footer cells reserved for wrapper-defined output or interface values.
 pub const F_OUTPUT_BASE_COL: usize = 55;
-pub const F_INTERFACE_TAIL_BASE_COL: usize = F_OUTPUT_BASE_COL;
-pub const F_INTERFACE_TAIL0_COL: usize = F_INTERFACE_TAIL_BASE_COL;
-pub const F_CLK_COL: usize = F_INTERFACE_TAIL0_COL;
 
 /// Row-dependent footer cells for carried `R` values followed by the future-working-state queue.
 /// Inactive full-CV coordinates are reused until their corresponding CV words become live.
@@ -81,17 +75,9 @@ pub const F_FUTURE_W_WORD_INDICES: [usize; F_FUTURE_W_COLS] =
 
 pub const F_R_CANON_INV_BASE_COL: usize = 61;
 pub const F_C_CANON_INV_COL: usize = 63;
-/// Number of controller requests represented by this compression cycle.
-///
-/// This is intentionally a field-valued count rather than a boolean: identical controller requests
-/// may be aggregated into one physical compression. Soundness relies on every controller request
-/// being emitted with unit multiplicity and locally tied to a real event; the compression provider
-/// then contributes the negated aggregate count.
-pub const F_COMPRESSION_MULTIPLICITY_COL: usize = 64;
 /// Physical compression-cycle identifier, shared by every message interaction in a row.
 pub const F_COMPRESSION_CYCLE_ID_COL: usize = G_COMPRESSION_CYCLE_ID_COL;
 /// Footer fields overlaid on the globally ternary-constrained k3 columns.
-pub const F_MODE_COL: usize = G_K3_BASE_COL;
 pub const F_R_CANON_Z_BASE_COL: usize = G_K3_BASE_COL + 1;
 pub const F_C_CANON_Z_COL: usize = G_K3_BASE_COL + 3;
 /// Free footer-0 coordinate used by the fused-to-footer total-B bridge.
@@ -214,10 +200,6 @@ pub const fn footer_future_w_col(footer_row: usize, idx: usize) -> usize {
     F_FOOTER_DATA_COLS[footer_row][2 * footer_row + idx]
 }
 
-pub const fn footer_interface_tail_col(idx: usize) -> usize {
-    footer_output_col(idx)
-}
-
 pub const fn footer_output_col(idx: usize) -> usize {
     if idx >= 4 {
         panic!("footer output index must be in 0..4");
@@ -230,4 +212,3 @@ const _: () = assert!(
     G_BD_ROT_SLOT_BASE_COL + NUM_G * BYTES_PER_WORD * BYTE_SLOT_WIDTH - 1 == G_MSG_WORD_BASE_COL
 );
 const _: () = assert!(G_K2_BASE_COL + NUM_G == NUM_COLS);
-const _: () = assert!(F_CLK_COL < NUM_COLS);

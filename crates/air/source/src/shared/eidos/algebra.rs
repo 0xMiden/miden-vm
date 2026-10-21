@@ -5,17 +5,17 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::{layout::*, schedule::EIDOS_COMPRESSION_IV};
 
 #[inline]
-pub(super) fn xor_from_and<E: PrimeCharacteristicRing>(lhs: E, rhs: E, and: E) -> E {
+pub(crate) fn xor_from_and<E: PrimeCharacteristicRing>(lhs: E, rhs: E, and: E) -> E {
     lhs + rhs - and.double()
 }
 
 #[inline]
-pub(super) fn pack_u32_le<E: PrimeCharacteristicRing>(b0: E, b1: E, b2: E, b3: E) -> E {
+pub(crate) fn pack_u32_le<E: PrimeCharacteristicRing>(b0: E, b1: E, b2: E, b3: E) -> E {
     b0 + E::from_u64(1 << 8) * b1 + E::from_u64(1 << 16) * b2 + E::from_u64(1 << 24) * b3
 }
 
 #[inline]
-pub(super) fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
+pub(crate) fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
     lo + E::from_u64(1u64 << 32) * hi
 }
 
@@ -30,7 +30,7 @@ where
 
 /// Reconstructs the one uncommitted rotation result from the next row's total B input and the
 /// other fifteen committed rotation contributions.
-pub(super) fn missing_rotation_result<E, A, B>(local: A, next: B) -> E
+pub(crate) fn missing_rotation_result<E, A, B>(local: A, next: B) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
