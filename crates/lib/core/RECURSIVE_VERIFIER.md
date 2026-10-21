@@ -2,7 +2,7 @@
 
 Ordinary library builds assemble the tracked `.masm` files. Regeneration is explicit.
 
-The generators capture the authored AIRs in `crates/air-definitions` once and derive widths,
+The generators capture the authored AIRs in `crates/air/source` once and derive widths,
 quotient geometry, security metadata, and the canonical ACE circuit from that capture. Cargo builds
 the native evaluators and embedded ACE streams from the same capture into `OUT_DIR`, so they have
 no regeneration step.
@@ -19,7 +19,7 @@ integers and elliptic-curve parameters.
 | VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/precompiles-verifier/src/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
-| Fixed-environment bus message catalogue | `crates/air-definitions/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
+| Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
 | Fixed-boundary instructions | Templates in `crates/precompiles-verifier/src/masm/` | `pvm/fixed_boundary.masm` |
 | OOD routing and proof-order schedules | Relation geometry and `miden-ace-codegen` renderers | `{vm,pvm}/ood_frames.masm` |
 | Constraint evaluation | Canonical ACE circuit and `miden-ace-codegen` renderer | `{vm,pvm}/constraints_eval.masm` |
@@ -32,8 +32,8 @@ against them. The PVM layout is generated as a complete module.
 
 ## Pinned relation identities
 
-The relation digest, ACE circuit digest, and setup commitments are pinned in `air/src/config.rs`
-for the VM and `air/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
+The relation digest, ACE circuit digest, and setup commitments are pinned in `crates/air/generated/src/config.rs`
+for the VM and `crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
 to these values, and the generated MASM embeds them. Two checks guard the pins, for different
 reasons:
 
@@ -55,7 +55,7 @@ These must match the native bus identifiers plus one, `MIDEN_AIR_COUNT`, and `NU
 respectively. The constants are maintained manually; `make check-constraints` checks the AIR count.
 
 The module's `compute_bus_gamma` routine is specialized to `gamma = beta^16`. The assertion in
-`crates/air-definitions/src/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
+`crates/air/source/src/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
 requires updating both the routine and the assertion.
 
 Generation requires `MAX_MESSAGE_WIDTH == 18`, matching the PVM gamma addition chain for `beta^18`.

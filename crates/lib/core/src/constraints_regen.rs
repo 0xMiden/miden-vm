@@ -802,8 +802,8 @@ fn constraints_eval_masm_matches_artifact(artifact: &ComputedArtifacts) -> Resul
     Ok(())
 }
 
-/// Verify that RELATION_DIGEST in `air/src/config.rs` and `sys/vm/parameters.masm` matches current
-/// AIR.
+/// Verify that RELATION_DIGEST in `crates/air/generated/src/config.rs` and `sys/vm/parameters.masm`
+/// matches the current AIR.
 pub fn relation_digest_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     relation_digest_matches_artifact(&artifact)
@@ -812,17 +812,18 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
 /// Checks the pinned relation identity against the circuit the authored AIRs compile to.
 fn pinned_identity_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
-                               in air/src/config.rs before regenerating";
+                               in crates/air/generated/src/config.rs before regenerating";
     if config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
         return Err(format!(
-            "ACE_CIRCUIT_DIGEST in air/src/config.rs is stale (it binds the transcript to the \
-             one circuit the recursive verifier evaluates): expected {:?}; {UPDATE_HINT}",
+            "ACE_CIRCUIT_DIGEST in crates/air/generated/src/config.rs is stale (it binds the \
+             transcript to the one circuit the recursive verifier evaluates): expected {:?}; \
+             {UPDATE_HINT}",
             artifact.circuit_digest.map(|felt| felt.as_canonical_u64())
         ));
     }
     if config::RELATION_DIGEST != artifact.relation_digest {
         return Err(format!(
-            "RELATION_DIGEST in air/src/config.rs is stale: expected {:?}; {UPDATE_HINT}",
+            "RELATION_DIGEST in crates/air/generated/src/config.rs is stale: expected {:?}; {UPDATE_HINT}",
             artifact.relation_digest.map(|felt| felt.as_canonical_u64())
         ));
     }
