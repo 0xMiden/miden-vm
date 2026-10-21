@@ -1,6 +1,7 @@
 //! ACE circuit policy for the precompile chiplet multi-AIR proof.
 //!
-//! The relation uses [`ChipletAir::all`] as its stable instance order and canonical ACE fold order,
+//! The relation uses [`miden_air_source::precompile::ChipletAir::all`] as its stable instance order
+//! and canonical ACE fold order,
 //! and aligns each per-AIR trace region to eight base-field elements. The lifted STARK proof
 //! commits traces in ascending height order, which varies per workload, but one order-invariant
 //! circuit serves every ordering: the verifier lands each proof-ordered segment at the canonical
@@ -12,64 +13,14 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_ace::{
-    AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
+#[cfg(any(test, feature = "constants-tools"))]
+pub use miden_air_source::precompile::codegen::build_canonical_precompile_ace_circuit;
+#[cfg(test)]
+use miden_air_source::precompile::{ChipletAir, NUM_CHIPLETS};
+pub use miden_air_source::precompile::{
+    codegen::{PvmRecursiveAceCircuit, build_pvm_recursive_verifier_ace_circuit},
+    proof_order_from_log_heights,
 };
-use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
-
-// MULTI-AIR ACE CIRCUIT
-// ================================================================================================
-
-/// Per-AIR trace regions are padded to this width before concatenation, matching the LMCS wire
-/// alignment used by the commitment scheme.
-const LMCS_ALIGNMENT: usize = 8;
-
-/// Number of quotient chunks the precompile relation commits to.
-///
-/// The lifted STARK verifier derives this quantity symbolically from the AIRs. Deriving it through
-/// the same implementation keeps the ACE circuit's READ layout coupled to the proof protocol.
-fn num_quotient_chunks() -> usize {
-    let max_log_quotient_degree = ChipletAir::all()
-        .iter()
-        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
-        .max()
-        .expect("the chiplet stack is non-empty");
-    1usize << max_log_quotient_degree
-}
-
-/// ACE codegen settings for the precompile chiplet relation.
-fn precompile_ace_config() -> AceConfig {
-    AceConfig {
-        num_quotient_chunks: num_quotient_chunks(),
-        layout: LayoutKind::Masm,
-    }
-}
-
-/// Builds the canonical (order-invariant) precompile chiplet ACE circuit.
-///
-/// Every chiplet's trace regions sit at its [`ChipletAir::all`] offset and every chiplet reads its
-/// fold coefficient from a dedicated slot, so one circuit serves every proof ordering. The caller
-/// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
-/// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
-pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = ChipletAir::all();
-    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
-}
-
-// RECURSIVE VERIFIER CIRCUIT
-// ================================================================================================
-
-pub use miden_ace::RecursiveAceCircuit as PvmRecursiveAceCircuit;
-
-/// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
-///
-/// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
-/// than rebuild it here.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    encoded.try_into()
-}
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
@@ -78,13 +29,6 @@ pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
         build_pvm_recursive_verifier_ace_circuit()
             .expect("PVM recursive-verifier ACE circuit must build")
     })
-}
-
-/// Returns [`ChipletAir::all`] instance indices in committed-trace order.
-pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize; NUM_CHIPLETS] {
-    let mut order = core::array::from_fn(|index| index);
-    order.sort_by_key(|&index| (log_heights[index], index));
-    order
 }
 
 /// Orders used by semantic checks: identity, reversal, adjacent swaps, each chiplet
@@ -259,7 +203,7 @@ mod tests {
                 &canonical_inputs,
                 order,
                 beta,
-                LMCS_ALIGNMENT,
+                8, // PVM Eidos commitment alignment.
             );
             assert_eq!(canonical_root, direct, "direct symbolic evaluation for {order:?}");
             roots.push(canonical_root);
@@ -310,13 +254,12 @@ mod tests {
 
         let max = derived.iter().map(|(_, degree)| *degree).max().expect("non-empty stack");
         let expected_chunks = 1usize << max;
+        let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
         assert_eq!(
-            precompile_ace_config().num_quotient_chunks,
+            canonical.layout().counts.num_quotient_chunks,
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
-        assert_eq!(canonical.layout().counts.num_quotient_chunks, expected_chunks);
     }
 
     /// Keep protocol and cost changes visible as numbers rather than only as a digest diff.
@@ -451,7 +394,7 @@ mod tests {
 
     #[test]
     fn pvm_aux_hook_matches_the_logup_registry() {
-        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
+        use miden_air_source::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
@@ -463,7 +406,7 @@ mod tests {
 
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
-        use miden_precompiles_air::ChipletMultiAir;
+        use miden_air::precompile::ChipletMultiAir;
         use miden_stark::air::{BaseAir, MultiAir};
 
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
@@ -563,9 +506,8 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-        use miden_precompiles_air::{
-            primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
-        };
+        use miden_air::precompile::stark_config::precompile_pcs_params;
+        use miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
@@ -660,7 +602,7 @@ mod tests {
     /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
-        use miden_precompiles_air::security as pvm_security;
+        use miden_air::precompile::security as pvm_security;
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -675,14 +617,14 @@ mod tests {
                 "DEEP_FIELD_BASE_BITS",
                 (sample_bits >> fractional_bits)
                     - u64::from(
-                        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+                        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
                     ),
             ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
             (
                 "MAX_CONSTRAINT_DEGREE",
-                (1u64 << miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup())
+                (1u64 << miden_air::precompile::stark_config::precompile_pcs_params().log_blowup())
                     + 1,
             ),
         ] {
@@ -790,7 +732,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+            miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 
@@ -828,7 +770,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
-        use miden_precompiles_air::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
+        use miden_air::precompile::ChipletMultiAir;
+        use miden_air_source::precompile::logup::NUM_PUBLIC_VALUES;
         use miden_stark::air::Statement;
 
         let challenges = [

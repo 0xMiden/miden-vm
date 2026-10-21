@@ -60,8 +60,14 @@ The future relation implementation crates are referred to here as `miden-vm-star
 | `51bbaa741` | Crypto/STARK dependency direction and stateful hashing ownership. |
 | `14973c083` | Shared AIR contracts, transcript, lookup support, and configuration factories in `miden-stark`. |
 | `f5d348c98` | ACE runtime/compiler separation and shared processor instruction codec. |
+| `005ec4dcb` | Authored VM AIR and optional ACE construction in `miden-air-source::vm`, with production evaluation and artifacts in `miden-air::vm`. |
 
-The VM AIR split applies the source/production owners above. Configuration, memory budgeting,
+The VM and precompile AIR splits apply the source/production owners above. The precompile
+relation continues to evaluate its authored AIRs directly; it does not gain a generated Rust
+evaluator. Both relations use neutral Eidos support in `miden-air-source::shared::eidos`, while
+retaining their own interfaces and bus namespaces. Canonical precompile identity pins live in
+`miden-air::precompile::protocol`; regeneration retains its existing compiler and MASM outputs.
+Configuration, memory budgeting,
 statement implementation, reporting, and cache relocation remain for the backend commits.
 Run lints before each commit, defer test execution
 until the end of the stack, and stop for discussion before starting the next commit.

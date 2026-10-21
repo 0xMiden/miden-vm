@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, vec, vec::Vec};
 
+use miden_air_source::precompile::primitives::byte_pair_lut::eidos;
 use miden_core::{
     Felt,
     deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},
@@ -10,7 +11,6 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::Eidos;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
-use miden_precompiles_air::primitives::byte_pair_lut::eidos;
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},
     lookup::debug::{ValidateLayout, ValidateLookupAir},

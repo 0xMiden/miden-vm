@@ -10,6 +10,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::precompile::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -22,10 +26,6 @@ use miden_core::{
     },
 };
 use miden_crypto::merkle::{MerklePath, PartialMerkleTree};
-use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
-};
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,

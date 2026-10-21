@@ -67,7 +67,7 @@ The VM proof commits to the deferred claims.
 To complete verification, you must also verify a precompile proof for those claims.
 See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
 
-The [precompile VM](crates/precompiles-air) proves deferred claims with specialized circuits.
+The [precompile VM](crates/air/source/src/precompile) proves deferred claims with specialized circuits.
 The [precompiles](crates/precompiles) support Keccak-256, SHA-256 and SHA-512 hashing. They also support 256-bit integer arithmetic and elliptic curve operations.
 The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
 
@@ -116,7 +116,7 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | Proof system | [stark](crates/stark/core) | Owns shared AIR contracts, LogUp lookups, transcript channels, and lifted STARK proving and verification. |
 | Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
-| Precompiles | [precompiles-air](crates/precompiles-air) | Defines precompile AIRs and common proof setup. |
+| Precompiles | [precompile AIR](crates/air/source/src/precompile) | Defines authored precompile AIRs; [production AIR](crates/air/generated/src/precompile) owns relation artifacts and common proof setup. |
 | Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
 | Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs. |
 | Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |

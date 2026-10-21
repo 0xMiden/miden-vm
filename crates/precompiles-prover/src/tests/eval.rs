@@ -2,13 +2,13 @@
 
 use std::{vec, vec::Vec};
 
+use miden_air_source::precompile::hash::{
+    chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
+};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
-};
-use miden_precompiles_air::hash::{
-    chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
 };
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},

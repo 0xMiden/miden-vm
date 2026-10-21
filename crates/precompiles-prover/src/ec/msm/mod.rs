@@ -1,4 +1,4 @@
-pub use miden_precompiles_air::ec::msm::*;
+pub use miden_air_source::precompile::ec::msm::*;
 
 pub mod require;
 pub mod trace;

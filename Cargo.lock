@@ -2079,11 +2079,14 @@ dependencies = [
  "miden-ace",
  "miden-core",
  "miden-crypto",
+ "miden-precompiles",
  "miden-stark",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
+ "miden-utils-sync",
  "p3-field",
  "proptest",
+ "ruint",
  "thiserror",
 ]
 
@@ -2227,7 +2230,6 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-precompiles-verifier",
  "miden-processor",
@@ -2508,29 +2510,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-air"
+name = "miden-precompiles-prover"
 version = "1.0.0"
 dependencies = [
+ "k256",
  "miden-air",
  "miden-air-source",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
- "miden-stark",
- "miden-utils-sync",
- "p3-security",
- "ruint",
-]
-
-[[package]]
-name = "miden-precompiles-prover"
-version = "1.0.0"
-dependencies = [
- "k256",
- "miden-core",
- "miden-crypto",
- "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-stark",
  "miden-utils-sync",
@@ -2551,9 +2539,9 @@ dependencies = [
  "insta",
  "miden-ace",
  "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-crypto",
- "miden-precompiles-air",
  "miden-serde-utils",
  "miden-stark",
  "serde",

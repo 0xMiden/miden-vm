@@ -10,7 +10,7 @@ use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
+const NUM_CHIPLETS: usize = miden_air_source::precompile::NUM_CHIPLETS;
 
 /// Boundary values each chiplet exposes, in canonical instance order.
 ///

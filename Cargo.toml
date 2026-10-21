@@ -35,7 +35,6 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "crates/precompiles",
-    "crates/precompiles-air",
     "crates/precompiles-verifier",
     "crates/precompiles-prover",
     "processor",
@@ -101,7 +100,6 @@ miden-stark             = { path = "./crates/stark/core", version = "1.0", defau
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0", default-features = false }
-miden-precompiles-air   = { path = "./crates/precompiles-air", version = "1.0", default-features = false }
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "1.0", default-features = false }
 miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "1.0", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0", default-features = false }

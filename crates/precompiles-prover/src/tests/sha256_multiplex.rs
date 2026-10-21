@@ -1,12 +1,12 @@
 use std::{collections::HashMap, string::String, vec};
 
+use miden_air_source::precompile::hash::sha256::{
+    COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
+};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
-};
-use miden_precompiles_air::hash::sha256::{
-    COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
 };
 use miden_stark::lookup::Challenges;
 

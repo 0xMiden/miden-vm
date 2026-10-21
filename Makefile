@@ -37,8 +37,7 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
-PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
-	crates/precompiles-air/src/protocol.rs
+PVM_GENERATOR_RUST_OUTPUTS := crates/air/generated/src/precompile/protocol.rs
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features

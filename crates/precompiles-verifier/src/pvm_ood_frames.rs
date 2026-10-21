@@ -19,8 +19,8 @@ use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
     render_proof_order_maps,
 };
+use miden_air_source::precompile::{ChipletAir, NUM_CHIPLETS};
 use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
 use miden_stark::air::{BaseAir, LiftedAir};
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.

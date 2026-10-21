@@ -1,4 +1,4 @@
-pub use miden_precompiles_air::hash::sha256::compression::*;
+pub use miden_air_source::precompile::hash::sha256::compression::*;
 
 mod trace;
 pub use trace::*;

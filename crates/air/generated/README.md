@@ -1,4 +1,5 @@
-# Miden VM AIR
+# Miden AIR
+
 This crate provides production VM AIR evaluation in `miden_air::vm`. Authored constraints, trace
 schemas, public-input packing, and proof-order helpers live in
 [`miden-air-source`](../source). The production adapter delegates trace shape and auxiliary
@@ -8,6 +9,13 @@ Relation identities and stored security metadata remain here. Configuration, run
 security reporting, and the complete multi-AIR statement also remain here until the backend
 ownership commits. Optional ACE construction lives in `miden_air_source::vm::codegen`; the
 `codegen` feature here enables access to the existing runtime circuit cache.
+
+The precompile VM's production surface lives in `miden_air::precompile`. It continues to evaluate
+the handwritten AIRs from `miden_air_source::precompile` directly, without a separate generated
+Rust evaluator. The production module holds the precompile identity pins and stored security
+metadata. Its multi-AIR protocol, configuration, memory model, reporting, and preprocessed cache
+remain here until the corresponding backend commit. The existing precompile ACE construction
+lives in the source crate's optional `precompile::codegen` module.
 
 AIR is a STARK-specific format of describing a computation. It consists of defining a set of constraints expressed as low-degree polynomials. Miden prover evaluates these polynomials over an execution trace produced by Miden processor and includes the results in the execution proof. To verify the proof, the verifier checks that the constraints are evaluated correctly against the execution trace committed to by the prover.
 
