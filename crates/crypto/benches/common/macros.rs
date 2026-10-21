@@ -5,13 +5,13 @@
 // # Usage
 // ```no_run
 // benchmark_hash_core!(
-//     hash_rpo256_elements,
-//     "rpo256",
+//     hash_eidos_elements,
+//     "eidos",
 //     "elements",
 //     HASH_ELEMENT_COUNTS,
 //     |b, count| {
 //         let elements = generate_felt_array_sequential(count);
-//         b.iter(|| Rpo256::hash_elements(black_box(&elements)))
+//         b.iter(|| Eidos::hash_elements(black_box(&elements)))
 //     },
 //     |count| Some(criterion::Throughput::Elements(count as u64))
 // );
@@ -54,13 +54,13 @@ macro_rules! benchmark_hash_core {
 //
 // # Usage
 // ```no_run
-// benchmark_hash_simple!(hash_rpo256_single, "rpo256", "single", HASH_INPUT_SIZES, |b, size| {
+// benchmark_hash_simple!(hash_eidos_single, "eidos", "single", HASH_INPUT_SIZES, |b, size| {
 //     let data = if size <= 64 {
 //         generate_byte_array_sequential(size)
 //     } else {
 //         generate_byte_array_random(size)
 //     };
-//     b.iter(|| Rpo256::hash(black_box(&data)))
+//     b.iter(|| Eidos::hash(black_box(&data)))
 // });
 // ```
 #[macro_export]
@@ -82,9 +82,9 @@ macro_rules! benchmark_hash_simple {
 //
 // # Usage
 // ```no_run
-// benchmark_hash!(hash_rpo256_bytes, "rpo256", "bytes", HASH_INPUT_SIZES, |b, size| {
+// benchmark_hash!(hash_eidos_bytes, "eidos", "bytes", HASH_INPUT_SIZES, |b, size| {
 //     let data = generate_byte_array_sequential(size);
-//     b.iter(|| Rpo256::hash(black_box(&data)))
+//     b.iter(|| Eidos::hash(black_box(&data)))
 // });
 // ```
 #[macro_export]
@@ -123,8 +123,8 @@ macro_rules! benchmark_hash {
 //
 // # Usage
 // ```rust
-// benchmark_hash_auto!(hash_rpo256_single, "rpo256", HASH_INPUT_SIZES, |b, data| {
-//     b.iter(|| Rpo256::hash(black_box(data)))
+// benchmark_hash_auto!(hash_eidos_single, "eidos", HASH_INPUT_SIZES, |b, data| {
+//     b.iter(|| Eidos::hash(black_box(data)))
 // });
 // ```
 #[macro_export]
@@ -145,7 +145,7 @@ macro_rules! benchmark_hash_auto {
 //
 // # Usage
 // ```no_run
-// benchmark_hash_merge!(hash_rpo_merge, "rpo256", &[1, 2, 4, 8, 16], |b, size| {
+// benchmark_hash_merge!(hash_eidos_merge, "eidos", &[1, 2, 4, 8, 16], |b, size| {
 //     // merge logic here
 // });
 // ```
@@ -182,12 +182,12 @@ macro_rules! benchmark_hash_merge {
 // # Usage
 // ```no_run
 // benchmark_hash_felt!(
-//     hash_rpo_elements,
-//     "rpo256",
+//     hash_eidos_elements,
+//     "eidos",
 //     &[1, 2, 4, 8, 16, 32, 64, 128],
 //     |b, count| {
 //         let elements = generate_felt_array_sequential(count);
-//         b.iter(|| Rpo256::hash_elements(black_box(&elements)))
+//         b.iter(|| Eidos::hash_elements(black_box(&elements)))
 //     },
 //     |count| Some(criterion::Throughput::Elements(count as u64))
 // );
@@ -270,93 +270,6 @@ macro_rules! benchmark_hash_merge_many {
             }
 
             group.finish();
-        }
-    };
-}
-
-// Creates a benchmark for random coin operations
-//
-// # Usage
-// ```no_run
-// benchmark_rand_core!(
-//     rpo_draw_elements,
-//     RpoRandomCoin,
-//     TEST_SEED,
-//     "draw_element",
-//     PRNG_OUTPUT_SIZES,
-//     |b, coin, count| {
-//         for _ in 0..count {
-//             coin.draw_element();
-//         }
-//     }
-// );
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_core {
-    (
-        $func_name:ident,
-        $coin_type:ty,
-        $seed:expr,
-        $group_name:expr,
-        $operation:literal,
-        $sizes:expr,
-        $closure:expr
-    ) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group($group_name);
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            let mut coin = <$coin_type>::new($seed);
-
-            for count_ref in $sizes {
-                let count = *count_ref;
-                group.bench_with_input(
-                    criterion::BenchmarkId::new($operation, count),
-                    &count,
-                    |b: &mut criterion::Bencher, &count_param: &usize| {
-                        b.iter(|| $closure(&mut coin, count_param))
-                    },
-                );
-
-                group.throughput(criterion::Throughput::Elements(count as u64));
-            }
-
-            group.finish();
-        }
-    };
-}
-
-// Creates a benchmark for random coin operations (legacy interface)
-//
-// # Usage
-// ```no_run
-// benchmark_rand_coin!(
-//     rpo_draw_elements,
-//     RpoRandomCoin,
-//     TEST_SEED,
-//     "draw_element",
-//     PRNG_OUTPUT_SIZES,
-//     |b, coin, count| {
-//         for _ in 0..count {
-//             coin.draw_element();
-//         }
-//     }
-// );
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_coin {
-    (
-        $func_name:ident, $coin_type:ty, $seed:expr, $operation:literal, $sizes:expr, $closure:expr
-    ) => {
-        $crate::benchmark_rand_core! {
-            $func_name,
-            $coin_type,
-            $seed,
-            "rand-".to_string() + stringify!($coin_type).to_lowercase().as_str() + "-" + $operation,
-            $operation,
-            $sizes,
-            $closure
         }
     };
 }
@@ -591,290 +504,6 @@ macro_rules! benchmark_batch {
 
             group.finish();
         }
-    };
-}
-
-// Creates a benchmark for random coin initialization
-//
-// # Usage
-// ```no_run
-// benchmark_rand_new!(rand_rpo_new, RpoRandomCoin, TEST_SEED);
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_new {
-    ($func_name:ident, $coin_type:ty, $seed:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group("rand-new");
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            group.bench_function("new_from_word", |b| {
-                b.iter(|| {
-                    let _coin = <$coin_type>::new(black_box($seed));
-                });
-            });
-
-            group.finish();
-        }
-    };
-}
-
-// Creates a benchmark for random coin drawing operations
-//
-// # Usage
-// ```no_run
-// benchmark_rand_draw!(
-//     rand_rpo_draw_elements,
-//     RpoRandomCoin,
-//     TEST_SEED,
-//     "draw_element",
-//     PRNG_OUTPUT_SIZES,
-//     |b, coin, count| {
-//         for _ in 0..count {
-//             let _element = coin.draw_element();
-//         }
-//     }
-// );
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_draw {
-    (
-        $func_name:ident, $coin_type:ty, $seed:expr, $operation:literal, $sizes:expr, $closure:expr
-    ) => {
-        $crate::benchmark_rand_core! {
-            $func_name,
-            $coin_type,
-            $seed,
-            "rand-draw",
-            $operation,
-            $sizes,
-            $closure
-        }
-    };
-}
-
-// Creates a benchmark for random coin reseeding operations
-//
-// # Usage
-// ```no_run
-// benchmark_rand_reseed!(rand_rpo_reseed, RpoRandomCoin, TEST_SEED);
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_reseed {
-    ($func_name:ident, $coin_type:ty, $seed:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group("rand-reseed");
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            let mut coin = <$coin_type>::new($seed);
-            let new_seeds: Vec<miden_crypto::Word> = (0u64..10)
-                .map(|i| {
-                    miden_crypto::Word::new([miden_crypto::Felt::new_unchecked((i + 1) as u64); 4])
-                })
-                .collect();
-
-            group.bench_function("reseed", |b| {
-                b.iter(|| {
-                    for seed in &new_seeds {
-                        coin.reseed(black_box(*seed));
-                    }
-                });
-            });
-
-            group.finish();
-        }
-    };
-}
-
-/// Creates a benchmark for random coin integer drawing operations
-///
-/// # Usage
-/// ```no_run
-/// benchmark_rand_draw_integers!(rand_rpo_draw_integers, RpoRandomCoin, TEST_SEED);
-/// ```
-#[macro_export]
-macro_rules! benchmark_rand_draw_integers {
-    ($func_name:ident, $coin_type:ty, $seed:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group("rand-draw-integers");
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            let mut coin = <$coin_type>::new($seed);
-
-            let num_values_list = &[1, 10, 100];
-            let domain_sizes = &[256, 1024, 4096, 65536];
-
-            for &num_values in num_values_list {
-                for &domain_size in domain_sizes {
-                    // Ensure num_values < domain_size to avoid assertion error
-                    if num_values < domain_size {
-                        group.bench_with_input(
-                            criterion::BenchmarkId::new(
-                                "draw_integers",
-                                format!("{num_values}_{domain_size}"),
-                            ),
-                            &(num_values, domain_size),
-                            |b, &(num_values, domain_size)| {
-                                b.iter(|| {
-                                    let _result = coin.draw_integers(
-                                        black_box(num_values),
-                                        black_box(domain_size),
-                                        black_box(0),
-                                    );
-                                })
-                            },
-                        );
-                    }
-                }
-            }
-
-            group.finish();
-        }
-    };
-}
-
-/// Creates a benchmark for random coin leading zero checking
-///
-/// # Usage
-/// ```no_run
-/// benchmark_rand_check_leading_zeros!(rand_rpo_check_leading_zeros, RpoRandomCoin, TEST_SEED);
-/// ```
-#[macro_export]
-macro_rules! benchmark_rand_check_leading_zeros {
-    ($func_name:ident, $coin_type:ty, $seed:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group("rand-check-trailing-zeros");
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            let coin = <$coin_type>::new($seed);
-            let test_values: Vec<u64> = (0u64..100).collect();
-
-            group.bench_function("check_trailing_zeros", |b| {
-                b.iter(|| {
-                    for &value in &test_values {
-                        let _zeros = coin.check_trailing_zeros(black_box(value));
-                    }
-                });
-            });
-
-            group.finish();
-        }
-    };
-}
-
-/// Creates a benchmark for random coin byte filling operations
-///
-/// # Usage
-/// ```no_run
-/// benchmark_rand_fill_bytes!(
-///     rand_rpo_fill_bytes,
-///     RpoRandomCoin,
-///     TEST_SEED,
-///     &[1, 32, 64, 128, 256, 512, 1024]
-/// );
-/// ```
-#[macro_export]
-macro_rules! benchmark_rand_fill_bytes {
-    ($func_name:ident, $coin_type:ty, $seed:expr, $sizes:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group("rand-fill-bytes");
-            group.measurement_time($crate::common::config::DEFAULT_MEASUREMENT_TIME);
-            group.sample_size($crate::common::config::DEFAULT_SAMPLE_SIZE);
-
-            let mut coin = <$coin_type>::new($seed);
-
-            for &size in $sizes {
-                group.bench_with_input(
-                    criterion::BenchmarkId::new("fill_bytes", size),
-                    &size,
-                    |b, &size| {
-                        let mut buffer = vec![0u8; size];
-                        b.iter(|| {
-                            coin.fill_bytes(black_box(&mut buffer));
-                        })
-                    },
-                );
-            }
-
-            group.finish();
-        }
-    };
-}
-
-// Creates a comprehensive benchmark group for random coin implementations
-//
-// This macro generates all common random coin benchmarks for a given coin type:
-// - Initialization
-// - Element drawing
-// - Word drawing
-// - Reseeding
-// - Integer drawing
-// - Leading zero checking
-// - Byte filling
-//
-// # Usage
-// ```no_run
-// benchmark_rand_comprehensive!(
-//     rand_rpo_,
-//     RpoRandomCoin,
-//     TEST_SEED,
-//     PRNG_OUTPUT_SIZES,
-//     &[1, 32, 64, 128, 256, 512, 1024]
-// );
-// ```
-#[macro_export]
-macro_rules! benchmark_rand_comprehensive {
-    ($prefix:ident, $coin_type:ty, $seed:expr, $output_sizes:expr, $byte_sizes:expr) => {
-        // Initialization benchmark
-        $crate::benchmark_rand_new!($prefix new, $coin_type, $seed);
-
-        // Element drawing benchmarks
-        $crate::benchmark_rand_draw!(
-            $prefix draw_elements,
-            $coin_type,
-            $seed,
-            "draw_element",
-            $output_sizes,
-            |_b, coin: &mut $coin_type, count| {
-                for _ in 0..count {
-                    let _element = coin.draw_element();
-                }
-            }
-        );
-
-        // Word drawing benchmarks
-        $crate::benchmark_rand_draw!(
-            $prefix draw_words,
-            $coin_type,
-            $seed,
-            "draw_word",
-            $output_sizes,
-            |_b, coin: &mut $coin_type, count| {
-                for _ in 0..count {
-                    let _word = coin.draw_word();
-                }
-            }
-        );
-
-        // Reseeding benchmark
-        $crate::benchmark_rand_reseed!($prefix reseeding, $coin_type, $seed);
-
-        // Integer drawing benchmark
-        $crate::benchmark_rand_draw_integers!($prefix draw_integers, $coin_type, $seed);
-
-        // Leading zero checking benchmark
-        $crate::benchmark_rand_check_leading_zeros!($prefix check_leading_zeros, $coin_type, $seed);
-
-        // Byte filling benchmark
-        $crate::benchmark_rand_fill_bytes!(
-            $prefix fill_bytes,
-            $coin_type,
-            $seed,
-            $byte_sizes
-        );
     };
 }
 

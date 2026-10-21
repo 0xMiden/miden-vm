@@ -211,13 +211,6 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		--features miden-crypto/persistent-forest
 	$(MAKE) test-lifted-stark
 
-.PHONY:test-rpx-avx2-debug
-test-rpx-avx2-debug: ## Tests unoptimized RPX with AVX2 and the default 2 MiB thread stack
-	RUSTFLAGS="$(RUSTFLAGS) -C target-feature=+avx2" $(MAKE) test \
-		CRATE=miden-crypto WORKSPACE_TEST_FEATURES= CARGO_PROFILE=test \
-		TEST_RUST_MIN_STACK=2097152 EXTRA="--lib --no-tests=fail" \
-		EXPR="-E 'test(rpx_packed_permutation_fits_default_thread_stack)'"
-
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES)
@@ -275,7 +268,7 @@ build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
 
 .PHONY: test-wasm-simd
-test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2/Eidos vs scalar tests under WASM SIMD128 (requires wasmtime)
+test-wasm-simd: ## Runs the packed Goldilocks/Eidos vs scalar tests under WASM SIMD128 (requires wasmtime)
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed

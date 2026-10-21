@@ -288,6 +288,10 @@ impl Deserializable for SparseMerklePath {
             DeserializationError::InvalidValue(format!("invalid SparseMerklePath: {err}"))
         })
     }
+
+    fn min_serialized_size() -> usize {
+        1 + 8 // depth and empty-sibling mask
+    }
 }
 
 // CONVERSIONS

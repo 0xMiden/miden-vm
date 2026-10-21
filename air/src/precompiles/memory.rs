@@ -40,14 +40,7 @@ mod tests {
             crate::precompiles::stark_config::precompile_pcs_params(),
             PcsParams::new(1, 1, 3, 0, 0, 1, 0).unwrap(),
         ] {
-            for hash_fn in [
-                HashFunction::Blake3_256,
-                HashFunction::Rpo256,
-                HashFunction::Rpx256,
-                HashFunction::Poseidon2,
-                HashFunction::Keccak,
-                HashFunction::Eidos,
-            ] {
+            for hash_fn in [HashFunction::Blake3_256, HashFunction::Keccak, HashFunction::Eidos] {
                 for heights in [
                     [0; NUM_CHIPLETS],
                     [1; NUM_CHIPLETS],

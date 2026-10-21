@@ -77,10 +77,9 @@ impl ExecutionWitness {
             stack: stack_outputs,
             advice: _,
             memory: _,
+            precompile_root,
             precompile_witness: precompile,
         } = execution_output;
-        let precompile_root =
-            precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -190,10 +189,9 @@ impl Deserializable for ExecutionWitness {
             },
             1 => {
                 let witness = PrecompileWitness::read_from(source)?;
-                if witness.root_unchecked() != vm.precompile_root {
+                if vm.precompile_root == TRUE_DIGEST {
                     return Err(DeserializationError::InvalidValue(
-                        "precompile witness root does not match the VM witness precompile root"
-                            .into(),
+                        "VM witness carries a precompile witness for an empty deferred root".into(),
                     ));
                 }
                 Some(witness)
@@ -243,6 +241,11 @@ impl VmWitness {
     /// Returns whether this witness authenticates deferred precompile work.
     pub fn has_precompiles(&self) -> bool {
         self.precompile_root != TRUE_DIGEST
+    }
+
+    /// Returns the deferred root authenticated by the replayed VM execution.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
     }
 
     /// Takes the hasher replay out, leaving an empty buffered one.
@@ -455,7 +458,7 @@ impl VmTrace {
         let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
         let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
-            Statement::new(MidenMultiAir::new(), public_values, kernel_felts)
+            Statement::new(MidenMultiAir::new(), vec![(0, public_values)], kernel_felts)
                 .expect("statement construction failed");
         let prover_statement = ProverStatement::new(
             statement,
@@ -514,9 +517,13 @@ mod wire_tests {
         operations::Operation,
         program::Program,
     };
+    use rstest::rstest;
 
-    use super::{ExecutionWitness, Serializable, build_trace};
-    use crate::{DefaultHost, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use super::{
+        ExecutionWitness, Serializable, build_trace,
+        trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
+    };
+    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -644,16 +651,67 @@ mod wire_tests {
         assert_eq!(restored_trace.clone_air_matrices(), original_trace.clone_air_matrices());
     }
 
+    #[rstest]
+    #[case::keystream_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.keystream[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_mismatch(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] =
+                Felt::new_unchecked(entry.ciphertext[lane].as_canonical_u64() ^ 1);
+        },
+        "AEAD stream ciphertext does not match plaintext XOR keystream"
+    )]
+    fn build_trace_rejects_inconsistent_aead_stream_replay(
+        #[case] tamper: fn(&mut AeadStreamReplayEntry, usize),
+        #[case] expected_error: &str,
+        #[values(0, 7)] lane: usize,
+    ) {
+        let mut witness = aead_stream_witness();
+        let replay = &mut witness.vm.trace_replay_mut().bitwise_replay;
+        let mut tampered = false;
+        for entry in core::mem::take(replay) {
+            match entry {
+                BitwiseReplayEntry::AeadStream(mut entry) => {
+                    if !tampered {
+                        tamper(&mut entry, lane);
+                        tampered = true;
+                    }
+                    replay.record_aead_stream(*entry);
+                },
+                BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => replay.record_u32and(a, b),
+                BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b) => replay.record_u32xor(a, b),
+            }
+        }
+        assert!(tampered, "the witness should contain an AEAD stream entry");
+
+        let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes())
+            .expect("the wire reader accepts Felt-valued replay lanes");
+        let Err(error) = build_trace(witness.into_parts().0) else {
+            panic!("invalid AEAD stream replay must return an error");
+        };
+        assert!(matches!(error, ExecutionError::OperationError { .. }));
+        assert!(format!("{error}").contains(expected_error), "unexpected error: {error}");
+    }
+
     #[test]
-    fn witness_wire_rejects_mismatched_precompile_root() {
+    fn witness_wire_rejects_precompile_witness_with_true_root() {
         let bytes = deferred_witness_bytes();
         let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
         let (vm, precompile) = restored.into_parts();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
         assert_ne!(vm.precompile_root, TRUE_DIGEST);
 
-        // Tamper only the VM-side precompile root and re-serialize: the two halves of the wire
-        // no longer describe the same execution, so deserialization must reject them.
+        // A carried witness with an explicitly empty VM-side root is not a valid transport shape.
         let tampered = ExecutionWitness {
             vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
             precompile: Some(precompile),
@@ -662,7 +720,7 @@ mod wire_tests {
             .expect_err("tampered witness should be rejected");
         assert!(
             format!("{err:?}")
-                .contains("precompile witness root does not match the VM witness precompile root"),
+                .contains("VM witness carries a precompile witness for an empty deferred root"),
             "unexpected error: {err:?}"
         );
 

@@ -45,10 +45,9 @@ impl StatementEncoding {
     pub fn observe<F: Field, C: CanObserve<F>>(
         self,
         challenger: &mut C,
-        air_inputs: &[F],
+        mut air_inputs: impl Iterator<Item = F>,
         aux_inputs: &[F],
     ) {
-        debug_assert_eq!(air_inputs.len(), self.num_public_values, "public value count");
         debug_assert_eq!(aux_inputs.len(), self.num_aux_inputs, "auxiliary input count");
         for field in Self::FIELDS {
             match field {
@@ -56,9 +55,12 @@ impl StatementEncoding {
                     challenger.observe(F::from_usize(self.num_public_values))
                 },
                 StatementField::PublicValues => {
-                    for &value in air_inputs {
+                    let mut count = 0;
+                    for value in air_inputs.by_ref() {
                         challenger.observe(value);
+                        count += 1;
                     }
+                    debug_assert_eq!(count, self.num_public_values, "public value count");
                 },
                 StatementField::MaxAuxInputs => {
                     challenger.observe(F::from_usize(self.max_aux_inputs))

@@ -16,12 +16,11 @@ use miden_lifted_air::Statement;
 use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
 
 use crate::precompiles::{
-    ChipletMultiAir,
+    ChipletAir, ChipletMultiAir,
     logup::NUM_PUBLIC_VALUES,
     stark_config::{
-        Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, Poseidon2Config,
-        RpoConfig, RpxConfig, blake3_256_config, eidos_config, keccak_config, poseidon2_config,
-        precompile_pcs_params, rpo_config, rpx_config,
+        Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
+        eidos_config, keccak_config, precompile_pcs_params,
     },
 };
 
@@ -58,8 +57,12 @@ where
 /// inputs — so a scratch statement with dummy public inputs builds the exact
 /// same bundle as the real per-proof statement would.
 fn scratch_statement() -> Statement<Felt, QuadFelt, ChipletMultiAir> {
-    Statement::new(ChipletMultiAir::new(), vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![])
-        .expect("chiplet statement inputs are valid")
+    Statement::new(
+        ChipletMultiAir::new(),
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, vec![Felt::ZERO; NUM_PUBLIC_VALUES])],
+        vec![],
+    )
+    .expect("chiplet statement inputs are valid")
 }
 
 fn build<SC>(config: &SC) -> Preprocessed<Felt, SC::Lmcs>
@@ -100,8 +103,5 @@ macro_rules! cached_preprocessed {
 }
 
 cached_preprocessed!(blake3, Blake3Config, blake3_256_config);
-cached_preprocessed!(rpo, RpoConfig, rpo_config);
-cached_preprocessed!(rpx, RpxConfig, rpx_config);
-cached_preprocessed!(poseidon2, Poseidon2Config, poseidon2_config);
 cached_preprocessed!(keccak, KeccakConfig, keccak_config);
 cached_preprocessed!(eidos, EidosConfig, eidos_config);

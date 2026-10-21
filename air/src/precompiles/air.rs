@@ -43,6 +43,8 @@ pub enum ChipletAir {
 }
 
 impl ChipletAir {
+    pub const TRANSCRIPT_EVAL_INDEX: usize = definitions::ChipletAir::TRANSCRIPT_EVAL_INDEX;
+
     pub fn definition(&self) -> definitions::ChipletAir {
         match self {
             Self::ChunkNodeSponge => definitions::ChipletAir::ChunkNodeSponge,
@@ -218,16 +220,13 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     fn airs(&self) -> &[ChipletAir] {
         &self.airs
     }
-    fn num_air_inputs(&self) -> usize {
-        self.definition().num_air_inputs()
-    }
     fn max_aux_inputs(&self) -> usize {
         self.definition().max_aux_inputs()
     }
     fn observe<C: p3_challenger::CanObserve<Felt>>(
         &self,
         challenger: &mut C,
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         heights: &[u8],
     ) {
@@ -236,7 +235,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     fn eval_external(
         &self,
         challenges: &[QuadFelt],
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         heights: &[u8],

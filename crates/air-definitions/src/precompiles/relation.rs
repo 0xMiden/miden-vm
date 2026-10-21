@@ -31,8 +31,7 @@ pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
 
 pub fn protocol() -> RelationProtocol {
     let airs = &AIRS;
-    let num_public_values = airs[0].num_public_values();
-    assert!(airs.iter().all(|air| air.num_public_values() == num_public_values));
+    let num_public_values = airs.iter().map(BaseAir::num_public_values).sum();
     RelationProtocol {
         protocol_id: policy::PROTOCOL_ID,
         num_public_values,

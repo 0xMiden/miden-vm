@@ -23,7 +23,7 @@ use miden_air::precompiles::{ChipletAir, ace::build_canonical_precompile_ace_cir
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(|| miden_air::precompiles::protocol::recursive_circuit())
+    CIRCUIT.get_or_init(miden_air::precompiles::protocol::recursive_circuit)
 }
 
 /// Returns [`miden_air::precompiles::ChipletAir::all`] instance indices in committed-trace order.
@@ -357,8 +357,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
-        use miden_air::precompiles::ChipletMultiAir;
-        use miden_lifted_air::MultiAir;
+        use miden_air::precompiles::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
+        use miden_lifted_air::Statement;
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
@@ -374,8 +374,17 @@ mod tests {
             .collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
-        let actual = ChipletMultiAir::new()
-            .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            alloc::vec![(
+                ChipletAir::TRANSCRIPT_EVAL_INDEX,
+                alloc::vec![Felt::ZERO; NUM_PUBLIC_VALUES]
+            )],
+            alloc::vec![],
+        )
+        .unwrap();
+        let actual = statement
+            .eval_external(&challenges, &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
         let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
             // Fixed secp256k1, Ed25519 and P-256 boundary denominators plus one value per chiplet.

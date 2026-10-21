@@ -28,7 +28,7 @@ use crate::{
             extract_outputs, generate_trace_from_states, lane_base, program::SLOT_D_ROL_BEGIN,
         },
     },
-    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
@@ -248,7 +248,7 @@ fn keccak_round_shape_and_degree_match_design() {
     let layout = ValidateLayout {
         preprocessed_width: air.preprocessed_width(),
         trace_width: air.width(),
-        num_public_values: NUM_PUBLIC_VALUES,
+        num_public_values: 0,
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: NUM_AUX_COLS,
         num_permutation_challenges: NUM_RANDOMNESS,

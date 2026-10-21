@@ -39,16 +39,12 @@ const FELT_BYTES: u64 = size_of::<Felt>() as u64;
 const EXT_DIMENSION: u64 = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION as u64;
 
 /// Digest size, in bytes, common to every STARK-configuration hash function the precompile
-/// prover supports: 4 [`Felt`] elements for the algebraic configs, 32 raw bytes for Blake3 and
+/// prover supports: 4 [`Felt`] elements for Eidos, 32 raw bytes for Blake3 and
 /// Keccak.
 const DIGEST_BYTES: u64 = 32;
 
 /// Per-proof LMCS trees held simultaneously at proof-opening time: main, auxiliary, and quotient.
 const PROOF_LMCS_TREES_AT_PEAK: u64 = 3;
-
-/// Sponge-state width, in bytes, of the transient per-leaf buffer RPO, RPX, and Poseidon2 hold
-/// while hashing an LMCS tree's leaves: 12 [`Felt`] elements per `StatefulSponge` state.
-const ALGEBRAIC_LEAF_STATE_BYTES: u64 = 12 * FELT_BYTES;
 
 /// Sponge-state width, in bytes, of the transient per-leaf buffer Keccak holds while hashing an
 /// LMCS tree's leaves: the full 25-`u64` (1600-bit) Keccak-f permutation state.
@@ -66,13 +62,10 @@ pub const SAFETY_DENOMINATOR: u64 = 4;
 /// `LiftedTree::build_with_alignment` in `miden-lifted-stark`) until every leaf's digest has been
 /// squeezed out of it; the buffer coexists with the squeezed digests until it is dropped. Blake3's
 /// `ChainingHasher` and the Eidos LMCS hasher use the digest itself as their state, so they cost
-/// nothing beyond [`DIGEST_BYTES`]; RPO, RPX, Poseidon2, and Keccak all hold a wider sponge state.
+/// nothing beyond [`DIGEST_BYTES`]; Keccak holds a wider sponge state.
 const fn leaf_state_bytes(hash_fn: HashFunction) -> u64 {
     match hash_fn {
         HashFunction::Blake3_256 | HashFunction::Eidos => DIGEST_BYTES,
-        HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
-            ALGEBRAIC_LEAF_STATE_BYTES
-        },
         HashFunction::Keccak => KECCAK_LEAF_STATE_BYTES,
     }
 }
@@ -255,9 +248,6 @@ mod tests {
         for (hash_fn, expected) in [
             (HashFunction::Blake3_256, 4660),
             (HashFunction::Eidos, 4660),
-            (HashFunction::Rpo256, 6580),
-            (HashFunction::Rpx256, 6580),
-            (HashFunction::Poseidon2, 6580),
             (HashFunction::Keccak, 9700),
         ] {
             assert_eq!(
@@ -280,13 +270,7 @@ mod tests {
     fn increasing_any_height_never_decreases_the_result() {
         let params = precompile_pcs_params();
         let base = [1_000usize; NUM_CHIPLETS];
-        for hash_fn in [
-            HashFunction::Blake3_256,
-            HashFunction::Rpo256,
-            HashFunction::Rpx256,
-            HashFunction::Poseidon2,
-            HashFunction::Keccak,
-        ] {
+        for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos, HashFunction::Keccak] {
             let base_bytes = prover_peak_bytes(&base, &params, hash_fn).expect("fits in u64");
             for i in 0..NUM_CHIPLETS {
                 let mut bumped = base;

@@ -272,11 +272,6 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn airs(&self) -> &[MidenAir] {
         &AIRS
     }
-    fn num_air_inputs(&self) -> usize {
-        <definitions::MidenMultiAir as MultiAir<Felt, EF>>::num_air_inputs(
-            &definitions::MidenMultiAir,
-        )
-    }
     fn max_aux_inputs(&self) -> usize {
         <definitions::MidenMultiAir as MultiAir<Felt, EF>>::max_aux_inputs(
             &definitions::MidenMultiAir,
@@ -285,7 +280,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn observe<C: CanObserve<Felt>>(
         &self,
         challenger: &mut C,
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         heights: &[u8],
     ) {
@@ -300,7 +295,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn eval_external(
         &self,
         challenges: &[EF],
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
         heights: &[u8],

@@ -23,7 +23,7 @@ use crate::{
         NUM_MAIN_COLS, Sha512CompressionAir, Sha512CompressionRequires, Sha512WordMsg,
         generate_trace, program,
     },
-    logup::{LookupMessage, NUM_PUBLIC_VALUES},
+    logup::LookupMessage,
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutRequires, NUM_MAIN_COLS as BPL_MAIN_COLS,
         generate_trace as bpl_trace,
@@ -467,7 +467,7 @@ fn sha512_and_bpl_buses_balance_with_input_and_output_boundaries() {
         net.values().all(|multiplicity| *multiplicity == Felt::ZERO),
         "SHA-512 and BPL lookup buses must balance at every message"
     );
-    assert_eq!(Sha512CompressionAir.num_public_values(), NUM_PUBLIC_VALUES);
+    assert_eq!(Sha512CompressionAir.num_public_values(), 0);
 }
 
 fn two_block_bus_residual(mutator: impl FnOnce(&mut RowMajorMatrix<Felt>)) -> usize {

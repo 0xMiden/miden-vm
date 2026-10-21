@@ -147,7 +147,10 @@ mod tests {
             miden_air_definitions::precompiles::ChipletMultiAir,
         >::new(
             miden_air_definitions::precompiles::ChipletMultiAir::new(),
-            vec![Felt::ZERO; crate::precompiles::logup::NUM_PUBLIC_VALUES],
+            vec![(
+                miden_air_definitions::precompiles::ChipletAir::TRANSCRIPT_EVAL_INDEX,
+                vec![Felt::ZERO; crate::precompiles::logup::NUM_PUBLIC_VALUES],
+            )],
             vec![],
         )
         .unwrap();

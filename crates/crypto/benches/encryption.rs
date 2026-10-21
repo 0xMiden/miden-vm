@@ -28,8 +28,6 @@ benchmark_aead_field!(
     aead_xchacha_felts_group
 );
 
-// Running the benchmarks:
-
 criterion_main!(
     aead_eidos_bytes_group,
     aead_eidos_felts_group,

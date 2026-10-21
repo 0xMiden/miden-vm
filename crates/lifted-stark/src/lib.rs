@@ -40,8 +40,8 @@
 //! These are AIR implementer responsibilities. Run [`debug::assert_prover_setup`] (or its
 //! components) from your test harness to catch structural mistakes early:
 //!
-//! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, positive
-//!    aux width, power-of-two periodic column lengths, and matching override helpers. Checked by
+//! 1. **AIR structural contract** — non-empty AIR collection, positive aux width, power-of-two
+//!    periodic column lengths, and matching override helpers. Checked by
 //!    [`miden_lifted_air::debug::assert_multi_air_valid`]. These are not typed `Statement::new`
 //!    errors.
 //! 2. **Window size** — only transition window size 2.

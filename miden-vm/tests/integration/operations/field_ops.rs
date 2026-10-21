@@ -411,6 +411,56 @@ fn exp_small_pow() {
 }
 
 #[test]
+fn exp_addition_chains_preserve_the_full_stack() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for pow in [4, 5, 6, 7, 8, 16] {
+        for base in [0, 1, 2, u32::MAX as u64, 1_u64 << 32, Felt::ORDER_U64 - 1] {
+            inputs[0] = base;
+            let mut expected = inputs.clone();
+            expected[0] = Felt::new_unchecked(base).exp_u64(pow).as_canonical_u64();
+
+            // Avoid build_op_test!'s stack truncation: it could hide an extra overflow row.
+            let test = build_test!(&format!("begin exp.{pow} end"), &inputs);
+            test.expect_stack(&expected);
+        }
+    }
+}
+
+#[test]
+fn zero_immediate_comparisons_preserve_the_full_stack() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for (op, zero_result, positive_result) in
+        [("lt", 0, 0), ("lte", 1, 0), ("gt", 0, 1), ("gte", 1, 1)]
+    {
+        for value in [0, 1, u32::MAX as u64, 1_u64 << 32, Felt::ORDER_U64 - 1] {
+            inputs[0] = value;
+            let mut expected = inputs.clone();
+            expected[0] = if value == 0 { zero_result } else { positive_result };
+
+            // Constant results must replace the top value without changing stack depth.
+            let test = build_test!(&format!("begin {op}.0 end"), &inputs);
+            test.expect_stack(&expected);
+        }
+    }
+}
+
+#[test]
+fn optimized_lowerings_preserve_overflow_values_and_satisfy_constraints() {
+    let inputs: Vec<u64> = (1..=16).collect();
+    let test = build_test!(
+        "begin
+            push.7
+            exp.4 exp.5 exp.6 exp.7 exp.8 exp.16
+            lt.0 lte.0 gt.0 gte.0
+            push.7 u32max push.7 assert_eq
+        end",
+        &inputs
+    );
+    test.expect_stack(&inputs);
+    test.check_constraints();
+}
+
+#[test]
 fn bare_exp_accepts_63_bit_boundaries() {
     let asm_op = "exp";
     let base = 7_u64;

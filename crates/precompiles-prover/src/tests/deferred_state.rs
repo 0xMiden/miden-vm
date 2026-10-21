@@ -572,14 +572,7 @@ fn prove_precompiles_with_budget_corner_cases() {
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn prove_deferred_state_round_trips_for_every_hash_function() {
     let synthetic = synthetic_keccak_state(b"abc");
-    let hash_fns = [
-        HashFunction::Eidos,
-        HashFunction::Blake3_256,
-        HashFunction::Rpo256,
-        HashFunction::Rpx256,
-        HashFunction::Poseidon2,
-        HashFunction::Keccak,
-    ];
+    let hash_fns = [HashFunction::Eidos, HashFunction::Blake3_256, HashFunction::Keccak];
 
     for hash_fn in hash_fns {
         for pass in 0..2 {

@@ -17,8 +17,8 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES,
-        NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
+        build_logup_aux_trace,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -42,10 +42,6 @@ struct AuxRegisterAir;
 impl BaseAir<Felt> for AuxRegisterAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 }
 

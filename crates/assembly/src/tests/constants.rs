@@ -4,6 +4,345 @@
 use super::*;
 
 #[test]
+fn unused_constant_warning() {
+    let context = TestContext::default();
+    let source = source_file!(&context, "\nconst UNUSED = 42\n\nbegin\n    push.1\nend");
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:2:1\]"#),
+        "1 |",
+        "2 | const UNUSED = 42",
+        "  : ^^^^^^^^^^^^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed"
+    );
+}
+
+#[test]
+fn used_constant_no_warning() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "\nconst MY_CONST = 42\n\nbegin\n    push.MY_CONST\nend");
+
+    context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn public_constant_no_warning() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\npub const EXPORTED = 42\n\npub proc foo\n    push.1\nend"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn reexported_private_constant_and_its_dependencies_do_not_warn() -> TestResult {
+    let context = TestContext::default();
+    for path in ["self", "test::lib", "::test::lib"] {
+        let source = source_file!(
+            &context,
+            format!(
+                "namespace test::lib\n\nconst A = 7\nconst C = A\npub use {{C as B}} from {path}\n\npub proc noop\n    nop\nend\n"
+            )
+        );
+
+        let module = context.parse_module(source)?;
+        context.assemble_library("test", None, module, [])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn private_local_import_used_by_procedure_keeps_source_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nconst A = 7\nconst C = A\nuse {C as B} from self\n\npub proc foo\n    push.B\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn private_local_import_used_by_live_constant_keeps_source_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nconst A = 7\nconst C = A\nuse {C as B} from self\npub const EXPORTED = B\n\npub proc noop\n    nop\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn reexport_from_another_module_does_not_mark_same_named_local_constant_used() {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "namespace test::lib\n\nconst A = 7\npub use {A as B} from ::dep\n");
+    let error = context.parse_module(source).expect_err("the local constant is unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused constant"), "{rendered}");
+    assert!(rendered.contains("const A = 7"), "{rendered}");
+}
+
+#[test]
+fn chained_unused_constants_both_warn() {
+    let context = TestContext::default();
+    let source = source_file!(&context, "\nconst A = 1\nconst B = A\n\nbegin\n    push.1\nend");
+    let error = context.assemble(source).expect_err("both constants should warn");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 2, "{rendered}");
+    assert!(rendered.contains("const A = 1"), "{rendered}");
+    assert!(rendered.contains("const B = A"), "{rendered}");
+}
+
+#[test]
+fn chained_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "\nconst A = 1\nconst B = A\n\nbegin\n    push.B\nend");
+
+    context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn cached_chained_constant_records_transitive_dependency() {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "\nconst A = B\nconst B = C\nconst C = 1\n\nbegin\n    push.B\nend");
+    let error = context
+        .assemble(source)
+        .expect_err("only the genuinely dead constant should warn");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 1, "{rendered}");
+    assert!(rendered.contains("const A = B"), "{rendered}");
+    assert!(!rendered.contains("const C = 1"), "{rendered}");
+}
+
+#[test]
+fn same_module_qualified_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nconst A = 1\npub const B = ::test::lib::A\n\npub proc foo\n    push.1\nend"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn self_qualified_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nconst A = 1\npub const B = self::A\n\npub proc foo\n    push.1\nend"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn ancestor_module_alias_keeps_local_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace test\npub mod lib\npub proc noop\n    nop\nend\n"
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\npub const LIVE = t::lib::A\n"
+    ))?;
+
+    let package = context.assemble_library("test", None, root, [child])?;
+    let value = package.manifest.exports().find_map(|export| match export {
+        PackageExport::Constant(constant)
+            if constant.path.as_ref() == Path::new("::test::lib::LIVE") =>
+        {
+            Some(&constant.value)
+        },
+        _ => None,
+    });
+    assert_eq!(
+        value,
+        Some(&miden_assembly_syntax::ast::ConstantValue::Int(Span::unknown(7u8.into())))
+    );
+    Ok(())
+}
+
+#[test]
+fn ancestor_module_alias_keeps_enum_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    for (ty, discriminant) in [("Status", "t::lib::BASE"), ("t::lib::Status", "BASE")] {
+        let root = context.parse_module(source_file!(
+            &context,
+            "namespace test\npub mod lib\npub proc noop\n    nop\nend\n"
+        ))?;
+        let child = context.parse_module(source_file!(
+            &context,
+            format!(
+                "namespace test::lib\nuse ::test as t\nconst BASE = 7\nenum Status : u16 {{\n    OK = {discriminant},\n}}\nproc hidden(value: {ty})\n    nop\nend\npub proc entry\n    exec.hidden\nend\n"
+            )
+        ))?;
+
+        context.assemble_library("test", None, root, [child])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn dead_constant_through_ancestor_alias_keeps_warnings() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\nconst DEAD = t::lib::A\npub proc entry\n    nop\nend\n"
+    );
+    let error = context
+        .parse_module(source)
+        .expect_err("both constants and the import are unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 2, "{rendered}");
+    assert!(rendered.contains("unused import"), "{rendered}");
+}
+
+#[test]
+fn ancestor_alias_to_another_module_does_not_keep_local_constant_live() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\npub const LIVE = t::other::A\n"
+    );
+    let error = context.parse_module(source).expect_err("the local constant is unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 1, "{rendered}");
+    assert!(rendered.contains("const A = 7"), "{rendered}");
+    assert!(!rendered.contains("unused import"), "{rendered}");
+}
+
+#[test]
+fn relative_full_namespace_does_not_mark_constant_used() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nconst A = 1\npub const B = test::lib::A\n\npub proc foo\n    push.1\nend"
+    );
+    let error = context
+        .parse_module(source)
+        .expect_err("the relative path must not resolve to the local constant");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused constant"), "{rendered}");
+    assert!(rendered.contains("const A = 1"), "{rendered}");
+}
+
+fn constant_library(context: &TestContext, name: &str) -> Box<Package> {
+    let module = parse_module!(
+        context,
+        format!(
+            "namespace lib::a\n\npub const {name} = 42\n\npub proc noop\n    push.1 drop\nend\n"
+        )
+    );
+    Assembler::new(context.source_manager())
+        .assemble_library("lib", module, None::<Box<Module>>)
+        .unwrap()
+}
+
+#[test]
+fn dead_constant_does_not_mask_unused_import() {
+    let context = TestContext::default();
+    let library = constant_library(&context, "BAR");
+    let mut context = TestContext::default();
+    context.add_library(Arc::from(library)).unwrap();
+    let source =
+        source_file!(&context, "\nuse lib::a\n\nconst DEAD = a::BAR\n\nbegin\n    push.1\nend");
+    let error = context.assemble(source).expect_err("both declarations should warn");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused import"), "{rendered}");
+    assert!(rendered.contains("unused constant"), "{rendered}");
+}
+
+#[test]
+fn dead_constant_direct_import_warns_unused_import() {
+    let context = TestContext::default();
+    let library = constant_library(&context, "BAR");
+    let mut context = TestContext::default();
+    context.add_library(Arc::from(library)).unwrap();
+    let source = source_file!(
+        &context,
+        "\nuse {BAR} from lib::a\n\nconst DEAD = BAR\n\nbegin\n    push.1\nend"
+    );
+    let error = context.assemble(source).expect_err("both declarations should warn");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused import"), "{rendered}");
+    assert!(rendered.contains("unused constant"), "{rendered}");
+}
+
+#[test]
+fn public_constant_keeps_import_live() -> TestResult {
+    let context = TestContext::default();
+    let library = constant_library(&context, "BAR");
+    let mut context = TestContext::default();
+    context.add_library(Arc::from(library))?;
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nuse lib::a\n\npub const LIVE = a::BAR\n\npub proc foo\n    push.1\nend"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn reexported_private_constant_keeps_import_live() -> TestResult {
+    let context = TestContext::default();
+    let library = constant_library(&context, "BAR");
+    let mut context = TestContext::default();
+    context.add_library(Arc::from(library))?;
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nuse {BAR} from lib::a\nconst A = BAR\npub use {A as EXPORTED} from self\n\npub proc noop\n    nop\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
 fn simple_constant() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
@@ -62,6 +401,56 @@ end
 "#
     );
     let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_type_in_called_procedure_keeps_discriminant_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+namespace test::lib
+
+const BASE = 10
+
+enum Status : u16 {
+    OK = BASE,
+}
+
+proc hidden(value: Status)
+    nop
+end
+
+pub proc entry
+    exec.hidden
+end
+"#
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn aliased_and_qualified_enum_types_keep_discriminant_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    for (import, ty) in [
+        ("use {Status as State} from self", "State"),
+        ("", "self::Status"),
+        ("", "::test::lib::Status"),
+    ] {
+        let source = source_file!(
+            &context,
+            format!(
+                "namespace test::lib\n\nconst BASE = 10\nenum Status : u16 {{\n    OK = BASE,\n}}\n{import}\nproc hidden(value: {ty})\n    nop\nend\n\npub proc entry\n    exec.hidden\nend\n"
+            )
+        );
+
+        let module = context.parse_module(source)?;
+        context.assemble_library("test", None, module, [])?;
+    }
     Ok(())
 }
 

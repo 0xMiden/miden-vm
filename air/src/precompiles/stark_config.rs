@@ -12,9 +12,8 @@ use miden_crypto::hash::eidos::MidenEidosChallenger;
 use miden_lifted_stark::{StarkConfig, pcs::PcsParams};
 
 pub use crate::shared::config::{
-    Blake3Config, EidosConfig, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
-    blake3_256_config, eidos_config, keccak_config, observe_protocol_params, poseidon2_config,
-    rpo_config, rpx_config,
+    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, eidos_config,
+    keccak_config, observe_protocol_params,
 };
 
 // SHARED TYPES

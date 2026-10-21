@@ -38,7 +38,7 @@ where
     let shared_period =
         periods.iter().flat_map(|cols| cols.iter().map(Vec::len)).max().unwrap_or(1);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let (mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0);
+    let (mut public, mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0, 0);
     let mut roots = Vec::with_capacity(airs.len());
     for (i, air) in airs.iter().enumerate() {
         let counts = InputCounts {
@@ -53,7 +53,7 @@ where
         let local = InputLayout::new(counts);
         let mut values = vec![QuadFelt::ZERO; local.total_inputs];
         for (dst, src, offset) in [
-            (local.regions.public_values, layout.regions.public_values, 0),
+            (local.regions.public_values, layout.regions.public_values, public),
             (local.regions.randomness, layout.regions.randomness, 0),
             (local.regions.preprocessed_curr, layout.regions.preprocessed_curr, preprocessed),
             (local.regions.preprocessed_next, layout.regions.preprocessed_next, preprocessed),
@@ -95,6 +95,7 @@ where
             &local,
             &periodic_values,
         ));
+        public += counts.num_public;
         preprocessed += counts.preprocessed_width.next_multiple_of(trace_alignment);
         main += counts.width.next_multiple_of(trace_alignment);
         aux += (counts.aux_width * crate::EXT_DEGREE).next_multiple_of(trace_alignment);

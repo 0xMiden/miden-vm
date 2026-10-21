@@ -82,7 +82,11 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
     use miden_crypto::hash::sha2::Sha512;
 
     for mixed in [false, true] {
-        let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+        let mut state = DeferredState::new(
+            Arc::new(miden_precompiles::registry()),
+            miden_precompiles::default_execution_precompile_limits(),
+        )
+        .unwrap();
         // 112 bytes requires two SHA-512 padding blocks; Keccak still needs only one.
         let input = [0xa5; 112];
         let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
@@ -101,7 +105,10 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
                 .unwrap();
             state.log_statement(assertion).unwrap();
         }
-        let witness = state.into_witness().unwrap().expect("the state logs hash claims");
+        let witness = state
+            .into_witness(&miden_precompiles::default_verification_precompile_limits())
+            .unwrap()
+            .expect("the state logs hash claims");
         let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
         let inputs =
             PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
@@ -113,7 +120,11 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
 fn pvm_verifies_sha256_claims() {
     use miden_crypto::hash::sha2::Sha256;
 
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+    let mut state = DeferredState::new(
+        Arc::new(miden_precompiles::registry()),
+        miden_precompiles::default_execution_precompile_limits(),
+    )
+    .unwrap();
     // 56 bytes pushes the length field into a second SHA-256 padding block.
     let input = [0x5a; 56];
     let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
@@ -122,7 +133,10 @@ fn pvm_verifies_sha256_claims() {
         .unwrap();
     let assertion = state.register(Sha256Precompile::assert_node(56, preimage, expected)).unwrap();
     state.log_statement(assertion).unwrap();
-    let witness = state.into_witness().unwrap().expect("the state logs a hash claim");
+    let witness = state
+        .into_witness(&miden_precompiles::default_verification_precompile_limits())
+        .unwrap()
+        .expect("the state logs a hash claim");
     let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
     let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
     assert_pvm_verifies(&inputs);

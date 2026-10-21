@@ -148,6 +148,9 @@ pub struct RowSegment {
 /// Physical row segments and constraint metadata for one canonical AIR position.
 #[derive(Clone, Debug)]
 pub struct AirGeometry {
+    /// Public values are concatenated in canonical AIR order without padding.
+    pub public_offset: usize,
+    pub num_public: usize,
     pub preprocessed: RowSegment,
     pub main: RowSegment,
     pub aux: RowSegment,
@@ -197,7 +200,7 @@ impl RelationGeometry {
             main_width: 0,
             aux_width: 0,
             num_aux_boundary: 0,
-            num_public: first.counts.num_public,
+            num_public: 0,
             num_randomness: first.counts.num_randomness,
             num_constraints: 0,
             max_constraint_degree: 0,
@@ -208,9 +211,6 @@ impl RelationGeometry {
         };
         for air in airs {
             let counts = air.counts;
-            if counts.num_public != result.num_public {
-                return Err(invalid("all AIRs must use the same public-value window"));
-            }
             if counts.num_randomness != 2 {
                 return Err(invalid(
                     "AIR must declare exactly 2 randomness challenges (alpha, beta)",
@@ -231,6 +231,8 @@ impl RelationGeometry {
             }
             let constraint_counts = air.constraint_counts();
             result.airs.push(AirGeometry {
+                public_offset: result.num_public,
+                num_public: counts.num_public,
                 preprocessed,
                 main,
                 aux,
@@ -240,6 +242,10 @@ impl RelationGeometry {
                 degrees: air.degrees,
                 period: air.max_periodic_length.max(1),
             });
+            result.num_public = result
+                .num_public
+                .checked_add(counts.num_public)
+                .ok_or_else(|| invalid("public input count overflow"))?;
             result.num_aux_boundary = result
                 .num_aux_boundary
                 .checked_add(counts.num_aux_boundary)

@@ -114,6 +114,7 @@ fn build_ace_dag_from_capture(
 
 #[derive(Clone, Copy, Debug, Default)]
 struct TraceOffsets {
+    public: usize,
     preprocessed: usize,
     main: usize,
     aux: usize,
@@ -139,6 +140,7 @@ fn reemit_air_root(
         let id = match *node {
             NodeKind::Input(key) => {
                 let key = match key {
+                    InputKey::Public(index) => InputKey::Public(index + offsets.public),
                     InputKey::Preprocessed { offset, index } => InputKey::Preprocessed {
                         offset,
                         index: index + offsets.preprocessed,
@@ -175,10 +177,11 @@ fn reemit_air_root(
 
 /// Builds one order-invariant ACE circuit for a nonempty AIR set.
 ///
-/// Each AIR reads trace inputs at its canonical instance offset and its fold coefficient from
-/// [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to those
-/// offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N = airs.len()`.
-/// Trace widths are padded to `trace_width_alignment` base-field elements before concatenation.
+/// Each AIR reads public and trace inputs at its canonical instance offset and its fold coefficient
+/// from [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to
+/// those offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N =
+/// airs.len()`. Trace widths are padded to `trace_width_alignment` base-field elements before
+/// concatenation.
 pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,
@@ -212,6 +215,7 @@ pub(crate) fn build_circuit_for_relation(
         .airs
         .iter()
         .map(|air| TraceOffsets {
+            public: air.public_offset,
             preprocessed: air.preprocessed.offset,
             main: air.main.offset,
             aux: air.aux.offset / EXT_DEGREE,

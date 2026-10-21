@@ -72,7 +72,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -100,7 +100,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -112,7 +112,7 @@ jobs:
         run: make test-crypto
 
   eidos-x86-backends:
-    name: Eidos x86 backends and RPX debug
+    name: Eidos x86 backends
     needs: classify-eidos-paths
     if: needs.classify-eidos-paths.outputs.run == 'true'
     runs-on: warp-ubuntu-latest-x64-8x
@@ -138,7 +138,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -205,8 +205,6 @@ jobs:
             failed=1
           fi
           exit "${failed}"
-      - name: Run RPX debug permutation with AVX2 on a 2 MiB stack
-        run: make test-rpx-avx2-debug NEXTEST_PROFILE=ci
 
   doc-tests:
     name: doc-tests
@@ -225,8 +223,8 @@ jobs:
       - name: Run doc-tests
         run: make test-docs
 
-  check-verifiers:
-    name: check generated AIR evaluators and verifier MASM
+  check-constraints:
+    name: check recursive constraint and PVM ACE artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,7 +294,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-hack
       - name: Check all feature combinations

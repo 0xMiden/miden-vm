@@ -49,15 +49,6 @@ pub const FIELD_BATCH_SIZES: &[usize] = &[
     1000, // Large batch
 ];
 
-// === Randomness Configuration ===
-/// Output sizes for PRNG testing (in elements)
-pub const PRNG_OUTPUT_SIZES: &[usize] = &[
-    1,    // Single element
-    32,   // Word size
-    100,  // Small array
-    1000, // Medium array
-];
-
 // === Encryption Configuration ===
 // Plaintext sizes in bytes
 pub const DATA_SIZES: &[usize] = &[16, 64, 256, 1024, 4096, 16384, 65536, 262144];

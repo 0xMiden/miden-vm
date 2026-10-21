@@ -116,7 +116,7 @@ impl MultiAir<Felt, QuadFelt> for ExternalMultiAir {
     fn eval_external(
         &self,
         challenges: &[QuadFelt],
-        _air_inputs: &[Felt],
+        _air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         _log_trace_heights: &[u8],
@@ -137,7 +137,7 @@ fn external_prover_statement(
 ) -> ProverStatement<Felt, QuadFelt, ExternalMultiAir> {
     let statement = Statement::new(
         ExternalMultiAir { airs: vec![ExternalAir { input }] },
-        air_inputs,
+        vec![(0, air_inputs)],
         aux_inputs,
     )
     .expect("statement inputs valid");

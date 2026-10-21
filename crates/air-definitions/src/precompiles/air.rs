@@ -94,6 +94,8 @@ impl ChipletAir {
             Self::Sha256 => "sha256",
         }
     }
+    /// Instance index of the AIR that reads the public transcript root.
+    pub const TRANSCRIPT_EVAL_INDEX: usize = 4;
 
     /// The twelve AIRs in canonical prover trace order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
@@ -258,7 +260,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     fn eval_external(
         &self,
         challenges: &[QuadFelt],
-        air_inputs: &[Felt],
+        air_inputs: &[Vec<Felt>],
         aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
@@ -287,13 +289,14 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
             )
             .into());
         }
-        if air_inputs.len() != crate::precompiles::logup::NUM_PUBLIC_VALUES {
-            return Err(format!(
-                "expected {} public values, got {}",
-                crate::precompiles::logup::NUM_PUBLIC_VALUES,
-                air_inputs.len()
-            )
-            .into());
+        if air_inputs.len() != self.airs.len()
+            || self
+                .airs
+                .iter()
+                .zip(air_inputs)
+                .any(|(air, inputs)| inputs.len() != air.num_public_values())
+        {
+            return Err("public-input shape does not match the AIRs".into());
         }
         if !aux_inputs.is_empty() {
             return Err(format!("expected no auxiliary inputs, got {}", aux_inputs.len()).into());
@@ -354,7 +357,11 @@ mod tests {
         let assertions = multi_air
             .eval_external(
                 &challenges,
-                &[Felt::ZERO; crate::precompiles::logup::NUM_PUBLIC_VALUES],
+                &multi_air
+                    .airs()
+                    .iter()
+                    .map(|air| vec![Felt::ZERO; air.num_public_values()])
+                    .collect::<Vec<_>>(),
                 &[],
                 &aux_refs,
                 &log_heights,
@@ -380,7 +387,11 @@ mod tests {
     fn chiplet_multi_air_rejects_malformed_external_inputs() {
         let multi_air = ChipletMultiAir::new();
         let challenges = [QuadFelt::ONE; crate::precompiles::logup::NUM_RANDOMNESS];
-        let air_inputs = [Felt::ZERO; crate::precompiles::logup::NUM_PUBLIC_VALUES];
+        let air_inputs: Vec<_> = multi_air
+            .airs()
+            .iter()
+            .map(|air| vec![Felt::ZERO; air.num_public_values()])
+            .collect();
         let aux_values: Vec<Vec<QuadFelt>> = multi_air
             .airs()
             .iter()
@@ -390,7 +401,7 @@ mod tests {
         let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
         let rejects = |case: &str,
                        challenges: &[QuadFelt],
-                       air_inputs: &[Felt],
+                       air_inputs: &[Vec<Felt>],
                        aux_inputs: &[Felt],
                        aux_values: &[&[QuadFelt]],
                        log_heights: &[u8]| {
@@ -426,10 +437,12 @@ mod tests {
             &aux_refs,
             &log_heights,
         );
+        let mut missing_public_value = air_inputs.clone();
+        missing_public_value[ChipletAir::TRANSCRIPT_EVAL_INDEX].pop();
         rejects(
             "missing public value",
             &challenges,
-            &air_inputs[..crate::precompiles::logup::NUM_PUBLIC_VALUES - 1],
+            &missing_public_value,
             &[],
             &aux_refs,
             &log_heights,
@@ -471,6 +484,10 @@ mod tests {
     /// Intentional changes require a protocol-version bump and a breaking changelog entry.
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
+        assert_eq!(
+            ChipletAir::all()[ChipletAir::TRANSCRIPT_EVAL_INDEX],
+            ChipletAir::TranscriptEval
+        );
         let pinned = [
             ChipletAir::ChunkNodeSponge,
             ChipletAir::EidosCompression,

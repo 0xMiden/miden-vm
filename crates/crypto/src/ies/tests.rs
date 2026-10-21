@@ -935,6 +935,13 @@ mod protocol_tests {
             UnsealingKey::X25519AeadEidos(sk),
             IesScheme::X25519AeadEidos,
         );
+
+        let sk = crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::Ecgfp5Eidos(sk.public_key()),
+            UnsealingKey::Ecgfp5Eidos(sk),
+            IesScheme::Ecgfp5Eidos,
+        );
     }
 }
 
@@ -1057,6 +1064,9 @@ mod keys_serialization_tests {
             ),
             SealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng).public_key()),
             SealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
+            SealingKey::Ecgfp5Eidos(
+                crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng).public_key(),
+            ),
         ]
     }
 
@@ -1067,6 +1077,7 @@ mod keys_serialization_tests {
             UnsealingKey::X25519XChaCha20Poly1305(KeyExchangeKey25519::with_rng(&mut rng)),
             UnsealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng)),
             UnsealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng)),
+            UnsealingKey::Ecgfp5Eidos(crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng)),
         ]
     }
 
@@ -1077,6 +1088,7 @@ mod keys_serialization_tests {
             (1, IesScheme::X25519XChaCha20Poly1305),
             (4, IesScheme::K256AeadEidos),
             (5, IesScheme::X25519AeadEidos),
+            (6, IesScheme::Ecgfp5Eidos),
         ] {
             assert_eq!(u8::from(scheme), tag);
             assert_eq!(IesScheme::try_from(tag).unwrap(), scheme);

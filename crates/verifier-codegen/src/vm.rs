@@ -421,7 +421,7 @@ use miden::core::stark::types
 use miden::core::sys::vm::layout
 
 # Number of AIR instances in the relation.
-const NUM_AIRS = {num_airs}
+# NUM_AIRS = {num_airs}
 
 # Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
 #   preprocessed: {preprocessed_parts} = {preprocessed} scalar evaluations

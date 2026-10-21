@@ -6,25 +6,16 @@
 use alloc::vec;
 
 use miden_core::{Felt, Word, field::QuadFelt, program::domain::STARK_TRANSCRIPT};
-use miden_crypto::{
-    field::Field,
-    hash::{
-        blake::Blake3Hasher,
-        eidos::{Eidos, EidosLmcsCompressor, EidosLmcsHasher, MidenEidosChallenger, PACKED_LANES},
-        keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
-        poseidon2::Poseidon2Permutation256,
-        rpo::RpoPermutation256,
-        rpx::RpxPermutation256,
-    },
+use miden_crypto::hash::{
+    blake::Blake3Hasher,
+    eidos::{Eidos, EidosLmcsCompressor, EidosLmcsHasher, MidenEidosChallenger, PACKED_LANES},
+    keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
 };
 use miden_lifted_stark::{GenericStarkConfig, lmcs::config::LmcsConfig, pcs::PcsParams};
 use miden_stateful_hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge};
-use p3_challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64};
+use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_dft::Radix2DitParallel;
-use p3_symmetric::{
-    CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
-    TruncatedPermutation,
-};
+use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge};
 
 // SHARED TYPES
 // ================================================================================================
@@ -36,8 +27,6 @@ use p3_symmetric::{
 /// Fiat-Shamir challenger (`Ch`) vary by hash function.
 pub type MidenStarkConfig<L, Ch> =
     GenericStarkConfig<Felt, QuadFelt, L, Radix2DitParallel<Felt>, Ch>;
-
-type PackedFelt = <Felt as Field>::Packing;
 
 /// Number of inputs to the Merkle compression function.
 const COMPRESSION_INPUTS: usize = 2;
@@ -108,7 +97,7 @@ pub fn relation_digest(protocol_id: u64, circuit_digest: &Word) -> RelationDiges
 /// caller-supplied relation digest into the prototype challenger; this function
 /// adds the actual PCS parameters used by that config.
 pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObserve<Felt>) {
-    // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
+    // Observe the eight PCS parameters, including a trailing zero.
     challenger.observe(Felt::new_unchecked(params.num_queries() as u64));
     challenger.observe(Felt::new_unchecked(params.query_pow_bits() as u64));
     challenger.observe(Felt::new_unchecked(params.deep_pow_bits() as u64));
@@ -119,79 +108,10 @@ pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObse
     challenger.observe(Felt::ZERO);
 }
 
-// ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
-// ================================================================================================
-
-/// Sponge state width in field elements.
-const SPONGE_WIDTH: usize = 12;
-/// Sponge rate (absorbable elements per permutation).
-pub const SPONGE_RATE: usize = 8;
-/// Sponge digest width in field elements.
-pub(crate) const DIGEST_WIDTH: usize = 4;
-/// Range of capacity slots within the sponge state array.
-const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
-
-/// Algebraic LMCS (for RPO, Poseidon2, RPX).
-type AlgLmcs<P> = LmcsConfig<
-    PackedFelt,
-    PackedFelt,
-    StatefulSponge<P, SPONGE_WIDTH, SPONGE_RATE, DIGEST_WIDTH>,
-    TruncatedPermutation<P, COMPRESSION_INPUTS, DIGEST_WIDTH, SPONGE_WIDTH>,
-    SPONGE_WIDTH,
-    DIGEST_WIDTH,
->;
-
-/// Algebraic duplex challenger (for RPO, Poseidon2, RPX).
-type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
-
-/// Concrete STARK configuration type for RPO.
-pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>>;
-
-/// Concrete STARK configuration type for Poseidon2.
-pub type Poseidon2Config =
-    MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
-/// Concrete STARK configuration type for RPX.
-pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
-
-/// Creates an RPO-based STARK configuration bound to `relation_digest`.
-pub fn rpo_config(params: PcsParams, relation_digest: RelationDigest) -> RpoConfig {
-    alg_config(params, RpoPermutation256, relation_digest)
-}
-
-/// Creates a Poseidon2-based STARK configuration bound to `relation_digest`.
-pub fn poseidon2_config(params: PcsParams, relation_digest: RelationDigest) -> Poseidon2Config {
-    alg_config(params, Poseidon2Permutation256, relation_digest)
-}
-
-/// Creates an RPX-based STARK configuration bound to `relation_digest`.
-pub fn rpx_config(params: PcsParams, relation_digest: RelationDigest) -> RpxConfig {
-    alg_config(params, RpxPermutation256, relation_digest)
-}
-
-/// Internal helper: builds an algebraic STARK configuration from a permutation.
-///
-/// The prototype challenger has the relation digest pre-loaded in the sponge capacity.
-/// When `observe_protocol_params` is called, the first duplexing permutes this
-/// capacity together with the PCS parameters written into the rate.
-fn alg_config<P>(
-    params: PcsParams,
-    perm: P,
-    relation_digest: RelationDigest,
-) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
-where
-    P: CryptographicPermutation<[Felt; SPONGE_WIDTH]> + Copy,
-{
-    let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
-    let mut state = [Felt::ZERO; SPONGE_WIDTH];
-    state[CAPACITY_RANGE].copy_from_slice(&relation_digest);
-    let challenger = DuplexChallenger {
-        sponge_state: state,
-        input_buffer: vec![],
-        output_buffer: vec![],
-        permutation: perm,
-    };
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
+/// Default commitment alignment, in base-field elements.
+pub const SPONGE_RATE: usize = miden_crypto::hash::eidos::BLOCK_LEN;
+/// Number of base-field elements in a digest.
+pub const DIGEST_WIDTH: usize = 4;
 
 // BLAKE3
 // ================================================================================================

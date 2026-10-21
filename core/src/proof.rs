@@ -9,7 +9,7 @@ use proptest::prelude::*;
 
 use crate::{
     Word,
-    crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::Blake3_256,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileWitness, fold_deferred_root},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(6709788805636672991),
-    crate::Felt::new_unchecked(3123750071737729735),
-    crate::Felt::new_unchecked(9047041766774444338),
-    crate::Felt::new_unchecked(8997647198517130739),
+    crate::Felt::new_unchecked(6531317477902291971),
+    crate::Felt::new_unchecked(6330145662319840937),
+    crate::Felt::new_unchecked(1346989877885786889),
+    crate::Felt::new_unchecked(2977526316393511162),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(5590780963878947933),
-    crate::Felt::new_unchecked(4630130988127364859),
-    crate::Felt::new_unchecked(6407532874471138157),
-    crate::Felt::new_unchecked(1323318770910249969),
+    crate::Felt::new_unchecked(6808264455915748692),
+    crate::Felt::new_unchecked(7335842088828173809),
+    crate::Felt::new_unchecked(8794786252055803605),
+    crate::Felt::new_unchecked(8801448297059648773),
 ]);
 
 // HASH FUNCTION
@@ -54,12 +54,7 @@ pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
 pub enum HashFunction {
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
-    /// RPO hash function with 256-bit output.
-    Rpo256 = 0x02,
-    /// RPX hash function with 256-bit output.
-    Rpx256 = 0x03,
-    /// Poseidon2 hash function with 256-bit output.
-    Poseidon2 = 0x04,
+    // IDs 0x02..=0x04 belonged to removed hash functions and must not be reused.
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
     /// Eidos hash function with 252-bit packed output.
@@ -71,9 +66,6 @@ impl HashFunction {
     pub const fn collision_resistance(&self) -> u32 {
         match self {
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
-            HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
-            HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
-            HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
             HashFunction::Eidos => 126,
         }
@@ -82,9 +74,7 @@ impl HashFunction {
 
 /// Error type for invalid hash function strings.
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak, eidos"
-)]
+#[error("invalid hash function '{hash_function}'. Valid options are: blake3-256, keccak, eidos")]
 pub struct InvalidHashFunctionError {
     pub hash_function: String,
 }
@@ -95,9 +85,6 @@ impl TryFrom<u8> for HashFunction {
     fn try_from(repr: u8) -> Result<Self, Self::Error> {
         match repr {
             0x01 => Ok(Self::Blake3_256),
-            0x02 => Ok(Self::Rpo256),
-            0x03 => Ok(Self::Rpx256),
-            0x04 => Ok(Self::Poseidon2),
             0x05 => Ok(Self::Keccak),
             0x06 => Ok(Self::Eidos),
             _ => Err(DeserializationError::InvalidValue(format!(
@@ -113,9 +100,6 @@ impl TryFrom<&str> for HashFunction {
     fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
         match hash_fn_str {
             "blake3-256" => Ok(Self::Blake3_256),
-            "rpo" => Ok(Self::Rpo256),
-            "rpx" => Ok(Self::Rpx256),
-            "poseidon2" => Ok(Self::Poseidon2),
             "keccak" => Ok(Self::Keccak),
             "eidos" => Ok(Self::Eidos),
             _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
@@ -130,12 +114,9 @@ impl Arbitrary for HashFunction {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         any::<u8>()
-            .prop_map(|tag| match tag % 6 {
+            .prop_map(|tag| match tag % 3 {
                 0 => Self::Blake3_256,
-                1 => Self::Rpo256,
-                2 => Self::Rpx256,
-                3 => Self::Poseidon2,
-                4 => Self::Keccak,
+                1 => Self::Keccak,
                 _ => Self::Eidos,
             })
             .boxed()
@@ -630,10 +611,20 @@ mod tests {
     }
 
     #[test]
-    fn eidos_hash_function_wire_tag_is_pinned() {
-        assert_eq!(HashFunction::Eidos as u8, 0x06);
-        assert_eq!(HashFunction::Eidos.to_bytes(), [0x06]);
-        assert_eq!(HashFunction::read_from_bytes(&[0x06]).unwrap(), HashFunction::Eidos);
+    fn hash_function_wire_tags_are_pinned_and_retired_tags_are_rejected() {
+        for (hash_fn, tag, name) in [
+            (HashFunction::Blake3_256, 0x01, "blake3-256"),
+            (HashFunction::Keccak, 0x05, "keccak"),
+            (HashFunction::Eidos, 0x06, "eidos"),
+        ] {
+            assert_eq!(hash_fn.to_bytes(), [tag]);
+            assert_eq!(HashFunction::read_from_bytes(&[tag]).unwrap(), hash_fn);
+            assert_eq!(HashFunction::try_from(name).unwrap(), hash_fn);
+        }
+        for (tag, name) in [(0x02, "rpo"), (0x03, "rpx"), (0x04, "poseidon2")] {
+            assert!(HashFunction::read_from_bytes(&[tag]).is_err());
+            assert!(HashFunction::try_from(name).is_err());
+        }
     }
 
     fn root(value: u64) -> DeferredRoot {
@@ -679,7 +670,7 @@ mod tests {
             rhs: 0,
         }])
         .unwrap();
-        let root = witness.root_unchecked();
+        let root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         (witness, root)
     }
 
@@ -848,6 +839,8 @@ mod tests {
 
     #[test]
     fn precompile_proof_decoder_rejects_oversized_root_count_before_payload() {
+        let at_limit = precompile_proof(&[root(3); MAX_PRECOMPILE_ROOTS]);
+        assert_eq!(PrecompileProof::read_from_bytes(&at_limit.to_bytes()).unwrap(), at_limit);
         let mut bytes = dummy_stark_proof(&[2]).to_bytes();
         bytes.write_usize(MAX_PRECOMPILE_ROOTS + 1);
 
@@ -983,10 +976,8 @@ mod proof_arbitrary {
                 proptest::collection::vec(any::<u8>(), 0..=64),
                 prop_oneof![
                     Just(HashFunction::Blake3_256),
-                    Just(HashFunction::Rpo256),
-                    Just(HashFunction::Rpx256),
-                    Just(HashFunction::Poseidon2),
                     Just(HashFunction::Keccak),
+                    Just(HashFunction::Eidos),
                 ],
             )
                 .prop_map(|(bytes, hash_fn)| StarkProof::new(bytes, hash_fn))

@@ -347,6 +347,151 @@ fn source_debug_call_frames_expose_inference_and_reuse_the_index() {
 }
 
 #[test]
+fn source_debug_call_frames_preserve_inherited_inline_calls_across_operations() {
+    let package = Arc::<Package>::from(
+        Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .assemble_program(
+                "program",
+                "proc inner push.7 drop end proc outer exec.inner push.8 drop end begin exec.outer push.9 drop end",
+            )
+            .unwrap(),
+    );
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut previous = None::<DebugCallFrame>;
+    let mut observations = 0;
+    loop {
+        for frame in resolver.resolve(&resume) {
+            if frame.debug_info()[frame.function().name_idx].ends_with("::inner") {
+                assert_eq!(frame.origin(), DebugFrameOrigin::InferredRange);
+                assert_eq!(
+                    frame.inherited_inline_calls(),
+                    2,
+                    "both enclosing exec calls remain inherited throughout inner"
+                );
+                if let Some(previous) = &previous {
+                    assert!(previous.is_same_frame(&frame));
+                }
+                previous = Some(frame);
+                observations += 1;
+            }
+        }
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+            .unwrap()
+        {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert!(observations >= 2, "inner must be observed across multiple operations");
+}
+
+#[test]
+fn source_debug_call_frames_distinguish_owned_and_inherited_inline_calls() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut module = Module::parser(Some(ModuleKind::Executable))
+        .parse_str(
+            None,
+            "proc inner push.7 drop nop push.6 drop nop push.5 drop end proc outer exec.inner push.8 drop end begin exec.outer push.9 drop end",
+            source_manager.clone(),
+        )
+        .unwrap();
+    let mut markers = [Some("source::inline"), None].into_iter();
+    for procedure in module.procedures_mut() {
+        for op in procedure.body_mut().iter_mut() {
+            let Op::Inst(instruction) = op else { continue };
+            if !matches!(instruction.inner(), Instruction::Nop) {
+                continue;
+            }
+            let span = instruction.span();
+            let replacement = match markers.next().unwrap() {
+                Some(name) => {
+                    let location = source_manager.file_line_col(span).unwrap();
+                    Instruction::DebugInlineCall(DebugInlineCallInfo::new(
+                        name,
+                        location.clone(),
+                        location,
+                    ))
+                },
+                None => Instruction::DebugInlineCallClear,
+            };
+            *op = Op::Inst(Span::new(span, replacement));
+        }
+    }
+    assert!(markers.next().is_none());
+    let package = Arc::<Package>::from(
+        Assembler::new(source_manager).assemble_program("program", module).unwrap(),
+    );
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut phases = Vec::new();
+    let mut previous = None::<DebugCallFrame>;
+    loop {
+        let operation = resume
+            .continuation_stack()
+            .iter_continuations_for_next_clock_with_source_node_ids()
+            .find_map(|(continuation, source)| {
+                let Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } =
+                    continuation
+                else {
+                    return None;
+                };
+                let offset = resume.current_forest()[*node_id]
+                    .unwrap_basic_block()
+                    .op_batches()
+                    .iter()
+                    .take(*batch_index)
+                    .map(|batch| batch.ops().len())
+                    .sum::<usize>();
+                Some((source?, (offset + op_idx_in_batch) as u32))
+            });
+        for frame in resolver.resolve(&resume) {
+            if frame.debug_info()[frame.function().name_idx].ends_with("::inner") {
+                assert_eq!(frame.origin(), DebugFrameOrigin::InferredRange);
+                assert_eq!(
+                    frame.inherited_inline_calls(),
+                    2,
+                    "callee-owned inline calls are not inherited"
+                );
+                if let Some(previous) = &previous {
+                    assert!(previous.is_same_frame(&frame));
+                }
+                previous = Some(frame);
+                if let Some((source, operation)) = operation {
+                    let own_inline =
+                        debug_info.inline_calls_for_operation(source, operation).any(|row| {
+                            debug_info[debug_info[row.callee_idx].name_idx].as_ref()
+                                == "source::inline"
+                        });
+                    if phases.last() != Some(&own_inline) {
+                        phases.push(own_inline);
+                    }
+                }
+            }
+        }
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+            .unwrap()
+        {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert_eq!(
+        phases,
+        [false, true, false],
+        "inner must enter and clear its own inline context"
+    );
+}
+
+#[test]
 fn source_debug_call_frames_distinguish_adjacent_identical_invocations() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Arc::<Package>::from(
@@ -400,10 +545,13 @@ fn source_debug_call_frames_track_dynamic_invocations() {
 #[case("push.7 drop")]
 #[case("push.1 if.true push.7 drop else push.8 drop end push.9 drop")]
 #[case("push.2 dup neq.0 while.true push.7 drop sub.1 dup neq.0 end drop")]
-fn source_debug_call_frames_distinguish_repeated_invocations_at_one_site(#[case] body: &str) {
+fn source_debug_call_frames_distinguish_repeated_invocations_at_one_site(
+    #[case] body: &str,
+    #[values(0, 4)] num_locals: u16,
+) {
     for invocation in ["call.inner", "exec.inner"] {
         let source = format!(
-            "proc inner {body} end begin push.2 dup neq.0 while.true {invocation} sub.1 dup neq.0 end drop end"
+            "@locals({num_locals}) proc inner {body} end begin push.2 dup neq.0 while.true {invocation} sub.1 dup neq.0 end drop end"
         );
         let package = Arc::<Package>::from(
             Assembler::new(Arc::new(DefaultSourceManager::default()))
@@ -2705,9 +2853,12 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     let options = ExecutionOptions::default()
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
-    let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-            .expect("processor advice inputs should fit advice map limits");
+    let mut processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        options.clone(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(
         processor.stack.len(),
@@ -3216,4 +3367,119 @@ fn pad_then_drop_ops(num_pads: usize) -> Vec<Operation> {
     let mut ops = vec![Operation::Pad; num_pads];
     ops.extend(vec![Operation::Drop; num_pads]);
     ops
+}
+
+#[rstest]
+#[case("exec.inner")]
+#[case("call.inner")]
+#[case("push.100 dynexec")]
+fn source_debug_call_frames_preserve_locals_wrappers_and_padding(#[case] invocation: &str) {
+    let source = format!(
+        "@locals(4) proc inner push.7 loc_store.0 push.5 drop end @locals(4) proc outer push.42 loc_store.0 push.3 drop {invocation} push.9 drop end begin procref.inner mem_storew_le.100 dropw exec.outer push.11 drop end"
+    );
+    let package: Arc<Package> = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program("program", source)
+        .unwrap()
+        .into();
+    let info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut identities = [None::<DebugCallFrame>, None];
+    let mut active = [false; 2];
+    let mut entries = [0; 2];
+    let mut seen_nested = false;
+    loop {
+        let frames = resolver.resolve(&resume);
+        let mut present = [false; 2];
+        for frame in &frames {
+            let name = &frame.debug_info()[frame.function().name_idx];
+            let index = if name.ends_with("::outer") {
+                0
+            } else if name.ends_with("::inner") {
+                1
+            } else {
+                continue;
+            };
+            present[index] = true;
+            if let Some(previous) = &identities[index] {
+                assert!(
+                    previous.is_same_frame(frame),
+                    "identity changed for {name} in {invocation}"
+                );
+            } else {
+                identities[index] = Some(frame.clone());
+            }
+        }
+        for index in 0..2 {
+            if present[index] && !active[index] {
+                entries[index] += 1;
+            }
+        }
+        active = present;
+        if present[1] {
+            assert!(present[0], "suspended locals owner must remain recovered: {invocation}");
+            seen_nested = true;
+        }
+        match processor.step_with_package_debug_info_sync(&mut host, resume, &info).unwrap() {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert!(seen_nested);
+    assert_eq!(entries, [1, 1], "padding/generated operations must not interrupt an invocation");
+    assert_eq!(active, [false, false], "both locals frames must return before main ends");
+}
+
+#[rstest]
+#[case(0)]
+#[case(4)]
+fn source_debug_call_frames_keep_inline_depth_from_selected_occurrence(#[case] num_locals: u16) {
+    use miden_assembly::ast::{DebugVarInfo, DebugVarLocation};
+    let manager = Arc::new(DefaultSourceManager::default());
+    let mut module = Module::parser(Some(ModuleKind::Executable))
+        .parse_str(
+            None,
+            format!("@locals({num_locals}) proc entrypoint push.2 push.3 add nop drop end begin exec.entrypoint end"),
+            manager.clone(),
+        )
+        .unwrap();
+    for procedure in module.procedures_mut() {
+        for op in procedure.body_mut().iter_mut() {
+            if let Op::Inst(instruction) = op
+                && matches!(instruction.inner(), Instruction::Nop)
+            {
+                *instruction = Span::new(
+                    instruction.span(),
+                    Instruction::DebugVar(DebugVarInfo::new("n", DebugVarLocation::Stack(0))),
+                );
+            }
+        }
+    }
+    let package: Arc<Package> =
+        Assembler::new(manager).assemble_program("program", module).unwrap().into();
+    let info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut seen = false;
+    loop {
+        for frame in resolver.resolve(&resume) {
+            if frame.debug_info()[frame.function().name_idx].ends_with("::entrypoint") {
+                assert_eq!(
+                    frame.inherited_inline_calls(),
+                    1,
+                    "the selected caller occurrence includes its exec boundary"
+                );
+                seen = true;
+            }
+        }
+        match processor.step_with_package_debug_info_sync(&mut host, resume, &info).unwrap() {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert!(seen);
 }

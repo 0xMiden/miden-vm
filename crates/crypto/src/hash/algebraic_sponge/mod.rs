@@ -8,14 +8,11 @@
 //! of its cryptographic permutation function. This can be done by implementing the trait
 //! `[AlgebraicSponge]` which boils down to implementing the `apply_permutation` method.
 //!
-//! There are currently three algebraic sponge-based hash functions implemented in the module, RPO
-//! and RPX hash functions, both of which belong to the Rescue family of hash functions, and
-//! Poseidon2 hash function.
+//! This module provides the sponge construction for the standalone Poseidon2 hash function.
 
 use core::ops::Range;
 
-use super::{Felt, Word, ZERO};
-use crate::field::BasedVectorSpace;
+use crate::{Felt, Word, ZERO, field::BasedVectorSpace};
 
 #[cfg(any(
     all(target_arch = "x86_64", target_feature = "avx2"),
@@ -25,7 +22,6 @@ use crate::field::BasedVectorSpace;
 ))]
 mod packed;
 pub(crate) mod poseidon2;
-pub(crate) mod rescue;
 
 // CONSTANTS
 // ================================================================================================

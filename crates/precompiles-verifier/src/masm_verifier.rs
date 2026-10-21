@@ -163,11 +163,12 @@ fn build_verifier_advice(
         .map_err(|err| PvmRecursiveVerifierInputsError::ProofDeserialization(err.to_string()))?;
 
     let public_root = claim.root();
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_elements().to_vec(), Vec::new())
-            .map_err(|_| {
-                PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement")
-            })?;
+    let statement = Statement::new(
+        ChipletMultiAir::new(),
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, public_root.as_elements().to_vec())],
+        Vec::new(),
+    )
+    .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
         VerifierInstance::new(&config, &statement, Some(preprocessed.commitment()))?;
     let mut challenger = config.challenger();
@@ -384,7 +385,7 @@ mod tests {
     #[test]
     fn recursive_inputs_reject_non_eidos_proofs_before_parsing() {
         let proof = PrecompileProof {
-            proof: SerializedStarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: SerializedStarkProof::new(Vec::new(), HashFunction::Blake3_256),
             roots: vec![Word::default()],
         };
         assert!(matches!(

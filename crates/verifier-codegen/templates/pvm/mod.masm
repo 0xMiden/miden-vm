@@ -33,7 +33,7 @@ const FIXED_BOUNDARY_LOOKUP_TERMS = {{ fixed_boundary_lookup_terms }}
 const LOG_HEIGHT_MAX = 29
 
 # Fixed ChipletAir::all() cardinality.
-const NUM_CHIPLETS = {{ num_chiplets }}
+# NUM_CHIPLETS = {{ num_chiplets }}
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")

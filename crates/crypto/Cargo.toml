@@ -21,6 +21,11 @@ required-features = ["executable"]
 
 [[bench]]
 harness           = false
+name              = "ecdh"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "encryption"
 required-features = ["std"]
 
@@ -67,6 +72,11 @@ required-features = ["persistent-forest"]
 [[bench]]
 harness           = false
 name              = "store"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "merkle_witness"
 required-features = ["std"]
 
 [[bench]]

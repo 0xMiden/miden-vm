@@ -26,7 +26,7 @@ use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::EidosBlockMsg,
@@ -88,8 +88,7 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 // The single exposed normalized value ([`NUM_LOGUP_VALUES`]) follows the VM-wide LogUp contract in
 // [`crate::precompiles::logup`]; aggregating the Memory64 + EidosBlock residues into one σ′ is the
 // shared shape, not a chunk-specific choice.
-// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript root alone; this AIR
-// declares but does not read them.
+// This AIR has no public inputs; transcript eval authenticates the root.
 
 // AIR
 // ================================================================================================
@@ -103,10 +102,6 @@ pub struct ChunkAir;
 impl BaseAir<Felt> for ChunkAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 }
 

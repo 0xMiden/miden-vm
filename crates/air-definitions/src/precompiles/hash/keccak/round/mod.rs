@@ -30,8 +30,7 @@ use crate::precompiles::{
     hash::memory64::Memory64Msg,
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
-        frac_col,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg, andnot_result_from_xor},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -146,10 +145,6 @@ static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::ne
 impl BaseAir<Felt> for KeccakRoundAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {

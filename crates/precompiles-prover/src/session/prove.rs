@@ -1,14 +1,14 @@
 //! Proving for the precompile multi-AIR relation.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
 use miden_air::precompiles::stark_config::test_challenger;
 use miden_air::precompiles::{
-    ChipletMultiAir, preprocessed,
+    ChipletAir, ChipletMultiAir, preprocessed,
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        observe_protocol_params, precompile_pcs_params,
     },
 };
 #[cfg(test)]
@@ -35,8 +35,12 @@ use crate::ProveError;
 impl SessionTraces {
     #[cfg(test)]
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
-        let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
+            Vec::new(),
+        )
+        .expect("chiplet statement inputs are valid");
         let mains: Vec<RowMajorMatrix<Felt>> = self.mains().into_iter().cloned().collect();
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
@@ -55,21 +59,6 @@ impl SessionTraces {
             HashFunction::Blake3_256 => {
                 let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed::blake3();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Rpo256 => {
-                let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpo();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Rpx256 => {
-                let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpx();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Poseidon2 => {
-                let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::poseidon2();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
@@ -95,8 +84,12 @@ impl SessionTraces {
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
     {
-        let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
+            Vec::new(),
+        )
+        .expect("chiplet statement inputs are valid");
         let prover_statement = ProverStatement::new(statement, self.into_mains())
             .expect("chiplet trace shapes are valid");
 

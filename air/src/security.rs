@@ -462,13 +462,7 @@ mod tests {
     #[test]
     fn full_field_challengers_preserve_their_security_bounds() {
         let params = protocol_params(&config::pcs_params());
-        for hash_fn in [
-            HashFunction::Blake3_256,
-            HashFunction::Rpo256,
-            HashFunction::Rpx256,
-            HashFunction::Poseidon2,
-            HashFunction::Keccak,
-        ] {
+        for hash_fn in [HashFunction::Blake3_256, HashFunction::Keccak] {
             let parameters = proof_security_parameters(&config::pcs_params(), 20, 0, 8, hash_fn);
             assert_eq!(parameters.hash_fn, hash_fn);
             assert_eq!(

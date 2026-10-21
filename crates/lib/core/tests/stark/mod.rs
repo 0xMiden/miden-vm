@@ -1,8 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{
-    MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
-};
+use miden_air::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, Statement, config};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -49,9 +47,17 @@ use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 pub(crate) fn pvm_layout_const(name: &str) -> u32 {
     let source = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/layout.masm"));
     let prefix = format!("const {name} = ");
+    let region_prefix = format!("### {name}: ");
     let value = source
         .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
+        .find_map(|line| {
+            let line = line.trim();
+            let value = line.strip_prefix(&prefix).or_else(|| {
+                let (_, range) = line.strip_prefix(&region_prefix)?.split_once(" felts at ")?;
+                range.split_once("..").map(|(start, _)| start)
+            })?;
+            value.parse::<u64>().ok()
+        })
         .unwrap_or_else(|| panic!("missing generated PVM layout constant {name}"));
     u32::try_from(value).expect("PVM layout pointer must fit in u32")
 }
@@ -1173,7 +1179,7 @@ fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
         vec![],
     )
     .expect("zero public inputs satisfy the Miden statement shape");

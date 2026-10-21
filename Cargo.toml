@@ -120,7 +120,6 @@ miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0"
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "1.0", default-features = false }
 miden-utils-sync        = { path = "./crates/utils-sync", version = "1.0", default-features = false }
-miden-verifier-codegen  = { path = "./crates/verifier-codegen", version = "1.0", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
 miden-verifier          = { path = "./verifier", version = "1.0", default-features = false }
 
@@ -162,6 +161,7 @@ proptest-derive = { version = "0.8", default-features = false }
 rand            = { version = "0.10", default-features = false }
 rayon           = { version = "1.11", default-features = false }
 rocksdb         = { version = "0.24", default-features = false }
+rustix          = { version = "1.1", default-features = false, features = ["fs", "std"] }
 seq-macro       = "0.3"
 semver          = { version = "1.0", default-features = false }
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }

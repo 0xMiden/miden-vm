@@ -1,0 +1,472 @@
+#! Diffie-Hellman agreement using short-scalar verification.
+#!
+#! Let G be the generator, Q the recipient's public key, r the private scalar, and n the prime
+#! subgroup order. Compute R = rG from the fixed generator table. For the proposed shared point S,
+#! the host supplies signed a and positive b, both at most 160 bits. Check b*r = a (mod n), then
+#! [a]Q - [b]S = O.
+#! Both points are decoded into the prime-order subgroup. Since 0 < b < n, the checks imply S = rQ.
+#!
+#! The host obtains a,b using extended Euclid. The VM checks the integer relation through
+#! range-checked limbs and carries; it does not repeat that search. A sixteen-entry joint table
+#! and eighty radix-four windows evaluate the point equation. Unlike the generator accumulation,
+#! this computation can encounter equal, opposite, or identity points and handles all three cases.
+
+use miden::core::crypto::ecdh::ecgfp5::arithmetic
+use miden::core::crypto::ecdh::ecgfp5::scalar
+use miden::core::crypto::ecdh::ecgfp5::tables
+use {PointEncoding} from miden::core::crypto::ecdh::ecgfp5
+use {
+    DIGITS_PTR, NUM_DIGITS, RADIX, SCALAR_ORDER_LIMB_0, SCALAR_ORDER_LIMB_1,
+    SCALAR_ORDER_LIMB_2, SCALAR_ORDER_LIMB_3, SCALAR_ORDER_LIMB_4, SCALAR_ORDER_LIMB_5,
+    SCALAR_ORDER_LIMB_6, SCALAR_ORDER_LIMB_7, SCALAR_ORDER_LIMB_8, SCALAR_ORDER_LIMB_9,
+} from miden::core::crypto::ecdh::ecgfp5::scalar
+use {ROOTS_INIT_CV, ROOTS_PTR} from miden::core::crypto::ecdh::ecgfp5::tables
+use {
+    ACC_X0, ACC_X1, ACC_X2, ACC_X3, ACC_X4, ACC_Y0, ACC_Y1, ACC_Y2, ACC_Y3, ACC_Y4, R_TERM_X0,
+    R_TERM_X4, R_TERM_Y0, R_TERM_Y4, R_X0, R_X4, R_Y0, R_Y4, TERM_X0, TERM_X1, TERM_X2,
+    TERM_X3, TERM_X4, TERM_Y0, TERM_Y1, TERM_Y2, TERM_Y3, TERM_Y4, TWO_THIRDS, WEIERSTRASS_A1,
+} from miden::core::crypto::ecdh::ecgfp5::arithmetic
+
+# DIRECT-PATH WORKSPACE
+# ==================================================================================================
+
+# One point encoding, reused for Q and then S during decoding.
+const ENCODING_PTR = 32
+const ENCODING_1_PTR = ENCODING_PTR + 1
+const ENCODING_2_PTR = ENCODING_PTR + 2
+const ENCODING_3_PTR = ENCODING_PTR + 3
+const ENCODING_TAIL_PTR = ENCODING_PTR + 4
+
+# Q's output encoding; ENCODING_PTR is reused when decoding S.
+const PUBLIC_KEY_PTR = 40
+const PUBLIC_KEY_TAIL_PTR = PUBLIC_KEY_PTR + 4
+
+# Eidos::init_chaining_word(ECGFP5_PUBLIC_KEY, 5).
+const PUBLIC_KEY_INIT_CV = [
+    13503953893947609089, 11912009168875159557, 11170449401267093504, 6620516959492505600
+]
+
+# PreparedPublicKey::new(G).to_commitment().
+const GENERATOR_COMMITMENT = [
+    8322671499278011819, 2745996783252868144, 1798403509551422579, 8877938735202709319
+]
+
+# Identity flags belong to the complete point operations in this module.
+const ACC_IDENTITY = 240
+const TERM_IDENTITY = 241
+
+# b, |a|, k each occupy ten u16 limbs. Padding stays zero in this fresh call context.
+const DENOMINATOR_PTR = 2304
+const NUMERATOR_PTR = 2320
+const QUOTIENT_PTR = 2336
+const NUMERATOR_SIGN = 2352 # 0 for a > 0, 1 for a < 0.
+const SHORT_LIMBS = 10
+const CARRY_OFFSET = 1048576 # Signed carries are represented as C + 2^20.
+const CARRY_SHIFT = (RADIX - 1) * CARRY_OFFSET
+
+# Copies of r and n have twelve leading and trailing zero slots for the convolution loop.
+const PADDED_SCALAR_PTR = 2572
+const PADDED_ORDER_PTR = 2636
+const ORDER_OFFSET = PADDED_ORDER_PTR - PADDED_SCALAR_PTR
+const QUOTIENT_OFFSET = QUOTIENT_PTR - DENOMINATOR_PTR
+
+const JOINT_DIGITS_PTR = 3072
+const JOINT_WINDOWS = 80 # Two bits from each 160-bit coefficient per window.
+
+# T[i+4*j] = i*sign(a)*Q - j*S, followed by a saved copy of S.
+# Entry offsets: X(5) at 0, Y(5) at 8, identity at 16; stride 20 Felts, including padding.
+const JOINT_TABLE_PTR = 4096
+const POINT_STRIDE = 20
+const FIRST_Q_PTR = JOINT_TABLE_PTR + POINT_STRIDE
+const FIRST_S_PTR = JOINT_TABLE_PTR + 4 * POINT_STRIDE
+const SAVED_S_PTR = JOINT_TABLE_PTR + 16 * POINT_STRIDE
+
+# AGREEMENT
+# ==================================================================================================
+
+#! Computes R from the generator table and verifies S using the short-scalar relation.
+#! Internal procedure; use `ecgfp5::agree` for key agreement.
+#!
+#! Input:  [public_key(4), pad(12)]
+#! Output: [R(5), S(5), Q(5), scratch(1)]
+#! Advice: Q, scalar, generator entries, short coefficients, and point witnesses
+#!         from `PublicKey::advise`.
+#!
+#! Called in a fresh memory context by `agree`. Uses this module's workspace together with
+#! the shared scalar digits, table roots, and point slots.
+#!
+#! Invocation: call
+pub proc agree_inner(
+    public_key: word,
+    padding: [felt; 12],
+) -> (PointEncoding, PointEncoding, PointEncoding, felt)
+    adv_pushw mem_storew_le.PUBLIC_KEY_PTR dropw
+    adv_push mem_store.PUBLIC_KEY_TAIL_PTR
+    # Q occupies five Felts; the three hash-padding slots are zero in this fresh context.
+    push.PUBLIC_KEY_PTR push.PUBLIC_KEY_INIT_CV padw padw
+    mem_stream compress
+    dropw dropw movup.4 drop assert_eqw.err="public key commitment"
+    padw mem_loadw_le.PUBLIC_KEY_PTR mem_storew_le.ENCODING_PTR dropw
+    mem_load.PUBLIC_KEY_TAIL_PTR mem_store.ENCODING_TAIL_PTR
+    exec.scalar::prepare
+    push.GENERATOR_COMMITMENT
+    push.ROOTS_PTR push.ROOTS_INIT_CV padw padw
+    repeat.10 adv_pipe compress end
+    dropw dropw movup.4 drop assert_eqw.err="generator roots"
+    push.1.0
+    do
+        # => [window, first, scratch(16)]
+        dup add.DIGITS_PTR mem_load dup neq.0
+        if.true
+            exec.tables::read_entry
+            dup.1
+            if.true
+                padw
+                mem_loadw_le.R_TERM_X0 mem_storew_le.R_X0
+                mem_loadw_le.R_TERM_Y0 mem_storew_le.R_Y0 dropw
+                mem_load.R_TERM_X4 mem_store.R_X4
+                mem_load.R_TERM_Y4 mem_store.R_Y4
+                swap drop push.0 swap
+            else exec.arithmetic::add_generator
+            end
+        else drop
+        end
+        add.1
+    while dup neq.NUM_DIGITS
+    end
+    drop drop
+    # Check the short coefficients before using them in [a]Q - [b]S.
+    exec.check_fraction
+    exec.build_joint_table
+    exec.prepare_joint_digits
+    push.1 mem_store.ACC_IDENTITY
+    push.JOINT_WINDOWS
+    repeat.JOINT_WINDOWS
+        sub.1
+        repeat.2 exec.double_complete end
+        dup add.JOINT_DIGITS_PTR mem_load dup neq.0
+        if.true
+            mul.POINT_STRIDE add.JOINT_TABLE_PTR exec.load_term exec.add_complete
+        else drop end
+    end
+    drop
+    mem_load.ACC_IDENTITY assert.err="short scalar product"
+    push.SAVED_S_PTR exec.load_term exec.copy_term
+    exec.arithmetic::encode_agreement
+    mem_load.PUBLIC_KEY_TAIL_PTR padw mem_loadw_le.PUBLIC_KEY_PTR
+    # => [Q(5), R(5), S(5), scratch(6)]
+    repeat.5 movup.15 drop end
+    repeat.10 movup.14 end
+end
+
+# SHORT-SCALAR RELATION
+# ==================================================================================================
+
+#! Checks b*r - k*n = a over the integers, with 0 < b < 2^160 and |a|,k < 2^160.
+#!
+#! Input:  [...]
+#! Advice: [b(10), |a|(10), k(10), sign, carries(30), ...]
+#! Output: [...]
+#!
+#! Reads r from scalar::DIGITS_PTR. Writes b, |a|, k and sign to this module's scalar slots,
+#! and padded copies of r and n to PADDED_SCALAR_PTR and PADDED_ORDER_PTR.
+#!
+#! Let D_i be coefficient i of b*r - k*n - a in radix B=2^16, before carrying.
+#! Each coefficient obeys D_i + C_i - B*C_(i+1) = 0, with C_0=C_30=0.
+#! Every limb is a u16 and every C_i+2^20 is a u21. Each residual has magnitude below 2^39,
+#! hence below the field modulus: field equality implies integer equality. Weighting the
+#! equations by B^i cancels the carries and establishes b*r - k*n = a.
+proc check_fraction()
+    push.DENOMINATOR_PTR exec.read_short_scalar
+    push.NUMERATOR_PTR exec.read_short_scalar
+    push.QUOTIENT_PTR exec.read_short_scalar
+    adv_push dup dup dup mul assert_eq.err="fraction sign" mem_store.NUMERATOR_SIGN
+    push.0.DENOMINATOR_PTR
+    repeat.SHORT_LIMBS
+        dup mem_load movup.2 add swap add.1
+    end
+    drop neq.0 assert.err="nonzero denominator"
+
+    # Place r and n between zero limbs so the convolution needs no boundary branches.
+    push.DIGITS_PTR.PADDED_SCALAR_PTR
+    repeat.5
+        padw dup.5 mem_loadw_le dup.4 mem_storew_le dropw
+        add.4 swap add.4 swap
+    end
+    drop drop
+    push.PADDED_ORDER_PTR
+    push.SCALAR_ORDER_LIMB_0 u32divmod.RADIX
+    push.SCALAR_ORDER_LIMB_1 u32divmod.RADIX
+    movup.3 movup.3 dup.4 mem_storew_le dropw add.4
+    push.SCALAR_ORDER_LIMB_2 u32divmod.RADIX
+    push.SCALAR_ORDER_LIMB_3 u32divmod.RADIX
+    movup.3 movup.3 dup.4 mem_storew_le dropw add.4
+    push.SCALAR_ORDER_LIMB_4 u32divmod.RADIX
+    push.SCALAR_ORDER_LIMB_5 u32divmod.RADIX
+    movup.3 movup.3 dup.4 mem_storew_le dropw add.4
+    push.SCALAR_ORDER_LIMB_6 u32divmod.RADIX
+    push.SCALAR_ORDER_LIMB_7 u32divmod.RADIX
+    movup.3 movup.3 dup.4 mem_storew_le dropw add.4
+    push.SCALAR_ORDER_LIMB_8 u32divmod.RADIX
+    push.SCALAR_ORDER_LIMB_9 u32divmod.RADIX
+    movup.3 movup.3 dup.4 mem_storew_le dropw drop
+
+    push.CARRY_OFFSET.0
+    repeat.30
+        # => [i, C_i+offset, ...]
+        dup add.PADDED_SCALAR_PTR push.DENOMINATOR_PTR movup.3
+        repeat.SHORT_LIMBS
+            # => [partial_sum, &b[j], &r[i-j], i, ...]
+            # Walk b,k forwards and r,n backwards; paired arrays have fixed address offsets.
+            dup.2 mem_load dup.2 mem_load mul add
+            dup.2 add.ORDER_OFFSET mem_load dup.2 add.QUOTIENT_OFFSET mem_load mul sub
+            movup.2 sub.1 movdn.2 swap add.1 swap
+        end
+        swap drop swap drop
+        dup.1 lt.SHORT_LIMBS
+        if.true
+            dup.1 add.NUMERATOR_PTR mem_load
+            mem_load.NUMERATOR_SIGN mul.2 neg add.1 mul sub
+        end
+        # => [D_i+C_i+offset, i, ...]. Check the next carry without storing it to memory.
+        add.CARRY_SHIFT
+        adv_push u32assert dup u32shr.21 assertz.err="fraction carry range"
+        dup movdn.2 mul.RADIX assert_eq.err="fraction congruence"
+        swap add.1
+    end
+    drop push.CARRY_OFFSET assert_eq.err="final fraction carry"
+end
+
+#! Reads ten u16 limbs into ten consecutive Felts at dst.
+#!
+#! Input:  [dst, ...]
+#! Advice: [limbs(10), ...]
+#! Output: [...]
+#!
+#! Checks each limb's range; word stores handle the first eight limbs together.
+proc read_short_scalar(dst: ptr<felt>)
+    repeat.2
+        dup adv_pushw
+        repeat.4 dup u32assert u32shr.16 assertz.err="fraction limb" movdn.3 end
+        movup.4 mem_storew_le dropw add.4
+    end
+    repeat.2
+        adv_push u32assert dup u32shr.16 assertz.err="fraction limb"
+        dup.1 mem_store add.1
+    end
+    drop
+end
+
+# JOINT MULTIPLICATION
+# ==================================================================================================
+
+#! Builds T[i+4*j] = i*sign(a)*Q - j*S, for 0 <= i,j < 4 and i+j > 0.
+#!
+#! Input:  [...]
+#! Advice: decoding witnesses for Q, point S, its decoding witness, and table-building slopes
+#! Output: [...]
+#!
+#! Reads Q at ENCODING_PTR and the checked sign at NUMERATOR_SIGN. Decodes Q and S into
+#! the prime-order subgroup. Writes entries 1 through 15 at JOINT_TABLE_PTR and saves S
+#! at SAVED_S_PTR before negating it for the table.
+proc build_joint_table()
+    exec.decode_point
+    mem_load.NUMERATOR_SIGN if.true exec.negate_term end
+    push.0 mem_store.TERM_IDENTITY
+    exec.copy_term
+    push.FIRST_Q_PTR dup exec.save_point
+    repeat.2
+        exec.add_complete add.POINT_STRIDE dup exec.save_point
+    end
+    drop
+
+    adv_pushw mem_storew_le.ENCODING_PTR dropw adv_push mem_store.ENCODING_TAIL_PTR
+    exec.decode_point
+    exec.copy_term push.SAVED_S_PTR exec.save_point
+    exec.negate_term exec.copy_term push.FIRST_S_PTR exec.save_point
+    push.1
+    repeat.3
+        # => [j, ...]. Start row j with -j*S, then add sign(a)*Q three times.
+        dup neq.1
+        if.true
+            dup sub.1 mul.4 mul.POINT_STRIDE add.JOINT_TABLE_PTR
+            exec.load_term exec.copy_term
+            push.FIRST_S_PTR exec.load_term exec.add_complete
+            dup mul.4 mul.POINT_STRIDE add.JOINT_TABLE_PTR exec.save_point
+        end
+        push.FIRST_Q_PTR exec.load_term
+        dup mul.4 mul.POINT_STRIDE add.JOINT_TABLE_PTR
+        repeat.3
+            exec.add_complete add.POINT_STRIDE dup exec.save_point
+        end
+        drop add.1
+    end
+    drop
+end
+
+#! Combines two bits from each short coefficient into joint-table indices.
+#!
+#! Input:  [...]
+#! Output: [...]
+#!
+#! Reads |a| at NUMERATOR_PTR and b at DENOMINATOR_PTR. Writes eighty indices
+#! a_i + 4*b_i in 0..16 at JOINT_DIGITS_PTR, least significant first.
+proc prepare_joint_digits()
+    push.JOINT_DIGITS_PTR.0
+    repeat.SHORT_LIMBS
+        dup add.DENOMINATOR_PTR mem_load
+        dup.1 add.NUMERATOR_PTR mem_load
+        # => [a_limb, b_limb, limb_index, dst, ...]
+        repeat.8
+            dup.1 u32mod.4 mul.4 dup.1 u32mod.4 add
+            dup.4 mem_store
+            movup.3 add.1 movdn.3
+            u32shr.2 swap u32shr.2 swap
+        end
+        drop drop add.1
+    end
+    drop drop
+end
+
+# POINT DECODING AND WORKSPACE TRANSFERS
+# ==================================================================================================
+
+#! Decodes the nonidentity point at ENCODING_PTR into the prime-order subgroup.
+#!
+#! Input:  [...]
+#! Advice: [sqrt(u)(5), ...]
+#! Output: [...]
+#!
+#! Writes X/Y at arithmetic::TERM_X/Y. For encoding w, u = X-2/3 satisfies
+#! u*(w^2-2-u) = 263*z and Y = -w*u. The two roots for u have nonsquare product 263*z,
+#! so exactly one is square. An advised square root selects that root, matching the
+#! canonical EcGFp5 decoder without a Legendre test.
+proc decode_point()
+    mem_load.ENCODING_PTR neq.0
+    mem_load.ENCODING_1_PTR neq.0 or mem_load.ENCODING_2_PTR neq.0 or
+    mem_load.ENCODING_3_PTR neq.0 or
+    mem_load.ENCODING_TAIL_PTR neq.0 or
+    assert.err="nonzero public key"
+    adv_pushw adv_push movdn.4 exec.arithmetic::square_fp5
+    mem_storew_le.TERM_X0 dropw mem_store.TERM_X4
+
+    mem_load.TERM_X4 padw mem_loadw_le.TERM_X0
+    mem_load.ENCODING_TAIL_PTR padw mem_loadw_le.ENCODING_PTR
+    exec.arithmetic::square_fp5 sub.2 exec.arithmetic::sub_fp5
+    mem_load.TERM_X4 padw mem_loadw_le.TERM_X0
+    exec.arithmetic::mul_fp5
+    assertz.err="public key"
+    push.WEIERSTRASS_A1 assert_eq.err="public key"
+    repeat.3 assertz.err="public key" end
+
+    mem_load.TERM_X4 padw mem_loadw_le.TERM_X0
+    mem_load.ENCODING_TAIL_PTR padw mem_loadw_le.ENCODING_PTR
+    exec.arithmetic::mul_fp5
+    repeat.5 neg movdn.4 end
+    mem_storew_le.TERM_Y0 dropw mem_store.TERM_Y4
+    mem_load.TERM_X0 add.TWO_THIRDS mem_store.TERM_X0
+end
+
+#! Saves the accumulator and its identity flag in a joint-table entry.
+#!
+#! Input:  [point_ptr, ...]
+#! Output: [...]
+#!
+#! Reads arithmetic::ACC_X/Y and ACC_IDENTITY. Writes X and Y into the eight-Felt slots at
+#! point_ptr and point_ptr+8, and the identity flag at point_ptr+16.
+proc save_point(point_ptr: ptr<felt>)
+    dup mem_load.ACC_IDENTITY swap add.16 mem_store
+    dup padw mem_loadw_le.ACC_X0 movup.4 mem_storew_le dropw
+    dup add.4 padw mem_loadw_le.ACC_X4 movup.4 mem_storew_le dropw
+    dup add.8 padw mem_loadw_le.ACC_Y0 movup.4 mem_storew_le dropw
+    add.12 padw mem_loadw_le.ACC_Y4 movup.4 mem_storew_le dropw
+end
+
+#! Loads a joint-table entry into the term slots.
+#!
+#! Input:  [point_ptr, ...]
+#! Output: [...]
+#!
+#! Reads X, Y, and identity from offsets 0, 8, and 16 of point_ptr. Writes
+#! arithmetic::TERM_X/Y and TERM_IDENTITY.
+proc load_term(point_ptr: ptr<felt>)
+    dup add.16 mem_load mem_store.TERM_IDENTITY
+    dup padw movup.4 mem_loadw_le mem_storew_le.TERM_X0 dropw
+    dup add.4 mem_load mem_store.TERM_X4
+    dup add.8 padw movup.4 mem_loadw_le mem_storew_le.TERM_Y0 dropw
+    add.12 mem_load mem_store.TERM_Y4
+end
+
+#! Copies the term and its identity flag into the accumulator.
+#!
+#! Input:  [...]
+#! Output: [...]
+#!
+#! Reads arithmetic::TERM_X/Y and TERM_IDENTITY; writes arithmetic::ACC_X/Y and ACC_IDENTITY.
+proc copy_term()
+    padw
+    mem_loadw_le.TERM_X0 mem_storew_le.ACC_X0
+    mem_loadw_le.TERM_Y0 mem_storew_le.ACC_Y0 dropw
+    mem_load.TERM_X4 mem_store.ACC_X4
+    mem_load.TERM_Y4 mem_store.ACC_Y4
+    mem_load.TERM_IDENTITY mem_store.ACC_IDENTITY
+end
+
+#! Negates the term point by replacing arithmetic::TERM_Y with -Y.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc negate_term()
+    mem_load.TERM_Y0 neg mem_store.TERM_Y0
+    mem_load.TERM_Y1 neg mem_store.TERM_Y1
+    mem_load.TERM_Y2 neg mem_store.TERM_Y2
+    mem_load.TERM_Y3 neg mem_store.TERM_Y3
+    mem_load.TERM_Y4 neg mem_store.TERM_Y4
+end
+
+# COMPLETE POINT OPERATIONS
+# ==================================================================================================
+
+#! Adds the term to the accumulator, including equal, opposite, and identity inputs.
+#!
+#! Input:  [...]
+#! Advice: [slope(5), ...] only when both inputs are finite and do not cancel
+#! Output: [...]
+#!
+#! Reads arithmetic::TERM_X/Y and TERM_IDENTITY; updates arithmetic::ACC_X/Y and ACC_IDENTITY.
+#! Distinct X coordinates use affine addition; equal points use doubling; opposite points
+#! sum to identity. The identity flags are computed by the VM, not supplied through advice.
+proc add_complete()
+    mem_load.ACC_IDENTITY
+    if.true exec.copy_term
+    else
+        mem_load.TERM_IDENTITY not
+        if.true
+            mem_load.ACC_X0 mem_load.TERM_X0 eq
+            mem_load.ACC_X1 mem_load.TERM_X1 eq and
+            mem_load.ACC_X2 mem_load.TERM_X2 eq and
+            mem_load.ACC_X3 mem_load.TERM_X3 eq and
+            mem_load.ACC_X4 mem_load.TERM_X4 eq and
+            if.true
+                mem_load.ACC_Y0 mem_load.TERM_Y0 eq
+                mem_load.ACC_Y1 mem_load.TERM_Y1 eq and
+                mem_load.ACC_Y2 mem_load.TERM_Y2 eq and
+                mem_load.ACC_Y3 mem_load.TERM_Y3 eq and
+                mem_load.ACC_Y4 mem_load.TERM_Y4 eq and
+                if.true exec.arithmetic::double_point
+                else push.1 mem_store.ACC_IDENTITY end
+            else exec.arithmetic::add_point end
+        end
+    end
+end
+
+#! Doubles the accumulator, leaving the identity unchanged.
+#!
+#! Input:  [...]
+#! Advice: [slope(5), ...] only for a nonidentity accumulator
+#! Output: [...]
+#!
+#! Reads ACC_IDENTITY and updates arithmetic::ACC_X/Y when the point is nonidentity.
+proc double_complete()
+    mem_load.ACC_IDENTITY not if.true exec.arithmetic::double_point end
+end

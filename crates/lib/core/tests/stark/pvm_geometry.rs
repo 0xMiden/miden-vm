@@ -12,12 +12,27 @@ const SECURITY_ESTIMATOR_PATH: &str =
 const GENERIC_UTILS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/asm/stark/utils.masm");
 
 fn masm_const(path: &str, name: &str) -> u64 {
-    let source = std::fs::read_to_string(path).unwrap();
-    let prefix = format!("const {name} = ");
+    let source =
+        std::fs::read_to_string(path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    let private_prefix = alloc::format!("const {name} = ");
+    let public_prefix = alloc::format!("pub const {name} = ");
+    let metadata_prefix = alloc::format!("# {name} = ");
+    let region_prefix = alloc::format!("### {name}: ");
     source
         .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.split('#').next()?.trim().parse().ok())
-        .unwrap_or_else(|| panic!("{name} not found in {path}"))
+        .find_map(|line| {
+            let line = line.trim();
+            let value = line
+                .strip_prefix(&private_prefix)
+                .or_else(|| line.strip_prefix(&public_prefix))
+                .or_else(|| line.strip_prefix(&metadata_prefix))
+                .or_else(|| {
+                    let (_, range) = line.strip_prefix(&region_prefix)?.split_once(" felts at ")?;
+                    range.split_once("..").map(|(start, _)| start)
+                })?;
+            value.split('#').next()?.trim().parse().ok()
+        })
+        .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
 }
 
 #[test]
@@ -70,7 +85,9 @@ fn pvm_public_input_hook_matches_the_statement_schema() {
     const RELATION_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm");
 
     let multi_air = ChipletMultiAir::new();
-    assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), multi_air.num_air_inputs() as u64);
+    let num_public_values: usize =
+        multi_air.airs().iter().map(miden_air::BaseAir::<Felt>::num_public_values).sum();
+    assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), num_public_values as u64);
     assert_eq!(masm_const(HOOK_PATH, "MAX_AUX_INPUTS"), multi_air.max_aux_inputs() as u64);
     assert_eq!(masm_const(HOOK_PATH, "NUM_AUX_INPUTS"), 0);
     assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);

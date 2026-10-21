@@ -21,12 +21,14 @@ workspace_root="$(printf '%s' "$metadata_json" | jq -r '.workspace_root')"
 selected_packages=()
 allow_existing=true
 check_semver=true
+skip_checks=false
 package_arguments=()
 
 for argument in "$@"; do
     case "$argument" in
         --allow-existing=*) allow_existing="${argument#*=}" ;;
         --skip-semver) check_semver=false ;;
+        --skip-checks) skip_checks=true ;;
         *) package_arguments+=("$argument") ;;
     esac
 done
@@ -62,6 +64,10 @@ if [[ ${#selected_packages[@]} -gt 0 ]]; then
     fi
 fi
 selected_package_count="${#selected_packages[@]}"
+if [[ "$skip_checks" == true && "$selected_package_count" -eq 0 ]]; then
+    echo 'ERROR: --skip-checks requires an explicit non-empty package selection.' >&2
+    exit 2
+fi
 
 publishable_package_names="$(
     publishable_packages | cut -f1
@@ -105,9 +111,25 @@ semver_latest_versions=()
 
 echo "Package release plan"
 echo
+if [[ "$skip_checks" == true ]]; then
+    echo 'WARNING: version, archive and semver validation skipped for manual recovery.'
+fi
 
-while IFS=$'\t' read -r package local_version manifest_path; do
+while IFS=$'\t' read -r package local_version _manifest_path; do
     if ! is_selected_package "$package"; then
+        continue
+    fi
+
+    if [[ "$skip_checks" == true ]]; then
+        if crate_version_exists "$package" "$local_version"; then
+            if [[ "$allow_existing" == true ]]; then
+                already_published+=("$package v$local_version (manually verified)")
+            else
+                version_errors+=("$package v$local_version already exists on crates.io")
+            fi
+        else
+            would_publish+=("$package v$local_version (manually verified)")
+        fi
         continue
     fi
 
@@ -119,9 +141,13 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     fi
 
     if crate_version_exists "$package" "$local_version"; then
+        has_binary_target="$(jq -r --arg package "$package" '
+            .packages[] | select(.name == $package)
+            | any(.targets[]; .kind | index("bin") != null)
+        ' <<< "$metadata_json")"
         if [[ "$allow_existing" == "false" ]]; then
             version_errors+=("$package v$local_version already exists on crates.io")
-        elif package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
+        elif package_archive_matches_published "$package" "$local_version" "$workspace_root" "$has_binary_target"; then
             already_published+=("$package v$local_version (latest published: $latest_version)")
         else
             archive_status=$?
@@ -230,5 +256,9 @@ fi
 echo
 echo "Release plan check passed."
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    printf 'packages=%s\n' "$(jq -cn --args '$ARGS.positional | map(split(" " )[0])' "${would_publish[@]}")" >> "$GITHUB_OUTPUT"
+    if [[ ${#would_publish[@]} -eq 0 ]]; then
+        echo 'packages=[]' >> "$GITHUB_OUTPUT"
+    else
+        printf 'packages=%s\n' "$(jq -cn --args '$ARGS.positional | map(split(" " )[0])' "${would_publish[@]}")" >> "$GITHUB_OUTPUT"
+    fi
 fi

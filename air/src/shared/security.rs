@@ -66,11 +66,7 @@ pub fn security_report_with_hash(
 ) -> SecurityReport {
     match hash_fn {
         HashFunction::Eidos => {},
-        HashFunction::Blake3_256
-        | HashFunction::Rpo256
-        | HashFunction::Rpx256
-        | HashFunction::Poseidon2
-        | HashFunction::Keccak => {
+        HashFunction::Blake3_256 | HashFunction::Keccak => {
             return p3_security::budget::security_report(params, instance, air);
         },
     }
@@ -100,7 +96,6 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// The transcript observes every field of [`PcsParams`], so computing a proof's security level
 /// under these parameters uses the parameters it was actually produced with.
-
 pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
     ProtocolParams {
         log_blowup: u32::from(params.log_blowup()),

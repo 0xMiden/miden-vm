@@ -32,12 +32,12 @@ type EcGroupPayload = struct {
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
 const UINT_VAL_BUS_SCALE = {{ uint_val_bus_scale }}
 const EC_GROUP_BUS_SCALE = {{ ec_group_bus_scale }}
-const MAX_LOGUP_MESSAGE_WIDTH = {{ max_logup_message_width }}
+# MAX_LOGUP_MESSAGE_WIDTH = {{ max_logup_message_width }}
 
 # Number of chiplet instances in the relation, each contributing one boundary value.
-const NUM_CHIPLETS = {{ num_chiplets }}
+# NUM_CHIPLETS = {{ num_chiplets }}
 # Complete words spanned by the proof-ordered, two-felt normalized boundary sums.
-const NUM_AUX_VALUE_WORDS = {{ num_aux_value_words }}
+# NUM_AUX_VALUE_WORDS = {{ num_aux_value_words }}
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the chiplet's
 #! row count `n = 2^log_height`.

@@ -1,11 +1,11 @@
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_air::precompiles::{
-    ChipletMultiAir, preprocessed,
+    ChipletAir, ChipletMultiAir, preprocessed,
     security::{self, ProofSecurityParameters},
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        observe_protocol_params, precompile_pcs_params,
     },
     transcript::eidos::EidosDigest,
 };
@@ -59,21 +59,6 @@ fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, us
             let preprocessed = preprocessed::blake3();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
-        HashFunction::Rpo256 => {
-            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpo();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Rpx256 => {
-            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpx();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::poseidon2();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
         HashFunction::Keccak => {
             let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed::keccak();
@@ -104,9 +89,12 @@ where
         proof_encoding_config,
     )?;
 
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+    let statement = Statement::new(
+        ChipletMultiAir::new(),
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, public_root.as_array().to_vec())],
+        Vec::new(),
+    )
+    .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);

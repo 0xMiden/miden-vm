@@ -24,6 +24,11 @@ on:
         required: false
         default: true
         type: boolean
+      skip_package_version_gate:
+        description: "Skip version/archive/semver validation for manual recovery. Requires an explicit package selection. Package verification and approval still run."
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -74,6 +79,7 @@ jobs:
       ref: ${{ github.sha }}
       packages: ${{ inputs.packages }}
       allow_existing: ${{ inputs.allow_existing }}
+      skip_checks: ${{ inputs.skip_package_version_gate }}
 
   create-draft:
     name: create draft release
@@ -203,7 +209,7 @@ jobs:
           set -euo pipefail
           mv target/packages/miden-core.masp release-assets/core.masp
       - name: Save release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-binaries-${{ matrix.target }}
           path: release-assets/
@@ -224,7 +230,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-binaries-*
           merge-multiple: true
@@ -327,6 +333,7 @@ jobs:
           mode: publish
           packages: ${{ join(fromJSON(needs.package-version-gate.outputs.packages), ' ') }}
           token: ${{ steps.auth.outputs.token }}
+          allow_existing: ${{ inputs.allow_existing }}
 
   publish-github-release:
     name: publish GitHub release

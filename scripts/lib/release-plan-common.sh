@@ -13,7 +13,8 @@ crates_io_get() {
     local status
 
     if ! status="$(
-        curl -sS -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
+        curl -sS --retry 3 --retry-max-time 60 --connect-timeout 10 --max-time 60 \
+            -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
             -o "$output_file" \
             -w "%{http_code}" \
             "https://crates.io/api/v1/${path}"
@@ -32,7 +33,8 @@ download_published_crate() {
     local status
 
     if ! status="$(
-        curl -sS -L -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
+        curl -sS -L --retry 3 --retry-max-time 60 --connect-timeout 10 --max-time 60 \
+            -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
             -o "$output_file" \
             -w "%{http_code}" \
             "https://crates.io/api/v1/crates/${package}/${version}/download"
@@ -202,6 +204,7 @@ package_archive_matches_published() {
     local package="$1"
     local version="$2"
     local workspace_root="$3"
+    local has_binary_target="${4:?binary target classification is required}"
     local package_target_dir package_log local_archive published_archive local_dir published_dir
     local diff_output diff_status
 
@@ -235,7 +238,7 @@ package_archive_matches_published() {
         return 2
     fi
 
-    download_published_crate "$package" "$version" "$published_archive"
+    download_published_crate "$package" "$version" "$published_archive" || return 2
 
     if ! tar -xzf "$local_archive" -C "$local_dir"; then
         echo "ERROR: could not extract local archive for $package v$version" >&2
@@ -247,6 +250,19 @@ package_archive_matches_published() {
     fi
 
     find "$local_dir" "$published_dir" -name .cargo_vcs_info.json -delete
+    case "$has_binary_target" in
+        false)
+            # Cargo regenerates this file against the registry during packaging.
+            # Library consumers resolve dependencies from the manifest instead.
+            rm -f "$local_dir/$package-$version/Cargo.lock" \
+                "$published_dir/$package-$version/Cargo.lock"
+            ;;
+        true) ;; # Preserve cargo install --locked behavior for executable packages.
+        *)
+            echo "ERROR: invalid binary target metadata for $package" >&2
+            return 2
+            ;;
+    esac
     if diff -qr "$local_dir" "$published_dir" >"$diff_output"; then
         return 0
     else

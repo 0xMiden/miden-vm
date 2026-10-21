@@ -268,28 +268,30 @@ mod tests {
 
     #[test]
     fn full_relation_consumes_exact_boundary_coordinates() {
-        for n in [miden_air::precompiles::NUM_CHIPLETS] {
-            let aux = plan(n).render_aux_trace().unwrap();
-            let observe = aux
-                .split_once("pub proc observe_aux_trace()")
+        let n = miden_air::precompiles::NUM_CHIPLETS;
+        let aux = plan(n).render_aux_trace().unwrap();
+        let observe = aux
+            .split_once("pub proc observe_aux_trace()")
+            .unwrap()
+            .1
+            .split_once("\nend")
+            .unwrap()
+            .0;
+        assert_eq!(observe.matches("padw adv_loadw").count(), 1 + n / 2);
+        assert_eq!(
+            observe.matches("adv_push dup exec.layout::aux_bus_boundary_ptr").count(),
+            2 * (n % 2)
+        );
+        assert_eq!(observe.matches("exec.load_weighted_aux_sum").count(), n);
+        assert!(aux.contains(&format!(
+            "push.{} assert_eq.err=\"PVM observe_aux_trace: boundary transcript framing drifted\"",
+            (4 + 2 * n) % 8
+        )));
+        assert!(
+            plan(n)
+                .render_public_inputs()
                 .unwrap()
-                .1
-                .split_once("\nend")
-                .unwrap()
-                .0;
-            assert_eq!(observe.matches("padw adv_loadw").count(), 1 + n / 2);
-            assert_eq!(
-                observe.matches("adv_push dup exec.layout::aux_bus_boundary_ptr").count(),
-                2 * (n % 2)
-            );
-            assert_eq!(observe.matches("exec.load_weighted_aux_sum").count(), n);
-            assert!(aux.contains(&format!("push.{} assert_eq.err=\"PVM observe_aux_trace: boundary transcript framing drifted\"", (4 + 2 * n) % 8)));
-            assert!(
-                plan(n)
-                    .render_public_inputs()
-                    .unwrap()
-                    .contains(&format!("const BUFFERED_SHAPE_VALUE_COUNT = {}", (12 + n) % 8))
-            );
-        }
+                .contains(&format!("const BUFFERED_SHAPE_VALUE_COUNT = {}", (12 + n) % 8))
+        );
     }
 }
