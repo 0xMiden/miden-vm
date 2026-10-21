@@ -82,7 +82,7 @@ opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
-miden-ace-codegen       = { path = "./crates/ace", version = "1.0", default-features = false }
+miden-ace               = { path = "./crates/ace", version = "1.0", default-features = false }
 miden-air               = { path = "./crates/air/generated", version = "1.0", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0", default-features = false }

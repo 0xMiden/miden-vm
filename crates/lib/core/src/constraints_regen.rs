@@ -6,7 +6,7 @@ use alloc::{
 };
 use std::{fs, io, println};
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, OodScatterPlan,
     ProofOrderMapsConfig, render_proof_order_maps,
 };
@@ -835,7 +835,7 @@ fn render_constraints_eval_file(
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     geometry: &VmGeometry,
 ) -> io::Result<String> {
-    miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
+    miden_ace::render_masm_constraints_eval(&miden_ace::MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
         layout_module: "miden::core::sys::vm::layout",

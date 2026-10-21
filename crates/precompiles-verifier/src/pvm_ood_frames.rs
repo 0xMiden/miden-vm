@@ -15,7 +15,7 @@ use alloc::{
 };
 use core::{fmt::Write as _, ops::Range};
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
     render_proof_order_maps,
 };

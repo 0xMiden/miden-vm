@@ -3,6 +3,8 @@
 //! This module provides Lehmer encoding for proof-order permutations and the comparator networks
 //! used by the MASM order-map renderer.
 
+use alloc::{vec, vec::Vec};
+
 /// Largest AIR count whose complete permutation set fits in the `u32` tag space.
 ///
 /// `12!` fits; `13!` does not. Ranking must reject larger compositions before any rank is
@@ -76,9 +78,12 @@ pub fn order_from_tag(tag: u32, num_airs: usize) -> Option<Vec<usize>> {
 /// proof order is defined as, provided every instance index is below the stride. Keys are compared
 /// as `u32`s, so the log height must also stay below `2^32 / PROOF_ORDER_KEY_STRIDE`; production
 /// verifiers bound it below 30 before any key is formed.
+#[cfg(any(test, feature = "compiler"))]
 pub(crate) const PROOF_ORDER_KEY_STRIDE: usize = 16;
+#[cfg(any(test, feature = "compiler"))]
 const _: () = assert!(MAX_ORDER_AIRS <= PROOF_ORDER_KEY_STRIDE, "keys must separate every AIR");
 // The generated pass unpacks the instance index with `u32and.(PROOF_ORDER_KEY_STRIDE - 1)`.
+#[cfg(any(test, feature = "compiler"))]
 const _: () = assert!(
     PROOF_ORDER_KEY_STRIDE.is_power_of_two(),
     "the key stride must be a power of two"
@@ -86,6 +91,7 @@ const _: () = assert!(
 
 /// One compare-exchange of a sorting network, as the pair of key positions `(lo, hi)` it touches
 /// (`lo < hi`). After the exchange the smaller key sits at position `lo` and the larger at `hi`.
+#[cfg(any(test, feature = "compiler"))]
 pub(crate) type Comparator = (usize, usize);
 
 /// A size-optimal 29-comparator sorting network for the PVM's ten AIRs.
@@ -95,6 +101,7 @@ pub(crate) type Comparator = (usize, usize);
 /// Codish et al. prove that 29 comparators are minimal for ten inputs
 /// (<https://doi.org/10.1016/j.jcss.2015.11.014>). By the zero-one principle, correctness over all
 /// 1,024 Boolean inputs establishes correctness for arbitrary inputs from a totally ordered domain.
+#[cfg(any(test, feature = "compiler"))]
 const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
     (0, 8),
     (1, 9),
@@ -142,6 +149,7 @@ const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
 /// Panics unless `1 <= num_inputs <= MAX_ORDER_AIRS`.
 ///
 /// The returned comparator sequence sorts arbitrary inputs over a totally ordered domain.
+#[cfg(any(test, feature = "compiler"))]
 pub(crate) fn sorting_network(num_inputs: usize) -> Vec<Comparator> {
     assert!(
         (1..=MAX_ORDER_AIRS).contains(&num_inputs),

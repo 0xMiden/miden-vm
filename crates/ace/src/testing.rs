@@ -1,8 +1,8 @@
-//! Test helpers for ACE codegen, available under the `testing` feature or `#[cfg(test)]`.
+//! ACE compiler test helpers, available with `testing` or in the compiler's unit tests.
 //!
 //! These provide reference evaluators for symbolic expressions, periodic columns,
 //! constraint folding, quotient recomposition, and DAG evaluation, suitable for
-//! validating the ACE pipeline from both within ace-codegen tests and from
+//! validating the ACE pipeline from both within miden-ace tests and from
 //! downstream integration tests (e.g. in miden-air).
 
 use miden_core::{Felt, field::QuadFelt};

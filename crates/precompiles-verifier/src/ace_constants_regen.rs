@@ -17,7 +17,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
     render_masm_constraints_eval,
 };

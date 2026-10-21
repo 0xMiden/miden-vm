@@ -12,7 +12,7 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_ace_codegen::{
+use miden_ace::{
     AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
 };
 use miden_core::{Felt, field::QuadFelt};
@@ -60,7 +60,7 @@ pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 // RECURSIVE VERIFIER CIRCUIT
 // ================================================================================================
 
-pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
+pub use miden_ace::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
@@ -140,7 +140,7 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 mod tests {
     use alloc::{format, string::String, vec::Vec};
 
-    use miden_ace_codegen::InputKey;
+    use miden_ace::InputKey;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
 
@@ -253,7 +253,7 @@ mod tests {
             }
             let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
 
-            let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+            let direct = miden_ace::testing::eval_multi_air_constraints(
                 &airs,
                 canonical_layout,
                 &canonical_inputs,

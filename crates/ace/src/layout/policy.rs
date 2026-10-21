@@ -4,7 +4,14 @@ use super::{
     InputCounts, InputLayout, InputRegion, LayoutRegions, MultiAirIndices, SELECTORS_PER_AIR,
     StarkVarIndices,
 };
-use crate::{EXT_DEGREE, randomness};
+use crate::EXT_DEGREE;
+
+/// Derive alpha/beta input indices from the memory-word layout `[beta, alpha]`.
+fn aux_rand_indices(randomness: InputRegion) -> (usize, usize) {
+    let beta_idx = randomness.index(0).expect("randomness region must have at least 2 slots");
+    let alpha_idx = randomness.index(1).expect("randomness region must have at least 2 slots");
+    (alpha_idx, beta_idx)
+}
 
 #[derive(Clone, Copy)]
 enum Alignment {
@@ -155,7 +162,7 @@ impl InputLayout {
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
-        let (aux_rand_alpha, aux_rand_beta) = randomness::aux_rand_indices(randomness);
+        let (aux_rand_alpha, aux_rand_beta) = aux_rand_indices(randomness);
         let preprocessed_curr = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
@@ -188,6 +195,7 @@ impl InputLayout {
         Self {
             regions: LayoutRegions {
                 public_values,
+                #[cfg(any(test, feature = "compiler"))]
                 randomness,
                 preprocessed_curr,
                 main_curr,
@@ -198,6 +206,7 @@ impl InputLayout {
                 aux_next,
                 quotient_next,
                 aux_bus_boundary,
+                #[cfg(any(test, feature = "compiler"))]
                 stark_vars,
             },
             aux_rand_alpha,
