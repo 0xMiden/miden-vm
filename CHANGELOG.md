@@ -4,24 +4,31 @@
 
 #### Features
 
+- Restored the standalone `miden_crypto::hash::poseidon2` API, including its original digest format, Plonky3 adapters, and SIMD implementations, for applications with existing Poseidon2 commitments.
+- [BREAKING] Added compact `SmtWitness` transport and CLI input support, including `MerkleData::SmtWitness` and stricter partial-SMT validation. Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes ([#4043](https://github.com/0xMiden/miden-vm/pull/4043)).
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - [BREAKING] Added `adv.export_deferred_witness` to store a registered true assertion's portable witness in the advice map under its digest. Downstream exhaustive matches on `SystemEvent` and `SystemEventNode` must handle the new `DeferredExportWitness` variant ([#4003](https://github.com/0xMiden/miden-vm/pull/4003)).
 - Added independent precompile obligation roots through `_with_root` stdlib procedures and `precompiles::append_root`, including arithmetic, curves, hashes, ECDSA, and EdDSA. Each manual call takes ordinary inputs and returns its complete obligation root first. Callers compose roots explicitly without advancing the VM root. `append_root` hashes its children in stack order, and `append_root_ptr` updates a root in memory. Single-binding operations return bare assertions, and predicates bind their inputs even when false. Signature implementations keep obligation roots on the operand stack and delay composition while intermediate values are consumed. Native signature procedures log their complete obligation once. Root grouping changes their deferred commitment digests ([#4012](https://github.com/0xMiden/miden-vm/pull/4012)).
+- [BREAKING] Added separately configurable execution and per-witness verification limits for deferred precompile work. Custom precompiles must implement `Precompile::work`; consuming witness preparation validates and admits work before commitment hashing or evaluation. Proving consumes prepared witnesses, with a separate memory-budget check before trace generation. The shared root ceiling for proving, canonical decoding, and verification drops from 4,096 to 128, rejecting existing format-2 proofs with 129–4,096 roots without changing the encoding version. Portable witness decoding now checks transport syntax and bounds only. Callers must prepare the witness to validate graph integrity ([#3886](https://github.com/0xMiden/miden-vm/pull/3886)).
 - [BREAKING] Added EcGFp5 Diffie-Hellman support in Rust and MASM, plus the `Ecgfp5Eidos` IES scheme ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
 - [BREAKING] Added associated-data support to MASM Eidos AEAD and replaced its low-level API with `encrypt`, `decrypt`, `encrypt_with_ad`, and `decrypt_with_ad` ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
+- [BREAKING] Added four typed precompile work limits to the Miden VM CLI. `prove` creates complete proofs by default; `--deferred` explicitly opts into exporting a raw precompile witness that can reveal private advice inputs, with disclosure in help and output. `--complete` explicitly selects complete proving. `verify` accepts valid deferred proofs by default with explicit status and outstanding precompile obligation; use `--require-complete` to require a fully STARK-backed proof. An explicit `prove --max-prover-memory` now sets both VM and precompile proving budgets, while omitting it preserves each stage's library default.
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/pull/3867)).
 - [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
 
 #### Changes
 
+- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 - [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#4041](https://github.com/0xMiden/miden-vm/pull/4041)).
-- [BREAKING] Removed RPO, RPX, and Poseidon2 hash implementations from the crypto crate and their VM and precompile proof configurations. Eidos, BLAKE3, and Keccak remain supported; proofs using the removed hashes are rejected ([#3504](https://github.com/0xMiden/miden-vm/issues/3504)).
+- [BREAKING] Removed RPO and RPX hashing APIs from the crypto crate and removed RPO, RPX, and Poseidon2 proof configurations from the VM and precompile VM. Eidos, BLAKE3, and Keccak remain supported for proofs. Proofs selecting the removed configurations are rejected ([#4032](https://github.com/0xMiden/miden-vm/pull/4032)).
+- Restored the standalone `miden_crypto::hash::poseidon2` API for applications with existing Poseidon2 commitments, preserving its original digest format, Plonky3 adapters, and SIMD implementations. The VM uses Eidos natively. Poseidon2 remains unsupported for VM and precompile proofs ([#4063](https://github.com/0xMiden/miden-vm/pull/4063)).
 
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
+- [BREAKING] Reduced configurable deferred-precompile admission defaults for hash calls and bytes, arithmetic and curve operations, and MSM calls and terms, independently of hard supported-input ceilings.
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
 - [BREAKING] Optimized Falcon512-Eidos verification with counter-mode hash-to-point and fused norm computation. Regenerate signatures and use `falcon512_eidos::encode_signature` for advice. `mod_12289` takes `u64` in `[lo, hi]` order instead of `[hi, lo]`. `Nonce` uses `{ lo, hi }`. Replaced `hash_to_point` and `compute_s1_norm_sq` with `hash_to_point_s1_norm_sq`. Removed `diff_mod_M` and `WideInteger` ([#3990](https://github.com/0xMiden/miden-vm/pull/3990)).
 - Added opt-in hashing of completed trace LDE blocks to the lifted STARK prover (`hash_lde_blocks`) ([#3866](https://github.com/0xMiden/miden-vm/pull/3866)).
@@ -56,6 +63,18 @@
 - [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 - [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 
+## v0.36.2 (2026-10-20)
+
+#### Fixes
+
+- Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
+- Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes per store while preserving compatibility with existing readers and payloads ([#4060](https://github.com/0xMiden/miden-vm/pull/4060)).
+- [BREAKING] Write CLI proofs and output JSON to sibling temporary files before replacing their destinations, preserving previous artifacts when writes fail. Replacements use the current user and normal file creation permissions instead of copying the previous file's access controls. Destination symlinks are replaced with artifact files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
+- Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4037](https://github.com/0xMiden/miden-vm/pull/4037)).
+
 ## v0.36.1 (2026-10-16)
 
 #### Features
@@ -66,7 +85,7 @@
 
 #### Fixes
 
-- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee.
+- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
 
 ## v0.36.0 (2026-10-14)
 

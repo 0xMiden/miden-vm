@@ -28,7 +28,7 @@ use crate::{
             sponge::{KeccakSpongeAir, NUM_AUX_COLS as SPONGE_NUM_AUX_COLS, trace::SpongeRequires},
         },
     },
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     tests::{
@@ -101,7 +101,7 @@ fn layout_and_lookup_shape_match_design() {
         ValidateLayout {
             preprocessed_width: ChunkNodeSpongeAir.preprocessed_width(),
             trace_width: ChunkNodeSpongeAir.width(),
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: ChunkNodeSpongeAir.periodic_columns().len(),
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,

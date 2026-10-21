@@ -1,8 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{
-    MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
-};
+use miden_air::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, Statement, config};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -1182,7 +1180,7 @@ fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
         vec![],
     )
     .expect("zero public inputs satisfy the Miden statement shape");

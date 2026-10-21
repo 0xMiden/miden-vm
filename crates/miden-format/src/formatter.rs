@@ -722,7 +722,7 @@ fn render_begin_block(begin: &BeginBlock, indent: usize, config: &Config) -> Str
 }
 
 fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> String {
-    let mut lines = render_procedure_attribute_prologue(procedure, indent);
+    let mut lines = render_procedure_attribute_prologue(procedure, indent, config);
     lines.extend(render_visibility_comments(procedure.visibility(), indent));
 
     let mut header = indent_string(indent);
@@ -764,7 +764,11 @@ fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> St
     lines.join("\n")
 }
 
-fn render_procedure_attribute_prologue(procedure: &Procedure, indent: usize) -> Vec<String> {
+fn render_procedure_attribute_prologue(
+    procedure: &Procedure,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
     let mut lines = Vec::new();
     let mut inline_comment_target = None;
     let mut same_line = false;
@@ -772,7 +776,21 @@ fn render_procedure_attribute_prologue(procedure: &Procedure, indent: usize) -> 
     for element in procedure.syntax().children_with_tokens() {
         match element {
             NodeOrToken::Node(child) if child.kind() == SyntaxKind::Attribute => {
-                lines.push(format!("{}{}", indent_string(indent), render_compact_tokens(&child)));
+                let tokens = all_tokens(&child);
+                if has_comment_tokens(&tokens) {
+                    lines.extend(render_token_stream_with_comments(
+                        &trim_outer_whitespace_tokens(&tokens),
+                        indent,
+                        SpacingStyle::Default,
+                        config,
+                    ));
+                } else {
+                    lines.push(format!(
+                        "{}{}",
+                        indent_string(indent),
+                        render_compact_tokens(&child)
+                    ));
+                }
                 inline_comment_target = Some(lines.len() - 1);
                 same_line = true;
             },
@@ -1613,7 +1631,12 @@ fn render_signature_item_lines(
     if has_comment_tokens(tokens) {
         render_token_stream_with_comments(tokens, indent, SpacingStyle::TypeBodyItem, config)
     } else {
-        render_token_lines_with_style(tokens, indent, true, SpacingStyle::TypeBodyItem, config)
+        let tokens = tokens
+            .iter()
+            .filter(|token| !token.kind().is_trivia())
+            .cloned()
+            .collect::<Vec<_>>();
+        render_token_lines_with_style(&tokens, indent, true, SpacingStyle::TypeBodyItem, config)
     }
 }
 
@@ -3383,6 +3406,47 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn signatures_with_comments_are_idempotent() {
+        let params = "\
+pub proc foo(
+    a: u32,
+    # the second parameter
+    b: felt
+)
+    nop
+end
+";
+        assert_eq!(assert_format_idempotent(params, "params"), params);
+
+        let results = "\
+pub proc foo(
+    a: u32
+) -> (
+    # first result
+    x: felt,
+    y: u32
+)
+    nop
+end
+";
+        assert_eq!(assert_format_idempotent(results, "results"), results);
+    }
+
+    #[test]
+    fn preserves_comments_inside_procedure_attribute_arguments() {
+        let source = "\
+@auth_script(
+    # role of the script
+    role = \"custom\"
+)
+pub proc foo
+    nop
+end
+";
+        assert_eq!(assert_format_idempotent(source, "attribute"), source);
     }
 
     #[test]

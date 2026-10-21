@@ -14,15 +14,19 @@ version = "1.0.0"
 
 [features]
 default = ["std"]
-std     = []
+std     = ["dep:rustix"]
 
 [dependencies]
 p3-field.workspace      = true
 p3-goldilocks.workspace = true
 wincode.workspace       = true
 
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, optional = true }
+
 [dev-dependencies]
 serde-wincode.workspace = true
+tempfile.workspace      = true
 
 [lints]
 workspace = true

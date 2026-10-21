@@ -2245,6 +2245,7 @@ version = "1.0.0"
 dependencies = [
  "assert_matches",
  "blake3",
+ "cc",
  "chacha20poly1305",
  "clap",
  "criterion",
@@ -2267,6 +2268,7 @@ dependencies = [
  "p3-blake3",
  "p3-challenger",
  "p3-dft",
+ "p3-goldilocks",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
@@ -2685,7 +2687,9 @@ version = "1.0.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "rustix",
  "serde-wincode",
+ "tempfile",
  "wincode",
 ]
 

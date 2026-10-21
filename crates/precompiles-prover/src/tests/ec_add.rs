@@ -25,7 +25,6 @@ use proptest::prelude::*;
 
 // The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
 // round-trip.
-use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
     ec::{
         COL_IS_CERT, EcRequire,
@@ -195,7 +194,7 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
     fn eval_external(
         &self,
         _challenges: &[QuadFelt],
-        _air_inputs: &[Felt],
+        _air_inputs: &[Vec<Felt>],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
@@ -239,20 +238,10 @@ impl EcStackTraces {
         }
     }
 
-    /// The shared `air_inputs` for the subset [`MultiAir`]: every chiplet
-    /// declares the 4-felt transcript root ([`NUM_PUBLIC_VALUES`]), but the
-    /// subset carries no eval chip to read it, so a dummy zero root satisfies
-    /// the length check and constrains nothing.
-    fn dummy_air_inputs() -> Vec<Felt> {
-        vec![Felt::ZERO; NUM_PUBLIC_VALUES]
-    }
-
-    /// The subset's [`ProverStatement`]: the [`EcStackMultiAir`] + the dummy
-    /// shared `air_inputs` + the five main traces in [`NUM_STACK`] order.
+    /// The subset's AIRs have no public inputs.
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, EcStackMultiAir> {
-        let statement =
-            Statement::new(EcStackMultiAir::new(), Self::dummy_air_inputs(), Vec::new())
-                .expect("subset statement inputs are valid");
+        let statement = Statement::new(EcStackMultiAir::new(), Vec::new(), Vec::new())
+            .expect("subset statement inputs are valid");
         let mains: Vec<RowMajorMatrix<Felt>> = self.0.to_vec();
         ProverStatement::new(statement, mains).expect("subset trace shapes are valid")
     }

@@ -76,6 +76,11 @@ required-features = ["std"]
 
 [[bench]]
 harness           = false
+name              = "merkle_witness"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "dsa"
 required-features = ["std"]
 
@@ -143,6 +148,7 @@ x25519-dalek     = { features = ["static_secrets"], workspace = true }
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
 p3-dft.workspace         = true
+p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
@@ -163,6 +169,9 @@ tempfile       = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { workspace = true }
+
+[build-dependencies]
+cc = { features = ["parallel"], workspace = true }
 
 [lints]
 workspace = true

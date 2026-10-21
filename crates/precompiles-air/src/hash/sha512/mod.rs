@@ -18,7 +18,7 @@ use miden_utils_sync::LazyLock;
 use crate::{
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -101,10 +101,6 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
 impl BaseAir<Felt> for Sha512Air {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {

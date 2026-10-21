@@ -31,6 +31,8 @@ pub mod field {
 }
 
 pub mod serde {
+    #[cfg(feature = "std")]
+    pub use miden_serde_utils::read_file_bounded;
     pub use miden_serde_utils::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader, read_bounded_len, validate_bounded_len,
@@ -43,7 +45,10 @@ pub mod crypto {
             EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
             PartialMerkleTree,
             mmr::{Mmr, MmrPeaks},
-            smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
+            smt::{
+                LeafIndex, PartialSmt, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError,
+                SmtWitness,
+            },
             store::{MerkleStore, StoreNode},
         };
     }

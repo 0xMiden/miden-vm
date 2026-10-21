@@ -856,9 +856,12 @@ pub(super) fn assert_trace_constraints_reject(
     and8_matrix: RowMajorMatrix<Felt>,
 ) {
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-    let statement =
-        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
-            .expect("valid statement inputs");
+    let statement = Statement::<Felt, QuadFelt, _>::new(
+        MidenMultiAir::new(),
+        vec![(0, public_values)],
+        aux_inputs,
+    )
+    .expect("valid statement inputs");
     let prover_statement = ProverStatement::new(
         statement,
         vec![core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix],

@@ -36,8 +36,7 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowA
 use crate::{
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        build_logup_aux_trace,
+        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -92,10 +91,6 @@ pub struct EidosCompressionAir;
 impl BaseAir<Felt> for EidosCompressionAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
@@ -192,10 +187,6 @@ pub struct EidosCompressionInterfaceAir;
 impl BaseAir<Felt> for EidosCompressionInterfaceAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {

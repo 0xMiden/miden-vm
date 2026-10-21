@@ -4,10 +4,11 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, Prover, internal::InputFile};
+use miden_vm::{HashFunction, PrecompileLimits, PrecompileStatus, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
+    precompile_limits::PrecompileArgs,
     utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
@@ -34,15 +35,38 @@ pub struct ProveCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
-    /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
+    /// Maximum combined logical advice size in bytes, also bounding witness loading
+    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
+    max_advice_size: usize,
+
+    /// Maximum modelled peak memory for each enabled proving stage (512M, 32Gi)
     ///
-    /// Excludes fixed preprocessed setup and precompile proving.
+    /// Sets the same budget for VM and precompile proving; --deferred omits the precompile stage.
+    /// When omitted, each stage retains its library default. This is a modelled
+    /// budget, not a total allocation cap; precompile witness preparation/import are excluded.
     #[arg(
         long = "max-prover-memory",
-        default_value_t = Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
         value_parser = parse_byte_size
     )]
-    max_prover_memory: u64,
+    max_prover_memory: Option<u64>,
+
+    #[command(flatten)]
+    precompile_limits: PrecompileArgs,
+
+    /// Generate a complete proof, including a STARK for any precompile work (the default)
+    ///
+    /// Complete proofs do not export a raw precompile witness. Cannot be combined with --deferred.
+    #[arg(long = "complete", conflicts_with = "deferred")]
+    complete: bool,
+
+    /// Export a deferred proof containing the raw precompile witness
+    ///
+    /// The witness includes raw precompile inputs and can reveal inputs from private advice.
+    /// Use this option only when that disclosure is intended. By default, generate a complete
+    /// STARK-backed proof without exporting the witness. Without precompile work, either mode
+    /// produces a complete proof.
+    #[arg(long = "deferred", conflicts_with = "complete")]
+    deferred: bool,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -72,12 +96,26 @@ pub struct ProveCmd {
 
 impl ProveCmd {
     pub fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
-        ExecutionOptions::new(
+        let options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
-        .map_err(|err| Report::msg(format!("{err}")))
+        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
+        .map_err(|err| Report::msg(format!("{err}")))?;
+        Ok(self.precompile_limits.apply_to(options))
+    }
+
+    fn prover(&self, hash_fn: HashFunction, verification_limits: PrecompileLimits) -> Prover {
+        let mut prover = Prover::new()
+            .with_hash_fn(hash_fn)
+            .with_verification_precompile_limits(verification_limits);
+        if let Some(bytes) = self.max_prover_memory {
+            prover = prover
+                .with_max_prover_memory_bytes(bytes)
+                .with_max_precompile_prover_memory_bytes(bytes);
+        }
+        prover
     }
 
     pub fn get_hash_fn(&self) -> Result<HashFunction, Report> {
@@ -91,6 +129,9 @@ impl ProveCmd {
         HashFunction::try_from(self.hasher.as_str()).map_err(|err| Report::msg(format!("{err}")))
     }
     pub fn execute(&self) -> Result<(), Report> {
+        // Resolve every policy before loading inputs or executing the program.
+        let execution_options = self.get_execution_options()?;
+        let verification_limits = execution_options.verification_precompile_limits().clone();
         println!("===============================================================================");
         println!("Prove program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -145,9 +186,10 @@ impl ProveCmd {
 
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-        let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+        let advice_inputs = input_data
+            .parse_advice_inputs_with_options(&execution_options)
+            .map_err(Report::msg)?;
 
-        let execution_options = self.get_execution_options()?;
         let hash_fn = self.get_hash_fn()?;
 
         // execute program and generate proof
@@ -171,13 +213,23 @@ impl ProveCmd {
                 .wrap_err("Failed to execute program")?,
         };
         let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(hash_fn)
-            .with_max_prover_memory_bytes(self.max_prover_memory)
-            .prove_full(witness)
-            .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+        let prover = self.prover(hash_fn, verification_limits);
+        let proof = if self.complete || !self.deferred {
+            prover.prove_full(witness)
+        } else {
+            prover.prove(witness)
+        }
+        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
+        if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
+            println!("Proof status: deferred");
+            println!("Precompile witness: exported; may reveal private advice inputs");
+            println!("Precompile STARK: not supplied");
+            println!("Outstanding precompile root: {}", proof.vm().precompile_root);
+        } else {
+            println!("Proof status: complete");
+        }
 
         // write proof to file
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
@@ -199,5 +251,67 @@ impl ProveCmd {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+    use miden_vm::{ProverError, default_verification_precompile_limits};
+
+    use super::*;
+
+    #[test]
+    fn memory_budget_preserves_defaults_or_overrides_both_stages() {
+        for (args, vm, precompile) in [
+            (
+                vec![],
+                Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+                Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+            ),
+            (vec!["--max-prover-memory", "2Mi"], 2 << 20, 2 << 20),
+        ] {
+            let cmd = ProveCmd::try_parse_from(["prove", "program.masm"].into_iter().chain(args))
+                .unwrap();
+            let options = cmd.get_execution_options().unwrap();
+            let prover = cmd
+                .prover(HashFunction::Blake3_256, options.verification_precompile_limits().clone());
+            assert_eq!(prover.max_prover_memory_bytes(), vm);
+            assert_eq!(prover.max_precompile_prover_memory_bytes(), precompile);
+        }
+    }
+
+    #[test]
+    fn prover_receives_verification_admission_and_memory_policies() {
+        let mut state = DeferredState::new(
+            Arc::new(PrecompileRegistry::new()),
+            PrecompileLimits::new(u64::MAX),
+        )
+        .unwrap();
+        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
+        state.log_statement(statement).unwrap();
+        let witness =
+            state.into_witness(&default_verification_precompile_limits()).unwrap().unwrap();
+        for args in [["--max-prover-memory", "1"], ["--max-precompile-elements", "0"]] {
+            let cmd =
+                ProveCmd::try_parse_from(["prove", "program.masm", args[0], args[1]]).unwrap();
+            let options = cmd.get_execution_options().unwrap();
+            let error = cmd
+                .prover(HashFunction::Blake3_256, options.verification_precompile_limits().clone())
+                .prove_precompiles(vec![witness.clone()])
+                .unwrap_err();
+            assert!(matches!(error, ProverError::PrecompileProofGeneration(_)));
+            let message = format!("{error:?}");
+            assert!(
+                message.contains(if args[0] == "--max-prover-memory" {
+                    "MemoryBudgetExceeded"
+                } else {
+                    "Preparation"
+                }),
+                "{message}"
+            );
+        }
     }
 }

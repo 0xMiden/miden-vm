@@ -1,4 +1,4 @@
-//! Cryptographic hash functions used by the Miden protocol.
+//! Cryptographic hash functions, including standalone application primitives.
 
 use crate::Felt;
 
@@ -16,6 +16,21 @@ pub mod keccak;
 
 /// SHA-2 hash functions (SHA-256 and SHA-512).
 pub mod sha2;
+
+/// Poseidon2 hash function for standalone applications.
+///
+/// Preserves the original Miden Poseidon2 hashing API and digest format. The VM's native hash
+/// function is Eidos; Poseidon2 is not a supported VM or precompile proof hash configuration.
+pub mod poseidon2 {
+    pub use p3_goldilocks::Poseidon2Goldilocks;
+
+    pub use super::algebraic_sponge::poseidon2::{
+        Poseidon2, Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher,
+        Poseidon2Permutation256,
+    };
+}
+
+mod algebraic_sponge;
 
 // TRAITS
 // ================================================================================================

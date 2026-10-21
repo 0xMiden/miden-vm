@@ -59,6 +59,7 @@ default = ["std"]
 executable = [
     "dep:clap",
     "dep:hex",
+    "dep:tempfile",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -70,6 +71,7 @@ std = [
     "miden-assembly/std",
     "miden-core-lib/std",
     "miden-processor/std",
+    "miden-precompiles/std",
     "miden-prover/std",
     "miden-verifier/std",
     "serde?/std",
@@ -84,6 +86,7 @@ internal = ["dep:hex", "serde", "std"]
 miden-assembly.workspace = true
 miden-core.workspace = true
 miden-processor.workspace = true
+miden-precompiles.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
@@ -94,12 +97,12 @@ clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
 
 [dev-dependencies]
-miden-precompiles.workspace = true
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }
