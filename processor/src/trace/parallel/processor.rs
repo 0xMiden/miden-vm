@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use miden_air::{Felt, trace::RowIndex};
+use miden_air_source::vm::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     deferred::Digest,

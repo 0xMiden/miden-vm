@@ -1,7 +1,7 @@
 //! PVM bus mapping for the shared Eidos byte-pair rotation relations.
 
-pub(super) use miden_air::eidos_compression::core::rotation_lookup::provider_values;
-pub use miden_air::eidos_compression::core::rotation_lookup::{
+pub(super) use miden_air_source::vm::eidos_compression::core::rotation_lookup::provider_values;
+pub use miden_air_source::vm::eidos_compression::core::rotation_lookup::{
     BytePairRelation as Relation, NUM_RELATIONS, Rotation, contribution, denormalize, normalize,
 };
 

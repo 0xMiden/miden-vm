@@ -760,15 +760,24 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "miden-ace"
 version = "1.0.0"
 dependencies = [
- "miden-constraint-compiler",
- "miden-core",
  "miden-crypto",
- "miden-stark",
  "thiserror",
 ]
 
 [[package]]
 name = "miden-air"
+version = "1.0.0"
+dependencies = [
+ "miden-air-source",
+ "miden-core",
+ "miden-crypto",
+ "miden-stark",
+ "p3-field",
+ "p3-security",
+]
+
+[[package]]
+name = "miden-air-source"
 version = "1.0.0"
 dependencies = [
  "miden-ace",
@@ -777,7 +786,7 @@ dependencies = [
  "miden-stark",
  "miden-utils-indexing",
  "p3-field",
- "p3-security",
+ "proptest",
  "thiserror",
 ]
 
@@ -822,15 +831,6 @@ dependencies = [
  "miden-debug-types",
  "miden-rowan",
  "miden-utils-diagnostics",
-]
-
-[[package]]
-name = "miden-constraint-compiler"
-version = "1.0.0"
-dependencies = [
- "miden-core",
- "miden-crypto",
- "miden-stark",
 ]
 
 [[package]]
@@ -1038,6 +1038,7 @@ dependencies = [
  "itertools",
  "miden-ace",
  "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-debug-types",
  "miden-mast-package",

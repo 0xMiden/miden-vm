@@ -1,6 +1,6 @@
 //! Regression tests: `ctx` and `fn_hash` are preserved across a continuation END.
 //!
-//! `crates/air/generated/src/constraints/system/mod.rs` used to gate the preservation of both
+//! `crates/air/source/src/vm/constraints/system/mod.rs` used to gate the preservation of both
 //! columns on the *coarse* END flag:
 //!
 //! ```ignore
@@ -29,7 +29,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::trace::RowIndex;
+use miden_air_source::vm::trace::RowIndex;
 use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, MastForest},

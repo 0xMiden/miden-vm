@@ -1,6 +1,6 @@
 //! Native checks for the mathematics used by the common recursive security estimator.
 
-use miden_air::{
+use miden_air::vm::{
     config,
     security::{self, ProofSecurityParameters},
 };

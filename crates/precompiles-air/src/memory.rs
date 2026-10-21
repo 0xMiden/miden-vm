@@ -1,6 +1,6 @@
 //! Peak prover memory model for the precompile chiplet-stack proof.
 //!
-//! Mirrors `miden_air::memory`'s peak-memory model for the Miden VM proof, generalized over the
+//! Mirrors `miden_air::vm::memory`'s peak-memory model for the Miden VM proof, generalized over the
 //! [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models the allocations that
 //! dominate peak usage: each main and aux trace held at its 1x buffer plus its blowup-factor LDE,
 //! the quotient accumulator, every layer of the three per-proof LMCS digest trees (main, aux,

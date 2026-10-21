@@ -55,7 +55,7 @@ pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
 
 /// PCS parameters for the precompile chiplet stack.
 ///
-/// Mirrors `miden_air::config::pcs_params` in every parameter, including
+/// Mirrors `miden_air::vm::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
 /// relying on the core VM's defaults. Every [`ChipletAir`](crate::ChipletAir) requires at most

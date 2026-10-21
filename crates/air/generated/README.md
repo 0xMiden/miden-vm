@@ -1,5 +1,13 @@
 # Miden VM AIR
-This crate contains *algebraic intermediate representation* (AIR) of Miden VM execution logic.
+This crate provides production VM AIR evaluation in `miden_air::vm`. Authored constraints, trace
+schemas, public-input packing, and proof-order helpers live in
+[`miden-air-source`](../source). The production adapter delegates trace shape and auxiliary
+construction to authored AIR and evaluates the existing generated Rust constraints.
+
+Relation identities and stored security metadata remain here. Configuration, runtime caches,
+security reporting, and the complete multi-AIR statement also remain here until the backend
+ownership commits. Optional ACE construction lives in `miden_air_source::vm::codegen`; the
+`codegen` feature here enables access to the existing runtime circuit cache.
 
 AIR is a STARK-specific format of describing a computation. It consists of defining a set of constraints expressed as low-degree polynomials. Miden prover evaluates these polynomials over an execution trace produced by Miden processor and includes the results in the execution proof. To verify the proof, the verifier checks that the constraints are evaluated correctly against the execution trace committed to by the prover.
 

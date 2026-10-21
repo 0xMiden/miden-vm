@@ -1,4 +1,4 @@
-use miden_air::trace::RowIndex;
+use miden_air_source::vm::trace::RowIndex;
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 use crate::{

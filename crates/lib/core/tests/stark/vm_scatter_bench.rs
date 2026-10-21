@@ -1,7 +1,7 @@
 //! Checks the generated OOD ingest hook's canonical memory layout, transcript state,
 //! DEEP accumulator, pointer updates, and two-row ingest cycle budget.
 
-use miden_air::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT};
+use miden_air::vm::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT};
 use miden_core::{
     Word,
     advice::AdviceStack,

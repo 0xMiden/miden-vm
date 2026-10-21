@@ -1,6 +1,6 @@
 //! PVM interface constraints around the shared 32-row Eidos compression core.
 
-use miden_air::eidos_compression::core::{self as shared, EidosCompressionSelectors};
+use miden_air_source::vm::eidos_compression::core::{self as shared, EidosCompressionSelectors};
 use miden_core::Felt;
 use miden_stark::air::{AirBuilder, LiftedAirBuilder};
 

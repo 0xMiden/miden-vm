@@ -1,7 +1,7 @@
 [package]
 name = "miden-air"
 version = "1.0.0"
-description = "Algebraic intermediate representation of Miden VM processor"
+description = "Production AIR evaluation and artifacts for Miden"
 documentation = "https://docs.rs/miden-air"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
@@ -19,28 +19,22 @@ doctest = false
 
 [features]
 default = ["std"]
-arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "miden-stark/std", "proptest?/std", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent", "miden-stark/concurrent"]
-testing = ["arbitrary"]
+arbitrary = ["std", "miden-air-source/arbitrary"]
+std = ["miden-air-source/std", "miden-core/std", "miden-stark/std"]
+concurrent = ["std", "miden-air-source/concurrent", "miden-crypto/concurrent", "miden-stark/concurrent"]
+testing = ["arbitrary", "miden-air-source/testing"]
+codegen = ["miden-air-source/codegen"]
 
 [dependencies]
-# Miden dependencies
-miden-ace = { workspace = true, features = ["compiler"] }
+miden-air-source.workspace = true
 miden-core.workspace = true
-miden-stark.workspace = true
 miden-crypto.workspace = true
-miden-utils-indexing.workspace = true
-
-# External dependencies
+miden-stark.workspace = true
 p3-field.workspace = true
 p3-security.workspace = true
-proptest = { workspace = true, optional = true }
-thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+miden-air-source = { workspace = true, features = ["codegen"] }
 miden-ace = { workspace = true, features = ["testing"] }
 miden-constraint-compiler.workspace = true
-miden-test-serialization-macros.workspace = true
-proptest.workspace = true

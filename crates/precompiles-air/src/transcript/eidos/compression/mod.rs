@@ -19,4 +19,4 @@ pub mod testing;
 pub mod trace;
 
 pub(super) use lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, emit_lookup_columns};
-pub(super) use miden_air::eidos_compression::core::EidosCompressionCols;
+pub(super) use miden_air_source::vm::eidos_compression::core::EidosCompressionCols;

@@ -20,6 +20,11 @@
 #### Changes
 
 - [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
+- [BREAKING] Split authored VM AIR into `miden-air-source::vm` and production evaluation into
+  `miden-air::vm`. Authored inputs, trace schemas, and proof-order helpers live in source; enable
+  its `codegen` feature for the existing ACE builders
+  ([#4055](https://github.com/0xMiden/miden-vm/issues/4055)).
+
 - [BREAKING] Renamed `miden-ace-codegen` to `miden-ace`. Its default build provides the ACE runtime
   format and layouts; enable `compiler` for circuit construction and renderers, or `testing` for
   compiler test helpers ([#4055](https://github.com/0xMiden/miden-vm/issues/4055)).

@@ -404,12 +404,12 @@ mod tests {
         );
         assert_ne!(
             PVM_RELATION_DIGEST,
-            miden_air::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
+            miden_air::vm::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
             "PVM_RELATION_DIGEST must not collide with the VM's RELATION_DIGEST"
         );
         assert_ne!(
             PVM_ACE_CIRCUIT_DIGEST,
-            miden_air::config::ACE_CIRCUIT_DIGEST.map(|felt| felt.as_canonical_u64()),
+            miden_air::vm::config::ACE_CIRCUIT_DIGEST.map(|felt| felt.as_canonical_u64()),
             "PVM_ACE_CIRCUIT_DIGEST must not collide with the VM's ACE_CIRCUIT_DIGEST"
         );
     }
@@ -664,7 +664,7 @@ mod tests {
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
-        let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+        let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
         for (name, expected) in [
             ("FP_SHIFT", u64::from(fractional_bits)),
             ("FP_ONE", fixed_point_one),

@@ -17,21 +17,24 @@ default = ["std"]
 concurrent = [
     "std",
     "miden-air/concurrent",
+    "miden-air-source/concurrent",
     "miden-crypto/concurrent",
     "miden-stark/concurrent",
 ]
 std = [
     "miden-air/std",
+    "miden-air-source/std",
     "miden-core/std",
     "miden-crypto/std",
     "miden-precompiles/std",
     "miden-utils-sync/std",
     "ruint/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["miden-air-source/testing"]
 
 [dependencies]
 miden-air.workspace = true
+miden-air-source.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
@@ -41,4 +44,4 @@ p3-security.workspace = true
 ruint.workspace = true
 
 [dev-dependencies]
-miden-air = { workspace = true, features = ["testing"] }
+miden-air-source = { workspace = true, features = ["testing"] }

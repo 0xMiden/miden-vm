@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn preprocessed_table_matches_the_mvm_byte_pair_table() {
         // Both verifiers commit to the same byte-pair matrix, including its column order.
-        let mvm = miden_air::and8_lookup::preprocessed_trace();
+        let mvm = miden_air_source::vm::and8_lookup::preprocessed_trace();
         let pvm = preprocessed_table();
         assert_eq!(mvm.width, pvm.width);
         assert_eq!(mvm.values, pvm.values);

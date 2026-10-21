@@ -1,15 +1,15 @@
 //! PVM adapter for the shared Eidos compression witness encoder.
 
 #[doc(hidden)]
-pub use miden_air::eidos_compression::core::trace::{
+pub use miden_air_source::vm::eidos_compression::core::trace::{
     ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
     retag_felt_trace_block_cycle_id,
 };
 #[cfg(any(test, feature = "testing"))]
-use miden_air::eidos_compression::core::{
+use miden_air_source::vm::eidos_compression::core::{
     layout::FOOTER_START, trace::write_core_felt_footer_rows,
 };
-use miden_air::eidos_compression::core::{
+use miden_air_source::vm::eidos_compression::core::{
     layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
     trace::write_core_felt_trace_block_into_zeroed_with_lookups,
 };
@@ -131,7 +131,7 @@ pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
 
 #[cfg(test)]
 mod tests {
-    use miden_air::{
+    use miden_air_source::vm::{
         eidos_compression::core::{layout::F_CV_STORAGE_COLS, universal_cv_word},
         trace::eidos_compression::{
             F_COMPRESSION_MULTIPLICITY_COL, TraceMode,

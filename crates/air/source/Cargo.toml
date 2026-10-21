@@ -1,0 +1,44 @@
+[package]
+name = "miden-air-source"
+version = "1.0.0"
+description = "Authored AIR constraints and trace schemas for Miden"
+documentation = "https://docs.rs/miden-air-source"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["air", "arithmetization", "crypto", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+arbitrary = ["std", "dep:proptest"]
+codegen = ["miden-ace/compiler"]
+std = ["miden-core/std", "miden-stark/std", "proptest?/std", "thiserror/std"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-stark/concurrent"]
+testing = ["arbitrary"]
+
+[dependencies]
+# Miden dependencies
+miden-ace.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-stark.workspace = true
+miden-utils-indexing.workspace = true
+
+# External dependencies
+p3-field.workspace = true
+proptest = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+miden-test-serialization-macros.workspace = true
+proptest.workspace = true

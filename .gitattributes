@@ -2,4 +2,4 @@ CHANGELOG.md merge=union
 crates/lib/core/asm/precompiles/u256.masm linguist-generated=true
 crates/lib/core/asm/precompiles/fields/*.masm linguist-generated=true
 crates/lib/core/asm/precompiles/curves/*.masm linguist-generated=true
-crates/air/generated/src/constraints/generated.rs linguist-generated=true
+crates/air/generated/src/vm/generated.rs linguist-generated=true

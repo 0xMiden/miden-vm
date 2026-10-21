@@ -1,6 +1,6 @@
 //! PVM interface aliases for the shared 32-row Eidos compression layout.
 
-pub use miden_air::eidos_compression::core::layout::*;
+pub use miden_air_source::vm::eidos_compression::core::layout::*;
 
 /// Number of auxiliary columns used by the shared narrow lookup core.
 pub const AUX_COLS: usize = 18;

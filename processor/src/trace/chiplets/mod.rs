@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{
+use miden_air_source::vm::trace::{
     CHIPLETS_CLK_COL, CHIPLETS_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH,

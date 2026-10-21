@@ -1,6 +1,6 @@
 use std::{vec, vec::Vec};
 
-use miden_air::eidos_compression::{
+use miden_air_source::vm::eidos_compression::{
     core::{EidosCompressionSelectors, get_periodic_column_values},
     testing as mvm,
 };

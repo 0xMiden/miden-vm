@@ -1,6 +1,6 @@
 //! PVM lookup namespace for the shared 32-row Eidos compression core.
 
-use miden_air::eidos_compression::core::{
+use miden_air_source::vm::eidos_compression::core::{
     EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign, NarrowLookupConfig,
     XorExpression, emit_narrow_lookup_columns,
 };

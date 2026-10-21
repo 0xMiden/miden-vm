@@ -35,7 +35,7 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace", "dep:miden-constraint-compiler", "dep:miden-stark"]
+constraints-tools = ["std", "dep:miden-air", "dep:miden-air-source", "dep:miden-ace", "dep:miden-constraint-compiler", "dep:miden-stark"]
 
 [dependencies]
 # Miden dependencies
@@ -46,6 +46,7 @@ miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
+miden-air-source = { workspace = true, optional = true, features = ["codegen"] }
 miden-ace = { workspace = true, optional = true, features = ["compiler"] }
 miden-constraint-compiler = { workspace = true, optional = true }
 miden-stark = { workspace = true, optional = true }
@@ -58,7 +59,8 @@ thiserror.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 miden-ace = { workspace = true, features = ["compiler"] }
-miden-air.workspace = true
+miden-air = { workspace = true, features = ["codegen"] }
+miden-air-source = { workspace = true, features = ["codegen"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-debug-types.workspace = true

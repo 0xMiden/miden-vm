@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::{assert_matches, ops::Range};
 
-use miden_air::trace::{
+use miden_air_source::vm::trace::{
     RowIndex,
     chiplets::memory::{
         MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,

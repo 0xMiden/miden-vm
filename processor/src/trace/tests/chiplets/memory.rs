@@ -15,7 +15,7 @@
 //!
 //! Coverage is limited to the stack-only memory ops above plus `AeadStream`. The DYN,
 //! DYNCALL, CALL-FMP-write, and PIPE memory-request paths in
-//! `crates/air/generated/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to
+//! `crates/air/source/src/vm/constraints/lookup/buses/chiplet_requests.rs` are deferred to
 //! integration tests — each is heavyweight to set up and small in algebraic surface. A bug in those
 //! paths would escape this module.
 //!
@@ -24,7 +24,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_source::vm::{
     logup::{MemoryMsg, MemoryResponseMsg},
     trace::MainTrace,
 };

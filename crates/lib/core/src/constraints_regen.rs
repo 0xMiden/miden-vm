@@ -10,12 +10,12 @@ use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, OodScatterPlan,
     ProofOrderMapsConfig, render_proof_order_maps,
 };
-use miden_air::{
-    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, Statement,
-    ace::{
-        RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
-    },
+use miden_air::vm::{
+    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
     config::{self, relation_digest},
+};
+use miden_air_source::vm::codegen::{
+    RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
 use miden_stark::{
@@ -32,7 +32,7 @@ pub enum Mode {
 }
 
 const PROTOCOL_ID: u64 = 1;
-const AIR_CONFIG_PATH: &str = "../../air/generated/src/config.rs";
+const AIR_CONFIG_PATH: &str = "../../air/generated/src/vm/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
@@ -181,7 +181,7 @@ type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commi
 fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![(0, vec![Felt::ZERO; NUM_PUBLIC_VALUES])],
         vec![],
     )
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
@@ -689,7 +689,7 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
         "# AND8 preprocessed matrix:",
         &format!(
             "    # AND8 preprocessed matrix: {} columns, padded to {} base felts by LMCS.",
-            BaseAir::<Felt>::preprocessed_width(&MidenAir::And8Lookup),
+            BaseAir::<Felt>::preprocessed_width(&MidenAir::AND8_LOOKUP),
             geometry.preprocessed_width,
         ),
     )?;
@@ -819,7 +819,7 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     );
     println!("wrote asm/sys/vm/mod.masm (relation digest and preprocessed commitment)");
     println!(
-        "wrote crates/air/generated/src/config.rs (relation and ACE digests, preprocessed commitments)"
+        "wrote crates/air/generated/src/vm/config.rs (relation and ACE digests, preprocessed commitments)"
     );
     println!("wrote VM recursive-verifier layout, OOD-frame, and DEEP-query geometry");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
@@ -886,7 +886,7 @@ fn constraints_eval_masm_matches_artifact(artifact: &ComputedArtifacts) -> Resul
     Ok(())
 }
 
-/// Verify that RELATION_DIGEST in `crates/air/generated/src/config.rs` and `sys/vm/mod.masm`
+/// Verify that RELATION_DIGEST in `crates/air/generated/src/vm/config.rs` and `sys/vm/mod.masm`
 /// matches current AIR.
 pub fn relation_digest_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
@@ -897,11 +897,11 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
     let expected = artifact.relation_digest;
 
     if config::RELATION_DIGEST != expected {
-        return Err("RELATION_DIGEST in crates/air/generated/src/config.rs is stale".into());
+        return Err("RELATION_DIGEST in crates/air/generated/src/vm/config.rs is stale".into());
     }
     if config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
         return Err(
-            "ACE_CIRCUIT_DIGEST in crates/air/generated/src/config.rs is stale (it binds the transcript to the \
+            "ACE_CIRCUIT_DIGEST in crates/air/generated/src/vm/config.rs is stale (it binds the transcript to the \
              one circuit the recursive verifier evaluates)"
                 .into(),
         );
@@ -934,7 +934,7 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
         || config::KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
     {
         return Err(
-            "preprocessed commitments in crates/air/generated/src/config.rs are stale".into()
+            "preprocessed commitments in crates/air/generated/src/vm/config.rs are stale".into()
         );
     }
 
@@ -993,21 +993,24 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // These literals define the shared fixed-point format and the PCS values used to bound the
     // terms omitted by the MASM estimator. The remaining limits are checked below against the MVM
     // relation and the generic verifier.
-    let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
-    let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
-    let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let fractional_bits = miden_air::vm::security::FIXED_POINT_FRACTIONAL_BITS;
+    let fixed_point_one = miden_air::vm::security::FIXED_POINT_ONE;
+    let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     let shared_literals: [(&str, u64); 9] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
-        ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
+        ("BITS_PER_QUERY_FP", miden_air::vm::security::BITS_PER_QUERY),
         ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
-        ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
+        ("SECURITY_CAP_BITS", miden_air::vm::security::SECURITY_CAP >> fractional_bits),
         (
             "DEEP_FIELD_BASE_BITS",
             (sample_bits >> fractional_bits) - u64::from(config::pcs_params().log_blowup()),
         ),
-        ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
-        ("LOG2_E_FP", miden_air::security::LOG2_E),
+        (
+            "FRI_FOLDING_BASE_BITS",
+            miden_air::vm::security::FOLDING_BASE >> fractional_bits,
+        ),
+        ("LOG2_E_FP", miden_air::vm::security::LOG2_E),
         ("MAX_CONSTRAINT_DEGREE", (1u64 << config::pcs_params().log_blowup()) + 1),
     ];
 
@@ -1024,12 +1027,12 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // estimator envelope. This function also pins the generic verifier bounds directly.
     let wrapper = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
     let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
-    let air_shape = miden_air::security::AIR_SHAPE;
+    let air_shape = miden_air::vm::security::AIR_SHAPE;
     let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
     let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
-    let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS)
+    let max_boundary_terms = u64::from(miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS)
         + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
     if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
         return Err("the MVM composed-constraint count exceeds the estimator envelope".into());
@@ -1069,29 +1072,32 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     }
 
     let descriptor_literals: [(&str, u64); 9] = [
-        ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
-        ("MAX_MESSAGE_WIDTH", miden_air::security::LOOKUP_SHAPE.max_message_width as u64),
+        ("LOOKUP_POW_BITS", miden_air::vm::security::LOOKUP_POW_BITS as u64),
+        (
+            "MAX_MESSAGE_WIDTH",
+            miden_air::vm::security::LOOKUP_SHAPE.max_message_width as u64,
+        ),
         (
             "NUM_COMPOSED_CONSTRAINTS",
-            miden_air::security::AIR_SHAPE.num_composed_constraints as u64,
+            miden_air::vm::security::AIR_SHAPE.num_composed_constraints as u64,
         ),
         (
             "MAX_CONSTRAINT_DEGREE",
-            miden_air::security::AIR_SHAPE.max_constraint_degree as u64,
+            miden_air::vm::security::AIR_SHAPE.max_constraint_degree as u64,
         ),
         (
             "NUM_DEEP_TERMS",
-            miden_air::security::AIR_SHAPE
+            miden_air::vm::security::AIR_SHAPE
                 .num_deep_terms
                 .expect("the MVM uses DEEP composition") as u64,
         ),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
-            miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
+            miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
-            miden_air::security::LOOKUP_SHAPE.fractions_per_row as u64,
+            miden_air::vm::security::LOOKUP_SHAPE.fractions_per_row as u64,
         ),
         ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
         ("LOG_HEIGHT_MAX", estimator_heights),
@@ -1316,7 +1322,7 @@ mod tests {
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
-        // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
+        // The VM preprocessed commitment group is occupied only by `MidenAir::AND8_LOOKUP`.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
         // Every AIR occupies the group.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());

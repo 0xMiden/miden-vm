@@ -16,7 +16,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_source::vm::{
     BaseAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };

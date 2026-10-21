@@ -27,7 +27,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -391,7 +391,7 @@ fn build_merkle_data(
     // compiled-in circuit digest.
     #[cfg(feature = "std")]
     {
-        let circuit = miden_air::ace::shared_recursive_circuit();
+        let circuit = miden_air::vm::ace::shared_recursive_circuit();
         debug_assert_eq!(
             circuit.commitment,
             Word::from(config::ACE_CIRCUIT_DIGEST),
@@ -402,9 +402,12 @@ fn build_merkle_data(
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit().map_err(|_| {
-            RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-        })?;
+        let circuit = miden_air_source::vm::codegen::build_recursive_verifier_ace_circuit()
+            .map_err(|_| {
+                RecursiveVerifierInputsError::InvalidProofShape(
+                    "failed to build recursive ACE circuit",
+                )
+            })?;
         debug_assert_eq!(
             circuit.commitment,
             Word::from(config::ACE_CIRCUIT_DIGEST),
@@ -547,7 +550,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
             vec![],
         )
         .expect("valid Miden statement shape");

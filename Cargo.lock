@@ -2062,14 +2062,27 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "miden-ace",
+ "miden-air-source",
  "miden-constraint-compiler",
+ "miden-core",
+ "miden-crypto",
+ "miden-stark",
+ "p3-field",
+ "p3-security",
+]
+
+[[package]]
+name = "miden-air-source"
+version = "1.0.0"
+dependencies = [
+ "insta",
+ "miden-ace",
  "miden-core",
  "miden-crypto",
  "miden-stark",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "p3-field",
- "p3-security",
  "proptest",
  "thiserror",
 ]
@@ -2203,6 +2216,7 @@ dependencies = [
  "fs-err",
  "miden-ace",
  "miden-air",
+ "miden-air-source",
  "miden-assembly",
  "miden-assembly-syntax",
  "miden-constraint-compiler",
@@ -2498,6 +2512,7 @@ name = "miden-precompiles-air"
 version = "1.0.0"
 dependencies = [
  "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
@@ -2512,7 +2527,6 @@ name = "miden-precompiles-prover"
 version = "1.0.0"
 dependencies = [
  "k256",
- "miden-air",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
@@ -2556,6 +2570,7 @@ dependencies = [
  "itertools 0.15.0",
  "miden-ace",
  "miden-air",
+ "miden-air-source",
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
@@ -2602,6 +2617,7 @@ name = "miden-prover"
 version = "1.0.0"
 dependencies = [
  "miden-air",
+ "miden-air-source",
  "miden-assembly",
  "miden-core",
  "miden-crypto",
@@ -2697,7 +2713,7 @@ name = "miden-test-utils"
 version = "1.0.0"
 dependencies = [
  "env_logger",
- "miden-air",
+ "miden-air-source",
  "miden-assembly",
  "miden-assembly-syntax",
  "miden-core",
@@ -2753,6 +2769,7 @@ name = "miden-verifier"
 version = "1.0.0"
 dependencies = [
  "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
@@ -2828,6 +2845,7 @@ version = "1.0.0"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-air",
+ "miden-air-source",
  "miden-assembly",
  "miden-core",
  "miden-core-lib",

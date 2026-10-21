@@ -4,7 +4,9 @@
 //! invariants, and evaluates the same ACE circuit in Rust.
 
 use miden_ace::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit};
+use miden_air_source::vm::{
+    MIDEN_AIR_COUNT, ProofOrder, codegen::build_canonical_multi_air_ace_circuit,
+};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},

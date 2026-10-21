@@ -106,7 +106,8 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | VM | [core](core) | Defines the instruction set and shared VM types. |
 | VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
 | VM | [processor](processor) | Executes programs and builds execution traces. |
-| VM | [air](crates/air/generated) | Defines the constraints checked for VM execution. |
+| VM | [air-source](crates/air/source) | Owns authored VM constraints, trace schemas, and optional codegen. |
+| VM | [air](crates/air/generated) | Provides production VM evaluation and artifacts. |
 | VM | [prover](prover) | Produces STARK proofs from execution traces. |
 | VM | [verifier](verifier) | Verifies VM execution proofs. |
 | VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |

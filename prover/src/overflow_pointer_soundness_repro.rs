@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_air::{CoreCols, PublicInputs, trace::RowIndex};
+use miden_air_source::vm::{CoreCols, PublicInputs, trace::RowIndex};
 use miden_core::{
     Felt,
     deferred::TRUE_DIGEST,

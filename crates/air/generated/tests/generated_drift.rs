@@ -20,12 +20,13 @@
 
 use std::collections::HashMap;
 
-use miden_air::{AIRS, HandwrittenMidenAir};
+use miden_air::vm::AIRS;
 use miden_constraint_compiler::ir::{
     Class, Graph, Leaf, Node, NodeId, OpKind, capture, capture_into,
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
+use miden_stark::air::{ConstraintDegrees, LiftedAir};
 
 const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
@@ -33,8 +34,13 @@ const SEEDS: [u64; 4] =
 #[test]
 fn generated_evaluators_match_handwritten_structurally() {
     for air in AIRS {
+        assert_eq!(
+            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
+            "production constraint_degree override is stale",
+        );
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
+        let handwritten = capture_into(&air.0, &mut builder);
         let generated = capture_into(&air, &mut builder);
         let graph = builder.freeze();
 
@@ -52,14 +58,14 @@ fn generated_evaluators_match_handwritten_structurally() {
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that
 /// differ from the handwritten capture's for every AIR. If
-/// `HandwrittenMidenAir` and `MidenAir` ever route to the same evaluator for
+/// authored and production `MidenAir` ever route to the same evaluator for
 /// even one AIR, both drift oracles silently compare the generated path against
 /// itself for that AIR — and this test fails instead.
 #[test]
 fn handwritten_and_generated_are_distinct_captures() {
     for air in AIRS {
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
+        let handwritten = capture_into(&air.0, &mut builder);
         let generated = capture_into(&air, &mut builder);
         let _ = builder.freeze();
         let differs = handwritten.base_roots != generated.base_roots
@@ -109,7 +115,7 @@ fn canonical_ids(graph: &Graph) -> Vec<usize> {
 #[test]
 fn generated_evaluators_match_handwritten_values() {
     for air in AIRS {
-        let (hand_graph, hand) = capture(&HandwrittenMidenAir(air));
+        let (hand_graph, hand) = capture(&air.0);
         let (gen_graph, generated) = capture(&air);
         assert_eq!(hand.base_global_indices, generated.base_global_indices);
         assert_eq!(hand.ext_global_indices, generated.ext_global_indices);

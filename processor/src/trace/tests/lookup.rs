@@ -16,8 +16,10 @@
 use alloc::{boxed::Box, vec::Vec};
 use std::collections::HashMap;
 
-use miden_air::{
+use miden_air::vm::{
     BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
+};
+use miden_air_source::vm::{
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,

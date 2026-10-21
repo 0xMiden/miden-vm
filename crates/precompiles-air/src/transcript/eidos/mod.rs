@@ -23,7 +23,7 @@ use compression::{
 };
 pub use digest::EidosDigest;
 pub use messages::{EidosBlockMsg, EidosInitMsg, EidosOutMsg};
-use miden_air::eidos_compression::core::{
+use miden_air_source::vm::eidos_compression::core::{
     EidosCompressionSelectors, get_periodic_column_values, universal_cv_word,
 };
 use miden_core::{

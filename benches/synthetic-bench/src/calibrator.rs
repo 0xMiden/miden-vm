@@ -152,7 +152,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
 
 #[cfg(test)]
 mod tests {
-    use miden_air::trace::chiplets::bitwise::OP_CYCLE_LEN;
+    use miden_air_source::vm::trace::chiplets::bitwise::OP_CYCLE_LEN;
 
     use super::*;
 

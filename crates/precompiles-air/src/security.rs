@@ -8,11 +8,11 @@
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
-pub use miden_air::security::{
+pub use miden_air::vm::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use miden_air::security::{
+use miden_air::vm::security::{
     CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
     OOD_POW_BITS, security_report_with_hash,
 };

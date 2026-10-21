@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/air/generated",
+    "crates/air/source",
     "benches/blake3-bench",
     "benches/miden-bench",
     "benches/precompiles-bench",
@@ -84,6 +85,7 @@ opt-level = 0
 # Workspace crates
 miden-ace               = { path = "./crates/ace", version = "1.0", default-features = false }
 miden-air               = { path = "./crates/air/generated", version = "1.0", default-features = false }
+miden-air-source        = { path = "./crates/air/source", version = "1.0", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "1.0", default-features = false }
