@@ -372,11 +372,6 @@ impl Linker {
     ///
     /// * Module with same [Path] is in the graph already
     /// * Too many modules in the graph
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the number of modules exceeds the maximum representable
-    /// [ModuleIndex] value, `u16::MAX`.
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
 
