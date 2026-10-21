@@ -90,8 +90,7 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_lifted_stark::air::ExtensionBuilder;
+use miden_stark::air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{

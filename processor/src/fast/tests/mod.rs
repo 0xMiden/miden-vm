@@ -27,7 +27,6 @@ use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
     Span, Uri,
 };
-use miden_lifted_stark::memory::prover_peak_bytes;
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
     debug_info::{
@@ -35,6 +34,7 @@ use miden_mast_package::{
         PackageDebugInfoBuilder,
     },
 };
+use miden_stark::memory::prover_peak_bytes;
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 

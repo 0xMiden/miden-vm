@@ -36,7 +36,7 @@ proptest = { workspace = true, optional = true }
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 miden-mast-package.workspace = true
 miden-precompiles.workspace = true
 miden-utils-diagnostics.workspace = true
@@ -50,6 +50,7 @@ tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-stark.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 miden-core = { workspace = true, features = ["arbitrary"] }

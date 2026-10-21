@@ -86,7 +86,7 @@ pub fn emit_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) -> String
 const MODULE_IMPORTS: &str = r"
 use miden_core::Felt;
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_stark::air::{LiftedAirBuilder, WindowAccess};
 use p3_field::Dup;
 ";
 
@@ -622,7 +622,7 @@ mod tests {
 
 use miden_core::Felt;
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_stark::air::{LiftedAirBuilder, WindowAccess};
 use p3_field::Dup;
 
 /// Generated globally-CSE'd evaluator for `MockAir::BASE`.

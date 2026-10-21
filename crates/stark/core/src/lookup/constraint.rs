@@ -56,13 +56,13 @@
 
 use core::marker::PhantomData;
 
-use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::field::PrimeCharacteristicRing;
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
     LookupMessage,
 };
+use crate::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 // CONSTRAINT LOOKUP BUILDER
 // ================================================================================================

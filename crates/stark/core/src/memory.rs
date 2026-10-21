@@ -8,10 +8,13 @@
 //! allocations such as FRI, DEEP, and per-AIR scratch. This is a capacity estimate, not a bound
 //! on total process RSS or concurrent proofs and cached setups for other configurations.
 
-use miden_lifted_air::{BaseAir, LiftedAir, MultiAir};
 use p3_field::{ExtensionField, Field};
 
-use crate::{log_quotient_degree, pcs::PcsParams};
+use crate::{
+    air::{BaseAir, LiftedAir, MultiAir},
+    log_quotient_degree,
+    pcs::PcsParams,
+};
 
 const DIGEST_BYTES: u64 = 32;
 // Keccak's 1600-bit state is the largest leaf-hashing state used by Miden's configurations.
@@ -142,12 +145,14 @@ where
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_lifted_air::{BaseAir, LiftedAirBuilder, WindowAccess};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
-    use crate::testing::configs::{Felt, QuadFelt};
+    use crate::{
+        air::{BaseAir, LiftedAirBuilder, WindowAccess},
+        testing::configs::{Felt, QuadFelt},
+    };
 
     struct TestAir {
         width: usize,

@@ -26,8 +26,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_lifted_stark::air::ExtensionBuilder;
+use miden_stark::air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{

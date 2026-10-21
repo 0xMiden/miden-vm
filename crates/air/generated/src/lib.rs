@@ -16,18 +16,19 @@ pub use definitions::{
     LiftedAirBuilder, MemoryCols, MidenAirBuilder, MultiAir, NUM_EIDOS_COMPRESSION_COLS,
     NUM_PUBLIC_VALUES, PcsParams, PermutationAirBuilder, ProverStatement, PublicInputs,
     QuadFeltExpr, Serializable, StackCols, StarkConfig, Statement, SystemCols, ToElements,
-    and8_lookup, debug, eidos_compression, hash_kernel_digests, logup, lookup, trace,
+    and8_lookup, debug, eidos_compression, hash_kernel_digests, logup, trace,
 };
 use miden_air_definitions as definitions;
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
 mod degrees {
-    use miden_lifted_air::ConstraintDegrees;
+    use miden_stark::air::ConstraintDegrees;
 
     use super::MidenAir;
 
     include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
 }
 pub mod ace;
+use miden_stark::lookup;
 pub mod config;
 pub mod precompiles;
 mod proof_order;
@@ -38,7 +39,7 @@ pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/evaluators.rs"));
 }
-use miden_lifted_stark::air::ReductionError;
+use miden_stark::air::ReductionError;
 use p3_challenger::CanObserve;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {

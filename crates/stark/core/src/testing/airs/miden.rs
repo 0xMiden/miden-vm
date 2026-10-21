@@ -6,9 +6,10 @@
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+use crate::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 
 // ---------------------------------------------------------------------------
 // Constants

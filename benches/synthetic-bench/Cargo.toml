@@ -20,7 +20,7 @@ thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 miden-vm-precompiles-bench = { path = "../precompiles-bench" }
-miden-lifted-stark = { workspace = true }
+miden-stark = { workspace = true }
 codspeed-criterion-compat = { workspace = true }
 miden-air = { workspace = true }
 miden-assembly = { workspace = true, features = ["std"] }

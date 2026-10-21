@@ -40,8 +40,8 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::precompiles::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},

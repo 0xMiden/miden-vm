@@ -2,9 +2,10 @@
 // `ChipletMultiAir` are defined in `air`: they evaluate constraints with the build-generated
 // evaluators.
 pub use miden_air_definitions::precompiles::{
-    ace, ec, fixed, hash, logup, math, policy, primitives, relations, transcript, uint, utils,
+    ace, ec, fixed, hash, logup, math, primitives, relations, transcript, uint, utils,
 };
 pub mod air;
+pub mod policy;
 pub mod preprocessed;
 pub mod protocol;
 pub mod security;

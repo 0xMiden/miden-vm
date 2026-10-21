@@ -6,7 +6,7 @@
 
 use miden_air_definitions::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 #[cfg(test)]
 use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.

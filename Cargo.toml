@@ -18,7 +18,6 @@ members = [
     "crates/field",
     "crates/lib/core",
     "crates/lib/core/codegen",
-    "crates/lifted-air",
     "crates/stark/core",
     "crates/mast-package",
     "crates/miden-constraint-compiler",
@@ -28,7 +27,6 @@ members = [
     "crates/miden-format",
     "crates/project",
     "crates/serde-utils",
-    "crates/stark-transcript",
     "crates/test-serialization-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
@@ -96,8 +94,7 @@ miden-crypto            = { path = "./crates/crypto", version = "1.0.0-rc.1", de
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "1.0.0-rc.1", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "1.0.0-rc.1", default-features = false }
 miden-field             = { path = "./crates/field", version = "1.0.0-rc.1", default-features = false }
-miden-lifted-air        = { path = "./crates/lifted-air", version = "1.0.0-rc.1", default-features = false }
-miden-lifted-stark      = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
+miden-stark            = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0.0-rc.1", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1", default-features = false }
@@ -108,7 +105,6 @@ miden-test-serialization-macros = { path = "./crates/test-serialization-macros",
 miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", default-features = false }
 miden-prover            = { path = "./prover", version = "1.0.0-rc.1", default-features = false }
 miden-serde-utils       = { path = "./crates/serde-utils", version = "1.0.0-rc.1", default-features = false }
-miden-stark-transcript  = { path = "./crates/stark-transcript", version = "1.0.0-rc.1", default-features = false }
 midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "1.0.0-rc.1", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0.0-rc.1", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0.0-rc.1", default-features = false }

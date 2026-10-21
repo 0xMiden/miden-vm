@@ -35,7 +35,7 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
 use crate::precompiles::{

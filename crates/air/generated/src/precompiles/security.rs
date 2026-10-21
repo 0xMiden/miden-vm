@@ -9,7 +9,7 @@
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 use miden_core::proof::HashFunction;
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 pub use crate::shared::security::{

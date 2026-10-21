@@ -24,7 +24,7 @@ pub fn derive_air_shape() -> AirShape {
                 .sum::<usize>() as u32,
             max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
         },
-        crate::shared::config::SPONGE_RATE,
+        miden_crypto::hash::eidos::BLOCK_LEN,
     )
 }
 

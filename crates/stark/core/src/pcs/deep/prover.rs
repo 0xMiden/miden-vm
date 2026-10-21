@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 use core::iter::zip;
 
-use miden_stark_transcript::ProverChannel;
 use p3_field::{
     ExtensionField, Field, FieldArray, HornerIter, PackedFieldExtension, PackedValue, TwoAdicField,
 };
@@ -13,6 +12,7 @@ use crate::{
     domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree, row_list::RowList},
     pcs::deep::{DeepParams, interpolate::PointQuotients},
+    transcript::ProverChannel,
     util::align::aligned_widths,
 };
 

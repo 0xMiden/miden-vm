@@ -35,7 +35,7 @@ use std::{fmt, time::Instant};
 use clap::Parser;
 use miden_air::config::eidos_config;
 use miden_core::Felt as MidenFelt;
-use miden_lifted_stark::{
+use miden_stark::{
     GenericStarkConfig,
     pcs::PcsParams,
     testing::{

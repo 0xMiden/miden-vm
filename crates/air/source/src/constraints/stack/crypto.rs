@@ -18,7 +18,7 @@
 //! - **MPVERIFY / MRUPDATE**: Bind the Merkle node index to its canonical field representative.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 use crate::{
     CoreCols, MidenAirBuilder,

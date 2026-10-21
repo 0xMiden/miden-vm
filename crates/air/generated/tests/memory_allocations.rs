@@ -13,7 +13,7 @@ use miden_air::{
     precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
 };
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_stark::memory;
+use miden_stark::memory;
 
 thread_local! {
     static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };

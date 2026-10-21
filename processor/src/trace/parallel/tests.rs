@@ -2,7 +2,6 @@ use alloc::{string::String, sync::Arc};
 
 use miden_air::{
     MidenAir,
-    lookup::build_logup_aux_trace,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
@@ -17,6 +16,7 @@ use miden_core::{
     program::{KernelDescriptor, Program, StackInputs},
     utils::RowMajorMatrix,
 };
+use miden_stark::lookup::build_logup_aux_trace;
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};

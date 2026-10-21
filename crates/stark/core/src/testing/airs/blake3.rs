@@ -2,10 +2,11 @@
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 pub use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
 use p3_field::{Field, PrimeField64};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+use crate::air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 
 /// [`Blake3Air`] adapted for the lifted STARK prover.
 ///

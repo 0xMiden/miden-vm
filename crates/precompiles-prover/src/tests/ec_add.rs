@@ -13,14 +13,16 @@
 use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, Scalar, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
-use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
+use miden_stark::{
+    Preprocessed, ProverInstance, VerifierInstance,
+    air::{MultiAir, ProverStatement, ReductionError, Statement},
+    lookup::Challenges,
+};
 use proptest::prelude::*;
 
 // The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
@@ -623,8 +625,8 @@ fn inactive_block_cannot_provide_ecgroupadd() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
-    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 8);
+    assert_eq!(miden_stark::air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
+    assert_eq!(miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 8);
     // Three selector groups and five pairs keep closing constraints at degree three. Dividing by
     // the trace vanishing polynomial leaves two quotient chunks, so log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);

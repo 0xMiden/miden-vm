@@ -101,7 +101,7 @@ fn evaluator_timing() {
 
 #[test]
 fn generated_degrees_match_handwritten() {
-    use miden_lifted_stark::air::{ConstraintDegrees, LiftedAir};
+    use miden_stark::air::{ConstraintDegrees, LiftedAir};
     for air in ChipletAir::all() {
         assert_eq!(
             <ChipletAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),

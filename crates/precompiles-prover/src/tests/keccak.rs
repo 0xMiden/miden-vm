@@ -6,17 +6,18 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupFractions, build_lookup_fractions,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::air::ConstraintDegrees;
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupFractions, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use proptest::prelude::*;
 
 use crate::{

@@ -18,7 +18,7 @@
 
 use core::borrow::Borrow;
 
-use miden_lifted_stark::air::WindowAccess;
+use miden_stark::air::WindowAccess;
 
 use super::{
     BusId,

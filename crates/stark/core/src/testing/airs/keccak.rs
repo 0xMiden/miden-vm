@@ -2,10 +2,11 @@
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_field::{Field, PrimeField64};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+use crate::air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 
 /// [`KeccakAir`] adapted for the lifted STARK prover.
 ///

@@ -248,7 +248,7 @@ mod tests {
             .map(|air| {
                 (
                     format!("{air:?}"),
-                    miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
+                    miden_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
                 )
             })
             .collect();
@@ -276,7 +276,7 @@ mod tests {
     fn pvm_canonical_ace_shape_matches_current_air() {
         assert!(
             ChipletAir::all().iter().all(|air| {
-                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
+                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
                     air,
                 ) <= 128
             }),
@@ -289,7 +289,7 @@ mod tests {
         let num_aux_values: usize = ChipletAir::all()
             .iter()
             .map(|air| {
-                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
+                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
             })
             .sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
@@ -381,7 +381,7 @@ mod tests {
 
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
-            .map(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
+            .map(miden_stark::air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
             .collect();
         assert_eq!(
             derived,
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
         use miden_air::precompiles::ChipletMultiAir;
-        use miden_lifted_air::{BaseAir, MultiAir};
+        use miden_stark::air::{BaseAir, MultiAir};
 
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
-        use miden_lifted_air::{BaseAir, LiftedAir};
+        use miden_stark::air::{BaseAir, LiftedAir};
 
         assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
@@ -760,7 +760,7 @@ mod tests {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
-        let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
+        let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
             miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
         )
@@ -802,7 +802,7 @@ mod tests {
     #[test]
     fn external_assertion_matches_the_protocol_version() {
         use miden_air::precompiles::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
-        use miden_lifted_air::Statement;
+        use miden_stark::air::Statement;
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),

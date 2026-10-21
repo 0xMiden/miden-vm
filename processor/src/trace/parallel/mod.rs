@@ -19,7 +19,7 @@ use miden_core::{
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
-use miden_lifted_stark::memory;
+use miden_stark::memory;
 use rayon::prelude::*;
 use tracing::instrument;
 

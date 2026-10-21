@@ -1,10 +1,7 @@
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::{
-    lookup::Challenges,
-    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
-};
+use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -13,11 +10,11 @@ use miden_core::{
     serde::{Deserializable, Serializable},
     utils::Matrix,
 };
-use miden_lifted_stark::memory;
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 use miden_precompiles_verifier::{VerifyError, verify_deferred};
+use miden_stark::{lookup::Challenges, memory};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

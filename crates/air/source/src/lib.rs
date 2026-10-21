@@ -18,16 +18,17 @@ use miden_core::{
         StackOutputs,
     },
 };
-use miden_lifted_stark::air::{ReductionError, WindowAccess};
+use miden_stark::air::{ReductionError, WindowAccess};
 use p3_challenger::CanObserve;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
 pub mod ace;
-pub use shared::config;
 mod constraints;
 pub mod geometry;
-pub mod lookup;
+use miden_stark::lookup;
+#[cfg(test)]
+mod lookup_tests;
 pub mod precompiles;
 mod proof_order;
 pub mod shared;
@@ -96,7 +97,7 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_lifted_stark::{
+    pub use miden_stark::{
         StarkConfig,
         air::{
             AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
@@ -642,7 +643,7 @@ impl And8LookupAir {
 
 /// AIR instance identifier for the Miden multi-AIR statement.
 ///
-/// [`MultiAir::Air`](miden_lifted_stark::air::MultiAir) is a single associated type, so every
+/// [`MultiAir::Air`](miden_stark::air::MultiAir) is a single associated type, so every
 /// instance in the multi-AIR proof must have the same type. This enum identifies which concrete
 /// AIR logic to dispatch to.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1160,18 +1161,6 @@ mod tests {
 
     use super::*;
 
-    /// Every source AIR must fit within the degree admitted by the explicit PCS policy.
-    #[test]
-    fn handwritten_degrees_fit_the_pcs_policy() {
-        for air in AIRS {
-            assert!(
-                miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air)
-                    <= config::LOG_BLOWUP
-            );
-            assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), air.column_shape().len());
-        }
-    }
-
     #[test]
     fn core_shape_and_degree_match_design() {
         let air = MidenAir::CORE;
@@ -1186,7 +1175,7 @@ mod tests {
             symbolic,
             "Core's declared degree must match its handwritten constraints",
         );
-        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+        assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
     }
 
     #[test]
@@ -1201,7 +1190,7 @@ mod tests {
             LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
             ConstraintDegrees { base: 0, ext: 3 }
         );
-        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
+        assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
     }
 
     #[test]

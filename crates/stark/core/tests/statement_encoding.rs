@@ -1,7 +1,7 @@
 //! The default statement binding's transcript order and lengths.
 
-use miden_field::Felt;
-use miden_lifted_air::StatementEncoding;
+use miden_crypto::Felt;
+use miden_stark::air::StatementEncoding;
 use p3_challenger::CanObserve;
 
 #[test]

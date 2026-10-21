@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::{
+use miden_stark::air::{
     AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
     symbolic::{AirLayout, SymbolicAirBuilder},
 };
@@ -992,7 +992,7 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
 
 #[test]
 fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
-    use miden_lifted_stark::air::ConstraintDegrees;
+    use miden_stark::air::ConstraintDegrees;
 
     use crate::CapturedAir;
     for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {

@@ -1,11 +1,11 @@
-//! Canonical AIR order and protocol policy of the precompile relation.
+//! Canonical AIR order, height rules, and compiler capture of the precompile relation.
 
 use alloc::vec::Vec;
 
 #[cfg(feature = "compiler")]
 use miden_ace_codegen::{AceError, CapturedAir, CompiledRelation};
 use miden_core::utils::Matrix;
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_stark::air::{BaseAir, LiftedAir};
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
 

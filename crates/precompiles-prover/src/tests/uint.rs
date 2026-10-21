@@ -4,16 +4,18 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::{
-    Challenges, LookupAir, LookupMessage, ProverLookupBuilder,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        Challenges, LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 

@@ -5,10 +5,12 @@
 
 use core::marker::PhantomData;
 
-use miden_lifted_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
 use p3_field::{ExtensionField, Field};
 
-use crate::selectors::Selectors;
+use crate::{
+    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
+    selectors::Selectors,
+};
 
 // ============================================================================
 // ConstraintFolder

@@ -6,7 +6,7 @@
 use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 // Quadratic non-residue for the extension: u^2 = 7.
 const W: u16 = 7;

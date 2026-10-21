@@ -83,7 +83,6 @@ mod tests;
 
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
-use miden_stark_transcript::{ProverChannel, TranscriptError, VerifierChannel};
 use p3_matrix::{
     Dimensions, Matrix,
     bitrev::BitReversibleMatrix,
@@ -94,7 +93,10 @@ use row_list::RowList;
 use thiserror::Error;
 use tree_indices::TreeIndices;
 
-use crate::util::align::aligned_len;
+use crate::{
+    transcript::{ProverChannel, TranscriptError, VerifierChannel},
+    util::align::aligned_len,
+};
 
 // ============================================================================
 // Type Aliases
@@ -298,7 +300,7 @@ pub trait Lmcs: Clone {
         tree: &Self::Tree<M>,
         query_indices: &TreeIndices,
     ) -> Result<Self::BatchProof, LmcsError> {
-        let tree_depth = miden_lifted_air::log2_strict_u8(tree.height());
+        let tree_depth = crate::air::log2_strict_u8(tree.height());
         let leaf_indices = query_indices.fold_to_depth(tree_depth)?;
         self.batch_proof(tree, &leaf_indices)
     }
@@ -367,7 +369,7 @@ pub trait LmcsTree<F, Commitment, M> {
         L: Lmcs<F = F, Commitment = Commitment>,
         Ch: ProverChannel<F = F, Commitment = Commitment>,
     {
-        let tree_log_height = miden_lifted_air::log2_strict_u8(self.height());
+        let tree_log_height = crate::air::log2_strict_u8(self.height());
         let leaf_indices = query_indices
             .fold_to_depth(tree_log_height)
             .expect("query index depth must be at least the committed tree depth");

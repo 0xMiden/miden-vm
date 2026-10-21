@@ -5,7 +5,7 @@ use miden_core::{
     crypto::hash::Blake3_256, proof::ExecutionProofCompatibility, serde::Serializable,
     utils::to_hex,
 };
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 use miden_vm::{HashFunction, ProgramInfo};
 
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v5-eidos";

@@ -7,7 +7,7 @@
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 use crate::{
     ChipletCols, MidenAirBuilder,

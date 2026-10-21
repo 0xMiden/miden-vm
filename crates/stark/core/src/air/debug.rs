@@ -13,26 +13,26 @@
 //!   prover and verifier loops.
 //!
 //! Runtime checks on caller-supplied data live on the constructors
-//! [`Statement::new`](crate::Statement::new) /
-//! [`ProverStatement::new`](crate::ProverStatement::new).
+//! [`Statement::new`](crate::air::Statement::new) /
+//! [`ProverStatement::new`](crate::air::ProverStatement::new).
 
 use p3_field::{ExtensionField, Field};
 use p3_matrix::Matrix;
 
-use crate::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
+use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 
 /// Assert a [`MultiAir`] is structurally well-formed.
 ///
 /// This checks the structural invariants that prover/verifier hot paths trust:
 /// - [`MultiAir::airs`] is non-empty.
 /// - Each AIR has positive auxiliary width.
-/// - Each AIR's [`crate::BaseAir::preprocessed_width`] agrees with
-///   [`crate::BaseAir::preprocessed_trace`] presence and width.
+/// - Each AIR's [`crate::air::BaseAir::preprocessed_width`] agrees with
+///   [`crate::air::BaseAir::preprocessed_trace`] presence and width.
 /// - Each periodic column is non-empty and has power-of-two length.
 /// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.
 ///
 /// Panics on any violation. An empty [`MultiAir`] is a malformed trusted AIR
-/// definition, not a typed [`Statement::new`](crate::Statement::new) error.
+/// definition, not a typed [`Statement::new`](crate::air::Statement::new) error.
 pub fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
 where
     F: Field,

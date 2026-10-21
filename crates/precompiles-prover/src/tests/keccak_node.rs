@@ -8,15 +8,17 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{Digest, Node, TRUE_DIGEST, deferred_chunks_frame},
     field::{Field, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    lookup::Challenges,
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

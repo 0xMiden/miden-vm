@@ -2,7 +2,7 @@
 
 use miden_constraint_compiler::ir::{CapturedConstraints, Graph, Leaf, Node, OpKind, capture};
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
 use crate::{AceCircuit, AceConfig, AceError, EXT_DEGREE, InputCounts, LayoutKind};
 

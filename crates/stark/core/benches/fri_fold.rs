@@ -17,7 +17,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::testing::{
+use miden_stark::testing::{
     FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, FriFold, LOG_HEIGHTS, PARALLEL_STR,
     TEST_SEED,
     configs::{Felt, QuadFelt},

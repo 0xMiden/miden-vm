@@ -4,7 +4,7 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::Felt;
-use miden_lifted_stark::air::WindowAccess;
+use miden_stark::air::WindowAccess;
 
 use super::{
     layout::*,

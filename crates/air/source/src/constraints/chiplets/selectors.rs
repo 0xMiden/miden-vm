@@ -55,7 +55,7 @@
 //! needing explicit `when_transition()` guards.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 use crate::{ChipletCols, MidenAirBuilder, constraints::utils::BoolNot};
 

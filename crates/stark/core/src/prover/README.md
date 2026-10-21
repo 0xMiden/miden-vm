@@ -4,7 +4,7 @@ End-to-end proving for the lifted STARK protocol using LMCS commitments
 and the lifted FRI PCS. Supports multiple traces of different power-of-two
 heights of at least 2 rows via virtual lifting.
 
-Protocol-level overview lives in `miden-lifted-stark/README.md`.
+Protocol-level overview lives in `miden-stark/README.md`.
 
 ## Entry Points
 

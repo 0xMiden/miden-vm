@@ -15,6 +15,4 @@ pub mod utils;
 
 pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 
-pub mod policy;
-
 pub mod ace;

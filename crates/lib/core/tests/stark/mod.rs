@@ -8,9 +8,9 @@ use miden_core::{
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
-use miden_lifted_stark::{Preprocessed, StarkConfig};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
+use miden_stark::{Preprocessed, StarkConfig};
 use miden_utils_testing::{
     AdviceInputs, Prover,
     recursive_verifier::{VerifierData, generate_advice_inputs},
@@ -1804,10 +1804,10 @@ fn quotient_recomposition_constants_match_derivation() {
 
     let log_quotient_degree = miden_air::AIRS
         .iter()
-        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
-    let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
         config::pcs_params().log_blowup(),
     )

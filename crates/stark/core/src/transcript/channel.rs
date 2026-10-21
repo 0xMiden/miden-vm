@@ -32,8 +32,8 @@ where
 {
 }
 
-/// Shared base trait for [`ProverChannel`](crate::ProverChannel) and
-/// [`VerifierChannel`](crate::VerifierChannel).
+/// Shared base trait for [`ProverChannel`](crate::transcript::ProverChannel) and
+/// [`VerifierChannel`](crate::transcript::VerifierChannel).
 ///
 /// Provides sampling methods common to both sides of the transcript.
 pub trait Channel {

@@ -12,7 +12,6 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use folder::ProverConstraintFolder;
-use miden_lifted_air::{LiftedAir, RowWindow, symbolic::ConstraintLayout};
 use p3_field::{
     Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, PackedValue,
     TwoAdicField,
@@ -23,6 +22,7 @@ use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
 use crate::{
+    air::{LiftedAir, RowWindow, symbolic::ConstraintLayout},
     domain::{Coset, EvaluationDomain},
     prover::periodic::PeriodicLde,
 };
@@ -239,7 +239,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                 };
 
             #[cfg(debug_assertions)]
-            miden_lifted_air::debug::check_builder_shape(air, &folder);
+            crate::air::debug::check_builder_shape(air, &folder);
             air.eval(&mut folder);
             let folded = folder.finalize_constraints();
 

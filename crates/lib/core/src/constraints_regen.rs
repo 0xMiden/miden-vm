@@ -17,7 +17,7 @@ use miden_air::{
 use miden_air_definitions::AIRS;
 use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {

@@ -28,7 +28,7 @@
 //! | m0        | Wire bus multiplicity for node 0               |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{

@@ -10,10 +10,7 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use thiserror::Error;
 
-use crate::{
-    BaseAir, LiftedAir,
-    air::{MultiAir, ReductionError},
-};
+use crate::air::{BaseAir, LiftedAir, MultiAir, ReductionError};
 
 // ============================================================================
 // Statement
@@ -23,7 +20,7 @@ use crate::{
 ///
 /// Holding one guarantees the caller-input length checks in [`Statement::new`] passed.
 /// The `MultiAir` itself is trusted application code; run
-/// [`crate::debug::assert_multi_air_valid`] in tests/setup to check structural
+/// [`crate::air::debug::assert_multi_air_valid`] in tests/setup to check structural
 /// invariants such as non-empty `airs()` and periodic-column shape.
 pub struct Statement<F, EF, MA>
 where
@@ -50,7 +47,7 @@ where
     /// differ from the AIR's declaration are rejected.
     ///
     /// This assumes `multi_air` satisfies the structural contract checked by
-    /// [`crate::debug::assert_multi_air_valid`]; malformed AIR definitions (for
+    /// [`crate::air::debug::assert_multi_air_valid`]; malformed AIR definitions (for
     /// example an empty [`MultiAir::airs`] collection) may panic.
     pub fn new(
         multi_air: MA,
@@ -142,10 +139,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use miden_field::Felt;
-    /// use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
+    /// use miden_crypto::Felt;
     /// use p3_challenger::CanObserve;
     /// use p3_matrix::{Matrix, dense::RowMajorMatrix};
+    ///
+    /// use crate::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
     ///
     /// #[derive(Clone)]
     /// struct ExampleAir;
@@ -267,7 +265,7 @@ where
     /// width against its AIR.
     ///
     /// This assumes the underlying [`MultiAir`] satisfies the structural contract
-    /// checked by [`crate::debug::assert_multi_air_valid`].
+    /// checked by [`crate::air::debug::assert_multi_air_valid`].
     pub fn new(
         statement: Statement<F, EF, MA>,
         traces: Vec<RowMajorMatrix<F>>,

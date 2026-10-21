@@ -15,7 +15,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::ops::{AddAssign, Mul};
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::field::PrimeCharacteristicRing;
 
 /// Encodes multiset/LogUp contributions as **bus_prefix\[bus\] + \<beta, message\>**.
 ///

@@ -6,6 +6,7 @@
 
 - [BREAKING] Unified VM and precompile prover memory estimation in `miden_lifted_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
 - [BREAKING] Reduced the PVM's aligned width from 912 to 768 columns. Verification uses precomputed table commitments to avoid rebuilding preprocessed tables. PVM proofs and recursive verifier roots change ([#4068](https://github.com/0xMiden/miden-vm/pull/4068)).
+- [BREAKING] Unified VM and precompile prover memory estimation in `miden_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
 - [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, security metadata, and canonical ACE circuits from one capture without adding compiler tooling to runtime dependencies. The recursive-verifier parameter generators consume the same capture and check the pinned relation identities instead of rewriting them. Removed the `regenerate-evaluator` tool. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
@@ -38,6 +39,7 @@
 #### Changes
 
 - Release all workspace crates, including `midenc-hir-type`, as `1.0.0-rc.0` and inherit their versions from the workspace.
+- [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions::precompiles`. Import STARK APIs directly from `miden-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, metadata, and canonical ACE without adding compiler tooling to runtime dependencies; complete generated verifier MASM remains tracked and checked against regeneration. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 - [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
@@ -472,7 +474,7 @@
 
 #### Fixes
 
-- Restored public `miden-lifted-stark` testing constants to preserve compatibility with version 0.28.1.
+- Restored public `miden-stark` testing constants to preserve compatibility with version 0.28.1.
 - Changed overspecified untrusted MAST forest input with wire hashes from an error log to a warning, and included the caller location in the warning ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
 - [BREAKING] Bound MMR peak commitments to the leaf count by hashing `[num_leaves, 0, 0, 0] || padded_peaks`, and updated the core library `mmr::pack`/`mmr::unpack` procedures to use the same preimage ([#3388](https://github.com/0xMiden/miden-vm/pull/3388)).
 - Documented the program-entrypoint locals invariant on `Procedure::set_num_locals` and now assert it at that AST mutation site, so setting locals on an executable module's `begin`..`end` block panics at the producer boundary. The existing assembler assertion is retained as a backstop for entrypoints built directly via `Procedure::new` ([#3382](https://github.com/0xMiden/miden-vm/pull/3382)).
@@ -545,7 +547,7 @@
 ## miden-crypto v0.28.0 (2026-07-03)
 
 - Added a zeroizing read helper for deserializing sensitive material, fixing secret-key read buffers that were not wiped on error paths (ECDSA) or at all (Falcon, Poseidon2 AEAD) ([#1057](https://github.com/0xMiden/crypto/pull/1057)).
-- [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
+- [BREAKING] Rename miden-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
 - Parallelize aux trace building for faster proving ([#1074](https://github.com/0xMiden/crypto/issues/1074)).
 - [BREAKING] Changed ECDSA-k256 public-key commitments to hash native affine-coordinate limbs (`qx || qy`, little-endian `u32` limbs) while keeping compressed SEC1 serialization unchanged ([#1075](https://github.com/0xMiden/crypto/issues/1075)).
 - Fixed SMT leaf advice decoding by rebuilding decoded entries through `SmtLeaf::new`, so decoded entries must match the supplied leaf index ([#1076](https://github.com/0xMiden/crypto/pull/1076)).
@@ -597,7 +599,7 @@
 - [BREAKING] `Assembler::compile_and_statically_link_from_dir` is now `Assembler::compile_and_statically_link_from_root`, this is related to the change to MASM module structure mentioned above.
 - [BREAKING] Moved debug info ownership out of `MastForest` and into package debug sections, adding source-node debug metadata that preserves distinct source occurrences after MAST node deduplication ([#3221](https://github.com/0xMiden/miden-vm/pull/3221)).
 - Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).
-- [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
+- [BREAKING] Update `miden-crypto` and `miden-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
 - Cleaned up processor error handling for diagnostics, malformed MAST loading, and binary-value checks ([#3230](https://github.com/0xMiden/miden-vm/pull/3230)).
 - [BREAKING] Import syntax in MASM has changed to be more explicit in distinguishing item vs module imports. Module imports are of the form `use some::module` or `use some::module as alias`, and may not have `pub` visibility; while item imports are of the form `use {item} from some::module` 
 - Moved `proptest` test support behind optional features so `rand` 0.9 is not in the default dependency tree ([#3241](https://github.com/0xMiden/miden-vm/pull/3241)).
@@ -777,13 +779,13 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
 - Optimized prover quotient evaluation by evaluating each AIR's quotient on its native coset (size `n_j · D_j`) and lifting per-AIR, instead of always on the global maximum coset; constraint division is fused into the constraint evaluation loop ([#991](https://github.com/0xMiden/crypto/pull/991)).
 - [BREAKING] Replaced the per-AIR witness/aux-builder proving model (`AirInstance`, `AirWitness`, `AuxBuilder`, `prove_multi` / `verify_multi`) with a `MultiAir` trait that owns its AIRs (each builds its own aux trace via `LiftedAir::build_aux_trace`), plus validated `Statement` / `ProverStatement` structs carried by `ProverInstance` / `VerifierInstance`. `LiftedAir::reduced_aux_values` and `num_var_len_public_inputs` are replaced by `MultiAir::eval_external`, which returns the cross-AIR external assertions as a flat list of extension-field values that must equal zero, fed by an `aux_inputs` slice whose schema each `MultiAir` owns and validates ([#992](https://github.com/0xMiden/crypto/pull/992)).
-- [BREAKING] Refactored `miden-lifted-stark::domain` around a uniform `Coset` trait shared by `TwoAdicSubgroup` and `TwoAdicCoset`, slimmed the `LiftedDomain` surface (drops dead getters, removes silently-dispatched `points`/`bit_reversed_points`/`vanishing_at` in favour of explicit `trace_subgroup()` / `lde_coset()` access), made `LiftedDomain` constructors fallible, moved selector logic onto `LiftedDomain`, and changed `log_blowup` to return `u8` ([#993](https://github.com/0xMiden/crypto/pull/993)).
+- [BREAKING] Refactored `miden-stark::domain` around a uniform `Coset` trait shared by `TwoAdicSubgroup` and `TwoAdicCoset`, slimmed the `LiftedDomain` surface (drops dead getters, removes silently-dispatched `points`/`bit_reversed_points`/`vanishing_at` in favour of explicit `trace_subgroup()` / `lde_coset()` access), made `LiftedDomain` constructors fallible, moved selector logic onto `LiftedDomain`, and changed `log_blowup` to return `u8` ([#993](https://github.com/0xMiden/crypto/pull/993)).
 - [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
-- [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
+- [BREAKING] Reorganized `miden-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
 - perf: fuse per-group accumulator and defer allocations ([#1008](https://github.com/0xMiden/crypto/pull/1008)).
 - [BREAKING] Reduced `LargeSmt<S>` cache depth from 24 to 16 levels ([#1011](https://github.com/0xMiden/crypto/pull/1011)).
 - [BREAKING] Implemented two-phase commit_mutations() / apply_mutations()-style API for `LargeSmtForest` ([#1018](https://github.com/0xMiden/crypto/pull/1018)).
-- [BREAKING] Tightened the `miden-lifted-stark` public API surface: dropped the wide crate-root re-export list (callers now import from `miden_lifted_stark::air` and `miden_lifted_stark::{lmcs, pcs, proof, prover, verifier}` directly), demoted internal submodules to `pub(crate)`/`pub(super)`, and folded the `transcript` module into `proof` (`TranscriptChallenger` / `TranscriptData` / `TranscriptError` are re-exported there). Renamed the proof artifact types — `StarkProof` → `StarkProofData` (wire artifact) and `StarkTranscript` → `StarkProof` (parsed view, built via `StarkProof::from_data`) — and `*::from_verifier_channel` → `*::read_from_channel` on the PCS sub-proofs. Dropped the panicking domain constructors (`TwoAdicCoset::unshifted`, `LiftedDomain::{canonical, sub_domain}`) in favour of the fallible `try_*` variants ([#1020](https://github.com/0xMiden/crypto/pull/1020)).
+- [BREAKING] Tightened the `miden-stark` public API surface: dropped the wide crate-root re-export list (callers now import from `miden_stark::air` and `miden_stark::{lmcs, pcs, proof, prover, verifier}` directly), demoted internal submodules to `pub(crate)`/`pub(super)`, and folded the `transcript` module into `proof` (`TranscriptChallenger` / `TranscriptData` / `TranscriptError` are re-exported there). Renamed the proof artifact types — `StarkProof` → `StarkProofData` (wire artifact) and `StarkTranscript` → `StarkProof` (parsed view, built via `StarkProof::from_data`) — and `*::from_verifier_channel` → `*::read_from_channel` on the PCS sub-proofs. Dropped the panicking domain constructors (`TwoAdicCoset::unshifted`, `LiftedDomain::{canonical, sub_domain}`) in favour of the fallible `try_*` variants ([#1020](https://github.com/0xMiden/crypto/pull/1020)).
 - [BREAKING] Added reusable preprocessed trace setup artifacts for Lifted STARKs: AIRs can declare fixed preprocessed columns, provers build and reuse a `Preprocessed` commitment bundle, and verifier instances receive the trusted preprocessed commitment ([#1021](https://github.com/0xMiden/crypto/pull/1021)).
 - [BREAKING] Fixed RocksDB CLI safety, non-canonical serde input handling, and qualified `WordWrapper` derive paths ([#1022](https://github.com/0xMiden/crypto/pull/1022)).
 - [BREAKING] Simplify `LargeSmtForest` backend API ([#1030](https://github.com/0xMiden/crypto/pull/1030)).
@@ -799,7 +801,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 ## miden-crypto v0.25.1 (2026-05-21)
 
-- Fixed `miden-lifted-stark` builds when `p3-maybe-rayon/parallel` is enabled without `miden-lifted-stark/parallel` ([#1023](https://github.com/0xMiden/crypto/pull/1023)).
+- Fixed `miden-stark` builds when `p3-maybe-rayon/parallel` is enabled without `miden-stark/parallel` ([#1023](https://github.com/0xMiden/crypto/pull/1023)).
 
 ## miden-vm v0.23.1 (2026-05-20)
 
@@ -877,7 +879,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - Documented sortedness precondition more prominently for sorted array operations ([#2832](https://github.com/0xMiden/miden-vm/pull/2832)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 - Clarified `/` and `//` division semantics in constant expressions ([#3113](https://github.com/0xMiden/miden-vm/pull/3113)).
-- [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-lifted-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
+- [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
 - Borrowed operation slices in basic-block batching helpers to avoid cloning in the fingerprinting path ([#2994](https://github.com/0xMiden/miden-vm/pull/2994)).
 - [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] `miden_processor::execute()` and `execute_sync()` now return `ExecutionOutput`; trace building remains explicit via `execute_trace_inputs*()` and `trace::build_trace()` ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
@@ -908,7 +910,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - Clarified that `mmr::get` fails for positions outside the current MMR rather than returning a sentinel value ([#3001](https://github.com/0xMiden/miden-vm/issues/3001)).
 - Added fuzz coverage for package semantic deserialization and project parsing, loading, and assembly ([#3015](https://github.com/0xMiden/miden-vm/pull/3015)).
 - Aligned AEAD key/nonce stack-order documentation and handler comments with the runtime contract ([#3036](https://github.com/0xMiden/miden-vm/pull/3036)).
-- [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-lifted-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
+- [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
 - Cached repeated test compilations to speed up assembler tests without changing coverage, and fixed the core library build watch path ([#3047](https://github.com/0xMiden/miden-vm/pull/3047)).
 - Made serde opt-in for package crates, and added macro-based binary and serde roundtrip tests for Arbitrary serialization types ([#3058](https://github.com/0xMiden/miden-vm/pull/3058)).
 - Corrected memory trace delta encoding comments to match first-row and same-word clock delta behavior ([#3062](https://github.com/0xMiden/miden-vm/pull/3062)).
@@ -1051,7 +1053,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - [BREAKING] Fixed `NodeIndex::to_scalar_index()` overflow at depth 64 by returning `Result<u64, MerkleError>` ([#865](https://github.com/0xMiden/crypto/issues/865)).
 - [BREAKING] Removed `RpoRandomCoin` and `RpxRandomCoin` and introduced a Poseidon2-based `RandomCoin` ([#871](https://github.com/0xMiden/crypto/pull/871)).
 - Harden MerkleStore deserialization and fuzz coverage ([#878](https://github.com/0xMiden/crypto/pull/878)).
-- [BREAKING] Upgraded Plonky3 from 0.4.2 to 0.5.0 and replaced `p3-miden-air`, `p3-miden-fri`, and `p3-miden-prover` with the unified `miden-lifted-stark` crate. The `stark` module now re-exports the Lifted STARK proving system from [p3-miden](https://github.com/0xMiden/p3-miden).
+- [BREAKING] Upgraded Plonky3 from 0.4.2 to 0.5.0 and replaced `p3-miden-air`, `p3-miden-fri`, and `p3-miden-prover` with the unified `miden-stark` crate. The `stark` module now re-exports the Lifted STARK proving system from [p3-miden](https://github.com/0xMiden/p3-miden).
 - [BREAKING] Changed the `LargeSmtForest::entries` iterator to be fallible by explicitly returning `Result<TreeEntry>` as the iterator item.
 - [BREAKING] Updated `SparseMerkleTree` and its implementations to reject batches of key-value pairs that contain more than one instance of any given key. This may cause previously successful operations to now fail if your input batch is not de-duplicated.
 - [BREAKING] `SimpleSmt::compute_mutations` now returns a result so it can fail gracefully if the input batch contains duplicate keys.

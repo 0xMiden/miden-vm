@@ -7,13 +7,13 @@ use miden_core::{
     field::QuadFelt,
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
-use miden_lifted_stark::memory;
 use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
     StackInputs, StackOutputs, SyncHost, VmWitness,
     advice::AdviceInputs,
     trace::{self, VmTrace, build_trace_with_budget},
 };
+use miden_stark::memory;
 
 use crate::{config, prove_stark};
 
@@ -35,7 +35,7 @@ impl Prover {
     /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
     /// This bounds the approximate lifted-STARK VM allocations modelled by
-    /// `miden_lifted_stark::memory`, including the fixed And8 preprocessed setup. It is not a
+    /// `miden_stark::memory`, including the fixed And8 preprocessed setup. It is not a
     /// total process-RSS or allocator cap. The precompile prover's memory is bounded separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;

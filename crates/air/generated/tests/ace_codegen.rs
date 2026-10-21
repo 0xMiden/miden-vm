@@ -9,7 +9,7 @@ use miden_ace_codegen::{
 use miden_air_definitions::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
-use miden_lifted_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
 fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
     AirLayout {

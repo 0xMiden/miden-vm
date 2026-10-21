@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use p3_challenger::{CanSample, CanSampleBits, CanSampleUniformBits};
 use p3_field::{BasedVectorSpace, Field};
 
-use crate::{
+use crate::transcript::{
     TranscriptData,
     channel::{Channel, TranscriptChallenger},
 };
