@@ -1483,10 +1483,13 @@ impl<'input> Parser<'input> {
         match token.kind() {
             SyntaxKind::DocComment | SyntaxKind::At => true,
             SyntaxKind::Ident => {
-                let next = if token.text() == "pub" {
-                    self.next_token_after_visibility(index)
-                } else {
-                    self.next_relevant_top_level_token(index + 1)
+                let next = match token.text() {
+                    // Visibility qualifiers may separate `pub` from the declaration keyword.
+                    "pub" => self.next_token_after_visibility(index),
+                    // `extern` needs the following token to determine if it starts a declaration.
+                    "extern" => self.next_relevant_top_level_token(index + 1),
+                    // Other names alone determine whether they start a declaration.
+                    _ => None,
                 };
                 is_top_level_declaration_prefix(token, next.and_then(|next| self.tokens.get(next)))
             },
@@ -2356,6 +2359,8 @@ end
         for (source, regular, strong) in [
             ("", false, false),
             ("const", true, false),
+            ("const # comment\nY = 2", true, true),
+            ("nop # comment\npush.1", false, false),
             ("const: u8", true, false),
             ("type::T", true, false),
             ("pub const Y = 2", true, true),
@@ -2372,10 +2377,12 @@ end
             ("#! docs\npub const Y = 2", true, true),
             ("pub adv_map TABLE = [1]", false, false),
             ("pub begin", false, false),
+            ("pub # comment\nnonsense", false, false),
             ("extern package foo", true, true),
             ("extern # comment\npackage foo", true, true),
             ("extern #! docs\npackage foo", false, true),
             ("extern const Y = 2", false, false),
+            ("extern # comment\nnonsense", false, false),
         ] {
             let file = super::detached_source_file(source);
             let mut parser = super::Parser::new(&file);
