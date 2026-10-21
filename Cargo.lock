@@ -2045,7 +2045,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "miden-ace-codegen"
+name = "miden-ace"
 version = "1.0.0-rc.1"
 dependencies = [
  "miden-constraint-compiler",
@@ -2063,7 +2063,7 @@ name = "miden-air"
 version = "1.0.0-rc.1"
 dependencies = [
  "insta",
- "miden-ace-codegen",
+ "miden-ace",
  "miden-air-definitions",
  "miden-constraint-compiler",
  "miden-core",
@@ -2079,7 +2079,7 @@ name = "miden-air-definitions"
 version = "1.0.0-rc.1"
 dependencies = [
  "insta",
- "miden-ace-codegen",
+ "miden-ace",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
@@ -2225,7 +2225,7 @@ dependencies = [
  "curve25519-dalek",
  "env_logger",
  "fs-err",
- "miden-ace-codegen",
+ "miden-ace",
  "miden-air",
  "miden-air-definitions",
  "miden-assembly",
@@ -2544,7 +2544,7 @@ name = "miden-precompiles-verifier"
 version = "1.0.0-rc.1"
 dependencies = [
  "insta",
- "miden-ace-codegen",
+ "miden-ace",
  "miden-air",
  "miden-air-definitions",
  "miden-core",
@@ -2563,6 +2563,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "insta",
  "itertools 0.15.0",
+ "miden-ace",
  "miden-air",
  "miden-assembly",
  "miden-core",

@@ -1,5 +1,5 @@
 #[cfg(feature = "compiler")]
-use miden_ace_codegen::CompiledRelation;
+use miden_ace::CompiledRelation;
 use miden_core::{Felt, field::QuadFelt};
 use p3_security::budget::{AirShape, LookupShape};
 

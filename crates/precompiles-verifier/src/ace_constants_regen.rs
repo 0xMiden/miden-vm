@@ -15,7 +15,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, render_masm_constraints_eval,
 };
@@ -725,7 +725,7 @@ fn masm_word_literal(word: Word) -> String {
 
 #[cfg(test)]
 mod tests {
-    use miden_ace_codegen::LayoutKind;
+    use miden_ace::LayoutKind;
     use miden_air_definitions::precompiles::relation::CapturedPvmRelation;
 
     use super::{

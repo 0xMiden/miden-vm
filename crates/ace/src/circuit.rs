@@ -7,18 +7,11 @@ use std::collections::HashMap;
 
 use miden_crypto::field::Field;
 
+pub(crate) use crate::instruction::Op as AceOp;
 use crate::{
     AceError, InputLayout,
     dag::{AceDag, NodeId, NodeKind},
 };
-
-/// Arithmetic operations supported by the ACE circuit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AceOp {
-    Add,
-    Sub,
-    Mul,
-}
 
 /// Nodes in the emitted ACE circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

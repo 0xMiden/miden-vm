@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use miden_ace_codegen::{factorial, order_from_tag, order_tag};
+use miden_ace::{factorial, order_from_tag, order_tag};
 
 use crate::MidenAir;
 
@@ -34,7 +34,7 @@ const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags 
 /// fixed sorting network emitted as `stage_proof_order_maps` in each relation's out-of-domain
 /// hook. The resulting position maps drive scatter, boundary placement, and fold-coefficient
 /// staging. The Lehmer tag API provides a stable encoding for exhaustive proof-order enumeration.
-/// The shared [`miden_ace_codegen::MAX_ORDER_AIRS`] bound ensures that every supported rank fits in
+/// The shared [`miden_ace::MAX_ORDER_AIRS`] bound ensures that every supported rank fits in
 /// `u32`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {

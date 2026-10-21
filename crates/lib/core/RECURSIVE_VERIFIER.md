@@ -21,8 +21,8 @@ integers and elliptic-curve parameters.
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/precompiles-verifier/src/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
 | Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
 | Fixed-boundary instructions | Templates in `crates/precompiles-verifier/src/masm/` | `pvm/fixed_boundary.masm` |
-| OOD routing and proof-order schedules | Relation geometry and `miden-ace-codegen` renderers | `{vm,pvm}/ood_frames.masm` |
-| Constraint evaluation | Canonical ACE circuit and `miden-ace-codegen` renderer | `{vm,pvm}/constraints_eval.masm` |
+| OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
+| Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
 
 The `.masm.tpl` files are source inputs. Edit `fixed_boundary.masm.tpl` for shared helpers and
 `fixed_uintval.masm.tpl` or `fixed_ecgroup.masm.tpl` for the instructions applied to each message.

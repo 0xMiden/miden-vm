@@ -39,9 +39,9 @@ constraints-tools = [
     "std",
     "dep:miden-air",
     "dep:miden-air-definitions",
-    "dep:miden-ace-codegen",
+    "dep:miden-ace",
     "dep:miden-stark",
-    "miden-ace-codegen/compiler",
+    "miden-ace/compiler",
     "miden-air-definitions/compiler",
 ]
 
@@ -55,7 +55,7 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
 miden-air-definitions = { workspace = true, optional = true }
-miden-ace-codegen = { workspace = true, optional = true }
+miden-ace = { workspace = true, optional = true }
 miden-stark = { workspace = true, optional = true }
 
 # External dependencies
@@ -66,7 +66,7 @@ thiserror.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true
-miden-ace-codegen = { workspace = true, features = ["compiler"] }
+miden-ace = { workspace = true, features = ["compiler"] }
 miden-air = { workspace = true, features = ["compiler"] }
 miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }

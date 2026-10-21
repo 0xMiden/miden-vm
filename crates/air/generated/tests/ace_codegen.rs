@@ -1,4 +1,4 @@
-use miden_ace_codegen::{
+use miden_ace::{
     AceConfig, AceDag, AceError, EXT_DEGREE, InputKey, InputLayout, LayoutKind, NodeKind,
     PeriodicColumnData, build_ace_dag_for_air, build_verifier_dag, emit_circuit,
     testing::{
@@ -354,7 +354,7 @@ fn canonical_circuit_matches_every_vm_proof_order() {
         }
         let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
 
-        let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+        let direct = miden_ace::testing::eval_multi_air_constraints(
             &AIRS,
             canonical_layout,
             &canonical_inputs,

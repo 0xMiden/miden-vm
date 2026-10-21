@@ -1,4 +1,4 @@
-use miden_ace_codegen::{AceConfig, AceError, LayoutKind};
+use miden_ace::{AceConfig, AceError, LayoutKind};
 use miden_core::{Felt, field::QuadFelt};
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
@@ -26,7 +26,7 @@ pub fn recursive_verifier_ace_config() -> AceConfig {
     }
 }
 
-pub use miden_ace_codegen::RecursiveAceCircuit;
+pub use miden_ace::RecursiveAceCircuit;
 
 /// Builds and encodes the order-invariant recursive-verifier ACE circuit.
 ///

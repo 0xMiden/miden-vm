@@ -1,8 +1,8 @@
 [package]
-name = "miden-ace-codegen"
+name = "miden-ace"
 version.workspace = true
-description = "ACE circuit codegen for Plonky3-based Miden AIRs."
-documentation = "https://docs.rs/miden-ace-codegen"
+description = "ACE circuit runtime and optional compiler for Miden AIRs."
+documentation = "https://docs.rs/miden-ace"
 readme = "README.md"
 categories = ["cryptography"]
 keywords = ["air", "arithmetization", "crypto", "miden"]
@@ -15,18 +15,20 @@ edition.workspace = true
 
 [features]
 default = []
+std = ["miden-crypto/std", "thiserror/std"]
 compiler = [
+    "std",
+    "dep:miden-core",
     "dep:miden-constraint-compiler",
     "dep:miden-stark",
     "dep:p3-dft",
     "miden-core/std",
-    "miden-crypto/std",
 ]
 testing = ["compiler"]
 
 [dependencies]
 miden-constraint-compiler = { workspace = true, optional = true }
-miden-core = { workspace = true }
+miden-core = { workspace = true, optional = true }
 miden-crypto = { workspace = true }
 miden-stark = { workspace = true, optional = true }
 p3-dft = { workspace = true, optional = true }

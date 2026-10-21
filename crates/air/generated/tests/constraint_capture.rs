@@ -5,7 +5,7 @@
 //!
 //! Lives here rather than in the compiler crate so `miden-constraint-compiler`
 //! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
-//! `miden-constraint-compiler` → `miden-ace-codegen` → `miden-air`.
+//! `miden-constraint-compiler` → `miden-ace` → `miden-air`.
 
 use miden_air_definitions::{AIRS, BaseAir, Felt};
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};

@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 #[cfg(feature = "compiler")]
-use miden_ace_codegen::{AceError, CapturedAir, CompiledRelation};
+use miden_ace::{AceError, CapturedAir, CompiledRelation};
 use miden_core::utils::Matrix;
 use miden_stark::air::{BaseAir, LiftedAir};
 
