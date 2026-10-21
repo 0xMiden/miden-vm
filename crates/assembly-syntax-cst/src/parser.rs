@@ -1591,13 +1591,17 @@ impl<'input> Parser<'input> {
                         matches!(token.kind(), SyntaxKind::LParen | SyntaxKind::Equal)
                     })
             },
-            "begin" | "mod" | "namespace" | "proc" => is_name,
+            "begin" | "mod" | "proc" => is_name,
+            "namespace" => is_name || next.kind() == SyntaxKind::ColonColon,
             "extern" => true,
             "use" => {
                 is_name
                     || matches!(
                         next.kind(),
-                        SyntaxKind::LBrace | SyntaxKind::Star | SyntaxKind::Number
+                        SyntaxKind::ColonColon
+                            | SyntaxKind::LBrace
+                            | SyntaxKind::Star
+                            | SyntaxKind::Number
                     )
             },
             _ => false,
@@ -2654,6 +2658,27 @@ end
             assert_eq!(constants.len(), 2);
             assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
             assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+        }
+    }
+
+    #[test]
+    fn constant_type_annotation_recovery_preserves_absolute_path_declarations() {
+        for (declaration, kind) in [
+            ("use ::foo::bar\n", SyntaxKind::Import),
+            ("namespace ::foo::bar\n", SyntaxKind::Namespace),
+        ] {
+            for ty in ["u8", "[u8; 4"] {
+                let source = format!("const X: {ty}\n{declaration}");
+                let parse = assert_constant_annotation_recovery(&source, declaration);
+                let constants = constant_declarations(&parse);
+                let annotation = constants[0].type_annotation().expect("type annotation");
+                assert_eq!(annotation.syntax().text().to_string().trim(), format!(": {ty}"));
+
+                let items = parse.syntax().children().collect::<Vec<_>>();
+                assert_eq!(items.len(), 2, "{source}");
+                assert_eq!(items[1].kind(), kind, "{source}");
+                assert_eq!(items[1].text().to_string().trim(), declaration.trim(), "{source}");
+            }
         }
     }
 
