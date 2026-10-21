@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 (Unreleased)
+## v1.0.0-rc.0 (2026-10-21)
 
 #### Features
 
@@ -12,13 +12,14 @@
 - [BREAKING] Added separately configurable execution and per-witness verification limits for deferred precompile work. Custom precompiles must implement `Precompile::work`; consuming witness preparation validates and admits work before commitment hashing or evaluation. Proving consumes prepared witnesses, with a separate memory-budget check before trace generation. The shared root ceiling for proving, canonical decoding, and verification drops from 4,096 to 128, rejecting existing format-2 proofs with 129–4,096 roots without changing the encoding version. Portable witness decoding now checks transport syntax and bounds only. Callers must prepare the witness to validate graph integrity ([#3886](https://github.com/0xMiden/miden-vm/pull/3886)).
 - [BREAKING] Added EcGFp5 Diffie-Hellman support in Rust and MASM, plus the `Ecgfp5Eidos` IES scheme ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
 - [BREAKING] Added associated-data support to MASM Eidos AEAD and replaced its low-level API with `encrypt`, `decrypt`, `encrypt_with_ad`, and `decrypt_with_ad` ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
-- [BREAKING] Added four typed precompile work limits to the Miden VM CLI. `prove` creates complete proofs by default; `--deferred` explicitly opts into exporting a raw precompile witness that can reveal private advice inputs, with disclosure in help and output. `--complete` explicitly selects complete proving. `verify` accepts valid deferred proofs by default with explicit status and outstanding precompile obligation; use `--require-complete` to require a fully STARK-backed proof. An explicit `prove --max-prover-memory` now sets both VM and precompile proving budgets, while omitting it preserves each stage's library default.
+- [BREAKING] Added four typed precompile work limits to the Miden VM CLI. `prove` creates complete proofs by default. `--deferred` explicitly opts into exporting a raw precompile witness that can reveal private advice inputs, with disclosure in help and output. `--complete` explicitly selects complete proving. `verify` accepts valid deferred proofs by default with explicit status and outstanding precompile obligation. Use `--require-complete` to require a fully STARK-backed proof. An explicit `prove --max-prover-memory` now sets both VM and precompile proving budgets, while omitting it preserves each stage's library default.
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/pull/3867)).
 - [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
 
 #### Changes
 
+- Release all workspace crates, including `midenc-hir-type`, as `1.0.0-rc.0` and inherit their versions from the workspace.
 - [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
