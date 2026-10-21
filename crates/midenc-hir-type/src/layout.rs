@@ -457,9 +457,17 @@ impl Type {
     }
 
     /// Returns the minimum number of bytes required to store a value of this type
+    ///
+    /// Aggregates are sized in bytes rather than derived from [Self::size_in_bits], so a type
+    /// that fits in a `usize` of bytes is sized even when its bit count would not fit (e.g. a
+    /// 2^29-byte array on a 32-bit target).
     pub fn size_in_bytes(&self) -> usize {
-        let bits = self.size_in_bits();
-        (bits / 8) + (!bits.is_multiple_of(8)) as usize
+        match self {
+            Self::Struct(struct_ty) => struct_ty.size(),
+            Self::Enum(enum_ty) => enum_ty.size_in_bytes(),
+            Self::Array(array_ty) => array_ty.size_in_bytes(),
+            ty => ty.size_in_bits().div_ceil(8),
+        }
     }
 
     /// Same as [Self::size_in_bits], but returns `None` instead of overflowing `usize`.
@@ -627,6 +635,7 @@ mod tests {
         ] {
             assert_eq!(ty.checked_size_in_bits(), Some(ty.size_in_bits()), "{ty}");
             assert_eq!(ty.checked_size_in_bytes(), Some(ty.size_in_bytes()), "{ty}");
+            assert_eq!(ty.size_in_bytes(), ty.size_in_bits().div_ceil(8), "{ty}");
         }
     }
 
@@ -648,6 +657,8 @@ mod tests {
         const LEN: usize = 1 << 29;
         let ty = Type::from(ArrayType::new(Type::U8, LEN));
         assert_eq!(ty.checked_size_in_bytes(), Some(LEN));
+        assert_eq!(ty.size_in_bytes(), LEN);
+        assert_eq!(ty.aligned_size_in_bytes(), LEN + 1);
 
         let struct_ty = StructType::try_from_parts(None, TypeRepr::Default, [ty]).unwrap();
         assert_eq!(struct_ty.size(), LEN);

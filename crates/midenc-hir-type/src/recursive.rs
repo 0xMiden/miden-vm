@@ -1129,9 +1129,12 @@ fn probe_stand_in(layout: Option<TypeLayout>) -> Type {
 
 fn layout_of(ty: &Type) -> Result<TypeLayout, RecursiveTypeError> {
     Ok(TypeLayout {
-        size_in_bytes: u32::try_from(ty.size_in_bytes()).map_err(|_| {
-            RecursiveTypeError::InvalidDefinition("type size exceeds u32::MAX bytes".into())
-        })?,
+        size_in_bytes: ty
+            .checked_size_in_bytes()
+            .and_then(|size| u32::try_from(size).ok())
+            .ok_or_else(|| {
+                RecursiveTypeError::InvalidDefinition("type size exceeds u32::MAX bytes".into())
+            })?,
         min_alignment: NonZeroU16::new(
             u16::try_from(ty.min_alignment()).expect("invalid type: alignment is out of range"),
         )
@@ -2500,6 +2503,14 @@ mod tests {
     /// `[felt; 2^30]` is 2^32 bytes on its own, which no struct size can hold.
     fn past_u32_range() -> TypeTemplate {
         TypeTemplate::array(TypeTemplate::from(Type::Felt), 1 << 30)
+    }
+
+    #[test]
+    fn layout_of_sizes_a_large_type_in_bytes() {
+        // 2^29 bytes is 2^32 bits: sizing through bits overflows a 32-bit `usize` (such as on
+        // wasm32), although the type fits in u32::MAX bytes.
+        let ty = Type::from(ArrayType::new(Type::U8, 1 << 29));
+        assert_eq!(layout_of(&ty).unwrap().size_in_bytes(), 1 << 29);
     }
 
     #[test]

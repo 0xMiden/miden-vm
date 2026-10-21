@@ -5,6 +5,15 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::*;
 
+/// [Type::aligned_size_in_bytes], with an overflow of the padded size reported as an error.
+fn checked_aligned_size_in_bytes(ty: &Type) -> Result<usize, InvalidEnumTypeError> {
+    let size = ty.checked_size_in_bytes().ok_or(InvalidEnumTypeError::SizeOverflow)?;
+    if size == 0 {
+        return Ok(0);
+    }
+    size.checked_add(ty.min_alignment()).ok_or(InvalidEnumTypeError::SizeOverflow)
+}
+
 /// The error type returned when attempting to construct an invalid [EnumType]
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidEnumTypeError {
@@ -190,8 +199,8 @@ impl EnumType {
                 offsets[i] = layout.fields()[1].offset;
                 match largest_variant.as_mut() {
                     Some(largest_variant)
-                        if value_ty.aligned_size_in_bytes()
-                            > largest_variant.aligned_size_in_bytes() =>
+                        if checked_aligned_size_in_bytes(value_ty)?
+                            > checked_aligned_size_in_bytes(largest_variant)? =>
                     {
                         *largest_variant = value_ty.clone();
                     },
@@ -621,6 +630,24 @@ mod tests {
         let err = EnumType::new("T".into(), Type::U8, [Variant::new("A".into(), payload, None)])
             .unwrap_err();
         assert!(matches!(err, InvalidEnumTypeError::SizeOverflow), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn enum_type_compares_variant_sizes_in_bytes() {
+        // A 2^29-byte payload is 2^32 bits, so comparing the variants through their bit sizes
+        // overflows a 32-bit `usize` (such as on wasm32), although the enum fits in u32::MAX
+        // bytes.
+        let payload = Type::from(ArrayType::new(Type::U8, 1 << 29));
+        let ty = EnumType::new(
+            "T".into(),
+            Type::U8,
+            [
+                Variant::new("A".into(), Type::U8, None),
+                Variant::new("B".into(), payload, None),
+            ],
+        )
+        .unwrap();
+        assert_eq!(ty.size_in_bytes(), (1 << 29) + 1);
     }
 
     #[test]

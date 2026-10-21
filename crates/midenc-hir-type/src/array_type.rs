@@ -51,6 +51,23 @@ impl ArrayType {
         }
     }
 
+    /// Returns the size in bytes of this array type
+    ///
+    /// Every element after the first is padded to its alignment, which is a whole number of
+    /// bytes, so this is [Self::size_in_bits] rounded up to whole bytes, computed without the
+    /// bit count.
+    pub fn size_in_bytes(&self) -> usize {
+        match self.len {
+            0 => 0,
+            1 => self.ty.size_in_bytes(),
+            n => {
+                let element_size = self.ty.size_in_bytes();
+                let padded_element_size = element_size.align_up(self.ty.min_alignment());
+                element_size + (padded_element_size * (n - 1))
+            },
+        }
+    }
+
     /// Returns the size in bits of this array type, or `None` if it does not fit in a `usize`.
     ///
     /// [Self::size_in_bits] multiplies the padded element size by the length without checking,
