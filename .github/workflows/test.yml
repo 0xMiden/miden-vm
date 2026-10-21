@@ -5,6 +5,9 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -38,6 +41,10 @@ jobs:
           if [ "${EVENT_NAME}" != "pull_request" ]; then
             run=true
           else
+            : "${BASE_SHA:?Missing PR base SHA}" "${HEAD_SHA:?Missing PR head SHA}"
+            changed_paths="$(mktemp)"
+            trap 'rm -f "${changed_paths}"' EXIT
+            git diff --no-renames --name-only -z "${BASE_SHA}...${HEAD_SHA}" -- > "${changed_paths}"
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
@@ -49,7 +56,7 @@ jobs:
                   break
                   ;;
               esac
-            done < <(git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
+            done < "${changed_paths}"
           fi
 
           echo "run=${run}" >> "${GITHUB_OUTPUT}"
@@ -62,10 +69,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check benchmark runner preflight
+      - name: Check CI and benchmark scripts
         run: |
-          bash -n scripts/bench_eidos_vs_poseidon2.sh
           python3 -m unittest discover -s scripts/tests -v
+          if [ -f scripts/bench_eidos_vs_poseidon2.sh ]; then
+            bash -n scripts/bench_eidos_vs_poseidon2.sh
+          fi
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
@@ -80,8 +89,6 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check generated precompile MASM
-        run: make check-precompile-masm
       - name: Build tests
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
@@ -245,7 +252,7 @@ jobs:
         run: make test-docs
 
   check-constraints:
-    name: check recursive constraint and PVM ACE artifacts
+    name: check recursive constraint artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,10 +267,54 @@ jobs:
         run: rustup update --no-self-update
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
-      - name: Check PVM ACE constants and MASM artifacts for drift
-        run: make check-pvm-constants
-      - name: Check pinned PVM proof fixture for drift
-        run: make check-pvm-proof-fixture
+
+  check-pvm-artifacts:
+    name: check PVM artifacts
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Check PVM and precompile artifacts for drift
+        run: make check-pvm-artifacts
+
+  pvm-checks:
+    name: PVM checks
+    needs: [check-constraints, check-pvm-artifacts]
+    if: ${{ always() }}
+    runs-on: ubuntu-slim
+    permissions: {}
+    steps:
+      - name: Require successful artifact checks
+        env:
+          PASSED: ${{ needs.check-constraints.result == 'success' && needs.check-pvm-artifacts.result == 'success' }}
+        run: test "${PASSED}" = true
+
+  # Keep the deployed required status names until both branches require PVM checks.
+  legacy-pvm-status:
+    name: ${{ matrix.status }}
+    needs: [check-constraints, check-pvm-artifacts]
+    if: ${{ always() }}
+    runs-on: ubuntu-slim
+    permissions: {}
+    strategy:
+      matrix:
+        status:
+          - check PVM registry and MASM artifacts
+          - check recursive constraint and PVM ACE artifacts
+    steps:
+      - name: Require successful artifact checks
+        env:
+          PASSED: ${{ needs.check-constraints.result == 'success' && needs.check-pvm-artifacts.result == 'success' }}
+        run: test "${PASSED}" = true
 
   run-examples:
     name: run masm examples
