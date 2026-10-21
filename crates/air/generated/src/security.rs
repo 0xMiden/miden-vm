@@ -8,7 +8,7 @@ use miden_core::{
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     proof::HashFunction,
 };
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
@@ -187,7 +187,7 @@ pub fn num_deep_terms(alignment: usize) -> u32 {
 /// Committed base columns for one AIR: preprocessed, main, and auxiliary traces, each its own
 /// matrix within its commitment group and so each padded on its own.
 fn column_count(air: MidenAir, alignment: usize) -> usize {
-    use miden_lifted_stark::air::{BaseAir, LiftedAir};
+    use miden_stark::air::{BaseAir, LiftedAir};
 
     aligned(BaseAir::<Felt>::preprocessed_width(&air), alignment)
         + aligned(BaseAir::<Felt>::width(&air), alignment)

@@ -6,11 +6,6 @@ use miden_core::{
     field::QuadFelt,
     proof::{HashFunction, MAX_STARK_PROOF_BYTES, StarkProof},
 };
-use miden_lifted_air::Statement;
-use miden_lifted_stark::{
-    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
-    lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
-};
 use miden_precompiles_air::{
     ChipletAir, ChipletMultiAir, preprocessed,
     security::{self, ProofSecurityParameters},
@@ -21,6 +16,10 @@ use miden_precompiles_air::{
     transcript::eidos::EidosDigest,
 };
 use miden_serde_utils::deserialize_schema_exact;
+use miden_stark::{
+    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
+    air::Statement, lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
+};
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 

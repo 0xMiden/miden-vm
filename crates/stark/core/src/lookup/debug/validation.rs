@@ -18,13 +18,9 @@
 use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
 
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_lifted_stark::air::{
-    AirBuilder, PermutationAirBuilder,
-    symbolic::{
-        BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
-        SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,
-    },
+use miden_crypto::{
+    Felt,
+    field::{BinomialExtensionField, PrimeCharacteristicRing},
 };
 use rand::RngExt;
 
@@ -32,8 +28,15 @@ use super::super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
     LookupMessage,
 };
-use crate::Felt;
+use crate::air::{
+    AirBuilder, PermutationAirBuilder,
+    symbolic::{
+        BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
+        SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,
+    },
+};
 
+type QuadFelt = BinomialExtensionField<Felt, 2>;
 type Inner = SymbolicAirBuilder<Felt, QuadFelt>;
 type Expr = SymbolicExpression<Felt>;
 type ExprEF = SymbolicExpressionExt<Felt, QuadFelt>;
@@ -136,8 +139,8 @@ pub struct ValidateLayout {
 }
 
 impl ValidateLayout {
-    fn to_symbolic(self) -> miden_lifted_stark::air::symbolic::AirLayout {
-        miden_lifted_stark::air::symbolic::AirLayout {
+    fn to_symbolic(self) -> crate::air::symbolic::AirLayout {
+        crate::air::symbolic::AirLayout {
             preprocessed_width: self.preprocessed_width,
             main_width: self.trace_width,
             num_public_values: self.num_public_values,

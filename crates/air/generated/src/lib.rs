@@ -18,9 +18,10 @@ use miden_core::{
         StackOutputs,
     },
 };
-use miden_lifted_stark::{
+use miden_stark::{
     air::{ReductionError, WindowAccess},
     challenger::CanObserve,
+    lookup,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -28,7 +29,8 @@ use proptest::prelude::*;
 pub mod ace;
 pub mod config;
 mod constraints;
-pub mod lookup;
+#[cfg(test)]
+mod lookup_tests;
 pub mod memory;
 mod proof_order;
 pub mod security;
@@ -40,7 +42,7 @@ pub mod trace;
 /// statement; it dispatches per-trace work to Core, Chiplets, Eidos compression, and
 /// byte-pair lookup AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
-/// The generic LogUp framework lives in [`crate::lookup`].
+/// The generic LogUp framework lives in [`miden_stark::lookup`].
 pub mod logup {
     pub use crate::constraints::lookup::{
         BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
@@ -97,7 +99,7 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_lifted_stark::{
+    pub use miden_stark::{
         StarkConfig,
         air::{
             AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
@@ -643,7 +645,7 @@ impl And8LookupAir {
 
 /// AIR instance identifier for the Miden multi-AIR statement.
 ///
-/// [`MultiAir::Air`](miden_lifted_stark::air::MultiAir) is a single associated type, so every
+/// [`MultiAir::Air`](miden_stark::air::MultiAir) is a single associated type, so every
 /// instance in the multi-AIR proof must have the same type. This enum identifies which concrete
 /// AIR logic to dispatch to.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1289,7 +1291,7 @@ mod tests {
             symbolic,
             "Core's declared degree must match its handwritten constraints",
         );
-        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+        assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
     }
 
     #[test]
@@ -1304,7 +1306,7 @@ mod tests {
             LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
             ConstraintDegrees { base: 0, ext: 3 }
         );
-        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
+        assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
     }
 
     #[test]

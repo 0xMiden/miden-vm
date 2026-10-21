@@ -7,7 +7,7 @@
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
-use miden_lifted_stark::{
+use miden_stark::{
     air::symbolic::{
         BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
         SymbolicExpressionExt,
@@ -32,9 +32,9 @@ pub fn eval_multi_air_constraints<A>(
     trace_alignment: usize,
 ) -> QuadFelt
 where
-    A: miden_lifted_stark::air::LiftedAir<Felt, QuadFelt>,
+    A: miden_stark::air::LiftedAir<Felt, QuadFelt>,
 {
-    use miden_lifted_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+    use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
     let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
     let shared_period =

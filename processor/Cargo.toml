@@ -35,6 +35,7 @@ proptest = { workspace = true, optional = true }
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-stark.workspace = true
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
 miden-precompiles.workspace = true

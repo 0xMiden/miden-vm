@@ -17,7 +17,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::testing::{
+use miden_stark::testing::{
     LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS,
     configs::goldilocks_poseidon2::{Felt, QuadFelt, test_lmcs},
     generate_matrices_from_specs, total_elements,
@@ -63,7 +63,7 @@ fn bench_merkle_commit(c: &mut Criterion) {
         // Extension field matrix with width-2 (simulates FRI arity-2 commit)
         // Uses FlatMatrixView to convert EF matrix to base field view
         {
-            let rng = &mut SmallRng::seed_from_u64(miden_lifted_stark::testing::TEST_SEED);
+            let rng = &mut SmallRng::seed_from_u64(miden_stark::testing::TEST_SEED);
             let ext_matrix = RowMajorMatrix::<QuadFelt>::rand(rng, n_leaves, 2);
 
             group.bench_with_input(
@@ -81,7 +81,7 @@ fn bench_merkle_commit(c: &mut Criterion) {
 
         // Extension field matrix with width-4 (simulates FRI arity-4 commit)
         {
-            let rng = &mut SmallRng::seed_from_u64(miden_lifted_stark::testing::TEST_SEED);
+            let rng = &mut SmallRng::seed_from_u64(miden_stark::testing::TEST_SEED);
             let ext_matrix = RowMajorMatrix::<QuadFelt>::rand(rng, n_leaves, 4);
 
             group.bench_with_input(

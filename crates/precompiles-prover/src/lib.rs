@@ -137,10 +137,10 @@ pub enum ProveError {
     MissingPreprocessed,
     /// The preprocessed bundle did not match the declared AIR columns/config.
     #[error(transparent)]
-    Preprocessed(#[from] miden_lifted_stark::PreprocessedValidationError),
+    Preprocessed(#[from] miden_stark::PreprocessedValidationError),
     /// The lifted STARK prover rejected the instance.
     #[error(transparent)]
-    Prover(#[from] miden_lifted_stark::ProverError),
+    Prover(#[from] miden_stark::ProverError),
     /// Failed to serialize the STARK proof data into the core proof envelope.
     #[error("failed to serialize STARK proof: {0}")]
     Serialization(#[from] wincode::error::WriteError),

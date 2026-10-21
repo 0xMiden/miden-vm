@@ -2,11 +2,13 @@
 
 use alloc::vec::Vec;
 
-use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::pcs::deep::{DeepParams, read_eval_matrices};
+use crate::{
+    pcs::deep::{DeepParams, read_eval_matrices},
+    transcript::{Channel, TranscriptError, VerifierChannel},
+};
 
 /// Opened evaluations grouped by commitment group and matrix.
 ///

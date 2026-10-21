@@ -3,8 +3,8 @@
 //! Two flavours of helpers live here:
 //!
 //! - **Structural assertion** ([`assert_prover_setup`]) — a panic-based check over
-//!   [`miden_lifted_air::debug::assert_multi_air_valid`]. Call it from tests / setup; the prover
-//!   and verifier hot paths trust the AIR's structural contract.
+//!   [`crate::air::debug::assert_multi_air_valid`]. Call it from tests / setup; the prover and
+//!   verifier hot paths trust the AIR's structural contract.
 //! - **Constraint checker** ([`check_constraints`]) — evaluates AIR constraints row-by-row on
 //!   concrete trace values and panics on the first nonzero constraint. It derives deterministic
 //!   debug challenges; it does not replay the prover transcript.
@@ -13,18 +13,20 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder, ProverStatement,
-    RowWindow, debug::assert_multi_air_valid,
-};
 use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::order::TraceOrder;
+use crate::{
+    air::{
+        AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder, ProverStatement,
+        RowWindow, debug::assert_multi_air_valid,
+    },
+    order::TraceOrder,
+};
 
 // ============================================================================
-// Structural assertions (over miden_lifted_air::debug)
+// Structural assertions (over crate::air::debug)
 // ============================================================================
 
 /// Assert the AIR's structural contract via [`assert_multi_air_valid`].
@@ -207,7 +209,7 @@ fn check_single_trace<F, EF, A>(
         };
 
         #[cfg(debug_assertions)]
-        miden_lifted_air::debug::check_builder_shape(air, &builder);
+        crate::air::debug::check_builder_shape(air, &builder);
 
         air.eval(&mut builder);
     }

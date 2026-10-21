@@ -26,14 +26,16 @@
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-use miden_lifted_air::{LiftedAir, log2_ceil_u8};
-use miden_stark_transcript::Channel;
 use p3_field::{ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_slice_index_bits;
 use thiserror::Error;
 
-use crate::selectors::Selectors;
+use crate::{
+    air::{LiftedAir, log2_ceil_u8},
+    selectors::Selectors,
+    transcript::Channel,
+};
 
 // ============================================================================
 // Errors
@@ -564,7 +566,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 /// Let N be the trace height (so trace columns are polynomials of degree < N).
 /// Symbolic evaluation assigns each constraint a *degree multiple* M
 /// (the AIR's combined
-/// [`constraint_degree().max()`](miden_lifted_air::ConstraintDegrees::max)),
+/// [`constraint_degree().max()`](crate::air::ConstraintDegrees::max)),
 /// so the numerator polynomial C(X) has degree bounded by roughly M·(N − 1).
 ///
 /// In a STARK, the constraint numerator is divisible by the trace vanishing

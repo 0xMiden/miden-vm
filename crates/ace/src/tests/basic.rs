@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_lifted_stark::{
+use miden_stark::{
     air::{
         AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
         symbolic::{AirLayout, SymbolicAirBuilder},

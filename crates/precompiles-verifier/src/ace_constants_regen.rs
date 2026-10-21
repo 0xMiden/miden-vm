@@ -23,9 +23,8 @@ use miden_ace_codegen::{
 };
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_air::BaseAir;
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
+use miden_stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs};
 
 use crate::{
     ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},

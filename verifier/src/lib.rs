@@ -17,11 +17,11 @@ use miden_core::{
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
-use miden_lifted_stark::{
+use miden_serde_utils::deserialize_schema_exact;
+use miden_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData,
     verifier::VerifierError,
 };
-use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
 
@@ -876,7 +876,7 @@ mod tests {
         )
         .unwrap();
 
-        let commitment = miden_lifted_stark::Preprocessed::build(&statement, &config)
+        let commitment = miden_stark::Preprocessed::build(&statement, &config)
             .map(|preprocessed| preprocessed.commitment());
 
         assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));

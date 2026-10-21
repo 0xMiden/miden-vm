@@ -3,7 +3,7 @@
 //! Every LogUp relation in the Precompile VM is identified by a globally
 //! unique numeric **bus id**. The id selects a precomputed prefix
 //! `bus_prefix[id] = α + (id + 1) · β^W` (see [`logup`](crate::logup) and
-//! [`Challenges`](miden_air::lookup::Challenges)) which serves as the encoded tuple's
+//! [`Challenges`](miden_stark::lookup::Challenges)) which serves as the encoded tuple's
 //! additive base. Distinct bus ids therefore live on disjoint
 //! `β^W`-spaced offsets, providing domain separation between relations
 //! without consuming a payload slot.
@@ -59,7 +59,7 @@
 /// Domain-separated bus identifier.
 ///
 /// `#[repr(usize)]` lets each variant be cast directly to the `usize`
-/// argument [`Challenges::encode`](miden_air::lookup::Challenges::encode) expects.
+/// argument [`Challenges::encode`](miden_stark::lookup::Challenges::encode) expects.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BusId {
@@ -108,8 +108,8 @@ pub enum BusId {
 
 /// Number of bus-prefix slots, one greater than the maximum [`BusId`].
 ///
-/// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes one prefix for each numeric
-/// ID in this range, including the reserved entries.
+/// [`Challenges::new`](miden_stark::lookup::Challenges::new) precomputes one prefix for each
+/// numeric ID in this range, including the reserved entries.
 pub const NUM_BUS_IDS: usize = 38;
 const _: () = assert!(NUM_BUS_IDS == BusId::Sha256IoContinuation as usize + 1);
 
@@ -156,7 +156,7 @@ const _: () = assert!(BusId::Sha256IoContinuation as usize == 37);
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
-/// by [`Challenges`](miden_air::lookup::Challenges).
+/// by [`Challenges`](miden_stark::lookup::Challenges).
 ///
 /// The widest payload is `UintLimbs`: `ptr`, `bound_ptr`, and one complete 16×16-bit value. The
 /// multiplication chiplet consumes this raw limb view. Message width affects only the precomputed

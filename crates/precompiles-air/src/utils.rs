@@ -21,7 +21,7 @@
 use core::array;
 
 use miden_core::{Felt, field::Algebra};
-use miden_lifted_air::WindowAccess;
+use miden_stark::air::WindowAccess;
 
 /// Pack base-`base` digits LSB-first into a Felt-algebra expression.
 ///

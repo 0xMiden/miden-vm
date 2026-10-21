@@ -18,7 +18,7 @@ concurrent = [
     "std",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
-    "miden-lifted-stark/concurrent",
+    "miden-stark/concurrent",
 ]
 std = [
     "miden-air/std",
@@ -34,8 +34,7 @@ testing = ["miden-air/testing"]
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-lifted-air.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 miden-precompiles.workspace = true
 miden-utils-sync.workspace = true
 p3-security.workspace = true

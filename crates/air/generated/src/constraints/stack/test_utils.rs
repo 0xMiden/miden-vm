@@ -4,7 +4,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_stark::{
+use miden_stark::{
     air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
     matrix::RowMajorMatrix,
 };

@@ -8,14 +8,14 @@ use miden_core::{
     },
 };
 use miden_crypto::hash::eidos::EidosChallenger;
-use miden_lifted_stark::{
+use miden_processor::ExecutionOutput;
+use miden_stark::{
     StarkConfig,
     challenger::{CanObserve, FieldChallenger, GrindingChallenger},
     testing::{
         Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
 };
-use miden_processor::ExecutionOutput;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 

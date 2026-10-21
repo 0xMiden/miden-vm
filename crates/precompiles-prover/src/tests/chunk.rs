@@ -12,7 +12,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::LiftedAir;
+use miden_stark::air::LiftedAir;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

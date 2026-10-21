@@ -20,8 +20,12 @@
 #### Changes
 
 - [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
+- [BREAKING] Consolidated AIR contracts, transcript channels, generic LogUp support, and shared
+  hash configurations in `miden-stark`; it replaces `miden-lifted-air`, `miden-lifted-stark`,
+  and `miden-stark-transcript` ([#4055](https://github.com/0xMiden/miden-vm/issues/4055)).
+
 - [BREAKING] Removed the crypto crate's STARK reexports; VM and proof consumers now import
-  `miden_lifted_stark` directly. Moved `EidosLmcs` and `lmcs_config` there, and absorbed
+  `miden_stark` directly. Moved `EidosLmcs` and `lmcs_config` there, and absorbed
   `miden-stateful-hasher` into `miden_crypto::hash::stateful`
   ([#4055](https://github.com/0xMiden/miden-vm/issues/4055)).
 

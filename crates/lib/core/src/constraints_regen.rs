@@ -18,7 +18,7 @@ use miden_air::{
     config::{self, relation_digest},
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
-use miden_lifted_stark::{
+use miden_stark::{
     Preprocessed, QuotientRecompositionInputs, StarkConfig,
     air::{BaseAir, LiftedAir},
     lmcs::Lmcs,

@@ -2,7 +2,7 @@
 
 use miden_air::eidos_compression::core::{self as shared, EidosCompressionSelectors};
 use miden_core::Felt;
-use miden_lifted_stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::layout::footer_digest_col;
 

@@ -21,8 +21,10 @@ use miden_core::{
     field::{BasedVectorSpace, QuadFelt},
     proof::HashFunction,
 };
-use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::{
+    air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir},
+    pcs::PcsParams,
+};
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{

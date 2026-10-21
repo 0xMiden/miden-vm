@@ -763,7 +763,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
+ "miden-stark",
  "thiserror",
 ]
 
@@ -774,13 +774,11 @@ dependencies = [
  "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
+ "miden-stark",
  "miden-utils-indexing",
  "p3-field",
  "p3-security",
- "rand 0.10.2",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -832,7 +830,7 @@ version = "1.0.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
+ "miden-stark",
 ]
 
 [[package]]
@@ -960,40 +958,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-lifted-air"
-version = "1.0.0"
-dependencies = [
- "p3-air",
- "p3-challenger",
- "p3-field",
- "p3-matrix",
- "p3-util",
- "thiserror",
-]
-
-[[package]]
-name = "miden-lifted-stark"
-version = "1.0.0"
-dependencies = [
- "miden-crypto",
- "miden-lifted-air",
- "miden-stark-transcript",
- "miden-utils-sync",
- "p3-challenger",
- "p3-dft",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-symmetric",
- "p3-util",
- "rand 0.10.2",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "miden-mast-package"
 version = "1.0.0"
 dependencies = [
@@ -1077,6 +1041,7 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",
+ "miden-stark",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
  "paste",
@@ -1121,13 +1086,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-stark-transcript"
+name = "miden-stark"
 version = "1.0.0"
 dependencies = [
+ "miden-crypto",
+ "miden-utils-sync",
+ "p3-air",
  "p3-challenger",
+ "p3-dft",
  "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "rand 0.10.2",
  "serde",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

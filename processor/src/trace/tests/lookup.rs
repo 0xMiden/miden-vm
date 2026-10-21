@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use miden_air::{
     BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{
@@ -40,6 +39,9 @@ use miden_core::{
     },
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
+};
+use miden_stark::lookup::{
+    Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions,
 };
 
 use super::{

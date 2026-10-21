@@ -8,7 +8,7 @@
 //! the node-for-node differential retires with it. Do not add production callers.
 
 use miden_crypto::field::{ExtensionField, Field};
-use miden_lifted_stark::air::symbolic::{
+use miden_stark::air::symbolic::{
     BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
     SymbolicExpressionExt,
 };

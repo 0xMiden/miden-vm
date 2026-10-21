@@ -2,16 +2,18 @@
 
 use std::vec::Vec;
 
-use miden_air::lookup::{
-    LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

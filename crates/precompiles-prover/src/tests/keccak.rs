@@ -6,17 +6,18 @@
 
 use std::{collections::HashMap, vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupFractions, build_lookup_fractions,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::air::ConstraintDegrees;
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupFractions, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use proptest::prelude::*;
 
 use crate::{
@@ -69,7 +70,7 @@ fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
 
 #[test]
 fn packed_passthrough_keeps_round_assertions_within_budget() {
-    let counts = miden_lifted_air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
+    let counts = miden_stark::air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
     assert_eq!(counts.base, 15);
 }
 

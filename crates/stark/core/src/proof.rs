@@ -16,21 +16,20 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{BaseAir, LiftedAir, MultiAir};
-use miden_stark_transcript::{Channel, VerifierChannel, VerifierTranscript};
-// Re-exported here so the crate root does not need a dedicated `transcript` module: callers
-// reach these via `proof::` alongside the proof types they parameterize.
-pub use miden_stark_transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 use p3_challenger::{CanFinalizeDigest, CanObserve};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use serde::{Deserialize, Serialize};
 
+// Expose the transcript data types alongside the proof types they parameterize.
+pub use crate::transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 use crate::{
     StarkConfig,
+    air::{BaseAir, LiftedAir, MultiAir},
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     lmcs::Lmcs,
     order::TraceOrder,
     pcs::{proof::PcsProof, verifier::CommitmentGroup},
+    transcript::{Channel, VerifierChannel, VerifierTranscript},
     util::align::aligned_len,
     verifier::{VerifierError, VerifierInstance},
 };
@@ -43,7 +42,7 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 ///
 /// The proof's AIR ordering is *not* stored. Both sides reconstruct it with a
 /// stable sort by `(log_trace_height, instance_index)`, where `instance_index`
-/// is the AIR's position in [`miden_lifted_air::Statement::airs`]. The derived
+/// is the AIR's position in [`crate::air::Statement::airs`]. The derived
 /// order then drives commitment grouping, aux-value layout, quotient accumulation, and PCS
 /// opening widths. The proof therefore commits to the instance-order heights,
 /// not an explicit ordering permutation.
@@ -57,7 +56,7 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 #[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
 pub struct StarkProofData<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     /// Per-AIR log₂ trace heights, in instance order. Matches
-    /// [`miden_lifted_air::Statement::airs`] position-for-position.
+    /// [`crate::air::Statement::airs`] position-for-position.
     pub(crate) log_trace_heights: Vec<u8>,
     pub(crate) transcript: TranscriptData<F, Commitment<F, EF, SC>>,
 }
@@ -196,7 +195,7 @@ where
     EF: ExtensionField<L::F>,
 {
     /// Per-AIR log₂ trace heights in instance order (matches
-    /// [`miden_lifted_air::Statement::airs`] position-for-position).
+    /// [`crate::air::Statement::airs`] position-for-position).
     pub fn log_trace_heights(&self) -> &[u8] {
         self.trace_order.log_heights()
     }

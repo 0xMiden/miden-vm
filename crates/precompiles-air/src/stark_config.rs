@@ -3,23 +3,23 @@
 //! This module provides production-style configuration factories matching the Miden VM
 //! hash-function surface, along with a smaller Eidos configuration for local tests.
 //!
-//! Production configs delegate to `miden_air::config`; callers pass the relation digest
+//! Production configs delegate to `miden_stark::config`; callers pass the relation digest
 //! explicitly. Callers should observe protocol parameters with [`observe_protocol_params`]
 //! before proving or verifying.
 
-pub use miden_air::config::{
-    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, eidos_config,
-    keccak_config, observe_protocol_params,
-};
-use miden_core::Felt;
+use miden_core::{Felt, program::domain::STARK_TRANSCRIPT};
 use miden_crypto::hash::eidos::MidenEidosChallenger;
-use miden_lifted_stark::{StarkConfig, pcs::PcsParams};
+pub use miden_stark::config::{
+    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, keccak_config,
+    observe_protocol_params,
+};
+use miden_stark::{StarkConfig, pcs::PcsParams};
 
 // SHARED TYPES
 // ================================================================================================
 
 /// Precompile prover STARK configuration with pre-filled common type parameters.
-pub type PrecompileStarkConfig<L, Ch> = miden_air::config::MidenStarkConfig<L, Ch>;
+pub type PrecompileStarkConfig<L, Ch> = miden_stark::config::MidenStarkConfig<L, Ch>;
 
 /// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.
 ///
@@ -38,6 +38,11 @@ pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
 /// Default commitment hash for precompile proofs.
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Eidos;
+
+/// Creates an Eidos-based STARK configuration bound to the PVM transcript domain.
+pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
+    miden_stark::config::eidos_config(params, relation_digest, STARK_TRANSCRIPT)
+}
 
 // PRECOMPILE PCS PARAMETERS
 // ================================================================================================

@@ -2,7 +2,6 @@
 //!
 //! Opens committed matrices at out-of-domain evaluation points.
 
-use miden_stark_transcript::ProverChannel;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use tracing::{info_span, instrument};
@@ -11,6 +10,7 @@ use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::{deep::prover::DeepPoly, fri::prover::FriPolys, params::PcsParams},
+    transcript::ProverChannel,
 };
 
 /// Open committed matrices at N evaluation points, writing to a prover channel.

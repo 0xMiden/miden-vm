@@ -16,7 +16,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 

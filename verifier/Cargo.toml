@@ -31,7 +31,7 @@ std = [
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 miden-crypto.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-verifier.workspace = true

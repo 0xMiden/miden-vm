@@ -2,7 +2,7 @@
 
 use miden_air::config::{eidos_config, observe_protocol_params};
 use miden_core::Felt;
-use miden_lifted_stark::{
+use miden_stark::{
     StarkConfig,
     challenger::{CanObserve, FieldChallenger},
     pcs::PcsParams,

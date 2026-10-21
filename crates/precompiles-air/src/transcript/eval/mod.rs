@@ -69,8 +69,8 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::EidosDomain;
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_precompiles::{CurvePrecompile, UintPrecompile};
+use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     ec::{

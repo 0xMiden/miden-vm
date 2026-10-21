@@ -1,14 +1,16 @@
 use std::{collections::HashMap, string::String, vec};
 
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles_air::hash::sha512::{
     COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
+};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::Challenges,
 };
 
 use crate::{

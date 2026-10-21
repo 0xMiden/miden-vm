@@ -137,7 +137,7 @@ pub mod core {
 #[doc(hidden)]
 pub mod testing {
     use miden_core::Felt;
-    use miden_lifted_stark::air::LiftedAirBuilder;
+    use miden_stark::air::LiftedAirBuilder;
 
     pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
 

@@ -56,10 +56,11 @@ pub(crate) mod verifier;
 
 use alloc::vec::Vec;
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use proof::OpenedValues;
+
+use crate::transcript::{TranscriptError, VerifierChannel};
 
 /// DEEP quotient parameters.
 ///

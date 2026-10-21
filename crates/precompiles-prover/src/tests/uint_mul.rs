@@ -5,13 +5,15 @@
 
 use std::{collections::HashMap, vec::Vec};
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::LiftedAir;
+use miden_stark::{
+    air::LiftedAir,
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 

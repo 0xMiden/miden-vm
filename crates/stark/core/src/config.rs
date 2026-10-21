@@ -9,12 +9,17 @@
 //! examples. Production integrations can implement `StarkConfig` on their own
 //! concrete struct.
 
+mod miden;
+
 use core::marker::PhantomData;
 
+pub use miden::{
+    Blake3Config, EidosConfig, KeccakConfig, MidenStarkConfig, RelationDigest, blake3_256_config,
+    eidos_config, keccak_config, observe_protocol_params, relation_digest,
+};
 use miden_crypto::hash::eidos::{
     DIGEST_WIDTH, EidosLmcsCompressor, EidosLmcsHasher, PACKED_LANES, PackedFelt,
 };
-use miden_stark_transcript::TranscriptChallenger;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
@@ -22,6 +27,7 @@ use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use crate::{
     lmcs::{Lmcs, config::LmcsConfig},
     pcs::params::PcsParams,
+    transcript::TranscriptChallenger,
 };
 
 /// Lifted STARK configuration.
@@ -159,10 +165,36 @@ mod tests {
     use rand::{SeedableRng, rngs::SmallRng};
 
     use super::*;
-    use crate::lmcs::{LmcsTree, hiding_config::HidingLmcsConfig};
+    use crate::{
+        challenger::CanObserve,
+        lmcs::{LmcsTree, hiding_config::HidingLmcsConfig},
+    };
 
     type PackedU64 = [u64; PACKED_LANES];
     type Digest = [u64; DIGEST_WIDTH];
+
+    #[derive(Default)]
+    struct RecordingChallenger(Vec<Felt>);
+
+    impl CanObserve<Felt> for RecordingChallenger {
+        fn observe(&mut self, value: Felt) {
+            self.0.push(value);
+        }
+    }
+
+    /// Transcript domain separation must bind the parameters supplied to the config.
+    #[test]
+    fn protocol_observation_uses_the_supplied_pcs_params() {
+        let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
+        let mut challenger = RecordingChallenger::default();
+        observe_protocol_params(&params, &mut challenger);
+        assert_eq!(
+            challenger.0,
+            [19, 13, 11, 5, 4, 6, 8, 0].map(Felt::new_unchecked),
+            "the transcript must encode [queries, query PoW, DEEP PoW, folding PoW, blowup log, \
+             final-degree log, folding arity, padding]",
+        );
+    }
 
     #[test]
     fn block_hashing_preserves_length_bound_salted_commitment() {

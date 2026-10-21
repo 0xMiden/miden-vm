@@ -8,7 +8,7 @@
 
 use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_stark::air::{BaseAir, LiftedAir};
+use miden_stark::air::{BaseAir, LiftedAir};
 
 use crate::{
     AceError, EXT_DEGREE,

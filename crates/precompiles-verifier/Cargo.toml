@@ -33,8 +33,7 @@ miden-ace-codegen = { workspace = true, optional = true }
 miden-air = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-lifted-air.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 miden-precompiles-air.workspace = true
 miden-serde-utils.workspace = true
 serde.workspace = true

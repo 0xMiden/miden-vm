@@ -2,10 +2,13 @@
 
 use alloc::vec::Vec;
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, TwoAdicField};
 
-use crate::{domain::LiftedDomain, pcs::fri::FriParams};
+use crate::{
+    domain::LiftedDomain,
+    pcs::fri::FriParams,
+    transcript::{TranscriptError, VerifierChannel},
+};
 
 /// Structured view of a single FRI folding round.
 pub struct FriRoundProof<F, EF, Commitment> {

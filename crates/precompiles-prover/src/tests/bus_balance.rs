@@ -2,13 +2,15 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

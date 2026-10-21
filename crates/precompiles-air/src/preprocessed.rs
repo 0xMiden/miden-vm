@@ -12,8 +12,7 @@ use alloc::vec;
 use core::ops::Deref;
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::Statement;
-use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
+use miden_stark::{Preprocessed, StarkConfig, air::Statement, lmcs::Lmcs};
 
 use crate::{
     ChipletAir, ChipletMultiAir,

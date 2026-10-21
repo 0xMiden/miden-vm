@@ -1,8 +1,8 @@
 //! PVM relation definitions over the shared Miden LogUp framework.
 //!
 //! Prover-side fraction collection, centered cyclic accumulation, constraint emission, and the
-//! preprocessed/main window contract come directly from [`miden_air::lookup`]. LogUp columns occupy
-//! the declared auxiliary prefix; chiplet-specific extension-field registers may follow that
+//! preprocessed/main window contract come directly from [`miden_stark::lookup`]. LogUp columns
+//! occupy the declared auxiliary prefix; chiplet-specific extension-field registers may follow that
 //! prefix without entering the bus balance.
 //!
 //! ## Encoding
@@ -45,14 +45,14 @@ macro_rules! frac_col {
     };
 }
 pub(crate) use frac_col;
+use miden_core::field::QuadFelt;
 // Re-export miden-vm's framework so chiplets only need one `use`.
-pub use miden_air::lookup::{
+pub use miden_stark::lookup::{
     BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
     LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
     accumulate, build_logup_aux_trace, build_logup_aux_trace_with_preprocessed,
     build_lookup_fractions,
 };
-use miden_core::field::QuadFelt;
 
 use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 

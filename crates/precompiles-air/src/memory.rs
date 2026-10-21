@@ -21,8 +21,11 @@ use miden_core::{
     field::{BasedVectorSpace, QuadFelt},
     proof::HashFunction,
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    log_quotient_degree,
+    pcs::PcsParams,
+};
 
 use crate::{
     air::{ChipletAir, NUM_CHIPLETS},
@@ -59,7 +62,7 @@ pub const SAFETY_DENOMINATOR: u64 = 4;
 /// Per-leaf LMCS hashing-scratch width, in bytes, for `hash_fn`.
 ///
 /// Building an LMCS tree's leaf layer holds a buffer of these per-leaf states (see
-/// `LiftedTree::build_with_alignment` in `miden-lifted-stark`) until every leaf's digest has been
+/// `LiftedTree::build_with_alignment` in `miden-stark`) until every leaf's digest has been
 /// squeezed out of it; the buffer coexists with the squeezed digests until it is dropped. Blake3's
 /// `ChainingHasher` and the Eidos LMCS hasher use the digest itself as their state, so they cost
 /// nothing beyond [`DIGEST_BYTES`]; Keccak holds a wider sponge state.

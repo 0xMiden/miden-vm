@@ -1,7 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::{iter::zip, marker::PhantomData};
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 use p3_matrix::Matrix;
 use thiserror::Error;
@@ -13,6 +12,7 @@ use crate::{
         deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
         verifier::CommitmentGroup,
     },
+    transcript::{TranscriptError, VerifierChannel},
 };
 
 /// Verifier's view of the DEEP quotient as a point-query oracle.

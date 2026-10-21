@@ -5,13 +5,13 @@
 //!
 //! [`LiftedAir::eval`] is generic over `AB: LiftedAirBuilder`, so it cannot branch
 //! on the concrete builder type. All builders expose data through the same trait
-//! methods — [`preprocessed()`](crate::AirBuilder::preprocessed),
-//! [`main()`](crate::AirBuilder::main),
-//! [`permutation()`](crate::PermutationAirBuilder::permutation),
-//! [`public_values()`](crate::AirBuilder::public_values),
-//! [`permutation_randomness()`](crate::PermutationAirBuilder::permutation_randomness),
-//! [`permutation_values()`](crate::PermutationAirBuilder::permutation_values), and
-//! [`periodic_values()`](crate::AirBuilder::periodic_values) — which return
+//! methods — [`preprocessed()`](crate::air::AirBuilder::preprocessed),
+//! [`main()`](crate::air::AirBuilder::main),
+//! [`permutation()`](crate::air::PermutationAirBuilder::permutation),
+//! [`public_values()`](crate::air::AirBuilder::public_values),
+//! [`permutation_randomness()`](crate::air::PermutationAirBuilder::permutation_randomness),
+//! [`permutation_values()`](crate::air::PermutationAirBuilder::permutation_values), and
+//! [`periodic_values()`](crate::air::AirBuilder::periodic_values) — which return
 //! matrices or slices.
 //!
 //! If the symbolic evaluation in [`LiftedAir::constraint_degree`] succeeds (i.e.
@@ -19,7 +19,7 @@
 //! the declared dimensions. Any concrete builder constructed with matching dimensions
 //! is therefore safe from out-of-bounds panics.
 //!
-//! Use [`crate::debug::check_builder_shape`] to verify a concrete builder's
+//! Use [`crate::air::debug::check_builder_shape`] to verify a concrete builder's
 //! dimensions match the AIR before calling `eval()`.
 
 use alloc::{boxed::Box, vec::Vec};
@@ -29,7 +29,7 @@ use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{
+use crate::air::{
     LiftedAirBuilder,
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
 };
@@ -51,7 +51,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// The default derives it from [`periodic_columns`](BaseAir::periodic_columns),
     /// asserting each column is a non-empty power of two. Override to return it
     /// directly when known statically; the override is cross-checked by
-    /// [`crate::debug::assert_multi_air_valid`].
+    /// [`crate::air::debug::assert_multi_air_valid`].
     fn max_periodic_length(&self) -> usize {
         self.periodic_columns()
             .iter()
@@ -77,8 +77,8 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     ///
     /// Returned by [`build_aux_trace`](Self::build_aux_trace) alongside the aux trace
     /// matrix; the count is independent of [`aux_width`](Self::aux_width) (the number
-    /// of aux trace columns). Exposed to constraints as *permutation values* via
-    /// [`PermutationAirBuilder::permutation_values`](crate::PermutationAirBuilder::permutation_values).
+    /// of aux trace columns). Exposed to constraints as
+    /// [permutation values](crate::air::PermutationAirBuilder::permutation_values).
     fn num_aux_values(&self) -> usize;
 
     /// Build this AIR's auxiliary trace and aux values.
@@ -244,13 +244,13 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 /// owned here, a `MultiAir` is constructed per proof.
 ///
 /// The framework defines instance order as the position of an AIR within
-/// [`Self::airs`]. Every per-AIR slice elsewhere on [`Statement`](crate::Statement) /
-/// [`ProverStatement`](crate::ProverStatement) uses the same ordering.
+/// [`Self::airs`]. Every per-AIR slice elsewhere on [`Statement`](crate::air::Statement) /
+/// [`ProverStatement`](crate::air::ProverStatement) uses the same ordering.
 ///
 /// # Structural contract
 ///
 /// Prover/verifier hot paths assume the structural invariants checked by
-/// [`crate::debug::assert_multi_air_valid`]. In particular, `airs()` must be
+/// [`crate::air::debug::assert_multi_air_valid`]. In particular, `airs()` must be
 /// non-empty and each AIR's dimensions and periodic columns must be well-formed.
 /// Public inputs are stored in instance order, with each AIR's slice sized
 /// by [`BaseAir::num_public_values`].
@@ -271,7 +271,7 @@ where
     /// These inputs are public/verifier-visible, but are separate from each AIR's
     /// `air_inputs` and are unrelated to aux trace columns. They are
     /// available only to the statement-level cross-AIR assertions. Validated by
-    /// [`Statement::new`](crate::Statement::new) before any cryptographic work.
+    /// [`Statement::new`](crate::air::Statement::new) before any cryptographic work.
     /// Default `0`; implementations that consume `aux_inputs` must override so
     /// the budget matches the schema their `eval_external` decodes.
     fn max_aux_inputs(&self) -> usize {
@@ -296,8 +296,8 @@ where
     /// - `challenges`: shared extension-field challenge pool; each AIR consumes the prefix of
     ///   length `air.num_randomness()`.
     /// - `air_inputs`: public inputs per AIR in instance order, with lengths validated by
-    ///   [`Statement::new`](crate::Statement::new).
-    /// - `aux_inputs`: the extra inputs from the [`Statement`](crate::Statement).
+    ///   [`Statement::new`](crate::air::Statement::new).
+    /// - `aux_inputs`: the extra inputs from the [`Statement`](crate::air::Statement).
     /// - `aux_values`, `log_trace_heights`: parallel per-AIR slices in instance order.
     ///   `aux_values[i]` and `log_trace_heights[i]` both describe `self.airs()[i]`. The protocol
     ///   derives proof order by stable-sorting instance indices by `(log_trace_height,
@@ -329,7 +329,7 @@ where
     /// observes the instance count and `log_trace_heights` separately after this
     /// hook, but passes the heights here so custom bindings can include AIR
     /// metadata that depends on the prover-chosen trace ordering or heights.
-    /// See [`Statement::observe`](crate::Statement::observe) for a runnable
+    /// See [`Statement::observe`](crate::air::Statement::observe) for a runnable
     /// example of the default binding sequence.
     ///
     /// # Soundness gap (TODO)

@@ -22,10 +22,10 @@
 //! symbolic `AB::Expr` / `AB::ExprEF` associated types) and the prover-path adapter
 //! (instantiated with the concrete `F` / `EF` field types) can satisfy them.
 
-use miden_core::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
-use miden_lifted_stark::air::WindowAccess;
+use miden_crypto::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 
 use super::message::LookupMessage;
+use crate::air::WindowAccess;
 
 // DEGREE ANNOTATION
 // ================================================================================================
@@ -513,7 +513,7 @@ pub trait BoundaryBuilder {
     type EF: ExtensionField<Self::F>;
 
     /// Variable-length public inputs (e.g. kernel felts). Matches the layout the
-    /// prover hands to `miden_lifted_stark::prover::prove_single`.
+    /// prover hands to `crate::prover::prove_single`.
     fn var_len_public_inputs(&self) -> &[&[Self::F]];
 
     /// Emit a boundary interaction with multiplicity `+1`.

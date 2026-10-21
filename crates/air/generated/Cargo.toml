@@ -20,15 +20,15 @@ doctest = false
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent", "miden-lifted-stark/concurrent"]
+std = ["miden-core/std", "miden-stark/std", "proptest?/std", "thiserror/std"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
 miden-ace-codegen.workspace = true
 miden-core.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
@@ -36,9 +36,7 @@ miden-utils-indexing.workspace = true
 p3-field.workspace = true
 p3-security.workspace = true
 proptest = { workspace = true, optional = true }
-rand.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
