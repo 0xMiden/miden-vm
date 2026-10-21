@@ -3,24 +3,23 @@
 //! This module provides production-style configuration factories matching the Miden VM
 //! hash-function surface, along with a smaller Eidos configuration for local tests.
 //!
-//! Production configs delegate to `crate::shared::config`; callers pass the relation digest
+//! Production configs delegate to `miden_stark::config`; callers pass the relation digest
 //! explicitly. Callers should observe protocol parameters with [`observe_protocol_params`]
 //! before proving or verifying.
 
-use miden_core::Felt;
+use miden_core::{Felt, program::domain::STARK_TRANSCRIPT};
 use miden_crypto::hash::eidos::MidenEidosChallenger;
-use miden_lifted_stark::{StarkConfig, pcs::PcsParams};
-
-pub use crate::shared::config::{
-    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, eidos_config,
-    keccak_config, observe_protocol_params,
+pub use miden_stark::config::{
+    Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, keccak_config,
+    observe_protocol_params,
 };
+use miden_stark::{StarkConfig, pcs::PcsParams};
 
 // SHARED TYPES
 // ================================================================================================
 
 /// Precompile prover STARK configuration with pre-filled common type parameters.
-pub type PrecompileStarkConfig<L, Ch> = crate::shared::config::MidenStarkConfig<L, Ch>;
+pub type PrecompileStarkConfig<L, Ch> = miden_stark::config::MidenStarkConfig<L, Ch>;
 
 /// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.
 ///
@@ -44,19 +43,24 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 // ================================================================================================
 
 /// Log2 of the PVM FRI blowup factor (blowup = 8).
-pub(crate) use miden_air_definitions::precompiles::policy::LOG_BLOWUP;
+pub(crate) use super::policy::LOG_BLOWUP;
 /// Log2 of the PVM FRI folding arity (arity = 4).
-pub(crate) use miden_air_definitions::precompiles::policy::LOG_FOLDING_ARITY;
+pub(crate) use super::policy::LOG_FOLDING_ARITY;
 /// PCS parameters for the precompile chiplet stack.
 ///
-/// Mirrors `crate::shared::config::pcs_params` in every parameter, including
+/// Mirrors `crate::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
 /// relying on the core VM's defaults. Every [`ChipletAir`](crate::precompiles::ChipletAir)
 /// requires at most four quotient chunks, below the eight permitted by `log_blowup = 3`. The
 /// MASM verifier compiles this PCS geometry, so changing it requires a coordinated MASM update
 /// and security review; it is not a runtime configuration.
-pub use miden_air_definitions::precompiles::policy::precompile_pcs_params;
+pub use super::policy::precompile_pcs_params;
+
+/// Creates the PVM Eidos configuration with its existing transcript domain.
+pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
+    miden_stark::config::eidos_config(params, relation_digest, STARK_TRANSCRIPT)
+}
 
 // TEST CONFIG
 // ================================================================================================

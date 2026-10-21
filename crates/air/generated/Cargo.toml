@@ -22,7 +22,7 @@ default = ["std"]
 compiler = ["miden-air-definitions/compiler", "miden-ace-codegen/compiler"]
 arbitrary = ["std", "miden-air-definitions/arbitrary"]
 std = ["miden-air-definitions/std", "miden-core/std"]
-concurrent = ["miden-air-definitions/concurrent", "std", "miden-crypto/concurrent", "miden-lifted-stark/concurrent"]
+concurrent = ["miden-air-definitions/concurrent", "std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary", "miden-air-definitions/testing"]
 
 [package.metadata.cargo-shear]
@@ -35,8 +35,7 @@ miden-ace-codegen.workspace = true
 miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-lifted-air.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 
 # External dependencies
 p3-field.workspace = true
@@ -50,6 +49,7 @@ miden-ace-codegen = { workspace = true, features = ["testing"] }
 miden-constraint-compiler.workspace = true
 
 [build-dependencies]
+miden-crypto.workspace = true
 miden-air-definitions = { workspace = true, features = ["std", "compiler"] }
 miden-ace-codegen = { workspace = true, features = ["compiler"] }
 miden-core.workspace = true

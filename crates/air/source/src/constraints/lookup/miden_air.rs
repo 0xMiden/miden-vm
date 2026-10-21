@@ -98,7 +98,7 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::{Matrix, RowMajorMatrix},
     };
-    use miden_lifted_stark::air::BaseAir;
+    use miden_stark::air::BaseAir;
 
     use crate::{
         ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,

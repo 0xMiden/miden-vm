@@ -16,7 +16,7 @@ use miden_air::{
 };
 use miden_air_definitions::{AIRS, HandwrittenMidenAir, MidenAir};
 use miden_core::{Felt, WORD_SIZE, Word, program::KernelDescriptor};
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use p3_air::BaseAir;
 
 use crate::templates::{VmDeepQueriesTemplate, VmLayoutTemplate, VmModTemplate};

@@ -1,4 +1,4 @@
-//! Canonical AIR order and protocol policy of the precompile relation.
+//! Canonical AIR order, input shape, and boundary reduction of the precompile relation.
 
 use alloc::{format, vec::Vec};
 
@@ -9,9 +9,9 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::Matrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, ReductionError};
+use miden_stark::air::{BaseAir, LiftedAir, ReductionError};
 
-use crate::precompiles::{ChipletAir, NUM_CHIPLETS, fixed, policy};
+use crate::precompiles::{ChipletAir, NUM_CHIPLETS, fixed};
 
 /// Canonical AIR identity and proof instance order.
 pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
@@ -33,7 +33,6 @@ pub fn protocol() -> RelationProtocol {
     let airs = &AIRS;
     let num_public_values = airs.iter().map(BaseAir::num_public_values).sum();
     RelationProtocol {
-        protocol_id: policy::PROTOCOL_ID,
         num_public_values,
         max_aux_inputs: 0,
         num_aux_inputs: 0,
@@ -123,7 +122,6 @@ impl AuxBoundaryPlan {
 
 #[derive(Clone, Debug)]
 pub struct RelationProtocol {
-    pub protocol_id: u64,
     pub num_public_values: usize,
     pub max_aux_inputs: usize,
     pub num_aux_inputs: usize,

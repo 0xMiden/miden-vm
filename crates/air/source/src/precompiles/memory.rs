@@ -21,8 +21,11 @@ use miden_core::{
     field::{BasedVectorSpace, QuadFelt},
     proof::HashFunction,
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    log_quotient_degree,
+    pcs::PcsParams,
+};
 
 use crate::precompiles::{
     air::{ChipletAir, NUM_CHIPLETS},
@@ -59,7 +62,7 @@ pub const SAFETY_DENOMINATOR: u64 = 4;
 /// Per-leaf LMCS hashing-scratch width, in bytes, for `hash_fn`.
 ///
 /// Building an LMCS tree's leaf layer holds a buffer of these per-leaf states (see
-/// `LiftedTree::build_with_alignment` in `miden-lifted-stark`) until every leaf's digest has been
+/// `LiftedTree::build_with_alignment` in `miden-stark`) until every leaf's digest has been
 /// squeezed out of it; the buffer coexists with the squeezed digests until it is dropped. Blake3's
 /// `ChainingHasher` and the Eidos LMCS hasher use the digest itself as their state, so they cost
 /// nothing beyond [`DIGEST_BYTES`]; Keccak holds a wider sponge state.
@@ -201,11 +204,14 @@ pub fn prover_peak_bytes_for_shape(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::precompiles::policy::precompile_pcs_params;
+    // Fixed inputs for the model's numeric fixtures; production policy is owned by miden-air.
+    fn memory_test_params() -> PcsParams {
+        PcsParams::new(3, 2, 7, 4, 12, 27, 17).expect("valid memory fixture parameters")
+    }
 
     #[test]
     fn supplied_quotient_chunks_preserve_the_symbolic_estimate() {
-        let params = precompile_pcs_params();
+        let params = memory_test_params();
         let heights = [16; NUM_CHIPLETS];
         assert_eq!(
             prover_peak_bytes_with_quotient_chunks(&heights, &params, HashFunction::Eidos, 4),
@@ -224,7 +230,7 @@ mod tests {
     #[test]
     fn preprocessed_bundle_cost_scales_with_blowup() {
         let low_blowup = PcsParams::new(1, 1, 3, 0, 0, 1, 0).expect("valid PCS params");
-        let production_blowup = precompile_pcs_params();
+        let production_blowup = memory_test_params();
 
         assert_eq!(
             prover_peak_bytes(&[0; NUM_CHIPLETS], &low_blowup, HashFunction::Blake3_256),
@@ -268,7 +274,7 @@ mod tests {
 
     #[test]
     fn increasing_any_height_never_decreases_the_result() {
-        let params = precompile_pcs_params();
+        let params = memory_test_params();
         let base = [1_000usize; NUM_CHIPLETS];
         for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos, HashFunction::Keccak] {
             let base_bytes = prover_peak_bytes(&base, &params, hash_fn).expect("fits in u64");
@@ -287,7 +293,7 @@ mod tests {
 
     #[test]
     fn overflow_returns_none_instead_of_panicking() {
-        let params = precompile_pcs_params();
+        let params = memory_test_params();
         assert_eq!(
             prover_peak_bytes(&[usize::MAX; NUM_CHIPLETS], &params, HashFunction::Keccak),
             None
@@ -300,7 +306,7 @@ mod tests {
     /// not just the persisted digest tree the model previously counted alone.
     #[test]
     fn keccak_leaf_hashing_scratch_exceeds_blake3() {
-        let params = precompile_pcs_params();
+        let params = memory_test_params();
         // `TRACE_HEIGHT` (the preprocessed bundle's fixed height) is also `2^16`, so this height
         // makes both the per-AIR shared term and the preprocessed term contribute the same-sized
         // leaf-hashing scratch below.

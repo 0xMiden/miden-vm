@@ -16,7 +16,7 @@ edition.workspace = true
 [dependencies]
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
-miden-lifted-stark = { workspace = true }
+miden-stark = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }

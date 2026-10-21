@@ -4,7 +4,7 @@ use miden_core::{
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     proof::HashFunction,
 };
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
@@ -12,7 +12,7 @@ use p3_security::{
     budget::report::{COLLISION_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
     fixed,
 };
-pub const COMMITMENT_ALIGNMENT: usize = super::config::SPONGE_RATE;
+pub const COMMITMENT_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
 pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance();
 pub const OOD_POW_BITS: u32 = 0;
 pub const LOOKUP_POW_BITS: u32 = 0;

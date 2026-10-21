@@ -9,7 +9,7 @@
 //!
 //! 1. **AIR = trusted** — [`air::LiftedAir`] / [`air::MultiAir`] implementations are application
 //!    code. Structural mistakes, including an empty AIR collection, may panic; check them in
-//!    tests/setup with [`miden_lifted_air::debug::assert_multi_air_valid`] or
+//!    tests/setup with [`crate::air::debug::assert_multi_air_valid`] or
 //!    [`debug::assert_prover_setup`].
 //!
 //! 2. **Runtime inputs = validated** — [`Statement::new`](air::Statement::new),
@@ -42,8 +42,7 @@
 //!
 //! 1. **AIR structural contract** — non-empty AIR collection, positive aux width, power-of-two
 //!    periodic column lengths, and matching override helpers. Checked by
-//!    [`miden_lifted_air::debug::assert_multi_air_valid`]. These are not typed `Statement::new`
-//!    errors.
+//!    [`crate::air::debug::assert_multi_air_valid`]. These are not typed `Statement::new` errors.
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
@@ -60,20 +59,26 @@
 
 extern crate alloc;
 
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
 // ============================================================================
 // Private implementation modules
 // ============================================================================
 
-mod config;
+pub mod air;
+pub mod config;
 pub mod debug;
 pub(crate) mod domain;
 pub mod lmcs;
+pub mod lookup;
 mod order;
 pub mod pcs;
 mod preprocessed;
 pub mod proof;
 pub mod prover;
 mod selectors;
+pub mod transcript;
 pub(crate) mod util;
 pub mod verifier;
 
@@ -93,48 +98,6 @@ pub use verifier::{VerifierError, VerifierInstance};
 // ============================================================================
 // Namespaced re-exports from upstream crates
 // ============================================================================
-
-/// AIR traits, statement/proving-input types, and upstream `p3-air` re-exports.
-///
-/// This module re-exports items from [`miden_lifted_air`], which in turn
-/// re-exports `p3-air` types. Consumers should never need to depend on `p3-air`
-/// directly.
-pub mod air {
-    pub use miden_lifted_air::{
-        // Upstream p3-air re-exports
-        Air,
-        AirBuilder,
-        AirBuilderWithContext,
-        BaseAir,
-        ConstraintCounts,
-        ConstraintDegrees,
-        ExtensionBuilder,
-        FilteredAirBuilder,
-        // Lifted AIR types
-        InstanceError,
-        LiftedAir,
-        LiftedAirBuilder,
-        MultiAir,
-        PermutationAirBuilder,
-        ProverStatement,
-        ReductionError,
-        RowWindow,
-        Statement,
-        WindowAccess,
-        debug,
-        log2_strict_u8,
-    };
-
-    /// Symbolic constraint analysis types from upstream p3-air.
-    pub mod symbolic {
-        pub use miden_lifted_air::symbolic::*;
-    }
-
-    /// AIR constraint utility functions from upstream p3-air.
-    pub mod utils {
-        pub use miden_lifted_air::utils::*;
-    }
-}
 
 /// Stateful hasher primitives for LMCS construction.
 pub mod hasher {

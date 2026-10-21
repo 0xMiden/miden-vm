@@ -2,8 +2,6 @@
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_lifted_air::log2_strict_u8;
-use miden_stark_transcript::VerifierTranscript;
 use p3_challenger::CanObserve;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::PrimeCharacteristicRing;
@@ -16,6 +14,7 @@ use verifier::{FriError, FriOracle};
 
 use super::*;
 use crate::{
+    air::log2_strict_u8,
     domain::LiftedDomain,
     lmcs::tree_indices::TreeIndices,
     testing::{
@@ -26,6 +25,7 @@ use crate::{
         },
         params::{FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8},
     },
+    transcript::VerifierTranscript,
 };
 
 /// Sample `count` random indices in `[0, upper)`.

@@ -5,7 +5,7 @@
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
 use miden_core::proof::HashFunction;
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 #[cfg(test)]
 use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.

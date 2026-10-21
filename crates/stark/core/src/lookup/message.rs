@@ -15,7 +15,7 @@
 //! and `W = MAX_MESSAGE_WIDTH`. The `(i + 1) · β^W` term separates bus domains, so
 //! payload values can start at `β⁰`.
 
-use miden_core::field::{Algebra, PrimeCharacteristicRing};
+use miden_crypto::field::{Algebra, PrimeCharacteristicRing};
 
 use crate::lookup::Challenges;
 

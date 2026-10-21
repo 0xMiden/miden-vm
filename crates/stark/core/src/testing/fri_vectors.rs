@@ -13,7 +13,6 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_stark_transcript::{ProverTranscript, TranscriptChallenger, VerifierTranscript};
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
 use p3_matrix::{Matrix as _, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
@@ -30,6 +29,7 @@ use crate::{
     lmcs::{Lmcs, proof::BatchProofView, tree_indices::TreeIndices},
     pcs::fri::{FriParams, proof::FriProof, prover::FriPolys, verifier::FriOracle},
     testing::params::FRI_FOLD_ARITY_4,
+    transcript::{ProverTranscript, TranscriptChallenger, VerifierTranscript},
 };
 
 /// Number of evaluations folded in each FRI round.

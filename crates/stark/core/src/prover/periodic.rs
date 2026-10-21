@@ -5,12 +5,14 @@
 //! column with period `p` only needs `p * blowup` LDE values (not `trace_height * blowup`),
 //! which are accessed via modular indexing.
 
-use miden_lifted_air::log2_strict_u8;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::domain::{Coset, EvaluationDomain};
+use crate::{
+    air::log2_strict_u8,
+    domain::{Coset, EvaluationDomain},
+};
 
 /// Prover-side periodic LDE values for constraint evaluation.
 ///
@@ -33,7 +35,7 @@ pub(super) struct PeriodicLde<F: TwoAdicField> {
 impl<F: TwoAdicField> PeriodicLde<F> {
     /// Build periodic LDEs from a periodic column matrix.
     ///
-    /// Takes the output of [`miden_lifted_air::BaseAir::periodic_columns_matrix`], where
+    /// Takes the output of [`crate::air::BaseAir::periodic_columns_matrix`], where
     /// columns with smaller periods have been repeated cyclically to the maximum period.
     ///
     /// # Arguments

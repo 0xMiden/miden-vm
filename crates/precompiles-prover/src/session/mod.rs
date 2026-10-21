@@ -30,7 +30,7 @@
 //!
 //! This produces traces only. Assembling the AIRs and provers and calling
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
-//! generic lifted-stark usage, not chiplet wiring.
+//! generic STARK usage, not chiplet wiring.
 
 use alloc::{vec, vec::Vec};
 

@@ -9,16 +9,20 @@ reviewers). Per-module API details live in `src/prover/README.md` and
 
 ## Overview
 
-This crate contains the full lifted STARK implementation: shared types,
-prover, and verifier.
+This crate owns shared AIR contracts, transcript channels, LogUp lookup support,
+configuration factories, and the lifted STARK prover and verifier. Relation-specific
+PCS presets, protocol versions, and transcript domains stay with production AIR.
 
 ```
-miden-lifted-stark              ← this crate
+miden-stark              ← this crate
 ├── src/prover/                    ← Proving: trace commitment, constraint evaluation, quotient construction
 ├── src/verifier/                  ← Verification: OOD check, quotient reconstruction, transcript canonicality
 ├── src/pcs/                       ← PCS (DEEP + FRI)
 ├── src/lmcs/                      ← Merkle commitments with lifting
-└── miden-lifted-air            ← AIR traits (aux columns, periodic columns)
+├── src/air/                       ← AIR contracts, statements, and symbolic analysis
+├── src/transcript/                ← Fiat-Shamir channels
+├── src/lookup/                    ← Generic LogUp mechanisms
+└── src/config/                    ← Shared hash configurations and transcript initialization
 ```
 
 The system supports **multiple traces of different power-of-two heights of at
@@ -212,7 +216,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProofData`, `StarkProof` — wire artifact and structured parse-only view |
 | `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
-| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_lifted_air::debug::assert_multi_air_valid` |
+| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_stark::air::debug::assert_multi_air_valid` |
 
 ## Conventions & Assumptions
 
@@ -251,7 +255,7 @@ benchmark matrix:
 
 Run with:
 ```bash
-cargo test -p miden-lifted-stark --features testing
+cargo test -p miden-stark --features testing
 ```
 
 ## Security

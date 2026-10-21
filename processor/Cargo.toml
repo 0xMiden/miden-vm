@@ -49,6 +49,7 @@ tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-stark.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 miden-core = { workspace = true, features = ["arbitrary"] }

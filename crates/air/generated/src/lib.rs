@@ -9,6 +9,7 @@ use miden_air_definitions as definitions;
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
 include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
 pub mod ace;
+use miden_stark::lookup;
 pub mod config;
 pub mod memory;
 pub mod precompiles;
@@ -20,7 +21,7 @@ pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/evaluators.rs"));
 }
-use miden_lifted_stark::air::ReductionError;
+use miden_stark::air::ReductionError;
 use p3_challenger::CanObserve;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {

@@ -3,7 +3,6 @@ use std::{env, fs, path::PathBuf};
 use miden_air_definitions::{
     AIRS, HandwrittenMidenAir,
     ace::{CapturedAir, CompiledRelation, LayoutKind},
-    config,
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
@@ -49,8 +48,8 @@ fn main() {
         ),
     );
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
-    let relation =
-        CompiledRelation::from_captured(&airs, config::SPONGE_RATE).expect("compile VM relation");
+    let relation = CompiledRelation::from_captured(&airs, miden_crypto::hash::eidos::BLOCK_LEN)
+        .expect("compile VM relation");
     write(
         "air_shape.rs",
         format!("{:?}", miden_air_definitions::geometry::air_shape(&relation)),

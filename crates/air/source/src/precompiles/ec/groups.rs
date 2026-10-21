@@ -23,7 +23,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::precompiles::{
     ec::EcGroupMsg,

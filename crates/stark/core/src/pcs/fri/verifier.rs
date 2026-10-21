@@ -18,7 +18,6 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
@@ -27,6 +26,7 @@ use crate::{
     domain::{Coset, LiftedDomain, TwoAdicSubgroup},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
     pcs::fri::FriParams,
+    transcript::{TranscriptError, VerifierChannel},
 };
 
 /// FRI low-degree test oracle.

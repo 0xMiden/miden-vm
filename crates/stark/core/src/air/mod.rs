@@ -1,6 +1,6 @@
 //! AIR traits for the Miden lifted STARK protocol.
 //!
-//! This crate provides:
+//! This module provides:
 //! - [`LiftedAir`]: super-trait for AIR definitions (inherits upstream + adds aux trace support and
 //!   periodic column data)
 //! - [`LiftedAirBuilder`]: super-trait for constraint builders
@@ -9,19 +9,15 @@
 //! - [`ProverStatement`]: validated proving input — a `Statement` plus per-AIR main witness traces
 //! - [`debug`]: panic-based AIR structural checks for tests / setup
 
-#![no_std]
-
-extern crate alloc;
-
-mod air;
 mod builder;
+mod contracts;
 pub mod debug;
 mod encoding;
 mod statement;
 mod util;
 
-pub use air::{ConstraintCounts, ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
+pub use contracts::{ConstraintCounts, ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use encoding::{StatementEncoding, StatementField};
 // Re-export upstream p3-air types so downstream crates never need to depend on p3-air
 // directly.

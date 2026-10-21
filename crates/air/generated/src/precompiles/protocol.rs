@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn relation_digest_binds_the_circuit_digest() {
-        let digest = crate::shared::config::relation_digest(
+        let digest = miden_stark::config::relation_digest(
             policy::PROTOCOL_ID,
             &Word::new(PINS.ace_circuit_digest.map(Felt::new_unchecked)),
         );
@@ -141,7 +141,7 @@ mod tests {
         use alloc::vec;
 
         use miden_core::field::QuadFelt;
-        let statement = miden_lifted_air::Statement::<
+        let statement = miden_stark::air::Statement::<
             Felt,
             QuadFelt,
             miden_air_definitions::precompiles::ChipletMultiAir,
@@ -159,9 +159,7 @@ mod tests {
             PINS.relation_digest.map(Felt::new_unchecked),
         );
         let commitment = <[u64; 4]>::from(
-            miden_lifted_stark::Preprocessed::build(&statement, &config)
-                .unwrap()
-                .commitment(),
+            miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
         );
         assert_eq!(commitment, PVM_PREPROCESSED_COMMITMENT, "{UPDATE_HINT}");
         assert_eq!(

@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use miden_crypto::hash::stateful::{Alignable, StatefulHasher};
-use miden_stark_transcript::VerifierChannel;
 use p3_field::PackedValue;
 use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
@@ -13,9 +12,12 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 
-use crate::lmcs::{
-    BlockConsumerFactory, Lmcs, LmcsError, OpenedRows, config::LmcsConfig,
-    lifted_tree::LiftedMerkleTree, proof::BatchProof, tree_indices::TreeIndices,
+use crate::{
+    lmcs::{
+        BlockConsumerFactory, Lmcs, LmcsError, OpenedRows, config::LmcsConfig,
+        lifted_tree::LiftedMerkleTree, proof::BatchProof, tree_indices::TreeIndices,
+    },
+    transcript::VerifierChannel,
 };
 
 /// Configuration for hiding LMCS with random salt.

@@ -1,6 +1,7 @@
 pub use miden_air_definitions::precompiles::*;
 pub mod air;
 pub mod memory;
+pub mod policy;
 pub mod preprocessed;
 pub mod protocol;
 pub mod security;

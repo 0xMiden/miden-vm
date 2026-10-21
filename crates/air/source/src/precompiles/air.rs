@@ -12,7 +12,7 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError};
+use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError};
 
 use crate::precompiles::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},

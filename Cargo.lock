@@ -2098,7 +2098,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
+ "miden-stark",
  "p3-dft",
  "p3-matrix",
  "proptest",
@@ -2115,8 +2115,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
+ "miden-stark",
  "p3-challenger",
  "p3-field",
  "p3-security",
@@ -2130,23 +2129,18 @@ dependencies = [
  "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
  "miden-precompiles",
+ "miden-stark",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "miden-utils-sync",
  "p3-challenger",
- "p3-dft",
  "p3-field",
  "p3-matrix",
  "p3-security",
- "p3-symmetric",
  "proptest",
- "rand 0.10.2",
  "ruint",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -2208,7 +2202,7 @@ name = "miden-bench"
 version = "1.0.0"
 dependencies = [
  "clap",
- "miden-lifted-stark",
+ "miden-stark",
  "p3-air",
  "p3-batch-stark",
  "p3-blake3",
@@ -2240,7 +2234,7 @@ version = "1.0.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
+ "miden-stark",
 ]
 
 [[package]]
@@ -2284,7 +2278,6 @@ dependencies = [
  "miden-core-lib-codegen",
  "miden-crypto",
  "miden-debug-types",
- "miden-lifted-stark",
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
@@ -2292,6 +2285,7 @@ dependencies = [
  "miden-precompiles-verifier",
  "miden-processor",
  "miden-prover",
+ "miden-stark",
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
@@ -2473,52 +2467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-lifted-air"
-version = "1.0.0"
-dependencies = [
- "miden-field",
- "p3-air",
- "p3-challenger",
- "p3-field",
- "p3-matrix",
- "p3-util",
- "thiserror",
-]
-
-[[package]]
-name = "miden-lifted-stark"
-version = "1.0.0"
-dependencies = [
- "criterion",
- "miden-crypto",
- "miden-lifted-air",
- "miden-stark-transcript",
- "miden-utils-sync",
- "p3-blake3",
- "p3-blake3-air",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-keccak",
- "p3-keccak-air",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-merkle-tree",
- "p3-poseidon2-air",
- "p3-symmetric",
- "p3-util",
- "proptest",
- "rand 0.10.2",
- "serde",
- "thiserror",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "miden-mast-package"
 version = "1.0.0"
 dependencies = [
@@ -2621,10 +2569,9 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
  "miden-precompiles",
  "miden-precompiles-verifier",
+ "miden-stark",
  "miden-utils-sync",
  "proptest",
  "rand 0.10.2",
@@ -2645,9 +2592,8 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
  "miden-serde-utils",
+ "miden-stark",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2666,6 +2612,7 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",
+ "miden-stark",
  "miden-test-serialization-macros",
  "miden-test-utils",
  "miden-utils-diagnostics",
@@ -2710,9 +2657,9 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
- "miden-lifted-stark",
  "miden-precompiles-prover",
  "miden-processor",
+ "miden-stark",
  "miden-verifier",
  "serde",
  "serde-wincode",
@@ -2754,13 +2701,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-stark-transcript"
+name = "miden-stark"
 version = "1.0.0"
 dependencies = [
+ "criterion",
+ "miden-crypto",
+ "miden-utils-sync",
+ "p3-air",
+ "p3-blake3",
+ "p3-blake3-air",
  "p3-challenger",
+ "p3-commit",
+ "p3-dft",
  "p3-field",
+ "p3-fri",
+ "p3-goldilocks",
+ "p3-keccak",
+ "p3-keccak-air",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-merkle-tree",
+ "p3-poseidon2-air",
+ "p3-symmetric",
+ "p3-util",
+ "proptest",
+ "rand 0.10.2",
  "serde",
  "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2837,10 +2806,10 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
  "miden-precompiles",
  "miden-precompiles-verifier",
  "miden-serde-utils",
+ "miden-stark",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2856,8 +2825,7 @@ dependencies = [
  "miden-air-definitions",
  "miden-core",
  "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
+ "miden-stark",
  "p3-air",
 ]
 

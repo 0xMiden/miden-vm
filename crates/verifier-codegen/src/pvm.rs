@@ -15,7 +15,7 @@ use miden_air::precompiles::security as pvm_security;
 use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 pub(crate) use crate::GENERATED_BY;
 use crate::{
@@ -200,7 +200,10 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         stream_len: circuit.stream_len,
     };
     let circuit_digest = circuit.commitment;
-    let relation_digest = miden_air::config::relation_digest(protocol.protocol_id, &circuit_digest);
+    let relation_digest = miden_air::config::relation_digest(
+        miden_air::precompiles::policy::PROTOCOL_ID,
+        &circuit_digest,
+    );
     let preprocessed_commitment = preprocessed_commitment();
 
     let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout)?;

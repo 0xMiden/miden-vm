@@ -8,7 +8,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{

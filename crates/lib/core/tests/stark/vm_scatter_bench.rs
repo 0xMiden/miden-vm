@@ -80,7 +80,7 @@ impl RowGeometry {
         }
         let max_log_quotient_degree = AIRS
             .iter()
-            .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+            .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
             .max()
             .expect("the Miden AIR set is non-empty");
         let quotient = (1usize << max_log_quotient_degree) * EXT_DEGREE;

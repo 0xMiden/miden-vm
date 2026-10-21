@@ -16,7 +16,6 @@
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -25,6 +24,7 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
+    air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8},
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
     order::TraceOrder,

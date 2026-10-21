@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_lifted_stark::air::{
+use miden_stark::air::{
     AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow,
 };
 use p3_matrix::dense::RowMajorMatrix;

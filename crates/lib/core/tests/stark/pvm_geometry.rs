@@ -394,7 +394,7 @@ fn pvm_masm_quotient_inputs_match_the_stark_domain() {
     let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
     let num_chunks = canonical.layout().counts.num_quotient_chunks;
     assert!(num_chunks.is_power_of_two());
-    let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         num_chunks.ilog2() as u8,
         miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
     )

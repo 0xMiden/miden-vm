@@ -8,16 +8,14 @@
 use alloc::{vec, vec::Vec};
 use core::{borrow::Borrow, ops::Range};
 
-use miden_core::{
-    field::{ExtensionField, Field},
-    utils::{Matrix, RowMajorMatrix},
-};
-use miden_lifted_stark::air::RowWindow;
+use miden_crypto::field::{ExtensionField, Field};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFractions,
     LookupGroup, LookupMessage,
 };
+use crate::air::RowWindow;
 
 // PROVER LOOKUP BUILDER
 // ================================================================================================
@@ -597,14 +595,18 @@ mod tests {
 
     use std::{vec, vec::Vec};
 
-    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-    use miden_lifted_stark::air::{RowWindow, WindowAccess};
+    use miden_crypto::{
+        Felt,
+        field::{BinomialExtensionField, PrimeCharacteristicRing},
+    };
 
     use super::*;
     use crate::{
-        Felt,
+        air::{RowWindow, WindowAccess},
         lookup::{Deg, LookupAir, accumulate_slow, message::LookupMessage},
     };
+
+    type QuadFelt = BinomialExtensionField<Felt, 2>;
 
     /// Encodes to `bus_prefix[0] + value`; the fixture's challenges keep it nonzero.
     #[derive(Clone, Copy, Debug)]

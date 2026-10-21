@@ -6,7 +6,7 @@
 use std::fmt::Write;
 
 use askama::Template;
-use miden_lifted_air::StatementEncoding;
+use miden_stark::air::StatementEncoding;
 
 use crate::templates::{PvmAuxTraceTemplate, PvmPublicInputsTemplate};
 

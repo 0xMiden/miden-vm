@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use miden_lifted_stark::{
+use miden_stark::{
     ProverInstance, StarkConfig, VerifierInstance,
     air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
     testing::airs::{
@@ -116,7 +116,7 @@ pub(crate) fn run_lifted<SC>(
 ) -> RunResult
 where
     SC: StarkConfig<Felt, QuadFelt>,
-    miden_lifted_stark::proof::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
+    miden_stark::proof::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
 {
     let airs: Vec<LiftedBenchAir> = specs
         .iter()

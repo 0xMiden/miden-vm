@@ -7,7 +7,7 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
@@ -263,7 +263,7 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use miden_core::{Felt, field::QuadFelt};
-    use miden_lifted_air::{ConstraintDegrees, LiftedAir};
+    use miden_stark::air::{ConstraintDegrees, LiftedAir};
 
     use crate::lookup::{
         LookupAir,

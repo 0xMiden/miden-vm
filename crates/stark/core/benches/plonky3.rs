@@ -15,16 +15,18 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::testing::{
-    BENCH_PCS_PARAMS, Coset, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, QC_CONSTRAINT_DEGREE,
-    QC_PCS_PARAMS, RELATIVE_SPECS, canonical_domain, commit_quotient,
-    configs::{
-        goldilocks_blake3_192 as gl_blake3_192, goldilocks_keccak as gl_keccak,
-        goldilocks_poseidon2 as gl,
+use miden_stark::{
+    testing::{
+        BENCH_PCS_PARAMS, Coset, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, QC_CONSTRAINT_DEGREE,
+        QC_PCS_PARAMS, RELATIVE_SPECS, canonical_domain, commit_quotient,
+        configs::{
+            goldilocks_blake3_192 as gl_blake3_192, goldilocks_keccak as gl_keccak,
+            goldilocks_poseidon2 as gl,
+        },
+        generate_matrices_from_specs, log2_strict_u8, open_with_channel, total_elements,
     },
-    generate_matrices_from_specs, log2_strict_u8, open_with_channel, total_elements,
+    transcript::ProverTranscript,
 };
-use miden_stark_transcript::ProverTranscript;
 use p3_blake3::Blake3;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs, Pcs, UnivariateStarkPcs};
@@ -302,7 +304,7 @@ fn bench_pcs_open(c: &mut Criterion) {
 type Dft = Radix2DitParallel<gl::Felt>;
 type LiftedLmcs = gl::Lmcs;
 type LiftedConfig =
-    miden_lifted_stark::GenericStarkConfig<gl::Felt, gl::QuadFelt, LiftedLmcs, Dft, gl::Challenger>;
+    miden_stark::GenericStarkConfig<gl::Felt, gl::QuadFelt, LiftedLmcs, Dft, gl::Challenger>;
 
 fn lifted_config() -> LiftedConfig {
     LiftedConfig::new(QC_PCS_PARAMS, gl::test_lmcs(), Dft::default(), gl::test_challenger())

@@ -5,7 +5,7 @@
 //!   traces of (possibly) different heights.
 //!
 //! [`ProverInstance::prove`](crate::ProverInstance::prove) writes the proof into a
-//! [`miden_stark_transcript::ProverChannel`] (commitments, grinding witnesses,
+//! [`crate::transcript::ProverChannel`] (commitments, grinding witnesses,
 //! and openings).
 //!
 //! # Fiat-Shamir / transcript binding (initial challenger state)
@@ -77,10 +77,6 @@ use alloc::vec::Vec;
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{
-    BaseAir, InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement,
-};
-use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -91,12 +87,16 @@ use tracing::{info_span, instrument};
 
 use crate::{
     StarkConfig,
+    air::{
+        BaseAir, InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement,
+    },
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     lmcs::Lmcs,
     order::TraceOrder,
     pcs::prover::open_with_channel,
     preprocessed::{Preprocessed, PreprocessedValidationError, validate_preprocessed},
     proof::{StarkOutput, StarkProofData},
+    transcript::{Channel, ProverChannel, ProverTranscript},
 };
 
 // ============================================================================
@@ -598,7 +598,7 @@ pub enum ProverError {
     #[error("external assertion {assertion} is non-zero")]
     ExternalAssertionFailed {
         /// Index into the assertions vector returned by
-        /// [`Statement::eval_external`](miden_lifted_air::Statement::eval_external).
+        /// [`Statement::eval_external`](crate::air::Statement::eval_external).
         assertion: usize,
     },
 }

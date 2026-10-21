@@ -2,8 +2,6 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::log2_strict_u8;
-use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
 use p3_challenger::CanObserve;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use params::PcsParams;
@@ -14,6 +12,7 @@ use verifier::{CommitmentGroup, PcsError, verify_aligned};
 
 use super::*;
 use crate::{
+    air::log2_strict_u8,
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree},
     testing::{
@@ -22,6 +21,7 @@ use crate::{
             self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
         },
     },
+    transcript::{ProverTranscript, VerifierTranscript},
     util::align::aligned_widths,
 };
 

@@ -2,7 +2,6 @@
 
 use alloc::vec::Vec;
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 
 use crate::{
@@ -11,6 +10,7 @@ use crate::{
     pcs::{
         deep::proof::DeepProof, fri::proof::FriProof, params::PcsParams, verifier::CommitmentGroup,
     },
+    transcript::{TranscriptError, VerifierChannel},
 };
 
 /// Structured view of the full PCS sub-proof.

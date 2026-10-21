@@ -112,12 +112,10 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
 | Shared code | [field](crates/field) | Provides a common field element type for Miden Rust code. |
 | Shared code | [crypto](crates/crypto) | Provides the cryptographic primitives used across the workspace. |
-| Proof system | [lifted-air](crates/lifted-air) | Defines AIR traits and symbolic constraints for the lifted STARK protocol. |
-| Proof system | [lifted-stark](crates/stark/core) | Implements lifted STARK proving and verification. |
-| Proof system | [stark-transcript](crates/stark-transcript) | Provides transcript channels used by proof protocols. |
+| Proof system | [stark](crates/stark/core) | Provides AIR contracts, transcripts, lookup support, configuration factories, and lifted STARK proving and verification. |
 | Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
-| Proof system | [air-definitions](crates/air/source) | Defines handwritten VM and precompile AIRs and shared contracts. |
+| Proof system | [air-definitions](crates/air/source) | Defines handwritten VM and precompile AIRs and shared equations. |
 | Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
 | Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs. |
 | Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |

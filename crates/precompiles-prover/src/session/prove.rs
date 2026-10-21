@@ -18,11 +18,11 @@ use miden_core::{
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
 };
-use miden_lifted_air::{ProverStatement, Statement};
 #[cfg(test)]
-use miden_lifted_stark::check_constraints;
-use miden_lifted_stark::{
+use miden_stark::check_constraints;
+use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
+    air::{ProverStatement, Statement},
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };

@@ -1,12 +1,8 @@
 //! Transcript channels for Fiat-Shamir protocols with raw field/commitment storage.
 //!
-//! This crate provides:
+//! This module provides:
 //! - [`ProverTranscript`] and [`ProverChannel`] for prover-side recording.
 //! - [`VerifierTranscript`] and [`VerifierChannel`] for verifier-side reading.
-
-#![no_std]
-
-extern crate alloc;
 
 mod channel;
 mod data;

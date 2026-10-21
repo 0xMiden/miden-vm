@@ -5,7 +5,7 @@ pub use miden_air_definitions::precompiles::memory::{
     prover_peak_bytes_with_quotient_chunks,
 };
 use miden_core::proof::HashFunction;
-use miden_lifted_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 
 use crate::precompiles::{NUM_CHIPLETS, protocol};
 

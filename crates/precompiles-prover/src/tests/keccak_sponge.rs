@@ -8,13 +8,15 @@
 
 use std::{borrow::Cow, vec, vec::Vec};
 
-use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::debug::{ValidateLayout, ValidateLookupAir},
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -471,7 +473,7 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // wrapper overrides that method to inject the corruption.
     use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
+    use miden_stark::air::{LiftedAir, LiftedAirBuilder};
 
     use crate::hash::keccak::sponge::NUM_AUX_COLS;
 

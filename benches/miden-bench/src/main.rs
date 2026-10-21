@@ -35,7 +35,7 @@ mod lifted;
 use std::{fmt, time::Instant};
 
 use clap::Parser;
-use miden_lifted_stark::{
+use miden_stark::{
     GenericStarkConfig,
     pcs::PcsParams,
     testing::{
@@ -69,8 +69,8 @@ type BatchPoseidon2Air = p3_poseidon2_air::Poseidon2Air<
     Felt,
     GenericPoseidon2LinearLayersGoldilocks,
     WIDTH,
-    { miden_lifted_stark::testing::airs::poseidon2::SBOX_DEGREE },
-    { miden_lifted_stark::testing::airs::poseidon2::SBOX_REGISTERS },
+    { miden_stark::testing::airs::poseidon2::SBOX_DEGREE },
+    { miden_stark::testing::airs::poseidon2::SBOX_REGISTERS },
     HALF_FULL_ROUNDS,
     PARTIAL_ROUNDS,
 >;

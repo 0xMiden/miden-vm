@@ -10,7 +10,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use miden_lifted_stark::{
+use miden_stark::{
     GenericStarkConfig,
     testing::{
         QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, canonical_domain, commit_quotient,

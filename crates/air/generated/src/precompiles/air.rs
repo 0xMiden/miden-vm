@@ -2,7 +2,7 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::precompiles as definitions;
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_lifted_air::{
+use miden_stark::air::{
     BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
 

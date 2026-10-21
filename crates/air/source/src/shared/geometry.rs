@@ -1,6 +1,6 @@
 //! Independent symbolic security-shape oracle for generated metadata.
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 use p3_security::budget::{AirShape, LookupShape};
 
 pub(crate) fn derive_air_shape<A: LiftedAir<Felt, QuadFelt>>(

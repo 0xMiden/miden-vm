@@ -4,7 +4,7 @@ use std::{format, string::String};
 
 use miden_core::{Felt, Word};
 use miden_crypto::hash::eidos::{Eidos, domains::GENERIC_FELT_SEQUENCE};
-use miden_lifted_stark::QuotientRecompositionInputs;
+use miden_stark::QuotientRecompositionInputs;
 
 use crate::AceError;
 
@@ -244,7 +244,7 @@ pub fn render_masm_constraints_eval(
 #[cfg(test)]
 mod tests {
     use miden_core::Felt;
-    use miden_lifted_stark::QuotientRecompositionInputs;
+    use miden_stark::QuotientRecompositionInputs;
 
     use super::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval};
 

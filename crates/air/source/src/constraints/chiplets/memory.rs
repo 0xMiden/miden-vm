@@ -28,7 +28,7 @@
 //! The `4 * w1` check prevents Goldilocks field wraparound (P > 2^18).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_stark::air::AirBuilder;
+use miden_stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{
@@ -258,7 +258,7 @@ mod tests {
         Felt,
         field::{Field, PrimeCharacteristicRing, QuadFelt},
     };
-    use miden_lifted_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+    use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::enforce_memory_constraints;

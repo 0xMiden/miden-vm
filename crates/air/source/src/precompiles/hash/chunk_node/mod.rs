@@ -14,8 +14,8 @@
 use core::array;
 
 use miden_core::{Felt, deferred::DEFERRED_CHUNKS_DOMAIN, field::PrimeCharacteristicRing};
-use miden_lifted_air::{AirBuilder, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::precompiles::{
     hash::{
