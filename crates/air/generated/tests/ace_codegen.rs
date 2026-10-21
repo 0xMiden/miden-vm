@@ -328,9 +328,7 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
 /// Checks the canonical circuit against a direct AIR fold for every VM proof order.
 #[test]
 fn canonical_circuit_matches_every_vm_proof_order() {
-    use miden_air::vm::{
-        AIRS, MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit,
-    };
+    use miden_air::vm::{AIRS, MIDEN_AIR_COUNT, ace::build_canonical_multi_air_ace_circuit};
 
     let config = AceConfig {
         num_quotient_chunks: 8,
@@ -344,14 +342,13 @@ fn canonical_circuit_matches_every_vm_proof_order() {
 
     let beta = QuadFelt::from_u64(97);
     let mut canonical_roots: Vec<QuadFelt> = Vec::new();
-    for order in ProofOrder::variants() {
+    for tag in 0..miden_ace::factorial(MIDEN_AIR_COUNT) as u32 {
+        let order = miden_ace::order_from_tag(tag, MIDEN_AIR_COUNT).expect("VM permutation tag");
         // Canonical circuit: trace values stay put, only the fold coefficients move. The AIR at
         // proof position `k` carries `beta^(N - 1 - k)`, matching the proof-order Horner fold.
         let mut canonical_inputs = base.clone();
-        for (position, air) in order.airs().iter().copied().enumerate() {
-            let idx = canonical_layout
-                .index(InputKey::MultiAirFoldCoeff(air.instance_index()))
-                .expect("coeff slot");
+        for (position, air) in order.iter().copied().enumerate() {
+            let idx = canonical_layout.index(InputKey::MultiAirFoldCoeff(air)).expect("coeff slot");
             canonical_inputs[idx] = beta.exp_u64((MIDEN_AIR_COUNT - 1 - position) as u64);
         }
         let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
@@ -360,11 +357,11 @@ fn canonical_circuit_matches_every_vm_proof_order() {
             &AIRS.map(|air| air.0),
             canonical_layout,
             &canonical_inputs,
-            &order.airs().iter().map(|air| air.instance_index()).collect::<Vec<_>>(),
+            &order,
             beta,
             8,
         );
-        assert_eq!(canonical_root, direct, "direct symbolic evaluation for {}", order.file_stem());
+        assert_eq!(canonical_root, direct, "direct symbolic evaluation for order {order:?}");
         canonical_roots.push(canonical_root);
     }
 

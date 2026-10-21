@@ -7,13 +7,9 @@ use miden_core::{
     WORD_SIZE, Word,
     deferred::DeferredRoot,
     field::ExtensionField,
-    program::{
-        KernelDescriptor, MIN_STACK_DEPTH, NUM_CLAIM_ELEMENTS, ProgramInfo, StackInputs,
-        StackOutputs,
-    },
+    program::{KernelDescriptor, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_stark::air::{ReductionError, WindowAccess};
-use p3_challenger::CanObserve;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
@@ -24,6 +20,7 @@ use miden_stark::lookup;
 #[cfg(test)]
 mod lookup_tests;
 mod proof_order;
+pub mod statement;
 pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
@@ -31,7 +28,7 @@ pub mod trace;
 /// [`crate::vm::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
 /// statement; it dispatches per-trace work to Core, Chiplets, Eidos compression, and
 /// byte-pair lookup AIRs.
-/// [`crate::vm::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
+/// [`crate::vm::statement`] supplies the authored cross-AIR reduction and statement binding.
 /// The generic LogUp framework lives in [`miden_stark::lookup`].
 pub mod logup {
     pub use crate::vm::constraints::lookup::{
@@ -276,8 +273,8 @@ impl Deserializable for PublicInputs {
 ///   [16..32] stack outputs
 ///
 /// The program hash and final deferred root are not read by any AIR constraint, so they
-/// are carried as `aux_inputs` and consumed only by [`MidenMultiAir::observe`] and
-/// [`MidenMultiAir::eval_external`].
+/// are carried as `aux_inputs` and consumed only by [`statement::observe`] and
+/// [`statement::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
 /// Combined LogUp width used by constraint test harnesses: 4 core columns, 4 chiplet
@@ -892,184 +889,6 @@ where
     }
 }
 
-// MIDEN MULTI-AIR
-// ================================================================================================
-
-/// The cross-AIR statement for the Miden VM proof.
-///
-/// AIR instances come from [`AIRS`], and the external reduction combines the trace-length-weighted
-/// normalized LogUp sums with the open-bus boundary corrections.
-///
-/// Instance order is `[Core, Chiplets, EidosCompression, And8Lookup]`; every per-AIR slice follows
-/// that ordering.
-#[derive(Copy, Clone, Debug)]
-pub struct MidenMultiAir;
-
-impl MidenMultiAir {
-    /// Construct the Miden multi-AIR statement marker.
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for MidenMultiAir {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
-    type Air = MidenAir;
-
-    fn airs(&self) -> &[MidenAir] {
-        &AIRS
-    }
-
-    fn max_aux_inputs(&self) -> usize {
-        // aux_inputs = program hash (1 word) + deferred root (1 word) + the var-len
-        // kernel-digest group: one `Word` per kernel procedure, capped at
-        // `KernelDescriptor::MAX_NUM_PROCEDURES`.
-        AUX_KERNEL_DIGESTS + KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE
-    }
-
-    /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
-    ///
-    /// One complete Eidos block: `[CLAIM_HASH (4) | deferred_root (4)]`, where `CLAIM_HASH` is the
-    /// canonical execution-claim commitment (see `miden_core::program::ExecutionClaim`) over
-    /// `program_hash ‖ kernel_H ‖ stack_inputs ‖ stack_outputs`. With the relation digest
-    /// pre-loaded in the challenger (see `config`), the transcript state after this block
-    /// realizes the factored statement binding `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
-    ///
-    /// The kernel digests enter the transcript only through `kernel_H` (see
-    /// [`hash_kernel_digests`]); the raw stack I/O and digest list remain public values for
-    /// constraint evaluation and are not separately absorbed.
-    fn observe<C: CanObserve<Felt>>(
-        &self,
-        challenger: &mut C,
-        air_inputs: &[Vec<Felt>],
-        aux_inputs: &[Felt],
-        _log_trace_heights: &[u8],
-    ) {
-        let core_inputs = &air_inputs[0];
-        assert_eq!(core_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
-        assert!(
-            aux_inputs.len() >= AUX_KERNEL_DIGESTS,
-            "aux inputs shorter than the fixed program-hash + deferred-root prefix"
-        );
-
-        let kernel_h = hash_kernel_digests(&aux_inputs[AUX_KERNEL_DIGESTS..]);
-        let program_hash = &aux_inputs[AUX_PROGRAM_HASH..AUX_PROGRAM_HASH + WORD_SIZE];
-        let deferred_root = &aux_inputs[AUX_DEFERRED_ROOT..AUX_DEFERRED_ROOT + WORD_SIZE];
-
-        // Canonical claim encoding P ‖ K ‖ I ‖ O; the offset layout of
-        // `ExecutionClaim::to_elements`, pinned by `observe_matches_execution_claim_commitment`.
-        let mut claim = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
-        claim[0..WORD_SIZE].copy_from_slice(program_hash);
-        claim[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&kernel_h);
-        claim[2 * WORD_SIZE..].copy_from_slice(core_inputs);
-        let claim_hash = miden_core::program::claim_commitment(&claim);
-
-        for &v in claim_hash.as_elements().iter().chain(deferred_root) {
-            challenger.observe(v);
-        }
-    }
-
-    /// Cross-AIR LogUp closure: each AIR commits `sigma_prime_i = sigma_i / n_i`, so the
-    /// trace-length-weighted sum `sum_i(n_i * sigma_prime_i)` plus the per-trace boundary
-    /// corrections must vanish. Boundary corrections are added once and are not trace-length
-    /// scaled. `aux_values` and `log_trace_heights` are parallel in instance order. `aux_inputs`
-    /// carries the program hash and deferred root followed by kernel digests.
-    fn eval_external(
-        &self,
-        challenges: &[EF],
-        air_inputs: &[Vec<Felt>],
-        aux_inputs: &[Felt],
-        aux_values: &[&[EF]],
-        log_trace_heights: &[u8],
-    ) -> Result<Vec<EF>, ReductionError> {
-        if aux_values.len() != AIRS.len() {
-            return Err(format!(
-                "expected aux values for {} AIRs, got {}",
-                AIRS.len(),
-                aux_values.len()
-            )
-            .into());
-        }
-        if log_trace_heights.len() != AIRS.len() {
-            return Err(format!(
-                "expected log heights for {} AIRs, got {}",
-                AIRS.len(),
-                log_trace_heights.len()
-            )
-            .into());
-        }
-        if challenges.len() != trace::AUX_TRACE_RAND_CHALLENGES {
-            return Err(format!(
-                "expected {} aux trace challenges, got {}",
-                trace::AUX_TRACE_RAND_CHALLENGES,
-                challenges.len()
-            )
-            .into());
-        }
-        if air_inputs[0].len() != NUM_PUBLIC_VALUES {
-            return Err(format!(
-                "expected {NUM_PUBLIC_VALUES} public values, got {}",
-                air_inputs[0].len()
-            )
-            .into());
-        }
-        if aux_inputs.len() < AUX_KERNEL_DIGESTS {
-            return Err(format!(
-                "aux_inputs length {} is shorter than the fixed prefix {AUX_KERNEL_DIGESTS}",
-                aux_inputs.len()
-            )
-            .into());
-        }
-        let max_aux_inputs = <MidenMultiAir as MultiAir<Felt, EF>>::max_aux_inputs(self);
-        if aux_inputs.len() > max_aux_inputs {
-            return Err(format!(
-                "aux_inputs length {} exceeds maximum {max_aux_inputs}",
-                aux_inputs.len()
-            )
-            .into());
-        }
-        let challenges = Challenges::<EF>::new(
-            challenges[0],
-            challenges[1],
-            MIDEN_MAX_MESSAGE_WIDTH,
-            BusId::COUNT,
-        );
-
-        let mut weighted_aux_sum = EF::ZERO;
-        let mut boundary_correction = EF::ZERO;
-        for ((air, values), &log_height) in
-            AIRS.iter().copied().zip(aux_values.iter()).zip(log_trace_heights)
-        {
-            boundary_correction += air.boundary_correction(&challenges, aux_inputs)?;
-            let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
-            if values.len() != expected {
-                return Err(format!(
-                    "{} expects {expected} aux boundary values, got {}",
-                    air.name(),
-                    values.len()
-                )
-                .into());
-            }
-
-            let trace_length = 1_u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
-                ReductionError::from(format!(
-                    "{} log trace height {log_height} does not fit in u64",
-                    air.name()
-                ))
-            })?;
-            weighted_aux_sum +=
-                values.iter().copied().sum::<EF>() * Felt::new_unchecked(trace_length);
-        }
-
-        Ok(vec![weighted_aux_sum + boundary_correction])
-    }
-}
-
 // KERNEL DIGEST SUMMARY HASH
 // ================================================================================================
 
@@ -1163,6 +982,7 @@ mod tests {
     use alloc::string::ToString;
 
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+    use p3_challenger::CanObserve;
 
     use super::*;
 
@@ -1200,7 +1020,6 @@ mod tests {
 
     #[test]
     fn eval_external_weights_normalized_sums_by_trace_length() {
-        let multi_air = MidenMultiAir::new();
         let raw_challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
         let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
         let aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
@@ -1230,8 +1049,7 @@ mod tests {
                 air.boundary_correction(&lookup_challenges, &aux_inputs).unwrap();
         }
 
-        let result = <MidenMultiAir as MultiAir<Felt, QuadFelt>>::eval_external(
-            &multi_air,
+        let result = statement::eval_external(
             &raw_challenges,
             &air_inputs,
             &aux_inputs,
@@ -1267,9 +1085,14 @@ mod tests {
             and8_aux.as_slice(),
         ];
 
-        let err = MidenMultiAir::new()
-            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8, 16])
-            .unwrap_err();
+        let err = statement::eval_external(
+            &challenges,
+            &air_inputs,
+            &aux_inputs,
+            &aux_values,
+            &[8, 8, 8, 16],
+        )
+        .unwrap_err();
 
         assert!(err.to_string().contains("kernel digest felts length 1 is not a multiple of 4"));
     }
@@ -1294,9 +1117,14 @@ mod tests {
             and8_aux.as_slice(),
         ];
 
-        let err = MidenMultiAir::new()
-            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8, 16])
-            .unwrap_err();
+        let err = statement::eval_external(
+            &challenges,
+            &air_inputs,
+            &aux_inputs,
+            &aux_values,
+            &[8, 8, 8, 16],
+        )
+        .unwrap_err();
 
         assert!(err.to_string().contains(&format!(
             "aux_inputs length {actual_aux_inputs} exceeds maximum {max_aux_inputs}"
@@ -1337,7 +1165,7 @@ mod tests {
         // The transcript's statement block must open with exactly
         // `ExecutionClaim::commitment()` for the same statement, followed by the deferred
         // root — pinning `observe`'s inline claim encoding to the canonical one.
-        use miden_core::{field::QuadFelt, program::ExecutionClaim};
+        use miden_core::program::ExecutionClaim;
 
         #[derive(Default)]
         struct FeltSink {
@@ -1382,13 +1210,7 @@ mod tests {
         aux_inputs.extend(Word::words_as_elements(kernel.proc_hashes()));
 
         let mut sink = FeltSink::default();
-        <MidenMultiAir as MultiAir<Felt, QuadFelt>>::observe(
-            &MidenMultiAir::new(),
-            &mut sink,
-            &air_inputs,
-            &aux_inputs,
-            &[10, 10, 10, 16],
-        );
+        statement::observe(&mut sink, &air_inputs, &aux_inputs, &[10, 10, 10, 16]);
 
         let mut expected: Vec<Felt> = claim.commitment().as_elements().to_vec();
         expected.extend(deferred_root.as_elements());
@@ -1413,14 +1235,7 @@ mod tests {
 
         let mut challenger = FeltSink::default();
         let air_inputs = [vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![], vec![], vec![]];
-        let multi_air = MidenMultiAir::new();
 
-        <MidenMultiAir as MultiAir<Felt, QuadFelt>>::observe(
-            &multi_air,
-            &mut challenger,
-            &air_inputs,
-            &[],
-            &[8, 8, 8, 16],
-        );
+        statement::observe(&mut challenger, &air_inputs, &[], &[8, 8, 8, 16]);
     }
 }

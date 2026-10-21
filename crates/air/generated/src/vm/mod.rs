@@ -26,7 +26,7 @@ pub mod config;
 pub mod memory;
 mod proof_order;
 pub mod security;
-pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
+pub use proof_order::{AIRS, MIDEN_AIR_COUNT};
 
 include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
 #[allow(clippy::eq_op)]
@@ -183,7 +183,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         &AIRS
     }
     fn max_aux_inputs(&self) -> usize {
-        <source::MidenMultiAir as MultiAir<Felt, EF>>::max_aux_inputs(&source::MidenMultiAir)
+        source::statement::max_aux_inputs()
     }
     fn observe<C: CanObserve<Felt>>(
         &self,
@@ -192,13 +192,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         aux_inputs: &[Felt],
         heights: &[u8],
     ) {
-        <source::MidenMultiAir as MultiAir<Felt, EF>>::observe(
-            &source::MidenMultiAir,
-            challenger,
-            air_inputs,
-            aux_inputs,
-            heights,
-        )
+        source::statement::observe(challenger, air_inputs, aux_inputs, heights)
     }
     fn eval_external(
         &self,
@@ -208,6 +202,6 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         aux_values: &[&[EF]],
         heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
-        source::MidenMultiAir.eval_external(challenges, air_inputs, aux_inputs, aux_values, heights)
+        source::statement::eval_external(challenges, air_inputs, aux_inputs, aux_values, heights)
     }
 }

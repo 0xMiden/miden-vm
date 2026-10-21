@@ -31,12 +31,14 @@ pub fn generate() {
     let degree_arms = AIRS
         .iter()
         .zip(captured.airs())
-        .map(|(air, capture)| format!("ChipletAir::{air:?} => {:?},", capture.degrees()))
+        .map(|(air, capture)| {
+            format!("definitions::ChipletAir::{air:?} => {:?},", capture.degrees())
+        })
         .collect::<String>();
     write(
         "degrees.rs",
         format!(
-            "fn generated_degrees(air: &ChipletAir) -> ConstraintDegrees {{ match air {{ {degree_arms} }} }}"
+            "fn generated_degrees(air: ChipletAir) -> ConstraintDegrees {{ match air.0 {{ {degree_arms} }} }}"
         ),
     );
     let compiled = captured.compile().expect("compile PVM relation");

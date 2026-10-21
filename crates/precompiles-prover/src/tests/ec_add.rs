@@ -159,14 +159,14 @@ impl EcStack {
 /// prove harness over them.
 struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 
-/// The subset's AIRs as [`ChipletAir`] variants, in [`NUM_STACK`] order.
+/// The subset's production [`ChipletAir`] instances, in [`NUM_STACK`] order.
 fn stack_airs() -> [ChipletAir; NUM_STACK] {
     [
-        ChipletAir::BytePairLut,
-        ChipletAir::UintStoreMul,
-        ChipletAir::UintAdd,
-        ChipletAir::EcPointStoreGroups,
-        ChipletAir::EcGroupAdd,
+        ChipletAir::BYTE_PAIR_LUT,
+        ChipletAir::UINT_STORE_MUL,
+        ChipletAir::UINT_ADD,
+        ChipletAir::EC_POINT_STORE_GROUPS,
+        ChipletAir::EC_GROUP_ADD,
     ]
 }
 

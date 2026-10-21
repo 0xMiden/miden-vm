@@ -9,9 +9,10 @@ common geometry helpers live in `shared`.
 `vm::MidenAir` evaluates handwritten constraints directly. The constraint compiler captures
 these definitions to generate the evaluators consumed by `miden-air`; independent checks
 compare the generated evaluators and degree metadata against this source. Production AIR
-owns PCS presets, protocol IDs, and identity pins. Existing source statement hooks and
-production delegation remain in place; the VM's complete derived proof order remains in
-production.
+owns PCS presets, protocol IDs, and identity pins. Authored statement binding, input validation,
+and external LogUp closure live in `vm::statement` and `precompile::statement`. Production
+`MultiAir` implementations select generated evaluators and call these source functions; the
+source crate does not define ordinary runtime `MultiAir` types.
 
 The normal runtime does not include the ACE compiler. Enable `compiler` for symbolic capture,
 relation compilation, and generation tooling. Production builds use these tools as host build

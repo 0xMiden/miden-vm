@@ -671,7 +671,7 @@ fn padding_rejects_noncanonical_chunk_digits_with_unchanged_packed_words() {
     );
     let sponge_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
 
@@ -709,7 +709,7 @@ fn dead_padding_state_remains_bus_inert() {
     let mains = traces.mains();
     let sponge_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     let mut decorated = mains[sponge_idx].clone();
     let width = decorated.width;

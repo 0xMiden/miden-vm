@@ -211,7 +211,7 @@ mod tests {
             .iter()
             .map(|air| {
                 (
-                    format!("{air:?}"),
+                    format!("{:?}", air.0),
                     miden_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
                 )
             })
@@ -403,18 +403,18 @@ mod tests {
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
-            ChipletAir::ChunkNodeSponge,
-            ChipletAir::EidosCompression,
-            ChipletAir::KeccakRound,
-            ChipletAir::BytePairLut,
-            ChipletAir::TranscriptEval,
-            ChipletAir::UintStoreMul,
-            ChipletAir::UintAdd,
-            ChipletAir::EcPointStoreGroups,
-            ChipletAir::EcGroupAdd,
-            ChipletAir::EcMsm,
-            ChipletAir::Sha512,
-            ChipletAir::Sha256,
+            ChipletAir::CHUNK_NODE_SPONGE,
+            ChipletAir::EIDOS_COMPRESSION,
+            ChipletAir::KECCAK_ROUND,
+            ChipletAir::BYTE_PAIR_LUT,
+            ChipletAir::TRANSCRIPT_EVAL,
+            ChipletAir::UINT_STORE_MUL,
+            ChipletAir::UINT_ADD,
+            ChipletAir::EC_POINT_STORE_GROUPS,
+            ChipletAir::EC_GROUP_ADD,
+            ChipletAir::EC_MSM,
+            ChipletAir::SHA512,
+            ChipletAir::SHA256,
         ];
         assert_eq!(
             ChipletAir::all(),

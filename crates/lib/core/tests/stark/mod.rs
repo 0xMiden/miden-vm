@@ -1,6 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, config};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -152,7 +152,7 @@ fn stark_verifier_e2f4_with_kernel_flipped_order() {
     let expected = expected_order_from_shape(&data);
 
     assert_eq!(order, expected);
-    assert_ne!(order, ProofOrder::instance_order());
+    assert_ne!(order, (0..MIDEN_AIR_COUNT).collect::<Vec<_>>());
 }
 
 #[test]
@@ -245,22 +245,21 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
     let proof_order = expected_order_from_shape(&data);
     assert_ne!(
         proof_order,
-        ProofOrder::instance_order(),
+        (0..MIDEN_AIR_COUNT).collect::<Vec<_>>(),
         "fixture must have a non-identity proof order to exercise scatter routing"
     );
 
     let proof_position = |target| {
         proof_order
-            .airs()
             .iter()
-            .position(|air| *air == target)
+            .position(|&air| air == target)
             .expect("each Miden AIR occurs once in the proof order")
     };
     // Auxiliary destinations begin at table offset 12 and occupy two felts per proof position.
     // Core and Chiplets both use `pipe_2`, so exchanging only these cells keeps every procedure
     // digest and segment length valid while corrupting the routing permutation.
-    let core_aux_destination = 12 + 2 * proof_position(MidenAir::CORE);
-    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::CHIPLETS);
+    let core_aux_destination = 12 + 2 * proof_position(MidenAir::CORE.instance_index());
+    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::CHIPLETS.instance_index());
 
     let source = |swap_destinations: bool| {
         let routing_mutation = if swap_destinations {
@@ -871,7 +870,7 @@ fn vm_verify_proof_program() -> String {
     )
 }
 
-fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
+fn run_recursive_verifier(data: &VerifierData) -> Vec<usize> {
     use miden_air::vm::security;
 
     let source = vm_verify_proof_program();
@@ -929,12 +928,12 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
 ///
 /// Proof-stream layout: 4 security parameters, the 4-felt deferred root, then the three
 /// execution-dependent log heights (the And8Lookup height is verifier-fixed).
-fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
-    ProofOrder::from_instance_log_heights(&[
-        data.proof_stream[8] as u8,
-        data.proof_stream[9] as u8,
-        data.proof_stream[10] as u8,
-        AND8_LOOKUP_LOG_HEIGHT,
+fn expected_order_from_shape(data: &VerifierData) -> Vec<usize> {
+    vm_scatter_bench::proof_order(&[
+        data.proof_stream[8],
+        data.proof_stream[9],
+        data.proof_stream[10],
+        u64::from(AND8_LOOKUP_LOG_HEIGHT),
     ])
 }
 

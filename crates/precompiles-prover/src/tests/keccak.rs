@@ -324,7 +324,7 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::KeccakRound)
+        .position(|air| air == ChipletAir::KECCAK_ROUND)
         .expect("KeccakRound is present in the chiplet stack");
 
     let honest = session_stack_residual(&mains, &[], &challenges);
@@ -499,7 +499,7 @@ fn compact_rotation_arithmetic_preserving_limb_alias_fails_global_range_checks()
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|a| a == ChipletAir::KeccakRound)
+        .position(|a| a == ChipletAir::KECCAK_ROUND)
         .unwrap();
     let main = mains[round_idx];
     let program = slots();
