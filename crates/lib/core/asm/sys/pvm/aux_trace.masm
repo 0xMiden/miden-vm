@@ -30,7 +30,7 @@ type EcGroupPayload = struct {
     lambda: EnvironmentPtr,
 }
 
-# Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
+# Bus-domain scale factors (`bus_id + 1`) from crates/air/source/src/precompiles/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 # MAX_LOGUP_MESSAGE_WIDTH = 18

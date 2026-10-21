@@ -1,12 +1,12 @@
 ---
-source: air/src/constraints/columns.rs
-expression: col_map!(ControllerCols)
+source: crates/air/source/src/constraints/columns.rs
+expression: col_map!(AeadStreamCols)
 ---
-ControllerCols {
-    s0: 0,
-    s1: 1,
-    s2: 2,
-    state: [
+AeadStreamCols {
+    payload: [
+        0,
+        1,
+        2,
         3,
         4,
         5,
@@ -19,11 +19,10 @@ ControllerCols {
         12,
         13,
         14,
-    ],
-    row_data: [
         15,
         16,
         17,
         18,
+        19,
     ],
 }

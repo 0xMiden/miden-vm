@@ -1,12 +1,12 @@
 ---
-source: air/src/constraints/columns.rs
-expression: CHIPLET_COL_MAP
+source: crates/air/source/src/constraints/columns.rs
+expression: col_map!(ControllerCols)
 ---
-ChipletCols {
-    chiplets: [
-        0,
-        1,
-        2,
+ControllerCols {
+    s0: 0,
+    s1: 1,
+    s2: 2,
+    state: [
         3,
         4,
         5,
@@ -19,14 +19,11 @@ ChipletCols {
         12,
         13,
         14,
+    ],
+    row_data: [
         15,
         16,
         17,
         18,
-        19,
-        20,
-        21,
-        22,
     ],
-    chip_clk: 23,
 }

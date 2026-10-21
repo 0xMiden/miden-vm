@@ -88,7 +88,7 @@ pub enum AceError {
 #[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub mod testing;
 
-/// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
+/// Exposed for the lowering differential tests (`crates/air/generated/tests/ace_codegen.rs`);
 /// production consumes the IR lowering through the pipeline.
 #[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};

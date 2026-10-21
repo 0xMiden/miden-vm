@@ -59,7 +59,7 @@ mod tests {
     use crate::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement, ace};
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
-                               in air/src/config.rs and update \
+                               in crates/air/generated/src/config.rs and update \
                                CURRENT_VM_VERIFIER_ROOT in core/src/proof.rs";
 
     #[derive(Default)]
