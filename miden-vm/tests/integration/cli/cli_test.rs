@@ -9,9 +9,10 @@ use miden_mast_package::Package;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-fn bin_under_test(working_dir: &Path) -> Command {
-    let binary = env::var("NEXTEST_BIN_EXE_miden_vm")
-        .or_else(|_| env::var("CARGO_BIN_EXE_miden-vm"))
+pub(super) fn bin_under_test(working_dir: &Path) -> Command {
+    let binary = env::var("NEXTEST_BIN_EXE_miden-vm")
+        .ok()
+        .or_else(|| option_env!("CARGO_BIN_EXE_miden-vm").map(str::to_owned))
         .expect("the test runner should provide the path to the miden-vm binary");
     let mut command = Command::new(binary);
     command.current_dir(working_dir);

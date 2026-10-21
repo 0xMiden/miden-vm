@@ -227,6 +227,11 @@ impl PrecompileLimits {
         self
     }
 
+    /// Returns the configured bound for `class`, if the policy admits it.
+    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
+        self.classes.get(&class).copied()
+    }
+
     fn check_elements(&self, actual: u64) -> Result<(), PrecompileLimitError> {
         if actual > self.max_elements {
             return Err(PrecompileLimitError::Elements { actual, max: self.max_elements });
