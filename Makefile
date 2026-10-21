@@ -344,6 +344,9 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 regenerate-pvm-registry: ## Regenerate PVM registry and MASM artifacts (~2 min; protocol break)
 	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --write
 
+.PHONY: check-pvm-artifacts
+check-pvm-artifacts: check-pvm-registry ## Check generated artifacts for this release line
+
 .PHONY: check-pvm-registry
 check-pvm-registry: ## Check PVM registry and MASM artifacts for drift (full recompute)
 	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --check

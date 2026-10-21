@@ -10,11 +10,9 @@ on:
       - "zizmor.yml"
   pull_request:
     types: [opened, reopened, synchronize]
-    paths:
-      - ".github/workflows/**"
-      - ".github/actions/**"
-      - ".github/actionlint.yaml"
-      - "zizmor.yml"
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +24,8 @@ permissions: {}
 jobs:
   actionlint:
     name: Run actionlint
+    needs: zizmor
+    if: needs.zizmor.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +41,8 @@ jobs:
   zizmor:
     name: Run zizmor
     runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
     permissions:
       actions: read
       contents: read
@@ -48,9 +50,55 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
+      - name: Check for CI changes
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            pull_request)
+              : "${BASE_SHA:?Missing PR base SHA}" "${HEAD_SHA:?Missing PR head SHA}"
+              diff_range="${BASE_SHA}...${HEAD_SHA}"
+              ;;
+            merge_group)
+              : "${BASE_SHA:?Missing merge group base SHA}" "${HEAD_SHA:?Missing merge group head SHA}"
+              diff_range="${BASE_SHA}..${HEAD_SHA}"
+              ;;
+            *)
+              echo "run=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+          esac
+
+          changed_paths="$(mktemp)"
+          trap 'rm -f "${changed_paths}"' EXIT
+          # Keep git diff outside process substitution so errors fail this job.
+          git diff --no-renames --name-only -z "${diff_range}" -- > "${changed_paths}"
+
+          run=false
+          while IFS= read -r -d '' path; do
+            case "${path}" in
+              .github/workflows/*|.github/actions/*|.github/actionlint.yaml|zizmor.yml)
+                run=true
+                break
+                ;;
+            esac
+          done < "${changed_paths}"
+
+          echo "run=${run}" >> "${GITHUB_OUTPUT}"
+          if [ "${run}" = false ]; then
+            echo "No CI changes detected. Zizmor audit is not needed." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
       - name: Run zizmor
+        if: steps.paths.outputs.run == 'true'
         uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           advanced-security: false
