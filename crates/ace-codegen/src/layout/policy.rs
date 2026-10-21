@@ -148,6 +148,7 @@ impl InputLayout {
         )
     }
 
+    #[cfg(feature = "compiler")]
     pub(crate) fn for_relation(
         counts: InputCounts,
         num_airs: usize,

@@ -2,7 +2,7 @@
 
 use miden_constraint_compiler::ir::{CapturedConstraints, Graph, Leaf, Node, OpKind, capture};
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_lifted_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
 use crate::{AceCircuit, AceConfig, AceError, EXT_DEGREE, InputCounts, LayoutKind};
 
@@ -346,69 +346,5 @@ impl<'a> CompiledRelation<'a> {
                 layout,
             },
         )
-    }
-}
-
-/// Whether a canonical AIR is always present or belongs to one optional group.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Inclusion {
-    Required,
-    /// A single-bit feature mask. Several AIRs can belong to the same group.
-    Optional(u32),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AirDeclaration<A> {
-    pub air: A,
-    pub inclusion: Inclusion,
-}
-
-/// A canonical family declaration independent of any protocol's feature names.
-#[derive(Debug)]
-pub struct RelationFamily<'a, A> {
-    declarations: &'a [AirDeclaration<A>],
-    supported_mask: u32,
-}
-
-impl<'a, A: Copy + Eq> RelationFamily<'a, A> {
-    pub fn new(declarations: &'a [AirDeclaration<A>]) -> Result<Self, AceError> {
-        if declarations.is_empty() {
-            return Err(invalid("relation family requires a nonempty AIR declaration"));
-        }
-        let mut supported_mask = 0;
-        for (index, declaration) in declarations.iter().enumerate() {
-            if declarations[..index].iter().any(|prior| prior.air == declaration.air) {
-                return Err(invalid("relation family contains a duplicate AIR ID"));
-            }
-            if let Inclusion::Optional(bit) = declaration.inclusion {
-                if !bit.is_power_of_two() {
-                    return Err(invalid("optional AIR group must use a single feature bit"));
-                }
-                supported_mask |= bit;
-            }
-        }
-        Ok(Self { declarations, supported_mask })
-    }
-
-    pub fn supported_mask(&self) -> u32 {
-        self.supported_mask
-    }
-
-    pub fn select(&self, mask: u32) -> Result<Vec<A>, AceError> {
-        if mask & !self.supported_mask != 0 {
-            return Err(invalid("relation feature mask contains unknown bits"));
-        }
-        let selected: Vec<_> = self
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration.inclusion {
-                Inclusion::Required => Some(declaration.air),
-                Inclusion::Optional(bit) => (mask & bit != 0).then_some(declaration.air),
-            })
-            .collect();
-        if selected.is_empty() {
-            return Err(invalid("relation selection requires a nonempty AIR set"));
-        }
-        Ok(selected)
     }
 }

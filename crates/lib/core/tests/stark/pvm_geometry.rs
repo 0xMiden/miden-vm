@@ -1,10 +1,10 @@
 use miden_ace_codegen::InputKey;
-use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{
+use miden_air::precompiles::{
     ChipletAir, NUM_CHIPLETS,
     ace::build_canonical_precompile_ace_circuit,
     protocol::{PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST},
 };
+use miden_core::{Felt, field::QuadFelt};
 
 const PVM_WRAPPER_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm");
 const SECURITY_ESTIMATOR_PATH: &str =
@@ -50,7 +50,7 @@ fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
 
 #[test]
 fn pvm_aux_hook_matches_the_logup_registry() {
-    use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
+    use miden_air::precompiles::relations::{BusId, MAX_MESSAGE_WIDTH};
 
     const HOOK_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/aux_trace.masm");
 
@@ -61,8 +61,10 @@ fn pvm_aux_hook_matches_the_logup_registry() {
 
 #[test]
 fn pvm_public_input_hook_matches_the_statement_schema() {
-    use miden_air::MultiAir;
-    use miden_precompiles_air::{ChipletMultiAir, protocol::PVM_PREPROCESSED_COMMITMENT};
+    use miden_air::{
+        MultiAir,
+        precompiles::{ChipletMultiAir, protocol::PVM_PREPROCESSED_COMMITMENT},
+    };
 
     const HOOK_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/public_inputs.masm");
     const RELATION_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm");
@@ -154,7 +156,7 @@ fn pvm_masm_read_layout_matches_every_codegen_boundary() {
 
 #[test]
 fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-    use miden_precompiles_air::{
+    use miden_air::precompiles::{
         primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
     };
 
@@ -247,7 +249,7 @@ fn pvm_wrapper_matches_the_relation_contract() {
 /// that does not determine the result.
 #[test]
 fn pvm_security_masm_matches_air() {
-    use miden_precompiles_air::security as pvm_security;
+    use miden_air::precompiles::security as pvm_security;
 
     let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -262,14 +264,15 @@ fn pvm_security_masm_matches_air() {
             "DEEP_FIELD_BASE_BITS",
             (sample_bits >> fractional_bits)
                 - u64::from(
-                    miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+                    miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
                 ),
         ),
         ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", pvm_security::LOG2_E),
         (
             "MAX_CONSTRAINT_DEGREE",
-            (1u64 << miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup()) + 1,
+            (1u64 << miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup())
+                + 1,
         ),
     ] {
         assert_eq!(
@@ -376,7 +379,7 @@ fn pvm_masm_quotient_inputs_match_the_stark_domain() {
     assert!(num_chunks.is_power_of_two());
     let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
         num_chunks.ilog2() as u8,
-        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
     )
     .expect("PVM quotient degree fits the PCS blowup");
 

@@ -343,10 +343,15 @@ stage-verifiers: ## Write the core-library assembly tree with generated verifier
 	@test -n "$(DIR)" || { echo "usage: make stage-verifiers DIR=<new or staged directory>" >&2; exit 1; }
 	cargo run --locked --package miden-verifier-codegen -- --stage crates/lib/core/asm "$(DIR)"
 
+.PHONY: regenerate-verifiers
+regenerate-verifiers: ## Regenerate tracked verifier MASM without accepting new protocol identities
+	cargo run --locked --package miden-verifier-codegen -- --write crates/lib/core/asm
+
 .PHONY: check-verifiers
-check-verifiers: ## Check generated evaluators, generated verifier modules and pinned verifier roots
+check-verifiers: ## Check generated evaluators, tracked verifier MASM and pinned verifier roots
+	cargo run --locked --package miden-verifier-codegen -- --check crates/lib/core/asm
 	cargo test --locked --package miden-air --test generated_drift
-	cargo test --locked --package miden-precompiles-air --test generated_drift
+	cargo test --locked --package miden-air --test precompiles_generated_drift
 	cargo test --locked --package miden-verifier-codegen
 	cargo test --locked --package miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library
 

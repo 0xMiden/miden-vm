@@ -1,9 +1,11 @@
-use alloc::vec::Vec;
-
-use miden_ace_codegen::{CapturedAir, CompiledRelation, EXT_DEGREE};
+#[cfg(feature = "compiler")]
+use miden_ace_codegen::CompiledRelation;
+use miden_ace_codegen::EXT_DEGREE;
+#[cfg(feature = "compiler")]
 use p3_security::budget::{AirShape, LookupShape};
 
-use crate::{AIRS, HandwrittenMidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH};
+#[cfg(feature = "compiler")]
+use crate::{AIRS, logup::MIDEN_MAX_MESSAGE_WIDTH};
 
 /// Number of out-of-domain points opened per committed column.
 ///
@@ -11,18 +13,23 @@ use crate::{AIRS, HandwrittenMidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH};
 pub const NUM_OOD_POINTS: u32 = 2;
 
 /// Derive the security shape for tooling and differential validation.
+#[cfg(feature = "compiler")]
 pub fn derive_air_shape() -> AirShape {
-    let captures: Vec<_> = AIRS
-        .iter()
-        .map(|air| CapturedAir::new(&HandwrittenMidenAir(*air)).expect("capture VM AIR"))
-        .collect();
-    let airs: Vec<_> = captures.iter().collect();
-    let relation = CompiledRelation::from_captured(&airs, crate::config::SPONGE_RATE)
-        .expect("compile VM relation");
-    air_shape(&relation)
+    crate::shared::geometry::derive_air_shape(
+        &AIRS,
+        LookupShape {
+            fractions_per_row: AIRS
+                .iter()
+                .map(|air| air.column_shape().iter().sum::<usize>())
+                .sum::<usize>() as u32,
+            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
+        },
+        crate::shared::config::SPONGE_RATE,
+    )
 }
 
 /// Security shape from the same captured relation used for evaluators and ACE generation.
+#[cfg(feature = "compiler")]
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
     let geometry = relation.geometry();
     let fractions_per_row: usize =

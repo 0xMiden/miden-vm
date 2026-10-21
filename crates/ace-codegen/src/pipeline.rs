@@ -7,7 +7,7 @@
 //! - emit a circuit that matches verifier evaluation.
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::LiftedAir;
+use miden_lifted_stark::air::LiftedAir;
 
 use crate::{
     AceError, CapturedAir, CompiledRelation, EXT_DEGREE,

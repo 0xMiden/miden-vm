@@ -11,7 +11,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::verifier::VerifierError;
+use miden_lifted_stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 

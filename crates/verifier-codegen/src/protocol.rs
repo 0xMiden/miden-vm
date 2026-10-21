@@ -5,7 +5,10 @@
 //! relation use direct calls and immediate addresses without a runtime metadata table.
 use std::fmt::Write;
 
-use miden_lifted_air::{StatementEncoding, StatementField};
+use askama::Template;
+use miden_lifted_air::StatementEncoding;
+
+use crate::templates::{PvmAuxTraceTemplate, PvmPublicInputsTemplate};
 
 /// The PVM statement schema and its one-boundary-value-per-instance protocol.
 #[derive(Clone, Copy, Debug)]
@@ -19,9 +22,9 @@ pub(crate) struct PvmProtocolPlan {
 impl PvmProtocolPlan {
     pub(crate) fn from_relation(
         num_airs: usize,
-        protocol: &miden_precompiles_air::relation::RelationProtocol,
+        protocol: &miden_air_definitions::precompiles::relation::RelationProtocol,
     ) -> Result<Self, String> {
-        use miden_precompiles_air::relation::AuxBoundaryReduction;
+        use miden_air_definitions::precompiles::relation::AuxBoundaryReduction;
         match protocol.boundary.reduction {
             AuxBoundaryReduction::TraceLengthWeightedSum => {},
         }
@@ -52,78 +55,30 @@ impl PvmProtocolPlan {
     }
 
     pub(crate) fn render_public_inputs(self) -> Result<String, String> {
-        let mut out = include_str!("../templates/pvm/public_inputs.masm").to_string();
-        for (name, value) in [
-            ("NUM_CHIPLETS", self.num_airs),
-            ("NUM_PUBLIC_VALUES", self.num_public_values),
-            ("MAX_AUX_INPUTS", self.max_aux_inputs),
-            ("NUM_AUX_INPUTS", self.num_aux_inputs),
-            // The trusted setup commitment contributes four buffered felts before the shared
-            // default statement/shape encoding used by the native transcript.
-            (
-                "BUFFERED_SHAPE_VALUE_COUNT",
-                (4 + StatementEncoding {
-                    num_public_values: self.num_public_values,
-                    max_aux_inputs: self.max_aux_inputs,
-                    num_aux_inputs: self.num_aux_inputs,
-                    num_airs: self.num_airs,
-                }
-                .shape_len())
-                    % 8,
-            ),
-        ] {
-            super::fill(&mut out, name, value)?;
-        }
-        let mut statement = String::new();
-        for field in StatementEncoding::FIELDS {
-            match field {
-                StatementField::PublicValuesLength => statement
-                    .push_str("    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt\n"),
-                StatementField::PublicValues => {
-                    for index in 0..self.num_public_values {
-                        statement.push_str("    exec.layout::public_inputs_ptr");
-                        offset(&mut statement, index * 2);
-                        statement.push_str(" mem_load exec.random_coin::observe_felt\n");
-                    }
-                },
-                StatementField::MaxAuxInputs => {
-                    statement.push_str("    push.MAX_AUX_INPUTS exec.random_coin::observe_felt\n")
-                },
-                StatementField::AuxInputsLength => {
-                    statement.push_str("    push.NUM_AUX_INPUTS exec.random_coin::observe_felt\n")
-                },
-                StatementField::AuxInputs => {}, /* This kernel's validated schema has zero aux
-                                                  * inputs. */
+        PvmPublicInputsTemplate {
+            num_chiplets: self.num_airs,
+            num_public_values: self.num_public_values,
+            max_aux_inputs: self.max_aux_inputs,
+            num_aux_inputs: self.num_aux_inputs,
+            buffered_shape_value_count: (4 + StatementEncoding {
+                num_public_values: self.num_public_values,
+                max_aux_inputs: self.max_aux_inputs,
+                num_aux_inputs: self.num_aux_inputs,
+                num_airs: self.num_airs,
             }
+            .shape_len())
+                % 8,
         }
-        super::fill(&mut out, "OBSERVE_STATEMENT", statement.trim_end())?;
-        Ok(out)
+        .render()
+        .map_err(|e| e.to_string())
     }
 
     pub(crate) fn render_aux_trace(self) -> Result<String, String> {
-        let mut out = include_str!("../templates/pvm/aux_trace.masm").to_string();
         let coordinates = self.num_airs * 2;
-        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
-        for (name, value) in [
-            ("UINT_VAL_BUS_SCALE", BusId::UintVal as usize + 1),
-            ("EC_GROUP_BUS_SCALE", BusId::EcGroup as usize + 1),
-            ("MAX_LOGUP_MESSAGE_WIDTH", MAX_MESSAGE_WIDTH),
-        ] {
-            super::fill(&mut out, name, value)?;
-        }
+        use miden_air::precompiles::relations::{BusId, MAX_MESSAGE_WIDTH};
         if MAX_MESSAGE_WIDTH != 18 {
             return Err("PVM beta-power kernel requires message width eighteen".into());
         }
-        super::fill(&mut out, "FIXED_UINT_CONSUMES", fixed_uint_consumes())?;
-        super::fill(&mut out, "FIXED_EC_CONSUMES", fixed_ec_consumes())?;
-        for (name, value) in [
-            ("NUM_CHIPLETS", self.num_airs),
-            ("NUM_AUX_VALUE_WORDS", coordinates / 4),
-            ("BUFFERED_AUX_VALUE_COUNT", (4 + coordinates) % 8),
-        ] {
-            super::fill(&mut out, name, value)?;
-        }
-
         let mut scatter = String::new();
         for id in (0..self.num_airs).rev() {
             write!(scatter, "    exec.layout::proof_order_positions_ptr").unwrap();
@@ -140,7 +95,6 @@ impl PvmProtocolPlan {
             offset(&mut scatter, start);
             scatter.push_str(" mem_store\n");
         }
-        super::fill(&mut out, "SCATTER_BOUNDARIES", scatter.trim_end())?;
 
         let mut observe = String::new();
         for start in (0..coordinates / 4 * 4).step_by(4) {
@@ -155,7 +109,6 @@ impl PvmProtocolPlan {
             offset(&mut observe, start);
             observe.push_str(" mem_store exec.random_coin::observe_felt\n");
         }
-        super::fill(&mut out, "OBSERVE_BOUNDARIES", observe.trim_end())?;
 
         let mut weighted = String::new();
         for id in 0..self.num_airs {
@@ -172,8 +125,21 @@ impl PvmProtocolPlan {
             }
             weighted.push('\n');
         }
-        super::fill(&mut out, "WEIGHT_BOUNDARIES", weighted.trim_end())?;
-        Ok(out)
+        PvmAuxTraceTemplate {
+            uint_val_bus_scale: BusId::UintVal as usize + 1,
+            ec_group_bus_scale: BusId::EcGroup as usize + 1,
+            max_logup_message_width: MAX_MESSAGE_WIDTH,
+            fixed_uint_consumes: fixed_uint_consumes(),
+            fixed_ec_consumes: fixed_ec_consumes(),
+            num_chiplets: self.num_airs,
+            num_aux_value_words: coordinates / 4,
+            buffered_aux_value_count: (4 + coordinates) % 8,
+            scatter_boundaries: scatter.trim_end().into(),
+            observe_boundaries: observe.trim_end().into(),
+            weight_boundaries: weighted.trim_end().into(),
+        }
+        .render()
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -187,7 +153,7 @@ fn offset(out: &mut String, offset: usize) {
 /// environment pointer. The arithmetic reduction is commutative, so this order only fixes the
 /// kernel's instruction stream; every literal is derived from native data.
 fn fixed_uint_consumes() -> String {
-    let mut messages = miden_precompiles_air::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
+    let mut messages = miden_air::precompiles::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
     messages.sort_by_key(|message| {
         (
             message.ptr != message.bound_ptr,
@@ -253,7 +219,7 @@ fn fixed_uint_consumes() -> String {
 
 fn fixed_ec_consumes() -> String {
     let mut out = String::new();
-    for message in miden_precompiles_air::fixed::fixed_ecgroup_msgs() {
+    for message in miden_air::precompiles::fixed::fixed_ecgroup_msgs() {
         writeln!(
             out,
             "    # EcGroup(group={}, A={}, B={}, base-bound={}, scalar-bound={}, beta={}, \
@@ -301,8 +267,8 @@ mod tests {
     }
 
     #[test]
-    fn selected_relations_consume_exact_boundary_coordinates() {
-        for n in 8..=12 {
+    fn full_relation_consumes_exact_boundary_coordinates() {
+        for n in [miden_air::precompiles::NUM_CHIPLETS] {
             let aux = plan(n).render_aux_trace().unwrap();
             let observe = aux
                 .split_once("pub proc observe_aux_trace()")

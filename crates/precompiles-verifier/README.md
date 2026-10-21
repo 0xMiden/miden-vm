@@ -6,12 +6,12 @@ for Miden VM execution proofs.
 Use `verify_deferred` to verify a proof against its deferred root. With `std`,
 the `masm_verifier` module builds host inputs for the in-VM PVM verifier.
 
-The handwritten AIRs and protocol policy live in `miden-precompiles-air-definitions`.
+The handwritten AIRs and protocol policy live in `miden_air_definitions::precompiles`.
 Cargo compiles the constraint evaluators and the ACE instruction stream into `OUT_DIR`.
 The relation digest, ACE circuit digest, and setup commitment are pinned in
-`miden-precompiles-air`; its tests and this crate's tests recompute them from the AIRs,
+`miden_air::precompiles`; its tests and this crate's tests recompute them from the AIRs,
 so a relation change must update them deliberately. `miden-verifier-codegen` renders
-the PVM verifier MASM from the AIR metadata and templates while `miden-core-lib` builds.
+the tracked PVM verifier MASM from AIR metadata and typed templates during explicit regeneration.
 
 Run `make check-verifiers` to check evaluator equivalence, the generated verifier modules,
 and the pinned verifier roots.

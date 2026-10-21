@@ -6,13 +6,13 @@
 
 use alloc::{vec, vec::Vec};
 
-#[cfg(test)]
-use miden_core::utils::RowMajorMatrix;
-use miden_core::{Felt, field::Field};
-use miden_precompiles_air::hash::sha512::compression::{
+use miden_air::precompiles::hash::sha512::compression::{
     self,
     program::{self, Op},
 };
+#[cfg(test)]
+use miden_core::utils::RowMajorMatrix;
+use miden_core::{Felt, field::Field};
 use miden_utils_sync::LazyLock;
 
 use crate::primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp};

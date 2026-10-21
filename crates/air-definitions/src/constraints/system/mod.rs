@@ -35,7 +35,7 @@
 
 pub mod columns;
 
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 use p3_field::Dup;
 
 use crate::{
@@ -121,10 +121,8 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         operations::opcodes,
     };
-    use miden_crypto::stark::{
-        air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-        matrix::RowMajorMatrix,
-    };
+    use miden_lifted_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+    use p3_matrix::dense::RowMajorMatrix;
 
     use super::enforce_main;
     use crate::{

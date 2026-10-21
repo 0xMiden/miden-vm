@@ -98,11 +98,6 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     for module in core::slice::from_ref(&root).iter().chain(support.iter()) {
         let label = module.path().to_relative();
         let relative = markdown_file_name(label);
-        // Relation-family subtrees repeat the full PVM relation's procedures; document the full
-        // relation's modules only.
-        if relative.starts_with("sys/pvm/relations/") {
-            continue;
-        }
         let out = output_path.join(&relative);
 
         // Create directories if needed
@@ -236,17 +231,12 @@ fn main() -> Result<(), Report> {
     // dependency against the exact embedded artifact.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    // The handwritten tree stays read-only; the staged copy adds the generated verifier modules.
+    // Assemble tracked MASM, using a build-owned copy for generated precompile assembly.
     let asm_dir = build_dir.join(ASM_DIR_PATH);
-    // `OUT_DIR` belongs to this build, so its previous staging is always safe to replace.
     if asm_dir.exists() {
         fs::remove_dir_all(&asm_dir).into_diagnostic()?;
     }
-    miden_verifier_codegen::stage_core_library(
-        &Path::new(manifest_dir).join(ASM_DIR_PATH),
-        &asm_dir,
-    )
-    .map_err(Report::msg)?;
+    copy_assembly_tree(&Path::new(manifest_dir).join(ASM_DIR_PATH), &asm_dir).into_diagnostic()?;
     println!("cargo:rustc-env=MIDEN_CORE_ASM_DIR={}", asm_dir.display());
     let precompiles_asm_dir = asm_dir.join("precompiles");
     miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;
@@ -279,5 +269,19 @@ fn main() -> Result<(), Report> {
         build_core_lib_docs(&asm_dir, docs_dir).into_diagnostic()?;
     }
 
+    Ok(())
+}
+
+fn copy_assembly_tree(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_assembly_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
     Ok(())
 }

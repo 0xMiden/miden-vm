@@ -21,7 +21,7 @@
 //! footprint.
 
 use miden_core::field::{BasedVectorSpace, QuadFelt};
-use miden_crypto::stark::{log_quotient_degree, pcs::PcsParams};
+use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
 
 use crate::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 

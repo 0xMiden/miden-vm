@@ -10,6 +10,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -21,20 +25,13 @@ use miden_core::{
         HashFunction, MAX_STARK_PROOF_BYTES, PrecompileProof, StarkProof as SerializedStarkProof,
     },
 };
-use miden_crypto::{
-    merkle::{MerklePath, PartialMerkleTree},
-    stark::{
-        StarkConfig,
-        lmcs::{Lmcs, proof::BatchProofView},
-        pcs::PcsProof,
-        proof::{StarkProof, StarkProofData},
-    },
-};
+use miden_crypto::merkle::{MerklePath, PartialMerkleTree};
 use miden_lifted_air::{LiftedAir, Statement};
-use miden_lifted_stark::VerifierInstance;
-use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+use miden_lifted_stark::{
+    StarkConfig, VerifierInstance,
+    lmcs::{Lmcs, proof::BatchProofView},
+    pcs::PcsProof,
+    proof::{StarkProof, StarkProofData},
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;

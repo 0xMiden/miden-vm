@@ -5,29 +5,26 @@ use std::{
     vec::Vec,
 };
 
+use askama::Template;
 use miden_ace_codegen::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
     render_masm_constraints_eval,
 };
+use miden_air::precompiles::security as pvm_security;
+use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
-use miden_precompiles_air::{
-    relation::{CapturedPvmRelation, RelationSelection},
-    security as pvm_security,
-};
 
 pub(crate) use crate::GENERATED_BY;
 use crate::{
-    module_path::RelationModulePath,
     pvm_ood_frames::{
         OOD_SCATTER_TABLE_FELTS, PvmOodGeometry, PvmScatterTableLayout, pvm_scatter_table_layout,
         render_pvm_ood_frames,
     },
+    templates::{PvmDeepQueriesTemplate, PvmModTemplate},
 };
-const PVM_DEEP_QUERIES_PATH: &str = "pvm/deep_queries";
-const PVM_RELATION_MOD_PATH: &str = "pvm/mod";
 /// Fixed 4-Ki-felt boundary after the VM relation's reserved ACE stream region. The PVM's complete
 /// READ section starts here; its aux-randomness anchor is later because four public EF inputs
 /// precede it.
@@ -172,40 +169,15 @@ impl PvmReadLayout {
     }
 }
 
-/// Render every declared relation member, and the subtree index once there is more than one.
+/// Render the complete production PVM relation.
 pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), String> {
     let captured = CapturedPvmRelation::new().map_err(|e| e.to_string())?;
-    let selections = RelationSelection::all();
-    for &selection in &selections {
-        render_selection(modules, &captured, selection, &selections)?;
-    }
-    if selections.len() > 1 {
-        let mut declarations = String::new();
-        for selection in selections.iter().filter(|&&s| s != RelationSelection::FULL) {
-            writeln!(declarations, "pub mod {}", selection.module_name()).unwrap();
-        }
-        super::push_module(modules, "pvm/relations", "mod", &declarations)?;
-    }
-    Ok(())
-}
-
-fn render_selection(
-    modules: &mut Vec<crate::RenderedModule>,
-    captured: &CapturedPvmRelation,
-    selection: RelationSelection,
-    selections: &[RelationSelection],
-) -> Result<(), String> {
-    let compiled = captured.compile(selection).map_err(|e| e.to_string())?;
+    let compiled = captured.compile().map_err(|e| e.to_string())?;
     let source = compiled.build_circuit(LayoutKind::Masm).map_err(|e| e.to_string())?;
     let num_airs = compiled.geometry().airs.len();
-    let protocol = selection.protocol();
-    let air_shape = miden_precompiles_air::geometry::air_shape(&compiled, selection);
+    let protocol = relation::protocol();
+    let air_shape = miden_air_definitions::precompiles::geometry::air_shape(&compiled);
     let lookup_shape = air_shape.lookup.ok_or("PVM relation requires lookup security data")?;
-    let module_path = RelationModulePath::new(if selection == RelationSelection::FULL {
-        "pvm".to_string()
-    } else {
-        format!("pvm/relations/{}", selection.module_name())
-    })?;
     let input_layout = source.layout();
     let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
         .map_err(|e| format!("{e}"))?;
@@ -218,7 +190,7 @@ fn render_selection(
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -229,7 +201,7 @@ fn render_selection(
     };
     let circuit_digest = circuit.commitment;
     let relation_digest = miden_air::config::relation_digest(protocol.protocol_id, &circuit_digest);
-    let preprocessed_commitment = preprocessed_commitment(selection)?;
+    let preprocessed_commitment = preprocessed_commitment();
 
     let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout)?;
     let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
@@ -249,43 +221,10 @@ fn render_selection(
         protocol.max_periodic_log,
     )?;
 
-    let mut relation_mod_masm = template_source(PVM_RELATION_MOD_PATH)?;
-    for (prefix, word) in [
-        ("RELATION_DIGEST", Word::new(relation_digest)),
-        ("PREPROCESSED_COMMITMENT", preprocessed_commitment),
-    ] {
-        for (index, felt) in word.iter().enumerate() {
-            super::fill(
-                &mut relation_mod_masm,
-                &format!("{prefix}_{index}"),
-                felt.as_canonical_u64(),
-            )?;
-        }
-    }
-    for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(lookup_shape.max_message_width)),
-        ("NUM_COMPOSED_CONSTRAINTS", u64::from(air_shape.num_composed_constraints)),
-        ("MAX_CONSTRAINT_DEGREE", u64::from(air_shape.max_constraint_degree)),
-        (
-            "NUM_DEEP_TERMS",
-            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
-        ),
-        ("LOOKUP_FRACTIONS_PER_ROW", u64::from(lookup_shape.fractions_per_row)),
-        ("FIXED_BOUNDARY_LOOKUP_TERMS", protocol.boundary.fixed_boundary_terms as u64),
-    ] {
-        super::fill(&mut relation_mod_masm, name, value)?;
-    }
-
-    for (name, value) in [
-        ("LOOKUP_POW_BITS", pvm_security::LOOKUP_POW_BITS as u64),
-        ("NUM_CHIPLETS", num_airs as u64),
-    ] {
-        super::fill(&mut relation_mod_masm, name, value)?;
-    }
     let mut heights = String::new();
     let mut loads = String::new();
     for (i, height) in protocol.heights.iter().enumerate() {
-        use miden_precompiles_air::relation::HeightRule;
+        use miden_air_definitions::precompiles::relation::HeightRule;
         let (prefix, loader, log_height) = match height {
             HeightRule::Fixed(log_height) => ("FIXED", "load_fixed_air_height", log_height),
             HeightRule::Minimum(log_height) => ("MIN", "load_air_height", log_height),
@@ -297,24 +236,31 @@ fn render_selection(
         write!(heights, "const {prefix}_LOG_HEIGHT_{i} = {log_height}").unwrap();
         write!(loads, "    push.{prefix}_LOG_HEIGHT_{i} exec.{loader}").unwrap();
     }
-    super::fill(&mut relation_mod_masm, "HEIGHT_CONSTANTS", heights)?;
-    super::fill(&mut relation_mod_masm, "LOAD_HEIGHTS", loads)?;
-    let protocol = crate::protocol::PvmProtocolPlan::from_relation(num_airs, &protocol)?;
-    if selections.len() > 1 {
-        if selection == RelationSelection::FULL {
-            let variants = selections
-                .iter()
-                .map(|s| (s.recursive_selector(), s.module_name()))
-                .collect::<Vec<_>>();
-            relation_mod_masm = crate::family::bind_dispatch(
-                &relation_mod_masm,
-                &variants,
-                selection.recursive_selector(),
-            )?;
-        } else {
-            relation_mod_masm = crate::family::expose_relation_entry(&relation_mod_masm)?;
-        }
+    let digest = relation_digest.map(|felt| felt.as_canonical_u64());
+    let setup = core::array::from_fn::<_, 4, _>(|i| preprocessed_commitment[i].as_canonical_u64());
+    let relation_mod_masm = PvmModTemplate {
+        relation_digest_0: digest[0],
+        relation_digest_1: digest[1],
+        relation_digest_2: digest[2],
+        relation_digest_3: digest[3],
+        preprocessed_commitment_0: setup[0],
+        preprocessed_commitment_1: setup[1],
+        preprocessed_commitment_2: setup[2],
+        preprocessed_commitment_3: setup[3],
+        max_message_width: lookup_shape.max_message_width as usize,
+        num_composed_constraints: air_shape.num_composed_constraints as usize,
+        max_constraint_degree: air_shape.max_constraint_degree as usize,
+        num_deep_terms: air_shape.num_deep_terms.expect("the PVM uses DEEP composition") as usize,
+        lookup_fractions_per_row: lookup_shape.fractions_per_row as usize,
+        fixed_boundary_lookup_terms: protocol.boundary.fixed_boundary_terms,
+        lookup_pow_bits: pvm_security::LOOKUP_POW_BITS as usize,
+        num_chiplets: num_airs,
+        height_constants: heights,
+        load_heights: loads,
     }
+    .render()
+    .map_err(|e| e.to_string())?;
+    let protocol = crate::protocol::PvmProtocolPlan::from_relation(num_airs, &protocol)?;
     for (name, content) in [
         ("aux_trace", protocol.render_aux_trace()?),
         ("public_inputs", protocol.render_public_inputs()?),
@@ -324,28 +270,17 @@ fn render_selection(
         ("deep_queries", deep_queries_masm),
         ("constraints_eval", constraints_eval_masm),
     ] {
-        super::push_module(
-            modules,
-            module_path.relative(),
-            name,
-            &module_path.bind_pvm_imports(&content),
-        )?;
+        super::push_module(modules, "pvm", name, &content)?;
     }
     Ok(())
 }
-/// The member's setup commitment, pinned in `miden-precompiles-air`, whose tests rebuild it from
-/// the AIRs.
-fn preprocessed_commitment(selection: RelationSelection) -> Result<Word, String> {
-    let pins = miden_precompiles_air::protocol::RELATION_PINS
-        .iter()
-        .find(|pins| pins.selection_mask == selection.mask())
-        .ok_or_else(|| {
-            format!(
-                "PVM relation member {} has no entry in RELATION_PINS; pin its identity first",
-                selection.mask()
-            )
-        })?;
-    Ok(Word::new(pins.preprocessed_commitment.map(Felt::new_unchecked)))
+/// The setup commitment pinned in `miden-air`, whose tests rebuild it from the AIRs.
+fn preprocessed_commitment() -> Word {
+    Word::new(
+        miden_air::precompiles::protocol::pins()
+            .preprocessed_commitment
+            .map(Felt::new_unchecked),
+    )
 }
 
 /// Relation-local scratch that follows the ACE READ section, in allocation order.
@@ -615,37 +550,46 @@ fn render_pvm_constraints_eval(
 }
 
 fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> {
-    let mut deep_queries = template_source(PVM_DEEP_QUERIES_PATH)?;
-    apply_pvm_deep_query_geometry(&mut deep_queries, geometry)?;
-    let depth = miden_precompiles_air::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
-        + u32::from(miden_precompiles_air::policy::LOG_BLOWUP);
-    let mask = 1u32
-        .checked_shl(depth)
-        .and_then(|n| n.checked_sub(1))
-        .ok_or("PVM setup depth exceeds u32 query indices")?;
-    super::fill(&mut deep_queries, "PREPROCESSED_TREE_DEPTH", depth)?;
-    super::fill(&mut deep_queries, "PREPROCESSED_INDEX_MASK", mask)?;
-    Ok(deep_queries)
-}
-
-fn apply_pvm_deep_query_geometry(
-    deep_queries: &mut String,
-    geometry: &PvmOodGeometry,
-) -> Result<(), String> {
-    for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
+    let groups = geometry.deep_query_groups();
+    let mut blocks = [0; 4];
+    let mut cvs: [String; 4] = core::array::from_fn(|_| String::new());
+    for (i, (blocks_name, init_cv_name, width)) in groups.into_iter().enumerate() {
         if !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
             return Err(format!(
                 "PVM {blocks_name} width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
             ));
         }
-        super::fill(deep_queries, blocks_name, width / EIDOS_BLOCK_WIDTH)?;
-
+        blocks[i] = width / EIDOS_BLOCK_WIDTH;
         let encoded_len = u32::try_from(width)
             .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
-        let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
-        super::fill(deep_queries, init_cv_name, masm_word_literal(init_cv))?;
+        cvs[i] = masm_word_literal(Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
     }
-    Ok(())
+    let depth = miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
+        + u32::from(miden_air::precompiles::policy::LOG_BLOWUP);
+    let mask = 1u32
+        .checked_shl(depth)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or("PVM setup depth exceeds u32 query indices")?;
+    let [
+        preprocessed_lmcs_init_cv,
+        main_lmcs_init_cv,
+        aux_lmcs_init_cv,
+        quotient_lmcs_init_cv,
+    ] = cvs;
+    PvmDeepQueriesTemplate {
+        preprocessed_tree_depth: depth,
+        preprocessed_index_mask: mask,
+        preprocessed_row_double_words: blocks[0],
+        main_row_double_words: blocks[1],
+        aux_row_double_words: blocks[2],
+        quotient_row_double_words: blocks[3],
+        preprocessed_lmcs_init_cv,
+        main_lmcs_init_cv,
+        aux_lmcs_init_cv,
+        quotient_lmcs_init_cv,
+    }
+    .render()
+    .map_err(|e| e.to_string())
 }
 
 fn masm_word_literal(word: Word) -> String {
@@ -655,94 +599,6 @@ fn masm_word_literal(word: Word) -> String {
         elements[0].as_canonical_u64(),
         elements[1].as_canonical_u64(),
         elements[2].as_canonical_u64(),
-        elements[3].as_canonical_u64(),
+        elements[3].as_canonical_u64()
     )
-}
-
-fn template_source(path: &str) -> Result<String, String> {
-    Ok(match path {
-        PVM_DEEP_QUERIES_PATH => include_str!("../templates/pvm/deep_queries.masm"),
-        PVM_RELATION_MOD_PATH => include_str!("../templates/pvm/mod.masm"),
-        _ => return Err("unknown MASM template".to_string()),
-    }
-    .to_string())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Compact subsets exercise the future family members without changing the full-only
-    /// production policy. Every kernel must agree on the physical committed row, especially when
-    /// two logical quotient chunks still occupy an eight-coordinate LMCS leaf.
-    #[test]
-    fn compact_subsets_specialize_all_geometry_dependent_kernels() {
-        let captured = CapturedPvmRelation::new().unwrap();
-        // The common relation excludes the four hash-related declarations, retaining BytePairLut.
-        let required = [1usize, 3, 4, 5, 6, 7, 8, 9];
-        let optional = [0usize, 2, 10, 11];
-        for additional in 0..=optional.len() {
-            let mut indices = required.to_vec();
-            indices.extend_from_slice(&optional[..additional]);
-            indices.sort_unstable();
-            let refs = indices.iter().map(|&index| &captured.airs()[index]).collect::<Vec<_>>();
-            let compiled = miden_ace_codegen::CompiledRelation::from_captured(&refs, 8).unwrap();
-            let source = compiled.build_circuit(LayoutKind::Masm).unwrap();
-            let layout = source.layout();
-            let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().unwrap()).unwrap();
-            let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), layout).unwrap();
-            let read = PvmReadLayout::from_input_layout(layout, indices.len()).unwrap();
-            let scatter = pvm_scatter_table_layout(&geometry).unwrap();
-            let scratch = pvm_scratch_allocation(&read, circuit.stream_len as u32).unwrap();
-            let quotient = quotient_recomposition_inputs::<Felt>(
-                compiled.geometry().num_quotient_chunks.ilog2() as u8,
-                miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
-            )
-            .unwrap();
-            let protocol = crate::protocol::PvmProtocolPlan {
-                num_airs: indices.len(),
-                num_public_values: 4,
-                max_aux_inputs: 0,
-                num_aux_inputs: 0,
-            }
-            .validate()
-            .unwrap();
-            let kernels = [
-                protocol.render_aux_trace().unwrap(),
-                protocol.render_public_inputs().unwrap(),
-                render_pvm_layout(&read, circuit.stream_len, &scatter).unwrap(),
-                render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))
-                    .unwrap(),
-                render_pvm_deep_queries(&geometry).unwrap(),
-                render_pvm_constraints_eval(
-                    CircuitShape {
-                        num_inputs: circuit.num_inputs,
-                        num_eval_gates: circuit.num_eval_gates,
-                        stream_len: circuit.stream_len,
-                    },
-                    circuit.commitment,
-                    quotient,
-                    read.fold_coefficient_offset,
-                    indices.len(),
-                    compiled.geometry().shared_period.ilog2(),
-                )
-                .unwrap(),
-            ];
-            for kernel in kernels {
-                assert!(!kernel.contains("{{"), "unexpanded compact-subset template");
-            }
-            assert_eq!(layout.quotient_width(), compiled.geometry().quotient_width);
-            assert_eq!(
-                geometry.row_felts() / EXT_DEGREE,
-                compiled.geometry().preprocessed_width
-                    + compiled.geometry().main_width
-                    + compiled.geometry().aux_width
-                    + compiled.geometry().quotient_width
-            );
-            if additional == 0 {
-                assert_eq!(compiled.geometry().num_quotient_chunks, 2);
-                assert_eq!(compiled.geometry().quotient_width, 8);
-                assert_eq!(compiled.geometry().shared_period.ilog2(), 5);
-            }
-        }
-    }
 }

@@ -21,13 +21,13 @@ const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
 const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
 # LMCS leaf initial chaining words derived from each committed row width.
-const PREPROCESSED_LMCS_INIT_CV = {{PREPROCESSED_LMCS_INIT_CV}}
-const QUOTIENT_LMCS_INIT_CV = {{QUOTIENT_LMCS_INIT_CV}}
-const AUX_LMCS_INIT_CV = {{AUX_LMCS_INIT_CV}}
-const MAIN_LMCS_INIT_CV = {{MAIN_LMCS_INIT_CV}}
+const PREPROCESSED_LMCS_INIT_CV = {{ preprocessed_lmcs_init_cv }}
+const QUOTIENT_LMCS_INIT_CV = {{ quotient_lmcs_init_cv }}
+const AUX_LMCS_INIT_CV = {{ aux_lmcs_init_cv }}
+const MAIN_LMCS_INIT_CV = {{ main_lmcs_init_cv }}
 
 # Query-index mask derived from the fixed lookup height and PCS blowup.
-const AND8_LDE_INDEX_MASK = {{AND8_LDE_INDEX_MASK}}
+const AND8_LDE_INDEX_MASK = {{ and8_lde_index_mask }}
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -167,7 +167,7 @@ proc process_preprocessed_segment
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the aligned preprocessed leaf.
-{{PREPROCESSED_COMMENT}}
+{{ preprocessed_comment }}
     push.PREPROCESSED_LMCS_INIT_CV
     swapw
     padw
@@ -188,7 +188,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_preprocessed_segment
-    repeat.{{REPEAT_load_preprocessed_segment}}
+    repeat.{{ repeat_load_preprocessed_segment }}
         adv_pipe
         horner_eval_base
         exec.eidos::compress
@@ -220,7 +220,7 @@ proc process_main_segment_execution_trace(
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-{{MAIN_COMMENT}}
+{{ main_comment }}
     exec.load_main_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -239,7 +239,7 @@ proc load_main_segment_execution_trace(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    repeat.{{REPEAT_load_main_segment_execution_trace}}
+    repeat.{{ repeat_load_main_segment_execution_trace }}
         adv_pipe
         horner_eval_base
         exec.eidos::compress
@@ -276,7 +276,7 @@ proc process_aux_segment_execution_trace(
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-{{AUX_COMMENT}}
+{{ aux_comment }}
     exec.load_aux_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -296,7 +296,7 @@ proc load_aux_segment_execution_trace(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    repeat.{{REPEAT_load_aux_segment_execution_trace}}
+    repeat.{{ repeat_load_aux_segment_execution_trace }}
         adv_pipe
         horner_eval_base
         exec.eidos::compress
@@ -356,7 +356,7 @@ proc load_constraints_composition_polys_trace(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    repeat.{{REPEAT_load_constraints_composition_polys_trace}}
+    repeat.{{ repeat_load_constraints_composition_polys_trace }}
         adv_pipe
         horner_eval_base
         exec.eidos::compress

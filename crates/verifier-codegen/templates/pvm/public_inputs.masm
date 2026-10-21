@@ -9,13 +9,13 @@ use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
 
 # Statement schema derived from ChipletMultiAir and SessionTraces::air_inputs.
-const NUM_PUBLIC_VALUES = {{NUM_PUBLIC_VALUES}}
-const MAX_AUX_INPUTS = {{MAX_AUX_INPUTS}}
-const NUM_AUX_INPUTS = {{NUM_AUX_INPUTS}}
-const NUM_CHIPLETS = {{NUM_CHIPLETS}}
+const NUM_PUBLIC_VALUES = {{ num_public_values }}
+const MAX_AUX_INPUTS = {{ max_aux_inputs }}
+const NUM_AUX_INPUTS = {{ num_aux_inputs }}
+const NUM_CHIPLETS = {{ num_chiplets }}
 
 # Exact Eidos input-buffer remainder after the relation's statement and shape.
-const BUFFERED_SHAPE_VALUE_COUNT = {{BUFFERED_SHAPE_VALUE_COUNT}}
+const BUFFERED_SHAPE_VALUE_COUNT = {{ buffered_shape_value_count }}
 
 #! Stores the deferred root as the PVM's four base-field public values.
 #!
@@ -66,7 +66,13 @@ pub proc process_public_inputs()
     exec.public_inputs::compute_and_store_public_inputs_address
 
     # Statement encoding: `[4, D0, D1, D2, D3, 0, 0]`.
-{{OBSERVE_STATEMENT}}
+    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.2 mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.4 mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.6 mem_load exec.random_coin::observe_felt
+    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
+    push.NUM_AUX_INPUTS exec.random_coin::observe_felt
 
     # Instance shape: `[N, h0, ..., h(N-1)]`.
     push.NUM_CHIPLETS exec.random_coin::observe_felt

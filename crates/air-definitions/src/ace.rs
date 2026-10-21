@@ -8,12 +8,16 @@
 //! `sum_i(n_i * sigma_prime_i) + c_boundary = 0`, where `sigma_prime_i` is AIR `i`'s
 //! normalized committed LogUp sum and `n_i` is its trace length.
 
+#[cfg(feature = "compiler")]
 mod multi_air;
+#[cfg(feature = "compiler")]
 mod recursive;
 
 // Shared build-time compiler types used by native artifact generation.
+pub use miden_ace_codegen::RecursiveAceCircuit;
+#[cfg(feature = "compiler")]
 pub use miden_ace_codegen::{CapturedAir, CompiledRelation, LayoutKind};
+#[cfg(feature = "compiler")]
 pub use multi_air::build_canonical_multi_air_ace_circuit;
-pub use recursive::{
-    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_ace_config,
-};
+#[cfg(feature = "compiler")]
+pub use recursive::{build_recursive_verifier_ace_circuit, recursive_verifier_ace_config};

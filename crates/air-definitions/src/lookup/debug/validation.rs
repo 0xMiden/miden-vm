@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_crypto::stark::air::{
+use miden_lifted_stark::air::{
     AirBuilder, PermutationAirBuilder,
     symbolic::{
         BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
@@ -136,8 +136,8 @@ pub struct ValidateLayout {
 }
 
 impl ValidateLayout {
-    fn to_symbolic(self) -> miden_crypto::stark::air::symbolic::AirLayout {
-        miden_crypto::stark::air::symbolic::AirLayout {
+    fn to_symbolic(self) -> miden_lifted_stark::air::symbolic::AirLayout {
+        miden_lifted_stark::air::symbolic::AirLayout {
             preprocessed_width: self.preprocessed_width,
             main_width: self.trace_width,
             num_public_values: self.num_public_values,

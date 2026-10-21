@@ -71,9 +71,8 @@ mod tests {
     use alloc::{format, vec, vec::Vec};
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_crypto::stark::{
-        Preprocessed, StarkConfig, challenger::CanObserve, lmcs::Lmcs, pcs::PcsParams,
-    };
+    use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs, pcs::PcsParams};
+    use p3_challenger::CanObserve;
 
     use crate::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement, ace};
 

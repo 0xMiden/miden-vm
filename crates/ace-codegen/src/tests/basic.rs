@@ -1,16 +1,12 @@
 use std::borrow::Cow;
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::{
-    field::PrimeCharacteristicRing,
-    stark::{
-        air::{
-            AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-            symbolic::{AirLayout, SymbolicAirBuilder},
-        },
-        matrix::{Matrix, RowMajorMatrix},
-    },
+use miden_crypto::field::PrimeCharacteristicRing;
+use miden_lifted_stark::air::{
+    AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+    symbolic::{AirLayout, SymbolicAirBuilder},
 };
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
@@ -939,50 +935,8 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
 }
 
 #[test]
-fn relation_family_selection_preserves_canonical_ids_and_optional_groups() {
-    use crate::{AirDeclaration, Inclusion, RelationFamily};
-    let declarations = [
-        AirDeclaration { air: 9u8, inclusion: Inclusion::Required },
-        AirDeclaration {
-            air: 2,
-            inclusion: Inclusion::Optional(2),
-        },
-        AirDeclaration {
-            air: 7,
-            inclusion: Inclusion::Optional(1),
-        },
-        AirDeclaration {
-            air: 3,
-            inclusion: Inclusion::Optional(2),
-        },
-    ];
-    let family = RelationFamily::new(&declarations).unwrap();
-    assert_eq!(family.select(0).unwrap(), [9]);
-    assert_eq!(family.select(2).unwrap(), [9, 2, 3]);
-    assert_eq!(family.select(3).unwrap(), [9, 2, 7, 3]);
-    assert!(family.select(4).is_err());
-    assert!(RelationFamily::new(&[declarations[0], declarations[0]]).is_err());
-    assert!(
-        RelationFamily::new(&[AirDeclaration {
-            air: 0,
-            inclusion: Inclusion::Optional(3)
-        }])
-        .is_err()
-    );
-    assert!(
-        RelationFamily::new(&[AirDeclaration {
-            air: 0,
-            inclusion: Inclusion::Optional(1)
-        }])
-        .unwrap()
-        .select(0)
-        .is_err()
-    );
-}
-
-#[test]
 fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
-    use miden_crypto::stark::air::ConstraintDegrees;
+    use miden_lifted_stark::air::ConstraintDegrees;
 
     use crate::CapturedAir;
     for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {

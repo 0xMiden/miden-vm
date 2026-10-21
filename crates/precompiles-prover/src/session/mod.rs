@@ -92,8 +92,8 @@ pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 #[cfg(test)]
-pub use miden_precompiles_air::ChipletAir;
-pub(crate) use miden_precompiles_air::NUM_CHIPLETS;
+pub use miden_air::precompiles::ChipletAir;
+pub(crate) use miden_air::precompiles::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///

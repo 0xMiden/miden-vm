@@ -1,6 +1,7 @@
 use core::num::NonZeroUsize;
 
 use super::{InputKey, SELECTORS_PER_AIR};
+#[cfg(any(test, feature = "compiler"))]
 use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
@@ -156,6 +157,7 @@ impl InputLayout {
     }
 
     /// Validate internal layout invariants.
+    #[cfg(any(test, feature = "compiler"))]
     pub(crate) fn validate(&self) {
         let mut max_end = 0usize;
         for region in [

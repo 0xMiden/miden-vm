@@ -13,9 +13,11 @@ description = "MASM specialization of the Miden recursive verifiers from their A
 doctest = false
 
 [dependencies]
+askama.workspace = true
+miden-air-definitions = { workspace = true, features = ["std", "compiler"] }
+p3-air.workspace = true
 miden-air = { workspace = true, features = ["std"] }
-miden-precompiles-air = { workspace = true, features = ["std"] }
-miden-ace-codegen.workspace = true
+miden-ace-codegen = { workspace = true, features = ["compiler"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-crypto = { workspace = true, features = ["std"] }
 miden-lifted-air.workspace = true

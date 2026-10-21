@@ -50,7 +50,7 @@ const BOUNDARY_INPUTS_PTR = 3223322836
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
 const KERNEL_WITNESS_PTR = 3223322844
 
-{{COMMENT_OOD_SCATTER_TABLE_PTR}}
+{{ comment_ood_scatter_table_ptr }}
 const OOD_SCATTER_TABLE_PTR = 3223323864
 
 ### Proof-order maps inside the reserve above, staged once per proof by
@@ -58,8 +58,8 @@ const OOD_SCATTER_TABLE_PTR = 3223323864
 ### `pos_by_id[k]` is AIR `k`'s position in the height-sorted proof order; `id_by_pos[p]` is the
 ### AIR committed at proof position `p`. The scatter staging and the auxiliary-boundary placement
 ### read `pos_by_id`; the fold-coefficient staging reads `id_by_pos`.
-const PROOF_ORDER_POSITIONS_PTR = {{PROOF_ORDER_POSITIONS_PTR}}
-const PROOF_ORDER_IDS_PTR = {{PROOF_ORDER_IDS_PTR}}
+const PROOF_ORDER_POSITIONS_PTR = {{ proof_order_positions_ptr }}
+const PROOF_ORDER_IDS_PTR = {{ proof_order_ids_ptr }}
 
 ## VM ACE READ section
 ##
@@ -70,7 +70,7 @@ const PROOF_ORDER_IDS_PTR = {{PROOF_ORDER_IDS_PTR}}
 ##   pi_ptr             -->  [ stack I/O public inputs  ]
 ##   AUX_RAND_ELEM_PTR  -->  [ aux randomness           ]  4 felts
 ##                           [ alignment pad            ]  4 felts
-{{OOD_ROW_DIAGRAM}}
+{{ ood_row_diagram }}
 ##   AUX_BUS_BOUNDARY_PTR -> [ four LogUp finals        ]  8 felts
 ##   AUXILIARY_ACE_INPUTS_PTR
 ##                       --> [ fixed stark vars         ]  slots 0..9
@@ -86,23 +86,23 @@ const PROOF_ORDER_IDS_PTR = {{PROOF_ORDER_IDS_PTR}}
 ### Two extension-field elements: beta followed by alpha, four base felts total.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-{{COMMENT_OOD_EVALUATIONS_PTR}}
-const OOD_EVALUATIONS_PTR = {{OOD_EVALUATIONS_PTR}}
+{{ comment_ood_evaluations_ptr }}
+const OOD_EVALUATIONS_PTR = {{ ood_evaluations_ptr }}
 
 ### Four LogUp finals, one per AIR in canonical instance order (8 base felts). The proof submits
 ### them in the height-sorted proof order; `sys/vm/aux_trace.masm` scatters them here.
-const AUX_BUS_BOUNDARY_PTR = {{AUX_BUS_BOUNDARY_PTR}}
+const AUX_BUS_BOUNDARY_PTR = {{ aux_bus_boundary_ptr }}
 
 ### Twenty-eight extension-field stark-var slots: 10 fixed slots, three selector slots and one
 ### multi-air fold coefficient for each of the four AIRs, and two alignment slots.
-const AUXILIARY_ACE_INPUTS_PTR = {{AUXILIARY_ACE_INPUTS_PTR}}
+const AUXILIARY_ACE_INPUTS_PTR = {{ auxiliary_ace_inputs_ptr }}
 
 ### ACE circuit stream, sized by the generated evaluator's `ACE_STREAM_BLOCKS`. The reserved tail
 ### beyond the stream keeps the PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
-const ACE_CIRCUIT_STREAM_PTR = {{ACE_CIRCUIT_STREAM_PTR}}
+const ACE_CIRCUIT_STREAM_PTR = {{ ace_circuit_stream_ptr }}
 
-{{COMMENT_CURRENT_TRACE_ROW_PTR}}
-const CURRENT_TRACE_ROW_PTR = {{CURRENT_TRACE_ROW_PTR}}
+{{ comment_current_trace_row_ptr }}
+const CURRENT_TRACE_ROW_PTR = {{ current_trace_row_ptr }}
 
 pub proc set_core_trace_length_log(height: u8)
     mem_store.LOG_AIR_TRACE_LENGTHS_PTR

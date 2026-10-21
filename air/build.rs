@@ -7,7 +7,11 @@ use miden_air_definitions::{
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
+#[path = "build/precompiles.rs"]
+mod precompiles;
+
 fn main() {
+    precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     let write = |name: &str, contents: String| {
@@ -47,6 +51,10 @@ fn main() {
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
     let relation =
         CompiledRelation::from_captured(&airs, config::SPONGE_RATE).expect("compile VM relation");
+    write(
+        "air_shape.rs",
+        format!("{:?}", miden_air_definitions::geometry::air_shape(&relation)),
+    );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
     let circuit: miden_air_definitions::ace::RecursiveAceCircuit = relation
         .build_circuit(LayoutKind::Masm)

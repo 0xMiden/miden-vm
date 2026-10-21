@@ -11,15 +11,15 @@ use miden::core::stark::deep_queries
 use miden::core::sys::pvm::layout
 
 # Fixed setup tree geometry derived from the lookup AIR and protocol PCS blowup.
-const PREPROCESSED_TREE_DEPTH = {{PREPROCESSED_TREE_DEPTH}}
-const PREPROCESSED_INDEX_MASK = {{PREPROCESSED_INDEX_MASK}}
+const PREPROCESSED_TREE_DEPTH = {{ preprocessed_tree_depth }}
+const PREPROCESSED_INDEX_MASK = {{ preprocessed_index_mask }}
 
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
-const PREPROCESSED_ROW_DOUBLE_WORDS = {{PREPROCESSED_ROW_DOUBLE_WORDS}}
-const MAIN_ROW_DOUBLE_WORDS = {{MAIN_ROW_DOUBLE_WORDS}}
-const AUX_ROW_DOUBLE_WORDS = {{AUX_ROW_DOUBLE_WORDS}}
-const QUOTIENT_ROW_DOUBLE_WORDS = {{QUOTIENT_ROW_DOUBLE_WORDS}}
+const PREPROCESSED_ROW_DOUBLE_WORDS = {{ preprocessed_row_double_words }}
+const MAIN_ROW_DOUBLE_WORDS = {{ main_row_double_words }}
+const AUX_ROW_DOUBLE_WORDS = {{ aux_row_double_words }}
+const QUOTIENT_ROW_DOUBLE_WORDS = {{ quotient_row_double_words }}
 
 # ERRORS
 # =================================================================================================
@@ -30,10 +30,10 @@ const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
 const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
 # Registered LMCS leaf initial chaining words, generated from the PVM row widths above.
-const PREPROCESSED_LMCS_INIT_CV = {{PREPROCESSED_LMCS_INIT_CV}}
-const MAIN_LMCS_INIT_CV = {{MAIN_LMCS_INIT_CV}}
-const AUX_LMCS_INIT_CV = {{AUX_LMCS_INIT_CV}}
-const QUOTIENT_LMCS_INIT_CV = {{QUOTIENT_LMCS_INIT_CV}}
+const PREPROCESSED_LMCS_INIT_CV = {{ preprocessed_lmcs_init_cv }}
+const MAIN_LMCS_INIT_CV = {{ main_lmcs_init_cv }}
+const AUX_LMCS_INIT_CV = {{ aux_lmcs_init_cv }}
+const QUOTIENT_LMCS_INIT_CV = {{ quotient_lmcs_init_cv }}
 
 # MAIN PROCEDURE
 # =================================================================================================

@@ -39,8 +39,6 @@ members = [
     "crates/verifier-codegen",
     "miden-vm",
     "crates/precompiles",
-    "crates/precompiles-air",
-    "crates/precompiles-air-definitions",
     "crates/precompiles-verifier",
     "crates/precompiles-prover",
     "processor",
@@ -87,6 +85,7 @@ overflow-checks = true
 opt-level = 0
 
 [workspace.dependencies]
+askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0", default-features = false }
 miden-air               = { path = "./air", version = "1.0", default-features = false }
@@ -107,8 +106,6 @@ miden-lifted-stark      = { path = "./crates/lifted-stark", version = "1.0", def
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0", default-features = false }
-miden-precompiles-air   = { path = "./crates/precompiles-air", version = "1.0", default-features = false }
-miden-precompiles-air-definitions = { path = "./crates/precompiles-air-definitions", version = "1.0", default-features = false }
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "1.0", default-features = false }
 miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "1.0", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0", default-features = false }

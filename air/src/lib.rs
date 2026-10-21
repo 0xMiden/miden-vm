@@ -11,14 +11,17 @@ include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
 pub mod ace;
 pub mod config;
 pub mod memory;
+pub mod precompiles;
 mod proof_order;
 pub mod security;
+pub mod shared;
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 #[allow(clippy::eq_op)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/evaluators.rs"));
 }
-use miden_crypto::stark::{air::ReductionError, challenger::CanObserve};
+use miden_lifted_stark::air::ReductionError;
+use p3_challenger::CanObserve;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {
     Core,

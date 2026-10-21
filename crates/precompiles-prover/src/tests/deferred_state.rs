@@ -1,7 +1,10 @@
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::Challenges;
+use miden_air::{
+    lookup::Challenges,
+    precompiles::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params},
+};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -13,7 +16,6 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
-use miden_precompiles_air::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params};
 use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
@@ -561,7 +563,7 @@ fn prove_precompiles_with_budget_corner_cases() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`miden_precompiles_air::preprocessed`, keyed by LMCS type). Proving and
+/// (`miden_air::precompiles::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises both the cold path (first
 /// call in the process, builds and caches the bundle) and the warm path
 /// (later calls, reused from cache) for every slot, guarding against a

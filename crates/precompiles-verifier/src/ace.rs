@@ -1,6 +1,6 @@
 //! ACE circuit policy for the precompile chiplet multi-AIR proof.
 //!
-//! The relation uses [`miden_precompiles_air::ChipletAir::all`] as its stable instance order and
+//! The relation uses [`miden_air::precompiles::ChipletAir::all`] as its stable instance order and
 //! canonical ACE fold order, and aligns each per-AIR trace region to eight base-field elements. The
 //! lifted STARK proof commits traces in ascending height order, which varies per workload, but one
 //! order-invariant circuit serves every ordering: the verifier lands each proof-ordered segment at
@@ -13,24 +13,20 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_precompiles_air::NUM_CHIPLETS;
-pub use miden_precompiles_air::ace::PvmRecursiveAceCircuit;
+use miden_air::precompiles::NUM_CHIPLETS;
+pub use miden_air::precompiles::ace::PvmRecursiveAceCircuit;
 #[cfg(test)]
-use miden_precompiles_air::ace::build_pvm_recursive_verifier_ace_circuit;
+use miden_air::precompiles::ace::build_pvm_recursive_verifier_ace_circuit;
 #[cfg(test)]
-use miden_precompiles_air::{ChipletAir, ace::build_canonical_precompile_ace_circuit};
+use miden_air::precompiles::{ChipletAir, ace::build_canonical_precompile_ace_circuit};
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(|| {
-        miden_precompiles_air::protocol::recursive_circuit(
-            miden_precompiles_air::relation::RelationSelection::FULL,
-        )
-    })
+    CIRCUIT.get_or_init(|| miden_air::precompiles::protocol::recursive_circuit())
 }
 
-/// Returns [`miden_precompiles_air::ChipletAir::all`] instance indices in committed-trace order.
+/// Returns [`miden_air::precompiles::ChipletAir::all`] instance indices in committed-trace order.
 pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize; NUM_CHIPLETS] {
     let mut order = core::array::from_fn(|index| index);
     order.sort_by_key(|&index| (log_heights[index], index));
@@ -91,9 +87,9 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace_codegen::InputKey;
+    use miden_air::precompiles::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
-    use miden_precompiles_air::ace::LMCS_ALIGNMENT;
 
     use super::*;
     use crate::ace_constants::{
@@ -228,13 +224,10 @@ mod tests {
         );
 
         let max = derived.iter().map(|(_, degree)| *degree).max().expect("non-empty stack");
-        assert!(max <= miden_precompiles_air::policy::LOG_BLOWUP);
+        assert!(max <= miden_air::precompiles::policy::LOG_BLOWUP);
         let expected_chunks = 1usize << max;
         assert_eq!(
-            miden_precompiles_air::protocol::metadata(
-                miden_precompiles_air::relation::RelationSelection::FULL
-            )
-            .num_quotient_chunks,
+            miden_air::precompiles::protocol::metadata().num_quotient_chunks,
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
@@ -364,8 +357,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
+        use miden_air::precompiles::ChipletMultiAir;
         use miden_lifted_air::MultiAir;
-        use miden_precompiles_air::ChipletMultiAir;
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),

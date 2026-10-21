@@ -21,19 +21,19 @@ use miden::core::stark::verifier
 
 # Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
 # zero because Lifted STARK does not grind lookup challenges.
-const LOOKUP_POW_BITS = {{LOOKUP_POW_BITS}}
-const MAX_MESSAGE_WIDTH = {{MAX_MESSAGE_WIDTH}}
-const NUM_COMPOSED_CONSTRAINTS = {{NUM_COMPOSED_CONSTRAINTS}}
-const MAX_CONSTRAINT_DEGREE = {{MAX_CONSTRAINT_DEGREE}}
-const NUM_DEEP_TERMS = {{NUM_DEEP_TERMS}}
-const LOOKUP_FRACTIONS_PER_ROW = {{LOOKUP_FRACTIONS_PER_ROW}}
-const FIXED_BOUNDARY_LOOKUP_TERMS = {{FIXED_BOUNDARY_LOOKUP_TERMS}}
+const LOOKUP_POW_BITS = {{ lookup_pow_bits }}
+const MAX_MESSAGE_WIDTH = {{ max_message_width }}
+const NUM_COMPOSED_CONSTRAINTS = {{ num_composed_constraints }}
+const MAX_CONSTRAINT_DEGREE = {{ max_constraint_degree }}
+const NUM_DEEP_TERMS = {{ num_deep_terms }}
+const LOOKUP_FRACTIONS_PER_ROW = {{ lookup_fractions_per_row }}
+const FIXED_BOUNDARY_LOOKUP_TERMS = {{ fixed_boundary_lookup_terms }}
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
 
 # Fixed ChipletAir::all() cardinality.
-const NUM_CHIPLETS = {{NUM_CHIPLETS}}
+const NUM_CHIPLETS = {{ num_chiplets }}
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
@@ -41,20 +41,20 @@ const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 # Minimum log2 trace height for each ChipletAir::all() instance. These are derived from the
 # AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
 # BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
-{{HEIGHT_CONSTANTS}}
+{{ height_constants }}
 
 # PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = {{RELATION_DIGEST_0}}
-const RELATION_DIGEST_1 = {{RELATION_DIGEST_1}}
-const RELATION_DIGEST_2 = {{RELATION_DIGEST_2}}
-const RELATION_DIGEST_3 = {{RELATION_DIGEST_3}}
+const RELATION_DIGEST_0 = {{ relation_digest_0 }}
+const RELATION_DIGEST_1 = {{ relation_digest_1 }}
+const RELATION_DIGEST_2 = {{ relation_digest_2 }}
+const RELATION_DIGEST_3 = {{ relation_digest_3 }}
 
 # Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
 # `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
-const PREPROCESSED_COMMITMENT_0 = {{PREPROCESSED_COMMITMENT_0}}
-const PREPROCESSED_COMMITMENT_1 = {{PREPROCESSED_COMMITMENT_1}}
-const PREPROCESSED_COMMITMENT_2 = {{PREPROCESSED_COMMITMENT_2}}
-const PREPROCESSED_COMMITMENT_3 = {{PREPROCESSED_COMMITMENT_3}}
+const PREPROCESSED_COMMITMENT_0 = {{ preprocessed_commitment_0 }}
+const PREPROCESSED_COMMITMENT_1 = {{ preprocessed_commitment_1 }}
+const PREPROCESSED_COMMITMENT_2 = {{ preprocessed_commitment_2 }}
+const PREPROCESSED_COMMITMENT_3 = {{ preprocessed_commitment_3 }}
 
 #! Loads the fixed PVM relation context.
 #!
@@ -70,7 +70,7 @@ pub proc load_air_context()
     push.0
     push.LOG_AIR_TRACE_LENGTHS_PTR
 
-{{LOAD_HEIGHTS}}
+{{ load_heights }}
 
     drop
     mem_store.LOG_TRACE_LENGTH_PTR

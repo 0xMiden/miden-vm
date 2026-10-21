@@ -20,7 +20,7 @@ use miden_ace_codegen::{
     render_proof_order_maps,
 };
 #[cfg(test)]
-use miden_precompiles_air::NUM_CHIPLETS;
+use miden_air::precompiles::NUM_CHIPLETS;
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
@@ -266,14 +266,13 @@ use miden::core::sys::pvm::layout
 
 #[cfg(test)]
 mod tests {
-    use miden_precompiles_air::ace::build_canonical_precompile_ace_circuit;
+    use miden_air::precompiles::ace::build_canonical_precompile_ace_circuit;
 
     use super::*;
     fn live_geometry() -> PvmOodGeometry {
-        let captured = miden_precompiles_air::relation::CapturedPvmRelation::new().unwrap();
-        let compiled = captured
-            .compile(miden_precompiles_air::relation::RelationSelection::FULL)
-            .unwrap();
+        let captured =
+            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
+        let compiled = captured.compile().unwrap();
         let canonical = compiled.build_circuit(miden_ace_codegen::LayoutKind::Masm).unwrap();
         PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout()).unwrap()
     }
@@ -336,10 +335,9 @@ mod tests {
     fn geometry_derivation_cross_checks_the_input_layout() {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
-        let captured = miden_precompiles_air::relation::CapturedPvmRelation::new().unwrap();
-        let compiled = captured
-            .compile(miden_precompiles_air::relation::RelationSelection::FULL)
-            .unwrap();
+        let captured =
+            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
+        let compiled = captured.compile().unwrap();
         assert!(PvmOodGeometry::from_compiled(compiled.geometry(), layout).is_ok());
         assert_eq!(
             PvmOodGeometry::from_compiled(compiled.geometry(), layout)

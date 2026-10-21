@@ -22,18 +22,18 @@ use miden::core::stark::verifier
 
 # Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
 # zero because Lifted STARK does not grind lookup challenges.
-const LOOKUP_POW_BITS = {{LOOKUP_POW_BITS}}
-const MAX_MESSAGE_WIDTH = {{MAX_MESSAGE_WIDTH}}
-const NUM_COMPOSED_CONSTRAINTS = {{NUM_COMPOSED_CONSTRAINTS}}
-const MAX_CONSTRAINT_DEGREE = {{MAX_CONSTRAINT_DEGREE}}
-const NUM_DEEP_TERMS = {{NUM_DEEP_TERMS}}
-const LOOKUP_FRACTIONS_PER_ROW = {{LOOKUP_FRACTIONS_PER_ROW}} # matches AIR_SHAPE.lookup.fractions_per_row
-const CORE_BOUNDARY_LOOKUP_TERMS = {{CORE_BOUNDARY_LOOKUP_TERMS}} # emit_core_boundary: block-hash seed + 2 log-deferred terms
+const LOOKUP_POW_BITS = {{ lookup_pow_bits }}
+const MAX_MESSAGE_WIDTH = {{ max_message_width }}
+const NUM_COMPOSED_CONSTRAINTS = {{ num_composed_constraints }}
+const MAX_CONSTRAINT_DEGREE = {{ max_constraint_degree }}
+const NUM_DEEP_TERMS = {{ num_deep_terms }}
+const LOOKUP_FRACTIONS_PER_ROW = {{ lookup_fractions_per_row }} # matches AIR_SHAPE.lookup.fractions_per_row
+const CORE_BOUNDARY_LOOKUP_TERMS = {{ core_boundary_lookup_terms }} # emit_core_boundary: block-hash seed + 2 log-deferred terms
 
 # Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
 # shapes before a security descriptor is constructed and keep its fixed-point arithmetic in the
 # common estimator's supported u32 domain.
-const LOG_HEIGHT_MIN = {{LOG_HEIGHT_MIN}}
+const LOG_HEIGHT_MIN = {{ log_height_min }}
 const LOG_HEIGHT_MAX = 29
 
 # Offset of K in the P | K | I | O claim encoding.
@@ -50,20 +50,20 @@ const KERNEL_DOMAIN_TAG = 0x01000001
 const FELTS_PER_KERNEL_DIGEST = 4
 
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
-const MAX_NUM_KERNEL_PROCEDURES = {{MAX_NUM_KERNEL_PROCEDURES}}
-const AND8_LOOKUP_LOG_HEIGHT = {{AND8_LOOKUP_LOG_HEIGHT}}
+const MAX_NUM_KERNEL_PROCEDURES = {{ max_num_kernel_procedures }}
+const AND8_LOOKUP_LOG_HEIGHT = {{ and8_lookup_log_height }}
 
 # RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
-const RELATION_DIGEST_0 = {{RELATION_DIGEST_0}}
-const RELATION_DIGEST_1 = {{RELATION_DIGEST_1}}
-const RELATION_DIGEST_2 = {{RELATION_DIGEST_2}}
-const RELATION_DIGEST_3 = {{RELATION_DIGEST_3}}
+const RELATION_DIGEST_0 = {{ relation_digest_0 }}
+const RELATION_DIGEST_1 = {{ relation_digest_1 }}
+const RELATION_DIGEST_2 = {{ relation_digest_2 }}
+const RELATION_DIGEST_3 = {{ relation_digest_3 }}
 
 # Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
-const AND8_PREPROCESSED_TRACE_COM_0 = {{AND8_PREPROCESSED_TRACE_COM_0}}
-const AND8_PREPROCESSED_TRACE_COM_1 = {{AND8_PREPROCESSED_TRACE_COM_1}}
-const AND8_PREPROCESSED_TRACE_COM_2 = {{AND8_PREPROCESSED_TRACE_COM_2}}
-const AND8_PREPROCESSED_TRACE_COM_3 = {{AND8_PREPROCESSED_TRACE_COM_3}}
+const AND8_PREPROCESSED_TRACE_COM_0 = {{ and8_preprocessed_trace_com_0 }}
+const AND8_PREPROCESSED_TRACE_COM_1 = {{ and8_preprocessed_trace_com_1 }}
+const AND8_PREPROCESSED_TRACE_COM_2 = {{ and8_preprocessed_trace_com_2 }}
+const AND8_PREPROCESSED_TRACE_COM_3 = {{ and8_preprocessed_trace_com_3 }}
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!

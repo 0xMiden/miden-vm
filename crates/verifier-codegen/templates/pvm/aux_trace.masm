@@ -30,14 +30,14 @@ type EcGroupPayload = struct {
 }
 
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
-const UINT_VAL_BUS_SCALE = {{UINT_VAL_BUS_SCALE}}
-const EC_GROUP_BUS_SCALE = {{EC_GROUP_BUS_SCALE}}
-const MAX_LOGUP_MESSAGE_WIDTH = {{MAX_LOGUP_MESSAGE_WIDTH}}
+const UINT_VAL_BUS_SCALE = {{ uint_val_bus_scale }}
+const EC_GROUP_BUS_SCALE = {{ ec_group_bus_scale }}
+const MAX_LOGUP_MESSAGE_WIDTH = {{ max_logup_message_width }}
 
 # Number of chiplet instances in the relation, each contributing one boundary value.
-const NUM_CHIPLETS = {{NUM_CHIPLETS}}
+const NUM_CHIPLETS = {{ num_chiplets }}
 # Complete words spanned by the proof-ordered, two-felt normalized boundary sums.
-const NUM_AUX_VALUE_WORDS = {{NUM_AUX_VALUE_WORDS}}
+const NUM_AUX_VALUE_WORDS = {{ num_aux_value_words }}
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the chiplet's
 #! row count `n = 2^log_height`.
@@ -85,7 +85,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc scatter_aux_bus_boundary()
-{{SCATTER_BOUNDARIES}}
+{{ scatter_boundaries }}
 end
 
 #! Observes the PVM auxiliary trace commitment and its normalized LogUp values.
@@ -122,10 +122,10 @@ pub proc observe_aux_trace()
     padw adv_loadw
     mem_storew_le.AUX_TRACE_COM_PTR
     exec.random_coin::eidos_observe_word
-{{OBSERVE_BOUNDARIES}}
+{{ observe_boundaries }}
 
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
-    push.{{BUFFERED_AUX_VALUE_COUNT}} assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
+    push.{{ buffered_aux_value_count }} assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
     mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     assertz.err="PVM observe_aux_trace: observed input exposed stale output"
 
@@ -136,7 +136,7 @@ pub proc observe_aux_trace()
 
     # Scale chiplet k's normalized sum, now at offset 2k, by chiplet k's trace length. Each call
     # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
-{{WEIGHT_BOUNDARIES}}
+{{ weight_boundaries }}
 
     exec.layout::c_total_ptr add.1 mem_load
     exec.layout::c_total_ptr mem_load
@@ -284,12 +284,12 @@ proc compute_fixed_boundary_correction()
     # Each literal push covers beta with the payload. Lift beta back above the payload for the
     # fold; the running sum and cached prefix stay beneath it.
 
-{{FIXED_UINT_CONSUMES}}
+{{ fixed_uint_consumes }}
 
     # Discard the cached UintVal prefix; the EcGroup messages use a different one.
     movup.5 drop movup.4 drop
 
-{{FIXED_EC_CONSUMES}}
+{{ fixed_ec_consumes }}
 
     exec.layout::c_total_ptr mem_store
     exec.layout::c_total_ptr add.1 mem_store

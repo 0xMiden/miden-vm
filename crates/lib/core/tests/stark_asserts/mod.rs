@@ -322,7 +322,7 @@ impl FoldRelation {
     fn pvm() -> Self {
         Self {
             relation: "pvm",
-            num_airs: miden_precompiles_air::NUM_CHIPLETS,
+            num_airs: miden_air::precompiles::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!(concat!(
                 env!("MIDEN_CORE_ASM_DIR"),

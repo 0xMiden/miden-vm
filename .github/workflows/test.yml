@@ -241,6 +241,20 @@ jobs:
         run: rustup update --no-self-update
       - name: Check generated evaluators and assembled verifiers
         run: make check-verifiers
+      - name: Check runtime dependency boundaries
+        run: |
+          for package in miden-air miden-crypto; do
+            cargo tree --locked --package "$package" --no-default-features --edges normal --prefix none > runtime-dependencies.txt
+            if grep -E '^miden-(constraint-compiler|verifier-codegen) ' runtime-dependencies.txt; then
+              echo "Compiler tooling leaked into $package runtime dependencies" >&2
+              exit 1
+            fi
+            if [ "$package" = miden-crypto ] && grep -E '^miden-lifted-stark ' runtime-dependencies.txt; then
+              echo "The STARK engine leaked into crypto dependencies" >&2
+              exit 1
+            fi
+          done
+          rm runtime-dependencies.txt
       - name: Check pinned PVM proof fixture for drift
         run: make check-pvm-proof-fixture
       - name: Ensure builds leave source files unchanged

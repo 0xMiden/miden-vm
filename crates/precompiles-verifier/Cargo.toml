@@ -17,13 +17,13 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "miden-precompiles-air/concurrent",
+    "miden-air/concurrent",
 ]
 std = [
     "dep:miden-ace-codegen",
     "miden-core/std",
     "miden-crypto/std",
-    "miden-precompiles-air/std",
+    "miden-air/std",
     "thiserror/std",
 ]
 
@@ -33,7 +33,7 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
-miden-precompiles-air.workspace = true
+miden-air.workspace = true
 miden-serde-utils.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
@@ -42,5 +42,5 @@ wincode.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
-miden-air = { workspace = true, features = ["std"] }
+miden-air = { workspace = true, features = ["std", "compiler"] }
 miden-ace-codegen = { workspace = true, features = ["testing"] }

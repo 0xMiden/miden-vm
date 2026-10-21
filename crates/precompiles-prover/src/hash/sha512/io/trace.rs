@@ -8,6 +8,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use miden_air::precompiles::hash::sha512::io::{self, program::IV};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
@@ -16,7 +17,6 @@ use miden_core::{
     field::PrimeCharacteristicRing,
 };
 use miden_precompiles::Sha512Precompile;
-use miden_precompiles_air::hash::sha512::io::{self, program::IV};
 
 use crate::{
     hash::sha512::compression::Sha512CompressionRequires,
