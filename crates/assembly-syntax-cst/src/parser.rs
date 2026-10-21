@@ -141,6 +141,8 @@ struct Parser<'input> {
     attribute_lookahead: Option<AttributeLookahead>,
     /// Caches context-independent classifications.
     cached_declaration_candidates: Option<Vec<Option<DeclarationCandidate>>>,
+    /// Caches top-level declaration checks to avoid repeating lookahead scans.
+    cached_top_level_starters: Option<Vec<Option<bool>>>,
     /// Caches (start, next non-trivia index) to avoid rescanning suffixes of a trivia run.
     /// The next index is `tokens.len()` when the run reaches EOF.
     cached_block_trivia_run: Option<(usize, usize)>,
@@ -256,6 +258,7 @@ impl<'input> Parser<'input> {
             tokens: tokenize(source),
             attribute_lookahead: None,
             cached_declaration_candidates: None,
+            cached_top_level_starters: None,
             cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
@@ -272,6 +275,7 @@ impl<'input> Parser<'input> {
             tokens: tokenize(source),
             attribute_lookahead: None,
             cached_declaration_candidates: None,
+            cached_top_level_starters: None,
             cached_block_trivia_run: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
@@ -1400,7 +1404,7 @@ impl<'input> Parser<'input> {
             || self.at_block_recovery_boundary()
     }
 
-    fn line_break_starts_new_top_level_item(&self) -> bool {
+    fn line_break_starts_new_top_level_item(&mut self) -> bool {
         match self.next_relevant_top_level_token(self.pos + 1) {
             Some(index) => self.is_top_level_starter(index),
             None => true,
@@ -1475,12 +1479,18 @@ impl<'input> Parser<'input> {
         )
     }
 
-    fn is_top_level_starter(&self, index: usize) -> bool {
+    /// Caches whether a token starts a top-level declaration.
+    fn is_top_level_starter(&mut self, index: usize) -> bool {
         let Some(token) = self.tokens.get(index) else {
             return false;
         };
 
-        match token.kind() {
+        if let Some(result) = self.cached_top_level_starters.as_ref().and_then(|cache| cache[index])
+        {
+            return result;
+        }
+
+        let result = match token.kind() {
             SyntaxKind::DocComment | SyntaxKind::At => true,
             SyntaxKind::Ident => {
                 let next = match token.text() {
@@ -1494,7 +1504,10 @@ impl<'input> Parser<'input> {
                 is_top_level_declaration_prefix(token, next.and_then(|next| self.tokens.get(next)))
             },
             _ => false,
-        }
+        };
+        self.cached_top_level_starters
+            .get_or_insert_with(|| vec![None; self.tokens.len()])[index] = Some(result);
+        result
     }
 
     /// Peeks past attributes for recovery, returning the candidate token's index and whether
@@ -1632,7 +1645,7 @@ impl<'input> Parser<'input> {
         self.at_keyword("else") || self.at_top_level_form_starter_in_block()
     }
 
-    fn at_top_level_form_starter(&self) -> bool {
+    fn at_top_level_form_starter(&mut self) -> bool {
         self.is_top_level_starter(self.pos)
     }
 
@@ -2396,6 +2409,30 @@ end
                 strong,
                 "strong lookahead for {source}"
             );
+        }
+    }
+
+    #[test]
+    fn top_level_lookahead_cache_uses_token_indices_not_names() {
+        let source = "pub # declaration\nconst X = 1\n\
+                      pub # not a declaration\nnonsense\n\
+                      extern # declaration\npackage foo\n\
+                      extern # not a declaration\nnonsense\n";
+        let file = super::detached_source_file(source);
+        let mut parser = super::Parser::new(&file);
+        let queries = parser
+            .tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, token)| matches!(token.text(), "pub" | "extern"))
+            .map(|(index, _)| index)
+            .zip([true, false, true, false])
+            .collect::<Vec<_>>();
+
+        for _ in 0..2 {
+            for &(index, expected) in &queries {
+                assert_eq!(parser.is_top_level_starter(index), expected, "token {index}");
+            }
         }
     }
 
