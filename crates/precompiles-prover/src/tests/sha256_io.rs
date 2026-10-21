@@ -1,12 +1,12 @@
 use std::{collections::HashMap, string::String, vec, vec::Vec};
 
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::sha2::Sha256;
+use miden_stark::lookup::Challenges;
 
 use crate::{
     hash::sha256::{

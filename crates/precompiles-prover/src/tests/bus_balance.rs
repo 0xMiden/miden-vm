@@ -2,13 +2,15 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -40,8 +42,8 @@ fn sha512_reuses_compression_padding_for_io() {
     // IO needs only sixty-four rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
     assert_eq!(Sha512Air.width(), 54);
-    assert_eq!(miden_precompiles_air::hash::sha512::io::NUM_MAIN_COLS, 37);
-    assert_eq!(miden_precompiles_air::hash::sha512::io::IO_PERIOD, 64);
+    assert_eq!(miden_air_source::precompile::hash::sha512::io::NUM_MAIN_COLS, 37);
+    assert_eq!(miden_air_source::precompile::hash::sha512::io::IO_PERIOD, 64);
     assert_eq!(Sha512Air.aux_width(), 14);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);

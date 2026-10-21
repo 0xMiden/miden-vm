@@ -1,1 +1,1 @@
-pub use miden_precompiles_air::logup::*;
+pub use miden_air_source::precompile::logup::*;

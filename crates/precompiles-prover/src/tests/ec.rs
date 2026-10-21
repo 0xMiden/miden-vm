@@ -8,14 +8,16 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::LiftedAir;
 use miden_precompiles::CurveId;
+use miden_stark::{
+    air::LiftedAir,
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

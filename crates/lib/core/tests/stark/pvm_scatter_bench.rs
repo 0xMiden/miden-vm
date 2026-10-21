@@ -17,7 +17,7 @@ use crate::helpers::read_memory_felt;
 /// Felts moved by one `adv_pipe`.
 const BLOCK_FELTS: u32 = 8;
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
+const NUM_CHIPLETS: usize = miden_air_source::precompile::NUM_CHIPLETS;
 
 // HARNESS MEMORY MAP
 // ================================================================================================
@@ -45,7 +45,7 @@ const INITIAL_ACC: [u64; 2] = [7, 9];
 ///
 /// This benchmark reads the widths from the checked-in generated hook's header. The verifier-side
 /// `pvm_row_geometry_is_the_one_the_hook_was_rendered_from` test ties that header to the
-/// [`miden_precompiles_air::ChipletAir`] declarations.
+/// [`miden_air_source::precompile::ChipletAir`] declarations.
 #[derive(Clone, Debug)]
 struct RowGeometry {
     preprocessed: Vec<usize>,

@@ -10,6 +10,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::precompile::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -21,22 +25,15 @@ use miden_core::{
         HashFunction, MAX_STARK_PROOF_BYTES, PrecompileProof, StarkProof as SerializedStarkProof,
     },
 };
-use miden_crypto::{
-    merkle::{MerklePath, PartialMerkleTree},
-    stark::{
-        StarkConfig,
-        lmcs::{Lmcs, proof::BatchProofView},
-        pcs::PcsProof,
-        proof::{StarkProof, StarkProofData},
-    },
-};
-use miden_lifted_air::{LiftedAir, Statement};
-use miden_lifted_stark::VerifierInstance;
-use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
-};
+use miden_crypto::merkle::{MerklePath, PartialMerkleTree};
 use miden_serde_utils::deserialize_schema_exact;
+use miden_stark::{
+    StarkConfig, VerifierInstance,
+    air::{LiftedAir, Statement},
+    lmcs::{Lmcs, proof::BatchProofView},
+    pcs::PcsProof,
+    proof::{StarkProof, StarkProofData},
+};
 use serde_wincode::SerdeCompat;
 
 use crate::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
@@ -125,10 +122,10 @@ pub enum PvmRecursiveVerifierInputsError {
     ProofDeserialization(String),
     /// The proof transcript could not be parsed against the PVM statement and setup.
     #[error(transparent)]
-    Transcript(#[from] miden_lifted_stark::VerifierError),
+    Transcript(#[from] miden_stark::VerifierError),
     /// The trusted setup commitment did not match the PVM AIR declaration.
     #[error(transparent)]
-    Preprocessed(#[from] miden_lifted_stark::PreprocessedValidationError),
+    Preprocessed(#[from] miden_stark::PreprocessedValidationError),
     /// The parsed proof does not have the fixed twelve-chiplet shape expected by the wrapper.
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),

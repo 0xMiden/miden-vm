@@ -1,8 +1,8 @@
 //! Behavioral oracles for the PVM statement and shape transcript hook.
 
-use miden_air::config::{eidos_config, observe_protocol_params};
+use miden_air::vm::config::{eidos_config, observe_protocol_params};
 use miden_core::Felt;
-use miden_crypto::stark::{
+use miden_stark::{
     StarkConfig,
     challenger::{CanObserve, FieldChallenger},
     pcs::PcsParams,

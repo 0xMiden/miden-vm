@@ -1,10 +1,12 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air::{
-    MIDEN_AIR_COUNT, PcsParams, memory,
+use miden_air::vm::memory;
+use miden_air_source::vm::{
+    MIDEN_AIR_COUNT,
     trace::{MIN_TRACE_LEN, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
+use miden_stark::pcs::PcsParams;
 
 use super::chiplets::Chiplets;
 use crate::{Felt, ONE};
@@ -180,8 +182,8 @@ pub struct TraceLenSummary {
     chiplets: ChipletsLengths,
     eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
-    /// Set by the trace builder when known, in [`miden_air::AIRS`] order. `None` falls back to
-    /// deriving the four padded heights from the unpadded component row counts.
+    /// Set by the trace builder when known, in [`miden_air_source::vm::AIRS`] order. `None` falls
+    /// back to deriving the four padded heights from the unpadded component row counts.
     padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
 }
 
@@ -202,7 +204,7 @@ impl TraceLenSummary {
     }
 
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
-    /// [`miden_air::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
+    /// [`miden_air_source::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
     pub fn new_with_padded(
         core_rows: usize,
         chiplets: ChipletsLengths,
@@ -288,13 +290,14 @@ impl TraceLenSummary {
             })
     }
 
-    /// Returns the padded per-AIR heights, in [`miden_air::AIRS`] order, if known.
+    /// Returns the padded per-AIR heights, in [`miden_air_source::vm::AIRS`] order, if known.
     pub fn padded_heights(&self) -> Option<&[usize; MIDEN_AIR_COUNT]> {
         self.padded_heights.as_ref()
     }
 
     /// Returns the modelled peak prover memory, in bytes, for the padded per-AIR heights, if
-    /// known. See [`miden_air::memory::prover_peak_bytes`] for what this does and does not cover.
+    /// known. See [`miden_air::vm::memory::prover_peak_bytes`] for what this does and does not
+    /// cover.
     pub fn prover_memory_bytes(&self, params: &PcsParams) -> Option<u64> {
         memory::prover_peak_bytes(self.padded_heights()?, params)
     }
@@ -337,7 +340,7 @@ mod tests {
         assert_eq!(summary.padded_heights(), Some(&heights));
         assert_eq!(summary.padded_trace_len(), 1 << 16);
 
-        let params = miden_air::config::pcs_params();
+        let params = miden_air::vm::config::pcs_params();
         assert_eq!(
             summary.prover_memory_bytes(&params),
             memory::prover_peak_bytes(&heights, &params)

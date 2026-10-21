@@ -1,3 +1,3 @@
-pub use miden_precompiles_air::hash::chunk::*;
+pub use miden_air_source::precompile::hash::chunk::*;
 
 pub mod trace;

@@ -1,0 +1,40 @@
+[package]
+name = "miden-air"
+version = "1.0.0"
+description = "Production AIR evaluation and artifacts for Miden"
+documentation = "https://docs.rs/miden-air"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["air", "arithmetization", "crypto", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+arbitrary = ["std", "miden-air-source/arbitrary"]
+std = ["miden-air-source/std", "miden-core/std", "miden-stark/std"]
+concurrent = ["std", "miden-air-source/concurrent", "miden-crypto/concurrent", "miden-stark/concurrent"]
+testing = ["arbitrary", "miden-air-source/testing"]
+codegen = ["miden-air-source/codegen"]
+
+[dependencies]
+miden-air-source.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-stark.workspace = true
+p3-field.workspace = true
+p3-security.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+miden-air-source = { workspace = true, features = ["codegen"] }
+miden-ace = { workspace = true, features = ["testing"] }
+miden-constraint-compiler.workspace = true

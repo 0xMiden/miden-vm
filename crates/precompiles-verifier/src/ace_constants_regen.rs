@@ -4,11 +4,11 @@
 //! mints its digest and the relation digest derived from it, and emits the memory layout, the
 //! out-of-domain ingest hook, and the constraint evaluator from the same circuit metadata.
 //! `--check` recomputes the same artifacts, compares the digests and circuit shape against the
-//! constants compiled into `ace_constants.rs`, then byte-compares every rendered file against its
-//! checked-in copy. For `ace_constants.rs` and `sys/pvm/mod.masm` themselves the byte comparison
-//! is close to tautological, since their rendering substitutes those already-checked values into
-//! the checked-in file's own template; the real coverage for those two paths is the value
-//! comparison above, not the byte comparison.
+//! constants compiled into `miden_air::precompile::protocol`, then byte-compares every rendered
+//! file against its checked-in copy. For the production constants and `sys/pvm/mod.masm` themselves
+//! the byte comparison is close to tautological, since their rendering substitutes those
+//! already-checked values into the checked-in file's own template; the real coverage for those two
+//! paths is the value comparison above, not the byte comparison.
 
 use std::{
     fmt::Write as _,
@@ -17,15 +17,15 @@ use std::{
     vec::Vec,
 };
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
     render_masm_constraints_eval,
 };
+use miden_air::precompile::security as pvm_security;
+use miden_air_source::precompile::{ChipletAir, NUM_CHIPLETS};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_air::BaseAir;
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
+use miden_stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs};
 
 use crate::{
     ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},
@@ -39,8 +39,7 @@ use crate::{
     },
 };
 
-const CONSTANTS_PATH: &str = "src/ace_constants.rs";
-const PROTOCOL_PATH: &str = "../precompiles-air/src/protocol.rs";
+const CONSTANTS_PATH: &str = "../air/generated/src/precompile/protocol.rs";
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../lib/core/asm/sys/pvm/constraints_eval.masm";
 const PVM_DEEP_QUERIES_PATH: &str = "../lib/core/asm/sys/pvm/deep_queries.masm";
 const PVM_LAYOUT_PATH: &str = "../lib/core/asm/sys/pvm/layout.masm";
@@ -100,8 +99,6 @@ struct GeneratedArtifacts {
     relation_mod_masm: String,
     /// Hand-written constants module with its generated values updated.
     constants_rs: String,
-    /// PVM AIR protocol module with the canonical-circuit relation digest updated.
-    protocol_rs: String,
 }
 
 #[derive(Clone, Debug)]
@@ -255,7 +252,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -335,7 +332,6 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         replace_limb_array_const(&mut constants_rs, name, &word)?;
     }
     replace_shape_const(&mut constants_rs, shape)?;
-    let protocol_rs = render_protocol(&relation_digest);
 
     Ok(GeneratedArtifacts {
         circuit_digest,
@@ -348,7 +344,6 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         constraints_eval_masm,
         relation_mod_masm,
         constants_rs,
-        protocol_rs,
     })
 }
 
@@ -359,11 +354,11 @@ fn compute() -> Result<GeneratedArtifacts, String> {
 /// is by construction the value they observe into the transcript. (The commitment itself
 /// is digest-independent; threading the digest avoids relying on that property here.)
 fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
-    let params = miden_precompiles_air::stark_config::precompile_pcs_params();
-    let config = miden_precompiles_air::stark_config::eidos_config(params, digest);
+    let params = miden_air::precompile::stark_config::precompile_pcs_params();
+    let config = miden_air::precompile::stark_config::eidos_config(params, digest);
     // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
     let commitment: [u64; 4] =
-        miden_precompiles_air::preprocessed::build_uncached(&config).commitment().into();
+        miden_air::precompile::preprocessed::build_uncached(&config).commitment().into();
     Word::new(commitment.map(Felt::new_unchecked))
 }
 
@@ -713,7 +708,6 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
 
     for (path, rendered) in [
         (CONSTANTS_PATH, &artifacts.constants_rs),
-        (PROTOCOL_PATH, &artifacts.protocol_rs),
         (PVM_LAYOUT_PATH, &artifacts.layout_masm),
         (PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm),
         (PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm),
@@ -730,7 +724,6 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
 
 fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
     write_generated_file(CONSTANTS_PATH, &artifacts.constants_rs)?;
-    write_generated_file(PROTOCOL_PATH, &artifacts.protocol_rs)?;
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
     write_generated_file(PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm)?;
     write_generated_file(PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;
@@ -789,21 +782,6 @@ fn masm_word_literal(word: Word) -> String {
         elements[1].as_canonical_u64(),
         elements[2].as_canonical_u64(),
         elements[3].as_canonical_u64(),
-    )
-}
-
-fn render_protocol(relation_digest: &[Felt; 4]) -> String {
-    let body: String = relation_digest
-        .iter()
-        .map(|felt| format!("    {},\n", felt.as_canonical_u64()))
-        .collect();
-    format!(
-        "/// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.\n\
-         ///\n\
-         /// Regenerated by `pvm-constants-regen`; must match `PVM_RELATION_DIGEST` in\n\
-         /// `miden-precompiles-verifier`'s `ace_constants.rs`.\n\
-         #[rustfmt::skip]\n\
-         pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{body}];\n"
     )
 }
 
@@ -894,7 +872,7 @@ mod tests {
         );
         assert_eq!(
             scratch.allocation_end - scratch.proof_order_ids_ptr,
-            miden_precompiles_air::NUM_CHIPLETS as u32,
+            miden_air_source::precompile::NUM_CHIPLETS as u32,
             "id_by_pos must reserve exactly one cell per chiplet"
         );
         assert!(scratch.allocation_end <= NEXT_VM_REGION_START);

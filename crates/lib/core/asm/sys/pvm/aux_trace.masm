@@ -29,7 +29,7 @@ type EcGroupPayload = struct {
     lambda: EnvironmentPtr,
 }
 
-# Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
+# Bus-domain scale factors (`bus_id + 1`) from air/source/src/precompile/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 # MAX_LOGUP_MESSAGE_WIDTH = 18
@@ -364,7 +364,7 @@ end
 #! scalar bounds), the A/B coefficients of secp256k1, Ed25519 and P-256, and secp256k1's GLV
 #! beta/lambda constants. Three EcGroup messages bind the secp256k1, Ed25519 and P-256 groups to
 #! those pointers. The literals must encode the fixed messages produced by
-#! `miden_precompiles_air::fixed::{fixed_uintval_msgs, fixed_ecgroup_msgs}`.
+#! `miden_air_source::precompile::fixed::{fixed_uintval_msgs, fixed_ecgroup_msgs}`.
 #!
 #! Input:  [...]
 #! Output: [...]

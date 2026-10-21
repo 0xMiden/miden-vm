@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_air::{StackCols, SystemCols};
+use miden_air_source::vm::{StackCols, SystemCols};
 use miden_core::program::MIN_STACK_DEPTH;
 
 use super::{

@@ -13,17 +13,19 @@
 use std::{format, string::String, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::{
-    LookupAir, ProverLookupBuilder,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupAir, ProverLookupBuilder,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 
 use crate::{
     ec::msm::{
@@ -1094,7 +1096,7 @@ fn certificate_ordering_limbs_are_range_checked() {
     // Both minting paths must request `Range16(−1)`, which the byte-pair table cannot provide.
     use std::collections::HashMap;
 
-    use miden_air::lookup::Challenges;
+    use miden_stark::lookup::Challenges;
     use rand::{SeedableRng, rngs::StdRng};
 
     use crate::{

@@ -1,0 +1,17 @@
+//! ACE circuit integration for the Miden multi-AIR proof.
+//!
+//! The public API is split by responsibility:
+//! - `recursive` builds the encoded circuit consumed by the recursive verifier.
+//! - `multi_air` combines the per-AIR ACE DAGs into one multi-AIR circuit.
+//!
+//! The cross-AIR LogUp boundary identity is checked outside the circuit as
+//! `sum_i(n_i * sigma_prime_i) + c_boundary = 0`, where `sigma_prime_i` is AIR `i`'s
+//! normalized committed LogUp sum and `n_i` is its trace length.
+
+mod multi_air;
+mod recursive;
+
+pub use multi_air::build_canonical_multi_air_ace_circuit;
+pub use recursive::{
+    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_ace_config,
+};

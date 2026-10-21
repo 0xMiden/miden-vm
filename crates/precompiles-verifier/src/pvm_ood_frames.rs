@@ -15,13 +15,13 @@ use alloc::{
 };
 use core::{fmt::Write as _, ops::Range};
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
     render_proof_order_maps,
 };
+use miden_air_source::precompile::{ChipletAir, NUM_CHIPLETS};
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
+use miden_stark::air::{BaseAir, LiftedAir};
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;

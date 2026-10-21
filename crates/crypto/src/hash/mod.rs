@@ -31,6 +31,8 @@ pub mod poseidon2 {
 }
 
 mod algebraic_sponge;
+/// Stateful hash adapters and alignment contracts.
+pub mod stateful;
 
 // TRAITS
 // ================================================================================================

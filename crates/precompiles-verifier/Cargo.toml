@@ -17,25 +17,27 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "miden-precompiles-air/concurrent",
+    "miden-air/concurrent",
+    "miden-air-source/concurrent",
 ]
-constants-tools = ["std", "dep:miden-air"]
+constants-tools = ["std"]
 std = [
-    "dep:miden-ace-codegen",
+    "dep:miden-ace",
+    "miden-air-source/codegen",
     "miden-core/std",
     "miden-crypto/std",
-    "miden-precompiles-air/std",
+    "miden-air/std",
+    "miden-air-source/std",
     "thiserror/std",
 ]
 
 [dependencies]
-miden-ace-codegen = { workspace = true, optional = true }
-miden-air = { workspace = true, optional = true }
+miden-ace = { workspace = true, optional = true, features = ["compiler"] }
+miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-lifted-air.workspace = true
-miden-lifted-stark.workspace = true
-miden-precompiles-air.workspace = true
+miden-stark.workspace = true
+miden-air-source.workspace = true
 miden-serde-utils.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
@@ -49,5 +51,6 @@ required-features = ["constants-tools"]
 
 [dev-dependencies]
 insta.workspace = true
+miden-air-source = { workspace = true, features = ["codegen"] }
 miden-air = { workspace = true, features = ["std"] }
-miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-ace = { workspace = true, features = ["testing"] }

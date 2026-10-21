@@ -27,7 +27,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -36,17 +36,15 @@ use miden_core::{
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction},
 };
-use miden_crypto::{
-    field::BasedVectorSpace,
-    stark::{
-        PreprocessedValidationError, StarkConfig, VerifierInstance,
-        lmcs::{Lmcs, proof::BatchProofView},
-        pcs::{PcsParams, PcsProof},
-        proof::{StarkProof, StarkProofData},
-        verifier::VerifierError as CryptoVerifierError,
-    },
-};
+use miden_crypto::field::BasedVectorSpace;
 use miden_serde_utils::deserialize_schema_exact;
+use miden_stark::{
+    PreprocessedValidationError, StarkConfig, VerifierInstance,
+    lmcs::{Lmcs, proof::BatchProofView},
+    pcs::{PcsParams, PcsProof},
+    proof::{StarkProof, StarkProofData},
+    verifier::VerifierError as CryptoVerifierError,
+};
 use serde_wincode::{SerdeCompat, wincode};
 
 use crate::MAX_STARK_PROOF_BYTES;
@@ -393,7 +391,7 @@ fn build_merkle_data(
     // compiled-in circuit digest.
     #[cfg(feature = "std")]
     {
-        let circuit = miden_air::ace::shared_recursive_circuit();
+        let circuit = miden_air::vm::ace::shared_recursive_circuit();
         debug_assert_eq!(
             circuit.commitment,
             Word::from(config::ACE_CIRCUIT_DIGEST),
@@ -404,9 +402,12 @@ fn build_merkle_data(
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit().map_err(|_| {
-            RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-        })?;
+        let circuit = miden_air_source::vm::codegen::build_recursive_verifier_ace_circuit()
+            .map_err(|_| {
+                RecursiveVerifierInputsError::InvalidProofShape(
+                    "failed to build recursive ACE circuit",
+                )
+            })?;
         debug_assert_eq!(
             circuit.commitment,
             Word::from(config::ACE_CIRCUIT_DIGEST),
@@ -498,7 +499,7 @@ mod tests {
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
-    use miden_crypto::stark::Preprocessed;
+    use miden_stark::Preprocessed;
 
     use super::*;
 
@@ -549,7 +550,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
             vec![],
         )
         .expect("valid Miden statement shape");

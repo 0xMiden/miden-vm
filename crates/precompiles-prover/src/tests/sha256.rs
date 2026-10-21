@@ -5,15 +5,17 @@ use std::{
     vec::Vec,
 };
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
+use miden_air_source::precompile::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
 use miden_core::{
     Felt,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::hash::sha2::Sha256;
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_precompiles_air::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 
 use crate::{
     hash::sha256::compression::{

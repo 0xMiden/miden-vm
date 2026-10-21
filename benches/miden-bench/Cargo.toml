@@ -12,7 +12,7 @@ version.workspace      = true
 
 [dependencies]
 # Internal
-miden-lifted-stark = { features = ["testing"], workspace = true }
+miden-stark = { features = ["testing"], workspace = true }
 
 # Plonky3
 p3-air.workspace           = true
@@ -43,7 +43,7 @@ tracing-forest               = { features = ["ansi", "smallvec"], workspace = tr
 tracing-subscriber.workspace = true
 
 [features]
-concurrent = ["miden-lifted-stark/concurrent"]
+concurrent = ["miden-stark/concurrent"]
 default    = []
 
 [lints]

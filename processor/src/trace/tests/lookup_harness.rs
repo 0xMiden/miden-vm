@@ -16,12 +16,12 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_source::vm::{
     BaseAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
+use miden_stark::lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions};
 
 use super::{Felt, VmTrace};
 

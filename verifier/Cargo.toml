@@ -21,6 +21,7 @@ doctest = false
 default = ["std"]
 std = [
     "miden-air/std",
+    "miden-air-source/std",
     "miden-core/std",
     "miden-precompiles/std",
     "miden-precompiles-verifier/std",
@@ -29,8 +30,10 @@ std = [
 
 [dependencies]
 # Miden dependencies
-miden-air.workspace = true
+miden-air = { workspace = true, features = ["codegen"] }
+miden-air-source = { workspace = true, features = ["codegen"] }
 miden-core.workspace = true
+miden-stark.workspace = true
 miden-crypto.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-verifier.workspace = true

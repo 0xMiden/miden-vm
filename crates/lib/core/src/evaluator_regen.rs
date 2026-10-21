@@ -1,10 +1,11 @@
-//! Regenerates the CSE'd constraint evaluators (`air/src/constraints/generated.rs`)
-//! from the hand-written `MidenAir` constraint definitions.
+//! Regenerates the CSE'd constraint evaluators
+//! (`crates/air/generated/src/vm/generated.rs`) from the hand-written `MidenAir`
+//! constraint definitions.
 
 use alloc::{format, string::String, vec::Vec};
 use std::{fs, println};
 
-use miden_air::{AIRS, HandwrittenMidenAir};
+use miden_air_source::vm::AIRS;
 use miden_constraint_compiler::{
     backend::rust_eval::{AirEvaluator, emit_module},
     ir::capture,
@@ -12,7 +13,7 @@ use miden_constraint_compiler::{
 
 pub use crate::constraints_regen::Mode;
 
-const GENERATED_EVAL_PATH: &str = "../../../air/src/constraints/generated.rs";
+const GENERATED_EVAL_PATH: &str = "../../air/generated/src/vm/generated.rs";
 
 const HEADER: &str = "\
 //! GENERATED globally-CSE'd constraint evaluators -- do not edit.
@@ -29,14 +30,9 @@ const HEADER: &str = "\
 
 /// Generate the evaluator-module source from the current constraint definitions.
 fn generate() -> String {
-    // `MidenAir::eval` executes the generated evaluators; the generator must
-    // never consume its own output (miden-constraint-compiler crate invariant 1),
-    // so capture goes through the handwritten-routing wrapper.
-    let captured: Vec<_> = AIRS
-        .iter()
-        .copied()
-        .map(|air| (air, capture(&HandwrittenMidenAir(air))))
-        .collect();
+    // Capture authored AIR directly: generation must never consume its own output
+    // (miden-constraint-compiler crate invariant 1).
+    let captured: Vec<_> = AIRS.iter().copied().map(|air| (air, capture(&air))).collect();
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
     let evaluators: Vec<_> = captured
@@ -64,17 +60,21 @@ pub fn run(mode: Mode) -> Result<(), String> {
             fs::write(&tmp, &content).map_err(|e| format!("failed to write {tmp}: {e}"))?;
             fs::rename(&tmp, &path)
                 .map_err(|e| format!("failed to rename {tmp} to {path}: {e}"))?;
-            println!("wrote air/src/constraints/generated.rs ({} lines)", content.lines().count());
+            println!(
+                "wrote crates/air/generated/src/vm/generated.rs ({} lines)",
+                content.lines().count()
+            );
             Ok(())
         },
         Mode::Check => {
             let existing =
                 fs::read_to_string(&path).map_err(|e| format!("failed to read {path}: {e}"))?;
             if existing == content {
-                println!("up to date: air/src/constraints/generated.rs");
+                println!("up to date: crates/air/generated/src/vm/generated.rs");
                 Ok(())
             } else {
-                Err("air/src/constraints/generated.rs does not match the generator output".into())
+                Err("crates/air/generated/src/vm/generated.rs does not match the generator output"
+                    .into())
             }
         },
     }

@@ -1,6 +1,7 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, Statement, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, NUM_PUBLIC_VALUES, Statement, config};
+use miden_air_source::vm::{MidenAir, ProofOrder};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -8,12 +9,12 @@ use miden_core::{
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
-use miden_crypto::stark::{
+use miden_mast_package::Package;
+use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
+use miden_stark::{
     Preprocessed, StarkConfig,
     challenger::{CanObserve, FieldChallenger},
 };
-use miden_mast_package::Package;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, Prover,
     recursive_verifier::{VerifierData, generate_advice_inputs},
@@ -873,7 +874,7 @@ fn vm_verify_proof_program() -> String {
 }
 
 fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
-    use miden_air::security;
+    use miden_air::vm::security;
 
     let source = vm_verify_proof_program();
     let mut initial_stack = data.initial_stack().to_vec();
@@ -1108,7 +1109,7 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
 /// One circuit serves every proof order, so this is the canonical circuit's own digest — the
 /// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
 fn recursive_circuit_key() -> Word {
-    miden_air::ace::shared_recursive_circuit().commitment
+    miden_air::vm::ace::shared_recursive_circuit().commitment
 }
 
 // EXAMPLE PROGRAMS
@@ -1180,7 +1181,7 @@ fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![(0, vec![Felt::ZERO; NUM_PUBLIC_VALUES])],
         vec![],
     )
     .expect("zero public inputs satisfy the Miden statement shape");
@@ -1615,7 +1616,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     //    root, and the aux randomness used by `compute_outer_logup_correction`.
     let digest_felts: Vec<Felt> =
         kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
+    let expected_kernel_h = miden_air::vm::hash_kernel_digests(&digest_felts);
     let mut claim_elements = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
     claim_elements[..WORD_SIZE].copy_from_slice(&program_digest.map(Felt::new_unchecked));
     claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&expected_kernel_h);
@@ -1796,12 +1797,12 @@ fn quotient_recomposition_constants_match_derivation() {
     let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
     let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
 
-    let log_quotient_degree = miden_air::AIRS
+    let log_quotient_degree = miden_air::vm::AIRS
         .iter()
-        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
-    let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
         config::pcs_params().log_blowup(),
     )
