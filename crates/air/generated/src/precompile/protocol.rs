@@ -163,15 +163,25 @@ mod tests {
     fn preprocessed_commitment_matches_the_authored_setup() {
         use alloc::vec;
 
+        use miden_air_source::precompile as source;
         use miden_core::field::QuadFelt;
-        let statement = miden_stark::air::Statement::<
-            Felt,
-            QuadFelt,
-            miden_air_source::precompile::ChipletMultiAir,
-        >::new(
-            miden_air_source::precompile::ChipletMultiAir::new(),
+        use miden_stark::air::{MultiAir, Statement};
+
+        // Setup must be reconstructed from authored AIRs, independently of the production
+        // evaluator adapter. Preprocessing only needs this list, not relation hook logic.
+        struct AuthoredAirs([source::ChipletAir; source::NUM_CHIPLETS]);
+        impl MultiAir<Felt, QuadFelt> for AuthoredAirs {
+            type Air = source::ChipletAir;
+
+            fn airs(&self) -> &[Self::Air] {
+                &self.0
+            }
+        }
+
+        let statement = Statement::<Felt, QuadFelt, _>::new(
+            AuthoredAirs(source::ChipletAir::all()),
             vec![(
-                miden_air_source::precompile::ChipletAir::TRANSCRIPT_EVAL_INDEX,
+                source::ChipletAir::TRANSCRIPT_EVAL_INDEX,
                 vec![Felt::ZERO; crate::precompile::logup::NUM_PUBLIC_VALUES],
             )],
             vec![],

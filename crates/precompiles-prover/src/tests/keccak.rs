@@ -311,7 +311,7 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::KeccakRound)
+        .position(|air| air == ChipletAir::KECCAK_ROUND)
         .expect("KeccakRound is present in the chiplet stack");
 
     let honest = session_stack_residual(&mains, &[], &challenges);

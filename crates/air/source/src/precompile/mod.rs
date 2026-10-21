@@ -9,10 +9,11 @@ pub mod math;
 pub mod primitives;
 pub mod relation;
 pub mod relations;
+pub mod statement;
 pub mod transcript;
 pub mod uint;
 pub mod utils;
 
-pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+pub use air::{ChipletAir, NUM_CHIPLETS};
 
 pub mod ace;

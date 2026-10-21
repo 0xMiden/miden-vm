@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
+use miden_air_source::precompile::ChipletAir as AuthoredChipletAir;
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -235,27 +236,35 @@ pub(crate) fn session_stack_net(
             .iter()
             .find_map(|(replacement_idx, main)| (*replacement_idx == idx).then_some(*main))
             .unwrap_or(mains[idx]);
-        match air {
-            ChipletAir::ChunkNodeSponge => {
+        match air.0 {
+            AuthoredChipletAir::ChunkNodeSponge => {
                 fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
             },
-            ChipletAir::EidosCompression => {
+            AuthoredChipletAir::EidosCompression => {
                 fold_balance(&EidosCompressionAir, main, challenges, &mut net)
             },
-            ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
-            ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
-            ChipletAir::TranscriptEval => {
+            AuthoredChipletAir::KeccakRound => {
+                fold_balance(&KeccakRoundAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::BytePairLut => {
+                fold_balance(&BytePairLutAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },
-            ChipletAir::UintStoreMul => fold_balance(&UintStoreMulAir, main, challenges, &mut net),
-            ChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
-            ChipletAir::EcPointStoreGroups => {
+            AuthoredChipletAir::UintStoreMul => {
+                fold_balance(&UintStoreMulAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
+            AuthoredChipletAir::EcPointStoreGroups => {
                 fold_balance(&EcPointStoreGroupsAir, main, challenges, &mut net)
             },
-            ChipletAir::EcGroupAdd => fold_balance(&EcGroupAddAir, main, challenges, &mut net),
-            ChipletAir::EcMsm => fold_balance(&EcMsmAir, main, challenges, &mut net),
-            ChipletAir::Sha512 => fold_balance(&Sha512Air, main, challenges, &mut net),
-            ChipletAir::Sha256 => fold_balance(&Sha256Air, main, challenges, &mut net),
+            AuthoredChipletAir::EcGroupAdd => {
+                fold_balance(&EcGroupAddAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::EcMsm => fold_balance(&EcMsmAir, main, challenges, &mut net),
+            AuthoredChipletAir::Sha512 => fold_balance(&Sha512Air, main, challenges, &mut net),
+            AuthoredChipletAir::Sha256 => fold_balance(&Sha256Air, main, challenges, &mut net),
         }
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);

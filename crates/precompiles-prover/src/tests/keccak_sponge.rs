@@ -647,7 +647,7 @@ fn noncanonical_prefix_digits_preserving_packed_words_fail_global_byte_checks() 
     );
     let index = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     let start = SPONGE_COL_OFFSET + CHUNK_BYTES_RANGE.start;
@@ -683,7 +683,7 @@ fn dead_padding_state_remains_bus_inert() {
     let mains = traces.mains();
     let index = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     let mut decorated = mains[index].clone();
     let width = decorated.width;
