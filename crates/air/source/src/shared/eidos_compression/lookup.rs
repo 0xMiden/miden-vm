@@ -6,6 +6,9 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing},
 };
+use miden_stark::lookup::{
+    Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
+};
 
 use super::{
     algebra::{missing_rotation_result, pack_pair, pack_u32_le, universal_cv_word, xor_from_and},
@@ -13,14 +16,9 @@ use super::{
     narrow::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields},
     selectors::EidosCompressionSelectors,
 };
-use crate::{
-    constraints::{
-        and8_lookup::eidos as eidos_lookup,
-        lookup::messages::{AeadEidosCompressionOutputPairMsg, BusId, byte_pair_relation_bus},
-    },
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
-    },
+use crate::vm::constraints::{
+    and8_lookup::eidos as eidos_lookup,
+    lookup::messages::{AeadEidosCompressionOutputPairMsg, BusId, byte_pair_relation_bus},
 };
 
 /// Typed view of the 108 Eidos compression main-trace columns.

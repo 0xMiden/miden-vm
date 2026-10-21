@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_stark::air::{
-    AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow,
+use miden_stark::{
+    air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
+    lookup::{ConstraintLookupBuilder, LookupAir},
 };
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -25,11 +26,7 @@ use super::{
         generate_felt_trace_block_with_cycle_id,
     },
 };
-use crate::{
-    Felt, HandwrittenMidenAir, MidenAir,
-    constraints::and8_lookup::eidos::normalize,
-    lookup::{ConstraintLookupBuilder, LookupAir},
-};
+use crate::vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize};
 
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
@@ -46,7 +43,7 @@ struct ConstraintEvalBuilder {
 
 #[test]
 fn handwritten_constraint_degree_remains_three() {
-    let air = HandwrittenMidenAir(MidenAir::EidosCompression);
+    let air = MidenAir::EidosCompression;
     let degree = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
     assert_eq!(degree, ConstraintDegrees { base: 3, ext: 3 });
 }

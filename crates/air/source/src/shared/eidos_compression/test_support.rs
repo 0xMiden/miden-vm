@@ -4,7 +4,7 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::Felt;
-use miden_stark::air::WindowAccess;
+use miden_stark::{air::WindowAccess, lookup::LookupAir};
 
 use super::{
     layout::*,
@@ -22,7 +22,7 @@ use super::{
         write_trace_rows_from_state,
     },
 };
-use crate::{constraints::lookup::MIDEN_MAX_MESSAGE_WIDTH, lookup::LookupAir};
+use crate::vm::constraints::lookup::MIDEN_MAX_MESSAGE_WIDTH;
 
 // Lookup descriptions used to check the semantic interaction grammar independently of the
 // production lookup builder.
@@ -91,7 +91,7 @@ where
     }
 
     fn num_bus_ids(&self) -> usize {
-        crate::logup::BusId::COUNT
+        crate::vm::logup::BusId::COUNT
     }
 
     fn eval(&self, builder: &mut LB) {

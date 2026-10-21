@@ -1,6 +1,6 @@
 use std::vec::Vec;
 
-use miden_air::precompiles::primitives::byte_pair_lut::eidos::{
+use miden_air_source::precompile::primitives::byte_pair_lut::eidos::{
     self as eidos_lookup, Relation as EidosRelation, Rotation,
 };
 use miden_core::{

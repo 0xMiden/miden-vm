@@ -1,4 +1,4 @@
-use miden_air::Serializable;
+use miden_core::serde::Serializable;
 use miden_crypto::hash::sha2::Sha256;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{

@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::{borrow::BorrowMut, fmt::Debug};
 
-use miden_air::{
+use miden_air_source::vm::{
     MemoryCols,
     trace::{
         RowIndex,

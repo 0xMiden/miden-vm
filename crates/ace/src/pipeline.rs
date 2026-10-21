@@ -54,7 +54,7 @@ pub struct AceArtifacts<EF> {
 ///
 /// The constraints are captured from `air.eval`: callers producing production
 /// artifacts must pass an AIR whose `eval` routes to the hand-written
-/// definitions (e.g. `HandwrittenMidenAir`).
+/// definitions (e.g. `miden_air_source::vm::MidenAir`).
 pub fn build_ace_circuit_for_air<A>(
     air: &A,
     config: AceConfig,

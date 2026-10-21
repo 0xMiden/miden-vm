@@ -7,7 +7,7 @@ use std::{
     hint::black_box,
 };
 
-use miden_air::{config::pcs_params, memory};
+use miden_air::vm::{config::pcs_params, memory};
 
 thread_local! {
     static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };

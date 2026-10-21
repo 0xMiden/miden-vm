@@ -6,7 +6,7 @@ use miden_ace::{
         zps_for_chunk,
     },
 };
-use miden_air::{AIRS, BaseAir, HandwrittenMidenAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air::vm::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
 use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
@@ -32,7 +32,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air.0, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -40,7 +40,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&periodic_columns, z_k);
 
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &layout));
-    air.eval_handwritten(&mut builder);
+    <_ as LiftedAir<Felt, QuadFelt>>::eval(&air.0, &mut builder);
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -67,7 +67,7 @@ fn all_airs_dag_matches_manual_eval() {
 
 #[test]
 fn core_air_dag_rejects_mismatched_layout() {
-    let air = MidenAir::Core;
+    let air = MidenAir::CORE;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Native,
@@ -77,8 +77,8 @@ fn core_air_dag_rejects_mismatched_layout() {
         layout: LayoutKind::Native,
     };
 
-    let dag = build_ace_dag_for_air(&air, dag_config).unwrap().dag;
-    let wrong_layout = build_ace_dag_for_air(&air, layout_config).unwrap().layout;
+    let dag = build_ace_dag_for_air(&air.0, dag_config).unwrap().dag;
+    let wrong_layout = build_ace_dag_for_air(&air.0, layout_config).unwrap().layout;
     let inputs: Vec<QuadFelt> = fill_inputs(&wrong_layout);
 
     let err = eval_dag(&dag, &inputs, &wrong_layout).unwrap_err();
@@ -95,7 +95,7 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
+    let artifacts = build_ace_dag_for_air(&MidenAir::CORE.0, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -123,7 +123,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
+    let artifacts = build_ace_dag_for_air(&MidenAir::CORE.0, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -159,7 +159,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
 #[test]
 fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
-    use miden_air::ace::build_canonical_multi_air_ace_circuit;
+    use miden_air::vm::ace::build_canonical_multi_air_ace_circuit;
 
     let config = AceConfig {
         num_quotient_chunks: 8,
@@ -258,12 +258,12 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
     };
     for air in AIRS {
         // Production path: handwritten capture -> IR -> DAG.
-        let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+        let artifacts = build_ace_dag_for_air(&air.0, config).unwrap();
 
         // Anchor: the original symbolic-tree lowering over the same constraints.
         let mut builder =
             SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &artifacts.layout));
-        air.eval_handwritten(&mut builder);
+        <_ as LiftedAir<Felt, QuadFelt>>::eval(&air.0, &mut builder);
         let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
         let periodic_data = (!periodic_columns.is_empty())
             .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
@@ -293,7 +293,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
 /// the production entry point to the exact circuit used by that sweep.
 #[test]
 fn recursive_verifier_circuit_matches_the_canonical_builder() {
-    use miden_air::ace::{
+    use miden_air::vm::ace::{
         build_canonical_multi_air_ace_circuit, build_recursive_verifier_ace_circuit,
     };
     use miden_core::crypto::hash::Eidos;
@@ -322,13 +322,13 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
 
     // The cached circuit is what the advice builder serves, and it is reachable across crates.
     #[cfg(feature = "std")]
-    assert_eq!(*miden_air::ace::shared_recursive_circuit(), produced);
+    assert_eq!(*miden_air::vm::ace::shared_recursive_circuit(), produced);
 }
 
 /// Checks the canonical circuit against a direct AIR fold for every VM proof order.
 #[test]
 fn canonical_circuit_matches_every_vm_proof_order() {
-    use miden_air::{
+    use miden_air::vm::{
         AIRS, MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit,
     };
 
@@ -357,7 +357,7 @@ fn canonical_circuit_matches_every_vm_proof_order() {
         let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
 
         let direct = miden_ace::testing::eval_multi_air_constraints(
-            &AIRS.map(HandwrittenMidenAir),
+            &AIRS.map(|air| air.0),
             canonical_layout,
             &canonical_inputs,
             &order.airs().iter().map(|air| air.instance_index()).collect::<Vec<_>>(),

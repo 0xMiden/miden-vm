@@ -9,12 +9,12 @@ use miden_ace::{
     CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
     LayoutKind, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry, render_proof_order_maps,
 };
-use miden_air::{
+use miden_air::vm::{
     MIDEN_AIR_COUNT,
     ace::RecursiveAceCircuit,
     config::{self, PROTOCOL_ID, relation_digest},
 };
-use miden_air_definitions::{AIRS, HandwrittenMidenAir, MidenAir};
+use miden_air_source::vm::{AIRS, MidenAir};
 use miden_core::{Felt, WORD_SIZE, Word, program::KernelDescriptor};
 use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use p3_air::BaseAir;
@@ -454,7 +454,7 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
         );
         Ok(format!("{:?}", word_to_array(cv).map(|f| f.as_canonical_u64())))
     };
-    let depth = u32::from(miden_air::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT)
+    let depth = u32::from(miden_air_source::vm::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT)
         + u32::from(config::LOG_BLOWUP);
     let mask = 1u32
         .checked_shl(depth)
@@ -468,7 +468,7 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
         quotient_lmcs_init_cv: chaining_word(geometry.quotient_width)?,
         preprocessed_comment: format!(
             "    # AND8 preprocessed matrix: {} columns, padded to {} base felts by LMCS.",
-            BaseAir::<Felt>::preprocessed_width(&HandwrittenMidenAir(MidenAir::And8Lookup)),
+            BaseAir::<Felt>::preprocessed_width(&MidenAir::AND8_LOOKUP),
             geometry.preprocessed_width
         ),
         main_comment: format!(
@@ -528,7 +528,7 @@ fn render_constraints_eval_file(
 pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), String> {
     let captured = AIRS
         .iter()
-        .map(|air| CapturedAir::new(&HandwrittenMidenAir(*air)))
+        .map(CapturedAir::new)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     let airs = captured.iter().collect::<Vec<_>>();
@@ -552,8 +552,8 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     .map_err(|e| e.to_string())?;
     let digest = compute_relation_digest(&word_to_array(circuit.commitment));
     let setup = config::EIDOS_PREPROCESSED_COMMITMENT;
-    use miden_air::security;
-    let min_trace_len = miden_air::trace::MIN_TRACE_LEN;
+    use miden_air::vm::security;
+    let min_trace_len = miden_air_source::vm::trace::MIN_TRACE_LEN;
     if !min_trace_len.is_power_of_two() {
         return Err("VM minimum trace length must be a power of two".into());
     }
@@ -575,8 +575,8 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         lookup_fractions_per_row: security::LOOKUP_SHAPE.fractions_per_row as usize,
         core_boundary_lookup_terms: security::CORE_BOUNDARY_LOOKUP_TERMS as usize,
         max_num_kernel_procedures: KernelDescriptor::MAX_NUM_PROCEDURES,
-        and8_lookup_log_height: miden_air::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT.ilog2()
-            as usize,
+        and8_lookup_log_height: miden_air_source::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT
+            .ilog2() as usize,
     }
     .render()
     .map_err(|e| e.to_string())?;
@@ -603,7 +603,9 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use miden_air::ace::{build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config};
+    use miden_air::vm::ace::{
+        build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
+    };
 
     use super::*;
     /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
@@ -611,7 +613,7 @@ mod tests {
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
-        // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
+        // The VM preprocessed commitment group is occupied only by `MidenAir::AND8_LOOKUP`.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
         // Every AIR occupies the group.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());
@@ -685,11 +687,7 @@ mod tests {
     fn deep_query_loader_repeats_follow_air_geometry() {
         let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
             .expect("recursive ACE circuit");
-        let captured = AIRS
-            .iter()
-            .map(|air| CapturedAir::new(&HandwrittenMidenAir(*air)))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let captured = AIRS.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>().unwrap();
         let refs = captured.iter().collect::<Vec<_>>();
         let compiled = CompiledRelation::from_captured(&refs, LMCS_ALIGNMENT).unwrap();
         let geometry =

@@ -17,7 +17,7 @@ use crate::helpers::read_memory_felt;
 /// Felts moved by one `adv_pipe`.
 const BLOCK_FELTS: u32 = 8;
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = miden_air::precompiles::NUM_CHIPLETS;
+const NUM_CHIPLETS: usize = miden_air::precompile::NUM_CHIPLETS;
 
 // HARNESS MEMORY MAP
 // ================================================================================================

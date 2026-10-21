@@ -2,7 +2,7 @@
 
 use alloc::vec;
 
-use miden_air::precompiles::hash::sha256::{IO_COLUMNS, IO_ROW_START};
+use miden_air_source::precompile::hash::sha256::{IO_COLUMNS, IO_ROW_START};
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 use super::{

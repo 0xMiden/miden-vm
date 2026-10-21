@@ -1,6 +1,6 @@
 use std::{collections::HashMap, string::String, vec};
 
-use miden_air::precompiles::hash::sha512::{
+use miden_air_source::precompile::hash::sha512::{
     COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
 };
 use miden_core::{

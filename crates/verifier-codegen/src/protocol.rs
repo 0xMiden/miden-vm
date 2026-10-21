@@ -22,9 +22,9 @@ pub(crate) struct PvmProtocolPlan {
 impl PvmProtocolPlan {
     pub(crate) fn from_relation(
         num_airs: usize,
-        protocol: &miden_air_definitions::precompiles::relation::RelationProtocol,
+        protocol: &miden_air_source::precompile::relation::RelationProtocol,
     ) -> Result<Self, String> {
-        use miden_air_definitions::precompiles::relation::AuxBoundaryReduction;
+        use miden_air_source::precompile::relation::AuxBoundaryReduction;
         match protocol.boundary.reduction {
             AuxBoundaryReduction::TraceLengthWeightedSum => {},
         }
@@ -75,7 +75,7 @@ impl PvmProtocolPlan {
 
     pub(crate) fn render_aux_trace(self) -> Result<String, String> {
         let coordinates = self.num_airs * 2;
-        use miden_air::precompiles::relations::{BusId, MAX_MESSAGE_WIDTH};
+        use miden_air::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
         if MAX_MESSAGE_WIDTH != 18 {
             return Err("PVM beta-power kernel requires message width eighteen".into());
         }
@@ -153,7 +153,7 @@ fn offset(out: &mut String, offset: usize) {
 /// environment pointer. The arithmetic reduction is commutative, so this order only fixes the
 /// kernel's instruction stream; every literal is derived from native data.
 fn fixed_uint_consumes() -> String {
-    let mut messages = miden_air::precompiles::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
+    let mut messages = miden_air::precompile::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
     messages.sort_by_key(|message| {
         (
             message.ptr != message.bound_ptr,
@@ -219,7 +219,7 @@ fn fixed_uint_consumes() -> String {
 
 fn fixed_ec_consumes() -> String {
     let mut out = String::new();
-    for message in miden_air::precompiles::fixed::fixed_ecgroup_msgs() {
+    for message in miden_air::precompile::fixed::fixed_ecgroup_msgs() {
         writeln!(
             out,
             "    # EcGroup(group={}, A={}, B={}, base-bound={}, scalar-bound={}, beta={}, \
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn full_relation_consumes_exact_boundary_coordinates() {
-        let n = miden_air::precompiles::NUM_CHIPLETS;
+        let n = miden_air::precompile::NUM_CHIPLETS;
         let aux = plan(n).render_aux_trace().unwrap();
         let observe = aux
             .split_once("pub proc observe_aux_trace()")

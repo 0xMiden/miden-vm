@@ -20,9 +20,11 @@ concurrent = [
     "miden-crypto/concurrent",
     "miden-stark/concurrent",
     "miden-air/concurrent",
+    "miden-air-source/concurrent",
 ]
 fixture-tools = ["std", "dep:miden-precompiles-verifier"]
 std = [
+    "miden-air-source/std",
     "miden-core/std",
     "miden-crypto/std",
     "miden-air/std",
@@ -32,6 +34,7 @@ std = [
 ]
 
 [dependencies]
+miden-air-source.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true

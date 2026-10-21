@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{
+use miden_air::precompile::{
     ChipletAir, ChipletMultiAir, preprocessed,
     security::{self, ProofSecurityParameters},
     stark_config::{

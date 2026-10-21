@@ -223,23 +223,23 @@ fixed.
 
 ## Implementation map
 
-- `crates/air/source/src/constraints/chiplets/selectors.rs`
+- `crates/air/source/src/vm/constraints/chiplets/selectors.rs`
   Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
-- `crates/air/source/src/constraints/chiplets/hasher_control/`
+- `crates/air/source/src/vm/constraints/chiplets/hasher_control/`
   Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
   routing.
-- `crates/air/source/src/constraints/chiplets/hasher_control/flags.rs`
+- `crates/air/source/src/vm/constraints/chiplets/hasher_control/flags.rs`
   Named row-kind flags derived from the controller-internal selectors.
 - `crates/air/source/src/shared/eidos_compression/`
   32-row layout, schedule, selectors, constraints, lookup plan, and trace writer.
-- `crates/air/source/src/constraints/and8_lookup/`
+- `crates/air/source/src/vm/constraints/and8_lookup/`
   Fixed byte-table AIR used by Eidos compression and AEAD stream XORs.
-- `crates/air/source/src/constraints/lookup/buses/chiplet_requests.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/chiplet_requests.rs`
   Decoder/stack requests for native hashing, Merkle operations, canonical-index range checks, AEAD
   stream, and deferred logging.
-- `crates/air/source/src/constraints/lookup/buses/chiplet_responses.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/chiplet_responses.rs`
   Controller, bytewise, memory, ACE, and kernel-ROM provider messages.
-- `crates/air/source/src/constraints/lookup/buses/wiring.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/wiring.rs`
   Controller-to-Eidos compression link and AEAD XOF output wiring.
 - `processor/src/trace/chiplets/hasher/`
   Controller trace generation, request deduplication, canonical physical IDs, and 32-row block

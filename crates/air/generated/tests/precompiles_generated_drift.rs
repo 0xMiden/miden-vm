@@ -15,7 +15,7 @@
 //!   this does not rely on shared-builder id canonicalization or the commutative-sort pass.
 use std::collections::HashMap;
 
-use miden_air::precompiles::ChipletAir;
+use miden_air::precompile::ChipletAir;
 use miden_constraint_compiler::ir::{
     Class, Graph, Leaf, Node, NodeId, OpKind, capture, capture_into,
 };
@@ -47,7 +47,7 @@ fn generated_evaluators_match_handwritten_structurally() {
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that
 /// differ from the handwritten capture's for every AIR. If
-/// `HandwrittenMidenAir` and `MidenAir` ever route to the same evaluator for
+/// authored and production `ChipletAir` ever route to the same evaluator for
 /// even one AIR, both drift oracles silently compare the generated path against
 /// itself for that AIR — and this test fails instead.
 #[test]

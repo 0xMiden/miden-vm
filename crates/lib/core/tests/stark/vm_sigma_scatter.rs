@@ -4,7 +4,7 @@
 //! The harness stages these pairs, calls `scatter_aux_bus_boundary`, and checks canonical
 //! memory placement and stack preservation. Transcript observation is outside this harness.
 
-use miden_air::MIDEN_AIR_COUNT;
+use miden_air::vm::MIDEN_AIR_COUNT;
 use miden_core::Felt;
 
 use super::vm_layout_const;

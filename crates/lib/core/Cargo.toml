@@ -50,6 +50,7 @@ p256 = { workspace = true, features = ["ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-air-source.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true

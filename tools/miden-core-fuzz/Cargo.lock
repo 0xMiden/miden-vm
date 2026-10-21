@@ -1508,7 +1508,7 @@ name = "miden-air"
 version = "1.0.0"
 dependencies = [
  "miden-ace",
- "miden-air-definitions",
+ "miden-air-source",
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
@@ -1519,7 +1519,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-air-definitions"
+name = "miden-air-source"
 version = "1.0.0"
 dependencies = [
  "miden-ace",
@@ -1794,10 +1794,12 @@ dependencies = [
  "itertools 0.15.0",
  "miden-ace",
  "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",
+ "miden-stark",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
  "paste",

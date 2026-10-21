@@ -2,7 +2,7 @@
 
 use alloc::vec;
 
-use miden_air::trace::RowIndex;
+use miden_air_source::vm::trace::RowIndex;
 use miden_core::{
     Felt,
     operations::opcodes,

@@ -15,7 +15,7 @@
 //!   this does not rely on shared-builder id canonicalization or the commutative-sort pass.
 use std::collections::HashMap;
 
-use miden_air::{AIRS, HandwrittenMidenAir};
+use miden_air::vm::AIRS;
 use miden_constraint_compiler::ir::{
     Class, Graph, Leaf, Node, NodeId, OpKind, capture, capture_into,
 };
@@ -29,7 +29,7 @@ const SEEDS: [u64; 4] =
 fn generated_evaluators_match_handwritten_structurally() {
     for air in AIRS {
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
+        let handwritten = capture_into(&air.0, &mut builder);
         let generated = capture_into(&air, &mut builder);
         let graph = builder.freeze();
 
@@ -47,14 +47,14 @@ fn generated_evaluators_match_handwritten_structurally() {
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that
 /// differ from the handwritten capture's for every AIR. If
-/// `HandwrittenMidenAir` and `MidenAir` ever route to the same evaluator for
+/// `miden_air_source::vm::MidenAir` and production `MidenAir` ever route to the same evaluator for
 /// even one AIR, both drift oracles silently compare the generated path against
 /// itself for that AIR — and this test fails instead.
 #[test]
 fn handwritten_and_generated_are_distinct_captures() {
     for air in AIRS {
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
+        let handwritten = capture_into(&air.0, &mut builder);
         let generated = capture_into(&air, &mut builder);
         let _ = builder.freeze();
         let differs = handwritten.base_roots != generated.base_roots
@@ -104,7 +104,7 @@ fn canonical_ids(graph: &Graph) -> Vec<usize> {
 #[test]
 fn generated_evaluators_match_handwritten_values() {
     for air in AIRS {
-        let (hand_graph, hand) = capture(&HandwrittenMidenAir(air));
+        let (hand_graph, hand) = capture(&air.0);
         let (gen_graph, generated) = capture(&air);
         assert_eq!(hand.base_global_indices, generated.base_global_indices);
         assert_eq!(hand.ext_global_indices, generated.ext_global_indices);
@@ -204,8 +204,8 @@ fn generated_degrees_match_handwritten() {
     use miden_stark::air::{ConstraintDegrees, LiftedAir};
     for air in AIRS {
         assert_eq!(
-            <miden_air::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&HandwrittenMidenAir(air))
+            <miden_air::vm::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
+            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.0)
         );
     }
 }

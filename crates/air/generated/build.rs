@@ -1,16 +1,16 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_definitions::{
-    AIRS, HandwrittenMidenAir,
+use miden_air_source::vm::{
+    AIRS,
     ace::{CapturedAir, CompiledRelation, LayoutKind},
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
 #[path = "build/precompiles.rs"]
-mod precompiles;
+mod precompile;
 
 fn main() {
-    precompiles::generate();
+    precompile::generate();
     println!("cargo:rerun-if-changed=build.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     let write = |name: &str, contents: String| {
@@ -21,7 +21,7 @@ fn main() {
     let captured: Vec<_> = AIRS
         .iter()
         .copied()
-        .map(|air| (air, CapturedAir::new(&HandwrittenMidenAir(air)).expect("capture VM AIR")))
+        .map(|air| (air, CapturedAir::new(&air).expect("capture VM AIR")))
         .collect();
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
@@ -38,12 +38,14 @@ fn main() {
     write("evaluators.rs", emit_module("", &evals));
     let degree_arms = captured
         .iter()
-        .map(|(air, captured)| format!("MidenAir::{} => {:?},", air.name(), captured.degrees()))
+        .map(|(air, captured)| {
+            format!("source::MidenAir::{} => {:?},", air.name(), captured.degrees())
+        })
         .collect::<String>();
     write(
         "degrees.rs",
         format!(
-            "fn generated_degrees(air: MidenAir) -> ConstraintDegrees {{ match air {{ \
+            "fn generated_degrees(air: MidenAir) -> ConstraintDegrees {{ match air.0 {{ \
              {degree_arms} }} }}"
         ),
     );
@@ -52,10 +54,10 @@ fn main() {
         .expect("compile VM relation");
     write(
         "air_shape.rs",
-        format!("{:?}", miden_air_definitions::geometry::air_shape(&relation)),
+        format!("{:?}", miden_air_source::vm::geometry::air_shape(&relation)),
     );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
-    let circuit: miden_air_definitions::ace::RecursiveAceCircuit = relation
+    let circuit: miden_air_source::vm::ace::RecursiveAceCircuit = relation
         .build_circuit(LayoutKind::Masm)
         .expect("canonical VM ACE circuit")
         .to_ace()
@@ -73,7 +75,7 @@ fn main() {
             circuit
                 .instructions
                 .iter()
-                .map(miden_air_definitions::Felt::as_canonical_u64)
+                .map(miden_air_source::vm::Felt::as_canonical_u64)
                 .collect::<Vec<_>>()
         ),
     );

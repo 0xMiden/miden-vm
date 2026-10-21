@@ -1,4 +1,4 @@
-use miden_air::config;
+use miden_air::vm::config;
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_stark::{
     StarkConfig,

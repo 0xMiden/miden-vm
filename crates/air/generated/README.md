@@ -1,5 +1,7 @@
 # Miden VM AIR
-This crate contains the production VM and precompile AIRs. Precompile APIs live in `miden_air::precompiles`; handwritten definitions live in `miden-air-definitions`, with shared Eidos equations owned there. Generic AIR contracts, transcript channels, lookup mechanisms, and configuration factories live in `miden-stark`; production AIR owns the VM/PVM PCS presets, protocol versions, transcript-domain adapters, and identity pins.
+This crate contains the production VM and precompile AIRs. The `vm` and `precompile` modules expose the two relations; handwritten constraints and trace schemas live in the matching modules of `miden-air-source`. Shared Eidos equations remain in the source crate, and shared production security helpers live in `miden_air::shared`. Generic AIR contracts, transcript channels, lookup mechanisms, and configuration factories live in `miden-stark`; production AIR owns the VM/PVM PCS presets, protocol versions, transcript-domain adapters, and identity pins.
+
+`vm::MidenAir` wraps the authored VM AIR, delegating metadata and auxiliary-trace construction while dispatching constraint evaluation and degrees to generated code. The PVM retains its distinct production evaluator. Complete VM proof ordering and the existing source/production statement delegation are unchanged.
 
 Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. Compiler tooling is a build dependency and is optional for runtime consumers. Complete generated verifier MASM is tracked in the core library; `make regenerate-verifiers` updates it and `make check-verifiers` checks freshness and the explicit protocol identity pins.
 

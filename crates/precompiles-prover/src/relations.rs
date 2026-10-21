@@ -1,1 +1,1 @@
-pub use miden_air::precompiles::relations::*;
+pub use miden_air_source::precompile::relations::*;

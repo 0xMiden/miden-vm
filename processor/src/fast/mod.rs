@@ -7,9 +7,9 @@ use alloc::{
 };
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{Felt, trace::RowIndex};
+use miden_air_source::vm::trace::RowIndex;
 use miden_core::{
-    EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO,
     deferred::{DeferredState, Digest, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},

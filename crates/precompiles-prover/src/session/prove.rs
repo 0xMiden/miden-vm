@@ -3,8 +3,8 @@
 use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
-use miden_air::precompiles::stark_config::test_challenger;
-use miden_air::precompiles::{
+use miden_air::precompile::stark_config::test_challenger;
+use miden_air::precompile::{
     ChipletAir, ChipletMultiAir, preprocessed,
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,

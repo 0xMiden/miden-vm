@@ -14,7 +14,7 @@ doctest = false
 
 [dependencies]
 askama.workspace = true
-miden-air-definitions = { workspace = true, features = ["std", "compiler"] }
+miden-air-source = { workspace = true, features = ["std", "compiler"] }
 p3-air.workspace = true
 miden-air = { workspace = true, features = ["std"] }
 miden-ace = { workspace = true, features = ["compiler"] }

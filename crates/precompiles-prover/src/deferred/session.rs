@@ -6,11 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{
-    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
-    memory,
-    stark_config::precompile_pcs_params,
-};
+use miden_air::precompile::{memory, stark_config::precompile_pcs_params};
+use miden_air_source::precompile::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
 use miden_core::{
     deferred::{
         DEFERRED_AND_FRAME, DataChunk, Digest, MAX_PRECOMPILE_ROOTS, PrecompileLimits,

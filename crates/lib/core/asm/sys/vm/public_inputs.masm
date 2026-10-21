@@ -153,7 +153,7 @@ end
 #! BUS_GAMMA_PTR as `[γ0, γ1, 0, 0]`.
 #!
 #! The four squarings below reach `β^16`; `MAX_MESSAGE_WIDTH` is hardcoded as 16 here, guarded
-#! by the `MIDEN_MAX_MESSAGE_WIDTH` tripwire in `crates/air/source/src/constraints/lookup/messages.rs`.
+#! by the `MIDEN_MAX_MESSAGE_WIDTH` tripwire in `crates/air/source/src/vm/constraints/lookup/messages.rs`.
 #!
 #! Input:  [...]
 #! Output: [...]

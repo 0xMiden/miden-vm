@@ -1,13 +1,14 @@
 //! Checks the generated OOD ingest hook's canonical memory layout, transcript state,
 //! DEEP accumulator, pointer updates, and two-row ingest cycle budget.
 
-use miden_air::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT};
+use miden_air::vm::{AIRS, MIDEN_AIR_COUNT};
 use miden_core::{
-    Word,
+    Felt, Word,
     advice::AdviceStack,
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
+use miden_stark::air::{BaseAir, LiftedAir};
 
 use super::{
     vm_layout_const,

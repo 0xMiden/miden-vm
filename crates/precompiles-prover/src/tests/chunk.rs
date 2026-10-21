@@ -7,12 +7,11 @@
 //! multi-invocation), and negative tests confirming `check_constraints`
 //! catches corruption.
 
-use miden_air::BaseAir;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::LiftedAir;
+use miden_stark::air::{BaseAir, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
