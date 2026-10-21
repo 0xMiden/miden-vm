@@ -24,4 +24,4 @@ wrap_comments = true
 
 # Generated constraint evaluators are committed as raw generator output so the
 # regen --check mode can byte-compare them; keep rustfmt away.
-ignore = ["air/src/constraints/generated.rs"]
+ignore = ["crates/air/generated/src/constraints/generated.rs"]

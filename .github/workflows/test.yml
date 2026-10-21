@@ -43,7 +43,7 @@ jobs:
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
                 .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
                 crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
-                crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
+                crates/stark/core/*|crates/serde-utils/*|crates/stark-transcript/*|\
                 crates/stateful-hasher/*)
                   run=true
                   break

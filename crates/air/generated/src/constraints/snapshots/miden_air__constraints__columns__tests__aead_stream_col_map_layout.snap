@@ -1,9 +1,9 @@
 ---
-source: air/src/constraints/columns.rs
-expression: CHIPLET_COL_MAP
+source: crates/air/generated/src/constraints/columns.rs
+expression: col_map!(AeadStreamCols)
 ---
-ChipletCols {
-    chiplets: [
+AeadStreamCols {
+    payload: [
         0,
         1,
         2,
@@ -24,9 +24,5 @@ ChipletCols {
         17,
         18,
         19,
-        20,
-        21,
-        22,
     ],
-    chip_clk: 23,
 }

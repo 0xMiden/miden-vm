@@ -15,9 +15,9 @@
 //!
 //! Coverage is limited to the stack-only memory ops above plus `AeadStream`. The DYN,
 //! DYNCALL, CALL-FMP-write, and PIPE memory-request paths in
-//! `air/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to integration tests —
-//! each is heavyweight to set up and small in algebraic surface. A bug in those paths would
-//! escape this module.
+//! `crates/air/generated/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to
+//! integration tests — each is heavyweight to set up and small in algebraic surface. A bug in those
+//! paths would escape this module.
 //!
 //! The programs run at ctx = 0 throughout (no CALL/SYSCALL), so a request/response bug that
 //! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.

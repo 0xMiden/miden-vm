@@ -677,7 +677,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let main = trace.main_trace();
 
     // The sibling-table gates are defined by `emit_siblings` in
-    // `air/src/constraints/lookup/operations/merkle.rs`.
+    // `crates/air/generated/src/constraints/lookup/operations/merkle.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {

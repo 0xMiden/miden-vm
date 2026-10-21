@@ -32,7 +32,7 @@ pub enum Mode {
 }
 
 const PROTOCOL_ID: u64 = 1;
-const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
+const AIR_CONFIG_PATH: &str = "../../air/generated/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
@@ -818,7 +818,9 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
     println!("wrote asm/sys/vm/mod.masm (relation digest and preprocessed commitment)");
-    println!("wrote air/src/config.rs (relation and ACE digests, preprocessed commitments)");
+    println!(
+        "wrote crates/air/generated/src/config.rs (relation and ACE digests, preprocessed commitments)"
+    );
     println!("wrote VM recursive-verifier layout, OOD-frame, and DEEP-query geometry");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
@@ -884,7 +886,8 @@ fn constraints_eval_masm_matches_artifact(artifact: &ComputedArtifacts) -> Resul
     Ok(())
 }
 
-/// Verify that RELATION_DIGEST in `air/src/config.rs` and `sys/vm/mod.masm` matches current AIR.
+/// Verify that RELATION_DIGEST in `crates/air/generated/src/config.rs` and `sys/vm/mod.masm`
+/// matches current AIR.
 pub fn relation_digest_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     relation_digest_matches_artifact(&artifact)
@@ -894,11 +897,11 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
     let expected = artifact.relation_digest;
 
     if config::RELATION_DIGEST != expected {
-        return Err("RELATION_DIGEST in air/src/config.rs is stale".into());
+        return Err("RELATION_DIGEST in crates/air/generated/src/config.rs is stale".into());
     }
     if config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
         return Err(
-            "ACE_CIRCUIT_DIGEST in air/src/config.rs is stale (it binds the transcript to the \
+            "ACE_CIRCUIT_DIGEST in crates/air/generated/src/config.rs is stale (it binds the transcript to the \
              one circuit the recursive verifier evaluates)"
                 .into(),
         );
@@ -930,7 +933,9 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
         || config::EIDOS_PREPROCESSED_COMMITMENT != commitments.eidos
         || config::KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
     {
-        return Err("preprocessed commitments in air/src/config.rs are stale".into());
+        return Err(
+            "preprocessed commitments in crates/air/generated/src/config.rs are stale".into()
+        );
     }
 
     // The generated map/scatter hook is specialized to one block per AIR. A stale value would

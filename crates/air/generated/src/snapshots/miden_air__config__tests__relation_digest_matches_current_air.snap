@@ -1,5 +1,5 @@
 ---
-source: air/src/config.rs
+source: crates/air/generated/src/config.rs
 expression: snapshot
 ---
 num_inputs: 734

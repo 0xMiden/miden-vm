@@ -1,5 +1,5 @@
 ---
-source: air/src/constraints/columns.rs
+source: crates/air/generated/src/constraints/columns.rs
 expression: col_map!(AeadStreamLowSecondCols)
 ---
 AeadStreamLowSecondCols {

@@ -14,7 +14,7 @@ Miden VM is a zero-knowledge virtual machine written in Rust.
 You can execute a program on Miden VM and generate a STARK proof of its execution.
 Anyone can verify the proof without executing the program again or knowing its source code.
 
-The prover uses the [lifted STARK protocol](crates/lifted-stark) with components from
+The prover uses the [lifted STARK protocol](crates/stark/core) with components from
 [Plonky3](https://github.com/Plonky3/Plonky3).
 
 For usage examples and the Rust API, see the [miden-vm crate](miden-vm).
@@ -106,14 +106,14 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | VM | [core](core) | Defines the instruction set and shared VM types. |
 | VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
 | VM | [processor](processor) | Executes programs and builds execution traces. |
-| VM | [air](air) | Defines the constraints checked for VM execution. |
+| VM | [air](crates/air/generated) | Defines the constraints checked for VM execution. |
 | VM | [prover](prover) | Produces STARK proofs from execution traces. |
 | VM | [verifier](verifier) | Verifies VM execution proofs. |
 | VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
 | Shared code | [field](crates/field) | Provides a common field element type for Miden Rust code. |
 | Shared code | [crypto](crates/crypto) | Provides the cryptographic primitives used across the workspace. |
 | Proof system | [lifted-air](crates/lifted-air) | Defines AIR traits and symbolic constraints for the lifted STARK protocol. |
-| Proof system | [lifted-stark](crates/lifted-stark) | Implements lifted STARK proving and verification. |
+| Proof system | [lifted-stark](crates/stark/core) | Implements lifted STARK proving and verification. |
 | Proof system | [stark-transcript](crates/stark-transcript) | Provides transcript channels used by proof protocols. |
 | Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
