@@ -8,8 +8,8 @@ use gl::{
 };
 use hiding_config::HidingLmcsConfig;
 use lifted_tree::LiftedMerkleTree;
+use miden_crypto::hash::stateful::{Alignable, StatefulHasher};
 use miden_lifted_air::log2_strict_u8;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use proof::BatchProofView;

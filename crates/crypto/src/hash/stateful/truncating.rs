@@ -62,7 +62,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::MockBinaryHasher;
+    use crate::hash::stateful::testing::MockBinaryHasher;
 
     #[test]
     fn truncates_prefix_of_inner_digest() {

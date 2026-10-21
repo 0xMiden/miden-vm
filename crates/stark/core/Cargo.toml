@@ -14,9 +14,9 @@ doctest = false
 
 [dependencies]
 # Internal
+miden-crypto.workspace           = true
 miden-lifted-air.workspace       = true
 miden-stark-transcript.workspace = true
-miden-stateful-hasher.workspace  = true
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)

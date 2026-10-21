@@ -10,9 +10,9 @@ use miden_crypto::hash::{
     blake::Blake3Hasher,
     eidos::{Eidos, EidosLmcsCompressor, EidosLmcsHasher, MidenEidosChallenger, PACKED_LANES},
     keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
+    stateful::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
 };
 use miden_lifted_stark::{GenericStarkConfig, lmcs::config::LmcsConfig, pcs::PcsParams};
-use miden_stateful_hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge};
 use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_dft::Radix2DitParallel;
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge};
@@ -221,9 +221,8 @@ pub fn keccak_config(params: PcsParams, relation_digest: RelationDigest) -> Kecc
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_crypto::{field::PrimeCharacteristicRing, hash::stateful::StatefulHasher};
     use miden_lifted_stark::lmcs::{Lmcs, LmcsTree, hiding_config::HidingLmcsConfig};
-    use miden_stateful_hasher::StatefulHasher;
     use p3_matrix::{
         Matrix,
         bitrev::BitReversibleMatrix,

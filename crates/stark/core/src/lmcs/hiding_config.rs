@@ -3,8 +3,8 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use miden_crypto::hash::stateful::{Alignable, StatefulHasher};
 use miden_stark_transcript::VerifierChannel;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
 use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};

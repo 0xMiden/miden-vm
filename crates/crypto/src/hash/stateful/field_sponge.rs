@@ -5,7 +5,7 @@
 
 use p3_symmetric::CryptographicPermutation;
 
-use crate::{Alignable, StatefulHasher};
+use super::{Alignable, StatefulHasher};
 
 /// A stateful sponge wrapper around a cryptographic permutation.
 ///
@@ -75,7 +75,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::testing::MockBinaryPermutation;
+    use crate::hash::stateful::testing::MockBinaryPermutation;
 
     #[test]
     fn basic() {

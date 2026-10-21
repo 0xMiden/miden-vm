@@ -29,7 +29,6 @@ members = [
     "crates/project",
     "crates/serde-utils",
     "crates/stark-transcript",
-    "crates/stateful-hasher",
     "crates/test-serialization-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
@@ -110,7 +109,6 @@ miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", d
 miden-prover            = { path = "./prover", version = "1.0.0-rc.1", default-features = false }
 miden-serde-utils       = { path = "./crates/serde-utils", version = "1.0.0-rc.1", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "1.0.0-rc.1", default-features = false }
-miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "1.0.0-rc.1", default-features = false }
 midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "1.0.0-rc.1", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0.0-rc.1", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0.0-rc.1", default-features = false }
