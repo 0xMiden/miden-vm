@@ -70,7 +70,7 @@
 pub(crate) mod batch;
 pub mod columns;
 
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 use p3_field::Dup;
 
 use crate::{

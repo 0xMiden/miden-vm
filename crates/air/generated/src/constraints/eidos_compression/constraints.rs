@@ -1,7 +1,7 @@
 //! AIR constraints for the 32-row Eidos compression trace.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder, WindowAccess};
+use miden_lifted_stark::air::{AirBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
     algebra::{pack_pair, pack_u32_le, sum_input_b, universal_cv_word, xor_from_and},

@@ -7,15 +7,13 @@ use miden_core::{
         BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt, TwoAdicField,
     },
 };
-use miden_crypto::{
-    hash::eidos::EidosChallenger,
-    stark::{
-        StarkConfig,
-        challenger::{CanObserve, FieldChallenger, GrindingChallenger},
+use miden_crypto::hash::eidos::EidosChallenger;
+use miden_lifted_stark::{
+    StarkConfig,
+    challenger::{CanObserve, FieldChallenger, GrindingChallenger},
+    testing::{
+        Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
-};
-use miden_lifted_stark::testing::{
-    Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
 };
 use miden_processor::ExecutionOutput;
 use rand::{RngExt, SeedableRng};

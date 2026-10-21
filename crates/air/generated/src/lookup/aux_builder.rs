@@ -25,7 +25,7 @@ use miden_core::{
     field::{ExtensionField, Field},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::LiftedAir;
+use miden_lifted_stark::air::LiftedAir;
 
 use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fraction_chunk};
 
@@ -593,7 +593,7 @@ mod tests {
     /// boundaries and the cyclic closing edge.
     #[test]
     fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
-        use miden_crypto::stark::air::BaseAir;
+        use miden_lifted_stark::air::BaseAir;
 
         use crate::{
             MidenAir,
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
-        use miden_crypto::stark::air::BaseAir;
+        use miden_lifted_stark::air::BaseAir;
 
         let air = crate::MidenAir::AND8_LOOKUP;
         let main = RowMajorMatrix::new(Felt::zero_vec(8 * air.width()), air.width());

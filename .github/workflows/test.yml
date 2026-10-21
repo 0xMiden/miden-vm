@@ -43,8 +43,7 @@ jobs:
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
                 .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
                 crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
-                crates/stark/core/*|crates/serde-utils/*|crates/stark-transcript/*|\
-                crates/stateful-hasher/*)
+                crates/stark/core/*|crates/serde-utils/*|crates/stark-transcript/*)
                   run=true
                   break
                   ;;
@@ -210,6 +209,9 @@ jobs:
             RUSTFLAGS="-C target-feature=${target_features}" \
               cargo nextest run --profile ci -p miden-crypto --lib --no-default-features \
                 --no-tests=fail 'hash::eidos::' || return 1
+            RUSTFLAGS="-C target-feature=${target_features}" \
+              cargo nextest run --profile ci -p miden-lifted-stark --lib --no-default-features \
+                --no-tests=fail 'config::tests::' || return 1
           }
 
           failed=0

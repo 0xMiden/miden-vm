@@ -1,26 +1,25 @@
 //! STARK configuration factories for different hash functions.
 //!
-//! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
+//! Each factory creates a [`StarkConfig`](miden_lifted_stark::StarkConfig) bundling the
 //! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
 
 use alloc::vec;
 
 use miden_core::{Felt, Word, field::QuadFelt, program::domain::STARK_TRANSCRIPT};
-use miden_crypto::{
-    hash::{
-        blake::Blake3Hasher,
-        eidos::{Eidos, EidosLmcs, MidenEidosChallenger, lmcs_config},
-        keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
-    },
-    stark::{
-        GenericStarkConfig,
-        challenger::{CanObserve, HashChallenger, SerializingChallenger64},
-        dft::Radix2DitParallel,
-        hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
-        lmcs::config::LmcsConfig,
-        pcs::PcsParams,
-        symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge},
-    },
+use miden_crypto::hash::{
+    blake::Blake3Hasher,
+    eidos::{Eidos, MidenEidosChallenger},
+    keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
+};
+use miden_lifted_stark::{
+    EidosLmcs, GenericStarkConfig,
+    challenger::{CanObserve, HashChallenger, SerializingChallenger64},
+    dft::Radix2DitParallel,
+    hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
+    lmcs::config::LmcsConfig,
+    lmcs_config,
+    pcs::PcsParams,
+    symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge},
 };
 
 // SHARED TYPES
@@ -254,7 +253,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::Felt;
-    use miden_crypto::stark::{challenger::CanObserve, pcs::PcsParams};
+    use miden_lifted_stark::{challenger::CanObserve, pcs::PcsParams};
 
     use crate::ace;
 

@@ -36,15 +36,13 @@ use miden_core::{
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction},
 };
-use miden_crypto::{
-    field::BasedVectorSpace,
-    stark::{
-        PreprocessedValidationError, StarkConfig, VerifierInstance,
-        lmcs::{Lmcs, proof::BatchProofView},
-        pcs::{PcsParams, PcsProof},
-        proof::{StarkProof, StarkProofData},
-        verifier::VerifierError as CryptoVerifierError,
-    },
+use miden_crypto::field::BasedVectorSpace;
+use miden_lifted_stark::{
+    PreprocessedValidationError, StarkConfig, VerifierInstance,
+    lmcs::{Lmcs, proof::BatchProofView},
+    pcs::{PcsParams, PcsProof},
+    proof::{StarkProof, StarkProofData},
+    verifier::VerifierError as CryptoVerifierError,
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::{SerdeCompat, wincode};
@@ -498,7 +496,7 @@ mod tests {
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
-    use miden_crypto::stark::Preprocessed;
+    use miden_lifted_stark::Preprocessed;
 
     use super::*;
 

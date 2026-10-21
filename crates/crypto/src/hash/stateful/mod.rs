@@ -1,20 +1,19 @@
 //! Stateful sponge-like hashers for cryptographic hashing.
 //!
-//! This crate provides the [`StatefulHasher`] trait and implementations that maintain
-//! an evolving state during hashing. This interface is used by commitment schemes and
-//! Merkle trees to incrementally absorb data and squeeze out digests.
+//! This module provides the [`StatefulHasher`](crate::hash::stateful::StatefulHasher) trait and
+//! implementations that maintain an evolving state during hashing. This interface is used by
+//! commitment schemes and Merkle trees to incrementally absorb data and squeeze out digests.
 //!
 //! # Implementations
 //!
-//! - [`StatefulSponge`]: Wraps a permutation with proper sponge semantics
-//! - [`SerializingStatefulSponge`]: Serializes field elements to binary before absorbing
-//! - [`ChainingHasher`]: Uses chaining mode `H(state || input)` with a regular hasher
-//! - [`TruncatingHasher`]: Wraps a hasher and returns a shorter fixed digest (prefix)
-
-#![no_std]
-
-#[cfg(test)]
-extern crate alloc;
+//! - [`StatefulSponge`](crate::hash::stateful::StatefulSponge): Wraps a permutation with proper
+//!   sponge semantics
+//! - [`SerializingStatefulSponge`](crate::hash::stateful::SerializingStatefulSponge): Serializes
+//!   field elements to binary before absorbing
+//! - [`ChainingHasher`](crate::hash::stateful::ChainingHasher): Uses chaining mode `H(state ||
+//!   input)` with a regular hasher
+//! - [`TruncatingHasher`](crate::hash::stateful::TruncatingHasher): Wraps a hasher and returns a
+//!   shorter fixed digest (prefix)
 
 mod chaining;
 mod field_sponge;

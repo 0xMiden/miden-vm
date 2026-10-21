@@ -14,7 +14,7 @@ use core::any::{Any, TypeId};
 use ::serde::Serialize;
 use miden_air::{MidenMultiAir, ProverStatement, Statement};
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_crypto::stark::{
+use miden_lifted_stark::{
     Preprocessed, ProverInstance, StarkConfig,
     lmcs::Lmcs,
     proof::{StarkOutput, StarkProofData},

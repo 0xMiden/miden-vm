@@ -46,7 +46,7 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 ///   length must match the number of [`LookupBuilder::next_column`] calls issued from
 ///   [`eval`](Self::eval). The shared adapters validate this invariant.
 /// - LogUp columns occupy the prefix `0..column_shape().len()` of the auxiliary trace. A
-///   [`LiftedAir`](miden_crypto::stark::air::LiftedAir) may append independently constrained
+///   [`LiftedAir`](miden_lifted_stark::air::LiftedAir) may append independently constrained
 ///   extension-field registers after that prefix; they are excluded from the LogUp recurrence.
 /// - [`max_message_width()`](Self::max_message_width) must be ≥ the widest payload any message in
 ///   the AIR emits. It counts **only** contiguous payload slots — the bus identifier is handled

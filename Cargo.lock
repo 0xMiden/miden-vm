@@ -2051,6 +2051,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
  "proptest",
  "thiserror",
 ]
@@ -2064,6 +2065,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "p3-field",
@@ -2165,6 +2167,7 @@ version = "1.0.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
 ]
 
 [[package]]
@@ -2183,6 +2186,7 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
+ "p3-matrix",
  "proptest",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -2259,19 +2263,19 @@ dependencies = [
  "k256",
  "miden-crypto-derive",
  "miden-field",
- "miden-lifted-stark",
  "miden-serde-utils",
  "miden-test-serialization-macros",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
+ "p3-bn254",
  "p3-challenger",
- "p3-dft",
+ "p3-field",
  "p3-goldilocks",
  "p3-keccak",
- "p3-matrix",
  "p3-maybe-rayon",
+ "p3-mersenne-31",
  "p3-symmetric",
  "p3-util",
  "proptest",
@@ -2414,9 +2418,9 @@ name = "miden-lifted-stark"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "miden-crypto",
  "miden-lifted-air",
  "miden-stark-transcript",
- "miden-stateful-hasher",
  "miden-utils-sync",
  "p3-blake3",
  "p3-blake3-air",
@@ -2651,6 +2655,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
+ "miden-lifted-stark",
  "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",
@@ -2701,17 +2706,6 @@ dependencies = [
  "p3-field",
  "serde",
  "thiserror",
-]
-
-[[package]]
-name = "miden-stateful-hasher"
-version = "1.0.0"
-dependencies = [
- "p3-bn254",
- "p3-field",
- "p3-goldilocks",
- "p3-mersenne-31",
- "p3-symmetric",
 ]
 
 [[package]]
@@ -2788,6 +2782,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
  "miden-precompiles",
  "miden-precompiles-verifier",
  "miden-serde-utils",

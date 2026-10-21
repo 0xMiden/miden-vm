@@ -14,9 +14,9 @@ doctest = false
 
 [dependencies]
 # Internal
+miden-crypto.workspace           = true
 miden-lifted-air.workspace       = true
 miden-stark-transcript.workspace = true
-miden-stateful-hasher.workspace  = true
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)
@@ -59,7 +59,7 @@ proptest.workspace           = true
 tracing-subscriber.workspace = true
 
 [features]
-concurrent = ["p3-maybe-rayon/parallel"]
+concurrent = ["miden-crypto/concurrent", "p3-maybe-rayon/parallel"]
 default    = ["concurrent"]
 testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
 

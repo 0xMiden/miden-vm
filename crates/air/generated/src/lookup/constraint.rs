@@ -57,7 +57,7 @@
 use core::marker::PhantomData;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_lifted_stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,

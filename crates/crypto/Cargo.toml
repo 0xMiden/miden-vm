@@ -101,7 +101,7 @@ required-features = ["std"]
 
 [features]
 arbitrary         = ["dep:proptest", "miden-field/arbitrary"]
-concurrent        = ["dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
+concurrent        = ["dep:rayon", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
@@ -116,7 +116,6 @@ testing           = ["arbitrary"]
 # Miden dependencies
 miden-crypto-derive = { workspace = true }
 miden-field         = { workspace = true }
-miden-lifted-stark  = { default-features = false, workspace = true }
 miden-serde-utils   = { workspace = true }
 
 # External dependencies
@@ -147,10 +146,9 @@ x25519-dalek     = { features = ["static_secrets"], workspace = true }
 # Upstream Plonky3 dependencies
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
-p3-dft.workspace         = true
 p3-goldilocks.workspace  = true
+p3-field.workspace       = true
 p3-keccak.workspace      = true
-p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
 p3-symmetric.workspace   = true
 p3-util.workspace        = true
@@ -161,6 +159,9 @@ assert_matches = { workspace = true }
 hex            = { features = ["alloc"], workspace = true }
 itertools      = { features = ["use_std"], workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
+p3-bn254.workspace = true
+p3-goldilocks.workspace = true
+p3-mersenne-31.workspace = true
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
 serde_json     = { workspace = true }

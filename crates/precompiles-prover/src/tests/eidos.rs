@@ -9,8 +9,9 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_crypto::{hash::eidos::Eidos, stark::air::ConstraintDegrees};
+use miden_crypto::hash::eidos::Eidos;
 use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_stark::air::ConstraintDegrees;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 use miden_precompiles_air::primitives::byte_pair_lut::eidos;
 

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_crypto::stark::{
+use miden_lifted_stark::{
     air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
     matrix::RowMajorMatrix,
 };

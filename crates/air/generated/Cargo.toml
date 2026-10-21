@@ -21,13 +21,14 @@ doctest = false
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-lifted-stark/concurrent"]
 testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
 miden-ace-codegen.workspace = true
 miden-core.workspace = true
+miden-lifted-stark.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 

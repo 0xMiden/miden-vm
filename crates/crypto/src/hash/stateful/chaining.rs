@@ -6,7 +6,7 @@
 use p3_field::Field;
 use p3_symmetric::CryptographicHasher;
 
-use crate::{Alignable, StatefulHasher};
+use crate::hash::stateful::{Alignable, StatefulHasher};
 
 /// An adapter that chains state with new input, hashing `state || encode(input)`.
 ///
@@ -178,7 +178,7 @@ mod tests {
     use p3_mersenne_31::Mersenne31;
 
     use super::*;
-    use crate::testing::MockBinaryHasher;
+    use crate::hash::stateful::testing::MockBinaryHasher;
 
     /// Verifies ChainingHasher produces same result as manual H(state || input) chaining.
     fn test_scalar_matches_manual<F: Field + RawDataSerializable>() {

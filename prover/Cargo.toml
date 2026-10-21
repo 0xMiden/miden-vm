@@ -19,6 +19,7 @@ concurrent = [
     "std",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
+    "miden-lifted-stark/concurrent",
     "miden-precompiles-prover/concurrent",
     "miden-processor/concurrent",
 ]
@@ -34,6 +35,7 @@ std = [
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-lifted-stark.workspace = true
 miden-precompiles-prover.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true

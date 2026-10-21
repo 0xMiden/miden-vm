@@ -77,7 +77,7 @@ mod selectors;
 pub(crate) mod util;
 pub mod verifier;
 
-pub use config::{GenericStarkConfig, StarkConfig};
+pub use config::{EidosLmcs, GenericStarkConfig, StarkConfig, lmcs_config};
 pub use debug::check_constraints;
 // `domain` and `order` are internal modules. Their error types surface through the public
 // `ProverError` / `VerifierError`, and quotient-degree derivation is part of the relation
@@ -138,8 +138,34 @@ pub mod air {
 
 /// Stateful hasher primitives for LMCS construction.
 pub mod hasher {
-    pub use miden_stateful_hasher::{
+    pub use miden_crypto::hash::stateful::{
         Alignable, ChainingHasher, SerializingStatefulSponge, StatefulHasher, StatefulSponge,
+    };
+}
+
+/// Challenge generation primitives from upstream Plonky3.
+pub mod challenger {
+    pub use p3_challenger::{
+        CanFinalizeDigest, CanObserve, DuplexChallenger, FieldChallenger, GrindingChallenger,
+        HashChallenger, SerializingChallenger64,
+    };
+}
+
+/// DFT implementations from upstream Plonky3.
+pub mod dft {
+    pub use p3_dft::{Radix2DFTSmallBatch, Radix2DitParallel, TwoAdicSubgroupDft};
+}
+
+/// Dense matrix types from upstream Plonky3.
+pub mod matrix {
+    pub use p3_matrix::{Matrix, dense::RowMajorMatrix};
+}
+
+/// Symmetric cryptographic primitives from upstream Plonky3.
+pub mod symmetric {
+    pub use p3_symmetric::{
+        CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge, Permutation,
+        SerializingHasher, TruncatedPermutation,
     };
 }
 

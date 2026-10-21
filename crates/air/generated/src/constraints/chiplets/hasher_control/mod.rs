@@ -9,7 +9,7 @@ pub mod flags;
 
 use flags::ControllerFlags;
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 
 use crate::{
     ChipletCols, MidenAirBuilder,
@@ -227,7 +227,7 @@ mod tests {
         Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
     };
-    use miden_crypto::stark::{
+    use miden_lifted_stark::{
         air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
         matrix::RowMajorMatrix,
     };

@@ -3,8 +3,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
+use miden_crypto::hash::stateful::{Alignable, StatefulHasher};
 use miden_stark_transcript::VerifierChannel;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
 use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
@@ -526,8 +526,8 @@ mod tests {
     fn goldilocks_blake3_roundtrip() {
         use alloc::{vec, vec::Vec};
 
+        use miden_crypto::hash::stateful::ChainingHasher;
         use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
-        use miden_stateful_hasher::ChainingHasher;
         use p3_blake3::Blake3;
         use p3_challenger::{HashChallenger, SerializingChallenger64};
         use p3_symmetric::CompressionFunctionFromHasher;
@@ -583,7 +583,7 @@ mod tests {
     fn goldilocks_blake3_192_roundtrip() {
         use alloc::{vec, vec::Vec};
 
-        use miden_stateful_hasher::{ChainingHasher, TruncatingHasher};
+        use miden_crypto::hash::stateful::{ChainingHasher, TruncatingHasher};
         use p3_blake3::Blake3;
         use p3_challenger::{HashChallenger, SerializingChallenger64};
         use p3_symmetric::CompressionFunctionFromHasher;
