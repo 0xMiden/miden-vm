@@ -1,5 +1,5 @@
 #[cfg(feature = "compiler")]
-use miden_ace_codegen::{AceCircuit, AceError, LayoutKind};
+use miden_ace::{AceCircuit, AceError, LayoutKind};
 #[cfg(feature = "compiler")]
 use miden_core::field::QuadFelt;
 
@@ -18,7 +18,7 @@ pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 // RECURSIVE VERIFIER CIRCUIT
 // ================================================================================================
 
-pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
+pub use miden_ace::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///

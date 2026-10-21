@@ -3,7 +3,7 @@
 use alloc::{format, vec::Vec};
 
 #[cfg(feature = "compiler")]
-use miden_ace_codegen::{AceError, CapturedAir, CompiledRelation};
+use miden_ace::{AceError, CapturedAir, CompiledRelation};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

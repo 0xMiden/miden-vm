@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
+use miden_ace::instruction::{Op, decode_instruction};
 use miden_air::{
     AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
@@ -11,10 +12,7 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{
-    MAX_NUM_ACE_WIRES,
-    instruction::{Op, decode_instruction},
-};
+use super::MAX_NUM_ACE_WIRES;
 use crate::{ContextId, errors::AceError};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the

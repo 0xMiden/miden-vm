@@ -1,4 +1,6 @@
-use crate::Felt;
+//! Packed instruction format shared by ACE circuit encoders and the processor.
+
+use miden_crypto::Felt;
 
 /// Number of bits used to represent the ID of a node in the evaluation graph.
 /// Define as 30 bits to ensure two indices and the operation can be encoded in a single `Felt`
@@ -28,6 +30,17 @@ impl TryFrom<u64> for Op {
         };
         Ok(op)
     }
+}
+
+/// Pack two node IDs and an operation into one field element.
+///
+/// Returns `None` if either ID exceeds the 30-bit instruction field.
+pub fn encode_instruction(id_l: u32, id_r: u32, op: Op) -> Option<Felt> {
+    if id_l > MAX_ID || id_r > MAX_ID {
+        return None;
+    }
+    let encoded = id_l as u64 + ((id_r as u64) << ID_BITS) + ((op as u64) << (2 * ID_BITS));
+    Some(Felt::new_unchecked(encoded))
 }
 
 /// Given a `Felt`, tries to recover the components `id_l, id_r, op`.

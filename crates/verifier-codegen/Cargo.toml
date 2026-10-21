@@ -17,7 +17,7 @@ askama.workspace = true
 miden-air-definitions = { workspace = true, features = ["std", "compiler"] }
 p3-air.workspace = true
 miden-air = { workspace = true, features = ["std"] }
-miden-ace-codegen = { workspace = true, features = ["compiler"] }
+miden-ace = { workspace = true, features = ["compiler"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-crypto = { workspace = true, features = ["std"] }
 miden-stark.workspace = true

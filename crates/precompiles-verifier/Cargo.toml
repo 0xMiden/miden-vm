@@ -20,7 +20,7 @@ concurrent = [
     "miden-air/concurrent",
 ]
 std = [
-    "dep:miden-ace-codegen",
+    "dep:miden-ace",
     "miden-core/std",
     "miden-crypto/std",
     "miden-air/std",
@@ -28,7 +28,7 @@ std = [
 ]
 
 [dependencies]
-miden-ace-codegen = { workspace = true, optional = true }
+miden-ace = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
@@ -42,4 +42,4 @@ wincode.workspace = true
 [dev-dependencies]
 insta.workspace = true
 miden-air = { workspace = true, features = ["std", "compiler"] }
-miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-ace = { workspace = true, features = ["testing"] }

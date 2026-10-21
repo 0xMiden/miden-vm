@@ -1,7 +1,8 @@
-//! ACE circuit codegen for Plonky3-based Miden AIRs.
+//! ACE circuit runtime and optional compiler for Miden AIRs.
 //!
-//! The default, `no_std` API provides encoded circuits and their input layouts.
-//! Enable `compiler` in build dependencies to capture AIRs and generate circuits.
+//! The default runtime supports `no_std` with `alloc`. It owns encoded circuits, instruction
+//! packing and decoding, input layouts, and proof-order tags. Enable `compiler` in build
+//! dependencies to capture AIRs and generate circuits.
 //!
 //! The compiler pipeline is:
 //! 1. Capture AIR constraints into the `miden-constraint-compiler` IR.
@@ -15,11 +16,11 @@
 //!
 //! Quick start:
 //! ```ignore
-//! use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
-//! use miden_air::ChipletsAir;
+//! use miden_ace::{AceConfig, LayoutKind, build_ace_circuit_for_air};
+//! use miden_air::MidenAir;
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
-//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
+//! let circuit = build_ace_circuit_for_air(&MidenAir::CORE, config)?;
 //! ```
 //!
 //! Module map (data flow):
@@ -28,6 +29,7 @@
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
 //! - `layout`: READ-section layout and index mapping.
 //! - `encode`: ACE stream encoding + padding rules.
+//! - `instruction`: packed arithmetic operations shared with the processor.
 //! - `masm`: shared renderer for relation-local MASM constraint evaluators.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
@@ -36,9 +38,11 @@
 //! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
 //! - `ood_scatter`: shared OOD scatter planning and MASM procedure generation.
 
-#![cfg_attr(not(feature = "compiler"), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+#[cfg(all(test, not(feature = "std")))]
+extern crate std;
 
 use alloc::string::String;
 
@@ -50,6 +54,7 @@ mod dag;
 
 // Input layout and encoding.
 mod encode;
+pub mod instruction;
 mod layout;
 #[cfg(feature = "compiler")]
 mod masm;
@@ -76,7 +81,7 @@ mod unit_tests;
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;
 
-/// Errors returned by ACE codegen.
+/// Errors returned by ACE circuit operations.
 #[derive(Debug, thiserror::Error)]
 pub enum AceError {
     #[error("invalid input length: expected {expected}, got {got}")]

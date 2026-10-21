@@ -6,7 +6,7 @@
 //! the Rust stable sort by `(height, instance index)` and against each other as inverses, for every
 //! VM order, the PVM structured sample, seeded random heights, and tied heights.
 
-use miden_ace_codegen::{MAX_ORDER_AIRS, ProofOrderMapsConfig, render_proof_order_maps};
+use miden_ace::{MAX_ORDER_AIRS, ProofOrderMapsConfig, render_proof_order_maps};
 use miden_core::Felt;
 
 use super::{
@@ -305,7 +305,7 @@ fn pvm_maps_resolve_ties_to_instance_order() {
 
 /// Deterministic pseudo-random height vectors, ties included, so the generated PVM stack
 /// choreography is driven by more than the structured sample. The Rust network itself is
-/// validated exhaustively in `miden-ace-codegen`; this exercises the rendered MASM with the same
+/// validated exhaustively in `miden-ace`; this exercises the rendered MASM with the same
 /// class of inputs.
 #[test]
 fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
@@ -326,7 +326,7 @@ fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
 /// The generated pass must be branch-free: a fixed comparator network of `cswap`s, no loops and
 /// no conditionals, so its cost and its control flow are independent of the proof order. Both the
 /// four-input VM network and the twelve-input PVM network are Batcher's merge exchange, generated
-/// by `miden-ace-codegen`.
+/// by `miden-ace`.
 #[test]
 fn the_pass_is_a_fixed_comparator_network() {
     for (hook, comparators) in [

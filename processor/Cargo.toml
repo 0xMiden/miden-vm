@@ -33,6 +33,7 @@ arbitrary = ["dep:proptest", "miden-air/arbitrary", "miden-core/arbitrary"]
 [dependencies]
 proptest = { workspace = true, optional = true }
 # Miden dependencies
+miden-ace.workspace = true
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true

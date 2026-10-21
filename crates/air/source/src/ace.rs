@@ -14,9 +14,9 @@ mod multi_air;
 mod recursive;
 
 // Shared build-time compiler types used by native artifact generation.
-pub use miden_ace_codegen::RecursiveAceCircuit;
+pub use miden_ace::RecursiveAceCircuit;
 #[cfg(feature = "compiler")]
-pub use miden_ace_codegen::{CapturedAir, CompiledRelation, LayoutKind};
+pub use miden_ace::{CapturedAir, CompiledRelation, LayoutKind};
 #[cfg(feature = "compiler")]
 pub use multi_air::build_canonical_multi_air_ace_circuit;
 #[cfg(feature = "compiler")]

@@ -1,6 +1,6 @@
 #[cfg(feature = "compiler")]
-use miden_ace_codegen::CompiledRelation;
-use miden_ace_codegen::EXT_DEGREE;
+use miden_ace::CompiledRelation;
+use miden_ace::EXT_DEGREE;
 #[cfg(feature = "compiler")]
 use p3_security::budget::{AirShape, LookupShape};
 

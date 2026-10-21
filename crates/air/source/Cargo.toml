@@ -18,7 +18,7 @@ doctest = false
 
 [features]
 default = ["std"]
-compiler = ["miden-ace-codegen/compiler"]
+compiler = ["miden-ace/compiler"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-stark/std", "miden-core/std", "proptest?/std", "thiserror/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std"]
 concurrent = ["miden-stark/concurrent", "std", "miden-crypto/concurrent"]
@@ -26,7 +26,7 @@ testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
-miden-ace-codegen.workspace = true
+miden-ace.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
@@ -45,6 +45,6 @@ thiserror.workspace = true
 [dev-dependencies]
 p3-matrix.workspace = true
 insta.workspace = true
-miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-ace = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true

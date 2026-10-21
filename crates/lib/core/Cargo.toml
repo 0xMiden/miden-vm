@@ -53,7 +53,7 @@ thiserror.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true
-miden-ace-codegen = { workspace = true, features = ["compiler"] }
+miden-ace = { workspace = true, features = ["compiler"] }
 miden-air = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }

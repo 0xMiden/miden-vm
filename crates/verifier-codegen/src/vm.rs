@@ -5,7 +5,7 @@ use std::{
 };
 
 use askama::Template;
-use miden_ace_codegen::{
+use miden_ace::{
     CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
     LayoutKind, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry, render_proof_order_maps,
 };
@@ -504,7 +504,7 @@ fn render_constraints_eval_file(
     geometry: &VmGeometry,
     max_cycle_len_log: u32,
 ) -> io::Result<String> {
-    miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
+    miden_ace::render_masm_constraints_eval(&miden_ace::MasmConstraintsEvalConfig {
         generated_by: crate::GENERATED_BY,
         layout_module: "miden::core::sys::vm::layout",
         num_inputs: circuit.num_inputs,

@@ -15,7 +15,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
     render_proof_order_maps,
 };
@@ -273,7 +273,7 @@ mod tests {
         let captured =
             miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
         let compiled = captured.compile().unwrap();
-        let canonical = compiled.build_circuit(miden_ace_codegen::LayoutKind::Masm).unwrap();
+        let canonical = compiled.build_circuit(miden_ace::LayoutKind::Masm).unwrap();
         PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout()).unwrap()
     }
     /// A group every chiplet occupies is indexed correctly by proof-order position, and one with a

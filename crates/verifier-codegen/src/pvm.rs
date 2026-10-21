@@ -6,7 +6,7 @@ use std::{
 };
 
 use askama::Template;
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
     render_masm_constraints_eval,

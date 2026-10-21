@@ -1,4 +1,4 @@
-use miden_ace_codegen::InputKey;
+use miden_ace::InputKey;
 use miden_air::precompiles::{
     ChipletAir, NUM_CHIPLETS,
     ace::build_canonical_precompile_ace_circuit,
