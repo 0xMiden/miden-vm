@@ -25,10 +25,7 @@ use miden_air_source::vm::trace::RowIndex;
 use miden_core::{Felt, Word, field::Field, operations::opcodes, utils::RowMajorMatrix};
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 const ADDR: u64 = 40;
 /// The forged caller depth. Any value != 16 exercises the gap.
@@ -85,11 +82,7 @@ fn build_fixture_with_setup(dyncall_setup: &str, pre_dyncall_depth: u64) -> Fixt
 
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
-        )
+        .execute_and_build_trace_sync(&program, &mut host, &crate::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
 

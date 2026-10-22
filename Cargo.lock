@@ -2644,18 +2644,13 @@ name = "miden-prover"
 version = "1.0.0"
 dependencies = [
  "miden-air",
- "miden-air-source",
  "miden-assembly",
  "miden-core",
- "miden-crypto",
  "miden-debug-types",
  "miden-precompile-stark",
  "miden-processor",
- "miden-stark",
  "miden-verifier",
  "miden-vm-stark",
- "serde",
- "serde-wincode",
  "thiserror",
  "tokio",
  "tracing",
@@ -2892,9 +2887,17 @@ version = "1.0.0"
 dependencies = [
  "miden-air",
  "miden-air-source",
+ "miden-assembly",
  "miden-core",
+ "miden-crypto",
+ "miden-processor",
  "miden-stark",
+ "miden-verifier",
  "p3-security",
+ "serde",
+ "serde-wincode",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -16,7 +16,7 @@ use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 
-use crate::{Prover, config, prove_stark};
+use crate::{prover::prove_stark, setup::config};
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
@@ -50,11 +50,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
-        )
+        .execute_and_build_trace_sync(&program, &mut host, &crate::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);

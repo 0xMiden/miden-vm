@@ -1,7 +1,7 @@
 //! Concrete VM configuration and setup policy.
 
 #[cfg(all(feature = "std", feature = "prover"))]
-pub mod preprocessed;
+pub(crate) mod preprocessed;
 
 pub mod ace;
 
