@@ -21,7 +21,11 @@
 //! footprint.
 
 use miden_core::field::{BasedVectorSpace, QuadFelt};
-use miden_stark::{log_quotient_degree, pcs::PcsParams};
+use miden_stark::{
+    log_quotient_degree,
+    memory::{ProverMemoryModel, ProvingBudget},
+    pcs::PcsParams,
+};
 
 use crate::vm::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 
@@ -54,31 +58,25 @@ pub const SAFETY_DENOMINATOR: u64 = 4;
 ///
 /// `heights` is in [`AIRS`] order. Returns `None` on arithmetic overflow.
 pub fn prover_peak_bytes(heights: &[usize; MIDEN_AIR_COUNT], params: &PcsParams) -> Option<u64> {
+    memory_model(params)?.prover_peak_bytes(heights)
+}
+
+/// Constructs a model from generated production AIR metadata, without symbolic evaluation.
+pub fn memory_model(params: &PcsParams) -> Option<ProverMemoryModel<MIDEN_AIR_COUNT>> {
     let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
     let one_plus_blowup = blowup.checked_add(1)?;
-
-    let mut per_air_total: u64 = 0;
-    let mut max_height: u64 = 0;
-    let mut max_quotient_degree: u64 = 0;
-
-    for (air, &height) in AIRS.iter().zip(heights.iter()) {
-        let height = u64::try_from(height).ok()?;
+    let mut row_costs = [0; MIDEN_AIR_COUNT];
+    let mut max_quotient_degree = 0;
+    for (air, cost) in AIRS.iter().zip(&mut row_costs) {
         let width = u64::try_from(air.width()).ok()?;
         let aux_width =
             u64::try_from(<MidenAir as LiftedAir<Felt, QuadFelt>>::aux_width(air)).ok()?;
-        let log_d = log_quotient_degree::<Felt, QuadFelt, _>(air);
-        let quotient_degree = 1u64.checked_shl(u32::from(log_d))?;
-
-        let aux_base_columns = aux_width.checked_mul(EXT_DIMENSION)?;
-        let columns = width.checked_add(aux_base_columns)?;
-        let bytes_per_row = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
-        let per_air = height.checked_mul(bytes_per_row)?;
-
-        per_air_total = per_air_total.checked_add(per_air)?;
-        max_height = max_height.max(height);
+        let quotient_degree =
+            1u64.checked_shl(u32::from(log_quotient_degree::<Felt, QuadFelt, _>(air)))?;
+        let columns = width.checked_add(aux_width.checked_mul(EXT_DIMENSION)?)?;
+        *cost = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
         max_quotient_degree = max_quotient_degree.max(quotient_degree);
     }
-
     let quotient_bytes = EXT_DIMENSION
         .checked_mul(FELT_BYTES)?
         .checked_mul(max_quotient_degree)?
@@ -87,54 +85,33 @@ pub fn prover_peak_bytes(heights: &[usize; MIDEN_AIR_COUNT], params: &PcsParams)
         .checked_mul(2)?
         .checked_mul(blowup)?
         .checked_mul(DIGEST_BYTES)?;
-    let shared_total = max_height.checked_mul(quotient_bytes.checked_add(tree_bytes)?)?;
-
-    let modelled = per_air_total.checked_add(shared_total)?;
-    modelled
-        .checked_mul(SAFETY_NUMERATOR)
-        .map(|scaled| scaled.div_ceil(SAFETY_DENOMINATOR))
+    Some(ProverMemoryModel::new(
+        row_costs,
+        quotient_bytes.checked_add(tree_bytes)?,
+        SAFETY_NUMERATOR,
+        SAFETY_DENOMINATOR,
+    ))
 }
 
-/// The largest single-AIR height that can fit in `budget_bytes`, derived from the cheapest AIR
-/// (every other height held at zero). Permissive: never rejects a shape [`prover_peak_bytes`]
-/// would accept.
+/// Permissive single-AIR height cap for this model and byte limit.
 pub fn max_any_height_for_budget(budget_bytes: u64, params: &PcsParams) -> usize {
-    let mut best = 0usize;
-    for i in 0..MIDEN_AIR_COUNT {
-        let height = max_height_for_budget(budget_bytes, params, |n| {
-            let mut heights = [0usize; MIDEN_AIR_COUNT];
-            heights[i] = n;
-            heights
-        });
-        best = best.max(height);
-    }
-    best
+    memory_model(params).map_or(0, |model| model.max_any_height_for_budget(budget_bytes))
 }
 
-/// The largest `n` for which `heights_for(n)` fits `budget_bytes`, found by binary search
-/// ([`prover_peak_bytes`] is non-decreasing in every height).
-fn max_height_for_budget(
-    budget_bytes: u64,
-    params: &PcsParams,
-    heights_for: impl Fn(usize) -> [usize; MIDEN_AIR_COUNT],
-) -> usize {
-    let fits =
-        |n: usize| prover_peak_bytes(&heights_for(n), params).is_some_and(|b| b <= budget_bytes);
+/// Default maximum modelled peak memory, preserving the existing 64 GiB policy.
+pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
-    let mut lo = 0usize;
-    let mut hi = usize::MAX;
-    if fits(hi) {
-        return hi;
-    }
-    while hi - lo > 1 {
-        let mid = lo + (hi - lo) / 2;
-        if fits(mid) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    lo
+/// Supplies the canonical VM model with the caller's byte limit.
+pub fn canonical_budget(limit_bytes: u64) -> ProvingBudget<MIDEN_AIR_COUNT> {
+    ProvingBudget::new(
+        memory_model(&crate::vm::config::pcs_params()).expect("canonical VM memory model fits"),
+        limit_bytes,
+    )
+}
+
+/// Supplies the canonical VM model with its default byte limit.
+pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
+    canonical_budget(DEFAULT_MAX_PROVER_MEMORY_BYTES)
 }
 
 #[cfg(test)]
