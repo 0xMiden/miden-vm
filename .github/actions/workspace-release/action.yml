@@ -52,7 +52,7 @@ runs:
         ./scripts/check-msrv.sh
 
     - name: Check MASM release compatibility
-      if: ${{ inputs.mode == 'dry-run' && (github.ref == 'refs/heads/main' || github.base_ref == 'main') }}
+      if: ${{ inputs.mode == 'dry-run' && (github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event.merge_group.base_ref == 'refs/heads/main') }}
       shell: bash
       run: |
         chmod +x scripts/check-masm-root-stability.sh

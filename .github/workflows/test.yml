@@ -5,6 +5,9 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -38,10 +41,14 @@ jobs:
           if [ "${EVENT_NAME}" != "pull_request" ]; then
             run=true
           else
+            : "${BASE_SHA:?Missing PR base SHA}" "${HEAD_SHA:?Missing PR head SHA}"
+            changed_paths="$(mktemp)"
+            trap 'rm -f "${changed_paths}"' EXIT
+            git diff --no-renames --name-only -z "${BASE_SHA}...${HEAD_SHA}" -- > "${changed_paths}"
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
-                .github/workflows/test.yml|Cargo.lock|Cargo.toml|rust-toolchain.toml|\
+                .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
                 crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
                 crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
                 crates/stateful-hasher/*)
@@ -49,7 +56,7 @@ jobs:
                   break
                   ;;
               esac
-            done < <(git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
+            done < "${changed_paths}"
           fi
 
           echo "run=${run}" >> "${GITHUB_OUTPUT}"
@@ -60,14 +67,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check benchmark runner preflight
+        run: |
+          if [ -f scripts/bench_eidos_vs_poseidon2.sh ]; then
+            bash -n scripts/bench_eidos_vs_poseidon2.sh
+            python3 -m unittest discover -s scripts/tests -v
+          fi
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -114,7 +128,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -152,7 +166,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -254,10 +268,10 @@ jobs:
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
 
-  check-pvm-registry:
-    name: check PVM registry and MASM artifacts
+  pvm-checks:
+    name: PVM checks
     runs-on: warp-ubuntu-latest-x64-8x
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,8 +283,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
-        run: make check-pvm-registry
+      - name: Check PVM and precompile artifacts for drift
+        run: make check-pvm-artifacts
 
   run-examples:
     name: run masm examples
@@ -306,7 +320,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-hack
       - name: Check all feature combinations
