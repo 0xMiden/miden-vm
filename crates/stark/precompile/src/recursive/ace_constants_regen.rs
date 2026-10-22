@@ -19,7 +19,7 @@ use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, render_masm_constraints_eval,
 };
-use miden_air::precompiles::{NUM_CHIPLETS, security as pvm_security};
+use miden_air::precompiles::NUM_CHIPLETS;
 use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation, HeightRule};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
@@ -36,6 +36,7 @@ use super::{
         render_pvm_ood_frames,
     },
 };
+use crate::setup::security as pvm_security;
 
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../../lib/core/asm/sys/pvm/constraints_eval.masm";
 const PVM_PARAMETERS_PATH: &str = "../../lib/core/asm/sys/pvm/parameters.masm";
@@ -243,7 +244,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
+        crate::setup::config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -559,7 +560,7 @@ fn render_pvm_parameters(
             writeln!(output, "pub const {prefix}_{index} = {}", felt.as_canonical_u64()).unwrap();
         }
     }
-    output.push_str("\n# Security descriptor from miden_air::precompiles::security.\n");
+    output.push_str("\n# Security descriptor from miden_precompile_stark::setup::security.\n");
     for (name, value) in [
         ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
         (
@@ -601,8 +602,7 @@ fn render_pvm_parameters(
         return Err("BytePairLut setup height must be a power of two".into());
     }
     let log_height = setup_height.ilog2();
-    let depth = log_height
-        + u32::from(miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup());
+    let depth = log_height + u32::from(crate::setup::config::precompile_pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(depth)
         .and_then(|size| u32::try_from(size - 1).ok())

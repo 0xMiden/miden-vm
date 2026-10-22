@@ -94,8 +94,12 @@ mod tests {
     use miden_crypto::field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::recursive::ace_constants::{
-        PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST, relation_digest_for_circuit,
+    use crate::{
+        recursive::ace_constants::{
+            PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST,
+            relation_digest_for_circuit,
+        },
+        setup::config::precompile_pcs_params,
     };
 
     const PVM_WRAPPER_PATH: &str =
@@ -521,9 +525,7 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-        use miden_air::precompiles::{
-            primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
-        };
+        use miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/parameters.masm");
@@ -623,7 +625,7 @@ mod tests {
     /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
-        use miden_air::precompiles::security as pvm_security;
+        use crate::setup::security as pvm_security;
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -637,17 +639,13 @@ mod tests {
             (
                 "DEEP_FIELD_BASE_BITS",
                 (sample_bits >> fractional_bits)
-                    - u64::from(
-                        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
-                    ),
+                    - u64::from(crate::setup::config::precompile_pcs_params().log_blowup()),
             ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
             (
                 "MAX_CONSTRAINT_DEGREE",
-                (1u64
-                    << miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup())
-                    + 1,
+                (1u64 << crate::setup::config::precompile_pcs_params().log_blowup()) + 1,
             ),
         ] {
             assert_eq!(
@@ -765,7 +763,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
+            crate::setup::config::precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 

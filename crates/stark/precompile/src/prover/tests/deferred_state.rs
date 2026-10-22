@@ -1,7 +1,8 @@
+use crate::setup::config::precompile_pcs_params;
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params};
+use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -545,7 +546,7 @@ fn prove_precompiles_with_budget_corner_cases() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`miden_air::precompiles::preprocessed`, keyed by LMCS type). Proving and
+/// (`crate::setup::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises bundle reuse and agreement
 /// with the verifier's pinned commitment for every slot, guarding against
 /// a mismatched or stale bundle being reused across hash functions.
