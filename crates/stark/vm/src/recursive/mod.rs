@@ -24,26 +24,25 @@
 use alloc::{
     string::{String, ToString},
     vec,
-    vec::Vec,
 };
 
 use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs};
 use miden_core::{
     Felt, Word,
-    advice::{AdviceInputs, AdviceStack},
-    crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
+    advice::AdviceInputs,
     field::QuadFelt,
-    program::{ExecutionClaim, proof_request_key},
+    program::ExecutionClaim,
     proof::{ExecutionProof, HashFunction},
 };
-use miden_crypto::field::BasedVectorSpace;
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance,
     air::Statement,
-    lmcs::{Lmcs, proof::BatchProofView},
-    pcs::{PcsParams, PcsProof},
     proof::{StarkProof, StarkProofData},
+    recursive::advice::{
+        AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
+        security_parameter_words,
+    },
     verifier::VerifierError as CryptoVerifierError,
 };
 use serde_wincode::{SerdeCompat, wincode};
@@ -106,10 +105,7 @@ impl RecursiveVerifierInputs {
     /// Moves the proof stream into the advice map under
     /// `proof_request_key(verifier_root, claim_commitment)`, leaving the advice stack empty.
     fn into_request_package(mut self, verifier_root: Word) -> Self {
-        let key = proof_request_key(verifier_root, self.claim_commitment);
-        let (proof_stream, mut map, store) = self.advice.into_parts();
-        map.insert(key, proof_stream.into_elements());
-        self.advice = AdviceInputs::new(AdviceStack::default(), map, store);
+        self.advice = package_for_request(verifier_root, self.claim_commitment, self.advice);
         self
     }
 }
@@ -166,8 +162,11 @@ pub enum RecursiveVerifierInputsError {
     Transcript(#[from] CryptoVerifierError),
 }
 
-/// Merkle store + advice map pair returned by Merkle data construction.
-type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
+impl From<AdviceError> for RecursiveVerifierInputsError {
+    fn from(error: AdviceError) -> Self {
+        Self::InvalidProofShape(error.message())
+    }
+}
 
 /// The per-AIR log trace heights in the fixed instance order streamed to the verifier.
 struct MidenTraceHeights {
@@ -246,7 +245,6 @@ fn build_advice(
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let pcs = &stark.pcs_proof;
     if stark.all_aux_values.len() != MIDEN_AIR_COUNT {
         return Err(RecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of aux-final groups",
@@ -276,33 +274,7 @@ fn build_advice(
         advice_stack.push(Felt::new_unchecked(height as u64));
     }
 
-    advice_stack.extend_from_slice(&commitment_felts(stark.main_commit));
-    advice_stack.extend_from_slice(&commitment_felts(stark.aux_commit));
-
-    for aux_values in &stark.all_aux_values {
-        advice_stack.extend_from_slice(&challenge_felts(aux_values));
-    }
-
-    advice_stack.extend_from_slice(&commitment_felts(stark.quotient_commit));
-
-    // The verifier consumes the DEEP alpha's two extension coordinates high-first.
-    let deep_alpha = pcs.deep_proof.challenge_columns;
-    let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
-    advice_stack.extend_from_slice(&[deep_coeffs[1], deep_coeffs[0]]);
-
-    append_ood_evaluations(&mut advice_stack, pcs)?;
-
-    advice_stack.push(pcs.deep_proof.pow_witness);
-
-    for round in &pcs.fri_proof.rounds {
-        advice_stack.extend_from_slice(&commitment_felts(round.commitment));
-        advice_stack.push(round.pow_witness);
-    }
-
-    let final_poly = &pcs.fri_proof.final_poly;
-    advice_stack.extend_from_slice(&QuadFelt::flatten_to_base(final_poly.to_vec()));
-
-    advice_stack.push(pcs.query_pow_witness);
+    append_proof_payload(&mut advice_stack, stark)?;
 
     let (store, advice_map) = build_merkle_data(stark)?;
 
@@ -312,56 +284,6 @@ fn build_advice(
         .with_merkle_store(store);
 
     Ok(RecursiveVerifierInputs { advice, claim_commitment })
-}
-
-/// Returns the proof-package header in the order consumed by the recursive MASM verifier.
-fn security_parameter_words(params: &PcsParams) -> [Felt; 4] {
-    [
-        Felt::new_unchecked(params.num_queries() as u64),
-        Felt::new_unchecked(params.query_pow_bits() as u64),
-        Felt::new_unchecked(params.deep_pow_bits() as u64),
-        Felt::new_unchecked(params.folding_pow_bits() as u64),
-    ]
-}
-
-// OOD EVALUATIONS
-// ================================================================================================
-
-/// Flatten OOD evaluations into the advice stack.
-///
-/// The DEEP transcript contains evaluations at two points (z and z*g) for each committed matrix
-/// (main, aux, quotient), split into local (at z) and next (at z*g) rows, appended local-first.
-fn append_ood_evaluations<L>(
-    advice_stack: &mut Vec<Felt>,
-    pcs: &PcsProof<Challenge, L>,
-) -> Result<(), RecursiveVerifierInputsError>
-where
-    L: Lmcs<F = Felt>,
-{
-    let evals = &pcs.deep_proof.evals;
-    let mut local_values = Vec::new();
-    let mut next_values = Vec::new();
-
-    for group in evals {
-        for matrix in group {
-            let width = matrix.width;
-            let values = matrix.values.as_slice();
-            // A matrix carries its local row and, for two-point openings, its next row.
-            if values.len() != width && values.len() != 2 * width {
-                return Err(RecursiveVerifierInputsError::InvalidProofShape(
-                    "OOD matrix must hold exactly one or two rows",
-                ));
-            }
-            local_values.extend_from_slice(&values[..width]);
-            if values.len() == 2 * width {
-                next_values.extend_from_slice(&values[width..]);
-            }
-        }
-    }
-
-    advice_stack.extend_from_slice(&challenge_felts(&local_values));
-    advice_stack.extend_from_slice(&challenge_felts(&next_values));
-    Ok(())
 }
 
 // MERKLE DATA
@@ -375,18 +297,7 @@ where
 fn build_merkle_data(
     stark: &StarkProof<Challenge, RecursiveLmcs>,
 ) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
-    let pcs = &stark.pcs_proof;
-
-    let mut store = MerkleStore::new();
-    let mut advice_map = Vec::new();
-
-    // DEEP openings (one BatchProof per commitment: main, aux, quotient), then FRI openings
-    // (one per FRI round).
-    for batch_proof in pcs.deep_witnesses.iter().chain(pcs.fri_witnesses.iter()) {
-        let (tree, entries) = batch_proof_to_merkle::<RecursiveLmcs>(batch_proof)?;
-        store.extend(tree.inner_nodes());
-        advice_map.extend(entries);
-    }
+    let (store, mut advice_map) = build_merkle_advice(stark)?;
 
     // One canonical circuit serves every proof order; the verifier authenticates it against the
     // pinned circuit digest.
@@ -404,83 +315,16 @@ fn build_merkle_data(
     Ok((store, advice_map))
 }
 
-/// Converts a `BatchProof` into a `PartialMerkleTree` (for the store) and its
-/// `leaf_hash -> leaf_data` advice-map entries.
-fn batch_proof_to_merkle<L>(
-    batch_proof: &L::BatchProof,
-) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveVerifierInputsError>
-where
-    L: Lmcs<F = Felt>,
-    L::Commitment: Copy + PartialEq + Into<[u64; 4]>,
-    L::BatchProof: BatchProofView<Felt, L::Commitment>,
-{
-    let mut paths = Vec::new();
-    let mut advice_entries = Vec::new();
-
-    for index in batch_proof.indices() {
-        let rows =
-            batch_proof
-                .opening(index)
-                .ok_or(RecursiveVerifierInputsError::InvalidProofShape(
-                    "missing opening for query index",
-                ))?;
-        let siblings = batch_proof.path(index).ok_or(
-            RecursiveVerifierInputsError::InvalidProofShape("missing Merkle path for query index"),
-        )?;
-        validate_non_hiding_lmcs_salt(batch_proof.salt(index))?;
-
-        let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
-        let leaf_hash = *batch_proof.leaf_hash(index).ok_or(
-            RecursiveVerifierInputsError::InvalidProofShape("missing leaf hash for query index"),
-        )?;
-        let leaf_word = Word::new(commitment_felts(leaf_hash));
-        let merkle_path =
-            MerklePath::new(siblings.into_iter().map(|c| Word::new(commitment_felts(c))).collect());
-
-        paths.push((index as u64, leaf_word, merkle_path));
-        advice_entries.push((leaf_word, leaf_data));
-    }
-
-    let tree = PartialMerkleTree::with_paths(paths)
-        .map_err(|_| RecursiveVerifierInputsError::InvalidProofShape("invalid merkle paths"))?;
-
-    Ok((tree, advice_entries))
-}
-
-fn validate_non_hiding_lmcs_salt(
-    salt: Option<&[Felt]>,
-) -> Result<(), RecursiveVerifierInputsError> {
-    let salt = salt.ok_or(RecursiveVerifierInputsError::InvalidProofShape(
-        "missing LMCS salt for query index",
-    ))?;
-    if !salt.is_empty() {
-        return Err(RecursiveVerifierInputsError::InvalidProofShape(
-            "hiding LMCS openings are unsupported by the MASM adapter",
-        ));
-    }
-    Ok(())
-}
-
-fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
-    // Eidos LMCS commitments are canonical, but this generic adapter accepts raw u64 limbs.
-    // Reduce them explicitly because advice words require canonical field representations.
-    commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
-}
-
-fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
-    QuadFelt::flatten_to_base(challenges.to_vec())
-}
-
 // TESTS
 // ================================================================================================
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{vec, vec::Vec};
 
     use miden_core::{
-        crypto::merkle::InnerNodeInfo,
-        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+        crypto::merkle::{InnerNodeInfo, MerkleStore},
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs, proof_request_key},
         proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
     use miden_stark::Preprocessed;
@@ -512,24 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn commitment_limbs_are_canonicalized_before_entering_advice() {
-        let felts = commitment_felts([Felt::ORDER + 7, u64::MAX, 0, Felt::ORDER - 1]);
-        assert_eq!(
-            felts.map(|felt| felt.as_canonical_u64()),
-            [7, u32::MAX as u64 - 1, 0, Felt::ORDER - 1]
-        );
-    }
-
-    /// The proof-package header must describe the supplied PCS parameters rather than the Miden
-    /// VM's current defaults; otherwise its transcript and MASM security checks can disagree.
-    #[test]
-    fn security_parameter_header_uses_the_supplied_pcs_params() {
-        let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
-
-        assert_eq!(security_parameter_words(&params), [19, 13, 11, 5].map(Felt::new_unchecked),);
-    }
-
-    #[test]
     fn eidos_preprocessed_commitment_matches_recursive_verifier_constant() {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
@@ -558,27 +384,6 @@ mod tests {
                 size,
                 max: MAX_STARK_PROOF_BYTES,
             } if size == proof_bytes.len()
-        ));
-    }
-
-    #[test]
-    fn recursive_masm_adapter_rejects_hiding_lmcs_salt() {
-        assert!(validate_non_hiding_lmcs_salt(Some(&[])).is_ok());
-
-        let err = validate_non_hiding_lmcs_salt(Some(&[Felt::ONE]))
-            .expect_err("hiding LMCS salt must be rejected");
-        assert!(matches!(
-            err,
-            RecursiveVerifierInputsError::InvalidProofShape(
-                "hiding LMCS openings are unsupported by the MASM adapter"
-            )
-        ));
-
-        let err = validate_non_hiding_lmcs_salt(None)
-            .expect_err("a missing LMCS salt view must be rejected");
-        assert!(matches!(
-            err,
-            RecursiveVerifierInputsError::InvalidProofShape("missing LMCS salt for query index")
         ));
     }
 
