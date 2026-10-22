@@ -30,7 +30,7 @@
 //!
 //! This produces traces only. Assembling the AIRs and provers and calling
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
-//! generic lifted-stark usage, not chiplet wiring.
+//! generic STARK usage, not chiplet wiring.
 
 use alloc::{vec, vec::Vec};
 
@@ -92,8 +92,8 @@ pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 #[cfg(test)]
-pub use miden_air::precompiles::ChipletAir;
-pub(crate) use miden_air::precompiles::NUM_CHIPLETS;
+pub use miden_air::precompile::ChipletAir;
+pub(crate) use miden_air::precompile::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///

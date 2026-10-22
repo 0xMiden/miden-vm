@@ -1,4 +1,4 @@
-use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
+use miden_ace::{AceCircuit, AceConfig, InputKey, LayoutKind};
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStack,
@@ -94,7 +94,7 @@ fn multi_air_eval_circuit_masm() {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
     };
-    let circuit = miden_air::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
+    let circuit = miden_air::vm::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);
@@ -147,7 +147,7 @@ fn multi_air_eval_circuit_masm() {
     test.check_constraints()
 }
 
-fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
+fn fill_inputs(layout: &miden_ace::InputLayout) -> Vec<QuadFelt> {
     let mut values = Vec::with_capacity(layout.total_inputs);
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     for _ in 0..layout.total_inputs {
@@ -162,7 +162,7 @@ fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
 
 fn adjust_quotient_to_zero(
     circuit: &AceCircuit<QuadFelt>,
-    layout: &miden_ace_codegen::InputLayout,
+    layout: &miden_ace::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
     let root = circuit.eval(inputs).expect("circuit eval");
@@ -179,14 +179,14 @@ fn adjust_quotient_to_zero(
 
 fn find_nonzero_quotient_slope(
     circuit: &AceCircuit<QuadFelt>,
-    layout: &miden_ace_codegen::InputLayout,
+    layout: &miden_ace::InputLayout,
     inputs: &mut [QuadFelt],
     root: QuadFelt,
 ) -> Option<(usize, QuadFelt)> {
     // Search for a quotient coordinate that has a non-zero influence on the output.
     // We do this by bumping a coordinate by +1 and re-evaluating to get the slope.
     for chunk in 0..layout.counts.num_quotient_chunks {
-        for coord in 0..miden_ace_codegen::EXT_DEGREE {
+        for coord in 0..miden_ace::EXT_DEGREE {
             let idx = layout
                 .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
                 .expect("quotient coord exists");

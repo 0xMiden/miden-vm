@@ -15,7 +15,7 @@ use miden::core::sys::pvm::layout
 const PREPROCESSED_TREE_DEPTH = 19
 const PREPROCESSED_INDEX_MASK = 524287
 
-# One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
+# One opened query row, in the same commitment-group order as miden-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
 const PREPROCESSED_ROW_DOUBLE_WORDS = 1
 const MAIN_ROW_DOUBLE_WORDS = 73

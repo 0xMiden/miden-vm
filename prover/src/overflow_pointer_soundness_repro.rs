@@ -1,7 +1,8 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_air::{CoreCols, PublicInputs, trace::RowIndex};
+use miden_air::vm::PublicInputs;
+use miden_air_source::vm::{CoreCols, trace::RowIndex};
 use miden_core::{
     Felt,
     deferred::TRUE_DIGEST,
@@ -11,8 +12,8 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 
 use crate::{Prover, config, prove_stark};

@@ -8,7 +8,6 @@
 
 use alloc::vec::Vec;
 
-use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_symmetric::PseudoCompressionFunction;
 
 use super::{
@@ -18,7 +17,10 @@ use super::{
     encoding,
     framing::{self, MERKLE_NODE_INIT_CV},
 };
-use crate::Felt;
+use crate::{
+    Felt,
+    hash::stateful::{Alignable, StatefulHasher},
+};
 
 const DIGEST_WIDTH: usize = super::DIGEST_WIDTH;
 const BLOCK_LEN: usize = super::BLOCK_LEN;

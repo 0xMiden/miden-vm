@@ -1,0 +1,51 @@
+[package]
+name = "miden-air-source"
+version = "1.0.0"
+description = "Handwritten VM and precompile AIR definitions and shared equations"
+documentation = "https://docs.rs/miden-air-source"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["air", "arithmetization", "crypto", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+compiler = ["miden-ace/compiler"]
+arbitrary = ["std", "dep:proptest"]
+std = ["miden-stark/std", "miden-core/std", "proptest?/std", "thiserror/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std"]
+concurrent = ["miden-stark/concurrent", "std", "miden-crypto/concurrent"]
+testing = ["arbitrary"]
+
+[dependencies]
+# Miden dependencies
+miden-ace.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-utils-indexing.workspace = true
+miden-precompiles.workspace = true
+miden-utils-sync.workspace = true
+miden-stark.workspace = true
+ruint.workspace = true
+
+# External dependencies
+p3-field.workspace = true
+p3-challenger.workspace = true
+p3-security.workspace = true
+proptest = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+p3-matrix.workspace = true
+insta.workspace = true
+miden-ace = { workspace = true, features = ["testing"] }
+miden-test-serialization-macros.workspace = true
+proptest.workspace = true

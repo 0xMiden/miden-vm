@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::hash::sha256::compression::{
+use miden_air_source::precompile::hash::sha256::compression::{
     self,
     program::{self, Op},
 };

@@ -6,16 +6,16 @@ use std::{
 };
 
 use askama::Template;
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
     render_masm_constraints_eval,
 };
-use miden_air::precompiles::security as pvm_security;
-use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation};
+use miden_air::precompile::security as pvm_security;
+use miden_air_source::precompile::relation::{self, CapturedPvmRelation};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 pub(crate) use crate::GENERATED_BY;
 use crate::{
@@ -176,7 +176,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     let source = compiled.build_circuit(LayoutKind::Masm).map_err(|e| e.to_string())?;
     let num_airs = compiled.geometry().airs.len();
     let protocol = relation::protocol();
-    let air_shape = miden_air_definitions::precompiles::geometry::air_shape(&compiled);
+    let air_shape = miden_air_source::precompile::geometry::air_shape(&compiled);
     let lookup_shape = air_shape.lookup.ok_or("PVM relation requires lookup security data")?;
     let input_layout = source.layout();
     let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
@@ -190,7 +190,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -200,7 +200,10 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         stream_len: circuit.stream_len,
     };
     let circuit_digest = circuit.commitment;
-    let relation_digest = miden_air::config::relation_digest(protocol.protocol_id, &circuit_digest);
+    let relation_digest = miden_air::vm::config::relation_digest(
+        miden_air::precompile::policy::PROTOCOL_ID,
+        &circuit_digest,
+    );
     let preprocessed_commitment = preprocessed_commitment();
 
     let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout)?;
@@ -224,7 +227,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     let mut heights = String::new();
     let mut loads = String::new();
     for (i, height) in protocol.heights.iter().enumerate() {
-        use miden_air_definitions::precompiles::relation::HeightRule;
+        use miden_air_source::precompile::relation::HeightRule;
         let (prefix, loader, log_height) = match height {
             HeightRule::Fixed(log_height) => ("FIXED", "load_fixed_air_height", log_height),
             HeightRule::Minimum(log_height) => ("MIN", "load_air_height", log_height),
@@ -277,7 +280,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
 /// The setup commitment pinned in `miden-air`, whose tests rebuild it from the AIRs.
 fn preprocessed_commitment() -> Word {
     Word::new(
-        miden_air::precompiles::protocol::pins()
+        miden_air::precompile::protocol::pins()
             .preprocessed_commitment
             .map(Felt::new_unchecked),
     )
@@ -576,8 +579,8 @@ fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> 
             .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
         cvs[i] = masm_word_literal(Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
     }
-    let depth = miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
-        + u32::from(miden_air::precompiles::policy::LOG_BLOWUP);
+    let depth = miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
+        + u32::from(miden_air::precompile::policy::LOG_BLOWUP);
     let mask = 1u32
         .checked_shl(depth)
         .and_then(|n| n.checked_sub(1))

@@ -6,17 +6,18 @@
 
 use std::{collections::HashMap, vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupFractions, build_lookup_fractions,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::air::ConstraintDegrees;
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupFractions, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use proptest::prelude::*;
 
 use crate::{
@@ -69,7 +70,7 @@ fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
 
 #[test]
 fn packed_passthrough_keeps_round_assertions_within_budget() {
-    let counts = miden_lifted_air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
+    let counts = miden_stark::air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
     assert_eq!(counts.base, 15);
 }
 
@@ -323,7 +324,7 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::KeccakRound)
+        .position(|air| air == ChipletAir::KECCAK_ROUND)
         .expect("KeccakRound is present in the chiplet stack");
 
     let honest = session_stack_residual(&mains, &[], &challenges);
@@ -498,7 +499,7 @@ fn compact_rotation_arithmetic_preserving_limb_alias_fails_global_range_checks()
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|a| a == ChipletAir::KeccakRound)
+        .position(|a| a == ChipletAir::KECCAK_ROUND)
         .unwrap();
     let main = mains[round_idx];
     let program = slots();

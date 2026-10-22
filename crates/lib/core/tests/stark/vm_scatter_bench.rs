@@ -1,13 +1,14 @@
 //! Checks the generated OOD ingest hook's canonical memory layout, transcript state,
 //! DEEP accumulator, pointer updates, and two-row ingest cycle budget.
 
-use miden_air::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT};
+use miden_air::vm::{AIRS, MIDEN_AIR_COUNT};
 use miden_core::{
-    Word,
+    Felt, Word,
     advice::AdviceStack,
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
+use miden_stark::air::{BaseAir, LiftedAir};
 
 use super::{
     vm_layout_const,
@@ -80,7 +81,7 @@ impl RowGeometry {
         }
         let max_log_quotient_degree = AIRS
             .iter()
-            .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+            .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
             .max()
             .expect("the Miden AIR set is non-empty");
         let quotient = (1usize << max_log_quotient_degree) * EXT_DEGREE;

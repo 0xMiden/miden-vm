@@ -50,15 +50,16 @@ p256 = { workspace = true, features = ["ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-air-source.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true
-miden-ace-codegen = { workspace = true, features = ["compiler"] }
+miden-ace = { workspace = true, features = ["compiler"] }
 miden-air = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-debug-types.workspace = true
-miden-lifted-stark = { workspace = true, features = ["testing"] }
+miden-stark = { workspace = true, features = ["testing"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-precompiles-prover = { workspace = true, features = ["concurrent"] }

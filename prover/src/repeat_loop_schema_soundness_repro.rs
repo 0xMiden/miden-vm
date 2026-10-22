@@ -4,10 +4,10 @@ use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 
-use miden_air::{
-    ChipletCols, MidenAir,
+use miden_air::vm::MidenAir;
+use miden_air_source::vm::{
+    ChipletCols,
     logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupMessage, build_lookup_fractions},
     trace::{
         MIN_TRACE_LEN, RowIndex,
         chiplets::hasher::{HASH_ABSORB, LINEAR_HASH, PADDING},
@@ -22,10 +22,13 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_stark::air::BaseAir;
 use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
+};
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
 
 use crate::{
@@ -58,7 +61,7 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     trace
 }
 
-fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<Felt> {
+fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air_source::vm::CoreCols<Felt> {
     let width = matrix.width();
     matrix.values[row * width..(row + 1) * width].borrow()
 }

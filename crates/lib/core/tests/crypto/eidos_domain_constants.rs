@@ -295,9 +295,9 @@ fn masm_initial_chaining_words_match_rust() {
     assert_word(CLAIM, "CLAIM_INIT_CV", Eidos::init_chaining_word(EXECUTION_CLAIM, 40));
 
     assert_word(FRI, "FRI_ROW_HASH_INIT_CV", Eidos::init_chaining_word(LMCS_LEAF, 8));
-    use miden_air::{AIRS, MidenAir};
+    use miden_air::vm::{AIRS, MidenAir};
     use miden_core::field::QuadFelt;
-    use miden_lifted_stark::air::{BaseAir, LiftedAir};
+    use miden_stark::air::{BaseAir, LiftedAir};
     let row_width = |width: fn(&MidenAir) -> usize| -> usize {
         AIRS.iter().map(|air| width(air).next_multiple_of(EIDOS_BLOCK_WIDTH)).sum()
     };
@@ -310,7 +310,7 @@ fn masm_initial_chaining_words_match_rust() {
         ),
         (
             "QUOTIENT_LMCS_INIT_CV",
-            miden_air::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
+            miden_air::vm::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
         ),
     ] {
         assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len as u32));

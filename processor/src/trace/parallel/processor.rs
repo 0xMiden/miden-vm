@@ -1,9 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use miden_air::{Felt, trace::RowIndex};
+use miden_air_source::vm::trace::RowIndex;
 use miden_core::{
-    WORD_SIZE, Word, ZERO,
+    Felt, WORD_SIZE, Word, ZERO,
     deferred::Digest,
     field::PrimeField64,
     mast::SparseMastForest,

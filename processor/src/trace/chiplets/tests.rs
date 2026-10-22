@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{
+use miden_air_source::vm::trace::{
     CHIPLETS_CLK_COL, CHIPLETS_MODE_COL, CHIPLETS_WIDTH, TRACE_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
@@ -248,7 +248,8 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
         // Non-selector hasher columns should be zero on padding rows, except the shared
         // controller discriminator. Controller constraints bind this cell to
         // The trailing column (chip_clk, CHIPLETS_WIDTH - 1) is the chiplet-trace row counter
-        // and is non-zero on every row by design; see `air/src/constraints/chiplets/chip_clk.rs`.
+        // and is non-zero on every row by design; see
+        // `crates/air/source/src/constraints/chiplets/mod.rs`.
         for col in 4..CHIPLETS_WIDTH - 1 {
             if col == CHIPLETS_MODE_COL {
                 assert_eq!(trace[col][row], ONE, "padding row {row}: mode cell should be 1");

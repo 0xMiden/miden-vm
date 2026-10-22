@@ -136,7 +136,7 @@ fn run_sweep_grid(adapter: &str, push_args: &str, outer_bound: u64, inner_bound:
 /// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
 fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
-    use miden_air::security;
+    use miden_air::vm::security;
 
     let push_args = (0..6)
         .rev()
@@ -248,7 +248,7 @@ fn vm_security_descriptor(
     log_max_height: u32,
     num_kernel_procedures: u32,
 ) -> [u64; 12] {
-    use miden_air::security;
+    use miden_air::vm::security;
 
     SecurityDescriptor {
         num_queries: u64::from(num_queries),
@@ -274,7 +274,7 @@ fn vm_security_descriptor(
 /// The MVM constructor supplies the shared PCS, field, and commitment settings. Every value carried
 /// by the descriptor is then replaced with the synthetic test value.
 fn native_level(descriptor: &SecurityDescriptor) -> u64 {
-    use miden_air::{config, security};
+    use miden_air::vm::{config, security};
 
     let mut params = security::proof_security_parameters(
         &config::pcs_params(),
@@ -611,7 +611,7 @@ fn estimator_envelope_violations_trap() {
 
 #[test]
 fn common_security_estimator_preserves_the_caller_stack() {
-    use miden_air::security;
+    use miden_air::vm::security;
     use miden_core::Felt;
 
     let descriptor = vm_security_descriptor(27, 17, 12, 4, 22, 255);
@@ -641,7 +641,7 @@ fn common_security_estimator_preserves_the_caller_stack() {
 /// Q16 lookup-boundary correction, mirroring `lookup_boundary_correction` in the estimator.
 /// Used to place synthetic descriptors provably inside the envelope before executing them.
 fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
-    use miden_air::security as vm;
+    use miden_air::vm::security as vm;
     if boundary == 0 {
         return 0;
     }
@@ -656,8 +656,8 @@ fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
 #[test]
 fn recursive_verifier_ranges_fit_security_estimator_envelope() {
     use miden_air::{
-        precompiles::{primitives::byte_pair_lut::TRACE_HEIGHT, security as pvm},
-        security as vm,
+        precompile::{primitives::byte_pair_lut::TRACE_HEIGHT, security as pvm},
+        vm::security as vm,
     };
 
     assert_eq!(PVM_LOG_HEIGHT_MIN, TRACE_HEIGHT.ilog2() as u64);
@@ -749,7 +749,7 @@ fn security_level_threshold_rejects_below_target() {
 #[test]
 fn pvm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Outer};
-    use miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
+    use miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
 
     const LOG_HEIGHT_SPAN: u64 = LOG_HEIGHT_MAX - PVM_LOG_HEIGHT_MIN + 1;
 
@@ -799,7 +799,7 @@ fn security_estimator_root_matches_procref() {
 /// Runs the PVM estimator over an `outer_bound × inner_bound` grid in one VM execution and checks
 /// every cell against the native PVM implementation.
 fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
-    use miden_air::precompiles::{security, stark_config::precompile_pcs_params};
+    use miden_air::precompile::{security, stark_config::precompile_pcs_params};
 
     let push_args = (0..5)
         .rev()

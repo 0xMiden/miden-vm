@@ -14,7 +14,9 @@
 
 use alloc::vec::Vec;
 
-use miden_air::trace::chiplets::hasher::{DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH};
+use miden_air_source::vm::trace::chiplets::hasher::{
+    DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH,
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use miden_air::config::RELATION_DIGEST;
+use miden_air::vm::config::RELATION_DIGEST;
 use miden_assembly::Linkage;
 use miden_core::{
     Felt, Word,

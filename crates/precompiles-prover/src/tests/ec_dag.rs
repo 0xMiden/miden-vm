@@ -12,13 +12,13 @@
 use std::{format, string::String, vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_precompiles::CurveId;
+use miden_stark::lookup::Challenges;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

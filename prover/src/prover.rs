@@ -30,9 +30,10 @@ pub struct Prover {
 impl Prover {
     /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::memory`; it
-    /// is not a total process-RSS or allocator cap. In particular, the model excludes the fixed
-    /// And8 preprocessed setup, and the precompile prover's memory footprint is bounded separately
+    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::vm::memory`;
+    /// it is not a total process-RSS or allocator cap. In particular, the model excludes the
+    /// fixed And8 preprocessed setup, and the precompile prover's memory footprint is bounded
+    /// separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 

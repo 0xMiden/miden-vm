@@ -1,6 +1,7 @@
 //! Rust oracles for the MASM random coin and verifier parameters.
 
-use miden_air::{config, trace::MIN_TRACE_LEN};
+use miden_air::vm::config;
+use miden_air_source::vm::trace::MIN_TRACE_LEN;
 use miden_core::{
     Felt, Word,
     field::{
@@ -8,13 +9,13 @@ use miden_core::{
     },
 };
 use miden_crypto::hash::eidos::EidosChallenger;
-use miden_lifted_stark::{
+use miden_processor::ExecutionOutput;
+use miden_stark::{
     StarkConfig,
     testing::{
         Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
 };
-use miden_processor::ExecutionOutput;
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;

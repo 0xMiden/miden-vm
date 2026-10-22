@@ -2,8 +2,9 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
-use miden_air::{
-    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols, config, memory,
+use miden_air::vm::{config, memory};
+use miden_air_source::vm::{
+    AIRS, CoreCols, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
         SYS_TRACE_WIDTH,
@@ -12,7 +13,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ONE, Word, ZERO,
+    Felt, ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     mast::{MastForestId, SparseMastForest},
     operations::opcodes,
@@ -105,7 +106,7 @@ pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
 }
 
 /// Same as [`build_trace`], but with an explicit modelled peak-memory budget instead of the
-/// default. See [`miden_air::memory`] for the model's scope and exclusions.
+/// default. See [`miden_air::vm::memory`] for the model's scope and exclusions.
 pub fn build_trace_with_budget(
     witness: VmWitness,
     max_prover_memory_bytes: u64,
@@ -220,10 +221,10 @@ fn build_trace_inner(
     debug_assert_eq!(
         AIRS,
         [
-            MidenAir::Core,
-            MidenAir::Chiplets,
-            MidenAir::EidosCompression,
-            MidenAir::And8Lookup,
+            MidenAir::CORE,
+            MidenAir::CHIPLETS,
+            MidenAir::EIDOS_COMPRESSION,
+            MidenAir::AND8_LOOKUP,
         ],
         "heights below must be listed in AIRS order",
     );

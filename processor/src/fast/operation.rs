@@ -1,11 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, chiplets::hasher::HasherState},
-};
+use miden_air_source::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
-    WORD_SIZE, Word, ZERO,
+    Felt, WORD_SIZE, Word, ZERO,
     chiplets::{eidos_compression, hasher::compress_state},
     crypto::merkle::MerklePath,
     deferred::Digest,

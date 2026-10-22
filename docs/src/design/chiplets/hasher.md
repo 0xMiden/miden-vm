@@ -223,23 +223,25 @@ fixed.
 
 ## Implementation map
 
-- `air/src/constraints/chiplets/selectors.rs`
+- `crates/air/source/src/vm/constraints/chiplets/selectors.rs`
   Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
-- `air/src/constraints/chiplets/hasher_control/`
+- `crates/air/source/src/vm/constraints/chiplets/hasher_control/`
   Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
   routing.
-- `air/src/constraints/chiplets/hasher_control/flags.rs`
+- `crates/air/source/src/vm/constraints/chiplets/hasher_control/flags.rs`
   Named row-kind flags derived from the controller-internal selectors.
-- `air/src/constraints/eidos_compression/`
-  32-row layout, schedule, selectors, constraints, lookup plan, and trace writer.
-- `air/src/constraints/and8_lookup/`
+- `crates/air/source/src/shared/eidos/`
+  Common 32-row layout, schedule, selectors, equations, narrow lookup encoding, and trace writer.
+- `crates/air/source/src/vm/constraints/eidos_compression/`
+  VM bus mappings, controller/AEAD footer constraints, and mode-aware trace helpers.
+- `crates/air/source/src/vm/constraints/and8_lookup/`
   Fixed byte-table AIR used by Eidos compression and AEAD stream XORs.
-- `air/src/constraints/lookup/buses/chiplet_requests.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/chiplet_requests.rs`
   Decoder/stack requests for native hashing, Merkle operations, canonical-index range checks, AEAD
   stream, and deferred logging.
-- `air/src/constraints/lookup/buses/chiplet_responses.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/chiplet_responses.rs`
   Controller, bytewise, memory, ACE, and kernel-ROM provider messages.
-- `air/src/constraints/lookup/buses/wiring.rs`
+- `crates/air/source/src/vm/constraints/lookup/buses/wiring.rs`
   Controller-to-Eidos compression link and AEAD XOF output wiring.
 - `processor/src/trace/chiplets/hasher/`
   Controller trace generation, request deduplication, canonical physical IDs, and 32-row block

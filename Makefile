@@ -41,7 +41,7 @@ WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,midenc-h
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
-MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
+MIDEN_STARK_TEST_PACKAGES := -p miden-stark
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -209,7 +209,7 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		--cargo-profile test-dev \
 		-p miden-crypto \
 		--features miden-crypto/persistent-forest
-	$(MAKE) test-lifted-stark
+	$(MAKE) test-stark
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
@@ -309,9 +309,10 @@ fuzz-build-crypto: ## Builds imported crypto fuzz targets
 		$(FUZZ_CARGO) fuzz build --fuzz-dir tools/miden-serde-utils-fuzz $$target; \
 	done
 
-.PHONY: test-lifted-stark
-test-lifted-stark: ## Runs imported lifted STARK crate tests with parallel feature enabled
-	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/concurrent
+.PHONY: test-stark
+test-stark: ## Runs imported lifted STARK crate tests with parallel feature enabled
+	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-stark/concurrent
+	cargo test -p miden-crypto --lib hash::stateful
 
 # --- executable ----------------------------------------------------------------------------------
 

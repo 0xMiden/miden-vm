@@ -16,12 +16,15 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
-    BaseAir, MidenAir,
+use miden_air_source::vm::{
+    MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
+};
 
 use super::{Felt, VmTrace};
 
@@ -208,7 +211,7 @@ impl<'a> Expectations<'a> {
 // ================================================================================================
 
 /// Slice the flat `LookupFractions` buffer into per-row bags using the row-major `counts`
-/// layout (see `air/src/lookup/fractions.rs` for the ordering spec).
+/// layout (see `crates/air/source/src/lookup/aux_builder.rs` for the ordering spec).
 fn split_rows(fractions: &LookupFractions<Felt, QuadFelt>) -> Vec<Vec<(Felt, QuadFelt)>> {
     let num_cols = fractions.num_columns();
     let counts = fractions.counts();

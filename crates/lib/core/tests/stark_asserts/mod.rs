@@ -310,7 +310,7 @@ impl FoldRelation {
     fn vm() -> Self {
         Self {
             relation: "vm",
-            num_airs: miden_air::MIDEN_AIR_COUNT,
+            num_airs: miden_air::vm::MIDEN_AIR_COUNT,
             stark_vars_ptr: crate::stark::vm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!(concat!(
                 env!("MIDEN_CORE_ASM_DIR"),
@@ -322,7 +322,7 @@ impl FoldRelation {
     fn pvm() -> Self {
         Self {
             relation: "pvm",
-            num_airs: miden_air::precompiles::NUM_CHIPLETS,
+            num_airs: miden_air::precompile::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!(concat!(
                 env!("MIDEN_CORE_ASM_DIR"),
@@ -546,7 +546,7 @@ fn stage_air_fold_coefficients_handles_zero_beta() {
 /// by a full recursive proof.
 #[test]
 fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
-    use miden_ace_codegen::{EXT_DEGREE, InputCounts, InputKey, InputLayout};
+    use miden_ace::{EXT_DEGREE, InputCounts, InputKey, InputLayout};
 
     let counts = InputCounts {
         preprocessed_width: 0,
@@ -558,7 +558,7 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
         num_quotient_chunks: 1,
     };
 
-    for num_airs in 2..=miden_ace_codegen::MAX_ORDER_AIRS {
+    for num_airs in 2..=miden_ace::MAX_ORDER_AIRS {
         let layout = InputLayout::new_masm_multi_air(counts, num_airs);
         let stark_base = layout.index(InputKey::Alpha).expect("alpha starts the stark-vars block");
         for k in 0..num_airs {
@@ -770,7 +770,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                 end: "AUX_BUS_BOUNDARY_PTR",
                 // The OOD allocation contains current and next rows, with every scalar
                 // evaluation represented by EXT_DEGREE base-field coordinates.
-                divisor: 2 * miden_ace_codegen::EXT_DEGREE as u64,
+                divisor: 2 * miden_ace::EXT_DEGREE as u64,
             },
         ),
     ];
@@ -1170,7 +1170,7 @@ fn height_array_capacity_covers_the_supported_air_count() {
     // pinned against the declaration itself by
     // `verifier_memory_layout_is_complete_dense_and_disjoint`.
     const RESERVED_HEIGHT_CELLS: usize = 16;
-    const { assert!(miden_ace_codegen::MAX_ORDER_AIRS <= RESERVED_HEIGHT_CELLS) };
+    const { assert!(miden_ace::MAX_ORDER_AIRS <= RESERVED_HEIGHT_CELLS) };
 }
 
 /// `load_air_context` documents no stack effect. Compare against a no-op program run with the

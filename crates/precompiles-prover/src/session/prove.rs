@@ -3,8 +3,8 @@
 use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
-use miden_air::precompiles::stark_config::test_challenger;
-use miden_air::precompiles::{
+use miden_air::precompile::stark_config::test_challenger;
+use miden_air::precompile::{
     ChipletAir, ChipletMultiAir, preprocessed,
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
@@ -18,11 +18,11 @@ use miden_core::{
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
 };
-use miden_lifted_air::{ProverStatement, Statement};
 #[cfg(test)]
-use miden_lifted_stark::check_constraints;
-use miden_lifted_stark::{
+use miden_stark::check_constraints;
+use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
+    air::{ProverStatement, Statement},
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
