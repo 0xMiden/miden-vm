@@ -1,4 +1,4 @@
-//! Miden VM constraint diagnostics, runtime setup, memory derivation, and security reporting.
+//! Miden VM relation proving, constraint diagnostics, runtime setup, and security reporting.
 #![no_std]
 
 extern crate alloc;
@@ -7,5 +7,30 @@ extern crate std;
 
 pub mod debug;
 pub mod memory;
+#[cfg(feature = "prover")]
+pub mod prover;
 pub mod security;
 pub mod setup;
+
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod block_stack_entry_kind_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod ctx_continuation_end_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod dyncall_bottom_slot_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod dyncall_end_relabel_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod dyncall_saved_frame_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod first_row_repeat_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod mrupdate_sibling_level_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod overflow_pointer_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod repeat_loop_schema_soundness_repro;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod repro_harness;
+#[cfg(all(test, feature = "std", feature = "prover"))]
+mod span_entry_soundness_repro;

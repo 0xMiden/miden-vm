@@ -31,10 +31,7 @@ use miden_stark::{
     lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
@@ -55,11 +52,7 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(
-            program,
-            &mut host,
-            &miden_vm_stark::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
-        )
+        .execute_and_build_trace_sync(program, &mut host, &crate::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     trace

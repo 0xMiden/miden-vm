@@ -12,7 +12,7 @@ use miden_core::{
 use miden_processor::trace::VmTrace;
 use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 
-use crate::{config, prove_stark};
+use crate::{prover::prove_stark, setup::config};
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
