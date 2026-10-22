@@ -31,8 +31,8 @@ pub use miden_ace::RecursiveAceCircuit;
 /// Builds and encodes the order-invariant recursive-verifier ACE circuit.
 ///
 /// The circuit does not depend on the proof order. Callers that need repeated access should use
-/// the build-compiled `miden_air::ace::shared_recursive_circuit` rather than rebuild it for each
-/// proof.
+/// the build-compiled `miden_vm_stark::setup::ace::shared_recursive_circuit` rather than rebuild it
+/// for each proof.
 pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, AceError> {
     let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())?;
     let encoded = circuit.to_ace()?;

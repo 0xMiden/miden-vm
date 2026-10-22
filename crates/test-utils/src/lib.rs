@@ -13,6 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
+pub use miden_air_source::vm::VmTrace;
 use miden_air_source::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
@@ -37,7 +38,6 @@ use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    trace::VmTrace,
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
@@ -632,7 +632,7 @@ impl Test {
 
         fast_stack_result.and_then(|witness| {
             let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness)?;
+            let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -714,7 +714,7 @@ impl Test {
     /// Executes the test program and checks all AIR constraints without generating a STARK proof.
     ///
     /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`VmTrace::check_constraints`], which is much faster than the
+    /// [`miden_vm_stark::debug::check_constraints`], which is much faster than the
     /// full prove/verify pipeline and provides better error diagnostics. Use
     /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
     /// complete STARK proof generation and verification flow.
@@ -732,7 +732,7 @@ impl Test {
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
-        trace.check_constraints();
+        miden_vm_stark::debug::check_constraints(&trace);
     }
 
     /// Returns the last state of the stack after executing a test.

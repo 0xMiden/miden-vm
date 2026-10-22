@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+miden-vm-stark = { workspace = true, features = ["std"] }
 miden-processor = { workspace = true, features = ["concurrent"] }
 miden-vm        = { path = "../../miden-vm", features = ["concurrent", "internal"] }
 serde           = { workspace = true, features = ["std"] }
@@ -25,7 +26,7 @@ miden-air = { workspace = true }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
-miden-precompiles-verifier = { workspace = true, features = ["concurrent"] }
+miden-precompile-stark = { workspace = true, features = ["std"] }
 miden-verifier = { workspace = true, features = ["std"] }
 
 [[bench]]

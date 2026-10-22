@@ -11,11 +11,12 @@ use miden_ace::{
     MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
     render_masm_constraints_eval,
 };
-use miden_air::precompile::security as pvm_security;
 use miden_air_source::precompile::relation::{self, CapturedPvmRelation};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{
+    QuotientRecompositionInputs, quotient_recomposition_inputs, security as pvm_security,
+};
 
 pub(crate) use crate::GENERATED_BY;
 use crate::{
@@ -190,7 +191,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::policy::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -200,7 +201,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         stream_len: circuit.stream_len,
     };
     let circuit_digest = circuit.commitment;
-    let relation_digest = miden_air::vm::config::relation_digest(
+    let relation_digest = miden_stark::config::relation_digest(
         miden_air::precompile::policy::PROTOCOL_ID,
         &circuit_digest,
     );
@@ -579,7 +580,7 @@ fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> 
             .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
         cvs[i] = masm_word_literal(Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
     }
-    let depth = miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
+    let depth = miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
         + u32::from(miden_air::precompile::policy::LOG_BLOWUP);
     let mask = 1u32
         .checked_shl(depth)

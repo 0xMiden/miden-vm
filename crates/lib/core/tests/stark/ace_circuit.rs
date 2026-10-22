@@ -21,7 +21,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // relation and the generic verifier.
     let fractional_bits = miden_air::vm::security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = miden_air::vm::security::FIXED_POINT_ONE;
-    let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let sample_bits = miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     let shared_literals: [(&str, u64); 9] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),

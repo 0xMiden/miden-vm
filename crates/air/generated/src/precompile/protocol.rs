@@ -2,12 +2,10 @@
 //!
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
+/// Encoded circuit returned by the production relation's embedded artifact.
+pub use miden_air_source::precompile::ace::PvmRecursiveAceCircuit;
 use miden_core::{Felt, Word};
-
-use crate::{
-    precompile::ace::PvmRecursiveAceCircuit,
-    shared::security::{AirShape, LookupShape},
-};
+pub use miden_stark::security::{AirShape, LookupShape};
 
 /// Pinned identity of the precompile relation (raw canonical u64 limbs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,7 +117,7 @@ mod tests {
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
         let independent =
-            crate::precompile::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+            miden_air_source::precompile::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 
@@ -159,23 +157,19 @@ mod tests {
             AuthoredAirs(source::ChipletAir::all()),
             vec![(
                 source::ChipletAir::TRANSCRIPT_EVAL_INDEX,
-                vec![Felt::ZERO; crate::precompile::logup::NUM_PUBLIC_VALUES],
+                vec![Felt::ZERO; source::logup::NUM_PUBLIC_VALUES],
             )],
             vec![],
         )
         .unwrap();
-        let config = crate::precompile::stark_config::eidos_config(
+        let config = miden_stark::config::eidos_config(
             policy::precompile_pcs_params(),
             PINS.relation_digest.map(Felt::new_unchecked),
+            miden_core::program::domain::STARK_TRANSCRIPT,
         );
         let commitment = <[u64; 4]>::from(
             miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
         );
         assert_eq!(commitment, PVM_PREPROCESSED_COMMITMENT, "{UPDATE_HINT}");
-        assert_eq!(
-            <[u64; 4]>::from(crate::precompile::preprocessed::eidos().commitment()),
-            commitment,
-            "{UPDATE_HINT}"
-        );
     }
 }

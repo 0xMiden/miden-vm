@@ -82,6 +82,7 @@ testing = ["arbitrary"]
 internal = ["dep:hex", "serde", "std"]
 
 [dependencies]
+miden-vm-stark.workspace = true
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true

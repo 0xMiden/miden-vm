@@ -1,0 +1,47 @@
+[package]
+name = "miden-vm-stark"
+version = "1.0.0"
+description = "Miden VM relation STARK backend"
+readme = "README.md"
+documentation = "https://docs.rs/miden-vm-stark"
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+default = ["std"]
+# Reference estimators used by cross-crate regression tests.
+testing = []
+std = ["miden-air/std", "miden-air-source/std", "miden-core/std", "miden-stark/std", "thiserror/std"]
+concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
+prover = ["dep:tracing"]
+
+[dependencies]
+miden-air.workspace = true
+miden-air-source.workspace = true
+miden-core.workspace = true
+miden-stark.workspace = true
+miden-serde-utils.workspace = true
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+miden-crypto.workspace = true
+p3-security.workspace = true
+rayon.workspace = true
+miden-processor = { workspace = true, features = ["std"] }
+miden-assembly.workspace = true
+miden-verifier = { workspace = true, features = ["std"] }
+miden-core = { workspace = true, features = ["testing"] }
+miden-air-source = { workspace = true, features = ["compiler"] }
+
+[lints]
+workspace = true

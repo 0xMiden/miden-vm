@@ -46,7 +46,7 @@ Remember that the weakest proof limits the security of the whole.
 ```rust
 use miden_core_lib::CoreLibrary;
 use miden_processor::StackInputs;
-use miden_verifier::recursive::RecursiveVerifierInputs;
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 let core_lib = CoreLibrary::default();
 let inputs = RecursiveVerifierInputs::for_request(
@@ -108,7 +108,7 @@ Package `pvm_proof` with `PvmRecursiveVerifierInputs::for_request`, which uses
 `[D]`. Return the advice map and Merkle nodes from the event handler:
 
 ```rust
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::advice::AdviceMutation;
 
 let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &pvm_proof)?;

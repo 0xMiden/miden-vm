@@ -266,7 +266,7 @@ use miden::core::sys::pvm::layout
 
 #[cfg(test)]
 mod tests {
-    use miden_air::precompile::ace::build_canonical_precompile_ace_circuit;
+    use miden_air_source::precompile::ace::build_canonical_precompile_ace_circuit;
 
     use super::*;
     fn live_geometry() -> PvmOodGeometry {

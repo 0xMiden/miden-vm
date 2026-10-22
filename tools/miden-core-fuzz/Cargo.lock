@@ -1495,27 +1495,8 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "miden-ace"
 version = "1.0.0"
 dependencies = [
- "miden-constraint-compiler",
- "miden-core",
  "miden-crypto",
- "miden-stark",
- "p3-dft",
  "thiserror",
-]
-
-[[package]]
-name = "miden-air"
-version = "1.0.0"
-dependencies = [
- "miden-ace",
- "miden-air-source",
- "miden-constraint-compiler",
- "miden-core",
- "miden-crypto",
- "miden-stark",
- "p3-challenger",
- "p3-field",
- "p3-security",
 ]
 
 [[package]]
@@ -1578,15 +1559,6 @@ dependencies = [
  "miden-debug-types",
  "miden-rowan",
  "miden-utils-diagnostics",
-]
-
-[[package]]
-name = "miden-constraint-compiler"
-version = "1.0.0"
-dependencies = [
- "miden-core",
- "miden-crypto",
- "miden-stark",
 ]
 
 [[package]]
@@ -1793,7 +1765,6 @@ version = "1.0.0"
 dependencies = [
  "itertools 0.15.0",
  "miden-ace",
- "miden-air",
  "miden-air-source",
  "miden-core",
  "miden-debug-types",
@@ -1847,6 +1818,7 @@ dependencies = [
 name = "miden-stark"
 version = "1.0.0"
 dependencies = [
+ "miden-core",
  "miden-crypto",
  "miden-utils-sync",
  "p3-air",
@@ -1856,6 +1828,7 @@ dependencies = [
  "p3-goldilocks",
  "p3-matrix",
  "p3-maybe-rayon",
+ "p3-security",
  "p3-symmetric",
  "p3-util",
  "rand 0.10.2",

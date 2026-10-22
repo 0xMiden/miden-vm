@@ -1,0 +1,10 @@
+---
+source: crates/stark/precompile/src/recursive/ace.rs
+expression: snapshot
+---
+layout_inputs: 1904
+num_vars: 2520
+num_eval_gates: 13000
+stream_len: 14232
+circuit_digest: [2255028588524991477, 8088146176287763667, 1935595524963351362, 5560235558590875651]
+relation_digest: [5618632176883261929, 5091169848121332946, 9110857118546866548, 100418585322354598]

@@ -18,13 +18,14 @@ use miden_core::{
     utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::Verifier;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, PrecompileWitness, ProgramInfo, Prover, StackInputs,
     StackOutputs, internal::InputFile, prove_sync, trace::build_trace,
 };
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 use super::{
     config::{BenchConfig, workspace_root},
@@ -411,7 +412,8 @@ fn print_tx_fixture_shape(
         .execute_for_proving_sync(program, &mut host)
         .expect("execute transaction fixture");
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness).expect("build transaction fixture trace");
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+        .expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE index={proof_index}");
     let shape = trace_shape_summary_for(summary);

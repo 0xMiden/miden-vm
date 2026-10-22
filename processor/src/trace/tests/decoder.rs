@@ -18,7 +18,10 @@ use core::borrow::BorrowMut;
 use miden_air_source::vm::{
     CoreCols,
     logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg},
-    trace::decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+    trace::{
+        MainTrace,
+        decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+    },
 };
 use miden_core::{
     Felt, ONE, ZERO,
@@ -35,7 +38,7 @@ use super::{
     VmTrace, build_trace_from_ops, build_trace_from_program, build_trace_from_program_with_stack,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{RowIndex, StackInputs, trace::MainTrace};
+use crate::{RowIndex, StackInputs};
 
 // HELPERS
 // ================================================================================================
@@ -986,7 +989,7 @@ fn canonical_op_batch_encodings_satisfy_the_full_air(
 ) {
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     batch_row(&trace, encoding);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
     super::lookup::assert_global_lookup_balance(&trace);
 }
 

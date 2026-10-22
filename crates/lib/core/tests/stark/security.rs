@@ -1,5 +1,7 @@
 //! Tests for the common MVM/PVM recursive security estimator.
 
+use miden_air::vm::security as vm_metadata;
+
 use super::{
     EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data, vm_verify_proof_program,
 };
@@ -136,7 +138,7 @@ fn run_sweep_grid(adapter: &str, push_args: &str, outer_bound: u64, inner_bound:
 /// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
 fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
-    use miden_air::vm::security;
+    use miden_vm_stark::security;
 
     let push_args = (0..6)
         .rev()
@@ -158,19 +160,19 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
             exec.security::compute_conjectured_security_level
         end
         ",
-        lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::LOOKUP_SHAPE.max_message_width,
-        num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
-        max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
-        num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
-        core_boundary_terms = security::CORE_BOUNDARY_LOOKUP_TERMS,
+        lookup_pow_bits = vm_metadata::LOOKUP_POW_BITS,
+        max_message_width = vm_metadata::LOOKUP_SHAPE.max_message_width,
+        num_composed_constraints = vm_metadata::AIR_SHAPE.num_composed_constraints,
+        max_constraint_degree = vm_metadata::AIR_SHAPE.max_constraint_degree,
+        num_deep_terms = vm_metadata::AIR_SHAPE.num_deep_terms.unwrap(),
+        fractions_per_row = vm_metadata::LOOKUP_SHAPE.fractions_per_row,
+        core_boundary_terms = vm_metadata::CORE_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
     for outer in 0..outer_bound {
         for inner in 0..inner_bound {
             let masm = levels[(outer * inner_bound + inner) as usize];
-            let native = u64::from(security::conjectured_security_level(
+            let native = u64::from(security::testing::conjectured_security_level(
                 axes[0].value(outer, inner),
                 axes[1].value(outer, inner),
                 axes[2].value(outer, inner),
@@ -248,22 +250,20 @@ fn vm_security_descriptor(
     log_max_height: u32,
     num_kernel_procedures: u32,
 ) -> [u64; 12] {
-    use miden_air::vm::security;
-
     SecurityDescriptor {
         num_queries: u64::from(num_queries),
         query_pow_bits: u64::from(query_pow_bits),
-        lookup_pow_bits: u64::from(security::LOOKUP_POW_BITS),
+        lookup_pow_bits: u64::from(vm_metadata::LOOKUP_POW_BITS),
         deep_pow_bits: u64::from(deep_pow_bits),
         folding_pow_bits: u64::from(folding_pow_bits),
         log_max_height: u64::from(log_max_height),
-        max_message_width: u64::from(security::LOOKUP_SHAPE.max_message_width),
-        num_composed_constraints: u64::from(security::AIR_SHAPE.num_composed_constraints),
-        max_constraint_degree: u64::from(security::AIR_SHAPE.max_constraint_degree),
-        num_deep_terms: u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        lookup_fractions_per_row: u64::from(security::LOOKUP_SHAPE.fractions_per_row),
+        max_message_width: u64::from(vm_metadata::LOOKUP_SHAPE.max_message_width),
+        num_composed_constraints: u64::from(vm_metadata::AIR_SHAPE.num_composed_constraints),
+        max_constraint_degree: u64::from(vm_metadata::AIR_SHAPE.max_constraint_degree),
+        num_deep_terms: u64::from(vm_metadata::AIR_SHAPE.num_deep_terms.unwrap()),
+        lookup_fractions_per_row: u64::from(vm_metadata::LOOKUP_SHAPE.fractions_per_row),
         num_lookup_boundary_terms: u64::from(
-            security::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+            vm_metadata::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
         ),
     }
     .into_stack()
@@ -274,13 +274,14 @@ fn vm_security_descriptor(
 /// The MVM constructor supplies the shared PCS, field, and commitment settings. Every value carried
 /// by the descriptor is then replaced with the synthetic test value.
 fn native_level(descriptor: &SecurityDescriptor) -> u64 {
-    use miden_air::vm::{config, security};
+    use miden_air::vm::config;
+    use miden_vm_stark::security;
 
     let mut params = security::proof_security_parameters(
         &config::pcs_params(),
         descriptor.log_max_height as u32,
         0,
-        security::COMMITMENT_ALIGNMENT,
+        vm_metadata::COMMITMENT_ALIGNMENT,
         miden_core::proof::HashFunction::Eidos,
     );
     params.protocol_params.num_queries = descriptor.num_queries as u32;
@@ -611,8 +612,8 @@ fn estimator_envelope_violations_trap() {
 
 #[test]
 fn common_security_estimator_preserves_the_caller_stack() {
-    use miden_air::vm::security;
     use miden_core::Felt;
+    use miden_vm_stark::security;
 
     let descriptor = vm_security_descriptor(27, 17, 12, 4, 22, 255);
     let caller_values = [91_001, 91_002, 91_003, 91_004];
@@ -625,7 +626,8 @@ fn common_security_estimator_preserves_the_caller_stack() {
             exec.security::compute_conjectured_security_level
         end
     ";
-    let expected_level = u64::from(security::conjectured_security_level(27, 17, 12, 4, 22, 255));
+    let expected_level =
+        u64::from(security::testing::conjectured_security_level(27, 17, 12, 4, 22, 255));
     let mut expected = vec![expected_level];
     expected.extend(caller_values);
     let trace = build_test!(source, &inputs).execute().expect("the estimator must execute");
@@ -655,18 +657,17 @@ fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
 /// values fit in u32, and that the lookup subtraction remains valid for both deployed shapes.
 #[test]
 fn recursive_verifier_ranges_fit_security_estimator_envelope() {
-    use miden_air::{
-        precompile::{primitives::byte_pair_lut::TRACE_HEIGHT, security as pvm},
-        vm::security as vm,
-    };
+    use miden_air::vm::security as vm;
+    use miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
+    use miden_precompile_stark::setup::security as pvm;
 
     assert_eq!(PVM_LOG_HEIGHT_MIN, TRACE_HEIGHT.ilog2() as u64);
-    assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::FIXED_POINT_FRACTIONAL_BITS);
-    assert_eq!(vm::FIXED_POINT_ONE, pvm::FIXED_POINT_ONE);
-    assert_eq!(vm::BITS_PER_QUERY, pvm::BITS_PER_QUERY);
-    assert_eq!(vm::SECURITY_CAP, pvm::SECURITY_CAP);
-    assert_eq!(vm::FOLDING_BASE, pvm::FOLDING_BASE);
-    assert_eq!(vm::LOG2_E, pvm::LOG2_E);
+    assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::testing::FIXED_POINT_FRACTIONAL_BITS);
+    assert_eq!(vm::FIXED_POINT_ONE, pvm::testing::FIXED_POINT_ONE);
+    assert_eq!(vm::BITS_PER_QUERY, pvm::testing::BITS_PER_QUERY);
+    assert_eq!(vm::SECURITY_CAP, pvm::testing::SECURITY_CAP);
+    assert_eq!(vm::FOLDING_BASE, pvm::testing::FOLDING_BASE);
+    assert_eq!(vm::LOG2_E, pvm::testing::LOG2_E);
 
     // u32 extremes of the estimator's arithmetic over its asserted envelope: the query product at
     // 150 queries, the correction numerator at 4,096 boundary terms, and the two slack products
@@ -691,8 +692,8 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
         ),
         (
             "PVM",
-            u64::from(pvm::LOOKUP_SHAPE.max_message_width),
-            u64::from(pvm::LOOKUP_SHAPE.fractions_per_row),
+            u64::from(pvm::testing::LOOKUP_SHAPE.max_message_width),
+            u64::from(pvm::testing::LOOKUP_SHAPE.fractions_per_row),
             u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS),
             PVM_LOG_HEIGHT_MIN,
         ),
@@ -700,7 +701,8 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
         let coefficient = (width + 2) * frac;
         let q = u64::from(64 - (coefficient - 1).leading_zeros());
         let r_w = correction_fp(boundary, frac, h_min) >> 16;
-        let field_whole_bits = vm::EIDOS_CHALLENGE_SAMPLE_BITS >> vm::FIXED_POINT_FRACTIONAL_BITS;
+        let field_whole_bits =
+            miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS >> vm::FIXED_POINT_FRACTIONAL_BITS;
         let base = field_whole_bits - q - LOG_HEIGHT_MAX - r_w;
         assert!(base >= 1, "{name} lookup base leaves less than one bit for the correction");
     }
@@ -749,7 +751,7 @@ fn security_level_threshold_rejects_below_target() {
 #[test]
 fn pvm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Outer};
-    use miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
+    use miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
 
     const LOG_HEIGHT_SPAN: u64 = LOG_HEIGHT_MAX - PVM_LOG_HEIGHT_MIN + 1;
 
@@ -799,7 +801,10 @@ fn security_estimator_root_matches_procref() {
 /// Runs the PVM estimator over an `outer_bound × inner_bound` grid in one VM execution and checks
 /// every cell against the native PVM implementation.
 fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
-    use miden_air::precompile::{security, stark_config::precompile_pcs_params};
+    use miden_air::precompile::policy::precompile_pcs_params;
+    use miden_precompile_stark::setup::security;
+
+    let air_shape = miden_air::precompile::protocol::metadata().air_shape;
 
     let push_args = (0..5)
         .rev()
@@ -821,12 +826,12 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
             exec.security::compute_conjectured_security_level
         end
         ",
-        lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::LOOKUP_SHAPE.max_message_width,
-        num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
-        max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
-        num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
+        lookup_pow_bits = security::testing::LOOKUP_POW_BITS,
+        max_message_width = security::testing::LOOKUP_SHAPE.max_message_width,
+        num_composed_constraints = air_shape.num_composed_constraints,
+        max_constraint_degree = air_shape.max_constraint_degree,
+        num_deep_terms = air_shape.num_deep_terms.unwrap(),
+        fractions_per_row = security::testing::LOOKUP_SHAPE.fractions_per_row,
         boundary_terms = security::FIXED_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
@@ -836,13 +841,14 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
         for inner in 0..inner_bound {
             let masm = levels[(outer * inner_bound + inner) as usize];
 
-            let mut params = security::protocol_params(&pcs_params);
+            let mut params = miden_stark::security::protocol_params(&pcs_params);
             params.num_queries = axes[0].value(outer, inner);
             params.query_pow_bits = axes[1].value(outer, inner);
             params.deep_pow_bits = axes[2].value(outer, inner);
             params.folding_pow_bits = axes[3].value(outer, inner);
             let log_height = axes[4].value(outer, inner);
-            let native = u64::from(security::security_report(&params, log_height).security_level());
+            let native =
+                u64::from(security::testing::security_report(&params, log_height).security_level());
 
             assert_eq!(
                 masm,

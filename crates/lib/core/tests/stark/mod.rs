@@ -16,6 +16,7 @@ use miden_utils_testing::{
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
+use miden_vm_stark::setup::config::eidos_config;
 use p3_challenger::{CanObserve, FieldChallenger};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -745,7 +746,7 @@ fn request_consumer_source() -> String {
 /// does not. No separate binding check is needed for the fetched proof package.
 #[test]
 fn request_flow_binds_proof_to_claim() {
-    use miden_utils_testing::recursive_verifier::proof_request_key;
+    use miden_core::program::proof_request_key;
 
     let intended = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
 
@@ -794,7 +795,8 @@ fn request_flow_binds_proof_to_claim() {
 /// mirrors (a mismatch is a missing advice-map key).
 #[test]
 fn stark_verifier_e2f4_request_multi_proof() {
-    use miden_utils_testing::{crypto::MerkleStore, recursive_verifier::proof_request_key};
+    use miden_core::program::proof_request_key;
+    use miden_utils_testing::crypto::MerkleStore;
 
     let mut inputs = fib_stack_inputs();
     let tx0 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs.clone(), None);
@@ -1106,7 +1108,7 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
 /// One circuit serves every proof order, so this is the canonical circuit's own digest — the
 /// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
 fn recursive_circuit_key() -> Word {
-    miden_air::vm::ace::shared_recursive_circuit().commitment
+    miden_vm_stark::setup::ace::shared_recursive_circuit().commitment
 }
 
 // EXAMPLE PROGRAMS
@@ -1175,7 +1177,7 @@ fn log_deferred_stack_inputs() -> Vec<u64> {
 /// The trusted AND8 preprocessed-trace commitment for the canonical Miden statement shape, as
 /// bound by `load_air_context` (must match `AND8_PREPROCESSED_TRACE_COM_*` in `sys/vm/mod.masm`).
 fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
         vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
@@ -1278,9 +1280,9 @@ fn public_input_transcript_matches_rust_challenger() {
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
     // Rust mirror over the identical observation stream.
-    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let config = eidos_config(params, config::RELATION_DIGEST);
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    miden_stark::config::observe_protocol_params(config.pcs(), &mut challenger);
     for element in and8_preprocessed_commitment() {
         challenger.observe(element);
     }
@@ -1342,9 +1344,9 @@ fn eidos_init_seed_matches_rust_challenger() {
     let test = build_test!(source.as_str(), &[], &shape);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let config = eidos_config(params, config::RELATION_DIGEST);
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    miden_stark::config::observe_protocol_params(config.pcs(), &mut challenger);
     // `init_seed` also stages the trusted preprocessed-trace commitment onto the buffered stream.
     for element in and8_preprocessed_commitment() {
         challenger.observe(element);
@@ -1380,7 +1382,7 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
     let test = build_test!(source, &[], &shape);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let mut challenger = config.challenger();
     let expected_word = Word::new(array::from_fn(|_| challenger.sample_algebra_element()));
 

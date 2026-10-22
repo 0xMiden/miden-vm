@@ -19,7 +19,6 @@ doctest = false
 
 [features]
 default = ["std"]
-compiler = ["miden-air-source/compiler", "miden-ace/compiler"]
 arbitrary = ["std", "miden-air-source/arbitrary"]
 std = ["miden-air-source/std", "miden-core/std"]
 concurrent = ["miden-air-source/concurrent", "std", "miden-crypto/concurrent", "miden-stark/concurrent"]

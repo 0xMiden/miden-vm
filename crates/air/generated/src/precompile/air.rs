@@ -48,8 +48,9 @@ impl ChipletAir {
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
     /// `BytePairLut` commits its main and preprocessed traces at
-    /// [`crate::precompile::primitives::byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must
-    /// carry exactly that height; every other instance ranges above its derived minimum.
+    /// [`miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT`], so its proof
+    /// shapes must carry exactly that height; every other instance ranges above its derived
+    /// minimum.
     pub fn fixed_log_height(&self) -> Option<u32> {
         self.0.fixed_log_height()
     }

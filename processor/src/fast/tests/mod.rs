@@ -2429,14 +2429,18 @@ fn test_prover_memory_budget_exceeded() {
         witness.into_parts().0
     };
 
-    let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
-    let params = miden_air::vm::config::pcs_params();
-    let exact_peak = measured
-        .trace_len_summary()
-        .prover_memory_bytes(&params)
+    let measured =
+        crate::trace::build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+            .expect("default budget must succeed");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(measured.trace_len_summary().padded_heights())
         .expect("modelled peak fits in u64");
 
-    let err = crate::trace::build_trace_with_budget(build_witness(), exact_peak - 1).unwrap_err();
+    let err = crate::trace::build_trace(
+        build_witness(),
+        &miden_vm_stark::memory::canonical_budget(exact_peak - 1),
+    )
+    .unwrap_err();
 
     assert_matches!(
         err,
@@ -2463,7 +2467,7 @@ fn test_prover_memory_default_budget_accepts_normal_trace() {
         .expect("execution should succeed");
     let (vm_witness, _) = witness.into_parts();
 
-    crate::trace::build_trace(vm_witness)
+    crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
         .expect("the default prover memory budget must accept a normal-sized trace");
 }
 
@@ -2789,7 +2793,7 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
             .expect("traced execution should grow the stack buffer past the initial buffer");
     let (vm_witness, _) = execution_witness.into_parts();
 
-    crate::trace::build_trace(vm_witness)
+    crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
         .expect("trace replay should accept the same operand stack depth limit");
 }
 

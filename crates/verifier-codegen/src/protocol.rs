@@ -75,7 +75,7 @@ impl PvmProtocolPlan {
 
     pub(crate) fn render_aux_trace(self) -> Result<String, String> {
         let coordinates = self.num_airs * 2;
-        use miden_air::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
+        use miden_air_source::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
         if MAX_MESSAGE_WIDTH != 18 {
             return Err("PVM beta-power kernel requires message width eighteen".into());
         }
@@ -153,7 +153,8 @@ fn offset(out: &mut String, offset: usize) {
 /// environment pointer. The arithmetic reduction is commutative, so this order only fixes the
 /// kernel's instruction stream; every literal is derived from native data.
 fn fixed_uint_consumes() -> String {
-    let mut messages = miden_air::precompile::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
+    let mut messages =
+        miden_air_source::precompile::fixed::fixed_uintval_msgs().collect::<Vec<_>>();
     messages.sort_by_key(|message| {
         (
             message.ptr != message.bound_ptr,
@@ -219,7 +220,7 @@ fn fixed_uint_consumes() -> String {
 
 fn fixed_ec_consumes() -> String {
     let mut out = String::new();
-    for message in miden_air::precompile::fixed::fixed_ecgroup_msgs() {
+    for message in miden_air_source::precompile::fixed::fixed_ecgroup_msgs() {
         writeln!(
             out,
             "    # EcGroup(group={}, A={}, B={}, base-bound={}, scalar-bound={}, beta={}, \

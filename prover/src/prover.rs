@@ -9,10 +9,10 @@ use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
     StackInputs, StackOutputs, SyncHost, VmWitness,
     advice::AdviceInputs,
-    trace::{self, VmTrace, build_trace_with_budget},
+    trace::{VmTrace, build_trace},
 };
 
-use crate::{config, prove_stark};
+use crate::PrecompileProvingError;
 
 /// A synchronous, configurable prover for post-execution Miden VM witnesses.
 ///
@@ -30,17 +30,18 @@ pub struct Prover {
 impl Prover {
     /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::vm::memory`;
+    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_vm_stark::memory`;
     /// it is not a total process-RSS or allocator cap. In particular, the model excludes the
     /// fixed And8 preprocessed setup, and the precompile prover's memory footprint is bounded
     /// separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
-    pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+    pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 =
+        miden_vm_stark::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
     /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
     /// precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
-        miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
+        miden_precompile_stark::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub fn new() -> Self {
@@ -49,7 +50,7 @@ impl Prover {
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
             verification_precompile_limits:
-                miden_precompiles_prover::default_verification_precompile_limits(),
+                miden_precompiles::default_verification_precompile_limits(),
         }
     }
 
@@ -145,8 +146,11 @@ impl Prover {
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
         let trace = {
             let _span = tracing::info_span!("build_miden_vm_trace").entered();
-            build_trace_with_budget(witness, self.max_prover_memory_bytes)
-                .map_err(ProverError::TraceGeneration)?
+            build_trace(
+                witness,
+                &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
+            )
+            .map_err(ProverError::TraceGeneration)?
         };
 
         self.prove_vm_trace(trace)
@@ -166,7 +170,7 @@ impl Prover {
         &self,
         witnesses: Vec<PrecompileWitness>,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompiles_prover::prove_precompiles_with_limits_and_budget(
+        miden_precompile_stark::prover::prove_precompiles_with_limits_and_budget(
             witnesses,
             self.hash_fn,
             &self.verification_precompile_limits,
@@ -180,7 +184,7 @@ impl Prover {
         witness: PrecompileWitness,
         expected_root: Word,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompiles_prover::prove_precompile_for_root_with_limits_and_budget(
+        miden_precompile_stark::prover::prove_precompile_for_root_with_limits_and_budget(
             witness,
             expected_root,
             self.hash_fn,
@@ -212,69 +216,10 @@ impl Prover {
     ///
     /// Buffered and overlapped trace construction share this private implementation so STARK
     /// generation and VM proof packaging cannot diverge.
-    #[tracing::instrument(name = "miden_vm", skip_all)]
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
-        let trace_len_summary = trace.trace_len_summary();
-        let params = config::pcs_params();
-        tracing::event!(
-            tracing::Level::INFO,
-            "Generated execution traces: core={}, chiplets={}, eidos_compression={}, and8={}, padded={}, \
-             estimated_prover_memory_bytes={:?}",
-            trace_len_summary.core_rows(),
-            trace_len_summary.chiplets_rows(),
-            trace_len_summary.eidos_compression_rows(),
-            trace_len_summary.byte_pair_lookup_rows(),
-            trace_len_summary.padded_trace_len(),
-            trace_len_summary.prover_memory_bytes(&params)
-        );
-
-        let precompile_root = trace.precompile_root();
-        let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
-            trace.into_air_matrices();
-
-        let proof_bytes = match self.hash_fn {
-            HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Keccak => {
-                let config = config::keccak_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Eidos => {
-                let config = config::eidos_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-        }
-        .map_err(ProverError::VmProofGeneration)?;
-
-        let proof = miden_core::proof::StarkProof::new(proof_bytes, self.hash_fn);
-        Ok(VmProof { proof, precompile_root })
+        miden_vm_stark::prover::prove(trace, self.hash_fn).map_err(|error| {
+            ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
+        })
     }
 }
 
@@ -307,7 +252,7 @@ pub fn prove_sync(
             processor.execute_and_build_trace_sync(
                 program,
                 host,
-                prover.max_prover_memory_bytes(),
+                &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
             )?
         };
         let stack_outputs = *trace.stack_outputs();
@@ -347,7 +292,7 @@ pub enum ProverError {
     VmProofGeneration(#[source] ExecutionError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
-    PrecompileProofGeneration(#[source] miden_precompiles_prover::PrecompileProvingError),
+    PrecompileProofGeneration(#[source] PrecompileProvingError),
 }
 
 impl ProverError {
@@ -426,7 +371,7 @@ mod tests {
     fn prove_precompiles_applies_the_configured_memory_budget() {
         // A 1-byte budget must reject even the minimal chiplet trace shapes, and the returned
         // error carries the configured budget. Exact-boundary behavior is covered by
-        // `miden-precompiles-prover`.
+        // `miden-precompile-stark`.
         let err = Prover::new()
             .with_max_precompile_prover_memory_bytes(1)
             .prove_precompiles(alloc::vec![trivial_precompile_witness()])
@@ -435,10 +380,7 @@ mod tests {
             matches!(
                 err,
                 ProverError::PrecompileProofGeneration(
-                    miden_precompiles_prover::PrecompileProvingError::MemoryBudgetExceeded {
-                        budget_bytes: 1,
-                        ..
-                    }
+                    PrecompileProvingError::MemoryBudgetExceeded { budget_bytes: 1, .. }
                 )
             ),
             "expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}"

@@ -5,50 +5,32 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc, vec};
+use alloc::{boxed::Box, sync::Arc};
 
-use miden_air::vm::{MidenMultiAir, PublicInputs, config, security};
-use miden_core::{
-    Felt,
-    deferred::{
-        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileLimits, PrecompileRegistry,
-        PreparationError, TRUE_DIGEST,
-    },
-    field::QuadFelt,
-    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
-};
-use miden_serde_utils::deserialize_schema_exact;
-use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierInstance, air::Statement, lmcs::Lmcs,
-    proof::StarkProofData, verifier::VerifierError,
-};
-use serde::de::DeserializeOwned;
-use serde_wincode::{SerdeCompat, wincode};
-
-type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
-
+#[cfg(test)]
+use miden_air::vm::{MidenMultiAir, config};
+#[cfg(test)]
+use miden_core::{Felt, field::QuadFelt};
 // RE-EXPORTS
 // ================================================================================================
-mod exports {
-    pub use miden_core::{
-        Word,
-        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{
-            ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
-            HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
-        },
-    };
-    pub mod math {
-        pub use miden_core::Felt;
-    }
-}
-pub use exports::*;
-pub use miden_air::vm::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
+pub use miden_core::{
+    Word,
+    deferred::{DeferredRoot, PrecompileError, PrecompileLimits, PreparationError},
+    program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+    proof::{
+        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+        HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+    },
 };
-
-pub mod recursive;
+use miden_core::{
+    deferred::{MAX_PRECOMPILE_ROOTS, PrecompileRegistry, TRUE_DIGEST},
+    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
+};
+#[cfg(test)]
+use miden_stark::air::Statement;
+pub use miden_stark::security::{ProofSecurityParameters, SecurityReport};
+#[cfg(test)]
+use miden_vm_stark::setup::config::eidos_config;
 
 struct VerifierSupport {
     format: u8,
@@ -246,7 +228,7 @@ impl Verifier {
         let aggregate_root =
             proof.aggregate_root().expect("precompile roots were checked to be non-empty");
         let security_parameters =
-            miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?;
+            miden_precompile_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
         self.check_security_level(&security_parameters)?;
         Ok(security_parameters)
     }
@@ -297,24 +279,16 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &VmProof,
     ) -> Result<(), VerificationError> {
-        let size = proof.proof.bytes().len();
-        if size > MAX_STARK_PROOF_BYTES {
-            return Err(VerificationError::StarkVerificationError(
-                claim.program_root(),
-                Box::new(StarkVerificationError::ProofTooLarge {
-                    size,
-                    max: MAX_STARK_PROOF_BYTES,
-                }),
-            ));
-        }
-        Ok(())
+        miden_vm_stark::verifier::preflight(proof).map_err(|error| {
+            VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
+        })
     }
 
     fn preflight_precompile_stark(&self, proof: &PrecompileProof) -> Result<(), VerificationError> {
         let size = proof.proof.bytes().len();
         if size > MAX_STARK_PROOF_BYTES {
             return Err(VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge {
+                miden_precompile_stark::verifier::VerifyError::ProofTooLarge {
                     size,
                     max: MAX_STARK_PROOF_BYTES,
                 },
@@ -334,115 +308,9 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &VmProof,
     ) -> Result<ProofSecurityParameters, VerificationError> {
-        let program_root = claim.program_root();
-        let pub_inputs = PublicInputs::new(
-            claim.to_program_info(),
-            *claim.stack_inputs(),
-            *claim.stack_outputs(),
-            proof.precompile_root,
-        );
-        let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
-
-        let stark = &proof.proof;
-        let proof_bytes = stark.bytes();
-        let pcs_params = config::pcs_params();
-        let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
-        match stark.hash_fn() {
-            HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::BLAKE3_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
-            HashFunction::Eidos => {
-                let config = config::eidos_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::EIDOS_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
-            HashFunction::Keccak => {
-                let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(
-                    &config,
-                    &public_values,
-                    &aux_inputs,
-                    proof_bytes,
-                    config::KECCAK_PREPROCESSED_COMMITMENT.into(),
-                )
-            },
-        }
-        .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
-        .map(|(log_max_height, alignment)| {
-            security::proof_security_parameters(
-                &pcs_params,
-                log_max_height,
-                num_kernel_procedures,
-                alignment,
-                stark.hash_fn(),
-            )
+        miden_vm_stark::verifier::verify(claim, proof).map_err(|error| {
+            VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
         })
-    }
-
-    /// Verifies a multi-AIR STARK proof for the Miden VM statement, returning the proof's largest
-    /// AIR log height and the LMCS's column alignment for grading.
-    ///
-    /// Pre-seeds the challenger with protocol parameters, AIR public values, and statement
-    /// `aux_inputs` (program hash, final deferred root, and kernel-procedure digests). Then
-    /// delegates to the lifted multi-AIR verifier.
-    fn verify_stark_proof<SC>(
-        &self,
-        config: &SC,
-        public_values: &[Felt],
-        aux_inputs: &[Felt],
-        proof_bytes: &[u8],
-        preprocessed_commitment: PreprocessedCommitment<SC>,
-    ) -> Result<(u32, usize), StarkVerificationError>
-    where
-        SC: StarkConfig<Felt, QuadFelt>,
-        PreprocessedCommitment<SC>: DeserializeOwned,
-    {
-        if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
-            return Err(StarkVerificationError::ProofTooLarge {
-                size: proof_bytes.len(),
-                max: MAX_STARK_PROOF_BYTES,
-            });
-        }
-
-        let proof_encoding_config = wincode::config::Configuration::default()
-            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-        let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
-            proof_bytes,
-            proof_encoding_config,
-        )?;
-
-        let mut challenger = config.challenger();
-        config::observe_protocol_params(config.pcs(), &mut challenger);
-
-        // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-        // statement inputs read during observation/boundary correction. The lifted verifier absorbs
-        // both into Fiat-Shamir internally, and derives the multi-AIR ordering deterministically
-        // from the proof's per-AIR trace heights.
-        let statement = Statement::<Felt, QuadFelt, _>::new(
-            MidenMultiAir::new(),
-            vec![(0, public_values.to_vec())],
-            aux_inputs.to_vec(),
-        )
-        .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
-
-        VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
-            .verify(&proof, challenger)?;
-
-        let log_max_height =
-            u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
-        Ok((log_max_height, config.lmcs().alignment()))
     }
 }
 
@@ -536,21 +404,11 @@ pub enum VerificationError {
     #[error("precompile proof roots do not cover the VM obligation")]
     InsufficientPrecompileRootCoverage,
     #[error("failed to verify aggregate precompile STARK proof: {0}")]
-    PrecompileStarkVerification(#[from] miden_precompiles_verifier::VerifyError),
+    PrecompileStarkVerification(#[from] PrecompileVerificationError),
 }
 
-/// Errors that can occur during low-level STARK proof verification.
-#[derive(Debug, thiserror::Error)]
-pub enum StarkVerificationError {
-    #[error("failed to deserialize proof: {0}")]
-    Deserialization(#[from] wincode::error::ReadError),
-    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
-    ProofTooLarge { size: usize, max: usize },
-    #[error(transparent)]
-    Verifier(#[from] VerifierError),
-    #[error(transparent)]
-    Preprocessed(#[from] PreprocessedValidationError),
-}
+pub use miden_precompile_stark::verifier::VerifyError as PrecompileVerificationError;
+pub use miden_vm_stark::verifier::VerificationError as StarkVerificationError;
 
 // HELPER FUNCTIONS
 // ================================================================================================
@@ -751,7 +609,7 @@ mod tests {
         assert!(matches!(
             error,
             VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge { size, max }
+                miden_precompile_stark::verifier::VerifyError::ProofTooLarge { size, max }
             ) if size == MAX_STARK_PROOF_BYTES + 1 && max == MAX_STARK_PROOF_BYTES
         ));
     }
@@ -868,7 +726,7 @@ mod tests {
 
     #[test]
     fn eidos_preprocessed_commitment_matches_fixed_table() {
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
             MidenMultiAir::new(),
             vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],

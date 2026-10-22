@@ -40,7 +40,7 @@ fn advice_map_loaded_before_execution() {
         Err(e) => {
             assert_matches!(
                 e,
-                miden_prover::ExecutionError::AdviceError {
+                miden_processor::ExecutionError::AdviceError {
                     err: AdviceError::MapKeyNotFound { .. },
                     ..
                 }
