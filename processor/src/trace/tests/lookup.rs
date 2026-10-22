@@ -260,13 +260,13 @@ fn and8_aux_column_constraint_holds_at(
 #[test]
 fn lookup_constraints_close_for_tiny_span() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_compress() {
     let trace = build_trace_from_ops(vec![Operation::Compress], &[1, 2, 3, 4, 5, 6, 7, 8]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -325,19 +325,19 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
 
     // The aggregate provider cancels both unit controller emissions in the complete four-AIR
     // ledger, and the composed constraints close as well.
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_aead_stream() {
     let trace = aead_stream_trace();
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_mixed_bitwise_aead_stream() {
     let trace = mixed_bitwise_aead_stream_trace();
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -347,7 +347,7 @@ fn lookup_constraints_close_for_fibonacci_span() {
         ops.extend([Operation::Swap, Operation::Dup1, Operation::Add]);
     }
     let trace = build_trace_from_ops(ops, &[0, 1]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -724,7 +724,7 @@ fn assert_eidos_compression_oracle_coverage(
 
 /// Checks the honest trace against the complete composed AIR, including global lookup closure.
 pub(super) fn assert_global_lookup_balance(trace: &VmTrace) {
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(trace);
 }
 
 /// Checks that caller-supplied matrices change the prover-emitted lookup multiset.
@@ -1097,5 +1097,5 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     );
     let _ = accumulate(&and8_fractions);
 
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(trace);
 }

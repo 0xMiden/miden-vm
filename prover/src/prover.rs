@@ -225,7 +225,9 @@ impl Prover {
             trace_len_summary.eidos_compression_rows(),
             trace_len_summary.byte_pair_lookup_rows(),
             trace_len_summary.padded_trace_len(),
-            trace_len_summary.prover_memory_bytes(&params)
+            trace_len_summary
+                .padded_heights()
+                .and_then(|heights| miden_air::vm::memory::prover_peak_bytes(heights, &params))
         );
 
         let precompile_root = trace.precompile_root();

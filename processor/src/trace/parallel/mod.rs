@@ -246,7 +246,13 @@ fn build_trace_inner(
 
     let trace_len_summary = TraceLenSummary::new_with_padded(
         core_trace_len,
-        ChipletsLengths::new(&chiplets),
+        ChipletsLengths::from_parts(
+            chiplets.bitwise_start().into(),
+            chiplets.memory_start() - chiplets.bitwise_start(),
+            chiplets.ace_start() - chiplets.memory_start(),
+            chiplets.kernel_rom_start() - chiplets.ace_start(),
+            chiplets.padding_start() - chiplets.kernel_rom_start(),
+        ),
         eidos_compression_trace_len,
         byte_pair_lookup_rows,
         heights,

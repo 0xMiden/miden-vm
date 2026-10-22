@@ -2431,10 +2431,11 @@ fn test_prover_memory_budget_exceeded() {
 
     let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
     let params = miden_air::vm::config::pcs_params();
-    let exact_peak = measured
-        .trace_len_summary()
-        .prover_memory_bytes(&params)
-        .expect("modelled peak fits in u64");
+    let exact_peak = miden_air::vm::memory::prover_peak_bytes(
+        measured.trace_len_summary().padded_heights().unwrap(),
+        &params,
+    )
+    .expect("modelled peak fits in u64");
 
     let err = crate::trace::build_trace_with_budget(build_witness(), exact_peak - 1).unwrap_err();
 

@@ -714,7 +714,7 @@ impl Test {
     /// Executes the test program and checks all AIR constraints without generating a STARK proof.
     ///
     /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`VmTrace::check_constraints`], which is much faster than the
+    /// [`miden_vm_stark::debug::check_constraints`], which is much faster than the
     /// full prove/verify pipeline and provides better error diagnostics. Use
     /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
     /// complete STARK proof generation and verification flow.
@@ -732,7 +732,7 @@ impl Test {
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
-        trace.check_constraints();
+        miden_vm_stark::debug::check_constraints(&trace);
     }
 
     /// Returns the last state of the stack after executing a test.

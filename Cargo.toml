@@ -36,6 +36,7 @@ members = [
     "crates/verifier-codegen",
     "miden-vm",
     "crates/precompiles",
+    "crates/stark/vm",
     "crates/stark/precompile",
     "processor",
     "prover",
@@ -101,6 +102,7 @@ miden-stark      = { path = "./crates/stark/core", version = "1.0", default-feat
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0", default-features = false }
+miden-vm-stark = { path = "./crates/stark/vm", version = "1.0", default-features = false }
 miden-precompile-stark = { path = "./crates/stark/precompile", version = "1.0", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
