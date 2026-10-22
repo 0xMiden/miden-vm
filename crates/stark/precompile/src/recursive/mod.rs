@@ -458,4 +458,51 @@ mod tests {
         );
         assert_eq!(package.claim_commitment(), claim.commitment());
     }
+
+    /// Pins the complete packaged advice produced before extracting the shared writers.
+    #[test]
+    fn packaged_advice_matches_pre_extraction_bytes() {
+        use miden_core::serde::Serializable;
+        use miden_crypto::hash::blake::Blake3_256;
+
+        let root: [Felt; 4] = include_str!("../../tests/fixtures/pvm_eidos_v1_0.root")
+            .split_ascii_whitespace()
+            .map(|value| Felt::new_unchecked(value.parse().unwrap()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let proof = PrecompileProof {
+            proof: SerializedStarkProof::new(
+                include_bytes!("../../tests/fixtures/pvm_eidos_v1_0.bin").to_vec(),
+                HashFunction::Eidos,
+            ),
+            roots: vec![Word::new(root)],
+        };
+        let inputs = PvmRecursiveVerifierInputs::for_request(
+            Word::new([21, 22, 23, 24].map(Felt::new_unchecked)),
+            &proof,
+        )
+        .unwrap();
+        assert!(inputs.advice().stack().is_empty());
+        // Preserve every store entry while making HashMap iteration order irrelevant.
+        let mut nodes: Vec<_> = inputs
+            .advice()
+            .store()
+            .inner_nodes()
+            .map(|node| (node.value, node.left, node.right))
+            .collect();
+        nodes.sort_unstable();
+        let mut bytes = inputs.advice().map().to_bytes();
+        bytes.extend(nodes.to_bytes());
+        bytes.extend(inputs.claim_commitment().to_bytes());
+        let digest: [u8; 32] = Blake3_256::hash(&bytes).into();
+        assert_eq!(
+            digest,
+            [
+                2, 117, 117, 128, 169, 228, 16, 254, 175, 30, 106, 79, 133, 7, 149, 126, 155, 16,
+                19, 159, 160, 254, 137, 216, 205, 210, 6, 71, 49, 10, 207, 234,
+            ],
+            "shared advice writers must preserve the pre-extraction PVM encoding",
+        );
+    }
 }
