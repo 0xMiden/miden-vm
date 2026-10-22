@@ -1,4 +1,3 @@
-use crate::setup::config::precompile_pcs_params;
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
@@ -14,38 +13,41 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
-use crate::verifier::{VerifyError, verify_deferred};
 use miden_stark::{lookup::Challenges, memory};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-use crate::prover::{
-    PrecompileProvingError,
-    deferred::session::session_from_witnesses,
-    hash::{
-        chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
-        chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
-        keccak::{
-            node::{
-                COL_ABSORPTION_ID_CHUNKS as NODE_COL_ABSORPTION_ID_CHUNKS, COL_ACT as NODE_COL_ACT,
-                COL_H_INPUT_CHUNKS_BEGIN, COL_N_CHUNKS as NODE_COL_N_CHUNKS, COL_N_CHUNKS_INV,
+use crate::{
+    prover::{
+        PrecompileProvingError,
+        deferred::session::session_from_witnesses,
+        hash::{
+            chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
+            chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
+            keccak::{
+                node::{
+                    COL_ABSORPTION_ID_CHUNKS as NODE_COL_ABSORPTION_ID_CHUNKS,
+                    COL_ACT as NODE_COL_ACT, COL_H_INPUT_CHUNKS_BEGIN,
+                    COL_N_CHUNKS as NODE_COL_N_CHUNKS, COL_N_CHUNKS_INV,
+                },
+                sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
             },
-            sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        },
+        logup::LookupMessage,
+        math::{U256, from_hex, to_limbs32},
+        prove_precompiles, prove_precompiles_with_budget,
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        session::{Session, SessionTraces},
+        stark_config::DEFAULT_HASH_FUNCTION,
+        tests::{
+            SessionTracesTestExt, batch_witness::WitnessFixture,
+            bus_balance::session_stack_residual, verify_deferred as verify_session,
+        },
+        transcript::eidos::{
+            COL_CHAIN_HEAD_ID, EidosDigest, EidosOutMsg, NUM_MAIN_COLS as EIDOS_NUM_MAIN_COLS,
+            compression::layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, footer_digest_col},
         },
     },
-    logup::LookupMessage,
-    math::{U256, from_hex, to_limbs32},
-    prove_precompiles, prove_precompiles_with_budget,
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces},
-    stark_config::DEFAULT_HASH_FUNCTION,
-    tests::{
-        SessionTracesTestExt, batch_witness::WitnessFixture, bus_balance::session_stack_residual,
-        verify_deferred as verify_session,
-    },
-    transcript::eidos::{
-        COL_CHAIN_HEAD_ID, EidosDigest, EidosOutMsg, NUM_MAIN_COLS as EIDOS_NUM_MAIN_COLS,
-        compression::layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, footer_digest_col},
-    },
+    verifier::{VerifyError, verify_deferred},
 };
 
 /// A raw Keccak-only portable fixture and the prover-typed view of its root.
@@ -799,7 +801,11 @@ fn merged_keccak_chunk_remainder_is_range_checked() {
     let tuple = super::keccak_node::forge_out_of_range_remainder(&mut node_row);
     super::chunk_node_sponge::write_node(&mut merged, 0, &node_row);
     crate::prover::tests::check_local(ChunkNodeSpongeAir, &merged);
-    crate::prover::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
+    crate::prover::tests::bus_balance::assert_unprovidable_xor_lookup(
+        &ChunkNodeSpongeAir,
+        &merged,
+        tuple,
+    );
 }
 
 /// Exercises the sponge-permutation range lookups in the deployed merged AIR across block

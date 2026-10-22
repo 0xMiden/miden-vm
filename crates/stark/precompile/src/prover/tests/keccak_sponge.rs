@@ -651,7 +651,8 @@ fn noncanonical_prefix_digits_preserving_packed_words_fail_global_byte_checks() 
         .unwrap();
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     let start = SPONGE_COL_OFFSET + CHUNK_BYTES_RANGE.start;
-    let expected = crate::prover::utils::halves_le::<Felt, _>(&mains[index].values[start..start + 8], 256);
+    let expected =
+        crate::prover::utils::halves_le::<Felt, _>(&mains[index].values[start..start + 8], 256);
     for byte in 0..6 {
         let mut forged = mains[index].clone();
         forged.values[start + byte] += Felt::from_u16(256);
@@ -690,7 +691,10 @@ fn dead_padding_state_remains_bus_inert() {
     assert_eq!(decorated.values.len() / width, 128);
     for slot in 0..SPONGE_PERIOD {
         let start = (96 + slot) * width + SPONGE_COL_OFFSET;
-        assert_eq!(decorated.values[start + crate::prover::hash::keccak::sponge::COL_ACT], Felt::ZERO);
+        assert_eq!(
+            decorated.values[start + crate::prover::hash::keccak::sponge::COL_ACT],
+            Felt::ZERO
+        );
         for bit in OFFSET_BITS_RANGE {
             assert_eq!(decorated.values[start + bit], Felt::ZERO);
         }

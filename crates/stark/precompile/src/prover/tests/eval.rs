@@ -401,7 +401,11 @@ fn check_corrupted(
     let (mut main, mut public_root) = build_eval_trace(&mut rng, k);
     corrupt_trace(&mut main);
     corrupt_public_root(&mut public_root);
-    crate::prover::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
+    crate::prover::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &main,
+        public_root.as_array().to_vec(),
+    );
 }
 
 fn build_pinned_uint_trace(seed: u64) -> (RowMajorMatrix<Felt>, EidosDigest, usize) {
@@ -518,7 +522,11 @@ fn corruption_non_msm_row_has_msm_index() {
         .expect("trace has an active non-MSM row after row zero");
 
     main.values[row * NUM_MAIN_COLS + COL_MSM_IDX] = Felt::ONE;
-    crate::prover::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
+    crate::prover::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &main,
+        public_root.as_array().to_vec(),
+    );
 }
 
 #[test]
@@ -527,7 +535,11 @@ fn corruption_pinned_leaf_chain_context_slot_mismatch() {
     let (mut main, public_root, pin_row) = build_pinned_uint_trace(0xf0_f6_3d);
     main.values[pin_row * NUM_MAIN_COLS + COL_PIN_CLAIM_PIN_PTR] += Felt::ONE;
 
-    crate::prover::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
+    crate::prover::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &main,
+        public_root.as_array().to_vec(),
+    );
 }
 
 #[test]
@@ -541,7 +553,11 @@ fn packed_relation_selectors_fail_closed_on_overlap() {
     main.values[pin_row * NUM_MAIN_COLS + COL_IS_MUL] = Felt::ONE;
 
     let rejected = std::panic::catch_unwind(|| {
-        crate::prover::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
+        crate::prover::tests::check_local_inputs(
+            TranscriptEvalAir,
+            &main,
+            public_root.as_array().to_vec(),
+        );
     })
     .is_err();
     assert!(rejected, "overlapping packed-relation selectors must be rejected");

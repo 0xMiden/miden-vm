@@ -1,4 +1,3 @@
-use miden_air::precompiles::protocol::PVM_PREPROCESSED_COMMITMENT;
 //! Advice construction for the in-VM PVM STARK verifier.
 //!
 //! This module parses an Eidos PVM proof into the exact stack, Merkle-store, and advice-map
@@ -47,8 +46,8 @@ use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
 use crate::setup::{
+    commitments,
     config::{EidosConfig, eidos_config},
-    preprocessed,
 };
 
 type Challenge = QuadFelt;
@@ -185,7 +184,7 @@ fn build_verifier_advice(
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(PVM_PREPROCESSED_COMMITMENT.into()))?;
+        VerifierInstance::new(&config, &statement, Some(commitments::EIDOS.into()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;

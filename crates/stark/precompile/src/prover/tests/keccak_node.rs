@@ -357,7 +357,11 @@ fn sponge_perm_count_cannot_exceed_length() {
     let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::from(2u8));
     assert_eq!(remainder, -Felt::from(104u8));
     crate::prover::tests::check_local(KeccakNodeAir, &main);
-    crate::prover::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, remainder);
+    crate::prover::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        remainder,
+    );
 }
 
 #[test]
@@ -384,7 +388,11 @@ fn sponge_perm_count_must_be_integral() {
     let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::ONE + fraction);
     assert_eq!(remainder, Felt::ZERO);
     crate::prover::tests::check_local(KeccakNodeAir, &main);
-    crate::prover::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, fraction);
+    crate::prover::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        fraction,
+    );
 }
 
 // MULTI-INVOCATION DIGEST FORGERY

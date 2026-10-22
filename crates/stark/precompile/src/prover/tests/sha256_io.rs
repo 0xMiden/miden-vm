@@ -364,7 +364,7 @@ fn sha256_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
     for column in io::COL_DIGEST_XOR {
         let mut bad = main.clone();
         bad.values[52 * io::NUM_MAIN_COLS + column] += Felt::ONE;
-        crate::tests::check_local(Sha256IoAir, &bad);
+        crate::prover::tests::check_local(Sha256IoAir, &bad);
         assert!(!balanced(&bad), "the XOR table must authenticate each digest scratch cell");
     }
 }
