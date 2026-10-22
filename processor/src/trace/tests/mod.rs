@@ -8,9 +8,10 @@ use miden_core::{
     program::Program,
 };
 
-use super::{Felt, VmTrace};
+use super::VmTrace;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs, trace::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
+    trace::build_trace,
 };
 
 mod chiplets;

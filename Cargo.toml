@@ -35,6 +35,7 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "crates/precompiles",
+    "crates/stark/vm",
     "crates/stark/precompile",
     "processor",
     "prover",
@@ -79,6 +80,7 @@ opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
+miden-vm-stark = { path = "./crates/stark/vm", version = "1.0.0-rc.1", default-features = false }
 miden-ace               = { path = "./crates/ace", version = "1.0.0-rc.1", default-features = false }
 miden-air               = { path = "./crates/air/generated", version = "1.0.0-rc.1", default-features = false }
 miden-air-definitions   = { path = "./crates/air/source", version = "1.0.0-rc.1", default-features = false }

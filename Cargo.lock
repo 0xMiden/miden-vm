@@ -2244,6 +2244,7 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
+ "miden-vm-stark",
  "num",
  "p256",
  "p3-challenger",
@@ -2561,6 +2562,7 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "miden-vm-stark",
  "paste",
  "pretty_assertions",
  "proptest",
@@ -2701,6 +2703,7 @@ dependencies = [
  "miden-processor",
  "miden-prover",
  "miden-verifier",
+ "miden-vm-stark",
  "pretty_assertions",
  "proptest",
  "test-case",
@@ -2819,6 +2822,16 @@ dependencies = [
  "miden-vm",
  "p256",
  "rand_chacha 0.10.0",
+]
+
+[[package]]
+name = "miden-vm-stark"
+version = "1.0.0-rc.1"
+dependencies = [
+ "miden-air",
+ "miden-air-definitions",
+ "miden-core",
+ "miden-stark",
 ]
 
 [[package]]

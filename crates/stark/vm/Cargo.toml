@@ -1,0 +1,29 @@
+[package]
+name = "miden-vm-stark"
+version.workspace = true
+description = "Miden VM relation STARK backend"
+readme = "README.md"
+documentation = "https://docs.rs/miden-vm-stark"
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+default = ["std"]
+std = ["miden-air/std", "miden-air-definitions/std", "miden-core/std", "miden-stark/std"]
+concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
+
+[dependencies]
+miden-air.workspace = true
+miden-air-definitions.workspace = true
+miden-core.workspace = true
+miden-stark.workspace = true
+
+[lints]
+workspace = true

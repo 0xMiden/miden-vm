@@ -127,9 +127,10 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 pub const LOOKUP_POW_BITS: u32 = 0;
 
 /// Number of one-time lookup fractions added at the PVM boundary by fixed protocol data: one
-/// `UintVal` fraction per fixed uint ([`miden_air::precompiles::fixed::fixed_uintval_msgs`]) and one
-/// `EcGroup` fraction per fixed curve group ([`miden_air::precompiles::fixed::fixed_ecgroup_msgs`]).
-/// These are additional to the per-row fractions recorded in [`AIR_SHAPE`].
+/// `UintVal` fraction per fixed uint ([`miden_air::precompiles::fixed::fixed_uintval_msgs`]) and
+/// one `EcGroup` fraction per fixed curve group
+/// ([`miden_air::precompiles::fixed::fixed_ecgroup_msgs`]). These are additional to the per-row
+/// fractions recorded in [`AIR_SHAPE`].
 ///
 /// The build counts the fixed-message catalogue; the native estimator and the recursive verifier's
 /// security descriptor both use this value.

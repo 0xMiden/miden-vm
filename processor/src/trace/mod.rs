@@ -1,12 +1,5 @@
-use alloc::{format, vec::Vec};
-#[cfg(any(test, feature = "testing"))]
-use core::ops::Range;
+use alloc::format;
 
-use miden_air::vm::{MidenMultiAir, config};
-use miden_air_definitions::vm::{
-    PublicInputs,
-    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
-};
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
     program::ExecutionClaim,
@@ -15,16 +8,8 @@ use miden_core::{
         SliceReader,
     },
 };
-use miden_stark::{
-    StarkConfig,
-    air::{ProverStatement, Statement},
-    debug,
-};
 
-use crate::{
-    Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    fast::ExecutionOutput, field::QuadFelt, utils::RowMajorMatrix,
-};
+use crate::{ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -45,7 +30,7 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air_definitions::vm::trace::RowIndex;
+pub use miden_air_definitions::vm::{ChipletsLengths, TraceLenSummary, VmTrace, trace::RowIndex};
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{
     CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,
@@ -57,7 +42,6 @@ pub use parallel::{
 pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 #[cfg(feature = "std")]
 pub(crate) use trace_state::ResolvedHasherOp;
-pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Complete in-memory witness produced by a traced program execution.
 ///
@@ -307,210 +291,6 @@ impl Deserializable for VmWitness {
             trace: TraceReplay::read_from(source)?,
             precompile_root: Digest::read_from(source)?,
         })
-    }
-}
-
-// VM EXECUTION TRACE
-// ================================================================================================
-
-/// Execution trace which is generated when a program is executed on the VM.
-///
-/// The trace consists of the following components:
-/// - Per-AIR main traces for Core, Chiplets, Eidos compression, and byte-pair lookup.
-/// - Information about the program (program hash and the kernel).
-/// - Information about the initial and final stack states and authenticated precompile root.
-/// - Summary of trace lengths of the main trace components.
-#[derive(Debug)]
-pub struct VmTrace {
-    main_trace: MainTrace,
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    precompile_root: Digest,
-    trace_len_summary: TraceLenSummary,
-}
-
-impl VmTrace {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    pub(crate) fn new_from_parts(
-        program_info: ProgramInfo,
-        stack_inputs: StackInputs,
-        stack_outputs: StackOutputs,
-        precompile_root: Digest,
-        main_trace: MainTrace,
-        trace_len_summary: TraceLenSummary,
-    ) -> Self {
-        Self {
-            main_trace,
-            program_info,
-            stack_inputs,
-            stack_outputs,
-            precompile_root,
-            trace_len_summary,
-        }
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the program info of this execution trace.
-    pub fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
-    }
-
-    /// Returns hash of the program execution of which resulted in this execution trace.
-    pub fn program_hash(&self) -> &Word {
-        self.program_info.program_hash()
-    }
-
-    /// Returns outputs of the program execution which resulted in this execution trace.
-    pub fn stack_outputs(&self) -> &StackOutputs {
-        &self.stack_outputs
-    }
-
-    /// Returns the public inputs for this execution trace.
-    pub fn public_inputs(&self) -> PublicInputs {
-        PublicInputs::new(
-            self.program_info.clone(),
-            self.stack_inputs,
-            self.stack_outputs,
-            self.precompile_root,
-        )
-    }
-
-    /// Returns the public values for this execution trace.
-    pub fn to_public_values(&self) -> Vec<Felt> {
-        self.public_inputs().to_elements()
-    }
-
-    /// Returns a reference to the main trace.
-    pub fn main_trace(&self) -> &MainTrace {
-        &self.main_trace
-    }
-
-    /// Returns a mutable reference to the main trace.
-    pub fn main_trace_mut(&mut self) -> &mut MainTrace {
-        &mut self.main_trace
-    }
-
-    /// Returns the authenticated root of the deferred precompile state.
-    pub fn precompile_root(&self) -> Digest {
-        self.precompile_root
-    }
-
-    /// Returns the owned stack outputs required for proof packaging.
-    pub fn into_outputs(self) -> StackOutputs {
-        self.stack_outputs
-    }
-
-    /// Returns the initial state of the top 16 stack registers.
-    pub fn init_stack_state(&self) -> StackInputs {
-        self.stack_inputs
-    }
-
-    /// Returns the final state of the top 16 stack registers.
-    pub fn last_stack_state(&self) -> StackOutputs {
-        let last_step = RowIndex::from(self.last_step());
-        let mut result = [ZERO; MIN_STACK_DEPTH];
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, last_step);
-        }
-        result.into()
-    }
-
-    /// Returns helper registers state at the specified `clk` of the VM
-    pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
-        let mut result = [ZERO; NUM_USER_OP_HELPERS];
-        let row = RowIndex::from(clk);
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.helper_register(i, row);
-        }
-        result
-    }
-
-    /// Returns the trace length.
-    pub fn get_trace_len(&self) -> usize {
-        self.main_trace.num_rows()
-    }
-
-    /// Returns the length of the trace (number of rows in the main trace).
-    pub fn length(&self) -> usize {
-        self.get_trace_len()
-    }
-
-    /// Returns a summary of the per-AIR trace lengths.
-    pub fn trace_len_summary(&self) -> &TraceLenSummary {
-        &self.trace_len_summary
-    }
-
-    // DEBUG CONSTRAINT CHECKING
-    // --------------------------------------------------------------------------------------------
-
-    /// Validates this execution trace against all AIR constraints without generating a STARK
-    /// proof.
-    ///
-    /// This is the recommended way to test trace correctness. It is much faster than full STARK
-    /// proving and provides better error diagnostics (panics on the first constraint violation
-    /// with the instance and row index).
-    ///
-    /// # Panics
-    ///
-    /// Panics if any AIR constraint evaluates to nonzero.
-    pub fn check_constraints(&self) {
-        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
-            self.main_trace.clone_air_matrices();
-        let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
-
-        let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
-            Statement::new(MidenMultiAir::new(), vec![(0, public_values)], kernel_felts)
-                .expect("statement construction failed");
-        let prover_statement = ProverStatement::new(
-            statement,
-            vec![core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix],
-        )
-        .expect("prover statement construction failed");
-
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-        debug::check_constraints(&prover_statement, config.challenger());
-    }
-
-    /// Clones the trace buffers into the per-AIR matrices consumed by the multi-AIR prover.
-    pub fn clone_air_matrices(
-        &self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        self.main_trace.clone_air_matrices()
-    }
-
-    /// Consuming variant for the proving hot path: moves the row-major buffers.
-    pub fn into_air_matrices(
-        self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        self.main_trace.into_air_matrices()
-    }
-
-    // HELPER METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the index of the last row in the Core trace.
-    fn last_step(&self) -> usize {
-        self.main_trace.core_height() - 1
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
-        self.main_trace.get_column_range(range)
     }
 }
 

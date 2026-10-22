@@ -15,6 +15,8 @@ use proptest::prelude::*;
 
 pub mod ace;
 mod constraints;
+mod execution_trace;
+pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
 pub mod geometry;
 use miden_stark::lookup;
 #[cfg(test)]
