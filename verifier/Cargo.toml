@@ -40,6 +40,5 @@ miden-precompile-stark.workspace = true
 miden-serde-utils.workspace = true
 
 # External dependencies
-serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true

@@ -1,6 +1,6 @@
 # Miden VM STARK backend
 
-This crate provides relation proving, production constraint diagnostics, concrete configuration and setup, proof-memory derivation, and security reporting.
+This crate provides relation proving and native verification, production constraint diagnostics, concrete configuration and setup, proof-memory derivation, and security reporting.
 
 Execution and trace construction remain in `miden-processor`. Both packages use the completed
 `miden_air_definitions::vm::VmTrace`; this backend has no normal dependency on processor.
@@ -24,3 +24,6 @@ PCS presets, and relation, circuit, and setup pins. This crate consumes those ar
 `std` enables shared setup and circuit caches.
 
 The `prover` feature enables relation proving. Application proof orchestration remains in `miden-prover`.
+
+Native verification is available without default features. Application acceptance policy remains
+in `miden-verifier`.

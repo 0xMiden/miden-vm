@@ -1,4 +1,4 @@
-//! Miden VM relation proving, constraint diagnostics, runtime setup, and security reporting.
+//! Miden VM relation proving and native verification, setup, and security reporting.
 #![no_std]
 
 extern crate alloc;
@@ -34,3 +34,6 @@ mod repeat_loop_schema_soundness_repro;
 mod repro_harness;
 #[cfg(all(test, feature = "std", feature = "prover"))]
 mod span_entry_soundness_repro;
+
+pub mod verifier;
+pub use miden_core::proof::MAX_STARK_PROOF_BYTES;
