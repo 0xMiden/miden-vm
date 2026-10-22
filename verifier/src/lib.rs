@@ -246,7 +246,7 @@ impl Verifier {
         let aggregate_root =
             proof.aggregate_root().expect("precompile roots were checked to be non-empty");
         let security_parameters =
-            miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?;
+            miden_precompile_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
         self.check_security_level(&security_parameters)?;
         Ok(security_parameters)
     }
@@ -314,7 +314,7 @@ impl Verifier {
         let size = proof.proof.bytes().len();
         if size > MAX_STARK_PROOF_BYTES {
             return Err(VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge {
+                miden_precompile_stark::verifier::VerifyError::ProofTooLarge {
                     size,
                     max: MAX_STARK_PROOF_BYTES,
                 },
@@ -536,7 +536,7 @@ pub enum VerificationError {
     #[error("precompile proof roots do not cover the VM obligation")]
     InsufficientPrecompileRootCoverage,
     #[error("failed to verify aggregate precompile STARK proof: {0}")]
-    PrecompileStarkVerification(#[from] miden_precompiles_verifier::VerifyError),
+    PrecompileStarkVerification(#[from] miden_precompile_stark::verifier::VerifyError),
 }
 
 /// Errors that can occur during low-level STARK proof verification.
@@ -751,7 +751,7 @@ mod tests {
         assert!(matches!(
             error,
             VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge { size, max }
+                miden_precompile_stark::verifier::VerifyError::ProofTooLarge { size, max }
             ) if size == MAX_STARK_PROOF_BYTES + 1 && max == MAX_STARK_PROOF_BYTES
         ));
     }

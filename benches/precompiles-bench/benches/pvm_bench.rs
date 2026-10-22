@@ -7,7 +7,7 @@ use codspeed_criterion_compat::{
 };
 use miden_air::precompiles::ChipletAir;
 use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_prover::{
+use miden_precompile_stark::prover::{
     DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction,
     prove_precompiles_with_limits_and_budget, testing,
 };
