@@ -2802,7 +2802,6 @@ dependencies = [
  "miden-serde-utils",
  "miden-stark",
  "miden-vm-stark",
- "serde",
  "serde-wincode",
  "thiserror",
 ]
@@ -2891,6 +2890,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-processor",
+ "miden-serde-utils",
  "miden-stark",
  "miden-verifier",
  "p3-security",
