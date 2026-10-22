@@ -16,7 +16,7 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-air-source/std", "miden-core/std", "miden-stark/std", "thiserror/std"]
+std = ["miden-air/std", "miden-air-source/std", "miden-core/std", "miden-crypto/std", "miden-stark/std", "thiserror/std"]
 concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
 prover = ["dep:tracing"]
 
@@ -24,16 +24,16 @@ prover = ["dep:tracing"]
 miden-air.workspace = true
 miden-air-source.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-stark.workspace = true
+miden-serde-utils.workspace = true
 p3-security.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
-miden-serde-utils.workspace = true
 
 [dev-dependencies]
-miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["std"] }
 miden-assembly.workspace = true
 miden-verifier = { workspace = true, features = ["std"] }
