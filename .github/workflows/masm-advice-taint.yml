@@ -1,0 +1,76 @@
+name: Core MASM advice evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: Analyze core MASM advice
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install compiler toolchain
+        working-directory: tools/midenc-masm-lint
+        run: rustup toolchain install --no-self-update
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          workspaces: tools/midenc-masm-lint
+      - name: Build advice analysis CLI
+        run: make build-masm-advice-lint
+      - name: Check advice CLI and runner lints
+        run: make lint-masm-advice-lint
+      - name: Check findings and coverage failure behavior
+        run: make test-masm-advice-lint
+      - name: Collect core reports
+        id: core
+        shell: bash
+        run: |
+          mkdir -p target/masm-advice-lint/evidence
+          set +e
+          bash scripts/check-masm-advice-taint.sh \
+            > target/masm-advice-lint/evidence/core-taint-compact.txt 2>&1
+          compact_status=$?
+          bash scripts/check-masm-advice-taint.sh --verbose \
+            > target/masm-advice-lint/evidence/core-taint-verbose.txt 2>&1
+          verbose_status=$?
+          set -e
+          cat target/masm-advice-lint/evidence/core-taint-compact.txt
+          printf 'compact=%s\nverbose=%s\n' "$compact_status" "$verbose_status" \
+            > target/masm-advice-lint/evidence/exit-status.txt
+          echo "compact_status=$compact_status" >> "$GITHUB_OUTPUT"
+          echo "verbose_status=$verbose_status" >> "$GITHUB_OUTPUT"
+      - name: Upload core reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: core-masm-advice-evidence
+          path: target/masm-advice-lint/evidence/
+          if-no-files-found: ignore
+      - name: Preserve analysis failure status
+        env:
+          COMPACT_STATUS: ${{ steps.core.outputs.compact_status }}
+          VERBOSE_STATUS: ${{ steps.core.outputs.verbose_status }}
+        run: |
+          if [[ "$COMPACT_STATUS" != "$VERBOSE_STATUS" ]]; then
+            echo "Display modes returned different exit statuses" >&2
+            exit 1
+          fi
+          if ! diff -u \
+            <(grep '^midenc-masm-lint:' target/masm-advice-lint/evidence/core-taint-compact.txt) \
+            <(grep '^midenc-masm-lint:' target/masm-advice-lint/evidence/core-taint-verbose.txt); then
+            echo "Display modes returned different diagnostic counts" >&2
+            exit 1
+          fi
+          exit "$COMPACT_STATUS"
