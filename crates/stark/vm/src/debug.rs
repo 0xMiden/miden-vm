@@ -8,7 +8,7 @@ use miden_stark::air::{ProverStatement, Statement};
 
 /// Checks every constraint, panicking on the first violation with AIR and row diagnostics.
 pub fn check_constraints(trace: &VmTrace) {
-    let (core, chiplets, eidos, and8) = trace.clone_air_matrices();
+    let (core, chiplets, eidos, and8) = trace.main_trace().clone_air_matrices();
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
     let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
         Statement::new(MidenMultiAir::new(), vec![(0, public_values)], aux_inputs)

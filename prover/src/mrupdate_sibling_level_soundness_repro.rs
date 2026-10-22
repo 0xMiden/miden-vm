@@ -104,7 +104,7 @@ fn build_fixture() -> Fixture {
         .unwrap();
     assert!(precompile_witness.is_none());
 
-    let (core, chiplets, eidos_compression, and8) = trace.clone_air_matrices();
+    let (core, chiplets, eidos_compression, and8) = trace.main_trace().clone_air_matrices();
     let honest_outputs =
         core::array::from_fn(|lane| trace.stack_outputs().get_element(lane).unwrap());
     Fixture {
