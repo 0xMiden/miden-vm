@@ -5,24 +5,24 @@
 //! field. Their recursive verifiers both use Eidos. Native verification derives alignment and
 //! collision resistance from the commitment scheme used for each proof.
 //!
-//! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
+//! Production AIR [metadata](miden_air::precompiles::protocol::metadata) stores the relation
+//! shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
+use miden_air::precompiles::policy::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 use miden_core::proof::HashFunction;
-pub use miden_stark::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
+use miden_stark::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
+    protocol_params, security_report_with_hash,
 };
-use miden_stark::{
+pub use miden_stark::{
     pcs::PcsParams,
     security::{
-        CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT,
-        EIDOS_CHALLENGE_SAMPLE_BITS, OOD_POW_BITS, security_report_with_hash,
+        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
+        SecurityReport, SecurityTerm,
     },
 };
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
-
-use crate::setup::config::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 
 /// Number of out-of-domain points opened per committed column.
 ///
@@ -31,23 +31,15 @@ const NUM_OOD_POINTS: u32 = 2;
 
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
-/// This stored value must equal the shape returned by [`derive_air_shape`].
-pub const AIR_SHAPE: AirShape = miden_air::precompiles::protocol::PROTOCOL.air_shape;
+/// This stored value must equal the shape returned by
+/// `miden_air_definitions::precompiles::geometry::derive_air_shape`.
+const AIR_SHAPE: AirShape = miden_air::precompiles::protocol::PROTOCOL.air_shape;
 
 /// Lookup shape generated from the authored AIR metadata.
 pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
     Some(shape) => shape,
     None => panic!("canonical AIR has lookup arguments"),
 };
-
-/// Computes the AIR shape by symbolically evaluating each handwritten chiplet AIR.
-///
-/// This allocating pass supports validation and tooling. [`security_report`] uses the stored
-/// [`AIR_SHAPE`] constant.
-#[cfg(test)]
-pub fn derive_air_shape() -> AirShape {
-    miden_air_definitions::precompiles::geometry::derive_air_shape()
-}
 
 /// Build-compiled security shape of the precompile relation at the given commitment
 /// alignment; this does not capture AIRs.
@@ -57,18 +49,6 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
         num_deep_terms: Some(metadata.num_deep_terms(alignment)),
         ..metadata.air_shape
     }
-}
-
-/// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
-///
-/// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the compiler's stored raw widths and quotient chunk count. Native
-/// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
-/// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
-/// fixed for the default Eidos preset.
-pub fn num_deep_terms(alignment: usize) -> u32 {
-    miden_air::precompiles::protocol::metadata().num_deep_terms(alignment)
 }
 
 // SECURITY MODEL CONSTANTS
@@ -127,10 +107,10 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 pub const LOOKUP_POW_BITS: u32 = 0;
 
 /// Number of one-time lookup fractions added at the PVM boundary by fixed protocol data: one
-/// `UintVal` fraction per fixed uint ([`miden_air::precompiles::fixed::fixed_uintval_msgs`]) and
-/// one `EcGroup` fraction per fixed curve group
-/// ([`miden_air::precompiles::fixed::fixed_ecgroup_msgs`]). These are additional to the per-row
-/// fractions recorded in [`AIR_SHAPE`].
+/// `UintVal` fraction per fixed uint
+/// ([`miden_air_definitions::precompiles::fixed::fixed_uintval_msgs`]) and one `EcGroup` fraction
+/// per fixed curve group ([`miden_air_definitions::precompiles::fixed::fixed_ecgroup_msgs`]). These
+/// are additional to the per-row fractions recorded in [`AIR_SHAPE`].
 ///
 /// The build counts the fixed-message catalogue; the native estimator and the recursive verifier's
 /// security descriptor both use this value.
@@ -200,22 +180,6 @@ fn apply_fixed_boundary_correction(report: SecurityReport, log_max_height: u32) 
     SecurityReport::new(terms)
 }
 
-/// Maps PCS parameters onto the protocol parameters the round budget reads.
-pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
-    ProtocolParams {
-        log_blowup: u32::from(params.log_blowup()),
-        log_folding_arity: u32::from(params.log_folding_arity()),
-        num_queries: params.num_queries() as u32,
-        query_pow_bits: params.query_pow_bits() as u32,
-        ood_pow_bits: OOD_POW_BITS,
-        deep_pow_bits: params.deep_pow_bits() as u32,
-        folding_pow_bits: params.folding_pow_bits() as u32,
-        // The chiplet stack samples its lookup challenges directly after the main-trace
-        // commitment, with no grinding in between.
-        lookup_pow_bits: LOOKUP_POW_BITS,
-    }
-}
-
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification, and
@@ -235,10 +199,7 @@ pub fn proof_security_parameters(
             collision_resistance: hash_fn.collision_resistance(),
         },
         hash_fn,
-        air_shape: AirShape {
-            num_deep_terms: Some(num_deep_terms(alignment)),
-            ..AIR_SHAPE
-        },
+        air_shape: air_shape_for(alignment),
         num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
     }
@@ -270,10 +231,11 @@ pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u3
 /// under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] is exact only at the Eidos preset's
-/// alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash function, so
-/// a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17) is graded
-/// under its own DEEP term count and collision-resistance cap rather than the Eidos ones.
+/// the production AIR shape otherwise. [`conjectured_security_level`] is exact only at the Eidos
+/// preset's alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash
+/// function, so a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment
+/// 17) is graded under its own DEEP term count and collision-resistance cap rather than the Eidos
+/// ones.
 pub fn conjectured_security_level_for_alignment(
     params: &PcsParams,
     log_max_height: u32,
@@ -286,13 +248,15 @@ pub fn conjectured_security_level_for_alignment(
 
 #[cfg(test)]
 mod tests {
+    use miden_air::precompiles::policy::precompile_pcs_params;
+    use miden_air_definitions::precompiles::geometry::derive_air_shape;
     use p3_security::budget::report::QUERY_LABEL;
 
     use super::*;
-    use crate::setup::config::precompile_pcs_params;
 
-    /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
-    /// reported security level differ from the level implied by the relation being verified.
+    /// Checks that the production AIR shape matches the current chiplet AIRs. A stale shape can
+    /// make the reported security level differ from the level implied by the relation being
+    /// verified.
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
@@ -329,7 +293,8 @@ mod tests {
         );
     }
 
-    /// [`num_deep_terms`] at [`COMMITMENT_ALIGNMENT`] must reproduce [`AIR_SHAPE`]'s stored
+    /// [`miden_air::precompiles::protocol::ProtocolMetadata::num_deep_terms`] at
+    /// [`COMMITMENT_ALIGNMENT`] must reproduce the production AIR shape's stored
     /// `num_deep_terms` exactly, so [`conjectured_security_level_for_alignment`] computes the same
     /// level for an Eidos proof as [`conjectured_security_level`].
     #[test]
@@ -339,9 +304,21 @@ mod tests {
             AIR_SHAPE,
             "the build-compiled full-relation shape must equal the pinned AIR_SHAPE"
         );
-        assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 741, "unexpected Blake3 (alignment 1) DEEP term count");
-        assert_eq!(num_deep_terms(17), 954, "unexpected Keccak (alignment 17) DEEP term count");
+        let metadata = miden_air::precompiles::protocol::metadata();
+        assert_eq!(
+            metadata.num_deep_terms(COMMITMENT_ALIGNMENT),
+            AIR_SHAPE.num_deep_terms.unwrap()
+        );
+        assert_eq!(
+            metadata.num_deep_terms(1),
+            741,
+            "unexpected Blake3 (alignment 1) DEEP term count"
+        );
+        assert_eq!(
+            metadata.num_deep_terms(17),
+            954,
+            "unexpected Keccak (alignment 17) DEEP term count"
+        );
     }
 
     /// Parameters built for a PVM proof must reproduce the independent PVM security report.

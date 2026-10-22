@@ -2,7 +2,7 @@ use crate::setup::config::precompile_pcs_params;
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS};
+use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},

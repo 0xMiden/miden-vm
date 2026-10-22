@@ -14,7 +14,13 @@ pub mod security;
 pub mod setup;
 pub mod verifier;
 
-pub use miden_core::proof::MAX_STARK_PROOF_BYTES;
+pub use miden_air_definitions::vm::VmTrace;
+pub use miden_core::{
+    Word,
+    advice::AdviceInputs,
+    program::ExecutionClaim,
+    proof::{ExecutionProof, HashFunction, VmProof},
+};
 
 #[cfg(all(test, feature = "std", feature = "prover"))]
 mod block_stack_entry_kind_repro;

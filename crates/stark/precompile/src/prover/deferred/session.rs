@@ -6,7 +6,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::ChipletMultiAir;
+use miden_air::precompiles::{ChipletMultiAir, policy::precompile_pcs_params};
 use miden_air_definitions::precompiles::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
 use miden_core::{
     Felt,
@@ -25,15 +25,12 @@ use miden_precompiles::{
 };
 use miden_stark::memory;
 
-use crate::{
-    prover::{
-        PrecompileProvingError,
-        ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
-        math::{U256, from_limbs32, to_limbs32},
-        session::{EcNode, Session, Truthy, UintNode, strategies},
-        transcript::eidos::EidosDigest,
-    },
-    setup::config::precompile_pcs_params,
+use crate::prover::{
+    PrecompileProvingError,
+    ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
+    math::{U256, from_limbs32, to_limbs32},
+    session::{EcNode, Session, Truthy, UintNode, strategies},
+    transcript::eidos::EidosDigest,
 };
 
 /// wNAF window for [`msm_from_terms`](WitnessImporter::msm_from_terms)'s joint-wNAF

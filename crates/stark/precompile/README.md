@@ -27,3 +27,8 @@ existing tests.
 The `constants-tools` feature enables the PVM MASM parameter and artifact generator. See
 [Maintaining recursive-verifier MASM](../../lib/core/RECURSIVE_VERIFIER.md) for source ownership
 and the edit/regenerate/test workflow.
+Generic configuration factories and transcript observation come from `miden_stark::config`.
+The accepted PVM PCS preset comes from `miden_air::precompiles::policy`; the backend's
+`setup::config::eidos_config` supplies the PVM transcript domain. Authored AIR definitions and
+compiler helpers are available directly from `miden_air_definitions::precompiles`, while production
+evaluators and embedded artifacts remain in `miden_air::precompiles`.

@@ -36,7 +36,6 @@ use super::{
         render_pvm_ood_frames,
     },
 };
-use crate::setup::security as pvm_security;
 
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../../lib/core/asm/sys/pvm/constraints_eval.masm";
 const PVM_PARAMETERS_PATH: &str = "../../lib/core/asm/sys/pvm/parameters.masm";
@@ -244,7 +243,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        crate::setup::config::precompile_pcs_params().log_blowup(),
+        miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -560,49 +559,45 @@ fn render_pvm_parameters(
             writeln!(output, "pub const {prefix}_{index} = {}", felt.as_canonical_u64()).unwrap();
         }
     }
-    output.push_str("\n# Security descriptor from miden_precompile_stark::setup::security.\n");
+    let metadata = &miden_air::precompiles::protocol::PROTOCOL;
+    let air_shape = metadata.air_shape;
+    let lookup_shape = air_shape.lookup.ok_or("PVM security metadata requires lookup arguments")?;
+    output.push_str("\n# Security descriptor from miden_air::precompiles::protocol.\n");
     for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
-        (
-            "NUM_COMPOSED_CONSTRAINTS",
-            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
-        ),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
-        ),
+        ("MAX_MESSAGE_WIDTH", u64::from(lookup_shape.max_message_width)),
+        ("NUM_COMPOSED_CONSTRAINTS", u64::from(air_shape.num_composed_constraints)),
+        ("MAX_CONSTRAINT_DEGREE", u64::from(air_shape.max_constraint_degree)),
         (
             "NUM_DEEP_TERMS",
-            u64::from(
-                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
-            ),
+            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
         ),
-        (
-            "LOOKUP_FRACTIONS_PER_ROW",
-            u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
-        ),
-        (
-            "FIXED_BOUNDARY_LOOKUP_TERMS",
-            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        ),
+        ("LOOKUP_FRACTIONS_PER_ROW", u64::from(lookup_shape.fractions_per_row)),
+        ("FIXED_BOUNDARY_LOOKUP_TERMS", u64::from(metadata.fixed_boundary_lookup_terms)),
     ] {
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
 
     output.push_str("\n# Bus-domain scale factors: BusId + 1 from the native relation registry.\n");
     for (name, bus) in [
-        ("UINT_VAL_BUS_SCALE", miden_air::precompiles::relations::BusId::UintVal),
-        ("EC_GROUP_BUS_SCALE", miden_air::precompiles::relations::BusId::EcGroup),
+        (
+            "UINT_VAL_BUS_SCALE",
+            miden_air_definitions::precompiles::relations::BusId::UintVal,
+        ),
+        (
+            "EC_GROUP_BUS_SCALE",
+            miden_air_definitions::precompiles::relations::BusId::EcGroup,
+        ),
     ] {
         writeln!(output, "pub const {name} = {}", bus as usize + 1).unwrap();
     }
 
-    let setup_height = miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
+    let setup_height = miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
     if !setup_height.is_power_of_two() {
         return Err("BytePairLut setup height must be a power of two".into());
     }
     let log_height = setup_height.ilog2();
-    let depth = log_height + u32::from(crate::setup::config::precompile_pcs_params().log_blowup());
+    let depth = log_height
+        + u32::from(miden_air::precompiles::policy::precompile_pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(depth)
         .and_then(|size| u32::try_from(size - 1).ok())

@@ -2,10 +2,8 @@
 
 use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir};
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{
-    memory::{ProverMemoryModel, ProvingBudget},
-    pcs::PcsParams,
-};
+pub use miden_stark::memory::{ProverMemoryModel, ProvingBudget};
+use miden_stark::pcs::PcsParams;
 
 /// Derives the shared STARK model from generated production AIR metadata.
 pub fn memory_model(params: &PcsParams) -> Option<ProverMemoryModel<MIDEN_AIR_COUNT>> {
@@ -28,7 +26,7 @@ pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 /// Supplies the canonical VM model with the caller's byte limit.
 pub fn canonical_budget(limit_bytes: u64) -> ProvingBudget<MIDEN_AIR_COUNT> {
     ProvingBudget::new(
-        memory_model(&crate::setup::config::pcs_params()).expect("canonical VM memory model fits"),
+        memory_model(&miden_air::vm::config::pcs_params()).expect("canonical VM memory model fits"),
         limit_bytes,
     )
 }

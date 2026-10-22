@@ -41,6 +41,10 @@ verification exposes the authenticated obligation through
 `outstanding_precompile_root()`; complete verification returns no outstanding root. See the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof policy.
 
+Recursive advice preparation is owned by `miden-vm-stark::recursive` and
+`miden-precompile-stark::recursive`. Import those backends directly when constructing the inputs
+consumed by the MASM relation verifiers.
+
 ## Crate features
 
 Miden verifier can be compiled with the following features:

@@ -3,7 +3,7 @@ use miden_air::precompiles::protocol::{PVM_BLAKE3_PREPROCESSED_COMMITMENT,PVM_KE
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{ChipletAir, ChipletMultiAir, transcript::eidos::EidosDigest};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -12,17 +12,17 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance, air::Statement,
-    lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
+    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
+    air::Statement,
+    config::{blake3_256_config, keccak_config, observe_protocol_params},
+    lmcs::Lmcs as LmcsTrait,
+    proof::StarkProofData,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 use crate::setup::{
-    config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
-    },
+    config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
     preprocessed,
     security::{self, ProofSecurityParameters},
 };
@@ -37,7 +37,7 @@ pub fn verify_deferred(
     proof: &StarkProof,
     public_root: DeferredRoot,
 ) -> Result<ProofSecurityParameters, VerifyError> {
-    let (log_max_height, alignment) = verify_stark(proof, EidosDigest::from(public_root))?;
+    let (log_max_height, alignment) = verify_stark(proof, public_root)?;
 
     Ok(security::proof_security_parameters(
         &precompile_pcs_params(),
@@ -47,7 +47,10 @@ pub fn verify_deferred(
     ))
 }
 
-fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, usize), VerifyError> {
+fn verify_stark(
+    proof: &StarkProof,
+    public_root: DeferredRoot,
+) -> Result<(u32, usize), VerifyError> {
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
         return Err(VerifyError::ProofTooLarge {
             size: proof.bytes().len(),
@@ -91,7 +94,7 @@ fn verify_stark_with_config<SC>(
     config: &SC,
     preprocessed_commitment: <SC::Lmcs as LmcsTrait>::Commitment,
     proof_bytes: &[u8],
-    public_root: EidosDigest,
+    public_root: DeferredRoot,
 ) -> Result<(u32, usize), VerifyError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -106,7 +109,7 @@ where
 
     let statement = Statement::new(
         ChipletMultiAir::new(),
-        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, public_root.as_array().to_vec())],
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, public_root.as_elements().to_vec())],
         Vec::new(),
     )
     .expect("chiplet statement inputs are valid");

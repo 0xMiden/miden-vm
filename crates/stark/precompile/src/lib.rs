@@ -7,7 +7,9 @@ extern crate alloc;
 extern crate std;
 
 pub use miden_core::{
-    deferred::DeferredRoot,
+    Word,
+    advice::AdviceInputs,
+    deferred::{DeferredClaim, DeferredRoot, PrecompileLimits, PrecompileWitness},
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
 pub use miden_stark::security::ProofSecurityParameters;

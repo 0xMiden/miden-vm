@@ -7,7 +7,7 @@ pub use deferred::session::testing;
 pub use deferred::session::{SessionInputError, WitnessLocation};
 use miden_core::deferred::{PrecompileLimits, PrecompileWitness};
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
-pub use miden_precompiles::default_verification_precompile_limits;
+use miden_precompiles::default_verification_precompile_limits;
 
 pub(crate) mod ec;
 pub(crate) mod hash;

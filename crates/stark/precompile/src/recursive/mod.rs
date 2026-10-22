@@ -20,7 +20,9 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params,
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
@@ -34,6 +36,7 @@ use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
     air::{LiftedAir, Statement},
+    config::observe_protocol_params,
     proof::{StarkProof, StarkProofData},
     recursive::advice::{
         AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
@@ -44,7 +47,7 @@ use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
 use crate::setup::{
-    config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+    config::{EidosConfig, eidos_config},
     preprocessed,
 };
 
