@@ -434,7 +434,10 @@ mod wire_tests {
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(restored_trace.clone_air_matrices(), original_trace.clone_air_matrices());
+        assert_eq!(
+            restored_trace.main_trace().clone_air_matrices(),
+            original_trace.main_trace().clone_air_matrices()
+        );
     }
 
     #[rstest]
