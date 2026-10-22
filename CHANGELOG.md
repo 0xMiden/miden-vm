@@ -8,7 +8,7 @@
 
 #### Fixes
 
-- Restored exact serialized size hints for `MastForest` and `AdviceMap` through `Serializable::get_size_hint`, allowing size checks without allocating or serializing a forest ([#2504](https://github.com/0xMiden/miden-vm/issues/2504)).
+- Restored exact serialized size hints for `MastForest` and `AdviceMap` through `Serializable::get_size_hint`, allowing size checks without allocating or serializing a forest ([#4080](https://github.com/0xMiden/miden-vm/pull/4080)).
 
 ## v0.36.2 (2026-10-20)
 
