@@ -2748,13 +2748,10 @@ version = "1.0.0-rc.1"
 dependencies = [
  "miden-air",
  "miden-core",
- "miden-crypto",
  "miden-precompile-stark",
  "miden-precompiles",
- "miden-serde-utils",
  "miden-stark",
  "miden-vm-stark",
- "serde-wincode",
  "thiserror",
 ]
 
