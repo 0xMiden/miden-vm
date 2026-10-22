@@ -9,6 +9,9 @@ on:
       - release-v*
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main]
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       packages:
