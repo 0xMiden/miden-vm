@@ -624,4 +624,62 @@ mod tests {
             proof_stream
         );
     }
+
+    /// Pins complete packaged advice from before the shared-writer extraction. A single Rayon
+    /// worker makes proof-of-work selection deterministic even in concurrent test builds.
+    #[cfg(all(feature = "std", feature = "prover"))]
+    #[test]
+    fn packaged_advice_matches_pre_extraction_bytes() {
+        use miden_core::serde::Serializable;
+        use miden_crypto::hash::blake::Blake3_256;
+
+        let inputs =
+            rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
+                let program = miden_assembly::Assembler::default()
+                    .assemble_program("advice_fixture", "begin push.5 push.8 add drop end")
+                    .unwrap()
+                    .unwrap_program();
+                let witness = miden_processor::FastProcessor::new(StackInputs::default())
+                    .execute_for_proving_sync(
+                        &program,
+                        &mut miden_processor::DefaultHost::default(),
+                    )
+                    .unwrap();
+                let claim = witness.claim();
+                let (vm, _) = witness.into_parts();
+                let trace =
+                    miden_processor::trace::build_trace(vm, &crate::memory::default_budget())
+                        .unwrap();
+                let vm_proof = crate::prover::prove(trace, HashFunction::Eidos, false).unwrap();
+                let proof = ExecutionProof::new(vm_proof, PrecompileStatus::Empty);
+                RecursiveVerifierInputs::for_request(
+                    Word::new([21, 22, 23, 24].map(Felt::new_unchecked)),
+                    &proof,
+                    &claim,
+                )
+                .unwrap()
+            });
+
+        assert!(inputs.advice().stack().is_empty());
+        // AdviceMap is ordered; MerkleStore uses HashMap under std, so sort its complete
+        // contents before hashing. The map includes the unchanged serialized proof stream.
+        let mut nodes: Vec<_> = inputs
+            .advice()
+            .store()
+            .inner_nodes()
+            .map(|node| (node.value, node.left, node.right))
+            .collect();
+        nodes.sort_unstable();
+        let mut bytes = inputs.advice().map().to_bytes();
+        bytes.extend(nodes.to_bytes());
+        bytes.extend(inputs.claim_commitment().to_bytes());
+        let digest: [u8; 32] = Blake3_256::hash(&bytes).into();
+        assert_eq!(
+            digest,
+            [
+                64, 70, 184, 218, 212, 109, 150, 180, 81, 241, 9, 30, 165, 30, 99, 0, 217, 199,
+                125, 94, 53, 49, 15, 43, 171, 24, 37, 8, 51, 53, 14, 87
+            ],
+        );
+    }
 }
