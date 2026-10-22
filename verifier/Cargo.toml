@@ -20,25 +20,23 @@ doctest = false
 [features]
 default = ["std"]
 std = [
-    "miden-air/std",
     "miden-core/std",
-    "miden-vm-stark/std",
     "miden-precompiles/std",
     "miden-precompile-stark/std",
+    "miden-vm-stark/std",
     "thiserror/std",
 ]
 
 [dependencies]
-miden-vm-stark.workspace = true
 # Miden dependencies
-miden-air.workspace = true
 miden-core.workspace = true
-miden-crypto.workspace = true
 miden-stark.workspace = true
 miden-precompiles.workspace = true
 miden-precompile-stark.workspace = true
-miden-serde-utils.workspace = true
+miden-vm-stark.workspace = true
 
 # External dependencies
-serde-wincode.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+miden-air.workspace = true
