@@ -432,40 +432,31 @@ mod tests {
         );
     }
 
-    /// Pins complete packaged advice from before the shared-writer extraction. A single Rayon
-    /// worker makes proof-of-work selection deterministic even in concurrent test builds.
-    #[cfg(all(feature = "std", feature = "prover"))]
+    /// Pins the complete packaged advice from a fixed, independently verified VM proof.
     #[test]
     fn packaged_advice_matches_pre_extraction_bytes() {
-        use miden_core::serde::Serializable;
+        use miden_core::serde::{Deserializable, Serializable};
         use miden_crypto::hash::blake::Blake3_256;
 
-        let inputs =
-            rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
-                let program = miden_assembly::Assembler::default()
-                    .assemble_program("advice_fixture", "begin push.5 push.8 add drop end")
-                    .unwrap()
-                    .unwrap_program();
-                let witness = miden_processor::FastProcessor::new(StackInputs::default())
-                    .execute_for_proving_sync(
-                        &program,
-                        &mut miden_processor::DefaultHost::default(),
-                    )
-                    .unwrap();
-                let claim = witness.claim();
-                let (vm, _) = witness.into_parts();
-                let trace =
-                    miden_processor::trace::build_trace(vm, &crate::memory::default_budget())
-                        .unwrap();
-                let vm_proof = crate::prover::prove(trace, HashFunction::Eidos).unwrap();
-                let proof = ExecutionProof::new(vm_proof, PrecompileStatus::Empty);
-                RecursiveVerifierInputs::for_request(
-                    Word::new([21, 22, 23, 24].map(Felt::new_unchecked)),
-                    &proof,
-                    &claim,
-                )
-                .unwrap()
-            });
+        let vm = VmProof::read_from_bytes(include_bytes!("../../tests/fixtures/vm_eidos_v1_0.bin"))
+            .expect("valid VM proof fixture encoding");
+        let program_root =
+            Word::read_from_bytes(include_bytes!("../../tests/fixtures/vm_eidos_v1_0.program"))
+                .expect("valid fixture program root");
+        let claim = ExecutionClaim::new(
+            program_root,
+            KernelDescriptor::default(),
+            StackInputs::default(),
+            StackOutputs::default(),
+        );
+        crate::verifier::verify(&claim, &vm).expect("pinned VM proof must verify");
+        let proof = ExecutionProof::new(vm, PrecompileStatus::Empty);
+        let inputs = RecursiveVerifierInputs::for_request(
+            Word::new([21, 22, 23, 24].map(Felt::new_unchecked)),
+            &proof,
+            &claim,
+        )
+        .unwrap();
 
         assert!(inputs.advice().stack().is_empty());
         // AdviceMap is ordered; MerkleStore uses HashMap under std, so sort its complete
@@ -488,5 +479,42 @@ mod tests {
                 125, 94, 53, 49, 15, 43, 171, 24, 37, 8, 51, 53, 14, 87
             ],
         );
+    }
+
+    /// Explicit fixture maintenance; standard tests consume the checked-in proof instead.
+    #[cfg(all(feature = "std", feature = "prover"))]
+    #[test]
+    #[ignore = "set MIDEN_VM_FIXTURE_OUTPUT_DIR to regenerate fixtures outside the source tree"]
+    fn regenerate_vm_advice_fixture() {
+        use miden_core::serde::Serializable;
+
+        let directory = std::path::PathBuf::from(
+            std::env::var_os("MIDEN_VM_FIXTURE_OUTPUT_DIR")
+                .expect("set MIDEN_VM_FIXTURE_OUTPUT_DIR to an output directory"),
+        );
+        std::fs::create_dir_all(&directory).unwrap();
+        rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
+            let program = miden_assembly::Assembler::default()
+                .assemble_program("advice_fixture", "begin push.5 push.8 add drop end")
+                .unwrap()
+                .unwrap_program();
+            let witness = miden_processor::FastProcessor::new(StackInputs::default())
+                .execute_for_proving_sync(&program, &mut miden_processor::DefaultHost::default())
+                .unwrap();
+            let claim = witness.claim();
+            assert_eq!(*claim.kernel(), KernelDescriptor::default());
+            assert_eq!(*claim.stack_inputs(), StackInputs::default());
+            assert_eq!(*claim.stack_outputs(), StackOutputs::default());
+            let (vm, _) = witness.into_parts();
+            let trace =
+                miden_processor::trace::build_trace(vm, &crate::memory::default_budget()).unwrap();
+            let proof = crate::prover::prove(trace, HashFunction::Eidos).unwrap();
+            std::fs::write(directory.join("vm_eidos_v1_0.bin"), proof.to_bytes()).unwrap();
+            std::fs::write(
+                directory.join("vm_eidos_v1_0.program"),
+                claim.program_root().to_bytes(),
+            )
+            .unwrap();
+        });
     }
 }
