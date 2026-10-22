@@ -33,10 +33,10 @@ mod lifted;
 use std::{fmt, time::Instant};
 
 use clap::Parser;
-use miden_air::vm::config::eidos_config;
 use miden_core::Felt as MidenFelt;
 use miden_stark::{
     GenericStarkConfig,
+    config::eidos_config,
     pcs::PcsParams,
     testing::{
         airs::{
@@ -221,7 +221,11 @@ fn main() {
     let result = match cli.mode {
         Mode::Lifted => match cli.hash {
             HashFn::Eidos => {
-                let config = eidos_config(pcs, [MidenFelt::ZERO; 4]);
+                let config = eidos_config(
+                    pcs,
+                    [MidenFelt::ZERO; 4],
+                    miden_core::program::domain::STARK_TRANSCRIPT,
+                );
                 lifted::run_lifted(
                     &config,
                     &specs,

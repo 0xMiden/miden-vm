@@ -22,12 +22,14 @@ default = ["std"]
 std = [
     "miden-air/std",
     "miden-core/std",
+    "miden-vm-stark/std",
     "miden-precompiles/std",
     "miden-precompile-stark/std",
     "thiserror/std",
 ]
 
 [dependencies]
+miden-vm-stark.workspace = true
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true

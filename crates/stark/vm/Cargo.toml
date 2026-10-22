@@ -18,12 +18,18 @@ doctest = false
 default = ["std"]
 std = ["miden-air/std", "miden-air-definitions/std", "miden-core/std", "miden-stark/std"]
 concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
+prover = []
 
 [dependencies]
 miden-air.workspace = true
 miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-stark.workspace = true
+p3-security.workspace = true
+
+[dev-dependencies]
+miden-air = { workspace = true, features = ["compiler"] }
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 
 [lints]
 workspace = true

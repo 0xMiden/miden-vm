@@ -1637,7 +1637,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
 
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();
@@ -1668,7 +1668,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();

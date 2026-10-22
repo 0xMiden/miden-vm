@@ -336,7 +336,7 @@ fn test_trace_generation_at_fragment_boundaries(
         host.load_library(create_simple_library()).unwrap();
         let vm_witness =
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
-        build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -354,7 +354,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
         assert!(vm_witness.trace_replay().core_trace_contexts.len() == 1);
 
-        build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -555,7 +555,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
@@ -588,7 +588,7 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 
     assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
 
-    let _ = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let _ = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -960,7 +960,7 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1001,7 +1001,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
         )),
     );
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1090,7 +1090,7 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         },
     }
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
@@ -1174,15 +1174,15 @@ fn test_build_trace_corner_cases(
 
     // Measure the actual padded per-AIR heights under the default (generous) budget, then derive
     // the exact modelled peak for those heights.
-    let measured = build_trace(build_witness(), &miden_air::vm::memory::default_budget())
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let exact_peak = miden_air::vm::memory::default_budget()
+    let exact_peak = miden_vm_stark::memory::default_budget()
         .prover_peak_bytes(summary.padded_heights().unwrap())
         .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
-    let result = build_trace(build_witness(), &miden_air::vm::memory::canonical_budget(budget));
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
 
     assert_eq!(
         result.is_ok(),
@@ -1229,10 +1229,10 @@ fn test_build_trace_accepts_small_program_at_default_fragment_size() {
 
     // Measure the exact modelled peak for the program's real (small) padded heights under the
     // default (generous) budget.
-    let measured = build_trace(build_witness(), &miden_air::vm::memory::default_budget())
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let exact_peak = miden_air::vm::memory::default_budget()
+    let exact_peak = miden_vm_stark::memory::default_budget()
         .prover_peak_bytes(summary.padded_heights().unwrap())
         .expect("modelled peak fits in u64");
 
@@ -1242,7 +1242,7 @@ fn test_build_trace_accepts_small_program_at_default_fragment_size() {
     // at its own (unblown-up) per-row cost instead.
     let budget = exact_peak * 3;
 
-    let result = build_trace(build_witness(), &miden_air::vm::memory::canonical_budget(budget));
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
     assert!(
         result.is_ok(),
         "expected build_trace to succeed at budget={budget} (exact peak={exact_peak}) \
@@ -1273,7 +1273,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::canonical_budget(u64::MAX));
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(u64::MAX));
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1318,7 +1318,7 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     // Measure the actual padded per-AIR heights under the default (generous) budget.
     let mut measuring_witness = build_witness(&program, stack_inputs);
     inject_extra_compressions(&mut measuring_witness);
-    let measured = build_trace(measuring_witness, &miden_air::vm::memory::default_budget())
+    let measured = build_trace(measuring_witness, &miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let heights = *summary.padded_heights().expect("build_trace records padded heights");
@@ -1329,13 +1329,13 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
             && eidos_compression_height > heights[MidenAir::AND8_LOOKUP.instance_index()],
         "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
-    let exact_peak = miden_air::vm::memory::default_budget()
+    let exact_peak = miden_vm_stark::memory::default_budget()
         .prover_peak_bytes(summary.padded_heights().unwrap())
         .expect("modelled peak fits in u64");
 
     let mut vm_witness = build_witness(&program, stack_inputs);
     inject_extra_compressions(&mut vm_witness);
-    let result = build_trace(vm_witness, &miden_air::vm::memory::canonical_budget(exact_peak - 1));
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 
     assert!(
         matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
@@ -1380,7 +1380,7 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
     stack.push_continuation(continuation);
     ctx.continuation = stack;
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {result:?}"
@@ -1410,7 +1410,7 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     // Clear core_trace_contexts to simulate an empty trace.
     vm_witness.trace_replay_mut().core_trace_contexts.clear();
 
-    let result = build_trace(vm_witness, &miden_air::vm::memory::default_budget());
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1444,7 +1444,7 @@ fn build_trace_for_program(
     host.load_library(create_simple_library()).unwrap();
     let vm_witness = processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0;
 
-    build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 fn collect_end_flags(trace: &VmTrace) -> Vec<Word> {
