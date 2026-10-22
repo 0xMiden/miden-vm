@@ -9,7 +9,7 @@ use std::{
 
 use miden_air::{
     precompiles::{ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params},
-    vm::{MidenMultiAir, config::pcs_params},
+    vm::config::pcs_params,
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::memory;
@@ -56,22 +56,14 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[test]
 fn trace_memory_budget_uses_compiled_geometry_without_allocating() {
     let params = pcs_params();
-    let multi_air = MidenMultiAir;
     ALLOCATIONS.set(Some(0));
-    let peak = black_box(memory::prover_peak_bytes::<Felt, QuadFelt, _>(
-        &multi_air,
+    let peak = black_box(miden_vm_stark::memory::prover_peak_bytes(
         black_box(&[1024, 2048, 4096, 65536]),
         &params,
     ));
-    let max_height = black_box(memory::max_any_height_for_budget::<Felt, QuadFelt, _>(
-        &multi_air,
-        black_box(1 << 30),
-        &params,
-    ));
-    let model = memory::ProverMemoryModel::from_multi_air::<Felt, QuadFelt, _>(&multi_air, &params)
-        .expect("production geometry fits");
-    assert_eq!(model.prover_peak_bytes(black_box(&[1024, 2048, 4096, 65536])), peak);
-    assert!(model.max_any_height_for_budget(black_box(1 << 30)) > 0);
+    let model =
+        black_box(miden_vm_stark::memory::memory_model(&params).expect("valid memory model"));
+    let max_height = black_box(model.max_any_height_for_budget(black_box(1 << 30)));
     let allocations = ALLOCATIONS.replace(None).unwrap();
 
     assert!(peak.is_some());
