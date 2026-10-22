@@ -31,7 +31,7 @@ use miden_core::{
     advice::AdviceMap,
     chiplets::hasher,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    program::KernelDescriptor,
+    program::{KernelDescriptor, KernelExport, hash_kernel_key},
     serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
 
@@ -1177,25 +1177,34 @@ where
 impl Package {
     /// Get a [KernelDescriptor] from this package, if this package contains one.
     pub fn to_kernel_descriptor(&self) -> Result<KernelDescriptor, Report> {
-        let exports = self
-            .manifest
-            .exports()
-            .filter_map(|export| {
-                if export.namespace().is_kernel_path()
-                    && let PackageExport::Procedure(p) = export
-                {
-                    Some(p.digest)
-                } else {
-                    None
+        let mut exports = BTreeMap::new();
+        for export in self.manifest.exports() {
+            if export.namespace().is_kernel_path()
+                && let PackageExport::Procedure(procedure) = export
+            {
+                // Normalize the root namespace and use the exported ABI name, independent of
+                // the implementation digest. Identity aliases preserve ordinary syscalls.
+                let path = Path::kernel_path().join(export.name());
+                let key = hash_kernel_key(path.as_str());
+                for key in [key, procedure.digest] {
+                    if let Some(previous) = exports.insert(key, procedure.digest)
+                        && previous != procedure.digest
+                    {
+                        return Err(Report::msg("invalid kernel package: conflicting export keys"));
+                    }
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
         if exports.is_empty() {
             return Err(Report::msg(
                 "invalid kernel package: does not export any kernel procedures",
             ));
         }
-        KernelDescriptor::new(&exports)
+        let exports = exports
+            .into_iter()
+            .map(|(key, procedure_root)| KernelExport { key, procedure_root })
+            .collect();
+        KernelDescriptor::from_exports(exports)
             .map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
     }
 

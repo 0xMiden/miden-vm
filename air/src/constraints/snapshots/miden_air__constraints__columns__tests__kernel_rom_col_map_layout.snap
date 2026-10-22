@@ -4,20 +4,26 @@ expression: col_map!(KernelRomCols)
 ---
 KernelRomCols {
     multiplicity: 0,
-    root: [
+    key: [
         1,
         2,
         3,
         4,
     ],
-    hasher_start: 5,
-    leaf_index: 6,
-    direction_bit: 7,
-    depth: 8,
+    root: [
+        5,
+        6,
+        7,
+        8,
+    ],
+    hasher_start: 9,
+    leaf_index: 10,
+    direction_bit: 11,
+    depth: 12,
     leaf: [
-        9,
-        10,
-        11,
-        12,
+        13,
+        14,
+        15,
+        16,
     ],
 }

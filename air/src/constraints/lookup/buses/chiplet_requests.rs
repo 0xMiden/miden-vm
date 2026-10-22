@@ -133,22 +133,29 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { v: 5, u: 6 }, // (V, U) = (1 + 4, 2 + 4)
                     );
 
-                    // SYSCALL: control-block remove + kernel-ROM call with the h[0..4] digest.
+                    // SYSCALL commits to the export key in h[0..4], while h[4..8] witnesses
+                    // the resolved procedure root. Only the key enters the control-block hash.
                     g.batch(
                         "syscall",
                         op_flags.syscall(),
                         move |b| {
                             let parent = addr_next.into();
-                            let digest = array::from_fn(|i| h[i].into());
-                            let h = h.map(LB::Expr::from);
+                            let key = array::from_fn(|i| h[i].into());
+                            let root = array::from_fn(|i| h[4 + i].into());
+                            let block =
+                                array::from_fn(
+                                    |i| {
+                                        if i < 4 { h[i].into() } else { LB::Expr::ZERO }
+                                    },
+                                );
                             b.remove(
                                 "syscall_ctrl_block",
-                                HasherMsg::control_block(parent, &h, opcodes::SYSCALL),
+                                HasherMsg::control_block(parent, &block, opcodes::SYSCALL),
                                 Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "syscall_kernel_rom",
-                                KernelRomMsg::call(digest),
+                                KernelRomMsg::call(key, root),
                                 Deg { v: 4, u: 5 },
                             );
                         },

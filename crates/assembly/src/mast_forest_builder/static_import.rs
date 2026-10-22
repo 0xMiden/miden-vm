@@ -207,6 +207,16 @@ impl MastForestBuilder {
         child_refs
     }
 
+    /// Keeps a stable syscall key opaque instead of importing its implementation subtree.
+    pub(crate) fn ensure_external_key_use(&mut self, key: Word) -> Result<MastNodeUse, Report> {
+        let node_ref = self.intern_pending_node(PendingMastNodeDraft::new(
+            PendingMastNodeKind::External,
+            key,
+            Vec::new(),
+        ))?;
+        Ok(self.latest_node_use(node_ref).expect("external key has a source occurrence"))
+    }
+
     /// Adds an externally-linked procedure root and returns its builder-local [`MastNodeRef`].
     pub(crate) fn ensure_external_link_with_source_ref(
         &mut self,

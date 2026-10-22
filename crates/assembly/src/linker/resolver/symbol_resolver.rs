@@ -39,7 +39,7 @@ pub struct SymbolResolutionContext {
 impl SymbolResolutionContext {
     #[inline]
     pub fn in_syscall(&self) -> bool {
-        matches!(self.kind, Some(InvokeKind::SysCall))
+        matches!(self.kind, Some(InvokeKind::SysCall | InvokeKind::SysCallStable))
     }
 }
 

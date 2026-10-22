@@ -24,6 +24,8 @@ pub mod program;
 pub mod proof;
 pub mod utils;
 
+pub use program::{KernelExport, hash_kernel_export, hash_kernel_key};
+
 pub mod field {
     pub use miden_crypto::field::*;
 

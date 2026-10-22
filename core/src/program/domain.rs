@@ -8,7 +8,7 @@ pub use miden_crypto::hash::eidos::DomainTag;
 #[cfg(test)]
 use miden_crypto::hash::eidos::domains::MidenCryptoDomainRegistry;
 use miden_crypto::hash::eidos::{
-    Custom, DomainVersion, FeltSequence, Transcript, domain::EidosDomain, namespace,
+    ByteString, Custom, DomainVersion, FeltSequence, Transcript, domain::EidosDomain, namespace,
 };
 
 use crate::Felt;
@@ -118,6 +118,13 @@ miden_crypto::eidos_domain_registry! {
                 encoding: FeltSequence,
                 description: "Kernel export Merkle leaf.",
                 schema: "param0 = 8; param1 = 0; param2 = 0; payload = export key (4 Felts) || implementation MAST root (4 Felts)",
+            }
+            pub KERNEL_KEY: KernelKeyDomain {
+                local_id: 0x000e,
+                version: DomainVersion::numbered(1),
+                encoding: ByteString,
+                description: "Stable kernel export key.",
+                schema: "param0 = byte length; param1 = 0; param2 = 0; payload = UTF-8 canonical fully qualified exported procedure path",
             }
         }
     }

@@ -179,6 +179,12 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
         self.validate_target(InvokeKind::SysCall, target)
     }
+    fn visit_mut_syscall_stable(
+        &mut self,
+        target: &mut InvocationTarget,
+    ) -> ControlFlow<LinkerError> {
+        self.validate_target(InvokeKind::SysCallStable, target)
+    }
     fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
         self.validate_target(InvokeKind::Call, target)
     }

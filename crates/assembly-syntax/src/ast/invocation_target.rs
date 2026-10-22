@@ -16,6 +16,7 @@ pub enum InvokeKind {
     Call,
     SysCall,
     ProcRef,
+    SysCallStable,
 }
 
 impl fmt::Display for InvokeKind {
@@ -24,6 +25,7 @@ impl fmt::Display for InvokeKind {
             Self::Exec => f.write_str("exec"),
             Self::Call => f.write_str("call"),
             Self::SysCall => f.write_str("syscall"),
+            Self::SysCallStable => f.write_str("syscall_stable"),
             Self::ProcRef => f.write_str("procref"),
         }
     }

@@ -25,7 +25,7 @@ use miden_core::{
     WORD_SIZE, Word,
     mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
-    program::KernelDescriptor,
+    program::{KernelDescriptor, hash_kernel_key},
     serde::Serializable,
 };
 use miden_mast_package::{
@@ -1616,6 +1616,18 @@ impl Assembler {
             kind: Some(kind),
         };
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
+        if kind == InvokeKind::SysCallStable {
+            let SymbolResolution::Exact { gid, .. } = resolved else {
+                return Err(Report::msg("stable syscalls require a named root kernel export"));
+            };
+            let path = self.linker[gid.module].path().join(self.linker[gid].name());
+            let key = hash_kernel_key(path.as_str());
+            if self.linker.kernel().resolve(key).is_none() {
+                return Err(Report::msg(format!("kernel does not export stable syscall '{path}'")));
+            }
+            let node = mast_forest_builder.ensure_external_key_use(key)?;
+            return Ok(ResolvedProcedure { node, function: None });
+        }
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
                 let path = match target {

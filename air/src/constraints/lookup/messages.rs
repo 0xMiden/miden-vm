@@ -696,20 +696,21 @@ pub struct AeadEidosCompressionOutputPairMsg<E> {
 // KERNEL ROM MESSAGE
 // ================================================================================================
 
-/// Kernel ROM message (4 elements): `bus_prefix[bus] + [digest[4]]`.
+/// Kernel ROM message (8 elements): `bus_prefix[bus] + [key[4], root[4]]`.
 ///
 /// Kernel procedure call responses, balanced against SYSCALL requests. Membership is checked
 /// separately on the hasher bus; the former initialization bus ID remains reserved.
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     bus: BusId,
-    pub digest: WordFields<E>,
+    pub key: WordFields<E>,
+    pub root: WordFields<E>,
 }
 
 impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     /// Kernel procedure call message (SYSCALL request side + chiplet CALL response).
-    pub fn call(digest: WordFields<E>) -> Self {
-        Self { bus: BusId::KernelRomCall, digest }
+    pub fn call(key: WordFields<E>, root: WordFields<E>) -> Self {
+        Self { bus: BusId::KernelRomCall, key, root }
     }
 }
 
@@ -1062,7 +1063,14 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(self.bus as usize, self.digest.clone())
+        let export: [E; 8] = core::array::from_fn(|i| {
+            if i < 4 {
+                self.key[i].clone()
+            } else {
+                self.root[i - 4].clone()
+            }
+        });
+        challenges.encode(self.bus as usize, export)
     }
 }
 

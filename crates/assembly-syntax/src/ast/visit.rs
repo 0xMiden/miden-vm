@@ -143,6 +143,9 @@ pub trait Visit<T = ()> {
     fn visit_syscall(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_syscall(self, target)
     }
+    fn visit_syscall_stable(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
+        visit_syscall_stable(self, target)
+    }
     fn visit_procref(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_procref(self, target)
     }
@@ -236,6 +239,9 @@ where
     }
     fn visit_syscall(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         (**self).visit_syscall(target)
+    }
+    fn visit_syscall_stable(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
+        (**self).visit_syscall_stable(target)
     }
     fn visit_procref(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         (**self).visit_procref(target)
@@ -486,6 +492,7 @@ where
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
         SysCall(target) => visitor.visit_syscall(target),
+        SysCallStable(target) => visitor.visit_syscall_stable(target),
         ProcRef(target) => visitor.visit_procref(target),
 
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
@@ -545,6 +552,14 @@ where
     V: ?Sized + Visit<T>,
 {
     visitor.visit_invoke_target(target)
+}
+
+#[inline]
+pub fn visit_syscall_stable<V, T>(visitor: &mut V, target: &InvocationTarget) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    visitor.visit_syscall(target)
 }
 
 #[inline]
@@ -710,6 +725,9 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_syscall(self, target)
     }
+    fn visit_mut_syscall_stable(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
+        visit_mut_syscall_stable(self, target)
+    }
     fn visit_mut_procref(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_procref(self, target)
     }
@@ -803,6 +821,9 @@ where
     }
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         (**self).visit_mut_syscall(target)
+    }
+    fn visit_mut_syscall_stable(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
+        (**self).visit_mut_syscall_stable(target)
     }
     fn visit_mut_procref(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         (**self).visit_mut_procref(target)
@@ -1057,6 +1078,7 @@ where
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
         SysCall(target) => visitor.visit_mut_syscall(target),
+        SysCallStable(target) => visitor.visit_mut_syscall_stable(target),
         ProcRef(target) => visitor.visit_mut_procref(target),
 
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
@@ -1119,6 +1141,17 @@ where
     V: ?Sized + VisitMut<T>,
 {
     visitor.visit_mut_invoke_target(target)
+}
+
+#[inline]
+pub fn visit_mut_syscall_stable<V, T>(
+    visitor: &mut V,
+    target: &mut InvocationTarget,
+) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    visitor.visit_mut_syscall(target)
 }
 
 #[inline]

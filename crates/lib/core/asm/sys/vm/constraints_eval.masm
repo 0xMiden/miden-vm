@@ -15,7 +15,7 @@ use miden::core::sys::vm::layout
 const NUM_INPUTS_CIRCUIT = 740
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 6824
+const NUM_EVAL_GATES_CIRCUIT = 6848
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 5
@@ -24,11 +24,11 @@ const MAX_CYCLE_LEN_LOG = 5
 const NUM_AIRS = 4
 
 # Number of 8-felt blocks in the authenticated ACE circuit stream.
-const ACE_STREAM_BLOCKS = 880
+const ACE_STREAM_BLOCKS = 883
 
 # Precomputed generic Felt-sequence chaining word for the fixed-length stream.
 const ACE_STREAM_INIT_CV_0 = 13503953893947607553
-const ACE_STREAM_INIT_CV_1 = 11912009168875166592
+const ACE_STREAM_INIT_CV_1 = 11912009168875166616
 const ACE_STREAM_INIT_CV_2 = 11170449401267093504
 const ACE_STREAM_INIT_CV_3 = 6620516959492505600
 
@@ -42,10 +42,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 4060620625394109941
-const ACE_CIRCUIT_DIGEST_1 = 5192206952314593240
-const ACE_CIRCUIT_DIGEST_2 = 4030667473333621274
-const ACE_CIRCUIT_DIGEST_3 = 4248687801598984886
+const ACE_CIRCUIT_DIGEST_0 = 824868645914494186
+const ACE_CIRCUIT_DIGEST_1 = 3531816583495332601
+const ACE_CIRCUIT_DIGEST_2 = 2639121484496160423
+const ACE_CIRCUIT_DIGEST_3 = 5727964536510487458
 
 # ERRORS
 # =================================================================================================

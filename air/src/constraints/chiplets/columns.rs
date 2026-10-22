@@ -457,12 +457,14 @@ const _: () = {
 // KERNEL ROM COLUMNS
 // ================================================================================================
 
-/// Kernel ROM chiplet columns (13 columns), viewed from `chiplets[5..18]`.
+/// Kernel ROM chiplet columns (17 columns), viewed from `chiplets[5..22]`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct KernelRomCols<T> {
-    /// Number of SYSCALLs to this procedure (CALL-label multiplicity).
+    /// Number of SYSCALLs to this export key (CALL-label multiplicity).
     pub multiplicity: T,
+    /// Export key committed by the syscall node.
+    pub key: [T; WORD_SIZE],
     /// Kernel procedure root digest.
     pub root: [T; WORD_SIZE],
     /// Start address of this procedure's Merkle verification in the hasher controller.
@@ -473,7 +475,7 @@ pub struct KernelRomCols<T> {
     pub direction_bit: T,
     /// Path length, bound to the final controller row through the Merkle return message.
     pub depth: T,
-    /// Domain-separated kernel leaf hash of the procedure root.
+    /// Domain-separated kernel leaf hash of the export key and procedure root.
     pub leaf: [T; WORD_SIZE],
 }
 

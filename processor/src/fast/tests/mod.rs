@@ -15,8 +15,8 @@ use miden_core::{
     ONE, Word,
     events::SystemEvent,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
-        MastNodeId, SplitNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNode,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::Operation,
     program::StackInputs,
@@ -1621,90 +1621,94 @@ fn dynexec_propagates_inline_context_through_the_selected_target() {
 }
 
 #[test]
-fn external_exec_propagates_inline_context_into_the_loaded_package() {
+fn stable_syscall_propagates_inline_context_into_the_loaded_kernel() {
     let source_manager = Arc::new(DefaultSourceManager::default());
-    let mut library_parser = Module::parser(Some(ModuleKind::Library));
-    let library_module = library_parser
-        .parse_str(
-            None,
-            "
-            namespace dep::math
-
-            pub proc target
-                push.7
-                drop
-            end
-            ",
-            source_manager.clone(),
-        )
-        .unwrap();
-    let library: Arc<Package> = Arc::from(
+    let kernel_module =
+        parse_kernel_source(source_manager.clone(), "pub proc target caller dropw push.7 drop end");
+    let kernel: Arc<Package> = Arc::from(
         Assembler::new(source_manager.clone())
-            .assemble_library("dep", library_module, None::<Box<Module>>)
+            .assemble_kernel("kernel", kernel_module, None::<Box<Module>>)
             .unwrap(),
     );
-    let assembler = Assembler::new(source_manager.clone())
-        .with_package(library.clone(), Linkage::Dynamic)
-        .unwrap();
-    let mut program_parser = Module::parser(Some(ModuleKind::Executable));
-    let mut program_module = program_parser
-        .parse_str(
-            None,
-            "
-            use dep::math
+    let kernel_forest = kernel.mast_forest().clone();
+    let assembler = Assembler::with_kernel(source_manager, kernel.clone()).unwrap();
+    let package: Arc<Package> = Arc::from(
+        assembler
+            .assemble_program(
+                "program",
+                "
+            proc wrapper
+                syscall_stable.target
+            end
 
-            begin
-                nop
-                nop
-                exec.math::target
+            proc inner
+                exec.wrapper
                 push.9
                 drop
             end
+
+            begin
+                call.inner
+                push.8
+                drop
+            end
             ",
-            source_manager.clone(),
-        )
-        .unwrap();
-    set_entrypoint_inline_context(&source_manager, &mut program_module, "source::external");
-    let package: Arc<Package> =
-        Arc::from(assembler.assemble_program("program", program_module).unwrap());
+            )
+            .unwrap(),
+    );
     let caller_forest = package.mast_forest().clone();
+    let caller_hash = caller_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Call(call) if !call.is_syscall() => {
+                Some(caller_forest[call.callee()].digest())
+            },
+            _ => None,
+        })
+        .expect("program should call its user procedure");
+    assert!(
+        caller_forest
+            .find_procedure_root(kernel.get_procedure_root_by_path("::$kernel::target").unwrap(),)
+            .is_none(),
+        "the stable syscall must load its implementation from the host",
+    );
 
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut resume_context = processor
         .get_initial_resume_context_for_package(package)
         .expect("package resume context should initialize");
     let mut host = DefaultHost::default();
-    host.load_library(library).unwrap();
+    host.load_library(kernel).unwrap();
     let mut saw_target_context = false;
+    let mut saw_target_metadata = false;
+    let mut saw_caller_identity = false;
     let mut saw_context_cleared = false;
     loop {
         let names = active_inline_names(&resume_context);
-        if names.is_empty() {
-            if saw_target_context {
-                saw_context_cleared = true;
-                assert_eq!(
-                    resume_context.current_forest().commitment(),
-                    caller_forest.commitment()
-                );
-                assert!(
-                    !matches!(
-                        resume_context.continuation_stack().peek_continuation(),
-                        Some(Continuation::EnterForest { .. })
-                    ),
-                    "resume contexts must eagerly restore non-clock forest continuations",
-                );
-            }
-        } else {
-            assert_eq!(names, ["::dep::math::target", "source::external"]);
+        if resume_context.current_forest().commitment() == kernel_forest.commitment() {
+            assert!(names.iter().any(|name| name.ends_with("::wrapper")), "{names:?}");
+            assert_eq!(processor.caller_hash(), caller_hash);
+            saw_caller_identity |= processor.stack_get_word(0) == caller_hash;
             let frames = resume_context.debug_call_frames();
-            assert_eq!(frames.first().unwrap().inherited_inline_calls(), 0);
             if let Some(target) = frames
                 .last()
                 .filter(|frame| frame.debug_info()[frame.function().name_idx].ends_with("target"))
             {
                 assert_eq!(target.inherited_inline_calls(), names.len());
+                saw_target_metadata = true;
             }
             saw_target_context = true;
+        } else if names.is_empty() && saw_target_context {
+            saw_context_cleared = true;
+            assert_eq!(resume_context.current_forest().commitment(), caller_forest.commitment());
+            assert!(
+                !matches!(
+                    resume_context.continuation_stack().peek_continuation(),
+                    Some(Continuation::EnterForest { .. })
+                ),
+                "resume contexts must eagerly restore non-clock forest continuations",
+            );
         }
 
         let Some(next_resume_context) = processor.step_sync(&mut host, resume_context).unwrap()
@@ -1714,8 +1718,10 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
         resume_context = next_resume_context;
     }
 
-    assert!(saw_target_context, "loaded target should inherit the external boundary context");
-    assert!(saw_context_cleared, "inline context should end when external execution returns");
+    assert!(saw_target_context, "loaded kernel should inherit the syscall's inline context");
+    assert!(saw_target_metadata, "stepping should retain loaded kernel debug metadata");
+    assert!(saw_caller_identity, "caller should return the invoking user procedure's digest");
+    assert!(saw_context_cleared, "inline context should end when the syscall returns");
 }
 
 #[test]

@@ -1118,8 +1118,8 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_kernel_proc_access(&mut self, proc_hash: Word) {
-        self.kernel.record_kernel_proc_access(proc_hash);
+    fn record_kernel_proc_access(&mut self, key: Word, _procedure_root: Word) {
+        self.kernel.record_kernel_proc_access(key);
     }
 
     #[inline(always)]

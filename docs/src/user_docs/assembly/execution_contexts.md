@@ -15,7 +15,7 @@ While executing in a user context, we can request to execute some procedures in 
 
 ### Procedure invocation semantics
 
-As mentioned in the [previous section](./code_organization.md), procedures in Miden assembly can be invoked via five different instructions: `exec`, `call`, `syscall`, `dynexec`, and `dyncall`. Invocation semantics of `call`, `dyncall`, and `syscall` instructions are basically the same, the only difference being that the `syscall` instruction can be used only with procedures which are defined in the program's kernel. The `exec` and `dynexec` instructions are different, and we explain these differences below.
+As mentioned in the [previous section](./code_organization.md), procedures in Miden assembly can be invoked via the following instructions: `exec`, `call`, `syscall` (or `syscall_stable`), `dynexec`, and `dyncall`. Invocation semantics of `call`, `dyncall`, and `syscall` instructions are basically the same, the only difference being that the `syscall` instruction can be used only with procedures which are defined in the program's kernel. The `exec` and `dynexec` instructions are different, and we explain these differences below.
 
 #### Invoking via `call`, `dyncall`, and `syscall` instructions
 
@@ -53,6 +53,23 @@ There are two unique properties that apply to kernel libraries:
 
 - Kernel syscalls correspond to the set of procedures exported from the root module of the kernel library, i.e. the `$kernel` module. Submodules of the kernel are pure library code, and may be invoked with `exec` just like any other library code.
 - Kernel submodules, being pure library code, are unique in that they may be used both in the implementation of the kernel itself, and to provide support functions for userspace. This is visible in the fact that kernel code can use the `caller` instruction, while userspace code cannot. However, due to the fact that procedures defined in kernel submodules can be made accessible to userspace, kernel authors should take care to ensure that use of `caller` only occurs in procedures _not_ exported to userspace. The set of submodules visible to userspace are those given `pub` visibility in the root kernel module (and any descendants which are also transitively `pub`).
+
+#### Stable syscall prototype
+
+`syscall_stable.foo` (also `syscall_stable.::$kernel::foo`) invokes a named export of the root
+kernel module with the same context and stack semantics as `syscall`. Submodule procedures and
+raw digest targets are not supported by this syntax.
+
+The assembler hashes the UTF-8 canonical exported path `::$kernel::foo` under the versioned
+`KERNEL_KEY` byte-string domain. It lowers the instruction to an ordinary syscall whose target
+is this key. The kernel map binds the key to an implementation MAST root, and the proof
+authenticates that pair against the public kernel root. Ordinary syscalls use identity bindings
+from a procedure digest to itself.
+
+Changing an implementation while keeping its exported name preserves the caller's MAST root;
+the kernel commitment changes. This provides no promise of ABI compatibility between
+implementations. Executable packages still pin their embedded kernel's exact name, version,
+and commitment; replacing the kernel remains an explicit program-construction operation.
 
 ### Memory layout
 

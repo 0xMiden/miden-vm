@@ -38,6 +38,7 @@ impl Assembler {
             instruction.inner(),
             Instruction::Call(_)
                 | Instruction::SysCall(_)
+                | Instruction::SysCallStable(_)
                 | Instruction::DynExec
                 | Instruction::DynCall
         );
@@ -569,11 +570,15 @@ impl Assembler {
                     )
                     .map(Into::into);
             },
-            Instruction::SysCall(callee) => {
+            Instruction::SysCall(callee) | Instruction::SysCallStable(callee) => {
                 let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
-                        InvokeKind::SysCall,
+                        if matches!(instruction.inner(), Instruction::SysCallStable(_)) {
+                            InvokeKind::SysCallStable
+                        } else {
+                            InvokeKind::SysCall
+                        },
                         callee,
                         proc_ctx.id(),
                         span,

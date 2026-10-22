@@ -58,12 +58,14 @@ impl Assembler {
                 }
                 mast_forest_builder.record_exec_inline_calls(resolved.node, &inline_calls)
             },
-            InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_use(
-                resolved.node,
-                matches!(kind, InvokeKind::SysCall),
-                asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
-                inline_calls,
-            ),
+            InvokeKind::Call | InvokeKind::SysCall | InvokeKind::SysCallStable => {
+                mast_forest_builder.ensure_call_node_use(
+                    resolved.node,
+                    matches!(kind, InvokeKind::SysCall | InvokeKind::SysCallStable),
+                    asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
+                    inline_calls,
+                )
+            },
         }
     }
 

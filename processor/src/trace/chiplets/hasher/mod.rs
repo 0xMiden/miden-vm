@@ -178,10 +178,10 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records an identity export-pair compression requested by the kernel ROM row.
-    pub(super) fn hash_kernel_leaf(&mut self, procedure_root: Digest) -> Digest {
+    /// Records an export-pair compression requested by the kernel ROM row.
+    pub(super) fn hash_kernel_export(&mut self, key: Digest, procedure_root: Digest) -> Digest {
         let mut state = [ZERO; STATE_WIDTH];
-        state[..4].copy_from_slice(procedure_root.as_elements());
+        state[..4].copy_from_slice(key.as_elements());
         state[4..8].copy_from_slice(procedure_root.as_elements());
         state[8..].copy_from_slice(Eidos::init_chaining_word(KERNEL_EXPORT, 8).as_elements());
         self.record_compression_request(&state, CompressionOutput::Packed);

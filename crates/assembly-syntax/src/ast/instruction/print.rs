@@ -321,6 +321,9 @@ impl PrettyPrint for Instruction {
             Self::SysCall(InvocationTarget::Path(path)) => {
                 const_text("syscall") + const_text(".") + display(path)
             },
+            Self::SysCallStable(target) => {
+                const_text("syscall_stable") + const_text(".") + display(target)
+            },
             Self::DynExec => const_text("dynexec"),
             Self::DynCall => const_text("dyncall"),
             Self::ProcRef(InvocationTarget::MastRoot(_)) => {

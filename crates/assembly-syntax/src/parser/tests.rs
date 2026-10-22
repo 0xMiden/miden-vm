@@ -907,6 +907,8 @@ begin
     push.[1,2,3,4][1..3]
     exec.foo
     call.foo::bar
+    syscall_stable.foo
+    syscall_stable.::$kernel::foo
     syscall.0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a
     procref.foo::bar
     emit.EVENT_ID
@@ -920,6 +922,33 @@ end
     );
 
     assert_parses(source);
+
+    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let source = "begin syscall_stable.foo syscall_stable.$kernel::bar end";
+    let module = ModuleParser::new(Some(ast::ModuleKind::Executable))
+        .parse_str(None, source, source_manager.clone())
+        .expect("named stable syscalls should parse");
+    let rendered = module.to_string();
+    assert!(rendered.contains("syscall_stable.::$kernel::foo"), "{rendered}");
+    assert!(rendered.contains("syscall_stable.::$kernel::bar"), "{rendered}");
+    let reparsed = ModuleParser::new(Some(ast::ModuleKind::Executable))
+        .parse_str(None, &rendered, source_manager.clone())
+        .expect("canonical stable syscalls should parse");
+    assert_eq!(reparsed.to_string(), rendered);
+
+    for target in [
+        "::$kernel::helpers::foo",
+        "userspace::foo",
+        "0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a",
+    ] {
+        let source = format!("begin syscall_stable.{target} end");
+        assert!(
+            ModuleParser::new(Some(ast::ModuleKind::Executable))
+                .parse_str(None, source, source_manager.clone())
+                .is_err(),
+            "accepted invalid stable target {target}",
+        );
+    }
 }
 
 #[test]

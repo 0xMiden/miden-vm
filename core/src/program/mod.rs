@@ -18,7 +18,10 @@ mod request;
 pub use request::{PROOF_REQUEST_DOMAIN_TAG, proof_request_key};
 
 mod kernel;
-pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError, hash_kernel_leaf};
+pub use kernel::{
+    KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError, KernelExport, hash_kernel_export,
+    hash_kernel_key, hash_kernel_leaf,
+};
 
 mod stack;
 pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutputs};

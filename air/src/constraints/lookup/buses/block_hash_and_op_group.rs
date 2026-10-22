@@ -61,7 +61,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
 
     let f_join = op_flags.join();
     let f_split = op_flags.split();
-    let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call() + op_flags.syscall();
+    let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call();
     let f_end = op_flags.end();
     let f_push = op_flags.push();
 
@@ -147,9 +147,9 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         Deg { v: 6, u: 6 },
                     );
 
-                    // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.
+                    // DYN/DYNCALL/CALL: single child at `h_0`.
                     g.add(
-                        "dyn_dyncall_call_syscall",
+                        "dyn_dyncall_call",
                         f_child,
                         || {
                             let parent = addr_next.into();
@@ -157,6 +157,19 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             BlockHashMsg::Child { parent, child_hash }
                         },
                         Deg { v: 5, u: 6 },
+                    );
+
+                    // SYSCALL executes the resolved root at `h_1`; its export key at `h_0`
+                    // is committed by the control-block hash and authenticated by the ROM.
+                    g.add(
+                        "syscall",
+                        op_flags.syscall(),
+                        || {
+                            let parent = addr_next.into();
+                            let child_hash = h_1.map(LB::Expr::from);
+                            BlockHashMsg::Child { parent, child_hash }
+                        },
+                        Deg { v: 4, u: 5 },
                     );
 
                     // END: remove the current child from the block-hash table.

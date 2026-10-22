@@ -5,12 +5,15 @@ use miden_air::{
     ChipletCols, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
 };
 use miden_core::{
-    Felt, ONE, ZERO,
+    Felt, ONE, Word, ZERO,
     crypto::hash::Eidos,
     field::QuadFelt,
-    mast::{BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest,
+        MastNodeExt,
+    },
     operations::Operation,
-    program::{KernelDescriptor, Program, domain::KERNEL_EXPORT},
+    program::{KernelDescriptor, KernelExport, Program, domain::KERNEL_EXPORT},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -27,10 +30,25 @@ fn program_with_kernel_calls() -> Program {
     let unused = BasicBlockNodeBuilder::new(vec![Operation::Push(ONE), Operation::Drop])
         .add_to_forest(&mut forest)
         .unwrap();
-    let kernel =
-        KernelDescriptor::new(&[forest[a].digest(), forest[b].digest(), forest[unused].digest()])
-            .unwrap();
-    let call_a = CallNodeBuilder::new_syscall(a).add_to_forest(&mut forest).unwrap();
+    let key_a = Word::from([1_u32, 2, 3, 4]);
+    let kernel = KernelDescriptor::from_exports(vec![
+        KernelExport {
+            key: key_a,
+            procedure_root: forest[a].digest(),
+        },
+        KernelExport {
+            key: forest[b].digest(),
+            procedure_root: forest[b].digest(),
+        },
+        KernelExport {
+            key: forest[unused].digest(),
+            procedure_root: forest[unused].digest(),
+        },
+    ])
+    .unwrap();
+    forest.make_root(a);
+    let stable_a = ExternalNodeBuilder::new(key_a).add_to_forest(&mut forest).unwrap();
+    let call_a = CallNodeBuilder::new_syscall(stable_a).add_to_forest(&mut forest).unwrap();
     let call_b = CallNodeBuilder::new_syscall(b).add_to_forest(&mut forest).unwrap();
     let aa = JoinNodeBuilder::new([call_a, call_a]).add_to_forest(&mut forest).unwrap();
     let ab = JoinNodeBuilder::new([call_a, call_b]).add_to_forest(&mut forest).unwrap();
@@ -95,10 +113,16 @@ fn kernel_membership_authenticates_distinct_accessed_procedures() {
             chiplets.values[row * chiplets.width()..(row + 1) * chiplets.width()].borrow();
         assert_ne!(cols.kernel_rom().hasher_start, ZERO);
         assert_eq!(cols.kernel_rom().depth, Felt::from_u8(2));
-        let identity_pair: [Felt; 8] = core::array::from_fn(|i| cols.kernel_rom().root[i % 4]);
+        let export_pair: [Felt; 8] = core::array::from_fn(|i| {
+            if i < 4 {
+                cols.kernel_rom().key[i]
+            } else {
+                cols.kernel_rom().root[i - 4]
+            }
+        });
         assert_eq!(
             cols.kernel_rom().leaf,
-            Eidos::hash_elements_in_domain(&identity_pair, KERNEL_EXPORT).into_elements(),
+            Eidos::hash_elements_in_domain(&export_pair, KERNEL_EXPORT).into_elements(),
         );
     }
 }
@@ -110,6 +134,7 @@ fn kernel_membership_rejects_broken_authorization_links() {
     let rows = kernel_rows(&chiplets);
     let width = chiplets.width();
     for tamper in [
+        "key",
         "callee",
         "multiplicity",
         "start",
@@ -127,27 +152,28 @@ fn kernel_membership_rejects_broken_authorization_links() {
         let (mut inputs, auxiliary) = trace.public_inputs().to_air_inputs();
         let row = rows[0] * width;
         match tamper {
+            "key" => altered.values[row + 6] += ONE,
             "callee" => {
-                // Authenticate the other exported procedure while retaining the original calls.
+                // Substitute the other implementation while retaining the original export key.
                 let other = rows[1] * width;
-                for column in 6..18 {
+                for column in 10..14 {
                     altered.values[row + column] = chiplets.values[other + column];
                 }
             },
             "multiplicity" => altered.values[row + 5] += ONE,
-            "start" => altered.values[row + 10] += ONE,
-            "index" => altered.values[row + 11] += ONE,
-            "bit" => altered.values[row + 12] = ONE - altered.values[row + 12],
+            "start" => altered.values[row + 14] += ONE,
+            "index" => altered.values[row + 15] += ONE,
+            "bit" => altered.values[row + 16] = ONE - altered.values[row + 16],
             "root" => inputs[1].1[0] += ONE,
-            "depth" => altered.values[row + 13] += ONE,
-            "zero_depth" => altered.values[row + 13] = ZERO,
-            "negative_depth" => altered.values[row + 13] = -ONE,
-            "large_depth" => altered.values[row + 13] = Felt::new_unchecked(1 << 32),
+            "depth" => altered.values[row + 17] += ONE,
+            "zero_depth" => altered.values[row + 17] = ZERO,
+            "negative_depth" => altered.values[row + 17] = -ONE,
+            "large_depth" => altered.values[row + 17] = Felt::new_unchecked(1 << 32),
             "swapped_authentication" => {
-                // Preserve the membership and syscall multisets, but bind each raw digest to
+                // Preserve the membership and syscall multisets, but bind each export pair to
                 // the other procedure's leaf. Only the leaf-compression link rejects this.
                 let other = rows[1] * width;
-                for column in 10..18 {
+                for column in 14..22 {
                     altered.values.swap(row + column, other + column);
                 }
             },
@@ -155,12 +181,12 @@ fn kernel_membership_rejects_broken_authorization_links() {
                 // Swapping both terminal rows preserves the return multiset if messages omit
                 // depth. Init and syscall messages stay honest; the final-level tag must reject it.
                 let other = rows[1] * width;
-                let start = altered.values[row + 10];
-                let other_start = altered.values[other + 10];
-                let depth = altered.values[row + 13];
-                let other_depth = altered.values[other + 13];
-                altered.values[row + 13] = other_start + other_depth - start;
-                altered.values[other + 13] = start + depth - other_start;
+                let start = altered.values[row + 14];
+                let other_start = altered.values[other + 14];
+                let depth = altered.values[row + 17];
+                let other_depth = altered.values[other + 17];
+                altered.values[row + 17] = other_start + other_depth - start;
+                altered.values[other + 17] = start + depth - other_start;
             },
             _ => unreachable!(),
         }

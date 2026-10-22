@@ -27,7 +27,7 @@ use crate::{
     },
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
-        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
+        finish_load_mast_forest_for_invocation, finish_load_mast_forest_from_external,
     },
     trace::execution_tracer::ExecutionTracer,
     tracer::Tracer,
@@ -960,7 +960,10 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
+                InternalBreakReason::LoadMastForestForInvocation {
+                    callee_hash,
+                    source_node_id,
+                } => {
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self.load_mast_forest_sync(
                             callee_hash,
@@ -973,7 +976,7 @@ impl FastProcessor {
                             Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
                         };
 
-                    finish_load_mast_forest_from_dyn_start(
+                    finish_load_mast_forest_for_invocation(
                         root_id,
                         new_forest,
                         new_package_debug_info,
@@ -1090,7 +1093,10 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
+                InternalBreakReason::LoadMastForestForInvocation {
+                    callee_hash,
+                    source_node_id,
+                } => {
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self
                             .load_mast_forest(
@@ -1106,7 +1112,7 @@ impl FastProcessor {
                             Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
                         };
 
-                    finish_load_mast_forest_from_dyn_start(
+                    finish_load_mast_forest_for_invocation(
                         root_id,
                         new_forest,
                         new_package_debug_info,
