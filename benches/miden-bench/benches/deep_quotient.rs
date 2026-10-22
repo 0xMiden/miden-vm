@@ -1,27 +1,29 @@
 //! DEEP quotient benchmarks.
 //!
 //! Benchmarks the barycentric evaluation used in DEEP quotient construction.
-//! Runs benchmarks for Goldilocks with Poseidon2.
+//! Runs benchmarks for Goldilocks with Eidos.
 //!
 //! Run with:
 //! ```bash
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench deep_quotient --features testing
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench --bench deep_quotient
 //!
 //! # With parallelism
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench deep_quotient --features testing,concurrent
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench \
+//!     --bench deep_quotient --features concurrent
 //!
 //! # Filter by field
-//! cargo bench --bench deep_quotient --features testing -- goldilocks
+//! cargo bench -p miden-bench --bench deep_quotient -- goldilocks
 //! ```
 
+#[path = "support/eidos.rs"]
+mod eidos;
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use eidos::{Felt, QuadFelt, test_lmcs};
 use miden_lifted_stark::testing::{
     Coset, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, PointQuotients, RELATIVE_SPECS,
-    canonical_domain,
-    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_lmcs},
-    generate_matrices_from_specs, total_elements,
+    canonical_domain, generate_matrices_from_specs, total_elements,
 };
 use p3_field::FieldArray;
 use p3_matrix::dense::RowMajorMatrix;
@@ -39,7 +41,7 @@ fn bench_deep_quotient(c: &mut Criterion) {
 
     for &log_lde_height in LOG_HEIGHTS {
         let n_leaves = 1usize << log_lde_height;
-        let group_name = format!("DEEP_Quotient/{n_leaves}/goldilocks/poseidon2/{PARALLEL_STR}");
+        let group_name = format!("DEEP_Quotient/{n_leaves}/goldilocks/eidos/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
 
         // Generate matrices using canonical specs
