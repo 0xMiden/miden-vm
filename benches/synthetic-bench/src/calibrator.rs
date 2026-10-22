@@ -32,8 +32,8 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         .execute_for_proving_sync(&program, &mut host)
         .map_err(|e| MeasurementError::Execution(format!("{e}")))?;
     let (vm_witness, _) = witness.into_parts();
-    let trace =
-        build_trace(vm_witness).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
+    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget())
+        .map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
     let summary = trace.trace_len_summary();
     let chiplets = summary.chiplets();
 

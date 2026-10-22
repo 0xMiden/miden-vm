@@ -28,6 +28,7 @@ std = [
 testing = ["arbitrary"]
 
 [dependencies]
+miden-air.workspace = true
 miden-vm-stark.workspace = true
 miden-air-source.workspace = true
 miden-assembly.workspace = true

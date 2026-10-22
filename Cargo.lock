@@ -2742,6 +2742,7 @@ name = "miden-test-utils"
 version = "1.0.0"
 dependencies = [
  "env_logger",
+ "miden-air",
  "miden-air-source",
  "miden-assembly",
  "miden-assembly-syntax",
@@ -2832,6 +2833,7 @@ dependencies = [
  "clap",
  "criterion",
  "hex",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
@@ -2860,6 +2862,7 @@ dependencies = [
  "clap",
  "codspeed-criterion-compat",
  "insta",
+ "miden-air",
  "miden-core-lib",
  "miden-vm",
  "rayon",

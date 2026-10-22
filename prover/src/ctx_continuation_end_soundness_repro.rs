@@ -95,7 +95,11 @@ fn build_basic_harness() -> (ReproTrace, BasicRows) {
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_air::vm::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 
@@ -225,7 +229,11 @@ fn build_call_harness() -> (ReproTrace, CallRows) {
 
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_air::vm::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 

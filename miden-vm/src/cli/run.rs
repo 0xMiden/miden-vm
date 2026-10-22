@@ -1,11 +1,12 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
+use miden_air::vm::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor,
-    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
+    trace::{VmTrace, build_trace},
 };
 use miden_vm::internal::InputFile;
 use tracing::instrument;
@@ -185,7 +186,7 @@ fn run_masp_program(
         .execute_for_proving_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
         .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
@@ -256,7 +257,7 @@ fn run_masm_program(
             .wrap_err("Failed to execute program")?,
     };
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
         .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))

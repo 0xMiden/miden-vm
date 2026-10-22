@@ -632,7 +632,7 @@ impl Test {
 
         fast_stack_result.and_then(|witness| {
             let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness)?;
+            let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)

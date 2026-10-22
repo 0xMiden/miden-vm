@@ -2,7 +2,6 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
-use miden_air::vm::{config, memory};
 use miden_air_source::vm::{
     AIRS, CoreCols, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
     trace::{
@@ -20,6 +19,7 @@ use miden_core::{
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
+use miden_stark::memory::ProvingBudget;
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -57,16 +57,8 @@ pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH;
 /// same cap again while replaying chiplet activity, and once more against each padded per-AIR
 /// height once they're known (see [`validate_heights_within_max_trace_len`]). Row indices are
 /// `u32`-backed, so this bound must hold regardless of budget; the actual memory bound is the
-/// tiered check in `build_trace_inner` (see [`memory::max_any_height_for_budget`] and
-/// [`memory::prover_peak_bytes`]).
+/// tiered check in `build_trace_inner` using the supplied [`ProvingBudget`].
 pub(crate) const MAX_TRACE_LEN: usize = 1 << 29;
-
-/// Default maximum modelled peak memory, in bytes, [`build_trace`] assumes when no budget is given
-/// explicitly.
-/// Set to 64 GiB, comfortably above every workload in-repo and far below what the previous
-/// row-count cap admitted; callers that own actual proving policy (e.g. `miden-prover`'s
-/// `Prover`) are expected to set their own via [`build_trace_with_budget`].
-pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
 pub(crate) mod core_trace_fragment;
 
@@ -80,6 +72,10 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
+///
+/// The caller supplies the relation's proof-memory model and byte limit. The builder enforces
+/// this budget before final padded allocations, retaining independent row-index and raw-buffer
+/// guards. The model's scope and excluded allocations are determined by the caller.
 ///
 /// # Example
 /// ```
@@ -96,40 +92,36 @@ mod tests;
 ///     .execute_for_proving_sync(&program, &mut host)
 ///     .unwrap();
 /// let (vm_witness, _) = execution_witness.into_parts();
-/// let trace = miden_processor::trace::build_trace(vm_witness).unwrap();
+/// let trace =
+///     miden_processor::trace::build_trace(vm_witness, &miden_air::vm::memory::default_budget())
+///         .unwrap();
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
 #[instrument(name = "build_trace", skip_all)]
-pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, DEFAULT_MAX_PROVER_MEMORY_BYTES)
-}
-
-/// Same as [`build_trace`], but with an explicit modelled peak-memory budget instead of the
-/// default. See [`miden_air::vm::memory`] for the model's scope and exclusions.
-pub fn build_trace_with_budget(
+pub fn build_trace(
     witness: VmWitness,
-    max_prover_memory_bytes: u64,
+    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, max_prover_memory_bytes)
+    build_trace_inner(witness, None, budget)
 }
 
-/// Same as [`build_trace_with_budget`], but with a hasher chiplet that was already built — used
+/// Same as [`build_trace`], but with a hasher chiplet that was already built — used
 /// by the streaming path, where the hasher builder runs concurrently with program execution
 /// (`FastProcessor::execute_and_build_trace_sync`, std-only).
 #[cfg(feature = "std")]
 pub(crate) fn build_trace_with_prebuilt_hasher(
     witness: VmWitness,
     prebuilt_hasher: Hasher,
-    max_prover_memory_bytes: u64,
+    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, Some(prebuilt_hasher), max_prover_memory_bytes)
+    build_trace_inner(witness, Some(prebuilt_hasher), budget)
 }
 
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
-    max_prover_memory_bytes: u64,
+    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
 ) -> Result<VmTrace, ExecutionError> {
     let VmWitness {
         program_info,
@@ -152,13 +144,12 @@ fn build_trace_inner(
         max_stack_depth,
     } = trace;
 
-    let pcs_params = config::pcs_params();
+    let max_prover_memory_bytes = budget.limit_bytes();
 
     // Tier 1: a permissive per-AIR row cap derived from the cheapest AIR's marginal cost, so it
     // never rejects a shape that the exact budget check below would accept. `MAX_TRACE_LEN` is a
     // hard ceiling independent of the budget (row indices are `u32`-backed).
-    let max_trace_len =
-        MAX_TRACE_LEN.min(memory::max_any_height_for_budget(max_prover_memory_bytes, &pcs_params));
+    let max_trace_len = MAX_TRACE_LEN.min(budget.max_any_height());
 
     // Before any trace generation, check that the core trace buffer `generate_core_trace_row_major`
     // is about to allocate (`core_trace_contexts.len() * fragment_size` rows, before any padding or
@@ -231,12 +222,11 @@ fn build_trace_inner(
     let heights: [usize; MIDEN_AIR_COUNT] =
         [core_height, chiplets_height, eidos_compression_height, byte_pair_lookup_rows];
     validate_heights_within_max_trace_len(&heights)?;
-    let estimated_bytes = memory::prover_peak_bytes(&heights, &pcs_params).ok_or(
-        ExecutionError::ProverMemoryExceeded {
+    let estimated_bytes =
+        budget.prover_peak_bytes(&heights).ok_or(ExecutionError::ProverMemoryExceeded {
             estimated_bytes: u64::MAX,
             budget_bytes: max_prover_memory_bytes,
-        },
-    )?;
+        })?;
     if estimated_bytes > max_prover_memory_bytes {
         return Err(ExecutionError::ProverMemoryExceeded {
             estimated_bytes,
