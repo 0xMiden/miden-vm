@@ -1,7 +1,7 @@
 //! Peak prover memory model for the precompile chiplet-stack proof.
 //!
-//! Mirrors the production VM peak-memory model in `miden-vm-stark` for the Miden VM proof,
-//! generalized over the [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models
+//! Derives chiplet-specific costs for the shared [`miden_stark::memory::ProverMemoryModel`].
+//! [`prover_peak_bytes_for_shape`] models
 //! the allocations that dominate peak usage: each main and aux trace held at its 1x buffer plus its
 //! blowup-factor LDE, the quotient accumulator, every layer of the three per-proof LMCS digest
 //! trees (main, aux, quotient) alive at `open` time, the transient per-leaf hashing buffer held
@@ -124,8 +124,8 @@ fn prover_peak_bytes_with_quotient_chunks(
 ///
 /// Each width tuple is `(preprocessed, main, auxiliary)` in base-field coordinates, before
 /// commitment padding. `preprocessed_shape` is the fixed table's `(height, width)`.
-pub fn prover_peak_bytes_for_shape(
-    heights: &[usize],
+pub fn prover_peak_bytes_for_shape<const N: usize>(
+    heights: &[usize; N],
     raw_widths: &[(usize, usize, usize)],
     preprocessed_shape: (usize, usize),
     num_quotient_chunks: usize,
@@ -166,19 +166,12 @@ pub fn prover_peak_bytes_for_shape(
         .checked_add(preprocessed_tree_bytes)?
         .checked_add(preprocessed_leaf_scratch_bytes)?;
 
-    let mut per_air_total: u64 = 0;
-    let mut max_height: u64 = 0;
-
-    for (&(_, width, aux_base_columns), &height) in raw_widths.iter().zip(heights) {
-        let height = u64::try_from(height).ok()?;
+    let mut per_air_bytes_per_row = [0; N];
+    for (&(_, width, aux_base_columns), cost) in raw_widths.iter().zip(&mut per_air_bytes_per_row) {
         let width = u64::try_from(width).ok()?;
         let aux_base_columns = u64::try_from(aux_base_columns).ok()?;
         let columns = width.checked_add(aux_base_columns)?;
-        let bytes_per_row = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
-        let per_air = height.checked_mul(bytes_per_row)?;
-
-        per_air_total = per_air_total.checked_add(per_air)?;
-        max_height = max_height.max(height);
+        *cost = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
     }
 
     let quotient_bytes = EXT_DIMENSION
@@ -191,21 +184,140 @@ pub fn prover_peak_bytes_for_shape(
         .checked_mul(DIGEST_BYTES)?;
     // Main, aux, and quotient trees are committed one at a time, so only one leaf-hashing scratch
     // buffer is alive at once; `max_height` bounds the LDE height of whichever tree that is.
-    let leaf_scratch_bytes =
-        max_height.checked_mul(blowup)?.checked_mul(extra_leaf_scratch_bytes)?;
-    let shared_total = max_height
-        .checked_mul(quotient_bytes.checked_add(tree_bytes)?)?
-        .checked_add(leaf_scratch_bytes)?;
-
-    let modelled = per_air_total.checked_add(shared_total)?.checked_add(preprocessed_total)?;
-    modelled
-        .checked_mul(SAFETY_NUMERATOR)
-        .map(|scaled| scaled.div_ceil(SAFETY_DENOMINATOR))
+    let model = miden_stark::memory::ProverMemoryModel::new(
+        per_air_bytes_per_row,
+        quotient_bytes.checked_add(tree_bytes)?,
+        SAFETY_NUMERATOR,
+        SAFETY_DENOMINATOR,
+    )
+    .with_additional_shared_bytes_per_max_row(blowup.checked_mul(extra_leaf_scratch_bytes)?)
+    .with_fixed_bytes(preprocessed_total);
+    model.prover_peak_bytes(heights)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Preserve the pre-refactor arithmetic as an independent overflow and rounding oracle.
+    fn reference_peak_bytes_for_shape(
+        heights: &[usize],
+        raw_widths: &[(usize, usize, usize)],
+        preprocessed_shape: (usize, usize),
+        num_quotient_chunks: usize,
+        params: &PcsParams,
+        hash_fn: HashFunction,
+    ) -> Option<u64> {
+        if heights.len() != raw_widths.len() {
+            return None;
+        }
+        if !num_quotient_chunks.is_power_of_two() {
+            return None;
+        }
+        let max_quotient_degree = u64::try_from(num_quotient_chunks).ok()?;
+        let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
+        let one_plus_blowup = blowup.checked_add(1)?;
+        // `tree_bytes`/`preprocessed_tree_bytes` already bound the persisted digest tree, leaf
+        // layer included, at `DIGEST_BYTES` per leaf; only the excess width of the
+        // transient per-leaf hashing state over that digest is unmodelled extra scratch.
+        let extra_leaf_scratch_bytes = leaf_state_bytes(hash_fn).saturating_sub(DIGEST_BYTES);
+
+        // `Preprocessed` is cached for the process lifetime and retains the raw byte-pair table,
+        // its LDE, every layer of its LMCS tree, and the leaf-hashing scratch buffer held while
+        // that tree's leaves are squeezed. A full binary tree has fewer than twice as many
+        // digests as leaves, so `2 * LDE height * DIGEST_BYTES` is a conservative upper
+        // bound.
+        let preprocessed_height = u64::try_from(preprocessed_shape.0).ok()?;
+        let preprocessed_width = u64::try_from(preprocessed_shape.1).ok()?;
+        let preprocessed_trace_bytes = preprocessed_height
+            .checked_mul(one_plus_blowup)?
+            .checked_mul(preprocessed_width)?
+            .checked_mul(FELT_BYTES)?;
+        let preprocessed_tree_bytes = preprocessed_height
+            .checked_mul(blowup)?
+            .checked_mul(2)?
+            .checked_mul(DIGEST_BYTES)?;
+        let preprocessed_leaf_scratch_bytes =
+            preprocessed_height.checked_mul(blowup)?.checked_mul(extra_leaf_scratch_bytes)?;
+        let preprocessed_total = preprocessed_trace_bytes
+            .checked_add(preprocessed_tree_bytes)?
+            .checked_add(preprocessed_leaf_scratch_bytes)?;
+
+        let mut per_air_total: u64 = 0;
+        let mut max_height: u64 = 0;
+
+        for (&(_, width, aux_base_columns), &height) in raw_widths.iter().zip(heights) {
+            let height = u64::try_from(height).ok()?;
+            let width = u64::try_from(width).ok()?;
+            let aux_base_columns = u64::try_from(aux_base_columns).ok()?;
+            let columns = width.checked_add(aux_base_columns)?;
+            let bytes_per_row = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
+            let per_air = height.checked_mul(bytes_per_row)?;
+
+            per_air_total = per_air_total.checked_add(per_air)?;
+            max_height = max_height.max(height);
+        }
+
+        let quotient_bytes = EXT_DIMENSION
+            .checked_mul(FELT_BYTES)?
+            .checked_mul(max_quotient_degree)?
+            .checked_mul(blowup)?;
+        let tree_bytes = PROOF_LMCS_TREES_AT_PEAK
+            .checked_mul(2)?
+            .checked_mul(blowup)?
+            .checked_mul(DIGEST_BYTES)?;
+        // Main, aux, and quotient trees are committed one at a time, so only one leaf-hashing
+        // scratch buffer is alive at once; `max_height` bounds the LDE height of whichever
+        // tree that is.
+        let leaf_scratch_bytes =
+            max_height.checked_mul(blowup)?.checked_mul(extra_leaf_scratch_bytes)?;
+        let shared_total = max_height
+            .checked_mul(quotient_bytes.checked_add(tree_bytes)?)?
+            .checked_add(leaf_scratch_bytes)?;
+
+        let modelled = per_air_total.checked_add(shared_total)?.checked_add(preprocessed_total)?;
+        modelled
+            .checked_mul(SAFETY_NUMERATOR)
+            .map(|scaled| scaled.div_ceil(SAFETY_DENOMINATOR))
+    }
+
+    #[test]
+    fn shared_model_preserves_reference_arithmetic_and_overflow() {
+        let widths = [(0, 3, 2), (0, 1, 4)];
+        for log_blowup in [1, 3, 8, 16, 29] {
+            let Ok(params) = PcsParams::new(log_blowup, 1, 3, 0, 0, 1, 0) else {
+                continue;
+            };
+            for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos, HashFunction::Keccak] {
+                for heights in [[0, 0], [1, 0], [2, 4], [1 << 20, 1 << 16], [usize::MAX; 2]] {
+                    for setup in [(0, 0), (8, 1), (65536, 8), (usize::MAX, usize::MAX)] {
+                        for chunks in [0, 1, 2, 4, 1usize << (usize::BITS - 1)] {
+                            assert_eq!(
+                                prover_peak_bytes_for_shape(
+                                    &heights, &widths, setup, chunks, &params, hash_fn
+                                ),
+                                reference_peak_bytes_for_shape(
+                                    &heights, &widths, setup, chunks, &params, hash_fn
+                                ),
+                                "blowup={log_blowup}, hash={hash_fn:?}, heights={heights:?}, setup={setup:?}, chunks={chunks}",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            prover_peak_bytes_for_shape(
+                &[0],
+                &widths,
+                (0, 0),
+                1,
+                &memory_test_params(),
+                HashFunction::Eidos
+            ),
+            None
+        );
+    }
+
     // Fixed inputs for the model's numeric fixtures; production policy is owned by miden-air.
     fn memory_test_params() -> PcsParams {
         PcsParams::new(3, 2, 7, 4, 12, 27, 17).expect("valid memory fixture parameters")

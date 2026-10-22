@@ -11,6 +11,8 @@
 pub struct ProverMemoryModel<const N: usize> {
     per_air_bytes_per_row: [u64; N],
     shared_bytes_per_max_row: u64,
+    additional_shared_bytes_per_max_row: u64,
+    fixed_bytes: u64,
     safety_numerator: u64,
     safety_denominator: u64,
 }
@@ -30,9 +32,26 @@ impl<const N: usize> ProverMemoryModel<N> {
         Self {
             per_air_bytes_per_row,
             shared_bytes_per_max_row,
+            additional_shared_bytes_per_max_row: 0,
+            fixed_bytes: 0,
             safety_numerator,
             safety_denominator,
         }
+    }
+
+    /// Includes fixed setup buffers before applying the safety multiplier.
+    pub const fn with_fixed_bytes(mut self, fixed_bytes: u64) -> Self {
+        self.fixed_bytes = fixed_bytes;
+        self
+    }
+
+    /// Includes another shared row cost, keeping its multiplication separately checked.
+    ///
+    /// Adding this coefficient to the first one before multiplying would reject some zero-height
+    /// shapes merely because the coefficient sum overflows. Sum the products instead.
+    pub const fn with_additional_shared_bytes_per_max_row(mut self, cost: u64) -> Self {
+        self.additional_shared_bytes_per_max_row = cost;
+        self
     }
 
     /// Returns the modelled peak bytes for the padded per-AIR heights, or `None` on overflow.
@@ -44,9 +63,13 @@ impl<const N: usize> ProverMemoryModel<N> {
             per_air_total = per_air_total.checked_add(cost.checked_mul(height)?)?;
             max_height = max_height.max(height);
         }
-        let shared_total = self.shared_bytes_per_max_row.checked_mul(max_height)?;
+        let shared_total = self
+            .shared_bytes_per_max_row
+            .checked_mul(max_height)?
+            .checked_add(self.additional_shared_bytes_per_max_row.checked_mul(max_height)?)?;
         per_air_total
             .checked_add(shared_total)?
+            .checked_add(self.fixed_bytes)?
             .checked_mul(self.safety_numerator)
             .map(|scaled| scaled.div_ceil(self.safety_denominator))
     }
@@ -113,6 +136,29 @@ impl<const N: usize> ProvingBudget<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_and_additional_shared_costs_round_once_with_the_trace_costs() {
+        let model = ProverMemoryModel::new([1, 2], 2, 5, 4)
+            .with_fixed_bytes(1)
+            .with_additional_shared_bytes_per_max_row(1);
+        assert_eq!(model.prover_peak_bytes(&[1, 2]), Some(15));
+        assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(2));
+    }
+
+    #[test]
+    fn shared_components_are_multiplied_before_their_checked_sum() {
+        let model =
+            ProverMemoryModel::new([0], u64::MAX, 1, 1).with_additional_shared_bytes_per_max_row(1);
+        assert_eq!(model.prover_peak_bytes(&[0]), Some(0));
+        assert_eq!(model.prover_peak_bytes(&[1]), None);
+        assert_eq!(
+            ProverMemoryModel::new([1], 0, 1, 1)
+                .with_fixed_bytes(u64::MAX)
+                .prover_peak_bytes(&[1]),
+            None
+        );
+    }
 
     #[test]
     fn safety_rounds_once_after_adding_shared_and_per_air_costs() {
