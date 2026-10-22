@@ -7,18 +7,12 @@ use miden_core_lib::dsa::{ecdsa_k256_keccak, ecdsa_p256_sha256, eddsa_25519_sha5
 use miden_crypto::dsa::{
     ecdsa_k256_keccak::SigningKey, eddsa_25519_sha512::SigningKey as Ed25519Key,
 };
+use miden_vm::{CURVE_WORK, HASH_WORK, MSM_WORK, PrecompileLimits, UINT_WORK};
 use p256::ecdsa::SigningKey as P256SigningKey;
 use rand_chacha::{
     ChaCha20Rng,
     rand_core::{Rng, SeedableRng},
 };
-
-pub const DEFAULT_KECCAKS: usize = 100;
-pub const DEFAULT_ECDSAS: usize = 4;
-pub const DEFAULT_EDDSAS: usize = 4;
-pub const DEFAULT_ECDSA_P256S: usize = 4;
-pub const DEFAULT_SHA256_64B: usize = 8;
-pub const DEFAULT_SHA256_1KIB: usize = 4;
 
 /// Bytes per fixed-size SHA-256 benchmark message.
 const SHA256_64B_LEN: usize = 64;
@@ -26,6 +20,7 @@ const SHA256_1KIB_LEN: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrecompileWorkload {
+    /// Keccak calls over a rolling 32-byte state.
     pub keccaks: usize,
     pub ecdsas: usize,
     pub eddsas: usize,
@@ -37,13 +32,41 @@ pub struct PrecompileWorkload {
 impl Default for PrecompileWorkload {
     fn default() -> Self {
         Self {
-            keccaks: DEFAULT_KECCAKS,
-            ecdsas: DEFAULT_ECDSAS,
-            eddsas: DEFAULT_EDDSAS,
-            ecdsa_p256s: DEFAULT_ECDSA_P256S,
-            sha256_64b: DEFAULT_SHA256_64B,
-            sha256_1kib: DEFAULT_SHA256_1KIB,
+            keccaks: 100,
+            ecdsas: 4,
+            eddsas: 4,
+            ecdsa_p256s: 4,
+            sha256_64b: 8,
+            sha256_1kib: 4,
         }
+    }
+}
+
+impl PrecompileWorkload {
+    /// Scales aggregate work limits by the largest workload/default count ratio, without
+    /// duplicating each operation's internal hash or curve costs. Per-call and structural limits
+    /// still apply, as does the prover's separate memory budget.
+    pub(crate) fn limits(self, mut limits: PrecompileLimits) -> PrecompileLimits {
+        let defaults = Self::default();
+        let scale = [
+            (self.keccaks, defaults.keccaks),
+            (self.ecdsas, defaults.ecdsas),
+            (self.eddsas, defaults.eddsas),
+            (self.ecdsa_p256s, defaults.ecdsa_p256s),
+            (self.sha256_64b, defaults.sha256_64b),
+            (self.sha256_1kib, defaults.sha256_1kib),
+        ]
+        .into_iter()
+        .map(|(count, default)| count.div_ceil(default) as u64)
+        .fold(1, u64::max);
+        for class in [UINT_WORK, CURVE_WORK, HASH_WORK, MSM_WORK] {
+            let mut limit = limits.class(class).expect("default precompile work class");
+            limit.max_count = limit.max_count.checked_mul(scale).expect("work count overflow");
+            limit.max_total_size =
+                limit.max_total_size.checked_mul(scale).expect("total work size overflow");
+            limits = limits.with_class(class, limit);
+        }
+        limits
     }
 }
 
@@ -60,7 +83,6 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
             pk.verify(message, &signature),
             "generated ECDSA fixture must verify before passing it to MASM",
         );
-
         advice_stack.append_word(message);
         advice_stack.append_word(ecdsa_k256_keccak::public_key_commitment(&pk));
         advice_stack.append_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
@@ -91,17 +113,15 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
     }
 
     for i in 0..workload.sha256_64b {
-        let message = sha256_message(SHA256_64B_LEN, i as u64);
+        let message = byte_message(SHA256_64B_LEN, i as u64);
         advice_stack.append_for_adv_pipe(&bytes_to_packed_u32_elements(&message));
     }
 
     for i in 0..workload.sha256_1kib {
-        let message = sha256_message(SHA256_1KIB_LEN, i as u64);
+        let message = byte_message(SHA256_1KIB_LEN, i as u64);
         advice_stack.append_for_adv_pipe(&bytes_to_packed_u32_elements(&message));
     }
 
-    // Each fixture contains message/commitment words followed by the scheme's native PK/SIG
-    // witness. Both witness lengths are multiples of 8, so adv_pipe requires no padding.
     let felts_per_ecdsa = 8 + 32;
     let felts_per_eddsa = 8 + 24;
     let felts_per_ecdsa_p256 = 8 + 32;
@@ -114,7 +134,7 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
             + workload.ecdsa_p256s * felts_per_ecdsa_p256
             + workload.sha256_64b * felts_per_sha256_64b
             + workload.sha256_1kib * felts_per_sha256_1kib,
-        "unexpected signature advice length",
+        "unexpected precompile advice length",
     );
     AdviceInputs::default().with_stack(advice_stack)
 }
@@ -136,7 +156,7 @@ fn p256_signing_key(rng: &mut ChaCha20Rng) -> P256SigningKey {
 }
 
 /// Deterministic pseudo-random message bytes of `len_bytes`, distinct per `index`.
-fn sha256_message(len_bytes: usize, index: u64) -> Vec<u8> {
+fn byte_message(len_bytes: usize, index: u64) -> Vec<u8> {
     assert!(len_bytes >= size_of::<u64>());
     let mut message = vec![0; len_bytes];
     ChaCha20Rng::seed_from_u64(index).fill_bytes(&mut message);
@@ -148,22 +168,17 @@ fn sha256_message(len_bytes: usize, index: u64) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn default_workload_has_valid_advice() {
-        super::generate_advice_inputs(super::PrecompileWorkload::default());
-    }
-
-    #[test]
-    fn sha256_scaling_inputs_do_not_repeat_after_256_claims() {
+    fn byte_messages_are_reproducible_and_distinct_by_index() {
         use std::collections::HashSet;
 
         use super::*;
 
         for len in [SHA256_64B_LEN, SHA256_1KIB_LEN] {
             let mut messages = HashSet::new();
-            for index in (0..1024).chain([1 << 32, 1 << 48, u64::MAX]) {
-                let message = sha256_message(len, index);
+            for index in [0, 1, 255, 256, 257, 1000, 1 << 32, 1 << 48, u64::MAX] {
+                let message = byte_message(len, index);
                 assert_eq!(message.len(), len);
-                assert_eq!(message, sha256_message(len, index), "fixtures must be reproducible");
+                assert_eq!(message, byte_message(len, index), "fixtures must be reproducible");
                 assert!(messages.insert(message), "claim {index} repeats at length {len}");
             }
         }

@@ -3,7 +3,7 @@
 //! Given a snapshot of per-component trace row counts captured by an external producer,
 //! this crate calibrates a small catalog of MASM snippets against the VM, solves
 //! for iteration counts, emits a synthetic program, and verifies that the program lands
-//! in the target core/chiplets/total padded brackets.
+//! in all four target padded AIR heights.
 //!
 //! The snapshot schema has two tiers:
 //! - `trace`: hard totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`,
@@ -17,3 +17,4 @@ pub mod snapshot;
 pub mod snippets;
 pub mod solver;
 pub mod verifier;
+pub mod workload;

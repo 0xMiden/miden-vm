@@ -2,9 +2,10 @@
 
 use std::{hint::black_box, time::Instant};
 
+use miden_core::program::ExecutionClaim;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, trace::TraceLenSummary};
 use miden_vm::{
-    ExecutionProof, ExecutionWitness, HashFunction, Prover, StackInputs, StackOutputs, VmTrace,
+    ExecutionProof, ExecutionWitness, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
     prove_sync, trace::build_trace,
 };
 
@@ -25,11 +26,13 @@ pub(super) struct TraceShape {
 }
 
 pub(super) struct CaseTraceShape {
+    scenario: String,
     composition: ProofComposition,
     trace: TraceShape,
 }
 
 struct ProveSummary {
+    scenario: String,
     composition: ProofComposition,
     runs: usize,
     avg_ms: f64,
@@ -95,10 +98,11 @@ pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost))
 }
 
 pub(super) fn prove_recursive_case(
-    (case, mut host, hash_fn): (RecursionCase, DefaultHost, HashFunction),
+    prover: &Prover,
+    (case, mut host): (RecursionCase, DefaultHost),
 ) -> (StackOutputs, ExecutionProof) {
     prove_sync(
-        &Prover::new().with_hash_fn(hash_fn),
+        prover,
         &case.program,
         StackInputs::default(),
         case.advice_inputs,
@@ -108,12 +112,12 @@ pub(super) fn prove_recursive_case(
     .expect("prove recursive verifier")
 }
 
-fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, usize) {
+fn prove_recursive_once(prover: &Prover, case: &RecursionCase) -> (f64, usize) {
     let advice_inputs = case.advice_inputs.clone();
     let mut host = recursive_host();
     let start = Instant::now();
-    let (_, proof) = prove_sync(
-        &Prover::new().with_hash_fn(hash_fn),
+    let (stack_outputs, proof) = prove_sync(
+        prover,
         &case.program,
         StackInputs::default(),
         advice_inputs,
@@ -122,12 +126,27 @@ fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, us
     )
     .expect("prove recursive verifier");
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
+    let claim = ExecutionClaim::from_program_info(
+        case.program.to_info(),
+        StackInputs::default(),
+        stack_outputs,
+    );
+    assert!(
+        Verifier::new()
+            .verify(&claim, &proof)
+            .expect("verify outer proof")
+            .is_complete()
+    );
     let proof_bytes = proof.to_bytes().len();
     black_box(proof);
     (elapsed_ms, proof_bytes)
 }
 
-fn prove_summary(composition: ProofComposition, samples: &[(f64, usize)]) -> ProveSummary {
+fn prove_summary(
+    scenario: &str,
+    composition: ProofComposition,
+    samples: &[(f64, usize)],
+) -> ProveSummary {
     assert!(!samples.is_empty(), "prove summary requires at least one sample");
 
     let runs = samples.len();
@@ -145,6 +164,7 @@ fn prove_summary(composition: ProofComposition, samples: &[(f64, usize)]) -> Pro
         samples.iter().map(|(_, proof_bytes)| *proof_bytes as f64).sum::<f64>() / runs as f64;
 
     ProveSummary {
+        scenario: scenario.to_string(),
         composition,
         runs,
         avg_ms,
@@ -156,8 +176,8 @@ fn prove_summary(composition: ProofComposition, samples: &[(f64, usize)]) -> Pro
 }
 
 pub(super) fn profile_prove_round_robin(
+    prover: &Prover,
     cases: &[RecursionCase],
-    hash_fn: HashFunction,
     warmups: usize,
     runs: usize,
 ) {
@@ -166,10 +186,11 @@ pub(super) fn profile_prove_round_robin(
     for warmup_round in 0..warmups {
         for offset in 0..cases.len() {
             let case = &cases[(warmup_round + offset) % cases.len()];
-            let (elapsed_ms, proof_bytes) = prove_recursive_once(case, hash_fn);
+            let (elapsed_ms, proof_bytes) = prove_recursive_once(prover, case);
             eprintln!(
-                "recursive_profile warmup {}/{warmups}/{}: {:.3} ms proof_bytes={}",
+                "recursive_profile warmup {}/{warmups} scenario={} {}: {:.3} ms proof_bytes={}",
                 warmup_round + 1,
+                case.scenario,
                 case.composition.label(),
                 elapsed_ms,
                 proof_bytes,
@@ -182,17 +203,19 @@ pub(super) fn profile_prove_round_robin(
         for offset in 0..cases.len() {
             let case_index = (run_round + offset) % cases.len();
             let case = &cases[case_index];
-            let (elapsed_ms, proof_bytes) = prove_recursive_once(case, hash_fn);
+            let (elapsed_ms, proof_bytes) = prove_recursive_once(prover, case);
             samples[case_index].push((elapsed_ms, proof_bytes));
             eprintln!(
-                "recursive_profile run {}/{runs}/{}: {:.3} ms proof_bytes={}",
+                "recursive_profile run {}/{runs} scenario={} {}: {:.3} ms proof_bytes={}",
                 run_round + 1,
+                case.scenario,
                 case.composition.label(),
                 elapsed_ms,
                 proof_bytes,
             );
             println!(
-                "BENCH_RECURSION_PROOF {} run={} prove_ms={:.3} proof_bytes={}",
+                "BENCH_RECURSION_PROOF scenario={} {} run={} prove_ms={:.3} proof_bytes={}",
+                case.scenario,
                 case.composition.machine_fields(),
                 run_round + 1,
                 elapsed_ms,
@@ -204,18 +227,21 @@ pub(super) fn profile_prove_round_robin(
     let summaries = cases
         .iter()
         .zip(samples)
-        .map(|(case, samples)| prove_summary(case.composition, &samples))
+        .map(|(case, samples)| prove_summary(&case.scenario, case.composition, &samples))
         .collect::<Vec<_>>();
     print_prove_summary(&summaries);
 }
 
 fn print_prove_summary(summaries: &[ProveSummary]) {
     println!("\n=== recursive proving summary");
-    println!("| MVM proofs | PVM proofs | median_s | avg_s | min_s | max_s | avg_proof_bytes |");
-    println!("|---:|---:|---:|---:|---:|---:|---:|");
+    println!(
+        "| Scenario | MVM proofs | PVM proofs | median_s | avg_s | min_s | max_s | avg_proof_bytes |"
+    );
+    println!("|:---|---:|---:|---:|---:|---:|---:|---:|");
     for summary in summaries {
         println!(
-            "| {} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} |",
+            "| {} | {} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} |",
+            summary.scenario,
             summary.composition.mvm_count(),
             summary.composition.pvm_count(),
             summary.median_ms / 1_000.0,
@@ -225,8 +251,9 @@ fn print_prove_summary(summaries: &[ProveSummary]) {
             summary.avg_proof_bytes,
         );
         println!(
-            "BENCH_RECURSION_PROOF_SUMMARY {} runs={} avg_ms={:.3} median_ms={:.3} \
+            "BENCH_RECURSION_PROOF_SUMMARY scenario={} {} runs={} avg_ms={:.3} median_ms={:.3} \
              min_ms={:.3} max_ms={:.3} avg_proof_bytes={:.0}",
+            summary.scenario,
             summary.composition.machine_fields(),
             summary.runs,
             summary.avg_ms,
@@ -257,19 +284,26 @@ pub(super) fn print_case_shape(case: &RecursionCase) -> CaseTraceShape {
         trace.max_trace_rows,
         trace.max_padded_rows,
     );
-    let record = format!("BENCH_RECURSION_SHAPE {}", case.composition.machine_fields());
+    let record = format!(
+        "BENCH_RECURSION_SHAPE scenario={} {}",
+        case.scenario,
+        case.composition.machine_fields()
+    );
     print_bench_shape(&record, &trace);
-    CaseTraceShape { composition: case.composition, trace }
+    CaseTraceShape {
+        scenario: case.scenario.clone(),
+        composition: case.composition,
+        trace,
+    }
 }
 
 pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
-    // This is a machine-readable schema consumed by benchmark parsers.
     println!(
         concat!(
             "{} ",
             "core_rows={} byte_pair_lookup_rows={} chiplets_rows={} eidos_compression_rows={} ",
             "hash_chiplet_rows={} bitwise_rows={} memory_rows={} ace_rows={} kernel_rows={} ",
-            "native_hash_rows={} and8_lookup_rows={} max_trace_rows={} max_padded_rows={}"
+            "max_trace_rows={} max_padded_rows={}"
         ),
         record,
         shape.core_rows,
@@ -281,8 +315,6 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
         shape.memory_rows,
         shape.ace_rows,
         shape.kernel_rows,
-        shape.eidos_compression_rows,
-        shape.byte_pair_lookup_rows,
         shape.max_trace_rows,
         shape.max_padded_rows,
     );
@@ -291,13 +323,14 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
 pub(super) fn print_trace_shape_summary(shapes: &[CaseTraceShape]) {
     println!("\n=== recursive trace summary");
     println!(
-        "| MVM proofs | PVM proofs | core | and8 | chiplets | EidosCompression | hash | bitwise | memory | ace | kernel | max_trace | padded |"
+        "| Scenario | MVM proofs | PVM proofs | core | and8 | chiplets | EidosCompression | hash | bitwise | memory | ace | kernel | max_trace | padded |"
     );
-    println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+    println!("|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
     for case in shapes {
         let shape = &case.trace;
         println!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            case.scenario,
             case.composition.mvm_count(),
             case.composition.pvm_count(),
             shape.core_rows,
