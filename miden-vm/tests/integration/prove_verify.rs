@@ -864,9 +864,9 @@ mod execution_witness_serialization {
             let (original_vm, _) = witness.into_parts();
             let (restored_vm, _) = restored.into_parts();
             let original_trace =
-                build_trace(original_vm).expect("original generated witness should build a trace");
+                build_trace(original_vm, &miden_air::vm::memory::default_budget()).expect("original generated witness should build a trace");
             let restored_trace =
-                build_trace(restored_vm).expect("restored generated witness should build a trace");
+                build_trace(restored_vm, &miden_air::vm::memory::default_budget()).expect("restored generated witness should build a trace");
             prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
             prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
             prop_assert_eq!(
@@ -915,8 +915,10 @@ mod execution_witness_serialization {
         );
 
         let (vm, _) = witness.into_parts();
-        let original_trace = build_trace(vm).expect("original witness builds trace");
-        let restored_trace = build_trace(restored_vm).expect("restored witness builds trace");
+        let original_trace = build_trace(vm, &miden_air::vm::memory::default_budget())
+            .expect("original witness builds trace");
+        let restored_trace = build_trace(restored_vm, &miden_air::vm::memory::default_budget())
+            .expect("restored witness builds trace");
         assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
         assert_eq!(restored_trace.program_info(), original_trace.program_info());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
