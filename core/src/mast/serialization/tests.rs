@@ -361,6 +361,7 @@ fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let forest = canonicalized_for_test(forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
+    assert_eq!(forest.get_size_hint(), bytes.len());
 
     let view = MastForestWireView::new(&bytes).unwrap();
     assert_eq!(view.node_count(), forest.nodes().len());
@@ -385,6 +386,38 @@ fn canonicalized_for_test(forest: &MastForest) -> MastForest {
         forest.advice_map().clone(),
     )
     .unwrap()
+}
+
+#[test]
+fn mast_forest_size_hint_matches_serialized_len() {
+    let mut forest = MastForest::new();
+    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+
+    let external = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+
+    let block = BasicBlockNodeBuilder::new(sample_basic_block_operations_all_variants())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+
+    forest.advice_map.insert(Word::default(), Vec::<Felt>::new());
+    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+
+    for count in [0, 1, 127, 128, 255, 256] {
+        let mut forest = forest.clone();
+        let block = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(42)); 300])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.roots.extend(core::iter::repeat_n(block, count));
+        for i in 0..count {
+            let key = Word::new([Felt::from_u32(i as u32), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            forest.advice_map.insert(key, vec![Felt::from_u32(42); count]);
+        }
+        assert_eq!(forest.get_size_hint(), forest.to_bytes().len(), "count: {count}");
+    }
 }
 
 #[test]

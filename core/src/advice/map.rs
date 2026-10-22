@@ -203,6 +203,15 @@ impl Serializable for AdviceMap {
             target.write((key, values.to_vec()));
         }
     }
+
+    /// Returns the exact serialized size in bytes without allocating.
+    fn get_size_hint(&self) -> usize {
+        let mut size = self.0.len().get_size_hint();
+        for (key, values) in &self.0 {
+            size += key.get_size_hint() + values.as_ref().get_size_hint();
+        }
+        size
+    }
 }
 
 impl Deserializable for AdviceMap {

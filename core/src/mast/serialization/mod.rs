@@ -222,6 +222,31 @@ impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.write_into_with_options(target, false);
     }
+
+    /// Returns the exact serialized size in bytes without allocating or serializing the forest.
+    fn get_size_hint(&self) -> usize {
+        let node_count = self.nodes.len();
+        let external_count = self.nodes.iter().take_while(|node| node.is_external()).count();
+        let internal_count = node_count - external_count;
+
+        let mut size = MAGIC.len() + size_of::<u8>() + VERSION.len();
+        size += internal_count.get_size_hint() + external_count.get_size_hint();
+        size += self.roots.len().get_size_hint() + self.roots.len() * size_of::<u32>();
+
+        let basic_block_len: usize = self
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                MastNode::Block(block) => Some(basic_block_data_len(block)),
+                _ => None,
+            })
+            .sum();
+        size += basic_block_len.get_size_hint() + basic_block_len;
+        // Every node has one fixed-width entry and one digest, including external nodes.
+        size += node_count * (MastNodeEntry::SERIALIZED_SIZE + Word::SERIALIZED_SIZE);
+        size += self.advice_map.get_size_hint();
+        size
+    }
 }
 
 impl MastForest {
