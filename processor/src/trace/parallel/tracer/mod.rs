@@ -87,6 +87,8 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// cycle (in [`start_clock_cycle`](Tracer::start_clock_cycle)) to be used when finalizing
     /// it.
     dyn_callee_hash: Option<Word>,
+    /// Resolved implementation root recorded while executing SYSCALL.
+    syscall_callee_hash: Option<Word>,
 
     /// The continuation captured at the beginning of the clock cycle (in
     /// [`start_clock_cycle`](Tracer::start_clock_cycle)), describing what is being executed at
@@ -124,6 +126,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             ctx_info: None,
             finish_loop_condition: None,
             dyn_callee_hash: None,
+            syscall_callee_hash: None,
             continuation: None,
             is_loop_body: false,
             error_encountered: None,
@@ -393,6 +396,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 impl Tracer for CoreTraceGenerationTracer<'_> {
     type Processor = ReplayProcessor;
     type Forest = Arc<SparseMastForest>;
+
+    fn record_kernel_proc_access(&mut self, _key: Word, procedure_root: Word) {
+        self.syscall_callee_hash = Some(procedure_root);
+    }
 
     fn start_clock_cycle(
         &mut self,

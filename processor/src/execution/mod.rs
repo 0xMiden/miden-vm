@@ -27,7 +27,7 @@ mod split;
 // RE-EXPORTS
 // ================================================================================================
 pub(crate) use basic_block::finish_emit_op_execution;
-pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
+pub(crate) use r#dyn::finish_load_mast_forest_for_invocation;
 pub(crate) use external::finish_load_mast_forest_from_external;
 #[cfg(test)]
 pub(crate) use operations::eval_circuit_impl;
@@ -165,13 +165,13 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///             // to complete the execution of the Emit operation.
 ///             finish_emit_op_execution(...);
 ///         },
-///         InternalBreakReason::LoadMastForestFromDyn { callee_hash } => {
+///         InternalBreakReason::LoadMastForestForInvocation { callee_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
 ///
-///             // As per `InternalBreakReason::LoadMastForestFromDyn` documentation, we call
-///             // `finish_load_mast_forest_from_dyn_start` to complete the execution of the operation.
-///             finish_load_mast_forest_from_dyn_start(...);
+///             // As per `InternalBreakReason::LoadMastForestForInvocation` documentation, we call
+///             // `finish_load_mast_forest_for_invocation` to complete the execution of the operation.
+///             finish_load_mast_forest_for_invocation(...);
 ///         },
 ///         InternalBreakReason::LoadMastForestFromExternal { external_node_id, procedure_hash } => {
 ///             // load MAST forest containing the callee procedure
@@ -352,8 +352,7 @@ where
                             .map_break(InternalBreakReason::from)?
                     },
                     MastNode::Call(call_node) => {
-                        call::start_call_node(&mut state, call_node, node_id, current_forest)
-                            .map_break(InternalBreakReason::from)?
+                        call::start_call_node(&mut state, call_node, node_id, current_forest)?
                     },
                     MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
                     MastNode::External(_) => external::execute_external_node(
@@ -501,8 +500,7 @@ where
                             .map_break(InternalBreakReason::from)?
                     },
                     MastNode::Call(call_node) => {
-                        call::start_call_node_pure(&mut state, call_node, node_id, current_forest)
-                            .map_break(InternalBreakReason::from)?
+                        call::start_call_node(&mut state, call_node, node_id, current_forest)?
                     },
                     MastNode::Dyn(_) => {
                         r#dyn::start_dyn_node_pure(&mut state, node_id, current_forest)?
@@ -602,17 +600,17 @@ where
 /// [`finish_emit_op_execution`] to complete the execution of the `Emit` operation and resume
 /// execution immediately after the `Emit` operation.
 ///
-/// # LoadMastForestFromDyn
+/// # LoadMastForestForInvocation
 ///
-/// - *Function to call after handling*: [`finish_load_mast_forest_from_dyn_start`]
+/// - *Function to call after handling*: [`finish_load_mast_forest_for_invocation`]
 ///
-/// The `LoadMastForestFromDyn` variant is used to break execution when `DynNode` is encountered
-/// that requires loading a MAST forest containing a given procedure. The associated data includes
+/// The `LoadMastForestForInvocation` variant is used when a dynamic call or keyed syscall
+/// requires loading a MAST forest containing its resolved procedure. The associated data includes
 /// the hash of the callee procedure to be loaded.
 ///
 /// Handling this operation typically involves loading the MAST forest from the host environment.
 /// After the MAST forest has been loaded, the processor *must* call
-/// [`finish_load_mast_forest_from_dyn_start`] to complete the execution of the operation and resume
+/// [`finish_load_mast_forest_for_invocation`] to complete the execution of the operation and resume
 /// execution with the first operation of the called procedure.
 ///
 /// # LoadMastForestFromExternal
@@ -634,7 +632,7 @@ pub enum InternalBreakReason<F> {
         continuation: Continuation<F>,
         source_node_id: Option<DebugSourceNodeId>,
     },
-    LoadMastForestFromDyn {
+    LoadMastForestForInvocation {
         callee_hash: Word,
         source_node_id: Option<DebugSourceNodeId>,
     },

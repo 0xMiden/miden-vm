@@ -4,7 +4,10 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
 use miden_core::{
-    Felt, program::ExecutionClaim, proof::ExecutionProof, serde::Serializable,
+    Felt,
+    program::{ExecutionClaim, Program},
+    proof::ExecutionProof,
+    serde::Serializable,
     utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::CoreLibrary;
@@ -137,48 +140,66 @@ fn test_all_hash_functions_prove_verify() {
     }
 }
 
-/// Native and recursive verification receive K alone; the path depth stays in the private trace.
+/// One compiled caller accepts two authenticated kernels; verification needs only their roots.
 #[test]
 fn root_only_kernel_proof_verifies_without_descriptor() {
-    let test = crate::build_test!("begin syscall.called syscall.called end").with_kernel(
-        "
-        pub proc called push.1 drop end
-        pub proc unused_a push.2 drop end
-        pub proc unused_b push.3 drop end
-    ",
-    );
-    let (program, kernel, _) = test.compile().unwrap();
-    let mut host = DefaultHost::default();
-    host.load_library(kernel.unwrap().mast_forest()).unwrap();
-    let witness = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_for_proving_sync(&program, &mut host)
-    .unwrap();
-    let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
-    let claim = witness.claim();
-    let proof = Prover::new().prove(witness).unwrap();
-    let proof = ExecutionProof::read_from_bytes(&proof.to_bytes()).unwrap();
-    assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());
-    assert_recursive_verify(
-        claim.to_program_info(),
-        *claim.stack_inputs(),
-        *claim.stack_outputs(),
-        &proof,
-    );
+    let test =
+        crate::build_test!("begin syscall_stable.called syscall_stable.called syscall.legacy end")
+            .with_kernel(
+                "pub proc called push.1 add end
+         pub proc legacy push.7 add end
+         pub proc unused push.3 drop end",
+            );
+    let (caller, kernel, _) = test.compile().unwrap();
+    let (_, replacement, _) = crate::build_test!("begin nop end")
+        .with_kernel(
+            "pub proc called push.2 add end
+         pub proc legacy push.7 add end
+         pub proc unused push.3 drop end",
+        )
+        .compile()
+        .unwrap();
+    let original_root = caller.kernel().commitment();
+    for (index, kernel) in [kernel.unwrap(), replacement.unwrap()].into_iter().enumerate() {
+        let program = Program::with_kernel(
+            caller.mast_forest().clone(),
+            caller.entrypoint(),
+            kernel.to_kernel_descriptor().unwrap(),
+        );
+        assert_eq!(program.hash(), caller.hash());
+        if index == 1 {
+            assert_ne!(program.kernel().commitment(), original_root);
+        }
+        let mut host = DefaultHost::default();
+        host.load_library(kernel.mast_forest()).unwrap();
+        let witness = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut host)
+            .unwrap();
+        let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
+        let claim = witness.claim();
+        assert_eq!(claim.stack_outputs()[0], Felt::new_unchecked(9 + index as u64 * 2));
+        let proof = Prover::new().prove(witness).unwrap();
+        let proof = ExecutionProof::read_from_bytes(&proof.to_bytes()).unwrap();
+        assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());
+        if index == 1 {
+            assert_recursive_verify(
+                claim.to_program_info(),
+                *claim.stack_inputs(),
+                *claim.stack_outputs(),
+                &proof,
+            );
+        }
 
-    let mut other_root = claim.kernel_root().into_elements();
-    other_root[0] += Felt::new_unchecked(1);
-    let other_claim = ExecutionClaim::new(
-        claim.program_root(),
-        other_root.into(),
-        *claim.stack_inputs(),
-        *claim.stack_outputs(),
-    );
-    assert!(Verifier::new().verify(&other_claim, &proof).is_err());
+        let mut other_root = claim.kernel_root().into_elements();
+        other_root[0] += Felt::new_unchecked(1);
+        let other_claim = ExecutionClaim::new(
+            claim.program_root(),
+            other_root.into(),
+            *claim.stack_inputs(),
+            *claim.stack_outputs(),
+        );
+        assert!(Verifier::new().verify(&other_claim, &proof).is_err());
+    }
 }
 
 #[test]

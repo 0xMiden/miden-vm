@@ -270,11 +270,16 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         call_node: &CallNode,
         current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
-        // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
-        // hash in the first half, and zeros in the second half (since CALL only has one
-        // child)
+        // SYSCALL commits to the key, while its second word witnesses the implementation.
+        // CALL continues to use a zero second word.
         let callee_hash: Word = get_digest_in_forest(current_forest, call_node.callee())?;
-        let zero_hash = Word::default();
+        let implementation = if call_node.is_syscall() {
+            self.syscall_callee_hash
+                .take()
+                .ok_or(ExecutionError::Internal("syscall implementation not recorded"))?
+        } else {
+            Word::default()
+        };
 
         let decoder_row = DecoderRow::new_control_flow(
             if call_node.is_syscall() {
@@ -282,7 +287,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             } else {
                 opcodes::CALL
             },
-            (callee_hash, zero_hash),
+            (callee_hash, implementation),
             self.decoder_state.parent_addr,
         );
 

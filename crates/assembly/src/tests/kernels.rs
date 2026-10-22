@@ -11,6 +11,9 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         pub proc foo
             exec.h::get_caller
             exec.helpers::get_caller
+        end
+        pub proc alias
+            exec.foo
         end"#;
     const HELPERS: &str = r#"
         namespace $kernel::helpers
@@ -41,10 +44,52 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
-    assert_eq!(kernel_lib.to_kernel_descriptor().ok().map(|k| k.proc_hashes().len()), Some(1));
+    let descriptor = kernel_lib.to_kernel_descriptor()?;
+    assert_eq!(descriptor.exports().len(), 3, "two names share one identity alias");
+    let foo_key = miden_core::program::hash_kernel_key("::$kernel::foo");
+    let alias_key = miden_core::program::hash_kernel_key("::$kernel::alias");
+    assert_eq!(descriptor.resolve(foo_key), descriptor.resolve(alias_key));
 
     Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
         .assemble_program("program", PROGRAM)?;
+
+    let key = miden_core::program::hash_kernel_key("::$kernel::foo");
+    let mut stable_programs = Vec::new();
+    let mut legacy_hashes = Vec::new();
+
+    for value in [1, 2] {
+        let kernel_source = format!("pub proc foo push.{value} end");
+        let kernel = context.parse_kernel(source_file!(&context, &kernel_source))?;
+        let kernel = Arc::<Package>::from(
+            Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, None)?,
+        );
+        let implementation = kernel.get_procedure_root_by_path("::$kernel::foo").unwrap();
+        assert_eq!(kernel.to_kernel_descriptor()?.resolve(key), Some(implementation));
+
+        let package = Assembler::with_kernel(context.source_manager(), kernel.clone())?
+            .assemble_program("program", "begin syscall_stable.foo end")?;
+        let decoded = Package::read_from_bytes(&package.to_bytes()).into_diagnostic()?;
+        let stable = decoded.try_into_program()?;
+        assert_eq!(stable.kernel().resolve(key), Some(implementation));
+        assert!(stable.mast_forest().nodes().iter().any(|node| {
+            matches!(node, MastNode::Call(call) if call.is_syscall()
+                && matches!(&stable.mast_forest()[call.callee()], MastNode::External(external)
+                    if external.digest() == key))
+        }));
+        stable_programs.push(stable);
+
+        let legacy = Assembler::with_kernel(context.source_manager(), kernel)?
+            .assemble_program("program", "begin syscall.foo end")?
+            .unwrap_program();
+        legacy_hashes.push(legacy.hash());
+    }
+
+    assert_eq!(stable_programs[0].hash(), stable_programs[1].hash());
+    assert_ne!(legacy_hashes[0], legacy_hashes[1]);
+    assert_ne!(
+        stable_programs[0].kernel().commitment(),
+        stable_programs[1].kernel().commitment()
+    );
 
     Ok(())
 }

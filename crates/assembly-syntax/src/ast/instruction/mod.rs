@@ -282,6 +282,8 @@ pub enum Instruction {
     Exec(InvocationTarget),
     Call(InvocationTarget),
     SysCall(InvocationTarget),
+    /// Calls a root kernel export by its stable, fully qualified name hash.
+    SysCallStable(InvocationTarget),
     DynExec,
     DynCall,
     ProcRef(InvocationTarget),

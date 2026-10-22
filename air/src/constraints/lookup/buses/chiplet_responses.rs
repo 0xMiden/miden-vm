@@ -206,12 +206,17 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // One authenticated row supplies all calls to the same procedure.
+                    // One authenticated row supplies all calls to the same export key.
                     g.insert(
                         "kernel_rom_call",
                         ctx.chiplet_active.kernel_rom.clone(),
                         krom.multiplicity.into(),
-                        || KernelRomMsg::call(krom.root.map(LB::Expr::from)),
+                        || {
+                            KernelRomMsg::call(
+                                krom.key.map(LB::Expr::from),
+                                krom.root.map(LB::Expr::from),
+                            )
+                        },
                         Deg { v: 6, u: 6 },
                     );
                 },

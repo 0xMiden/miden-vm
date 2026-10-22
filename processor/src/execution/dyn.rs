@@ -128,9 +128,9 @@ where
             // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
             // processors need this to be done asynchronously. Thus, we break here and make the
             // implementing processor handle the loading in the outer execution loop. When done, the
-            // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
+            // processor *must* call `finish_load_mast_forest_for_invocation()` below for execution
             // to proceed properly.
-            return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
+            return ControlFlow::Break(InternalBreakReason::LoadMastForestForInvocation {
                 callee_hash,
                 source_node_id: state.current_source_node_id(),
             });
@@ -240,9 +240,9 @@ where
             // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
             // processors need this to be done asynchronously. Thus, we break here and make the
             // implementing processor handle the loading in the outer execution loop. When done, the
-            // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
+            // processor *must* call `finish_load_mast_forest_for_invocation()` below for execution
             // to proceed properly.
-            return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
+            return ControlFlow::Break(InternalBreakReason::LoadMastForestForInvocation {
                 callee_hash,
                 source_node_id: None,
             });
@@ -260,9 +260,9 @@ where
     .map_break(InternalBreakReason::from)
 }
 
-/// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
-/// documentation of that enum variant for more details.
-pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
+/// Function to be called after [`InternalBreakReason::LoadMastForestForInvocation`] is handled. See
+/// the documentation of that enum variant for more details.
+pub fn finish_load_mast_forest_for_invocation<P, S, T, F>(
     root_id: MastNodeId,
     new_forest: F,
     new_package_debug_info: Option<Arc<PackageDebugInfo>>,
@@ -301,14 +301,13 @@ where
     *current_forest = new_forest;
     *current_package_debug_info = new_package_debug_info;
 
-    // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
-    // forest because the continuation was set during start_clock_cycle, which referenced the old
-    // forest.
-    finalize_clock_cycle(processor, tracer, stopper, continuation_stack, &old_forest)?;
-
+    // Record loading before the stopper can interrupt finalization at a fragment boundary.
     tracer.record_mast_forest_resolution(root_id, current_forest);
 
-    ControlFlow::Continue(())
+    // Finalize the invocation's clock cycle. We pass the old
+    // forest because the continuation was set during start_clock_cycle, which referenced the old
+    // forest.
+    finalize_clock_cycle(processor, tracer, stopper, continuation_stack, &old_forest)
 }
 
 /// Executes the finish phase of a Dyn node.

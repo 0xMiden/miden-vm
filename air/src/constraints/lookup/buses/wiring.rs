@@ -201,13 +201,19 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     merkle::emit_compression::<LB, _>(g, ctx);
 
-                    // Bind the syscall digest to both words of its identity export pair.
+                    // Bind both the export key and resolved procedure root to the Merkle leaf.
                     g.add(
                         "kernel_leaf_compression",
                         ctx.chiplet_active.kernel_rom.clone(),
                         || {
                             let kernel = local.kernel_rom();
-                            let block = array::from_fn(|i| kernel.root[i % 4].into());
+                            let block = array::from_fn(|i| {
+                                if i < 4 {
+                                    kernel.key[i].into()
+                                } else {
+                                    kernel.root[i - 4].into()
+                                }
+                            });
                             let cv_in = Eidos::init_chaining_word(KERNEL_EXPORT, 8)
                                 .into_elements()
                                 .map(LB::Expr::from);

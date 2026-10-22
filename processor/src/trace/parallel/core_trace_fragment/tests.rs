@@ -1329,10 +1329,10 @@ fn test_syscall_decoding() {
     assert_eq!(bar_basic_block_hash, get_hasher_state1(&dec_trace, 12));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 12));
 
-    // in the 13th row, we start the SYSCALL block which has foo_span as its only child
+    // in the 13th row, SYSCALL records the identity key and resolved foo_span root
     let foo_root_hash = foo_root.digest();
     assert_eq!(foo_root_hash, get_hasher_state1(&dec_trace, 13));
-    assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 13));
+    assert_eq!(foo_root_hash, get_hasher_state2(&dec_trace, 13));
 
     // at the end of the foo block, the hasher state is set to the hash of the first child
     assert_eq!(foo_root_hash, get_hasher_state1(&dec_trace, 16));

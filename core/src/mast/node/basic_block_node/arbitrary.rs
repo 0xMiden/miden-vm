@@ -17,7 +17,7 @@ use crate::{
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
     },
     operations::Operation,
-    program::{KernelDescriptor, Program},
+    program::{KernelDescriptor, KernelExport, Program},
 };
 
 // OPERATIONS
@@ -589,12 +589,12 @@ fn build_executable_forest(
     add_local_externals(&mut forest, &node_ids, &mut roots, &mut externals, &seeds.external_picks);
     let syscall_hashes = match kernel {
         Some(kernel) => {
-            let hashes = kernel.proc_hashes();
+            let hashes: Vec<_> = kernel.exports().iter().map(|export| export.key).collect();
             add_kernel_syscalls(
                 &mut forest,
                 &mut roots,
                 &mut externals,
-                hashes,
+                &hashes,
                 &seeds.syscall_picks,
             );
             Vec::new()
@@ -825,11 +825,16 @@ impl Arbitrary for KernelDescriptor {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Distinct random words, well below `MAX_NUM_PROCEDURES`.
-        prop::collection::btree_set(any::<Word>(), 0..=3)
-            .prop_map(|words| {
-                KernelDescriptor::from_hashes(words.into_iter().collect())
-                    .expect("Generated kernel should be valid")
+        // Distinct random keys, well below `MAX_NUM_PROCEDURES`.
+        prop::collection::btree_map(any::<Word>(), any::<Word>(), 0..=3)
+            .prop_map(|exports| {
+                KernelDescriptor::from_exports(
+                    exports
+                        .into_iter()
+                        .map(|(key, procedure_root)| KernelExport { key, procedure_root })
+                        .collect(),
+                )
+                .expect("Generated kernel should be valid")
             })
             .boxed()
     }
@@ -965,7 +970,7 @@ mod tests {
             .find(|(forest, _)| syscalls(forest).next().is_some())
             .expect("a sample with syscalls");
 
-        assert_eq!(kernel.proc_hashes().len(), hashes.len());
+        assert_eq!(kernel.exports().len(), hashes.len());
         for call in syscalls(&forest) {
             let callee = &forest[call.callee()];
             assert!(callee.is_external());
@@ -1132,7 +1137,7 @@ mod tests {
             (forest, kernel) in forest_kernel_strategy(executable_params())
         ) {
             for call in syscalls(&forest) {
-                prop_assert!(kernel.contains_proc(forest[call.callee()].digest()));
+                prop_assert!(kernel.resolve(forest[call.callee()].digest()).is_some());
             }
         }
 
@@ -1142,7 +1147,7 @@ mod tests {
         ) {
             let targets: BTreeSet<Word> =
                 syscalls(&forest).map(|call| forest[call.callee()].digest()).collect();
-            let listed: BTreeSet<Word> = kernel.proc_hashes().iter().copied().collect();
+            let listed: BTreeSet<Word> = kernel.exports().iter().map(|export| export.key).collect();
             prop_assert_eq!(listed, targets);
         }
 

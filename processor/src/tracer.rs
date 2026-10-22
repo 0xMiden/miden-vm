@@ -327,10 +327,10 @@ pub trait Tracer {
         self.record_u32_range_checks(quotient, remainder);
     }
 
-    /// Records the procedure hash of a syscall.
+    /// Records the authenticated key and implementation root of a syscall.
     ///
     /// Called by: `SYSCALL`.
-    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {}
+    fn record_kernel_proc_access(&mut self, _key: Word, _procedure_root: Word) {}
 
     /// Records the evaluation of a circuit.
     ///

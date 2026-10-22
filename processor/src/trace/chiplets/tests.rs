@@ -321,7 +321,7 @@ fn validate_memory_trace(trace: &ChipletsTrace, start: usize, end: usize) {
 /// - Columns beyond kernel ROM trace width + selectors are zero
 fn validate_kernel_rom_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // Kernel ROM uses NUM_KERNEL_ROM_SELECTORS (5) chiplet selector columns +
-    // KERNEL_ROM_TRACE_WIDTH (13) internal columns = 18 columns total.
+    // KERNEL_ROM_TRACE_WIDTH (17) internal columns = 22 columns total.
     let kernel_rom_used_cols = NUM_KERNEL_ROM_SELECTORS + KERNEL_ROM_TRACE_WIDTH;
 
     for row in start..end {

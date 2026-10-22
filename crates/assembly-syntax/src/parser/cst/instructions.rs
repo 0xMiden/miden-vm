@@ -1254,6 +1254,10 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
         kind: ExtendedInstructionKind::Invocation(Instruction::SysCall),
     },
     ExtendedInstructionSpec {
+        keyword: "syscall_stable",
+        kind: ExtendedInstructionKind::Invocation(Instruction::SysCallStable),
+    },
+    ExtendedInstructionSpec {
         keyword: "procref",
         kind: ExtendedInstructionKind::Invocation(Instruction::ProcRef),
     },

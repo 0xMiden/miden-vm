@@ -87,6 +87,44 @@ impl<'a> VerifyInvokeTargets<'a> {
 }
 
 impl VerifyInvokeTargets<'_> {
+    fn verify_syscall(
+        &mut self,
+        target: &mut InvocationTarget,
+        kind: InvokeKind,
+    ) -> ControlFlow<()> {
+        match target {
+            // Syscalls to a local name will be rewritten to refer to implicit exports of the
+            // kernel module.
+            InvocationTarget::Symbol(name) => {
+                let span = name.span();
+                let path = Path::kernel_path().join(name).into();
+                *target = InvocationTarget::Path(Span::new(span, path));
+            },
+            // Syscalls which reference a path, are only valid if the module id is $kernel
+            InvocationTarget::Path(path) => {
+                let span = path.span();
+                if let Some(name) = path.as_ident() {
+                    let new_path = Path::kernel_path().join(&name).into();
+                    *path = Span::new(span, new_path);
+                } else if kind == InvokeKind::SysCallStable && path.is_in_kernel() {
+                    *path =
+                        Span::new(span, path.canonicalize().expect("validated kernel path").into());
+                } else {
+                    self.analyzer.error(SemanticAnalysisError::InvalidSyscallTarget { span });
+                }
+            },
+            // We assume that a syscall specifying a MAST root knows what it is doing, but this
+            // will be validated by the assembler
+            InvocationTarget::MastRoot(root) if kind == InvokeKind::SysCallStable => {
+                self.analyzer
+                    .error(SemanticAnalysisError::InvalidSyscallTarget { span: root.span() });
+            },
+            InvocationTarget::MastRoot(_) => (),
+        }
+        self.invoked.insert(Invoke::new(kind, target.clone()));
+        ControlFlow::Continue(())
+    }
+
     fn track_used_item_name(&mut self, name: &str) {
         if matches!(self.locals.get(name), Some(LocalInvokeTarget::ModuleImport)) {
             return;
@@ -232,30 +270,10 @@ impl VisitMut for VerifyInvokeTargets<'_> {
         result
     }
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
-        match target {
-            // Syscalls to a local name will be rewritten to refer to implicit exports of the
-            // kernel module.
-            InvocationTarget::Symbol(name) => {
-                let span = name.span();
-                let path = Path::kernel_path().join(name).into();
-                *target = InvocationTarget::Path(Span::new(span, path));
-            },
-            // Syscalls which reference a path, are only valid if the module id is $kernel
-            InvocationTarget::Path(path) => {
-                let span = path.span();
-                if let Some(name) = path.as_ident() {
-                    let new_path = Path::kernel_path().join(&name).into();
-                    *path = Span::new(span, new_path);
-                } else {
-                    self.analyzer.error(SemanticAnalysisError::InvalidSyscallTarget { span });
-                }
-            },
-            // We assume that a syscall specifying a MAST root knows what it is doing, but this
-            // will be validated by the assembler
-            InvocationTarget::MastRoot(_) => (),
-        }
-        self.invoked.insert(Invoke::new(InvokeKind::SysCall, target.clone()));
-        ControlFlow::Continue(())
+        self.verify_syscall(target, InvokeKind::SysCall)
+    }
+    fn visit_mut_syscall_stable(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
+        self.verify_syscall(target, InvokeKind::SysCallStable)
     }
     fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
         self.visit_mut_invoke_target(target)?;

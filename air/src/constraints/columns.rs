@@ -164,9 +164,9 @@ impl<T> ChipletCols<T> {
         self.chiplets[4..20].borrow()
     }
 
-    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..18\]).
+    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..22\]).
     pub fn kernel_rom(&self) -> &KernelRomCols<T> {
-        self.chiplets[5..18].borrow()
+        self.chiplets[5..22].borrow()
     }
 
     /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
@@ -277,7 +277,7 @@ const _: () = assert!(NUM_MEMORY_COLS == 15);
 const _: () = assert!(NUM_ACE_COLS == 16);
 const _: () = assert!(NUM_ACE_READ_COLS == 4);
 const _: () = assert!(NUM_ACE_EVAL_COLS == 4);
-const _: () = assert!(NUM_KERNEL_ROM_COLS == 13);
+const _: () = assert!(NUM_KERNEL_ROM_COLS == 17);
 
 // TESTS
 // ================================================================================================

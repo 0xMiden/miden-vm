@@ -4,6 +4,7 @@
 
 #### Features
 
+- [BREAKING] Added prototype `syscall_stable.<name>` for kernel exports with authenticated `key -> procedure_root` bindings, preserving the caller MAST root when replacing a kernel implementation. This changes kernel descriptor serialization and breaks compatibility with prior proofs ([#4073](https://github.com/0xMiden/miden-vm/issues/4073)).
 - Restored the standalone `miden_crypto::hash::poseidon2` API, including its original digest format, Plonky3 adapters, and SIMD implementations, for applications with existing Poseidon2 commitments.
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - [BREAKING] Added `adv.export_deferred_witness` to store a registered true assertion's portable witness in the advice map under its digest. Downstream exhaustive matches on `SystemEvent` and `SystemEventNode` must handle the new `DeferredExportWitness` variant ([#4003](https://github.com/0xMiden/miden-vm/pull/4003)).

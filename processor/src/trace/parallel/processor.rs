@@ -22,7 +22,7 @@ use crate::{
     errors::OperationError,
     execution::{
         InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,
-        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
+        finish_load_mast_forest_for_invocation, finish_load_mast_forest_from_external,
     },
     host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
@@ -178,7 +178,7 @@ impl ReplayProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { .. } => {
+                InternalBreakReason::LoadMastForestForInvocation { .. } => {
                     // load mast forest from replay
                     let (root_id, new_forest_id) =
                         match self.mast_forest_resolution_replay.replay_resolution() {
@@ -195,7 +195,7 @@ impl ReplayProcessor {
 
                     // Finish loading the MAST forest from the Dyn node, as per the sans-IO
                     // contract.
-                    finish_load_mast_forest_from_dyn_start(
+                    finish_load_mast_forest_for_invocation(
                         root_id,
                         new_forest,
                         None,

@@ -122,7 +122,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                 |g| {
                     merkle::emit_siblings::<LB, _>(g, ctx);
 
-                    // Authenticate the row digest once, independently of its syscall count.
+                    // Authenticate the export-pair leaf once, independently of its syscall count.
                     g.batch(
                         "kernel_membership",
                         ctx.chiplet_active.kernel_rom.clone(),
