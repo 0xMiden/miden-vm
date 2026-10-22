@@ -68,7 +68,7 @@ FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        := testing
-FEATURES_vm-stark        := concurrent
+FEATURES_vm-stark        := concurrent,prover
 FEATURES_precompile-stark := concurrent,prover
 FEATURES_verifier        :=
 

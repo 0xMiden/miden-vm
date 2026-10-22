@@ -2156,7 +2156,6 @@ version = "1.0.0-rc.1"
 dependencies = [
  "clap",
  "criterion",
- "miden-air",
  "miden-core",
  "miden-stark",
  "p3-air",
@@ -2608,6 +2607,7 @@ dependencies = [
  "miden-processor",
  "miden-stark",
  "miden-verifier",
+ "miden-vm-stark",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2695,7 +2695,6 @@ name = "miden-test-utils"
 version = "1.0.0-rc.1"
 dependencies = [
  "env_logger",
- "miden-air",
  "miden-air-definitions",
  "miden-assembly",
  "miden-assembly-syntax",
@@ -2759,6 +2758,7 @@ dependencies = [
  "miden-precompiles",
  "miden-serde-utils",
  "miden-stark",
+ "miden-vm-stark",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2772,7 +2772,6 @@ dependencies = [
  "clap",
  "criterion",
  "hex",
- "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
@@ -2782,6 +2781,7 @@ dependencies = [
  "miden-prover",
  "miden-test-utils",
  "miden-verifier",
+ "miden-vm-stark",
  "predicates",
  "rand 0.10.2",
  "serde",
@@ -2801,9 +2801,9 @@ dependencies = [
  "clap",
  "codspeed-criterion-compat",
  "insta",
- "miden-air",
  "miden-core-lib",
  "miden-vm",
+ "miden-vm-stark",
  "rayon",
  "serde",
  "serde_json",
@@ -2835,6 +2835,7 @@ dependencies = [
  "miden-air-definitions",
  "miden-core",
  "miden-stark",
+ "p3-security",
 ]
 
 [[package]]
@@ -2853,6 +2854,7 @@ dependencies = [
  "miden-verifier",
  "miden-vm",
  "miden-vm-precompiles-bench",
+ "miden-vm-stark",
  "serde",
  "serde_json",
  "thiserror",

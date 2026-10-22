@@ -12,12 +12,14 @@ use miden_ace::{
 };
 use miden_air::vm::{
     MIDEN_AIR_COUNT,
-    config::{self, PROTOCOL_ID, relation_digest},
+    config::{self, PROTOCOL_ID},
 };
 use miden_air_definitions::vm::AIRS;
 use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{
+    QuotientRecompositionInputs, config::relation_digest, quotient_recomposition_inputs,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {

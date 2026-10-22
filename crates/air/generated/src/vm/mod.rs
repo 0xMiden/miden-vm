@@ -23,7 +23,6 @@ use p3_challenger::CanObserve;
 
 pub mod ace;
 pub mod config;
-pub mod memory;
 mod proof_order;
 pub mod security;
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT};

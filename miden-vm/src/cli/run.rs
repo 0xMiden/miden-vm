@@ -1,7 +1,6 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_air::vm::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
@@ -9,6 +8,7 @@ use miden_processor::{
     trace::{VmTrace, build_trace},
 };
 use miden_vm::internal::InputFile;
+use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
 use super::{

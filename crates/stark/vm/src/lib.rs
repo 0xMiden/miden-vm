@@ -1,4 +1,4 @@
-//! Miden VM production constraint diagnostics.
+//! Miden VM constraint diagnostics, runtime setup, memory derivation, and security reporting.
 #![no_std]
 
 extern crate alloc;
@@ -6,3 +6,6 @@ extern crate alloc;
 extern crate std;
 
 pub mod debug;
+pub mod memory;
+pub mod security;
+pub mod setup;

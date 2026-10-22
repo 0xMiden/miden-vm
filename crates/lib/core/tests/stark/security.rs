@@ -136,7 +136,7 @@ fn run_sweep_grid(adapter: &str, push_args: &str, outer_bound: u64, inner_bound:
 /// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
 fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
-    use miden_air::vm::security;
+    use miden_vm_stark::security;
 
     let push_args = (0..6)
         .rev()
@@ -248,7 +248,7 @@ fn vm_security_descriptor(
     log_max_height: u32,
     num_kernel_procedures: u32,
 ) -> [u64; 12] {
-    use miden_air::vm::security;
+    use miden_vm_stark::security;
 
     SecurityDescriptor {
         num_queries: u64::from(num_queries),
@@ -274,7 +274,7 @@ fn vm_security_descriptor(
 /// The MVM constructor supplies the shared PCS, field, and commitment settings. Every value carried
 /// by the descriptor is then replaced with the synthetic test value.
 fn native_level(descriptor: &SecurityDescriptor) -> u64 {
-    use miden_air::vm::{config, security};
+    use miden_vm_stark::{security, setup::config};
 
     let mut params = security::proof_security_parameters(
         &config::pcs_params(),
@@ -611,8 +611,8 @@ fn estimator_envelope_violations_trap() {
 
 #[test]
 fn common_security_estimator_preserves_the_caller_stack() {
-    use miden_air::vm::security;
     use miden_core::Felt;
+    use miden_vm_stark::security;
 
     let descriptor = vm_security_descriptor(27, 17, 12, 4, 22, 255);
     let caller_values = [91_001, 91_002, 91_003, 91_004];
@@ -641,7 +641,7 @@ fn common_security_estimator_preserves_the_caller_stack() {
 /// Q16 lookup-boundary correction, mirroring `lookup_boundary_correction` in the estimator.
 /// Used to place synthetic descriptors provably inside the envelope before executing them.
 fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
-    use miden_air::vm::security as vm;
+    use miden_vm_stark::security as vm;
     if boundary == 0 {
         return 0;
     }
@@ -655,8 +655,9 @@ fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
 /// values fit in u32, and that the lookup subtraction remains valid for both deployed shapes.
 #[test]
 fn recursive_verifier_ranges_fit_security_estimator_envelope() {
-    use miden_air::{precompiles::primitives::byte_pair_lut::TRACE_HEIGHT, vm::security as vm};
+    use miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
     use miden_precompile_stark::setup::security as pvm;
+    use miden_vm_stark::security as vm;
 
     assert_eq!(PVM_LOG_HEIGHT_MIN, TRACE_HEIGHT.ilog2() as u64);
     assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::FIXED_POINT_FRACTIONAL_BITS);

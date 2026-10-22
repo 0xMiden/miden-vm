@@ -12,7 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-miden-air.workspace = true
+miden-vm-stark.workspace = true
 clap = { workspace = true, features = ["derive", "std"] }
 miden-core-lib = { workspace = true }
 miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }

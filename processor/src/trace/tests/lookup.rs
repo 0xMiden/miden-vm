@@ -16,7 +16,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use std::collections::HashMap;
 
-use miden_air::vm::{MidenMultiAir, config};
+use miden_air::vm::MidenMultiAir;
 use miden_air_definitions::vm::{
     MidenAir,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
@@ -47,6 +47,7 @@ use miden_stark::{
     debug,
     lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
 };
+use miden_vm_stark::setup::config;
 
 use super::{
     Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,

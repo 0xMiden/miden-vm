@@ -1,8 +1,8 @@
 //! Behavioral oracles for the PVM statement and shape transcript hook.
 
-use miden_air::vm::config::{eidos_config, observe_protocol_params};
 use miden_core::Felt;
 use miden_stark::{StarkConfig, pcs::PcsParams};
+use miden_vm_stark::setup::config::{eidos_config, observe_protocol_params};
 use p3_challenger::{CanObserve, FieldChallenger};
 
 use super::pvm_layout_const;

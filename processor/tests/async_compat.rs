@@ -132,12 +132,12 @@ async fn fast_processor_execute_for_proving_async_matches_sync() {
     let (async_vm_witness, _) = async_witness.into_parts();
     let sync_trace = miden_processor::trace::build_trace(
         sync_vm_witness,
-        &miden_air::vm::memory::default_budget(),
+        &miden_vm_stark::memory::default_budget(),
     )
     .unwrap();
     let async_trace = miden_processor::trace::build_trace(
         async_vm_witness,
-        &miden_air::vm::memory::default_budget(),
+        &miden_vm_stark::memory::default_budget(),
     )
     .unwrap();
 

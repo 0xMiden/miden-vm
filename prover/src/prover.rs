@@ -1,10 +1,8 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_air::vm::MidenMultiAir;
 use miden_core::{
-    Felt, Word,
+    Word,
     deferred::PrecompileLimits,
-    field::QuadFelt,
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
 use miden_processor::{
@@ -13,7 +11,6 @@ use miden_processor::{
     advice::AdviceInputs,
     trace::{VmTrace, build_trace},
 };
-use miden_stark::memory;
 
 use crate::{config, prove_stark};
 
@@ -39,7 +36,7 @@ impl Prover {
     /// total process-RSS or allocator cap. The precompile prover's memory is bounded separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 =
-        miden_air::vm::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+        miden_vm_stark::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
     /// Default maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
@@ -159,7 +156,7 @@ impl Prover {
             let _span = tracing::info_span!("build_miden_vm_trace").entered();
             build_trace(
                 witness,
-                &miden_air::vm::memory::canonical_budget(self.max_prover_memory_bytes),
+                &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
             )
             .map_err(ProverError::TraceGeneration)?
         };
@@ -240,13 +237,9 @@ impl Prover {
             trace_len_summary.eidos_compression_rows(),
             trace_len_summary.byte_pair_lookup_rows(),
             trace_len_summary.padded_trace_len(),
-            trace_len_summary.padded_heights().and_then(|heights| {
-                memory::prover_peak_bytes::<Felt, QuadFelt, _>(
-                    &MidenMultiAir::new(),
-                    heights,
-                    &params,
-                )
-            })
+            trace_len_summary
+                .padded_heights()
+                .and_then(|heights| miden_vm_stark::memory::prover_peak_bytes(heights, &params))
         );
 
         let precompile_root = trace.precompile_root();
@@ -331,7 +324,7 @@ pub fn prove_sync(
             processor.execute_and_build_trace_sync(
                 program,
                 host,
-                &miden_air::vm::memory::canonical_budget(prover.max_prover_memory_bytes()),
+                &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
             )?
         };
         let stack_outputs = *trace.stack_outputs();

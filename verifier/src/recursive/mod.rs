@@ -27,7 +27,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -46,6 +46,7 @@ use miden_stark::{
     proof::{StarkProof, StarkProofData},
     verifier::VerifierError as CryptoVerifierError,
 };
+use miden_vm_stark::setup::config;
 use serde_wincode::{SerdeCompat, wincode};
 
 use crate::MAX_STARK_PROOF_BYTES;
@@ -392,12 +393,12 @@ fn build_merkle_data(
     // pinned circuit digest.
     #[cfg(feature = "std")]
     {
-        let circuit = miden_air::vm::ace::shared_recursive_circuit();
+        let circuit = miden_vm_stark::setup::ace::shared_recursive_circuit();
         advice_map.push((circuit.commitment, circuit.instructions.clone()));
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::vm::ace::compiled_recursive_circuit();
+        let circuit = miden_vm_stark::setup::ace::compiled_recursive_circuit();
         advice_map.push((circuit.commitment, circuit.instructions));
     }
 

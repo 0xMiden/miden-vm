@@ -1,6 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -16,6 +16,7 @@ use miden_utils_testing::{
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
+use miden_vm_stark::setup::config;
 use p3_challenger::{CanObserve, FieldChallenger};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -878,7 +879,7 @@ fn vm_verify_proof_program() -> String {
 }
 
 fn run_recursive_verifier(data: &VerifierData) -> Vec<usize> {
-    use miden_air::vm::security;
+    use miden_vm_stark::security;
 
     let source = vm_verify_proof_program();
     let mut initial_stack = data.initial_stack().to_vec();
@@ -1113,7 +1114,7 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
 /// One circuit serves every proof order, so this is the canonical circuit's own digest — the
 /// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
 fn recursive_circuit_key() -> Word {
-    miden_air::vm::ace::shared_recursive_circuit().commitment
+    miden_vm_stark::setup::ace::shared_recursive_circuit().commitment
 }
 
 // EXAMPLE PROGRAMS
