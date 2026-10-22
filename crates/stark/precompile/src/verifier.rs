@@ -11,7 +11,7 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
+    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
     air::Statement,
     config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs as LmcsTrait,
@@ -21,8 +21,8 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 use crate::setup::{
+    commitments,
     config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
-    preprocessed,
     security::{self, ProofSecurityParameters},
 };
 
@@ -61,25 +61,35 @@ fn verify_stark(
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
             let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::blake3();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                commitments::BLAKE3.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
         HashFunction::Keccak => {
             let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::keccak();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                commitments::KECCAK.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
         HashFunction::Eidos => {
             let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::eidos();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(&config, commitments::EIDOS.into(), proof.bytes(), public_root)
         },
     }
 }
 
+type PreprocessedCommitment<SC> =
+    <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as LmcsTrait>::Commitment;
+
 fn verify_stark_with_config<SC>(
     config: &SC,
-    preprocessed: &Preprocessed<Felt, SC::Lmcs>,
+    preprocessed_commitment: PreprocessedCommitment<SC>,
     proof_bytes: &[u8],
     public_root: DeferredRoot,
 ) -> Result<(u32, usize), VerifyError>
@@ -104,7 +114,7 @@ where
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
 
-    VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
+    VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
         .verify(&proof, challenger)?;
 
     let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));

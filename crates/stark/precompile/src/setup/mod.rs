@@ -4,8 +4,10 @@
 //! circuit remain owned by `miden-air`. This module constructs and caches the corresponding
 //! runtime configurations without recapturing the AIRs.
 
+pub(crate) mod commitments;
 pub mod config;
 #[cfg(feature = "prover")]
 pub mod memory;
+#[cfg(any(test, feature = "prover"))]
 pub mod preprocessed;
 pub mod security;

@@ -4,7 +4,7 @@
 //! pure function of the fixed twelve-chiplet list and the STARK config's
 //! blowup/LMCS/DFT. Under `std`, each hash function's bundle is built once per
 //! process and reused via `OnceLock`; without `std` (e.g. a `no_std`
-//! verifier target), every call rebuilds it, matching the pre-caching
+//! prover target), every call rebuilds it, matching the pre-caching
 //! behavior exactly.
 
 use alloc::vec;
