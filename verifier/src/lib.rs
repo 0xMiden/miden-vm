@@ -8,43 +8,29 @@ extern crate std;
 use alloc::{boxed::Box, sync::Arc};
 
 #[cfg(test)]
-use miden_air::vm::MidenMultiAir;
+use miden_air::vm::{MidenMultiAir, config};
 #[cfg(test)]
 use miden_core::{Felt, field::QuadFelt};
-use miden_core::{
-    deferred::{
-        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileLimits, PrecompileRegistry,
-        PreparationError, TRUE_DIGEST,
+// RE-EXPORTS
+// ================================================================================================
+pub use miden_core::{
+    Word,
+    deferred::{DeferredRoot, PrecompileError, PrecompileLimits, PreparationError},
+    program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+    proof::{
+        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+        HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
+};
+use miden_core::{
+    deferred::{MAX_PRECOMPILE_ROOTS, PrecompileRegistry, TRUE_DIGEST},
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
 #[cfg(test)]
 use miden_stark::air::Statement;
+pub use miden_stark::security::{ProofSecurityParameters, SecurityReport};
 #[cfg(test)]
-use miden_vm_stark::setup::config;
-
-// RE-EXPORTS
-// ================================================================================================
-mod exports {
-    pub use miden_core::{
-        Word,
-        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{
-            ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
-            HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
-        },
-    };
-    pub mod math {
-        pub use miden_core::Felt;
-    }
-}
-pub use exports::*;
-pub use miden_stark::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
-};
-
-pub mod recursive;
+use miden_vm_stark::setup::config::eidos_config;
 
 struct VerifierSupport {
     format: u8,
@@ -418,9 +404,10 @@ pub enum VerificationError {
     #[error("precompile proof roots do not cover the VM obligation")]
     InsufficientPrecompileRootCoverage,
     #[error("failed to verify aggregate precompile STARK proof: {0}")]
-    PrecompileStarkVerification(#[from] miden_precompile_stark::verifier::VerifyError),
+    PrecompileStarkVerification(#[from] PrecompileVerificationError),
 }
 
+pub use miden_precompile_stark::verifier::VerifyError as PrecompileVerificationError;
 pub use miden_vm_stark::verifier::VerificationError as StarkVerificationError;
 
 // HELPER FUNCTIONS
@@ -739,7 +726,7 @@ mod tests {
 
     #[test]
     fn eidos_preprocessed_commitment_matches_fixed_table() {
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
             MidenMultiAir::new(),
             vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],

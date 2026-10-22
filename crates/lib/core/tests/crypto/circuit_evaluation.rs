@@ -94,7 +94,8 @@ fn multi_air_eval_circuit_masm() {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
     };
-    let circuit = miden_air::vm::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
+    let circuit =
+        miden_air_definitions::vm::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);

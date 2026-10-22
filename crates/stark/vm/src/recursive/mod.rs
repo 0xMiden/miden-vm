@@ -26,18 +26,20 @@ use alloc::{
     vec,
 };
 
-use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, config};
+use miden_air_definitions::vm::PublicInputs;
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     field::QuadFelt,
     program::ExecutionClaim,
-    proof::{ExecutionProof, HashFunction},
+    proof::{ExecutionProof, HashFunction, MAX_STARK_PROOF_BYTES},
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance,
     air::Statement,
+    config::observe_protocol_params,
     proof::{StarkProof, StarkProofData},
     recursive::advice::{
         AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
@@ -47,13 +49,13 @@ use miden_stark::{
 };
 use serde_wincode::{SerdeCompat, wincode};
 
-use crate::{MAX_STARK_PROOF_BYTES, setup::config};
+use crate::setup::config::eidos_config;
 
 // TYPES
 // ================================================================================================
 
 type Challenge = QuadFelt;
-type RecursiveConfig = config::EidosConfig;
+type RecursiveConfig = miden_stark::config::EidosConfig;
 type RecursiveLmcs = <RecursiveConfig as StarkConfig<Felt, Challenge>>::Lmcs;
 type RecursiveProofData = StarkProofData<Felt, Challenge, RecursiveConfig>;
 
@@ -181,13 +183,13 @@ fn build_from_proof_bytes(
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
 
     let proof = deserialize_proof(proof_bytes)?;
 
     let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     let statement = Statement::<Felt, Challenge, _>::new(
         MidenMultiAir::new(),
@@ -357,7 +359,7 @@ mod tests {
 
     #[test]
     fn eidos_preprocessed_commitment_matches_recursive_verifier_constant() {
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
             vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],

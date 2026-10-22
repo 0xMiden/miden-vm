@@ -1,8 +1,8 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_air::vm::PublicInputs;
-use miden_air_definitions::vm::{CoreCols, trace::RowIndex};
+use miden_air::vm::config;
+use miden_air_definitions::vm::{CoreCols, PublicInputs, trace::RowIndex};
 use miden_core::{
     Felt,
     deferred::TRUE_DIGEST,
@@ -16,7 +16,7 @@ use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 
-use crate::{prover::prove_stark, setup::config};
+use crate::{prover::prove_stark, setup::config::eidos_config};
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
@@ -139,7 +139,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
         trace.precompile_root(),
     );
     let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-    let stark_config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let stark_config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let proof_bytes = prove_stark(
         &stark_config,
         core_matrix,

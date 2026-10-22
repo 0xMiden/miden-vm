@@ -2,7 +2,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{ChipletAir, ChipletMultiAir};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs_params};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
@@ -15,6 +15,7 @@ use miden_stark::check_constraints;
 use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
     air::{ProverStatement, Statement},
+    config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
@@ -27,10 +28,7 @@ use crate::setup::config::test_challenger;
 use crate::{
     prover::ProveError,
     setup::{
-        config::{
-            PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-            observe_protocol_params, precompile_pcs_params,
-        },
+        config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
         preprocessed,
     },
 };

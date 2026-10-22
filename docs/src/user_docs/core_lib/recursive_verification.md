@@ -46,7 +46,7 @@ Remember that the weakest proof limits the security of the whole.
 ```rust
 use miden_core_lib::CoreLibrary;
 use miden_processor::StackInputs;
-use miden_verifier::recursive::RecursiveVerifierInputs;
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 let core_lib = CoreLibrary::default();
 let inputs = RecursiveVerifierInputs::for_request(

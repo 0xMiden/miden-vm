@@ -34,3 +34,10 @@ Authored equations and statement semantics remain in source AIR. Production AIR 
 generated evaluators, geometry and embedded ACE instructions, along with explicitly accepted
 PCS presets and relation, circuit and setup pins. This crate consumes those artifacts without
 compiling AIR at runtime or changing accepted identities.
+
+The backend exposes the VM transcript-bound factory at `setup::config::eidos_config`,
+with its input and output types. Immutable PCS presets and accepted pins belong to
+`miden_air::vm::config`; generic hash factories and transcript helpers belong to
+`miden_stark::config`. Generated security geometry and constants belong to
+`miden_air::vm::security`, while this backend supplies the VM security estimators
+and their input and output types. Generic estimators belong to `miden_stark::security`.

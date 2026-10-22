@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec, vec::Vec};
 
 use ::serde::Serialize;
-use miden_air::vm::MidenMultiAir;
+use miden_air::vm::{MidenMultiAir, config};
 use miden_air_definitions::vm::VmTrace;
 use miden_core::{
     Felt,
@@ -12,13 +12,14 @@ use miden_core::{
 use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
     air::{ProverStatement, Statement},
+    config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs,
     proof::{StarkOutput, StarkProofData},
 };
 use serde_wincode::{SerdeCompat, wincode};
 use tracing::instrument;
 
-use crate::setup::config;
+use crate::setup::config::eidos_config;
 #[cfg(feature = "std")]
 use crate::setup::preprocessed::cached_preprocessed_setup;
 
@@ -60,7 +61,7 @@ pub fn prove(
 
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let mut config = config::blake3_256_config(params, config::RELATION_DIGEST);
+            let mut config = blake3_256_config(params, config::RELATION_DIGEST);
             config.hash_lde_blocks = hash_lde_blocks;
             prove_stark(
                 &config,
@@ -73,7 +74,7 @@ pub fn prove(
             )
         },
         HashFunction::Keccak => {
-            let mut config = config::keccak_config(params, config::RELATION_DIGEST);
+            let mut config = keccak_config(params, config::RELATION_DIGEST);
             config.hash_lde_blocks = hash_lde_blocks;
             prove_stark(
                 &config,
@@ -86,7 +87,7 @@ pub fn prove(
             )
         },
         HashFunction::Eidos => {
-            let mut config = config::eidos_config(params, config::RELATION_DIGEST);
+            let mut config = eidos_config(params, config::RELATION_DIGEST);
             config.hash_lde_blocks = hash_lde_blocks;
             prove_stark(
                 &config,
@@ -128,7 +129,7 @@ where
     Preprocessed<Felt, SC::Lmcs>: Send + Sync,
 {
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
     // statement inputs read during observation/boundary correction.

@@ -12,6 +12,8 @@ use miden_processor::{
     trace::{VmTrace, build_trace},
 };
 
+use crate::PrecompileProvingError;
+
 /// A synchronous, configurable prover for post-execution Miden VM witnesses.
 ///
 /// This type does not execute programs. It owns proof-generation policy — including the memory
@@ -48,7 +50,7 @@ impl Prover {
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
             verification_precompile_limits:
-                miden_precompile_stark::prover::default_verification_precompile_limits(),
+                miden_precompiles::default_verification_precompile_limits(),
         }
     }
 
@@ -298,7 +300,7 @@ pub enum ProverError {
     VmProofGeneration(#[source] ExecutionError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
-    PrecompileProofGeneration(#[source] miden_precompile_stark::prover::PrecompileProvingError),
+    PrecompileProofGeneration(#[source] PrecompileProvingError),
 }
 
 impl ProverError {
@@ -386,10 +388,7 @@ mod tests {
             matches!(
                 err,
                 ProverError::PrecompileProofGeneration(
-                    miden_precompile_stark::prover::PrecompileProvingError::MemoryBudgetExceeded {
-                        budget_bytes: 1,
-                        ..
-                    }
+                    PrecompileProvingError::MemoryBudgetExceeded { budget_bytes: 1, .. }
                 )
             ),
             "expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}"

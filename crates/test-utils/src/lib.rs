@@ -13,6 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
+pub use miden_air_definitions::vm::VmTrace;
 use miden_air_definitions::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
@@ -37,7 +38,6 @@ use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    trace::VmTrace,
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,

@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use miden_air::precompiles::relations::MAX_MESSAGE_WIDTH;
+use miden_air_definitions::precompiles::relations::MAX_MESSAGE_WIDTH;
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},

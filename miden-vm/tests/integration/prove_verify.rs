@@ -741,12 +741,13 @@ mod execution_witness_serialization {
             BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
         },
         operations::Operation,
+        serde::Serializable,
     };
     use miden_processor::{
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{HashFunction, Prover, serde::Serializable};
+    use miden_prover::{HashFunction, Prover};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;

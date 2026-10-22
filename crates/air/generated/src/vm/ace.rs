@@ -1,5 +1,7 @@
-//! Circuit adapters and embedded recursive-verifier instructions.
-pub use miden_air_definitions::vm::ace::*;
+//! Build-compiled recursive-verifier circuit data.
+//!
+//! Authored circuit construction lives in [`miden_air_definitions::vm::ace`].
+pub use miden_air_definitions::vm::ace::RecursiveAceCircuit;
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
 pub const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =
@@ -14,7 +16,8 @@ mod tests {
 
     #[test]
     fn embedded_circuit_matches_independent_capture() {
-        let independent = build_recursive_verifier_ace_circuit().unwrap();
+        let independent =
+            miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(
             ACE_CIRCUIT_SHAPE,
             (independent.num_inputs, independent.num_eval_gates, independent.stream_len)
