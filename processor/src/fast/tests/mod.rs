@@ -2433,7 +2433,7 @@ fn test_prover_memory_budget_exceeded() {
         crate::trace::build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
             .expect("default budget must succeed");
     let exact_peak = miden_vm_stark::memory::default_budget()
-        .prover_peak_bytes(measured.trace_len_summary().padded_heights().unwrap())
+        .prover_peak_bytes(measured.trace_len_summary().padded_heights())
         .expect("modelled peak fits in u64");
 
     let err = crate::trace::build_trace(

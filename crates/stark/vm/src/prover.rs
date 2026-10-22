@@ -41,9 +41,7 @@ pub fn prove(trace: VmTrace, hash_fn: HashFunction) -> Result<VmProof, ProvingEr
         trace_len_summary.eidos_compression_rows(),
         trace_len_summary.byte_pair_lookup_rows(),
         trace_len_summary.padded_trace_len(),
-        trace_len_summary
-            .padded_heights()
-            .and_then(|heights| crate::memory::prover_peak_bytes(heights, &params))
+        crate::memory::prover_peak_bytes(trace_len_summary.padded_heights(), &params)
     );
 
     let precompile_root = trace.precompile_root();
