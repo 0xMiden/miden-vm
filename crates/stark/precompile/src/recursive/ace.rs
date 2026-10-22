@@ -624,15 +624,15 @@ mod tests {
     fn pvm_security_masm_matches_air() {
         use crate::setup::security as pvm_security;
 
-        let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
-        let fixed_point_one = pvm_security::FIXED_POINT_ONE;
+        let fractional_bits = pvm_security::testing::FIXED_POINT_FRACTIONAL_BITS;
+        let fixed_point_one = pvm_security::testing::FIXED_POINT_ONE;
         let sample_bits = miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
         for (name, expected) in [
             ("FP_SHIFT", u64::from(fractional_bits)),
             ("FP_ONE", fixed_point_one),
-            ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
+            ("BITS_PER_QUERY_FP", pvm_security::testing::BITS_PER_QUERY),
             ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
-            ("SECURITY_CAP_BITS", pvm_security::SECURITY_CAP >> fractional_bits),
+            ("SECURITY_CAP_BITS", pvm_security::testing::SECURITY_CAP >> fractional_bits),
             (
                 "DEEP_FIELD_BASE_BITS",
                 (sample_bits >> fractional_bits)
@@ -640,8 +640,8 @@ mod tests {
                         miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
                     ),
             ),
-            ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
-            ("LOG2_E_FP", pvm_security::LOG2_E),
+            ("FRI_FOLDING_BASE_BITS", pvm_security::testing::FOLDING_BASE >> fractional_bits),
+            ("LOG2_E_FP", pvm_security::testing::LOG2_E),
             (
                 "MAX_CONSTRAINT_DEGREE",
                 (1u64 << miden_air::precompiles::policy::precompile_pcs_params().log_blowup()) + 1,
@@ -708,11 +708,15 @@ mod tests {
         );
 
         for (name, path, expected) in [
-            ("LOOKUP_POW_BITS", PVM_WRAPPER_PATH, u64::from(pvm_security::LOOKUP_POW_BITS)),
+            (
+                "LOOKUP_POW_BITS",
+                PVM_WRAPPER_PATH,
+                u64::from(pvm_security::testing::LOOKUP_POW_BITS),
+            ),
             (
                 "MAX_MESSAGE_WIDTH",
                 PVM_PARAMETERS_PATH,
-                u64::from(pvm_security::LOOKUP_SHAPE.max_message_width),
+                u64::from(pvm_security::testing::LOOKUP_SHAPE.max_message_width),
             ),
             (
                 "NUM_COMPOSED_CONSTRAINTS",
@@ -741,7 +745,7 @@ mod tests {
             (
                 "LOOKUP_FRACTIONS_PER_ROW",
                 PVM_PARAMETERS_PATH,
-                u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
+                u64::from(pvm_security::testing::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
                 "FIXED_BOUNDARY_LOOKUP_TERMS",
