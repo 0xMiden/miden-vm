@@ -105,7 +105,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         }
     }
 
-    let pvm_shape = pvm::LOOKUP_SHAPE;
+    let pvm_shape = pvm::testing::LOOKUP_SHAPE;
     let pvm_coefficient =
         (u64::from(pvm_shape.max_message_width) + 2) * u64::from(pvm_shape.fractions_per_row);
     let (_, _, pvm_bound) = bound(pvm_coefficient);
@@ -234,7 +234,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
         report.terms().iter().find(|term| term.label == label).unwrap().bits
     };
     let base = miden_stark::security::protocol_params(&config::pcs_params());
-    let zero = security::security_report(
+    let zero = security::testing::security_report(
         &ProtocolParams {
             deep_pow_bits: 0,
             folding_pow_bits: 0,
@@ -248,7 +248,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
     let zero_folding = term_bits(&zero, FOLDING_LABEL);
 
     for pow_bits in 0..=31 {
-        let deep = security::security_report(
+        let deep = security::testing::security_report(
             &ProtocolParams {
                 deep_pow_bits: pow_bits,
                 folding_pow_bits: 0,
@@ -264,7 +264,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
             "DEEP grinding was not credited at {pow_bits} bits"
         );
 
-        let folding = security::security_report(
+        let folding = security::testing::security_report(
             &ProtocolParams {
                 deep_pow_bits: 0,
                 folding_pow_bits: pow_bits,
