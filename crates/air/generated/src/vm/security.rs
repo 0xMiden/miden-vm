@@ -6,19 +6,24 @@
 
 use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
-use miden_stark::pcs::PcsParams;
+pub use miden_stark::security::{
+    CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS, ProofSecurityParameters, protocol_params,
+    security_report_with_hash,
+};
+use miden_stark::{
+    pcs::PcsParams,
+    security::{apply_lookup_correction, lookup_boundary_correction},
+};
+#[cfg(test)]
+use p3_security::budget::report::LOOKUP_LABEL;
 #[cfg(test)]
 use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
-use p3_security::{budget::report::LOOKUP_LABEL, fixed};
+use p3_security::fixed;
 
-pub use crate::shared::security::{
-    CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS, ProofSecurityParameters, protocol_params,
-    security_report_with_hash,
-};
 use crate::vm::config;
 
 /// Column alignment of the commitment scheme, in base field elements.
@@ -172,70 +177,6 @@ pub const LOG2_E: u64 = fixed::LOG2_E;
 /// the two log-deferred-root terminals. Matches `sys::vm::mod.masm`'s
 /// `CORE_BOUNDARY_LOOKUP_TERMS`.
 pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
-
-/// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
-/// via `log2(1 + x) <= x · log2(e)`.
-///
-/// `num_boundary_terms` is the number of one-time lookup fractions consumed on top of the
-/// per-row terms counted by `fractions_per_row`. Both divisions round up, so the correction is
-/// never smaller than the true log term, keeping the corrected round conservative. The two-step
-/// division order (first by `fractions_per_row`, then by `2^log_max_height`) is what the common
-/// MASM estimator mirrors bit-for-bit: a single combined divisor overflows a `u32` at the deployed
-/// shape's larger heights.
-fn lookup_boundary_correction(
-    num_boundary_terms: u32,
-    fractions_per_row: u32,
-    log_max_height: u32,
-) -> u64 {
-    if num_boundary_terms == 0 {
-        return 0;
-    }
-    assert!(fractions_per_row > 0, "lookup boundary terms require per-row lookup fractions");
-    let height = 1u64
-        .checked_shl(log_max_height)
-        .expect("maximum trace height must fit in a u64");
-    (u64::from(num_boundary_terms) * LOG2_E)
-        .div_ceil(u64::from(fractions_per_row))
-        .div_ceil(height)
-}
-
-fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityReport {
-    let terms = (*report.terms()).map(|term| {
-        if term.label == LOOKUP_LABEL {
-            SecurityTerm::new(term.label, term.bits.saturating_sub(correction))
-        } else {
-            term
-        }
-    });
-    SecurityReport::new(terms)
-}
-
-impl ProofSecurityParameters {
-    /// Computes the conjectured security report for the verified proof.
-    ///
-    /// The same estimator handles MVM and PVM proofs because the parameters include the protocol,
-    /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
-    /// authenticated the proof rather than values assembled independently.
-    pub fn conjectured_security_report(&self) -> SecurityReport {
-        let report = security_report_with_hash(
-            &self.protocol_params,
-            &self.instance_shape,
-            &self.air_shape,
-            self.hash_fn,
-        );
-        let correction = lookup_boundary_correction(
-            self.num_lookup_boundary_terms,
-            self.air_shape.lookup.map_or(0, |lookup| lookup.fractions_per_row),
-            self.instance_shape.log_max_height,
-        );
-        apply_lookup_correction(report, correction)
-    }
-
-    /// Returns the conjectured security level for the verified proof.
-    pub fn conjectured_security_level(&self) -> u32 {
-        self.conjectured_security_report().security_level()
-    }
-}
 
 /// Builds MVM security parameters from values obtained during proof verification.
 ///

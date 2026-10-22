@@ -3,11 +3,9 @@
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
 use miden_core::{Felt, Word};
+use miden_stark::security::{AirShape, LookupShape};
 
-use crate::{
-    precompiles::ace::PvmRecursiveAceCircuit,
-    shared::security::{AirShape, LookupShape},
-};
+use crate::precompiles::ace::PvmRecursiveAceCircuit;
 
 /// Pinned relation identity and setup commitments for the supported proof configurations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
