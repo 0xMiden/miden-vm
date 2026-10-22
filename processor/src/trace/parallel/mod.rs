@@ -293,7 +293,7 @@ fn pad_to_trace_length(logical_len: usize) -> usize {
 ///
 /// The buffer is `rows * CORE_STORAGE_WIDTH` [`Felt`]s at its 1x size, with no blowup, quotient, or
 /// Merkle-tree overhead yet, so this is priced directly off the buffer's own byte size rather than
-/// through [`ProvingBudget::max_any_height`]'s full-pipeline model.
+/// through the caller-supplied proving budget's full-pipeline model.
 fn max_core_alloc_rows(max_prover_memory_bytes: u64) -> usize {
     let bytes_per_row = (CORE_STORAGE_WIDTH * size_of::<Felt>()) as u64;
     usize::try_from(max_prover_memory_bytes / bytes_per_row).unwrap_or(usize::MAX)

@@ -1209,7 +1209,7 @@ fn test_build_trace_corner_cases(
 /// Regression test for a tier-1 over-rejection: the raw core-trace buffer allocated by
 /// `generate_core_trace_row_major` (`core_trace_contexts.len() * fragment_size` rows at its
 /// unblown-up 1x size) used to be checked against a cap derived from the *full* proving-pipeline
-/// model (`memory::max_any_height_for_budget`, which additionally prices in blowup, quotient, and
+/// model (`ProvingBudget::max_any_height`, which additionally prices in blowup, quotient, and
 /// Merkle-tree overhead this buffer hasn't incurred yet). At the default (unshrunk) core trace
 /// fragment size, that rejected small programs under budgets that comfortably cover their real,
 /// much smaller padded heights.

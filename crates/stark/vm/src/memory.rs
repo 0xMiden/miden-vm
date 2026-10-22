@@ -15,11 +15,6 @@ pub fn prover_peak_bytes(heights: &[usize; MIDEN_AIR_COUNT], params: &PcsParams)
     memory_model(params)?.prover_peak_bytes(heights)
 }
 
-/// Largest single-AIR height that can fit the budget with the other heights zero.
-pub fn max_any_height_for_budget(limit_bytes: u64, params: &PcsParams) -> usize {
-    memory_model(params).map_or(0, |model| model.max_any_height_for_budget(limit_bytes))
-}
-
 /// Default maximum estimated proving memory: 64 GiB.
 pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
@@ -118,7 +113,7 @@ mod tests {
             heights[cheapest] = n;
             let budget = prover_peak_bytes(&heights, &params).expect("fits in u64");
             assert_eq!(
-                max_any_height_for_budget(budget, &params),
+                memory_model(&params).unwrap().max_any_height_for_budget(budget),
                 n,
                 "round trip failed for n = {n}"
             );
@@ -130,7 +125,7 @@ mod tests {
         let params = pcs_params();
         for n in [0usize, 1, 7, 100, 1 << 10, 1 << 20] {
             let budget = prover_peak_bytes(&[n; MIDEN_AIR_COUNT], &params).expect("fits in u64");
-            let any = max_any_height_for_budget(budget, &params);
+            let any = memory_model(&params).unwrap().max_any_height_for_budget(budget);
             assert!(
                 any >= n,
                 "max_any_height_for_budget({budget}) = {any} rejects uniform height {n}"
