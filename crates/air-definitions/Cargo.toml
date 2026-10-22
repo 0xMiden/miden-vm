@@ -1,6 +1,6 @@
 [package]
 name = "miden-air-definitions"
-version = "1.0.0"
+version.workspace = true
 description = "Handwritten VM and precompile AIR definitions and shared contracts"
 documentation = "https://docs.rs/miden-air-definitions"
 categories = ["cryptography", "no-std"]

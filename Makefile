@@ -360,6 +360,9 @@ check-core-docs: ## Check published MASM API documentation without writing sourc
 	MIDEN_BUILD_LIB_DOCS=1 MIDEN_CORE_LIB_DOCS_DIR="$$core_docs_tmp/docs" cargo build --locked -p miden-core-lib; \
 	diff -ru crates/lib/core/docs "$$core_docs_tmp/docs"
 
+.PHONY: check-pvm-artifacts
+check-pvm-artifacts: check-precompile-masm check-pvm-proof-fixture ## Check generated artifacts for this release line
+
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 	@set -eu; \
