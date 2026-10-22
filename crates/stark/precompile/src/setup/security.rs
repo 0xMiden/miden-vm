@@ -11,9 +11,11 @@
 
 use miden_air::precompile::policy::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 use miden_core::proof::HashFunction;
+#[cfg(test)]
+use miden_stark::security::COMMITMENT_ALIGNMENT;
 use miden_stark::security::{
-    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
-    protocol_params, security_report_with_hash,
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, EIDOS_CHALLENGE_SAMPLE_BITS, protocol_params,
+    security_report_with_hash,
 };
 pub use miden_stark::{
     pcs::PcsParams,
@@ -227,31 +229,6 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
     apply_fixed_boundary_correction(report, log_max_height)
 }
 
-/// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
-pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, HashFunction::Eidos)
-        .conjectured_security_level()
-}
-
-/// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
-/// under a commitment scheme with the given column alignment.
-///
-/// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// the production AIR shape otherwise. [`conjectured_security_level`] is exact only at the Eidos
-/// preset's alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash
-/// function, so a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment
-/// 17) is graded under its own DEEP term count and collision-resistance cap rather than the Eidos
-/// ones.
-pub fn conjectured_security_level_for_alignment(
-    params: &PcsParams,
-    log_max_height: u32,
-    alignment: usize,
-    hash_fn: HashFunction,
-) -> u32 {
-    proof_security_parameters(params, log_max_height, alignment, hash_fn)
-        .conjectured_security_level()
-}
-
 #[cfg(test)]
 mod tests {
     use miden_air::precompile::policy::precompile_pcs_params;
@@ -312,8 +289,8 @@ mod tests {
 
     /// [`miden_air::precompile::protocol::ProtocolMetadata::num_deep_terms`] at
     /// [`COMMITMENT_ALIGNMENT`] must reproduce the production AIR shape's stored
-    /// `num_deep_terms` exactly, so [`conjectured_security_level_for_alignment`] computes the same
-    /// level for an Eidos proof as [`conjectured_security_level`].
+    /// `num_deep_terms` exactly, so authenticated security parameters compute the same
+    /// level for an Eidos proof as the pinned AIR shape.
     #[test]
     fn num_deep_terms_matches_the_reference_alignment() {
         assert_eq!(

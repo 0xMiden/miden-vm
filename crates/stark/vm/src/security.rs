@@ -146,48 +146,6 @@ pub fn conjectured_security_level(
     .conjectured_security_level()
 }
 
-/// Computes a deployed Miden VM proof's conjectured security level, in whole bits, for a proof
-/// committed under a commitment scheme with the given column alignment.
-///
-/// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`miden_air::vm::security::AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier
-/// accepts only Eidos proofs, which `conjectured_security_level` computes at alignment
-/// [`miden_air::vm::security::COMMITMENT_ALIGNMENT`] (and this function is identical at that
-/// alignment, since `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
-/// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
-/// every hash function, including the non-algebraic ones the recursive verifier never sees, and
-/// supplies the hash configuration to select both the collision bound and the sampling support.
-pub fn conjectured_security_level_for_alignment(
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
-    log_max_height: u32,
-    num_kernel_procedures: u32,
-    alignment: usize,
-    hash_fn: HashFunction,
-) -> u32 {
-    let protocol = ProtocolParams {
-        log_blowup: config::LOG_BLOWUP as u32,
-        log_folding_arity: config::LOG_FOLDING_ARITY as u32,
-        num_queries,
-        query_pow_bits,
-        ood_pow_bits: OOD_POW_BITS,
-        deep_pow_bits,
-        folding_pow_bits,
-        lookup_pow_bits: LOOKUP_POW_BITS,
-    };
-    mvm_security_parameters_from_protocol(
-        protocol,
-        u32::from(config::pcs_params().log_final_degree()),
-        log_max_height,
-        num_kernel_procedures,
-        alignment,
-        hash_fn,
-    )
-    .conjectured_security_level()
-}
-
 /// Computes the conjectured security level of a Miden VM statement proof, for each protocol
 /// round.
 ///
@@ -312,7 +270,7 @@ mod tests {
 
     /// `num_deep_terms` at [`miden_air::vm::security::COMMITMENT_ALIGNMENT`] (algebraic sponges)
     /// must reproduce [`miden_air::vm::security::AIR_SHAPE`]'s stored `num_deep_terms` exactly,
-    /// so `conjectured_security_level_for_alignment` computes the same level for an Eidos proof
+    /// so authenticated security parameters compute the same level for an Eidos proof
     /// as `conjectured_security_level`.
     ///
     /// The other two are the deployed non-algebraic configurations' actual alignments: Blake3's

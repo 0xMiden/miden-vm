@@ -96,11 +96,6 @@ impl VmTrace {
         &self.main_trace
     }
 
-    /// Returns a mutable reference to the main trace.
-    pub fn main_trace_mut(&mut self) -> &mut MainTrace {
-        &mut self.main_trace
-    }
-
     /// Returns the authenticated root of the deferred precompile state.
     pub fn precompile_root(&self) -> Digest {
         self.precompile_root

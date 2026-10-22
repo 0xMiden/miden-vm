@@ -74,14 +74,6 @@ where
         .expect("chiplet stack always declares BytePairLut preprocessed columns")
 }
 
-/// Builds a bundle without caching it.
-pub fn build_uncached<SC>(config: &SC) -> Preprocessed<Felt, SC::Lmcs>
-where
-    SC: StarkConfig<Felt, QuadFelt>,
-{
-    build(config)
-}
-
 macro_rules! cached_preprocessed {
     ($fn_name:ident, $config:ty, $config_fn:ident) => {
         pub fn $fn_name()
