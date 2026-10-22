@@ -172,7 +172,7 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
     for outer in 0..outer_bound {
         for inner in 0..inner_bound {
             let masm = levels[(outer * inner_bound + inner) as usize];
-            let native = u64::from(security::conjectured_security_level(
+            let native = u64::from(security::testing::conjectured_security_level(
                 axes[0].value(outer, inner),
                 axes[1].value(outer, inner),
                 axes[2].value(outer, inner),
@@ -626,7 +626,8 @@ fn common_security_estimator_preserves_the_caller_stack() {
             exec.security::compute_conjectured_security_level
         end
     ";
-    let expected_level = u64::from(security::conjectured_security_level(27, 17, 12, 4, 22, 255));
+    let expected_level =
+        u64::from(security::testing::conjectured_security_level(27, 17, 12, 4, 22, 255));
     let mut expected = vec![expected_level];
     expected.extend(caller_values);
     let trace = build_test!(source, &inputs).execute().expect("the estimator must execute");
@@ -661,12 +662,12 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
     use miden_precompile_stark::setup::security as pvm;
 
     assert_eq!(PVM_LOG_HEIGHT_MIN, TRACE_HEIGHT.ilog2() as u64);
-    assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::FIXED_POINT_FRACTIONAL_BITS);
-    assert_eq!(vm::FIXED_POINT_ONE, pvm::FIXED_POINT_ONE);
-    assert_eq!(vm::BITS_PER_QUERY, pvm::BITS_PER_QUERY);
-    assert_eq!(vm::SECURITY_CAP, pvm::SECURITY_CAP);
-    assert_eq!(vm::FOLDING_BASE, pvm::FOLDING_BASE);
-    assert_eq!(vm::LOG2_E, pvm::LOG2_E);
+    assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::testing::FIXED_POINT_FRACTIONAL_BITS);
+    assert_eq!(vm::FIXED_POINT_ONE, pvm::testing::FIXED_POINT_ONE);
+    assert_eq!(vm::BITS_PER_QUERY, pvm::testing::BITS_PER_QUERY);
+    assert_eq!(vm::SECURITY_CAP, pvm::testing::SECURITY_CAP);
+    assert_eq!(vm::FOLDING_BASE, pvm::testing::FOLDING_BASE);
+    assert_eq!(vm::LOG2_E, pvm::testing::LOG2_E);
 
     // u32 extremes of the estimator's arithmetic over its asserted envelope: the query product at
     // 150 queries, the correction numerator at 4,096 boundary terms, and the two slack products
@@ -691,8 +692,8 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
         ),
         (
             "PVM",
-            u64::from(pvm::LOOKUP_SHAPE.max_message_width),
-            u64::from(pvm::LOOKUP_SHAPE.fractions_per_row),
+            u64::from(pvm::testing::LOOKUP_SHAPE.max_message_width),
+            u64::from(pvm::testing::LOOKUP_SHAPE.fractions_per_row),
             u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS),
             PVM_LOG_HEIGHT_MIN,
         ),
@@ -825,12 +826,12 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
             exec.security::compute_conjectured_security_level
         end
         ",
-        lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::LOOKUP_SHAPE.max_message_width,
+        lookup_pow_bits = security::testing::LOOKUP_POW_BITS,
+        max_message_width = security::testing::LOOKUP_SHAPE.max_message_width,
         num_composed_constraints = air_shape.num_composed_constraints,
         max_constraint_degree = air_shape.max_constraint_degree,
         num_deep_terms = air_shape.num_deep_terms.unwrap(),
-        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
+        fractions_per_row = security::testing::LOOKUP_SHAPE.fractions_per_row,
         boundary_terms = security::FIXED_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
@@ -846,7 +847,8 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
             params.deep_pow_bits = axes[2].value(outer, inner);
             params.folding_pow_bits = axes[3].value(outer, inner);
             let log_height = axes[4].value(outer, inner);
-            let native = u64::from(security::security_report(&params, log_height).security_level());
+            let native =
+                u64::from(security::testing::security_report(&params, log_height).security_level());
 
             assert_eq!(
                 masm,

@@ -436,13 +436,13 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         .max()
         .expect("the PVM relation has chiplet AIRs");
     let expected = [
-        u64::from(security::LOOKUP_POW_BITS),
+        u64::from(security::testing::LOOKUP_POW_BITS),
         u64::from(air_shape.num_composed_constraints),
         u64::from(air_shape.max_constraint_degree),
         u64::from(air_shape.num_deep_terms.unwrap()),
-        u64::from(security::LOOKUP_SHAPE.max_message_width),
+        u64::from(security::testing::LOOKUP_SHAPE.max_message_width),
         u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        u64::from(security::LOOKUP_SHAPE.fractions_per_row),
+        u64::from(security::testing::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         stream[0].as_canonical_u64(),
         stream[1].as_canonical_u64(),

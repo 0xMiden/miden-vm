@@ -16,6 +16,8 @@ doctest = false
 
 [features]
 default = ["std"]
+# Reference estimators used by cross-crate regression tests.
+testing = []
 std = ["miden-air/std", "miden-air-source/std", "miden-core/std", "miden-stark/std", "thiserror/std"]
 concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
 prover = ["dep:tracing"]

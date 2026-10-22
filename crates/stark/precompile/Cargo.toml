@@ -18,6 +18,8 @@ doctest = false
 
 [features]
 default = ["std"]
+# Reference estimators used by cross-crate regression tests.
+testing = ["dep:p3-security"]
 prover = ["dep:miden-precompiles", "dep:miden-utils-sync", "dep:tracing"]
 concurrent = [
     "std",
@@ -46,7 +48,7 @@ miden-air.workspace = true
 miden-precompiles = { workspace = true, optional = true }
 miden-utils-sync = { workspace = true, optional = true }
 miden-serde-utils.workspace = true
-p3-security.workspace = true
+p3-security = { workspace = true, optional = true }
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
@@ -59,6 +61,7 @@ path = "src/bin/pvm_proof_fixture.rs"
 required-features = ["fixture-tools"]
 
 [dev-dependencies]
+p3-security.workspace = true
 insta.workspace = true
 # Known-good secp256k1 reference for EC circuit cross-validation.
 k256 = { workspace = true, features = ["arithmetic"] }
