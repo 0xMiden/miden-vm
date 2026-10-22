@@ -329,7 +329,7 @@ fn serialized_controllers_reject_transport_and_period_seam_corruption() {
     ] {
         let mut forged = main.clone();
         forged.values[row * NUM_MAIN_COLS + column] += Felt::ONE;
-        crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged);
+        crate::prover::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged);
     }
 }
 
@@ -350,7 +350,7 @@ fn next_row_node_payloads_are_authenticated_by_their_consumers() {
     for phase in [20, 22] {
         let mut forged = mains[0].clone();
         forged.values[phase * NUM_MAIN_COLS + chunk_node::PAYLOAD[0]] += Felt::ONE;
-        crate::tests::check_local(ChunkNodeSpongeAir, &forged);
+        crate::prover::tests::check_local(ChunkNodeSpongeAir, &forged);
         assert!(
             !super::bus_balance::session_stack_residual(&mains, &[(0, &forged)], &challenges)
                 .is_empty()

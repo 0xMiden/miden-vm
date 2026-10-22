@@ -310,8 +310,12 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
         let mut forged = tampered.clone();
         forged.values[row * EVAL_NUM_MAIN_COLS + column] =
             Felt::ONE - forged.values[row * EVAL_NUM_MAIN_COLS + column];
-        crate::tests::assert_constraint_failure(|| {
-            crate::tests::check_local_inputs(TranscriptEvalAir, &forged, traces.air_inputs());
+        crate::prover::tests::assert_constraint_failure(|| {
+            crate::prover::tests::check_local_inputs(
+                TranscriptEvalAir,
+                &forged,
+                traces.air_inputs(),
+            );
         });
     }
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_ADD] = Felt::ZERO;

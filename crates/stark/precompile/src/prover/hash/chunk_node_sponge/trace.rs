@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::precompiles::hash::chunk_node as layout;
+use miden_air_definitions::precompiles::hash::chunk_node as layout;
 use miden_core::{
     Felt,
     utils::{Matrix, RowMajorMatrix},

@@ -172,8 +172,8 @@ fn stack_airs() -> [ChipletAir; NUM_STACK] {
 
 /// The subset as a [`MultiAir`] over the five [`stack_airs`] in
 /// [`NUM_STACK`] order, closing the same trace-length-weighted LogUp identity as the full
-/// [`ChipletMultiAir`](crate::prover::session::ChipletMultiAir). The subset is bus-closed, so the raw
-/// residue sum reconstructed from its normalized values vanishes. Drives the
+/// [`ChipletMultiAir`](crate::prover::session::ChipletMultiAir). The subset is bus-closed, so the
+/// raw residue sum reconstructed from its normalized values vanishes. Drives the
 /// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip.
 #[derive(Clone, Debug)]
 struct EcStackMultiAir {

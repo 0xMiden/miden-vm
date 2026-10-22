@@ -405,12 +405,17 @@ fn packed_passthrough_aliases_preserve_memory_but_fail_canonical_byte_checks() {
             // source/destination words, carries, mask lookups and the packed passthrough tie.
             for bytes in [A_BYTES_RANGE, R_BYTES_RANGE] {
                 let start = row + bytes.start;
-                let expected =
-                    crate::prover::utils::halves_le::<Felt, _>(&honest.values[start..start + 8], 256);
+                let expected = crate::prover::utils::halves_le::<Felt, _>(
+                    &honest.values[start..start + 8],
+                    256,
+                );
                 forged.values[start + 4 * half] += Felt::from_u16(256);
                 forged.values[start + 4 * half + 1] -= Felt::ONE;
                 assert_eq!(
-                    crate::prover::utils::halves_le::<Felt, _>(&forged.values[start..start + 8], 256),
+                    crate::prover::utils::halves_le::<Felt, _>(
+                        &forged.values[start..start + 8],
+                        256
+                    ),
                     expected,
                 );
             }

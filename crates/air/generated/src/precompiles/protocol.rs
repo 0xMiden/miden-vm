@@ -7,8 +7,6 @@ pub use miden_air_definitions::precompiles::ace::PvmRecursiveAceCircuit;
 use miden_core::{Felt, Word};
 pub use miden_stark::security::{AirShape, LookupShape};
 
-pub use miden_air_definitions::precompiles::ace::PvmRecursiveAceCircuit;
-
 /// Pinned relation identity and setup commitments for the supported proof configurations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RelationPins {
@@ -189,8 +187,10 @@ mod tests {
         )
         .unwrap();
         let relation_digest = PINS.relation_digest.map(Felt::new_unchecked);
-        let blake3_config =
-            miden_stark::config::blake3_256_config(policy::precompile_pcs_params(), relation_digest);
+        let blake3_config = miden_stark::config::blake3_256_config(
+            policy::precompile_pcs_params(),
+            relation_digest,
+        );
         assert_eq!(
             <[u8; 32]>::from(
                 miden_stark::Preprocessed::build(&statement, &blake3_config)
@@ -211,7 +211,11 @@ mod tests {
             PVM_KECCAK_PREPROCESSED_COMMITMENT,
             "{UPDATE_HINT}"
         );
-        let config = miden_stark::config::eidos_config(policy::precompile_pcs_params(), relation_digest, miden_core::program::domain::STARK_TRANSCRIPT);
+        let config = miden_stark::config::eidos_config(
+            policy::precompile_pcs_params(),
+            relation_digest,
+            miden_core::program::domain::STARK_TRANSCRIPT,
+        );
         let commitment = <[u64; 4]>::from(
             miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
         );

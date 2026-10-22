@@ -289,7 +289,9 @@ fn sha256_arithmetic_edges_cover_rotations_and_both_carries() {
     let main = generate_trace(requires, &mut BytePairLutRequires::new());
     let mut seen = 0u8;
     for row in main.values.as_chunks::<{ NUM_MAIN_COLS }>().0.iter() {
-        if row[crate::prover::hash::sha256::compression::COL_PROG_BEGIN + program::T_IS_ADD] == Felt::ONE {
+        if row[crate::prover::hash::sha256::compression::COL_PROG_BEGIN + program::T_IS_ADD]
+            == Felt::ONE
+        {
             seen |= 1 << row[COL_CARRY].as_canonical_u64();
         }
     }
