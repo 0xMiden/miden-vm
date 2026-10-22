@@ -68,6 +68,10 @@ fn trace_memory_budget_uses_compiled_geometry_without_allocating() {
         black_box(1 << 30),
         &params,
     ));
+    let model = memory::ProverMemoryModel::from_multi_air::<Felt, QuadFelt, _>(&multi_air, &params)
+        .expect("production geometry fits");
+    assert_eq!(model.prover_peak_bytes(black_box(&[1024, 2048, 4096, 65536])), peak);
+    assert!(model.max_any_height_for_budget(black_box(1 << 30)) > 0);
     let allocations = ALLOCATIONS.replace(None).unwrap();
 
     assert!(peak.is_some());
@@ -88,6 +92,10 @@ fn precompile_memory_budget_uses_compiled_geometry_without_allocating() {
         black_box(&heights),
         &params,
     ));
+    let model = memory::ProverMemoryModel::from_multi_air::<Felt, QuadFelt, _>(&multi_air, &params)
+        .expect("production geometry fits");
+    assert_eq!(model.prover_peak_bytes(black_box(&heights)), peak);
+    assert!(model.max_any_height_for_budget(black_box(1 << 30)) > 0);
     let allocations = ALLOCATIONS.replace(None).unwrap();
 
     assert!(peak.is_some());
