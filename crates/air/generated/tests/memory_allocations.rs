@@ -8,7 +8,7 @@ use std::{
 };
 
 use miden_air::{
-    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
+    precompiles::{ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params},
     vm::{MidenMultiAir, config::pcs_params},
 };
 use miden_core::{Felt, field::QuadFelt};

@@ -2,15 +2,7 @@
 
 use alloc::{vec, vec::Vec};
 
-#[cfg(test)]
-use miden_air::precompiles::stark_config::test_challenger;
-use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, preprocessed,
-    stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
-    },
-};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
@@ -30,7 +22,18 @@ use serde::Serialize;
 use serde_wincode::SerdeCompat;
 
 use super::SessionTraces;
-use crate::prover::ProveError;
+#[cfg(test)]
+use crate::setup::config::test_challenger;
+use crate::{
+    prover::ProveError,
+    setup::{
+        config::{
+            PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+            observe_protocol_params, precompile_pcs_params,
+        },
+        preprocessed,
+    },
+};
 
 impl SessionTraces {
     #[cfg(test)]

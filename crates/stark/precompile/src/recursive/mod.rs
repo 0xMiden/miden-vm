@@ -1,3 +1,4 @@
+use miden_air::precompiles::protocol::PVM_PREPROCESSED_COMMITMENT;
 //! Advice construction for the in-VM PVM STARK verifier.
 //!
 //! This module parses an Eidos PVM proof into the exact stack, Merkle-store, and advice-map
@@ -19,11 +20,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
-    protocol::PVM_PREPROCESSED_COMMITMENT,
-    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
-};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -47,6 +44,10 @@ use miden_stark::{
 use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
+use crate::setup::{
+    config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+    preprocessed,
+};
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;

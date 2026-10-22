@@ -10,7 +10,7 @@ pub const PREPROCESSED_COMMITMENT_1 = 2022626773377316756
 pub const PREPROCESSED_COMMITMENT_2 = 6941685244114430330
 pub const PREPROCESSED_COMMITMENT_3 = 5172579525468662096
 
-# Security descriptor from miden_air::precompiles::security.
+# Security descriptor from miden_precompile_stark::setup::security.
 pub const MAX_MESSAGE_WIDTH = 18
 pub const NUM_COMPOSED_CONSTRAINTS = 826
 pub const MAX_CONSTRAINT_DEGREE = 5

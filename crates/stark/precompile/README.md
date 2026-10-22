@@ -1,6 +1,6 @@
 # miden-precompile-stark
 
-STARK proving, verification, and recursive advice for the Miden precompile
+STARK proving, verification, runtime setup, and recursive advice for the Miden precompile
 relation. Authored AIR semantics, production evaluators, compiled geometry, embedded ACE
 instructions, and accepted protocol identities remain in `miden-air-definitions` and `miden-air`.
 
@@ -17,8 +17,8 @@ before trace allocation; it does not bound preparation or session construction.
 
 `verifier::verify_deferred` verifies a serialized STARK against an explicit aggregate root and
 returns authenticated security parameters. Execution-root coverage and minimum-security acceptance
-remain application policy. Runtime configurations, preprocessing caches, security calculations,
-and the proving-memory model remain in `miden-air`.
+remain application policy. `setup` owns config construction, preprocessing caches, runtime
+security calculations, and (with `prover`) the proving-memory model.
 
 The `fixture-tools` feature enables the `pvm-proof-fixture` maintenance binary. Independent AIR
 capture, setup-pin, proof-fixture, and recursive-verifier checks remain available in the crate's

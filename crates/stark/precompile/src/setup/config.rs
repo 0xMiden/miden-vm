@@ -26,7 +26,7 @@ pub type PrecompileStarkConfig<L, Ch> = miden_stark::config::MidenStarkConfig<L,
 /// The generated raw limbs live with the canonical ACE constants; this public field-valued view
 /// is the value passed to every production PVM configuration.
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
-    let [d0, d1, d2, d3] = crate::precompiles::PVM_RELATION_DIGEST;
+    let [d0, d1, d2, d3] = miden_air::precompiles::PVM_RELATION_DIGEST;
     [
         Felt::new_unchecked(d0),
         Felt::new_unchecked(d1),
@@ -43,19 +43,19 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 // ================================================================================================
 
 /// Log2 of the PVM FRI blowup factor (blowup = 8).
-pub(crate) use super::policy::LOG_BLOWUP;
+pub(crate) use miden_air::precompiles::policy::LOG_BLOWUP;
 /// Log2 of the PVM FRI folding arity (arity = 4).
-pub(crate) use super::policy::LOG_FOLDING_ARITY;
+pub(crate) use miden_air::precompiles::policy::LOG_FOLDING_ARITY;
 /// PCS parameters for the precompile chiplet stack.
 ///
-/// Mirrors `crate::vm::config::pcs_params` in every parameter, including
+/// Mirrors the VM relation preset in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
-/// relying on the core VM's defaults. Every [`ChipletAir`](crate::precompiles::ChipletAir)
+/// relying on the core VM's defaults. Every [`ChipletAir`](miden_air::precompiles::ChipletAir)
 /// requires at most four quotient chunks, below the eight permitted by `log_blowup = 3`. The
 /// MASM verifier compiles this PCS geometry, so changing it requires a coordinated MASM update
 /// and security review; it is not a runtime configuration.
-pub use super::policy::precompile_pcs_params;
+pub use miden_air::precompiles::policy::precompile_pcs_params;
 
 /// Creates the PVM Eidos configuration with its existing transcript domain.
 pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {

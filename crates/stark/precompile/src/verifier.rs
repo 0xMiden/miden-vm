@@ -1,20 +1,9 @@
+use miden_air::precompiles::protocol::{PVM_BLAKE3_PREPROCESSED_COMMITMENT,PVM_KECCAK_PREPROCESSED_COMMITMENT,PVM_PREPROCESSED_COMMITMENT};
 //! Native verification against an explicit precompile root.
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir,
-    protocol::{
-        PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
-        PVM_PREPROCESSED_COMMITMENT,
-    },
-    security::{self, ProofSecurityParameters},
-    stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
-    },
-    transcript::eidos::EidosDigest,
-};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir, transcript::eidos::EidosDigest};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -28,6 +17,15 @@ use miden_stark::{
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
+
+use crate::setup::{
+    config::{
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, precompile_pcs_params,
+    },
+    preprocessed,
+    security::{self, ProofSecurityParameters},
+};
 
 /// Verifies a precompile STARK against an explicit deferred root and returns its authenticated
 /// security parameters.

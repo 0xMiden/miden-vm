@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Native proving, verification, and recursive advice for the precompile relation.
+//! Native proving, verification, setup, and recursive advice for the precompile relation.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
@@ -16,4 +16,5 @@ pub use miden_stark::security::ProofSecurityParameters;
 pub mod prover;
 #[cfg(feature = "std")]
 pub mod recursive;
+pub mod setup;
 pub mod verifier;
