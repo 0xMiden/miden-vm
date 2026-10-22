@@ -1,7 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
 use miden_air_definitions::{
-    AIRS, HandwrittenMidenAir,
+    AIRS,
     ace::{CapturedAir, CompiledRelation, LayoutKind},
     config,
 };
@@ -22,7 +22,7 @@ fn main() {
     let captured: Vec<_> = AIRS
         .iter()
         .copied()
-        .map(|air| (air, CapturedAir::new(&HandwrittenMidenAir(air)).expect("capture VM AIR")))
+        .map(|air| (air, CapturedAir::new(&air).expect("capture VM AIR")))
         .collect();
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
@@ -44,7 +44,7 @@ fn main() {
     write(
         "degrees.rs",
         format!(
-            "fn generated_degrees(air: MidenAir) -> ConstraintDegrees {{ match air {{ \
+            "pub(super) fn generated_degrees(air: MidenAir) -> ConstraintDegrees {{ match air {{ \
              {degree_arms} }} }}"
         ),
     );

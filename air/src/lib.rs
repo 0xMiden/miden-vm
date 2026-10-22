@@ -7,7 +7,13 @@ use alloc::{borrow::Cow, vec::Vec};
 pub use definitions::*;
 use miden_air_definitions as definitions;
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
-include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
+mod degrees {
+    use miden_lifted_air::ConstraintDegrees;
+
+    use super::MidenAir;
+
+    include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
+}
 pub mod ace;
 pub mod config;
 pub mod memory;
@@ -60,7 +66,7 @@ impl MidenAir {
     /// the hand-written source itself is required — capturing the AIRs the build
     /// specializes, or checking the generated evaluators for drift.
     pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.definition().eval_handwritten(builder)
+        LiftedAir::<Felt, miden_core::field::QuadFelt>::eval(&self.definition(), builder)
     }
 }
 
@@ -140,7 +146,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {
-        generated_degrees(*self)
+        degrees::generated_degrees(*self)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
