@@ -93,7 +93,9 @@ fn ntru_sealing_matches_rust_and_common_ies() {
             ntru_eidos::seal_with_rng(key.public_key(), &mut native_rng, &plaintext, &context)
                 .unwrap();
         let (_, _, advice) = key.public_key().encapsulate_with_advice(&mut rng);
-        let program = assemble(&(seal_source(&plaintext, &context) + "\nend"));
+        let mut source = seal_source(&plaintext, &context);
+        source.push_str("\nend");
+        let program = assemble(&source);
         let mut inputs = key.public_key().to_commitment().into_elements().to_vec();
         inputs.extend([Felt::from(73u32), Felt::from(91u32)]);
         let output = execute(&program, &inputs, advice_inputs(&advice));
@@ -145,7 +147,9 @@ fn ntru_rejects_malformed_advice_and_wrong_recipient() {
     let key = SecretKey::with_rng(&mut rng);
     let (_, _, advice) = key.public_key().encapsulate_with_advice(&mut rng);
     let advice: Vec<_> = advice.elements().collect();
-    let program = assemble(&(seal_source(&[Felt::ONE; 8], &[Felt::ONE; 7]) + "\nend"));
+    let mut source = seal_source(&[Felt::ONE; 8], &[Felt::ONE; 7]);
+    source.push_str("\nend");
+    let program = assemble(&source);
     let product = 512 + 52;
     let ciphertext = product + 1024;
     for (offset, value, error) in [
