@@ -25,7 +25,7 @@ miden-air = { workspace = true }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
-miden-precompiles-verifier = { workspace = true, features = ["concurrent"] }
+miden-precompile-stark = { workspace = true, features = ["std"] }
 miden-verifier = { workspace = true, features = ["std"] }
 
 [[bench]]

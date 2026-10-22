@@ -23,7 +23,7 @@ std = [
     "miden-air/std",
     "miden-core/std",
     "miden-precompiles/std",
-    "miden-precompiles-verifier/std",
+    "miden-precompile-stark/std",
     "thiserror/std",
 ]
 
@@ -34,7 +34,7 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
 miden-precompiles.workspace = true
-miden-precompiles-verifier.workspace = true
+miden-precompile-stark.workspace = true
 miden-serde-utils.workspace = true
 
 # External dependencies

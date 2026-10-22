@@ -64,6 +64,7 @@ FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        := testing
+FEATURES_precompile-stark := concurrent,prover
 FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
@@ -383,11 +384,11 @@ check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 
 .PHONY: regenerate-pvm-proof-fixture
 regenerate-pvm-proof-fixture: ## Regenerate the pinned Eidos PVM proof and deferred root
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --write
+	cargo run --release --no-default-features --package miden-precompile-stark --features fixture-tools --bin pvm-proof-fixture -- --write
 
 .PHONY: check-pvm-proof-fixture
 check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root for drift
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
+	cargo run --release --no-default-features --package miden-precompile-stark --features fixture-tools --bin pvm-proof-fixture -- --check
 
 
 .PHONY: exec-info

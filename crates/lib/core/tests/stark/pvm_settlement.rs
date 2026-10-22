@@ -14,7 +14,7 @@ use miden_core::{
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME, dsa::eddsa_25519_sha512};
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_precompiles_verifier::masm_verifier::{
+use miden_precompile_stark::recursive::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{

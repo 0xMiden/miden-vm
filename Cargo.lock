@@ -2281,9 +2281,8 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-precompile-stark",
  "miden-precompiles",
- "miden-precompiles-prover",
- "miden-precompiles-verifier",
  "miden-processor",
  "miden-prover",
  "miden-stark",
@@ -2554,25 +2553,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles"
+name = "miden-precompile-stark"
 version = "1.0.0"
 dependencies = [
- "miden-core",
- "miden-crypto",
- "ruint",
-]
-
-[[package]]
-name = "miden-precompiles-prover"
-version = "1.0.0"
-dependencies = [
+ "insta",
  "k256",
+ "miden-ace",
  "miden-air",
  "miden-air-source",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
- "miden-precompiles-verifier",
+ "miden-serde-utils",
  "miden-stark",
  "miden-utils-sync",
  "proptest",
@@ -2586,20 +2578,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-verifier"
+name = "miden-precompiles"
 version = "1.0.0"
 dependencies = [
- "insta",
- "miden-ace",
- "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-serde-utils",
- "miden-stark",
- "serde",
- "serde-wincode",
- "thiserror",
- "wincode",
+ "ruint",
 ]
 
 [[package]]
@@ -2662,7 +2646,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
- "miden-precompiles-prover",
+ "miden-precompile-stark",
  "miden-processor",
  "miden-stark",
  "miden-verifier",
@@ -2811,8 +2795,8 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
+ "miden-precompile-stark",
  "miden-precompiles",
- "miden-precompiles-verifier",
  "miden-serde-utils",
  "miden-stark",
  "serde",
@@ -2902,7 +2886,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-precompiles-verifier",
+ "miden-precompile-stark",
  "miden-processor",
  "miden-verifier",
  "miden-vm",

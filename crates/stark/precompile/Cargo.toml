@@ -1,0 +1,69 @@
+[package]
+name = "miden-precompile-stark"
+version = "1.0.0"
+description = "STARK backend for the Miden precompile relation"
+documentation = "https://docs.rs/miden-precompile-stark"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "stark", "zkp"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+default = ["std"]
+prover = ["dep:miden-air-source", "dep:miden-precompiles", "dep:miden-utils-sync", "dep:tracing"]
+concurrent = [
+    "std",
+    "miden-crypto/concurrent",
+    "miden-stark/concurrent",
+    "miden-air/concurrent",
+    "miden-air-source?/concurrent",
+]
+fixture-tools = ["std", "prover"]
+std = [
+    "miden-air-source?/std",
+    "miden-core/std",
+    "miden-crypto/std",
+    "miden-air/std",
+    "miden-precompiles?/std",
+    "miden-utils-sync?/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-air-source = { workspace = true, optional = true }
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-stark.workspace = true
+miden-air.workspace = true
+miden-precompiles = { workspace = true, optional = true }
+miden-utils-sync = { workspace = true, optional = true }
+miden-serde-utils.workspace = true
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+tracing = { workspace = true, optional = true }
+wincode.workspace = true
+
+[[bin]]
+name = "pvm-proof-fixture"
+path = "src/bin/pvm_proof_fixture.rs"
+required-features = ["fixture-tools"]
+
+[dev-dependencies]
+insta.workspace = true
+# Known-good secp256k1 reference for EC circuit cross-validation.
+k256 = { workspace = true, features = ["arithmetic"] }
+miden-air = { workspace = true, features = ["std", "compiler", "testing"] }
+miden-ace = { workspace = true, features = ["testing"] }
+proptest = { workspace = true, features = ["std"] }
+rand = { workspace = true, features = ["std_rng"] }
+rayon.workspace = true
+tracing = { workspace = true, features = ["std"] }

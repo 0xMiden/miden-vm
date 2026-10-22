@@ -40,7 +40,7 @@ impl Prover {
     /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
     /// precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
-        miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
+        miden_precompile_stark::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub fn new() -> Self {
@@ -49,7 +49,7 @@ impl Prover {
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
             verification_precompile_limits:
-                miden_precompiles_prover::default_verification_precompile_limits(),
+                miden_precompile_stark::prover::default_verification_precompile_limits(),
         }
     }
 
@@ -166,7 +166,7 @@ impl Prover {
         &self,
         witnesses: Vec<PrecompileWitness>,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompiles_prover::prove_precompiles_with_limits_and_budget(
+        miden_precompile_stark::prover::prove_precompiles_with_limits_and_budget(
             witnesses,
             self.hash_fn,
             &self.verification_precompile_limits,
@@ -180,7 +180,7 @@ impl Prover {
         witness: PrecompileWitness,
         expected_root: Word,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompiles_prover::prove_precompile_for_root_with_limits_and_budget(
+        miden_precompile_stark::prover::prove_precompile_for_root_with_limits_and_budget(
             witness,
             expected_root,
             self.hash_fn,
@@ -347,7 +347,7 @@ pub enum ProverError {
     VmProofGeneration(#[source] ExecutionError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
-    PrecompileProofGeneration(#[source] miden_precompiles_prover::PrecompileProvingError),
+    PrecompileProofGeneration(#[source] miden_precompile_stark::prover::PrecompileProvingError),
 }
 
 impl ProverError {
@@ -435,7 +435,7 @@ mod tests {
             matches!(
                 err,
                 ProverError::PrecompileProofGeneration(
-                    miden_precompiles_prover::PrecompileProvingError::MemoryBudgetExceeded {
+                    miden_precompile_stark::prover::PrecompileProvingError::MemoryBudgetExceeded {
                         budget_bytes: 1,
                         ..
                     }

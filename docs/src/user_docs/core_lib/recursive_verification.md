@@ -108,7 +108,7 @@ Package `pvm_proof` with `PvmRecursiveVerifierInputs::for_request`, which uses
 `[D]`. Return the advice map and Merkle nodes from the event handler:
 
 ```rust
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::advice::AdviceMutation;
 
 let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &pvm_proof)?;
