@@ -234,7 +234,7 @@ fn build_trace_inner(
         });
     }
 
-    let trace_len_summary = TraceLenSummary::new_with_padded(
+    let trace_len_summary = TraceLenSummary::new(
         core_trace_len,
         ChipletsLengths::from_parts(
             chiplets.bitwise_start().into(),

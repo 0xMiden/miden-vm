@@ -11,9 +11,11 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 
+#[cfg(test)]
+use super::trace::MIN_TRACE_LEN;
 use super::{
-    MIDEN_AIR_COUNT, PublicInputs,
-    trace::{MIN_TRACE_LEN, MainTrace, RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
+    MIDEN_AIR_COUNT, MidenAir, PublicInputs,
+    trace::{MainTrace, RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 
 // VM EXECUTION TRACE
@@ -169,36 +171,20 @@ impl VmTrace {
 ///
 /// Dynamic AIRs store their unpadded row counts. Use the `*_height()` accessors for their padded
 /// power-of-two AIR matrix heights. The byte-pair lookup stores its fixed physical row count.
-#[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
     core_rows: usize,
     chiplets: ChipletsLengths,
     eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
-    /// Set by the trace builder when known, in [`crate::vm::AIRS`] order. `None` falls
-    /// back to deriving the four padded heights from the unpadded component row counts.
-    padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
+    /// Actual padded heights in [`crate::vm::AIRS`] order.
+    padded_heights: [usize; MIDEN_AIR_COUNT],
 }
 
 impl TraceLenSummary {
-    pub fn new(
-        core_rows: usize,
-        chiplets: ChipletsLengths,
-        eidos_compression_rows: usize,
-        byte_pair_lookup_rows: usize,
-    ) -> Self {
-        TraceLenSummary {
-            core_rows,
-            chiplets,
-            eidos_compression_rows,
-            byte_pair_lookup_rows,
-            padded_heights: None,
-        }
-    }
-
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
     /// [`crate::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
-    pub fn new_with_padded(
+    pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
         eidos_compression_rows: usize,
@@ -210,7 +196,7 @@ impl TraceLenSummary {
             chiplets,
             eidos_compression_rows,
             byte_pair_lookup_rows,
-            padded_heights: Some(padded_heights),
+            padded_heights,
         }
     }
 
@@ -258,44 +244,33 @@ impl TraceLenSummary {
 
     /// Returns the padded height of the core AIR.
     pub fn core_height(&self) -> usize {
-        padded_height(self.core_rows)
+        self.padded_heights[MidenAir::CORE.instance_index()]
     }
 
     /// Returns the padded height of the chiplets AIR.
     pub fn chiplets_height(&self) -> usize {
-        padded_height(self.chiplets_rows())
+        self.padded_heights[MidenAir::CHIPLETS.instance_index()]
     }
 
     /// Returns the padded height of the Eidos compression AIR.
     pub fn eidos_compression_height(&self) -> usize {
-        padded_height(self.eidos_compression_rows)
+        self.padded_heights[MidenAir::EIDOS_COMPRESSION.instance_index()]
     }
 
     /// Returns the greatest padded height among the four AIRs.
     pub fn padded_trace_len(&self) -> usize {
-        self.padded_heights
-            .map(|heights| heights.into_iter().max().expect("heights is non-empty"))
-            .unwrap_or_else(|| {
-                self.core_height()
-                    .max(self.chiplets_height())
-                    .max(self.eidos_compression_height())
-                    .max(self.byte_pair_lookup_rows)
-            })
+        self.padded_heights.into_iter().max().expect("heights is non-empty")
     }
 
-    /// Returns the padded per-AIR heights, in [`crate::vm::AIRS`] order, if known.
-    pub fn padded_heights(&self) -> Option<&[usize; MIDEN_AIR_COUNT]> {
-        self.padded_heights.as_ref()
+    /// Returns the actual padded per-AIR heights, in [`crate::vm::AIRS`] order.
+    pub fn padded_heights(&self) -> &[usize; MIDEN_AIR_COUNT] {
+        &self.padded_heights
     }
 
     /// Returns the percent (0 - 100) of rows added by padding.
     pub fn padding_percentage(&self) -> usize {
         (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
     }
-}
-
-fn padded_height(rows: usize) -> usize {
-    rows.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 // CHIPLET LENGTHS
@@ -372,8 +347,18 @@ mod tests {
 
     #[test]
     fn trace_len_summary_reports_eidos_compression_count() {
-        let summary =
-            TraceLenSummary::new(0, ChipletsLengths::default(), 3 * EIDOS_COMPRESSION_CYCLE_LEN, 0);
+        let summary = TraceLenSummary::new(
+            0,
+            ChipletsLengths::default(),
+            3 * EIDOS_COMPRESSION_CYCLE_LEN,
+            0,
+            [
+                MIN_TRACE_LEN,
+                MIN_TRACE_LEN,
+                (3 * EIDOS_COMPRESSION_CYCLE_LEN).next_power_of_two().max(MIN_TRACE_LEN),
+                MIN_TRACE_LEN,
+            ],
+        );
 
         assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.eidos_compression_count(), 3);
@@ -382,7 +367,7 @@ mod tests {
     #[test]
     fn trace_len_summary_records_four_air_heights_in_instance_order() {
         let heights = [MIN_TRACE_LEN, 2 * MIN_TRACE_LEN, 4 * MIN_TRACE_LEN, 1 << 16];
-        let summary = TraceLenSummary::new_with_padded(
+        let summary = TraceLenSummary::new(
             17,
             ChipletsLengths::from_parts(19, 0, 0, 0, 0),
             3 * EIDOS_COMPRESSION_CYCLE_LEN,
@@ -395,7 +380,10 @@ mod tests {
         assert_eq!(summary.chiplets_rows(), 20);
         assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
-        assert_eq!(summary.padded_heights(), Some(&heights));
+        assert_eq!(summary.padded_heights(), &heights);
+        assert_eq!(summary.core_height(), heights[0]);
+        assert_eq!(summary.chiplets_height(), heights[1]);
+        assert_eq!(summary.eidos_compression_height(), heights[2]);
         assert_eq!(summary.padded_trace_len(), 1 << 16);
     }
 }
