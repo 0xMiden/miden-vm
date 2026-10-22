@@ -18,7 +18,7 @@ static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCac
 /// setup depends only on the concrete config type and LDE blowup, so it is
 /// cached per `(TypeId, log_blowup)` across proves.
 #[cfg(feature = "std")]
-pub fn cached_preprocessed_setup<SC>(
+pub(crate) fn cached_preprocessed_setup<SC>(
     statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
     config: &SC,
 ) -> Option<std::sync::Arc<PreprocessedSetup<SC>>>

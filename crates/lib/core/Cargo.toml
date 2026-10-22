@@ -63,7 +63,7 @@ p256 = { workspace = true, features = ["ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
-miden-vm-stark = { workspace = true, features = ["std"] }
+miden-vm-stark = { workspace = true, features = ["prover", "std"] }
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true

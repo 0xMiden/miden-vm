@@ -12,8 +12,6 @@ use miden_processor::{
     trace::{VmTrace, build_trace},
 };
 
-use crate::{config, prove_stark};
-
 /// A synchronous, configurable prover for post-execution Miden VM witnesses.
 ///
 /// This type does not execute programs. It owns proof-generation policy — including the memory
@@ -224,74 +222,10 @@ impl Prover {
     ///
     /// Buffered and overlapped trace construction share this private implementation so STARK
     /// generation and VM proof packaging cannot diverge.
-    #[tracing::instrument(name = "miden_vm", skip_all)]
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
-        let trace_len_summary = trace.trace_len_summary();
-        let params = config::pcs_params();
-        tracing::event!(
-            tracing::Level::INFO,
-            "Generated execution traces: core={}, chiplets={}, eidos_compression={}, and8={}, padded={}, \
-             estimated_prover_memory_bytes={:?}",
-            trace_len_summary.core_rows(),
-            trace_len_summary.chiplets_rows(),
-            trace_len_summary.eidos_compression_rows(),
-            trace_len_summary.byte_pair_lookup_rows(),
-            trace_len_summary.padded_trace_len(),
-            trace_len_summary
-                .padded_heights()
-                .and_then(|heights| miden_vm_stark::memory::prover_peak_bytes(heights, &params))
-        );
-
-        let precompile_root = trace.precompile_root();
-        let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
-            trace.into_air_matrices();
-
-        let proof_bytes = match self.hash_fn {
-            HashFunction::Blake3_256 => {
-                let mut config = config::blake3_256_config(params, config::RELATION_DIGEST);
-                config.hash_lde_blocks = self.hash_lde_blocks;
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Keccak => {
-                let mut config = config::keccak_config(params, config::RELATION_DIGEST);
-                config.hash_lde_blocks = self.hash_lde_blocks;
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Eidos => {
-                let mut config = config::eidos_config(params, config::RELATION_DIGEST);
-                config.hash_lde_blocks = self.hash_lde_blocks;
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-        }
-        .map_err(ProverError::VmProofGeneration)?;
-
-        let proof = miden_core::proof::StarkProof::new(proof_bytes, self.hash_fn);
-        Ok(VmProof { proof, precompile_root })
+        miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
+            ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
+        })
     }
 }
 
