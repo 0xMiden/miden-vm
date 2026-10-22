@@ -281,7 +281,11 @@ fn hornerbase_emits_one_memory_request() {
     ];
     let trace = build_trace_from_ops(operations, &stack);
     const HORNER_CLK: u32 = 11;
-    let helpers = trace.get_user_op_helpers_at(HORNER_CLK);
+    let helpers = trace
+        .main_trace()
+        .core_row(RowIndex::from(HORNER_CLK))
+        .decoder
+        .user_op_helpers();
     assert_ne!(helpers[2], ZERO);
     assert_ne!(helpers[3], ZERO);
 

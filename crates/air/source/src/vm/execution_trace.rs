@@ -13,10 +13,7 @@ use miden_core::{
 
 use super::{
     MIDEN_AIR_COUNT, PublicInputs,
-    trace::{
-        MIN_TRACE_LEN, MainTrace, RowIndex, decoder::NUM_USER_OP_HELPERS,
-        eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
-    },
+    trace::{MIN_TRACE_LEN, MainTrace, RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 
 // VM EXECUTION TRACE
@@ -129,16 +126,6 @@ impl VmTrace {
         result.into()
     }
 
-    /// Returns helper registers state at the specified `clk` of the VM
-    pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
-        let mut result = [ZERO; NUM_USER_OP_HELPERS];
-        let row = RowIndex::from(clk);
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.helper_register(i, row);
-        }
-        result
-    }
-
     /// Returns the trace length.
     pub fn get_trace_len(&self) -> usize {
         self.main_trace.num_rows()
@@ -152,18 +139,6 @@ impl VmTrace {
     /// Returns a summary of the per-AIR trace lengths.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
-    }
-
-    /// Clones the trace buffers into the per-AIR matrices consumed by the multi-AIR prover.
-    pub fn clone_air_matrices(
-        &self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        self.main_trace.clone_air_matrices()
     }
 
     /// Consuming variant for the proving hot path: moves the row-major buffers.
@@ -324,40 +299,6 @@ impl TraceLenSummary {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trace_len_summary_reports_eidos_compression_count() {
-        let summary =
-            TraceLenSummary::new(0, ChipletsLengths::default(), 3 * EIDOS_COMPRESSION_CYCLE_LEN, 0);
-
-        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
-        assert_eq!(summary.eidos_compression_count(), 3);
-    }
-
-    #[test]
-    fn trace_len_summary_records_four_air_heights_in_instance_order() {
-        let heights = [MIN_TRACE_LEN, 2 * MIN_TRACE_LEN, 4 * MIN_TRACE_LEN, 1 << 16];
-        let summary = TraceLenSummary::new_with_padded(
-            17,
-            ChipletsLengths::from_parts(19, 0, 0, 0, 0),
-            3 * EIDOS_COMPRESSION_CYCLE_LEN,
-            1 << 16,
-            heights,
-        );
-
-        assert_eq!(summary.core_rows(), 17);
-        // ChipletsLengths adds the mandatory connector-padding row.
-        assert_eq!(summary.chiplets_rows(), 20);
-        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
-        assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
-        assert_eq!(summary.padded_heights(), Some(&heights));
-        assert_eq!(summary.padded_trace_len(), 1 << 16);
-    }
-}
-
 fn padded_height(rows: usize) -> usize {
     rows.next_power_of_two().max(MIN_TRACE_LEN)
 }
@@ -427,5 +368,39 @@ impl ChipletsLengths {
             + self.ace_chiplet_len()
             + self.kernel_rom_len()
             + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_len_summary_reports_eidos_compression_count() {
+        let summary =
+            TraceLenSummary::new(0, ChipletsLengths::default(), 3 * EIDOS_COMPRESSION_CYCLE_LEN, 0);
+
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.eidos_compression_count(), 3);
+    }
+
+    #[test]
+    fn trace_len_summary_records_four_air_heights_in_instance_order() {
+        let heights = [MIN_TRACE_LEN, 2 * MIN_TRACE_LEN, 4 * MIN_TRACE_LEN, 1 << 16];
+        let summary = TraceLenSummary::new_with_padded(
+            17,
+            ChipletsLengths::from_parts(19, 0, 0, 0, 0),
+            3 * EIDOS_COMPRESSION_CYCLE_LEN,
+            1 << 16,
+            heights,
+        );
+
+        assert_eq!(summary.core_rows(), 17);
+        // ChipletsLengths adds the mandatory connector-padding row.
+        assert_eq!(summary.chiplets_rows(), 20);
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
+        assert_eq!(summary.padded_heights(), Some(&heights));
+        assert_eq!(summary.padded_trace_len(), 1 << 16);
     }
 }
