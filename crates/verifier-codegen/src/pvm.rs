@@ -191,7 +191,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::policy::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 

@@ -6,7 +6,6 @@ pub mod geometry;
 pub mod hash;
 pub mod logup;
 pub mod math;
-pub mod memory;
 pub mod primitives;
 pub mod relation;
 pub mod relations;

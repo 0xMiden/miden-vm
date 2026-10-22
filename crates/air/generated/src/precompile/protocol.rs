@@ -162,18 +162,14 @@ mod tests {
             vec![],
         )
         .unwrap();
-        let config = crate::precompile::stark_config::eidos_config(
+        let config = miden_stark::config::eidos_config(
             policy::precompile_pcs_params(),
             PINS.relation_digest.map(Felt::new_unchecked),
+            miden_core::program::domain::STARK_TRANSCRIPT,
         );
         let commitment = <[u64; 4]>::from(
             miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
         );
         assert_eq!(commitment, PVM_PREPROCESSED_COMMITMENT, "{UPDATE_HINT}");
-        assert_eq!(
-            <[u64; 4]>::from(crate::precompile::preprocessed::eidos().commitment()),
-            commitment,
-            "{UPDATE_HINT}"
-        );
     }
 }

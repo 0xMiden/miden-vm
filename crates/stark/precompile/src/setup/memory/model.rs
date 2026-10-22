@@ -1,8 +1,8 @@
 //! Peak prover memory model for the precompile chiplet-stack proof.
 //!
-//! Mirrors the production VM peak-memory model in `miden-air` for the Miden VM proof, generalized
-//! over the [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models the
-//! allocations that dominate peak usage: each main and aux trace held at its 1x buffer plus its
+//! Mirrors the production VM peak-memory model in `miden-vm-stark` for the Miden VM proof,
+//! generalized over the [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models
+//! the allocations that dominate peak usage: each main and aux trace held at its 1x buffer plus its
 //! blowup-factor LDE, the quotient accumulator, every layer of the three per-proof LMCS digest
 //! trees (main, aux, quotient) alive at `open` time, the transient per-leaf hashing buffer held
 //! while whichever of those trees is under construction squeezes its leaf digests, and the
@@ -16,20 +16,20 @@
 //! instead by [`SAFETY_NUMERATOR`] / [`SAFETY_DENOMINATOR`], a documented guess rather than a
 //! measurement.
 
+use miden_air_source::precompile::{
+    air::{ChipletAir, NUM_CHIPLETS},
+    primitives::byte_pair_lut::TRACE_HEIGHT,
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
     proof::HashFunction,
 };
+#[cfg(test)]
+use miden_stark::log_quotient_degree;
 use miden_stark::{
     air::{BaseAir, LiftedAir},
-    log_quotient_degree,
     pcs::PcsParams,
-};
-
-use crate::precompile::{
-    air::{ChipletAir, NUM_CHIPLETS},
-    primitives::byte_pair_lut::TRACE_HEIGHT,
 };
 
 // CONSTANTS
@@ -77,7 +77,8 @@ const fn leaf_state_bytes(hash_fn: HashFunction) -> u64 {
 // ================================================================================================
 
 /// Peak prover memory, deriving quotient geometry symbolically for tooling.
-/// Production callers use the facade's compiled-degree estimator.
+/// Production callers use the backend's compiled-degree estimator.
+#[cfg(test)]
 pub fn prover_peak_bytes(
     heights: &[usize; NUM_CHIPLETS],
     params: &PcsParams,

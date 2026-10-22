@@ -2567,6 +2567,7 @@ dependencies = [
  "miden-serde-utils",
  "miden-stark",
  "miden-utils-sync",
+ "p3-security",
  "proptest",
  "rand 0.10.2",
  "rayon",

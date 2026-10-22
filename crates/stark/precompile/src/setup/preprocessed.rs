@@ -2,8 +2,7 @@
 //!
 //! `Preprocessed::build` LDEs and commits the fixed `BytePairLut` table — a
 //! pure function of the fixed twelve-chiplet list and the STARK config's
-//! blowup/LMCS/DFT — yet both `prove_stark` and `verify_stark` rebuild it on
-//! every call. Under `std`, each hash function's bundle is built once per
+//! blowup/LMCS/DFT. Under `std`, each hash function's bundle is built once per
 //! process and reused via `OnceLock`; without `std` (e.g. a `no_std`
 //! verifier target), every call rebuilds it, matching the pre-caching
 //! behavior exactly.
@@ -11,16 +10,13 @@
 use alloc::vec;
 use core::ops::Deref;
 
+use miden_air::precompile::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{Preprocessed, StarkConfig, air::Statement, lmcs::Lmcs};
 
-use crate::precompile::{
-    ChipletAir, ChipletMultiAir,
-    logup::NUM_PUBLIC_VALUES,
-    stark_config::{
-        Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
-        eidos_config, keccak_config, precompile_pcs_params,
-    },
+use crate::setup::config::{
+    Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
+    eidos_config, keccak_config, precompile_pcs_params,
 };
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
@@ -104,3 +100,15 @@ macro_rules! cached_preprocessed {
 cached_preprocessed!(blake3, Blake3Config, blake3_256_config);
 cached_preprocessed!(keccak, KeccakConfig, keccak_config);
 cached_preprocessed!(eidos, EidosConfig, eidos_config);
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn eidos_setup_matches_the_accepted_pin() {
+        assert_eq!(
+            <[u64; 4]>::from(super::eidos().commitment()),
+            miden_air::precompile::protocol::PVM_PREPROCESSED_COMMITMENT,
+            "backend setup must reproduce the accepted AIR-owned commitment",
+        );
+    }
+}

@@ -175,7 +175,7 @@ fn pvm_masm_read_layout_matches_every_codegen_boundary() {
 #[test]
 fn pvm_deep_query_hook_matches_commitment_group_geometry() {
     use miden_air::precompile::{
-        primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
+        policy::precompile_pcs_params, primitives::byte_pair_lut::TRACE_HEIGHT,
     };
 
     const HOOK_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/deep_queries.masm");
@@ -267,7 +267,7 @@ fn pvm_wrapper_matches_the_relation_contract() {
 /// that does not determine the result.
 #[test]
 fn pvm_security_masm_matches_air() {
-    use miden_air::precompile::security as pvm_security;
+    use miden_precompile_stark::setup::security as pvm_security;
 
     let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -282,14 +282,15 @@ fn pvm_security_masm_matches_air() {
             "DEEP_FIELD_BASE_BITS",
             (sample_bits >> fractional_bits)
                 - u64::from(
-                    miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
+                    miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup(),
                 ),
         ),
         ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", pvm_security::LOG2_E),
         (
             "MAX_CONSTRAINT_DEGREE",
-            (1u64 << miden_air::precompile::stark_config::precompile_pcs_params().log_blowup()) + 1,
+            (1u64 << miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup())
+                + 1,
         ),
     ] {
         assert_eq!(
@@ -396,7 +397,7 @@ fn pvm_masm_quotient_inputs_match_the_stark_domain() {
     assert!(num_chunks.is_power_of_two());
     let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         num_chunks.ilog2() as u8,
-        miden_air::precompile::stark_config::precompile_pcs_params().log_blowup(),
+        miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup(),
     )
     .expect("PVM quotient degree fits the PCS blowup");
 

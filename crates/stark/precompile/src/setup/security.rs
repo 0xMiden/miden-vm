@@ -22,7 +22,7 @@ use miden_stark::{
 };
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
-use crate::precompile::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY};
+use crate::setup::config::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 
 /// Number of out-of-domain points opened per committed column.
 ///
@@ -32,7 +32,7 @@ const NUM_OOD_POINTS: u32 = 2;
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
-pub const AIR_SHAPE: AirShape = super::protocol::PROTOCOL.air_shape;
+pub const AIR_SHAPE: AirShape = miden_air::precompile::protocol::PROTOCOL.air_shape;
 
 /// Lookup shape generated from the authored AIR metadata.
 pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
@@ -44,7 +44,7 @@ pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
 ///
 /// This allocating pass supports validation and tooling. [`security_report`] uses the stored
 /// [`AIR_SHAPE`] constant.
-#[cfg(any(test, feature = "compiler"))]
+#[cfg(test)]
 pub fn derive_air_shape() -> AirShape {
     miden_air_source::precompile::geometry::derive_air_shape()
 }
@@ -52,7 +52,7 @@ pub fn derive_air_shape() -> AirShape {
 /// Build-compiled security shape of the precompile relation at the given commitment
 /// alignment; this does not capture AIRs.
 pub fn air_shape_for(alignment: usize) -> AirShape {
-    let metadata = crate::precompile::protocol::metadata();
+    let metadata = miden_air::precompile::protocol::metadata();
     AirShape {
         num_deep_terms: Some(metadata.num_deep_terms(alignment)),
         ..metadata.air_shape
@@ -68,7 +68,7 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
 /// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    crate::precompile::protocol::metadata().num_deep_terms(alignment)
+    miden_air::precompile::protocol::metadata().num_deep_terms(alignment)
 }
 
 // SECURITY MODEL CONSTANTS
@@ -168,12 +168,12 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 }
 
 /// Counts the lookup fractions added at the PVM boundary by fixed protocol data: one
-/// `UintVal` fraction per fixed uint ([`crate::precompile::fixed::fixed_uintval_msgs`]) and one
-/// `EcGroup` fraction per fixed curve group ([`crate::precompile::fixed::fixed_ecgroup_msgs`]).
+/// `UintVal` fraction per fixed uint ([`miden_air::precompile::fixed::fixed_uintval_msgs`]) and one
+/// `EcGroup` fraction per fixed curve group ([`miden_air::precompile::fixed::fixed_ecgroup_msgs`]).
 /// These are additional to the per-row fractions recorded in [`AIR_SHAPE`].
 fn fixed_boundary_fraction_count() -> u64 {
-    (crate::precompile::fixed::fixed_uintval_msgs().count()
-        + crate::precompile::fixed::fixed_ecgroup_msgs().count()) as u64
+    (miden_air::precompile::fixed::fixed_uintval_msgs().count()
+        + miden_air::precompile::fixed::fixed_ecgroup_msgs().count()) as u64
 }
 
 /// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
@@ -294,7 +294,7 @@ mod tests {
     use p3_security::budget::report::QUERY_LABEL;
 
     use super::*;
-    use crate::precompile::stark_config::precompile_pcs_params;
+    use crate::setup::config::precompile_pcs_params;
 
     /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
     /// reported security level differ from the level implied by the relation being verified.

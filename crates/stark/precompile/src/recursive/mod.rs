@@ -13,10 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompile::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
-};
+use miden_air::precompile::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -40,6 +37,10 @@ use miden_stark::{
 use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
+use crate::setup::{
+    config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
+    preprocessed,
+};
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;

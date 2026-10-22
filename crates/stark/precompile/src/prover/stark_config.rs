@@ -1,1 +1,1 @@
-pub use miden_air::precompile::stark_config::*;
+pub use crate::setup::config::*;
