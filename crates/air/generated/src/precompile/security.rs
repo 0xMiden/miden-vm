@@ -9,20 +9,20 @@
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 use miden_core::proof::HashFunction;
-use miden_stark::pcs::PcsParams;
-use p3_security::{budget::report::LOOKUP_LABEL, fixed};
-
-pub use crate::shared::security::{
+pub use miden_stark::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use crate::{
-    precompile::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    shared::security::{
+use miden_stark::{
+    pcs::PcsParams,
+    security::{
         CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT,
         EIDOS_CHALLENGE_SAMPLE_BITS, OOD_POW_BITS, security_report_with_hash,
     },
 };
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
+
+use crate::precompile::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 
 /// Number of out-of-domain points opened per committed column.
 ///

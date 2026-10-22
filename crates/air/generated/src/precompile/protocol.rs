@@ -3,11 +3,9 @@
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
 use miden_core::{Felt, Word};
+use miden_stark::security::{AirShape, LookupShape};
 
-use crate::{
-    precompile::ace::PvmRecursiveAceCircuit,
-    shared::security::{AirShape, LookupShape},
-};
+use crate::precompile::ace::PvmRecursiveAceCircuit;
 
 /// Pinned identity of the precompile relation (raw canonical u64 limbs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

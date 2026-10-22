@@ -11,11 +11,12 @@ use miden_ace::{
     MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
     render_masm_constraints_eval,
 };
-use miden_air::precompile::security as pvm_security;
 use miden_air_source::precompile::relation::{self, CapturedPvmRelation};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{
+    QuotientRecompositionInputs, quotient_recomposition_inputs, security as pvm_security,
+};
 
 pub(crate) use crate::GENERATED_BY;
 use crate::{

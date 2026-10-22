@@ -1847,6 +1847,7 @@ dependencies = [
 name = "miden-stark"
 version = "1.0.0"
 dependencies = [
+ "miden-core",
  "miden-crypto",
  "miden-utils-sync",
  "p3-air",
@@ -1856,6 +1857,7 @@ dependencies = [
  "p3-goldilocks",
  "p3-matrix",
  "p3-maybe-rayon",
+ "p3-security",
  "p3-symmetric",
  "p3-util",
  "rand 0.10.2",

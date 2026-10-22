@@ -6,11 +6,11 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-pub use miden_air::precompile::security::ProofSecurityParameters;
 pub use miden_core::{
     deferred::DeferredRoot,
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
+pub use miden_stark::security::ProofSecurityParameters;
 
 #[cfg(feature = "prover")]
 pub mod prover;

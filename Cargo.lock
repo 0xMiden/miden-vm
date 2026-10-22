@@ -2694,6 +2694,7 @@ name = "miden-stark"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "miden-core",
  "miden-crypto",
  "miden-utils-sync",
  "p3-air",
@@ -2711,6 +2712,7 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-poseidon2-air",
+ "p3-security",
  "p3-symmetric",
  "p3-util",
  "proptest",
