@@ -85,7 +85,11 @@ fn build_trace(c: &mut Criterion) {
                             let witness =
                                 processor.execute_for_proving(&program, &mut host).await.unwrap();
                             let (vm_witness, _) = witness.into_parts();
-                            let trace = trace::build_trace(vm_witness).unwrap();
+                            let trace = trace::build_trace(
+                                vm_witness,
+                                &miden_air::vm::memory::default_budget(),
+                            )
+                            .unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,

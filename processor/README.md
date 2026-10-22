@@ -23,7 +23,8 @@ For more control over execution and trace generation, you can use `FastProcessor
 
 `FastProcessor::execute_for_proving()` and `FastProcessor::execute_for_proving_sync()` run a
 program while collecting the complete post-execution `ExecutionWitness`. Pass the `VmWitness`
-from `ExecutionWitness::into_parts()` to `build_trace()` to construct the full `VmTrace`. Trace
+from `ExecutionWitness::into_parts()` and a caller-supplied proving budget to `build_trace()` to
+construct the full `VmTrace`. Trace
 building is parallel when the `concurrent` feature is enabled.
 
 With the `std` feature, `FastProcessor::execute_and_build_trace_sync()` preserves the optimized
@@ -45,8 +46,11 @@ The `FastProcessor` is designed for fast program execution with minimal overhead
 
 ### Trace generation with `build_trace()`
 After execution with `FastProcessor::execute_for_proving*()`, split the returned
-`ExecutionWitness` and pass its `VmWitness` to `build_trace()`. When the `concurrent` feature is
-enabled, trace generation is parallelized for improved performance.
+`ExecutionWitness` and call `build_trace(vm_witness, &budget)`. The VM backend provides
+`miden_air::vm::memory::default_budget()` and `canonical_budget(limit_bytes)` using the canonical
+proof configuration. Processor enforces the supplied model before final allocations and retains
+independent row-index and raw-buffer limits. When the `concurrent` feature is enabled, trace
+generation is parallelized for improved performance.
 
 
 Trace generation produces the four matrices in the Miden proof statement:

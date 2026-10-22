@@ -11,7 +11,7 @@ use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
     StackInputs, StackOutputs, SyncHost, VmWitness,
     advice::AdviceInputs,
-    trace::{self, VmTrace, build_trace_with_budget},
+    trace::{VmTrace, build_trace},
 };
 use miden_stark::memory;
 
@@ -38,7 +38,8 @@ impl Prover {
     /// `miden_stark::memory`, including the fixed And8 preprocessed setup. It is not a
     /// total process-RSS or allocator cap. The precompile prover's memory is bounded separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
-    pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+    pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 =
+        miden_air::vm::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
     /// Default maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
@@ -156,8 +157,11 @@ impl Prover {
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
         let trace = {
             let _span = tracing::info_span!("build_miden_vm_trace").entered();
-            build_trace_with_budget(witness, self.max_prover_memory_bytes)
-                .map_err(ProverError::TraceGeneration)?
+            build_trace(
+                witness,
+                &miden_air::vm::memory::canonical_budget(self.max_prover_memory_bytes),
+            )
+            .map_err(ProverError::TraceGeneration)?
         };
 
         self.prove_vm_trace(trace)
@@ -327,7 +331,7 @@ pub fn prove_sync(
             processor.execute_and_build_trace_sync(
                 program,
                 host,
-                prover.max_prover_memory_bytes(),
+                &miden_air::vm::memory::canonical_budget(prover.max_prover_memory_bytes()),
             )?
         };
         let stack_outputs = *trace.stack_outputs();

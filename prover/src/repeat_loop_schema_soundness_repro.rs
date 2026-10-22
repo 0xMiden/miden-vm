@@ -55,7 +55,11 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            program,
+            &mut host,
+            &miden_air::vm::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
     trace

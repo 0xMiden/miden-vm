@@ -6,9 +6,8 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
-    advice::AdviceInputs,
-    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace},
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
+    trace::build_trace,
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
@@ -78,13 +77,17 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .unwrap();
         let (vm_witness, precompiles_witness) = execution_witness.into_parts();
         assert!(precompiles_witness.is_none());
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
         let (trace, precompiles_witness) = processor(stack, advice.clone())
-            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .execute_and_build_trace_sync(
+                &program,
+                &mut host,
+                &miden_air::vm::memory::default_budget(),
+            )
             .unwrap();
         assert!(precompiles_witness.is_none());
         trace
@@ -205,7 +208,11 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
         processor(&[1], AdviceInputs::default())
-            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .execute_and_build_trace_sync(
+                &program,
+                &mut host,
+                &miden_air::vm::memory::default_budget(),
+            )
             .unwrap();
     });
 

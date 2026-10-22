@@ -32,9 +32,7 @@ mod tests;
 pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air_definitions::vm::{ChipletsLengths, TraceLenSummary, VmTrace, trace::RowIndex};
 pub use miden_core::deferred::PrecompileWitness;
-pub use parallel::{
-    CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,
-};
+pub use parallel::{CORE_TRACE_WIDTH, build_trace};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
 // uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
@@ -423,14 +421,16 @@ mod wire_tests {
         let claim = witness.claim();
         let (original_vm, original_precompile) = witness.into_parts();
         assert!(original_precompile.is_none());
-        let original_trace = build_trace(original_vm).expect("original trace should build");
+        let original_trace = build_trace(original_vm, &miden_air::vm::memory::default_budget())
+            .expect("original trace should build");
 
         let restored =
             ExecutionWitness::read_from_bytes(&bytes).expect("witness should round trip");
         assert_eq!(restored.claim(), claim);
         let (restored_vm, restored_precompile) = restored.into_parts();
         assert!(restored_precompile.is_none());
-        let restored_trace = build_trace(restored_vm).expect("restored trace should build");
+        let restored_trace = build_trace(restored_vm, &miden_air::vm::memory::default_budget())
+            .expect("restored trace should build");
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
@@ -485,7 +485,9 @@ mod wire_tests {
 
         let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes())
             .expect("the wire reader accepts Felt-valued replay lanes");
-        let Err(error) = build_trace(witness.into_parts().0) else {
+        let Err(error) =
+            build_trace(witness.into_parts().0, &miden_air::vm::memory::default_budget())
+        else {
             panic!("invalid AEAD stream replay must return an error");
         };
         assert!(matches!(error, ExecutionError::OperationError { .. }));
