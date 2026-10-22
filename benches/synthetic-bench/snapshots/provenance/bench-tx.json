@@ -1,16 +1,9 @@
 {
   "schema": "eidos-four-air-v1",
-  "protocol_head": "5f6a2466d17e5f9e58f81ff5ec3f878d27ba7a0d",
-  "protocol_patch_sha256": "06c9aef215272b1ffd612c3cb9c4547ff725583c297fc380bb65009e9b796cde",
-  "vm_base": "4016cf0532659da5368c97859ff869500c650ffb",
-  "vm_additional_revisions": [
-    "1b9f7dc48cdeaa113a37fbb85b5d7f85ddec7d41"
-  ],
-  "vm_patch_sha256": "5173c37f43fda16ecbf0f2f2ca3cea37164439a7ba503bbc70056735c15da16d",
-  "snapshot_sha256": "0c3981d22763cb48ce1ea3dda4bcc6022f36758000a39663d2027b9a295b9513",
-  "capture_inputs_archive_sha256": "61cd9dfbfb440ccc321d9753145113cd591b471aee29471c7fba248b92300177",
-  "producer_command": "cargo run --release -p bench-transaction --features concurrent",
-  "vm_dependency_override": "all protocol VM git dependencies patched to vm_base plus vm-measurement.patch",
+  "protocol_head": "e9852edb7a77c4b350873ee2453ade850dbb6513",
+  "vm_revision": "832a6d1f96ed6308a05b2a5f8256800ca70e4d85",
+  "snapshot_sha256": "9ca4dde5bb6a44f4815eabad3e4f40841500019a889ab0e6aedcbafc7f9b5e24",
+  "producer_command": "cargo run --locked --profile test-dev -p bench-transaction --features concurrent",
   "signing_schemes": [
     "Falcon512-Eidos",
     "ECDSA-secp256k1-Keccak"

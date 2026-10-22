@@ -221,14 +221,14 @@ For example, the measured Falcon workload for consuming one P2ID note has:
   "consume single P2ID note with Falcon signing": {
     "provenance": "producer_measured",
     "trace": {
-      "core_rows": 43126,
-      "chiplets_rows": 5484,
-      "eidos_compression_rows": 83616,
+      "core_rows": 43619,
+      "chiplets_rows": 5559,
+      "eidos_compression_rows": 84320,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
-        "hasher_rows": 3448,
+        "hasher_rows": 3504,
         "bitwise_rows": 84,
-        "memory_rows": 1950,
+        "memory_rows": 1969,
         "kernel_rom_rows": 1,
         "ace_rows": 0
       }
@@ -237,24 +237,26 @@ For example, the measured Falcon workload for consuming one P2ID note has:
 }
 ```
 
-The checked-in snapshot contains the full producer output. The [capture metadata](snapshots/provenance/bench-tx.json)
-records the source revisions and file hashes.
+The checked-in snapshot contains the full producer output. The
+[capture metadata](snapshots/provenance/bench-tx.json) records the protocol and VM revisions and
+the snapshot hash.
 
-TODO: After the protocol Eidos migration lands, remeasure the protocol workloads and refresh the
-snapshot if their trace sizes have changed.
-
-To refresh a snapshot, select the protocol and VM versions to measure. Set `VM_CHECKOUT` to the
-VM checkout path, then run:
+To reproduce the capture, run the following from the VM checkout root:
 
 ```sh
-# In the protocol checkout:
-cargo run --release -p bench-transaction --features concurrent
+VM_CHECKOUT="$PWD"
+CAPTURE_WORKDIR=$(mktemp -d)
+git clone https://github.com/0xMiden/protocol.git "$CAPTURE_WORKDIR/protocol"
+cd "$CAPTURE_WORKDIR/protocol"
+git fetch origin e9852edb7a77c4b350873ee2453ade850dbb6513
+git checkout --detach FETCH_HEAD
+cargo run --locked --profile test-dev -p bench-transaction --features concurrent
 
-# Copy the generated file into the VM checkout:
 cp bin/bench-transaction/bench-tx.json \
   "$VM_CHECKOUT/benches/synthetic-bench/snapshots/bench-tx.json"
 ```
 
+For a new capture, select the protocol revision to measure and use its checked-in lockfile.
 Update the capture metadata and expected default AIR heights in `src/snapshot.rs` from the new
 data. All six P2ID workloads must pass the trace checks before recording timings.
 
