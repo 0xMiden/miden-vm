@@ -2832,6 +2832,7 @@ dependencies = [
  "miden-stark",
  "miden-verifier",
  "p3-security",
+ "rayon",
  "serde",
  "serde-wincode",
  "thiserror",
