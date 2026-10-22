@@ -2427,7 +2427,6 @@ dependencies = [
  "p3-commit",
  "p3-dft",
  "p3-field",
- "p3-fri",
  "p3-goldilocks",
  "p3-keccak",
  "p3-keccak-air",
@@ -2442,7 +2441,6 @@ dependencies = [
  "serde",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
