@@ -68,6 +68,7 @@ FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        := testing
+FEATURES_precompile-stark := concurrent,prover
 FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
@@ -342,7 +343,7 @@ regenerate-constraints: ## Regenerate the checked-in VM verifier MASM artifacts
 
 .PHONY: regenerate-pvm-constants
 regenerate-pvm-constants: ## Regenerate PVM verifier MASM artifacts
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
+	cargo run --release --package miden-precompile-stark --features constants-tools --bin pvm-constants-regen -- --write
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: recursive-verifier-regeneration-handoff
@@ -360,7 +361,7 @@ check-pvm-artifacts: check-precompile-masm check-pvm-constants check-pvm-proof-f
 
 .PHONY: check-pvm-constants
 check-pvm-constants: ## Check PVM verifier MASM artifacts and pinned relation identities for drift
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
+	cargo run --release --package miden-precompile-stark --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift
@@ -384,11 +385,11 @@ check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 
 .PHONY: regenerate-pvm-proof-fixture
 regenerate-pvm-proof-fixture: ## Regenerate the pinned Eidos PVM proof and deferred root
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --write
+	cargo run --release --no-default-features --package miden-precompile-stark --features fixture-tools --bin pvm-proof-fixture -- --write
 
 .PHONY: check-pvm-proof-fixture
 check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root for drift
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
+	cargo run --release --no-default-features --package miden-precompile-stark --features fixture-tools --bin pvm-proof-fixture -- --check
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in VM verifier MASM artifacts and pinned relation identities for drift

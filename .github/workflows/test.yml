@@ -271,7 +271,7 @@ jobs:
         run: make check-constraints
       - name: Check runtime dependency boundaries
         run: |
-          for package in miden-air miden-crypto miden-precompiles-verifier miden-verifier; do
+          for package in miden-air miden-crypto miden-precompile-stark miden-verifier; do
             cargo tree --locked --package "$package" --edges normal --prefix none > runtime-dependencies.txt
             if grep -E '^miden-constraint-compiler ' runtime-dependencies.txt; then
               echo "Compiler tooling leaked into $package runtime dependencies" >&2

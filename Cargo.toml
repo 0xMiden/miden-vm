@@ -35,8 +35,7 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "crates/precompiles",
-    "crates/precompiles-verifier",
-    "crates/precompiles-prover",
+    "crates/stark/precompile",
     "processor",
     "prover",
     "tests/wycheproof",
@@ -97,9 +96,8 @@ miden-field             = { path = "./crates/field", version = "1.0.0-rc.1", def
 miden-stark            = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0.0-rc.1", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0.0-rc.1", default-features = false }
+miden-precompile-stark = { path = "./crates/stark/precompile", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1", default-features = false }
-miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "1.0.0-rc.1", default-features = false }
-miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "1.0.0-rc.1", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0.0-rc.1", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", default-features = false }

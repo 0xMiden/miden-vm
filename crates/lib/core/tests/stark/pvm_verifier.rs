@@ -22,11 +22,11 @@ use miden_core_lib::{
     dsa::{ecdsa_p256_sha256, eddsa_25519_sha512},
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
-use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
-use miden_precompiles_prover::prove_precompiles;
-use miden_precompiles_verifier::masm_verifier::{
-    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
+use miden_precompile_stark::{
+    prover::prove_precompiles,
+    recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
+use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
