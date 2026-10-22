@@ -10,8 +10,9 @@ reviewers). Per-module API details live in `src/prover/README.md` and
 ## Overview
 
 This crate owns shared AIR contracts, transcript channels, LogUp lookup support,
-configuration factories, and the lifted STARK prover and verifier. Relation-specific
-PCS presets, protocol versions, and transcript domains stay with production AIR.
+configuration factories, common MASM advice encoding, and the lifted STARK prover and
+verifier. Relation-specific PCS presets, protocol versions, and transcript domains stay
+with the relation backends.
 
 ```
 miden-stark              ← this crate
@@ -22,6 +23,7 @@ miden-stark              ← this crate
 ├── src/air/                       ← AIR contracts, statements, and symbolic analysis
 ├── src/transcript/                ← Fiat-Shamir channels
 ├── src/lookup/                    ← Generic LogUp mechanisms
+├── src/recursive/                 ← Shared MASM proof payloads, Merkle advice, and request packaging
 └── src/config/                    ← Shared hash configurations and transcript initialization
 ```
 
