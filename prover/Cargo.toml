@@ -18,6 +18,7 @@ default = ["std"]
 concurrent = [
     "std",
     "miden-air/concurrent",
+    "miden-vm-stark/concurrent",
     "miden-crypto/concurrent",
     "miden-stark/concurrent",
     "miden-precompile-stark/concurrent",
@@ -25,6 +26,7 @@ concurrent = [
 ]
 std = [
     "miden-air/std",
+    "miden-vm-stark/std",
     "miden-debug-types/std",
     "miden-precompile-stark/std",
     "miden-processor/std",
@@ -32,6 +34,7 @@ std = [
 ]
 
 [dependencies]
+miden-vm-stark = { workspace = true, features = ["prover"] }
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true

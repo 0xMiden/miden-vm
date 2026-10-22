@@ -271,7 +271,7 @@ fn pvm_security_masm_matches_air() {
 
     let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = pvm_security::FIXED_POINT_ONE;
-    let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let sample_bits = miden_vm_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     for (name, expected) in [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),

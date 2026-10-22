@@ -12,11 +12,13 @@ use miden_ace::{
 use miden_air::vm::{
     MIDEN_AIR_COUNT,
     ace::RecursiveAceCircuit,
-    config::{self, PROTOCOL_ID, relation_digest},
+    config::{self, PROTOCOL_ID},
 };
 use miden_air_source::vm::{AIRS, MidenAir};
 use miden_core::{Felt, WORD_SIZE, Word, program::KernelDescriptor};
-use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{
+    QuotientRecompositionInputs, config::relation_digest, quotient_recomposition_inputs,
+};
 use p3_air::BaseAir;
 
 use crate::templates::{VmDeepQueriesTemplate, VmLayoutTemplate, VmModTemplate};

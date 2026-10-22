@@ -1,4 +1,3 @@
-use miden_air::vm::config;
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_stark::{
     StarkConfig,
@@ -7,6 +6,7 @@ use miden_stark::{
     },
 };
 use miden_utils_testing::crypto::{MerklePath, PartialMerkleTree};
+use miden_vm_stark::setup::config;
 
 pub(super) const BLOWUP_EXP: u8 = 3;
 const NUM_FRI_QUERIES: usize = 32;

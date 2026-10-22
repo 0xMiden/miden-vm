@@ -16,6 +16,6 @@ pub fn check_constraints(trace: &VmTrace) {
     let statement = ProverStatement::new(statement, vec![core, chiplets, eidos, and8])
         .expect("prover statement construction failed");
     use miden_stark::StarkConfig;
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = crate::setup::config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     miden_stark::debug::check_constraints(&statement, config.challenger());
 }

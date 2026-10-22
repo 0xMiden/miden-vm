@@ -30,13 +30,13 @@ pub struct Prover {
 impl Prover {
     /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::vm::memory`;
+    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_vm_stark::memory`;
     /// it is not a total process-RSS or allocator cap. In particular, the model excludes the
     /// fixed And8 preprocessed setup, and the precompile prover's memory footprint is bounded
     /// separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 =
-        miden_air::vm::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+        miden_vm_stark::memory::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
     /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
     /// precompile witness.
@@ -148,7 +148,7 @@ impl Prover {
             let _span = tracing::info_span!("build_miden_vm_trace").entered();
             build_trace(
                 witness,
-                &miden_air::vm::memory::canonical_budget(self.max_prover_memory_bytes),
+                &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
             )
             .map_err(ProverError::TraceGeneration)?
         };
@@ -231,7 +231,7 @@ impl Prover {
             trace_len_summary.padded_trace_len(),
             trace_len_summary
                 .padded_heights()
-                .and_then(|heights| miden_air::vm::memory::prover_peak_bytes(heights, &params))
+                .and_then(|heights| miden_vm_stark::memory::prover_peak_bytes(heights, &params))
         );
 
         let precompile_root = trace.precompile_root();
@@ -313,7 +313,7 @@ pub fn prove_sync(
             processor.execute_and_build_trace_sync(
                 program,
                 host,
-                &miden_air::vm::memory::canonical_budget(prover.max_prover_memory_bytes()),
+                &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
             )?
         };
         let stack_outputs = *trace.stack_outputs();

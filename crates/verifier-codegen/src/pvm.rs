@@ -201,7 +201,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         stream_len: circuit.stream_len,
     };
     let circuit_digest = circuit.commitment;
-    let relation_digest = miden_air::vm::config::relation_digest(
+    let relation_digest = miden_stark::config::relation_digest(
         miden_air::precompile::policy::PROTOCOL_ID,
         &circuit_digest,
     );

@@ -1,10 +1,10 @@
 //! Native checks for the mathematics used by the common recursive security estimator.
 
-use miden_air::vm::{
-    config,
-    security::{self, ProofSecurityParameters},
-};
 use miden_core::program::KernelDescriptor;
+use miden_vm_stark::{
+    security::{self, ProofSecurityParameters},
+    setup::config,
+};
 use p3_security::{
     budget::{
         AirShape, LookupShape, ProtocolParams, SecurityReport,

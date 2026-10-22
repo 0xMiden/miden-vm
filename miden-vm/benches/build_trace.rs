@@ -87,7 +87,7 @@ fn build_trace(c: &mut Criterion) {
                             let (vm_witness, _) = witness.into_parts();
                             let trace = trace::build_trace(
                                 vm_witness,
-                                &miden_air::vm::memory::default_budget(),
+                                &miden_vm_stark::memory::default_budget(),
                             )
                             .unwrap();
                             black_box(trace);

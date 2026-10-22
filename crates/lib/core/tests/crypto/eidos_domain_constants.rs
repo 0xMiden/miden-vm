@@ -310,7 +310,7 @@ fn masm_initial_chaining_words_match_rust() {
         ),
         (
             "QUOTIENT_LMCS_INIT_CV",
-            miden_air::vm::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
+            miden_vm_stark::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
         ),
     ] {
         assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len as u32));

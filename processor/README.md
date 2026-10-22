@@ -47,7 +47,7 @@ The `FastProcessor` is designed for fast program execution with minimal overhead
 ### Trace generation with `build_trace()`
 After execution with `FastProcessor::execute_for_proving*()`, split the returned
 `ExecutionWitness` and call `build_trace(vm_witness, &budget)`. The VM backend provides
-`miden_air::vm::memory::default_budget()` and `canonical_budget(limit_bytes)` using the canonical
+`miden_vm_stark::memory::default_budget()` and `canonical_budget(limit_bytes)` using the canonical
 proof configuration. Processor enforces the supplied model before final allocations and retains
 independent row-index and raw-buffer limits. When the `concurrent` feature is enabled, trace
 generation is parallelized for improved performance.

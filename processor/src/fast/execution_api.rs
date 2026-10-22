@@ -259,7 +259,7 @@ impl FastProcessor {
     ///     .unwrap();
     /// let (vm_witness, _) = execution_witness.into_parts();
     /// let trace =
-    ///     miden_processor::trace::build_trace(vm_witness, &miden_air::vm::memory::default_budget())
+    ///     miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
     ///         .unwrap();
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());

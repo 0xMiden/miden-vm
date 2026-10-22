@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::{boxed::Box, sync::Arc, vec};
 
-use miden_air::vm::{MidenMultiAir, PublicInputs, config, security};
+use miden_air::vm::{MidenMultiAir, PublicInputs};
 use miden_core::{
     Felt,
     deferred::{
@@ -22,6 +22,7 @@ use miden_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance, air::Statement, lmcs::Lmcs,
     proof::StarkProofData, verifier::VerifierError,
 };
+use miden_vm_stark::{security, setup::config};
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
 
@@ -43,7 +44,7 @@ mod exports {
     }
 }
 pub use exports::*;
-pub use miden_air::vm::security::{
+pub use miden_vm_stark::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };

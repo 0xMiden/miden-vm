@@ -43,7 +43,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTr
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 /// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
@@ -66,7 +66,7 @@ pub fn build_trace_from_program_with_stack(
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
@@ -109,7 +109,7 @@ pub fn build_trace_from_ops_with_inputs(
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
     assert_eq!(output.precompile_root(), precompile_root);
     assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));
 
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.precompile_root(), precompile_root);
 }
 
@@ -175,7 +175,7 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(output.precompile_root(), TRUE_DIGEST);
     assert!(output.precompile_witness.is_none());
 
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.init_stack_state(), stack_inputs);
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
     assert_eq!(trace.to_public_values(), expected_public_inputs.to_elements());

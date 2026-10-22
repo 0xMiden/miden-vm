@@ -77,7 +77,7 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .unwrap();
         let (vm_witness, precompiles_witness) = execution_witness.into_parts();
         assert!(precompiles_witness.is_none());
-        build_trace(vm_witness, &miden_air::vm::memory::default_budget()).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let streamed = {
@@ -86,7 +86,7 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .execute_and_build_trace_sync(
                 &program,
                 &mut host,
-                &miden_air::vm::memory::default_budget(),
+                &miden_vm_stark::memory::default_budget(),
             )
             .unwrap();
         assert!(precompiles_witness.is_none());
@@ -211,7 +211,7 @@ fn overlap_builder_thread_enters_the_instrument_span() {
             .execute_and_build_trace_sync(
                 &program,
                 &mut host,
-                &miden_air::vm::memory::default_budget(),
+                &miden_vm_stark::memory::default_budget(),
             )
             .unwrap();
     });

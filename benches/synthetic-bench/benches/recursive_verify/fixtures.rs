@@ -411,7 +411,7 @@ fn print_tx_fixture_shape(
         .execute_for_proving_sync(program, &mut host)
         .expect("execute transaction fixture");
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_air::vm::memory::default_budget())
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
         .expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE index={proof_index}");

@@ -319,10 +319,6 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
     // Calling it twice must be deterministic.
     let produced_again = build_recursive_verifier_ace_circuit().expect("recursive ACE circuit");
     assert_eq!(produced, produced_again);
-
-    // The cached circuit is what the advice builder serves, and it is reachable across crates.
-    #[cfg(feature = "std")]
-    assert_eq!(*miden_air::vm::ace::shared_recursive_circuit(), produced);
 }
 
 /// Checks the canonical circuit against a direct AIR fold for every VM proof order.

@@ -53,7 +53,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
         .execute_and_build_trace_sync(
             &program,
             &mut host,
-            &miden_air::vm::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
+            &miden_vm_stark::memory::canonical_budget(Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES),
         )
         .unwrap();
     assert!(precompile_witness.is_none());
