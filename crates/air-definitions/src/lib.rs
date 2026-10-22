@@ -723,97 +723,6 @@ impl MidenAir {
             Self::And8Lookup => And8LookupAir.boundary_correction(challenges, &[]),
         }
     }
-
-    /// Evaluate the hand-written constraint definitions.
-    ///
-    /// The definitions crate always evaluates the handwritten source. The runtime facade
-    /// specializes this source during its Cargo build.
-    pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        match self {
-            Self::Core => CoreAir.eval(builder),
-            Self::Chiplets => ChipletsAir.eval(builder),
-            Self::EidosCompression => EidosCompressionAir.eval(builder),
-            Self::And8Lookup => And8LookupAir.eval(builder),
-        }
-    }
-}
-
-/// [`MidenAir`] wrapped for symbolic capture of the hand-written constraint definitions.
-///
-/// Capture that feeds generated artifacts, or anchors an equivalence oracle, must consume the
-/// hand-written source; taking this wrapper makes that explicit at the call site.
-#[derive(Copy, Clone, Debug)]
-pub struct HandwrittenMidenAir(pub MidenAir);
-
-impl BaseAir<Felt> for HandwrittenMidenAir {
-    fn width(&self) -> usize {
-        self.0.width()
-    }
-
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.0.preprocessed_trace()
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        self.0.preprocessed_width()
-    }
-
-    fn num_public_values(&self) -> usize {
-        BaseAir::<Felt>::num_public_values(&self.0)
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        self.0.periodic_columns()
-    }
-}
-
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for HandwrittenMidenAir {
-    fn num_randomness(&self) -> usize {
-        LiftedAir::<Felt, EF>::num_randomness(&self.0)
-    }
-
-    fn aux_width(&self) -> usize {
-        LiftedAir::<Felt, EF>::aux_width(&self.0)
-    }
-
-    fn num_aux_values(&self) -> usize {
-        LiftedAir::<Felt, EF>::num_aux_values(&self.0)
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
-    }
-
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        preprocessed: Option<&RowMajorMatrix<Felt>>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        self.0.build_aux_trace_with_preprocessed(
-            main,
-            preprocessed,
-            air_inputs,
-            aux_inputs,
-            challenges,
-        )
-    }
-
-    fn constraint_degree(&self) -> ConstraintDegrees {
-        LiftedAir::<Felt, EF>::constraint_degree(&self.0)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.0.eval_handwritten(builder)
-    }
 }
 
 impl BaseAir<Felt> for MidenAir {
@@ -1266,7 +1175,7 @@ mod tests {
     #[test]
     fn core_shape_and_degree_match_design() {
         let air = MidenAir::CORE;
-        let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&HandwrittenMidenAir(air));
+        let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
 
         assert_eq!(air.width(), 48);
         assert_eq!(constraints::columns::NUM_DECODER_COLS, 23);

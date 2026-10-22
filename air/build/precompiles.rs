@@ -36,7 +36,7 @@ pub fn generate() {
     write(
         "degrees.rs",
         format!(
-            "fn generated_degrees(air: &ChipletAir) -> ConstraintDegrees {{ match air {{ {degree_arms} }} }}"
+            "pub(super) fn generated_degrees(air: &ChipletAir) -> ConstraintDegrees {{ match air {{ {degree_arms} }} }}"
         ),
     );
     let compiled = captured.compile().expect("compile PVM relation");

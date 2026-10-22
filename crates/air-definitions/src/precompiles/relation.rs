@@ -1,15 +1,11 @@
 //! Canonical AIR order and protocol policy of the precompile relation.
 
-use alloc::{format, vec::Vec};
+use alloc::vec::Vec;
 
 #[cfg(feature = "compiler")]
 use miden_ace_codegen::{AceError, CapturedAir, CompiledRelation};
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-    utils::Matrix,
-};
-use miden_lifted_air::{BaseAir, LiftedAir, ReductionError};
+use miden_core::{Felt, field::QuadFelt, utils::Matrix};
+use miden_lifted_air::{BaseAir, LiftedAir};
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS, fixed, policy};
 
@@ -84,40 +80,6 @@ impl AuxBoundaryPlan {
             fixed_boundary_terms: fixed::fixed_uintval_msgs().count()
                 + fixed::fixed_ecgroup_msgs().count(),
         }
-    }
-
-    /// Reduce normalized committed LogUp residues using their committed trace lengths.
-    pub fn reduce(
-        &self,
-        values: &[&[QuadFelt]],
-        log_heights: &[u8],
-    ) -> Result<QuadFelt, ReductionError> {
-        if values.len() != self.values_per_air.len() || log_heights.len() != values.len() {
-            return Err("auxiliary boundary AIR count mismatch".into());
-        }
-        let mut sum = QuadFelt::ZERO;
-        for (index, ((values, &expected), &log_height)) in
-            values.iter().zip(&self.values_per_air).zip(log_heights).enumerate()
-        {
-            if values.len() != expected {
-                return Err(format!(
-                    "AIR {index} expects {expected} auxiliary boundary values, got {}",
-                    values.len()
-                )
-                .into());
-            }
-            let length = 1u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
-                ReductionError::from(format!(
-                    "AIR {index} log trace height {log_height} does not fit in u64"
-                ))
-            })?;
-            match self.reduction {
-                AuxBoundaryReduction::TraceLengthWeightedSum => {
-                    sum += values.iter().copied().sum::<QuadFelt>() * Felt::new_unchecked(length);
-                },
-            }
-        }
-        Ok(sum)
     }
 }
 
