@@ -13,12 +13,14 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
+#[cfg(test)]
+use miden_air::precompile::ChipletAir;
 use miden_air::precompile::NUM_CHIPLETS;
-pub use miden_air::precompile::ace::PvmRecursiveAceCircuit;
+pub use miden_air::precompile::protocol::PvmRecursiveAceCircuit;
 #[cfg(test)]
-use miden_air::precompile::ace::build_pvm_recursive_verifier_ace_circuit;
+use miden_air_source::precompile::ace::build_canonical_precompile_ace_circuit;
 #[cfg(test)]
-use miden_air::precompile::{ChipletAir, ace::build_canonical_precompile_ace_circuit};
+use miden_air_source::precompile::ace::build_pvm_recursive_verifier_ace_circuit;
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
@@ -87,7 +89,7 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace::InputKey;
-    use miden_air::precompile::ace::LMCS_ALIGNMENT;
+    use miden_air_source::precompile::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
 
@@ -357,7 +359,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
-        use miden_air::precompile::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
+        use miden_air::precompile::{ChipletAir, ChipletMultiAir};
+        use miden_air_source::precompile::logup::NUM_PUBLIC_VALUES;
         use miden_stark::air::Statement;
 
         let challenges = [

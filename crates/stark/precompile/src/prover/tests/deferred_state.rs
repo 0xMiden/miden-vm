@@ -1,7 +1,7 @@
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::precompile::NUM_CHIPLETS;
+use miden_air::precompile::{NUM_CHIPLETS, policy::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -49,7 +49,7 @@ use crate::{
             compression::layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, footer_digest_col},
         },
     },
-    setup::{config::precompile_pcs_params, memory},
+    setup::memory,
     verifier::{VerifyError, verify_deferred},
 };
 

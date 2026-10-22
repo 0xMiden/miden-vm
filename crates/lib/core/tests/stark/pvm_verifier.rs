@@ -424,6 +424,8 @@ fn run_pvm_verifier_with_advice(
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
     use miden_precompile_stark::setup::security;
 
+    let air_shape = miden_air::precompile::protocol::metadata().air_shape;
+
     let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
         .expect("PVM MASM verifier rejected a valid proof");
 
@@ -435,9 +437,9 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         .expect("the PVM relation has chiplet AIRs");
     let expected = [
         u64::from(security::LOOKUP_POW_BITS),
-        u64::from(security::AIR_SHAPE.num_composed_constraints),
-        u64::from(security::AIR_SHAPE.max_constraint_degree),
-        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
+        u64::from(air_shape.num_composed_constraints),
+        u64::from(air_shape.max_constraint_degree),
+        u64::from(air_shape.num_deep_terms.unwrap()),
         u64::from(security::LOOKUP_SHAPE.max_message_width),
         u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
         u64::from(security::LOOKUP_SHAPE.fractions_per_row),

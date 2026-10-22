@@ -6,6 +6,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::precompile::policy::precompile_pcs_params;
 use miden_air_source::precompile::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
 use miden_core::{
     deferred::{
@@ -29,7 +30,7 @@ use crate::{
         session::{EcNode, Session, Truthy, UintNode, strategies},
         transcript::eidos::EidosDigest,
     },
-    setup::{config::precompile_pcs_params, memory},
+    setup::memory,
 };
 
 /// wNAF window for [`msm_from_terms`](WitnessImporter::msm_from_terms)'s joint-wNAF

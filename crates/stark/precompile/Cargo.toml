@@ -18,17 +18,17 @@ doctest = false
 
 [features]
 default = ["std"]
-prover = ["dep:miden-air-source", "dep:miden-precompiles", "dep:miden-utils-sync", "dep:tracing"]
+prover = ["dep:miden-precompiles", "dep:miden-utils-sync", "dep:tracing"]
 concurrent = [
     "std",
     "miden-crypto/concurrent",
     "miden-stark/concurrent",
     "miden-air/concurrent",
-    "miden-air-source?/concurrent",
+    "miden-air-source/concurrent",
 ]
 fixture-tools = ["std", "prover"]
 std = [
-    "miden-air-source?/std",
+    "miden-air-source/std",
     "miden-core/std",
     "miden-crypto/std",
     "miden-air/std",
@@ -38,7 +38,7 @@ std = [
 ]
 
 [dependencies]
-miden-air-source = { workspace = true, optional = true }
+miden-air-source.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
@@ -62,7 +62,7 @@ required-features = ["fixture-tools"]
 insta.workspace = true
 # Known-good secp256k1 reference for EC circuit cross-validation.
 k256 = { workspace = true, features = ["arithmetic"] }
-miden-air = { workspace = true, features = ["std", "compiler", "testing"] }
+miden-air = { workspace = true, features = ["std", "testing"] }
 miden-air-source = { workspace = true, features = ["compiler", "testing"] }
 miden-ace = { workspace = true, features = ["testing"] }
 proptest = { workspace = true, features = ["std"] }

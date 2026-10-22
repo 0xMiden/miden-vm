@@ -17,13 +17,12 @@ edition.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "miden-air/concurrent",
     "miden-vm-stark/concurrent",
     "miden-precompile-stark/concurrent",
     "miden-processor/concurrent",
 ]
 std = [
-    "miden-air/std",
+    "miden-precompiles/std",
     "miden-precompile-stark/std",
     "miden-vm-stark/std",
     "miden-processor/std",
@@ -32,8 +31,8 @@ std = [
 
 [dependencies]
 # Miden dependencies
-miden-air.workspace = true
 miden-core.workspace = true
+miden-precompiles.workspace = true
 miden-precompile-stark = { workspace = true, features = ["prover"] }
 miden-vm-stark = { workspace = true, features = ["prover"] }
 miden-processor.workspace = true

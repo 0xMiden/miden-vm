@@ -2643,11 +2643,11 @@ dependencies = [
 name = "miden-prover"
 version = "1.0.0"
 dependencies = [
- "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
  "miden-precompile-stark",
+ "miden-precompiles",
  "miden-processor",
  "miden-verifier",
  "miden-vm-stark",

@@ -23,3 +23,9 @@ security calculations, and (with `prover`) the proving-memory model.
 The `fixture-tools` feature enables the `pvm-proof-fixture` maintenance binary. Independent AIR
 capture, setup-pin, proof-fixture, and recursive-verifier checks remain available in the crate's
 existing tests.
+
+Generic configuration factories and transcript observation come from `miden_stark::config`.
+The accepted PVM PCS preset comes from `miden_air::precompile::policy`; the backend's
+`setup::config::eidos_config` supplies the PVM transcript domain. Authored AIR definitions and
+compiler helpers are available directly from `miden_air_source::precompile`, while production
+evaluators and embedded artifacts remain in `miden_air::precompile`.

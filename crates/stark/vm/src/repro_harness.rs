@@ -1,8 +1,8 @@
 use alloc::{format, string::String, vec::Vec};
 use core::borrow::BorrowMut;
 
-use miden_air::vm::PublicInputs;
-use miden_air_source::vm::CoreCols;
+use miden_air::vm::config;
+use miden_air_source::vm::{CoreCols, PublicInputs};
 use miden_core::{
     Felt,
     program::{ExecutionClaim, StackOutputs},
@@ -12,7 +12,7 @@ use miden_core::{
 use miden_processor::trace::VmTrace;
 use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 
-use crate::{prover::prove_stark, setup::config};
+use crate::{prover::prove_stark, setup::config::eidos_config};
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
@@ -145,7 +145,7 @@ impl ReproTrace {
             self.precompile_root,
         );
         let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         prove_stark(&config, core, chiplets, eidos_compression, and8, &public_values, &aux_inputs)
             .map_err(|error| format!("{error}"))
     }

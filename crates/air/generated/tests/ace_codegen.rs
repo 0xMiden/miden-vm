@@ -159,7 +159,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
 #[test]
 fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
-    use miden_air::vm::ace::build_canonical_multi_air_ace_circuit;
+    use miden_air_source::vm::ace::build_canonical_multi_air_ace_circuit;
 
     let config = AceConfig {
         num_quotient_chunks: 8,
@@ -293,7 +293,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
 /// the production entry point to the exact circuit used by that sweep.
 #[test]
 fn recursive_verifier_circuit_matches_the_canonical_builder() {
-    use miden_air::vm::ace::{
+    use miden_air_source::vm::ace::{
         build_canonical_multi_air_ace_circuit, build_recursive_verifier_ace_circuit,
     };
     use miden_core::crypto::hash::Eidos;
@@ -324,7 +324,8 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
 /// Checks the canonical circuit against a direct AIR fold for every VM proof order.
 #[test]
 fn canonical_circuit_matches_every_vm_proof_order() {
-    use miden_air::vm::{AIRS, MIDEN_AIR_COUNT, ace::build_canonical_multi_air_ace_circuit};
+    use miden_air::vm::{AIRS, MIDEN_AIR_COUNT};
+    use miden_air_source::vm::ace::build_canonical_multi_air_ace_circuit;
 
     let config = AceConfig {
         num_quotient_chunks: 8,

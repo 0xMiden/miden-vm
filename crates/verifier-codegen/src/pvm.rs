@@ -580,7 +580,7 @@ fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> 
             .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
         cvs[i] = masm_word_literal(Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
     }
-    let depth = miden_air::precompile::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
+    let depth = miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2()
         + u32::from(miden_air::precompile::policy::LOG_BLOWUP);
     let mask = 1u32
         .checked_shl(depth)

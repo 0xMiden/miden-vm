@@ -10,14 +10,16 @@
 use alloc::vec;
 use core::ops::Deref;
 
-use miden_air::precompile::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
+use miden_air::precompile::{ChipletAir, ChipletMultiAir, policy::precompile_pcs_params};
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{Preprocessed, StarkConfig, air::Statement, lmcs::Lmcs};
-
-use crate::setup::config::{
-    Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
-    eidos_config, keccak_config, precompile_pcs_params,
+use miden_stark::{
+    Preprocessed, StarkConfig,
+    air::{BaseAir, Statement},
+    config::{Blake3Config, KeccakConfig, blake3_256_config, keccak_config},
+    lmcs::Lmcs,
 };
+
+use crate::setup::config::{EidosConfig, PRECOMPILE_RELATION_DIGEST, eidos_config};
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
 /// callers dereference to the underlying [`Preprocessed`] either way.
@@ -54,7 +56,10 @@ where
 fn scratch_statement() -> Statement<Felt, QuadFelt, ChipletMultiAir> {
     Statement::new(
         ChipletMultiAir::new(),
-        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, vec![Felt::ZERO; NUM_PUBLIC_VALUES])],
+        vec![(
+            ChipletAir::TRANSCRIPT_EVAL_INDEX,
+            vec![Felt::ZERO; ChipletAir::TRANSCRIPT_EVAL.num_public_values()],
+        )],
         vec![],
     )
     .expect("chiplet statement inputs are valid")

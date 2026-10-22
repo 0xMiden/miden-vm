@@ -2,10 +2,10 @@
 //!
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
+/// Encoded circuit returned by the production relation's embedded artifact.
+pub use miden_air_source::precompile::ace::PvmRecursiveAceCircuit;
 use miden_core::{Felt, Word};
-use miden_stark::security::{AirShape, LookupShape};
-
-use crate::precompile::ace::PvmRecursiveAceCircuit;
+pub use miden_stark::security::{AirShape, LookupShape};
 
 /// Pinned identity of the precompile relation (raw canonical u64 limbs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
         let independent =
-            crate::precompile::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+            miden_air_source::precompile::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 
@@ -157,7 +157,7 @@ mod tests {
             AuthoredAirs(source::ChipletAir::all()),
             vec![(
                 source::ChipletAir::TRANSCRIPT_EVAL_INDEX,
-                vec![Felt::ZERO; crate::precompile::logup::NUM_PUBLIC_VALUES],
+                vec![Felt::ZERO; source::logup::NUM_PUBLIC_VALUES],
             )],
             vec![],
         )

@@ -20,11 +20,12 @@ use miden_core::{
 use miden_core_lib::CoreLibrary;
 use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::Verifier;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, PrecompileWitness, ProgramInfo, Prover, StackInputs,
     StackOutputs, internal::InputFile, prove_sync, trace::build_trace,
 };
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 use super::{
     config::{BenchConfig, workspace_root},

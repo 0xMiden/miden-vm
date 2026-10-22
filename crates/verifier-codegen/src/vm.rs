@@ -605,7 +605,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use miden_air::vm::ace::{
+    use miden_air_source::vm::ace::{
         build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
     };
 

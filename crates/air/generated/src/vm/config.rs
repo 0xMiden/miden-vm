@@ -4,7 +4,7 @@
 //! identities. Concrete runtime configuration construction belongs to the VM STARK backend.
 
 use miden_core::Felt;
-use miden_stark::{config::RelationDigest, pcs::PcsParams};
+pub use miden_stark::{config::RelationDigest, pcs::PcsParams};
 
 // PCS PARAMETERS
 // ================================================================================================
@@ -96,9 +96,8 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec::Vec};
 
+    use miden_air_source::vm::ace;
     use miden_core::{Felt, field::QuadFelt};
-
-    use crate::vm::ace;
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
                                in crates/air/generated/src/vm/config.rs and update \

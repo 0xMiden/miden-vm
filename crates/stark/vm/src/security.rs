@@ -1,20 +1,35 @@
 //! Security reports for authenticated VM proofs.
-pub use miden_air::vm::security::*;
-use miden_air_source::shared::geometry::NUM_OOD_POINTS;
-use miden_core::proof::HashFunction;
-pub use miden_stark::security::{
-    ProofSecurityParameters, protocol_params, security_report_with_hash,
+#[cfg(test)]
+use miden_air::vm::security::{
+    BITS_PER_QUERY, COLLISION_RESISTANCE, COMPOSITION_TERM, DEEP_BASE, FIXED_POINT_FRACTIONAL_BITS,
+    FIXED_POINT_ONE, FOLDING_BASE, LOOKUP_BASE, OOD_BASE, SECURITY_CAP,
 };
-use miden_stark::{
+use miden_air::vm::{
+    config,
+    security::{
+        AIR_SHAPE, COMMITMENT_ALIGNMENT, CORE_BOUNDARY_LOOKUP_TERMS, LOOKUP_POW_BITS, LOOKUP_SHAPE,
+        OOD_POW_BITS, RAW_WIDTHS,
+    },
+};
+use miden_air_source::shared::geometry::NUM_OOD_POINTS;
+#[cfg(test)]
+use miden_air_source::vm::geometry::derive_air_shape;
+use miden_core::proof::HashFunction;
+use miden_stark::security::{
+    CHALLENGE_FIELD_BITS, apply_lookup_correction, lookup_boundary_correction, protocol_params,
+    security_report_with_hash,
+};
+pub use miden_stark::{
     pcs::PcsParams,
-    security::{apply_lookup_correction, lookup_boundary_correction},
+    security::{
+        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
+        SecurityReport, SecurityTerm,
+    },
 };
 #[cfg(test)]
 use p3_security::budget::report::LOOKUP_LABEL;
 #[cfg(test)]
 use p3_security::budget::report::QUERY_LABEL;
-
-use crate::setup::config;
 
 #[cfg(test)]
 const fn deployed_instance(log_max_height: u32) -> InstanceShape {
@@ -26,13 +41,14 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 }
 
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
+/// alignment, holding every other AIR shape input fixed at [`miden_air::vm::security::AIR_SHAPE`]'s
+/// stored values.
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
 /// from the compiler's stored raw widths and quotient chunk count. A native verifier
 /// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
-/// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
-/// for the Eidos-only recursive verifier.
+/// Keccak, alignment 17) calls this instead of using the alignment-8
+/// [`miden_air::vm::security::AIR_SHAPE`], which is fixed for the Eidos-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     miden_air_source::shared::geometry::num_deep_terms_for_widths(
         RAW_WIDTHS,
@@ -134,10 +150,10 @@ pub fn conjectured_security_level(
 /// committed under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Eidos
-/// proofs, which `conjectured_security_level` computes at alignment
-/// [`COMMITMENT_ALIGNMENT`] (and this function is identical at that alignment, since
-/// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
+/// [`miden_air::vm::security::AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier
+/// accepts only Eidos proofs, which `conjectured_security_level` computes at alignment
+/// [`miden_air::vm::security::COMMITMENT_ALIGNMENT`] (and this function is identical at that
+/// alignment, since `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
 /// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
 /// every hash function, including the non-algebraic ones the recursive verifier never sees, and
 /// supplies the hash configuration to select both the collision bound and the sampling support.
@@ -286,16 +302,17 @@ mod tests {
         }
     }
 
-    /// Checks that [`AIR_SHAPE`] matches the current AIRs. A stale shape can make the reported
-    /// security level differ from the level implied by the relation being verified.
+    /// Checks that [`miden_air::vm::security::AIR_SHAPE`] matches the current AIRs. A stale shape
+    /// can make the reported security level differ from the level implied by the relation being
+    /// verified.
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
     }
 
-    /// `num_deep_terms` at [`COMMITMENT_ALIGNMENT`] (algebraic sponges) must reproduce
-    /// [`AIR_SHAPE`]'s stored `num_deep_terms` exactly, so
-    /// `conjectured_security_level_for_alignment` computes the same level for an Eidos proof
+    /// `num_deep_terms` at [`miden_air::vm::security::COMMITMENT_ALIGNMENT`] (algebraic sponges)
+    /// must reproduce [`miden_air::vm::security::AIR_SHAPE`]'s stored `num_deep_terms` exactly,
+    /// so `conjectured_security_level_for_alignment` computes the same level for an Eidos proof
     /// as `conjectured_security_level`.
     ///
     /// The other two are the deployed non-algebraic configurations' actual alignments: Blake3's

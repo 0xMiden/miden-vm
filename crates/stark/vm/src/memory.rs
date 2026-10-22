@@ -20,13 +20,10 @@
 //! modelled here, not total process RSS. It also does not cover the precompile prover's memory
 //! footprint.
 
-use miden_air::vm::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air::vm::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir, config};
 use miden_core::field::{BasedVectorSpace, QuadFelt};
-use miden_stark::{
-    log_quotient_degree,
-    memory::{ProverMemoryModel, ProvingBudget},
-    pcs::PcsParams,
-};
+pub use miden_stark::memory::{ProverMemoryModel, ProvingBudget};
+use miden_stark::{log_quotient_degree, pcs::PcsParams};
 
 // CONSTANTS
 // ================================================================================================
@@ -103,7 +100,7 @@ pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 /// Supplies the canonical VM model with the caller's byte limit.
 pub fn canonical_budget(limit_bytes: u64) -> ProvingBudget<MIDEN_AIR_COUNT> {
     ProvingBudget::new(
-        memory_model(&crate::setup::config::pcs_params()).expect("canonical VM memory model fits"),
+        memory_model(&config::pcs_params()).expect("canonical VM memory model fits"),
         limit_bytes,
     )
 }
@@ -115,10 +112,10 @@ pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
 
 #[cfg(test)]
 mod tests {
+    use miden_air::vm::config::pcs_params;
     use miden_air_source::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
 
     use super::*;
-    use crate::setup::config::pcs_params;
 
     /// Pinned bytes/row figures for the current AIR shape: Core, Chiplets, EidosCompression, and
     /// And8 have 48/24/108/7 main columns, 4/4/20/4 extension-field auxiliary columns, and

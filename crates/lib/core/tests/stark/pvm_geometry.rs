@@ -1,9 +1,9 @@
 use miden_ace::InputKey;
 use miden_air::precompile::{
     ChipletAir, NUM_CHIPLETS,
-    ace::build_canonical_precompile_ace_circuit,
     protocol::{PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST},
 };
+use miden_air_source::precompile::ace::build_canonical_precompile_ace_circuit;
 use miden_core::{Felt, field::QuadFelt};
 
 const PVM_WRAPPER_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm");
@@ -65,7 +65,7 @@ fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
 
 #[test]
 fn pvm_aux_hook_matches_the_logup_registry() {
-    use miden_air::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
+    use miden_air_source::precompile::relations::{BusId, MAX_MESSAGE_WIDTH};
 
     const HOOK_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/aux_trace.masm");
 
@@ -174,9 +174,8 @@ fn pvm_masm_read_layout_matches_every_codegen_boundary() {
 
 #[test]
 fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-    use miden_air::precompile::{
-        policy::precompile_pcs_params, primitives::byte_pair_lut::TRACE_HEIGHT,
-    };
+    use miden_air::precompile::policy::precompile_pcs_params;
+    use miden_air_source::precompile::primitives::byte_pair_lut::TRACE_HEIGHT;
 
     const HOOK_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/deep_queries.masm");
 
@@ -271,7 +270,7 @@ fn pvm_security_masm_matches_air() {
 
     let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = pvm_security::FIXED_POINT_ONE;
-    let sample_bits = miden_vm_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let sample_bits = miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     for (name, expected) in [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
@@ -281,16 +280,13 @@ fn pvm_security_masm_matches_air() {
         (
             "DEEP_FIELD_BASE_BITS",
             (sample_bits >> fractional_bits)
-                - u64::from(
-                    miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup(),
-                ),
+                - u64::from(miden_air::precompile::policy::precompile_pcs_params().log_blowup()),
         ),
         ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", pvm_security::LOG2_E),
         (
             "MAX_CONSTRAINT_DEGREE",
-            (1u64 << miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup())
-                + 1,
+            (1u64 << miden_air::precompile::policy::precompile_pcs_params().log_blowup()) + 1,
         ),
     ] {
         assert_eq!(
@@ -303,7 +299,7 @@ fn pvm_security_masm_matches_air() {
     // The estimator omits four native security terms only while the PVM shape satisfies these
     // bounds. `pvm_canonical_ace_shape_matches_current_air` checks the stored shape against the
     // chiplet AIRs; the checks below fail if that shape leaves the estimator envelope.
-    let air_shape = pvm_security::AIR_SHAPE;
+    let air_shape = miden_air::precompile::protocol::metadata().air_shape;
     let lookup = air_shape.lookup.expect("the PVM uses a lookup argument");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
@@ -356,19 +352,11 @@ fn pvm_security_masm_matches_air() {
     for (name, expected) in [
         ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
         ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
-        (
-            "NUM_COMPOSED_CONSTRAINTS",
-            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
-        ),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
-        ),
+        ("NUM_COMPOSED_CONSTRAINTS", u64::from(air_shape.num_composed_constraints)),
+        ("MAX_CONSTRAINT_DEGREE", u64::from(air_shape.max_constraint_degree)),
         (
             "NUM_DEEP_TERMS",
-            u64::from(
-                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
-            ),
+            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
@@ -397,7 +385,7 @@ fn pvm_masm_quotient_inputs_match_the_stark_domain() {
     assert!(num_chunks.is_power_of_two());
     let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         num_chunks.ilog2() as u8,
-        miden_precompile_stark::setup::config::precompile_pcs_params().log_blowup(),
+        miden_air::precompile::policy::precompile_pcs_params().log_blowup(),
     )
     .expect("PVM quotient degree fits the PCS blowup");
 

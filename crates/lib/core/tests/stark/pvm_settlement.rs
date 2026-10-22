@@ -24,7 +24,8 @@ use miden_processor::{
     event::EventError,
 };
 use miden_prover::{Prover, ProverError};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::Verifier;
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 use crate::{
     helpers::masm_push_word,

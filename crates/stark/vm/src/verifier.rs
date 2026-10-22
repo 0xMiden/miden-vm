@@ -1,7 +1,8 @@
 //! Native verification of a VM STARK against an explicit execution claim.
 use alloc::vec;
 
-use miden_air::vm::{MidenMultiAir, PublicInputs};
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_source::vm::PublicInputs;
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -10,13 +11,18 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierInstance, air::Statement, lmcs::Lmcs,
-    proof::StarkProofData, security::ProofSecurityParameters, verifier::VerifierError,
+    PreprocessedValidationError, StarkConfig, VerifierInstance,
+    air::Statement,
+    config::{blake3_256_config, keccak_config, observe_protocol_params},
+    lmcs::Lmcs,
+    proof::StarkProofData,
+    security::ProofSecurityParameters,
+    verifier::VerifierError,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
 
-use crate::{security, setup::config};
+use crate::{security, setup::config::eidos_config};
 
 type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 
@@ -48,7 +54,7 @@ pub fn verify(
     let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
     match stark.hash_fn() {
         HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
+            let config = blake3_256_config(pcs_params, config::RELATION_DIGEST);
             verify_stark_proof(
                 &config,
                 &public_values,
@@ -58,7 +64,7 @@ pub fn verify(
             )
         },
         HashFunction::Eidos => {
-            let config = config::eidos_config(pcs_params, config::RELATION_DIGEST);
+            let config = eidos_config(pcs_params, config::RELATION_DIGEST);
             verify_stark_proof(
                 &config,
                 &public_values,
@@ -68,7 +74,7 @@ pub fn verify(
             )
         },
         HashFunction::Keccak => {
-            let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
+            let config = keccak_config(pcs_params, config::RELATION_DIGEST);
             verify_stark_proof(
                 &config,
                 &public_values,
@@ -121,7 +127,7 @@ where
     )?;
 
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
     // statement inputs read during observation/boundary correction. The lifted verifier absorbs

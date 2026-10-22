@@ -1,5 +1,6 @@
 //! Materialization and caching of the VM relation's embedded recursive circuit.
-use miden_air::vm::ace::{ACE_CIRCUIT_SHAPE, ACE_INSTRUCTIONS, RecursiveAceCircuit};
+pub use miden_air::vm::ace::RecursiveAceCircuit;
+use miden_air::vm::ace::{ACE_CIRCUIT_SHAPE, ACE_INSTRUCTIONS};
 
 /// Materialize the build-compiled VM circuit without symbolic AIR capture at runtime.
 ///
@@ -31,7 +32,7 @@ pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
 mod tests {
     #[test]
     fn cached_circuit_matches_independent_authored_capture() {
-        let authored = miden_air::vm::ace::build_recursive_verifier_ace_circuit()
+        let authored = miden_air_source::vm::ace::build_recursive_verifier_ace_circuit()
             .expect("authored recursive ACE circuit");
         assert_eq!(*super::shared_recursive_circuit(), authored);
     }

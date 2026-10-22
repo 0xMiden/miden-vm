@@ -1,3 +1,4 @@
+use miden_air::vm::config;
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_stark::{
     StarkConfig,
@@ -6,7 +7,7 @@ use miden_stark::{
     },
 };
 use miden_utils_testing::crypto::{MerklePath, PartialMerkleTree};
-use miden_vm_stark::setup::config;
+use miden_vm_stark::setup::config::eidos_config;
 
 pub(super) const BLOWUP_EXP: u8 = 3;
 const NUM_FRI_QUERIES: usize = 32;
@@ -59,7 +60,7 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
         domain_generator,
     } = {
         // Use the production Eidos components so Merkle nodes match the VM's native hash.
-        let stark_config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let stark_config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         fold4_ext2_test_vectors::<Felt, QuadFelt, _, _, _>(
             stark_config.lmcs(),
             &stark_config.challenger(),

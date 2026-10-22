@@ -6,13 +6,11 @@ pub(crate) mod preprocessed;
 pub mod ace;
 
 pub mod config {
-    pub use miden_air::vm::config::*;
     use miden_core::program::domain::STARK_TRANSCRIPT;
-    pub use miden_stark::config::{
-        Blake3Config, EidosConfig, EidosLmcs, KeccakConfig, MidenStarkConfig, RelationDigest,
-        blake3_256_config, keccak_config, observe_protocol_params, relation_digest,
+    pub use miden_stark::{
+        config::{EidosConfig, RelationDigest},
+        pcs::PcsParams,
     };
-    use miden_stark::pcs::PcsParams;
 
     /// Creates the Eidos configuration bound to the VM transcript domain.
     pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
@@ -23,9 +21,17 @@ pub mod config {
     mod tests {
         use alloc::vec;
 
-        use miden_air::vm::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement};
+        use miden_air::vm::{MidenMultiAir, config};
+        use miden_air_source::vm::NUM_PUBLIC_VALUES;
         use miden_core::{Felt, field::QuadFelt};
-        use miden_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
+        use miden_stark::{
+            Preprocessed, StarkConfig,
+            air::Statement,
+            config::{blake3_256_config, keccak_config},
+            lmcs::Lmcs,
+        };
+
+        use super::eidos_config;
         const UPDATE_HINT: &str =
             "an intentional relation change must update the production pins and verifier root";
         /// The And8 setup commitment the given configuration builds from the canonical VM setup.
@@ -47,10 +53,10 @@ pub mod config {
             ($test:ident, $config:ident, $pinned:ident, $repr:ty) => {
                 #[test]
                 fn $test() {
-                    let config = super::$config(super::pcs_params(), super::RELATION_DIGEST);
+                    let config = $config(config::pcs_params(), config::RELATION_DIGEST);
                     assert_eq!(
                         <$repr>::from(canonical_setup_commitment(&config)),
-                        super::$pinned,
+                        config::$pinned,
                         "{} is stale; {UPDATE_HINT}",
                         stringify!($pinned)
                     );
@@ -77,9 +83,4 @@ pub mod config {
             [u64; 4]
         );
     }
-}
-
-/// Supplies the canonical VM memory model and caller-selected byte limit.
-pub fn proving_budget(limit_bytes: u64) -> miden_stark::memory::ProvingBudget<4> {
-    crate::memory::canonical_budget(limit_bytes)
 }

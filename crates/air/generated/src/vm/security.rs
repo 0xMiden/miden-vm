@@ -2,15 +2,14 @@
 //!
 //! The AIR shape entering the security calculation is stored in [`AIR_SHAPE`], allowing the MASM
 //! estimator to use it without evaluating the AIRs symbolically. Runtime security reporting lives
-//! in the VM STARK backend; [`derive_air_shape`] supports its independent comparison checks.
+//! in the VM STARK backend. Independent comparison checks use
+//! `miden_air_source::vm::geometry::derive_air_shape`.
 
 use miden_core::proof::HashFunction;
-pub use miden_stark::security::{CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS};
-/// Security-estimation types used by verified Miden proofs.
-pub use p3_security::budget::{
-    AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-};
-use p3_security::fixed;
+/// Types describing the generated AIR and lookup shapes.
+pub use miden_stark::security::{AirShape, LookupShape};
+use miden_stark::security::{CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS};
+use p3_security::{budget::InstanceShape, fixed};
 
 use crate::vm::config;
 
@@ -35,15 +34,6 @@ pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
 /// Raw `(preprocessed, main, auxiliary)` widths of each AIR, compiled from the AIR definitions.
 pub const RAW_WIDTHS: &[(usize, usize, usize)] =
     &include!(concat!(env!("OUT_DIR"), "/raw_widths.rs"));
-
-/// Computes the AIR shape by symbolically evaluating every AIR in the statement.
-///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// AIR, so verifiers use the checked constant instead of calling this function.
-#[cfg(any(test, feature = "compiler"))]
-pub fn derive_air_shape() -> AirShape {
-    miden_air_source::vm::geometry::derive_air_shape()
-}
 
 // SECURITY MODEL CONSTANTS
 // ================================================================================================
