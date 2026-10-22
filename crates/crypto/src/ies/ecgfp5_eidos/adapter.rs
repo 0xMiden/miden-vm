@@ -9,14 +9,9 @@ use crate::{
     Felt,
     aead::DataType,
     hash::eidos::{Eidos, domains::ECGFP5_SEAL_BYTE_CONTEXT},
-    ies::{IesError, SealedMessage, keys::EphemeralPublicKey},
-    utils::{
-        BINARY_CHUNK_SIZE, Deserializable, Serializable, bytes_to_elements_with_padding,
-        padded_elements_to_bytes,
-    },
+    ies::{IesError, SealedMessage, eidos_envelope, keys::PublicEncapsulation},
+    utils::{BINARY_CHUNK_SIZE, bytes_to_elements_with_padding, padded_elements_to_bytes},
 };
-
-const PAYLOAD_HEADER_BYTES: usize = 1 + 2 * Felt::NUM_BYTES;
 
 pub(in crate::ies) fn seal_elements<R: CryptoRng>(
     recipient: &PublicKey,
@@ -94,26 +89,17 @@ impl TryFrom<SealedMessage> for Envelope {
 
     /// Extracts a Felt envelope. Byte messages and other IES schemes are rejected.
     fn try_from(message: SealedMessage) -> Result<Self, Self::Error> {
-        let EphemeralPublicKey::Ecgfp5Eidos(ephemeral_key) = message.ephemeral_key else {
+        let PublicEncapsulation::Ecgfp5Eidos(ephemeral_key) = message.encapsulation else {
             return Err(IesError::SchemeMismatch);
         };
         decode(ephemeral_key, &message.ciphertext, DataType::Elements)
     }
 }
 
-// The common IES header already contains R. Its ciphertext payload is
-// [data_type: u8, tag: 2 canonical u64 Felts, ciphertext: u32 limbs].
-// Each plaintext Felt contributes two limbs, so the payload length determines its count.
 fn encode(sealed: Envelope, data_type: DataType) -> SealedMessage {
-    let mut ciphertext = Vec::with_capacity(PAYLOAD_HEADER_BYTES + 4 * sealed.ciphertext.len());
-    ciphertext.push(data_type as u8);
-    sealed.tag.write_into(&mut ciphertext);
-    for limb in sealed.ciphertext {
-        ciphertext.extend_from_slice(&(limb.as_canonical_u64() as u32).to_le_bytes());
-    }
     SealedMessage {
-        ephemeral_key: EphemeralPublicKey::Ecgfp5Eidos(sealed.ephemeral_key),
-        ciphertext,
+        encapsulation: PublicEncapsulation::Ecgfp5Eidos(sealed.ephemeral_key),
+        ciphertext: eidos_envelope::encode(&sealed.ciphertext, sealed.tag, data_type),
     }
 }
 
@@ -122,18 +108,6 @@ fn decode(
     ciphertext: &[u8],
     expected_type: DataType,
 ) -> Result<Envelope, IesError> {
-    let header = ciphertext.get(..PAYLOAD_HEADER_BYTES).ok_or(IesError::DecryptionFailed)?;
-    let limbs = &ciphertext[PAYLOAD_HEADER_BYTES..];
-    if header[0] != expected_type as u8 || !limbs.len().is_multiple_of(8) {
-        return Err(IesError::DecryptionFailed);
-    }
-    check_lengths(limbs.len() / 8, 0).map_err(|_| IesError::DecryptionFailed)?;
-    let tag = <[Felt; 2]>::read_from_bytes(&header[1..]).map_err(|_| IesError::DecryptionFailed)?;
-    let ciphertext = limbs
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|limb| Felt::from_u32(u32::from_le_bytes(*limb)))
-        .collect();
+    let (ciphertext, tag) = eidos_envelope::decode(ciphertext, expected_type)?;
     Ok(Envelope { ephemeral_key, ciphertext, tag })
 }

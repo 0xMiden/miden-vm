@@ -110,6 +110,8 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::crypto::hashes::keccak256](./docs/crypto/hashes/keccak256.md)
 - [miden::core::crypto::hashes::sha256](./docs/crypto/hashes/sha256.md)
 - [miden::core::crypto::ies::ecgfp5_eidos](./docs/crypto/ies/ecgfp5_eidos.md)
+- [miden::core::crypto::ies::ntru_eidos](./docs/crypto/ies/ntru_eidos.md)
+- [miden::core::crypto::kem::ntru_hps509](./docs/crypto/kem/ntru_hps509.md)
 - [miden::core::math::u256](./docs/math/u256.md)
 - [miden::core::math::u64](./docs/math/u64.md)
 - [miden::core::mem](./docs/mem.md)

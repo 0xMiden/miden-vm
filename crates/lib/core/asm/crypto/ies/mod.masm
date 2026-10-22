@@ -1,3 +1,4 @@
 #! Integrated encryption schemes.
 
 pub mod ecgfp5_eidos
+pub mod ntru_eidos

@@ -1,0 +1,575 @@
+#! NTRU-HPS-2048-509 encapsulation with Eidos hashing.
+#!
+#! Encapsulation uses the recipient's public key and fresh randomness to produce a shared secret
+#! and a capsule, the KEM ciphertext:
+#!
+#! `Encapsulate(recipient_public_key, fresh_randomness) -> (capsule, shared_secret)`
+#! `Decapsulate(recipient_private_key, capsule) -> shared_secret`
+#!
+#! The sender sends the capsule to the recipient, who uses its private key to recover the same
+#! secret. That secret supplies key material for encrypting the application message; the capsule
+#! is separate from the encrypted message. Use `crypto::ies::ntru_eidos::seal` to combine these
+#! operations.
+#!
+#! Let h be the recipient's public polynomial and r, m be sampled polynomials with trits 0, 1, 2.
+#! The lift maps 0, 1, 2 to 0, 1, 2047, representing 0, 1, -1 modulo 2048. Encapsulation computes
+#! c = h * lift(r) + lift(m) modulo (X^509 - 1, 2048), then hashes the encodings of r and m
+#! to obtain the shared secret. Here m is a sampled secret, not the application message;
+#! it has 127 trits of each nonzero value.
+#!
+#! The host supplies h, r, m, and the integer product P = h * lift(r) through advice.
+#! Instead of multiplying the polynomials in the VM, this module checks P at two extension-field
+#! points derived from a hash of h, P, r, and m. Two points meet the polynomial check's 128-bit
+#! soundness target in the ideal-hash model.
+#! The module also checks h against the public-key commitment, then checks the trit encodings and
+#! m's weight before constructing the capsule.
+
+use miden::core::crypto::hashes::eidos
+
+# The polynomial ring is Z_Q[X] / (X^N - 1).
+const N = 509
+const Q = 2048
+const LIFT_NEGATIVE = Q - 1
+const LIFT_NEGATIVE_STEP = LIFT_NEGATIVE - 1 # lift(2) - lift(1)
+const WEIGHT_PER_SIGN = 127
+
+# Buffers are padded to eight-Felt blocks for hashing and Horner evaluation.
+const POLY_BLOCKS = 64
+const POLY_LEN = 8 * POLY_BLOCKS
+const PRODUCT_BLOCKS = 2 * POLY_BLOCKS
+const PRODUCT_LEN = 2 * POLY_LEN
+const CIPHERTEXT_BLOCKS = 22
+const CIPHERTEXT_BUFFER_LEN = 8 * CIPHERTEXT_BLOCKS
+const CIPHERTEXT_FULL_BLOCKS = CIPHERTEXT_BLOCKS - 1 # The final block has seven advised limbs.
+
+# Advice packs 508 trits as 25 groups of 20 and one group of eight.
+const FULL_TRIT_GROUPS = 25
+const PACKED_TRIT_POLY_LEN = FULL_TRIT_GROUPS + 1
+const PACKED_TRIT_BLOCKS = 7 # Both packed polynomials, followed by four zero Felts.
+const TRITS20_LIMIT = 3486784401 # 3^20
+const TRITS8_LIMIT = 6561 # 3^8
+const TRIT_WORD_RADIX = 81 # 3^4: four trits select one lifted word.
+const TRIT_BYTE_RADIX = 243 # 3^5: five trits form one byte in the reference encoding.
+const BYTE_RADIX = 256
+const TWO_BYTE_RADIX = BYTE_RADIX * BYTE_RADIX
+const THREE_BYTE_RADIX = TWO_BYTE_RADIX * BYTE_RADIX
+const SECRET_HASH_BLOCKS = 7 # 204 bytes occupy 51 u32 Felts, followed by five zero Felts.
+
+# Eidos::init_chaining_word(NTRU_HPS509_PUBLIC_KEY, 512): h followed by three zero Felts.
+const PUBLIC_KEY_INIT_CV = [
+    13503953893947609857, 11912009168875160064, 11170449401267093504, 6620516959492505600
+]
+# Eidos::init_chaining_word_with_params(NTRU_HPS509_EIDOS, [role, length, 0]).
+# Product-check transcript: role 4, 1588 Felts.
+const PRODUCT_INIT_CV = [
+    13503953893947610113, 11912009168875159556, 11170449401267095092, 6620516959492505600
+]
+# Shared secret: role 1, the 204-byte encoding of (r, m).
+const SECRET_INIT_CV = [
+    13503953893947610113, 11912009168875159553, 11170449401267093708, 6620516959492505600
+]
+# Capsule digest: role 8, 699 bytes.
+const CIPHERTEXT_INIT_CV = [
+    13503953893947610113, 11912009168875159560, 11170449401267094203, 6620516959492505600
+]
+
+# Only encapsulate_inner and its helpers access this isolated memory context.
+# The lookup table holds 81 lifted words: one for each possible group of four trits.
+const LIFT_TABLE = 128
+# Polynomial buffers hold 512 Felts each; the unreduced product holds 1024.
+# Decoders write 508 lifted coefficients. Their four remaining slots stay zero in this call context.
+const H = 1024
+const PRODUCT = H + POLY_LEN
+const LIFT_M = PRODUCT + PRODUCT_LEN
+const PRODUCT_UPPER_WORD = PRODUCT + N - 1
+const PRODUCT_UPPER_NEXT = PRODUCT_UPPER_WORD + 4
+const LIFT_R = LIFT_M + POLY_LEN
+const PACKED_CIPHERTEXT = LIFT_R + POLY_LEN
+# Each polynomial's first 508 trits occupy 26 Felts: 25 groups of 20 trits and one group of 8.
+# The final coefficient is zero. Each group is packed in base 3, lowest coefficient first.
+const PACKED_TRITS = PACKED_CIPHERTEXT + CIPHERTEXT_BUFFER_LEN
+const HASH_INPUT = PACKED_TRITS + 8 * PACKED_TRIT_BLOCKS
+const EXPECTED_KEY = 32
+const CHALLENGE = 44
+const SECOND_CHALLENGE = 84
+const H_TAIL = H + N - 1
+const PRODUCT_TAIL = PRODUCT + 2 * (N - 1)
+const PRODUCT_LAST_WORD = PRODUCT_TAIL + 4
+const LAST_R_TRITS = LIFT_R + 20 * FULL_TRIT_GROUPS
+const LAST_M_TRITS = LIFT_M + 20 * FULL_TRIT_GROUPS
+const PACKED_TRITS_LAST_WORD = PACKED_TRITS + 2 * PACKED_TRIT_POLY_LEN - 4
+const PACKED_M = PACKED_TRITS + PACKED_TRIT_POLY_LEN
+# Fifteen complete groups of 32 coefficients occupy eleven u32 limbs each.
+const CIPHERTEXT_LAST_BLOCK = PACKED_CIPHERTEXT + 15 * 11
+
+#! Produces a capsule and shared secret for the recipient's public key.
+#! Writes the 699-byte capsule as 175 little-endian u32 Felts followed by one zero Felt.
+#!
+#! Input:  [public_key(4), destination, ...]
+#! Output: [shared_secret(4), ciphertext_digest(4), ...]
+#!
+#! The public_key input is the commitment returned by Rust's `PublicKey::to_commitment`.
+#! Prepare advice with `PublicKey::encapsulate_with_advice`.
+#! The destination must be a word-aligned u32 pointer with all 176 Felts below the local frame.
+#! Polynomial checks and capsule construction run in a separate memory context. This procedure
+#! copies the capsule from advice to destination and compares its digest with the computed one.
+#! Fails on an invalid destination, polynomial encoding, key commitment, product witness, or
+#! capsule copy.
+#!
+#! Invocation: exec
+@locals(4)
+pub proc encapsulate(public_key: eidos::Digest, destination: ptr<felt>) -> (word, eidos::Digest)
+    locaddr.0 push.CIPHERTEXT_BUFFER_LEN dup.6 exec.assert_range
+    movup.4 loc_store.0
+
+    padw padw padw movupw.3
+    call.encapsulate_inner
+    # => [shared_secret(4), ciphertext_digest(4), pad(8), ...]
+    swapdw dropw dropw
+
+    # Copy the capsule out of the isolated context through advice, checking its digest.
+    loc_load.0 exec.read_ciphertext
+    # => [copied_digest(4), shared_secret(4), ciphertext_digest(4), ...]
+    dupw.2 assert_eqw.err="encapsulation binding"
+end
+
+# Write the advised capsule and hash each block as it is written.
+# The last block has seven advised limbs and one zero padding Felt.
+# Input: [destination, ...]. Output: [ciphertext_digest(4), ...].
+proc read_ciphertext(destination: ptr<felt>) -> eidos::Digest
+    push.CIPHERTEXT_INIT_CV padw padw
+    repeat.CIPHERTEXT_FULL_BLOCKS adv_pipe compress end
+    dropw dropw
+    # => [CV(4), destination + 168, ...]
+    adv_pushw dup.8 mem_storew_le
+    push.0 repeat.3 adv_push end swap movup.2
+    dup.12 add.4 mem_storew_le
+    # => [ct[172..176](4), ct[168..172](4), CV(4), destination + 168, ...]
+    swapw compress
+    dropw dropw movup.4 drop
+end
+
+# Construct the capsule from the advised polynomials:
+# 1. Check h against the commitment; decode r and m and check m's weight.
+# 2. Hash h, the advised product P, and the packed trits to derive two evaluation points.
+# 3. Check P = h * lift(r) at both points, then fold P modulo X^509 - 1 and add lift(m).
+# 4. Encode the capsule and hash the reference byte encodings of r and m for the shared secret.
+# Input: [public_key(4), pad(12)]. Output: [shared_secret(4), ciphertext_digest(4), pad(8)].
+# The call from encapsulate gives these fixed scratch buffers a fresh memory context.
+proc encapsulate_inner(public_key: word, padding: [felt; 12]) -> (word, word, [felt; 8])
+    mem_storew_le.EXPECTED_KEY dropw
+    exec.read_public_key
+    exec.read_polynomials
+    exec.read_product
+    # Split the transcript digest into [alpha0, alpha1, 0, 0] for each Horner evaluation.
+    # => [alpha0, alpha1, beta0, beta1, pad(16)]
+    push.0.0 movdn.3 movdn.3 mem_storew_le.CHALLENGE dropw
+    push.0.0 movdn.3 movdn.3 mem_storew_le.SECOND_CHALLENGE dropw
+    push.CHALLENGE exec.check_product
+    push.SECOND_CHALLENGE exec.check_product
+    exec.encode_ciphertext
+    exec.hash_secret
+    push.PACKED_CIPHERTEXT exec.hash_ciphertext
+    # => [ciphertext_digest(4), shared_secret(4), pad(16)]
+    swapdw dropw dropw swapw
+end
+
+# Read h into H and check its zero-sum representation: each coefficient is below Q and
+# sum(h) = 0 modulo Q. After checking the three padding Felts, hash the buffer and compare
+# it with EXPECTED_KEY.
+# Input: [...]. Output: [...].
+proc read_public_key()
+    push.H padw padw padw push.1
+    while.true
+        repeat.4
+            adv_pipe
+            dupw.1
+            repeat.2
+                u32assert2
+                repeat.2
+                    push.Q u32overflowing_sub assert.err="public key coefficient"
+                    drop
+                end
+            end
+            dupw
+            repeat.2
+                u32assert2
+                repeat.2
+                    push.Q u32overflowing_sub assert.err="public key coefficient"
+                    drop
+                end
+            end
+            repeat.8
+                add
+            end
+            padw padw
+        end
+        dup.12 neq.PRODUCT
+    end
+    dropw dropw
+    padw mem_loadw_le.H_TAIL drop repeat.3 assertz.err="polynomial padding" end
+    u32mod.Q assertz.err="public key sum" drop drop drop drop
+
+    push.H push.PUBLIC_KEY_INIT_CV padw padw
+    repeat.POLY_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+    padw mem_loadw_le.EXPECTED_KEY assert_eqw.err="public key commitment"
+end
+
+# Read r and m as base-3 integers, lowest coefficient first. Each polynomial uses 26 Felts:
+# 25 groups of 20 trits, then eight trits; coefficient 508 is zero and is not transmitted.
+# Decode them into LIFT_R and LIFT_M using the four-trit lookup table. For m, accumulate the
+# lifted coefficients to check that exactly 127 trits have each nonzero sign.
+# Input: [...]. Output: [...].
+proc read_polynomials()
+    exec.prepare_lift_table
+    push.PACKED_TRITS padw padw padw
+    repeat.6
+        adv_pipe
+    end
+    dropw dropw dropw drop
+    adv_pushw mem_storew_le.PACKED_TRITS_LAST_WORD dropw
+    push.PACKED_TRITS.LIFT_R push.1
+    while.true
+        repeat.5
+            dup.1 mem_load exec.decode_r20 swap add.1 swap
+        end
+        dup neq.LAST_R_TRITS
+    end
+    dup.1 mem_load exec.decode_r8 drop drop
+    push.0
+    push.PACKED_M.LIFT_M push.1
+    while.true
+        repeat.5
+            dup.1 mem_load exec.decode_m20 swap add.1 swap
+        end
+        dup neq.LAST_M_TRITS
+    end
+    dup.1 mem_load exec.decode_m8 drop drop
+    # sum(lift(m)) = positive_count + (Q - 1)*negative_count.
+    # Each count is at most 508 < Q - 1, so division recovers the counts without a carry.
+    u32divmod.LIFT_NEGATIVE eq.WEIGHT_PER_SIGN assert.err="positive weight"
+    eq.WEIGHT_PER_SIGN assert.err="negative weight"
+end
+
+# Read P and hash h(512) || P(1024) || packed_r(26) || packed_m(26).
+# The checked packed encodings uniquely determine r and m. All coefficients of P enter
+# this transcript before its digest supplies the product-check challenges.
+# Input: [...]. Output: [transcript_digest(4), ...].
+proc read_product() -> eidos::Digest
+    push.H push.PRODUCT_INIT_CV padw padw
+    repeat.POLY_BLOCKS mem_stream compress end
+    # The pointer now addresses PRODUCT. Absorb each advised block as it is written there.
+    repeat.PRODUCT_BLOCKS adv_pipe compress end
+    movup.12 drop push.PACKED_TRITS movdn.12
+    # The last block contains four packed Felts and four zeros from the fresh call context.
+    repeat.PACKED_TRIT_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+
+    # A product of two 509-coefficient polynomials needs at most 1017 slots.
+    # The seven remaining slots must be zero.
+    padw mem_loadw_le.PRODUCT_TAIL drop repeat.3 assertz.err="polynomial padding" end
+    padw mem_loadw_le.PRODUCT_LAST_WORD repeat.4 assertz.err="polynomial padding" end
+end
+
+# Reduce P modulo X^509 - 1, add lift(m), and pack 508 coefficients into capsule limbs.
+# The final coefficient is determined by the zero-sum encoding and is not transmitted.
+# Input: [...]. Output: [...].
+proc encode_ciphertext()
+    push.0.PACKED_CIPHERTEXT push.1
+    while.true
+        repeat.3
+            exec.fold_encode32
+        end
+        dup neq.CIPHERTEXT_LAST_BLOCK
+    end
+    exec.fold_encode28 drop drop
+end
+
+# Check the product identity at alpha = [mem[challenge_ptr], mem[challenge_ptr + 1]].
+# Horner reads each buffer in ascending address order, producing the reversed evaluation
+# rev_n(a)(alpha) = sum_i a[i] * alpha^(n-1-i).
+# The product of two 512-slot evaluations gives exponent 1022-i-j for h[i]*lift(r[j]),
+# while the 1024-slot product buffer gives exponent 1023-i-j. One multiplication by alpha aligns
+# them: alpha * rev_512(h)(alpha) * rev_512(lift(r))(alpha) = rev_1024(P)(alpha).
+# Input: [challenge_ptr, ...]. Output: [...].
+proc check_product(challenge: ptr<felt>)
+    dup push.0.0 movup.2 push.H padw padw padw
+    repeat.POLY_BLOCKS mem_stream horner_eval_base end
+    dropw dropw dropw drop drop
+    dup.2 push.0.0 movup.2 push.LIFT_R padw padw padw
+    repeat.POLY_BLOCKS mem_stream horner_eval_base end
+    dropw dropw dropw drop drop
+    ext2mul
+    dup.2 add.1 mem_load dup.3 mem_load ext2mul
+    dup.2 push.0.0 movup.2 push.PRODUCT padw padw padw
+    repeat.PRODUCT_BLOCKS mem_stream horner_eval_base end
+    dropw dropw dropw drop drop
+    ext2sub assertz.err="product identity" assertz.err="product identity"
+    drop
+end
+
+# Require a word-aligned pointer and a nonempty range ending below local_start.
+# Input: [ptr, len, local_start, ...]. Output: [...].
+proc assert_range(ptr: ptr<felt>, len: u32, local_start: ptr<felt>)
+    u32assert.err="NTRU pointer must fit in a u32"
+    dup u32mod.4 assertz.err="NTRU pointer must be word-aligned"
+    swap sub.1 u32overflowing_add
+    assertz.err="NTRU destination exceeds the u32 address space"
+    u32gt assert.err="NTRU destination must stay below the local frame"
+end
+
+# Four coefficients pack in radix Q, with Q2 and Q3 as the upper two place values.
+const Q2 = Q * Q
+const Q3 = Q2 * Q
+
+# Multipliers for appending a packed group above a partial u32 limb.
+const CARRY4_RADIX = 16
+const CARRY12_RADIX = 4096
+const CARRY20_RADIX = 1048576
+const CARRY28_RADIX = 268435456
+
+# Since X^509 = 1 in the ciphertext ring, fold coefficient i+509 into coefficient i.
+# Add lift(m), reduce each coefficient modulo Q, and pack four at a time:
+# c_j = (P[i+j] + P[i+j+509] + lift(m[i+j])) mod 2048, for j = 0, 1, 2, 3.
+# The packed result is c0 + 2^11*c1 + 2^22*c2 + 2^33*c3, which fits in 44 bits.
+# Input: [i, carry, packed_ptr, ...].
+# Output: [packed44, i, carry, packed_ptr, ...].
+# The shift by 509 is not word-aligned. Load at i+508, discard that first element, and append
+# the element at i+512 to obtain the four upper coefficients.
+# Product equality and bounded inputs give each integer sum < 2^32, so no field wrap is possible.
+proc fold_pack_four(i: u32, carry: felt, packed: ptr<felt>) -> (felt, u32, felt, ptr<felt>)
+    padw dup.4 add.LIFT_M mem_loadw_le
+    # Push the offsets first: dup.9 and dup.13 are native, unlike dup.8 and dup.12.
+    padw push.PRODUCT_UPPER_WORD dup.9 add mem_loadw_le
+    drop dup.7 add.PRODUCT_UPPER_NEXT mem_load movdn.3
+    padw push.PRODUCT dup.13 add mem_loadw_le
+    # Write Pj = P[i+j], Uj = P[i+j+509], and Mj = lift(m[i+j]).
+    # => [P0, P1, P2, P3, U0, U1, U2, U3, M0, M1, M2, M3, i, carry, packed_ptr, ...]
+    movup.8 movup.5 add add u32divmod.Q movdn.8 drop
+    # => [P1, P2, P3, U1, U2, U3, M1, c0, M2, M3, i, carry, packed_ptr, ...]
+    # Accumulate the packed value while discarding each division's quotient.
+    movup.6 movup.4 add add u32divmod.Q
+    mul.Q movup.6 add movdn.7 drop
+    # => [P2, P3, U2, U3, M2, M3, c0 + 2^11*c1, i, carry, packed_ptr, ...]
+    movup.4 movup.3 add add u32divmod.Q
+    mul.Q2 movup.5 add movdn.4 drop
+    # => [P3, U3, M3, c0 + 2^11*c1 + 2^22*c2, i, carry, packed_ptr, ...]
+    add add u32mod.Q mul.Q3 add
+end
+
+# Append seven groups of four 11-bit coefficients to a little-endian u32 stream.
+# Each group adds 44 bits. Write complete low limbs and retain the high bits for the next group;
+# the carried widths on entry are 0, 12, 24, 4, 16, 28, and 8 bits. This emits nine u32 limbs
+# and leaves a 20-bit carry. Split before a shift that would produce 64 or more bits, since a
+# full u64 value need not fit in the base field.
+# Input: [i, carry, packed_ptr, ...]. Output: [i + 28, carry, packed_ptr, ...].
+proc fold_first28(i: u32, carry: felt, packed: ptr<felt>) -> (u32, felt, ptr<felt>)
+    # Coefficients 0..3: 0 carried bits.
+    exec.fold_pack_four
+    movup.2 drop
+    u32split dup.3 add.0 mem_store swap
+    add.4
+    # Coefficients 4..7: 12 carried bits.
+    exec.fold_pack_four
+    mul.CARRY12_RADIX movup.2 add
+    u32split dup.3 add.1 mem_store swap
+    add.4
+    # Coefficients 8..11: 24 carried bits.
+    exec.fold_pack_four
+    u32split mul.THREE_BYTE_RADIX movup.3 add u32split dup.4 add.2 mem_store
+    swap mul.THREE_BYTE_RADIX add u32split dup.3 add.3 mem_store swap
+    add.4
+    # Coefficients 12..15: 4 carried bits.
+    exec.fold_pack_four
+    mul.CARRY4_RADIX movup.2 add
+    u32split dup.3 add.4 mem_store swap
+    add.4
+    # Coefficients 16..19: 16 carried bits.
+    exec.fold_pack_four
+    mul.TWO_BYTE_RADIX movup.2 add
+    u32split dup.3 add.5 mem_store swap
+    add.4
+    # Coefficients 20..23: 28 carried bits.
+    exec.fold_pack_four
+    u32split mul.CARRY28_RADIX movup.3 add u32split dup.4 add.6 mem_store
+    swap mul.CARRY28_RADIX add u32split dup.3 add.7 mem_store swap
+    add.4
+    # Coefficients 24..27: 8 carried bits.
+    exec.fold_pack_four
+    mul.BYTE_RADIX movup.2 add
+    u32split dup.3 add.8 mem_store swap
+    add.4
+end
+
+# Encode 32 coefficients into eleven u32 limbs: 32 * 11 = 11 * 32 bits.
+# After the first 28 coefficients, append the final 44 bits above the 20-bit carry.
+# Split that group first so the combined 64-bit value is never held in one Felt.
+# Input: [packed_ptr, i, ...]. Output: [packed_ptr + 11, i + 32, ...].
+proc fold_encode32(packed: ptr<felt>, i: u32) -> (ptr<felt>, u32)
+    swap push.0 swap exec.fold_first28
+    exec.fold_pack_four
+    u32split mul.CARRY20_RADIX movup.3 add u32split dup.4 add.9 mem_store
+    swap mul.CARRY20_RADIX add u32split dup.3 add.10 mem_store swap
+    swap drop add.4 swap add.11
+end
+
+# Encode the last 28 coefficients as nine complete u32 limbs and one 20-bit limb.
+# Writing the carry directly leaves the last limb's high twelve bits zero.
+# Input: [packed_ptr, i, ...]. Output: [packed_ptr + 10, i + 28, ...].
+proc fold_encode28(packed: ptr<felt>, i: u32) -> (ptr<felt>, u32)
+    swap push.0 swap exec.fold_first28
+    swap dup.2 add.9 mem_store swap add.10
+end
+
+# Build the table used by the decoders. For trits a, b, c, d:
+#   j = a + 3*b + 9*c + 27*d
+#   mem[LIFT_TABLE + 4*j] = [lift(a), lift(b), lift(c), lift(d)]
+# Enumerate the nine (c, d) pairs, then b = 0, 1, 2. Each write_lift_rows call varies a.
+# Input: [...]. Output: [...].
+proc prepare_lift_table()
+    push.0.LIFT_TABLE push.1
+    while.true
+        # [destination, c + 3*d, ...] -> [lift(c), lift(d), destination, c + 3*d, ...]
+        dup.1 u32divmod.3
+        push.LIFT_NEGATIVE dup.1 eq.2 cdrop
+        swap push.LIFT_NEGATIVE dup.1 eq.2 cdrop swap
+        push.0.0
+        # => [0, 0, lift(c), lift(d), destination, c + 3*d, ...]
+        exec.write_lift_rows
+        # Reset a to zero and advance b to one.
+        drop push.0 swap add.1 swap
+        exec.write_lift_rows
+        # Advance b to two; lift(2) - lift(1) = 2046.
+        drop push.0 swap add.LIFT_NEGATIVE_STEP swap
+        exec.write_lift_rows
+        dropw swap add.1 swap dup.1 neq.9
+    end
+    drop drop
+end
+
+# Write three consecutive table rows, varying a from zero to two.
+# Input:  [0, lift(b), lift(c), lift(d), destination, ...].
+# Output: [2047, lift(b), lift(c), lift(d), destination + 12, ...].
+proc write_lift_rows(lifts: word, destination: ptr<felt>) -> (word, ptr<felt>)
+    dup.4 mem_storew_le movup.4 add.4 movdn.4
+    add.1 dup.4 mem_storew_le movup.4 add.4 movdn.4
+    add.LIFT_NEGATIVE_STEP dup.4 mem_storew_le movup.4 add.4 movdn.4
+end
+
+# Check a 20-trit group's range, then decode it through five four-trit lookups.
+# Requires prepare_lift_table. Values below the arguments, including the packed-input pointer,
+# stay on the stack.
+# The branch lets repeated decodes share a MAST block instead of inlining one large block.
+proc decode_r20(packed: u32, destination: ptr<felt>) -> (ptr<felt>)
+    u32assert dup u32lt.TRITS20_LIMIT
+    if.true
+        padw
+        repeat.5 exec.decode_r_word end
+        dropw drop
+    else
+        push.0 assert.err="packed trits"
+    end
+end
+
+# Decode the final eight-trit group through two lookups, after checking its smaller range.
+# Requires prepare_lift_table; values below the arguments are unchanged.
+proc decode_r8(packed: u32, destination: ptr<felt>) -> (ptr<felt>)
+    u32assert dup u32lt.TRITS8_LIMIT assert.err="packed trits"
+    padw
+    repeat.2 exec.decode_r_word end
+    dropw drop
+end
+
+# The remainder modulo 81 selects the lifted word for the next four trits. Each lookup
+# overwrites the previous word, so the loop needs only one scratch word on the stack.
+# Input: [scratch(4), packed, lift_ptr, ...].
+# Output: [lifts(4), quotient, lift_ptr + 4, ...].
+proc decode_r_word(scratch: word, packed: u32, destination: ptr<felt>) -> (word, u32, ptr<felt>)
+    movup.4 u32divmod.TRIT_WORD_RADIX mul.4 add.LIFT_TABLE
+    swap movdn.5 mem_loadw_le
+    dup.5 mem_storew_le
+    movup.5 add.4 movdn.5
+end
+
+# Decode a 20-trit group as for r, adding each lifted word to m's weight sum.
+# Requires prepare_lift_table.
+proc decode_m20(packed: u32, destination: ptr<felt>, packed_ptr: ptr<felt>, sum: u32) -> (ptr<felt>, ptr<felt>, u32)
+    u32assert dup u32lt.TRITS20_LIMIT
+    if.true
+        repeat.5 exec.decode_m_word end
+        drop
+    else
+        push.0 assert.err="packed trits"
+    end
+end
+
+# Decode m's final eight trits and add their lifts to the weight sum.
+# Requires prepare_lift_table.
+proc decode_m8(packed: u32, destination: ptr<felt>, packed_ptr: ptr<felt>, sum: u32) -> (ptr<felt>, ptr<felt>, u32)
+    u32assert dup u32lt.TRITS8_LIMIT assert.err="packed trits"
+    repeat.2 exec.decode_m_word end
+    drop
+end
+
+# Input: [packed, lift_ptr, packed_ptr, sum, ...].
+# Output: [quotient, lift_ptr + 4, packed_ptr, updated_sum, ...].
+# As in decode_r_word, look up the lifted word, then add it to the weight sum.
+proc decode_m_word(packed: u32, destination: ptr<felt>, packed_ptr: ptr<felt>, sum: u32) -> (u32, ptr<felt>, ptr<felt>, u32)
+    u32divmod.TRIT_WORD_RADIX mul.4 add.LIFT_TABLE
+    padw movup.4 mem_loadw_le
+    dup.5 mem_storew_le
+    add add add movup.4 add movdn.3
+    swap add.4 swap
+end
+
+# Convert a checked 20-trit group from advice packing to the reference byte encoding.
+# Each byte b_i contains five trits, so 0 <= b_i < 3^5 = 243:
+#   packed = b0 + 243*b1 + 243^2*b2 + 243^3*b3
+#   result = b0 + 256*b1 + 256^2*b2 + 256^3*b3
+# Repeated division by 243 extracts the bytes; add each directly at its u32 byte position.
+# Input: [packed_ptr, ...]. Output: [encoded_u32, packed_ptr, ...].
+proc encode_trits20(packed: ptr<felt>) -> (u32, ptr<felt>)
+    dup mem_load
+    u32divmod.TRIT_BYTE_RADIX swap u32divmod.TRIT_BYTE_RADIX
+    mul.BYTE_RADIX movup.2 add
+    # => [b0 + 2^8*b1, b2 + 243*b3, packed_ptr, ...]
+    swap u32divmod.TRIT_BYTE_RADIX
+    mul.TWO_BYTE_RADIX movup.2 add
+    swap mul.THREE_BYTE_RADIX add
+end
+
+# Hash encode(r) || encode(m), with 102 bytes per polynomial and no padding between them.
+# The first 100 bytes of r form 25 u32 limbs. Its last two bytes share a limb with m's first two;
+# carry the high two bytes of each encoded m word into the next limb.
+# Input: [...]. Output: [shared_secret(4), ...].
+proc hash_secret() -> word
+    push.HASH_INPUT.PACKED_TRITS
+    repeat.FULL_TRIT_GROUPS
+        exec.encode_trits20 dup.2 mem_store
+        add.1 swap add.1 swap
+    end
+    dup mem_load u32divmod.TRIT_BYTE_RADIX swap mul.BYTE_RADIX add
+    swap add.1
+    # => [m_packed_ptr, carry16, hash_ptr, ...]
+    repeat.FULL_TRIT_GROUPS
+        exec.encode_trits20
+        u32divmod.TWO_BYTE_RADIX
+        mul.TWO_BYTE_RADIX movup.3 add dup.3 mem_store
+        swap add.1 movup.2 add.1 movdn.2
+    end
+    mem_load u32divmod.TRIT_BYTE_RADIX swap mul.BYTE_RADIX add mul.TWO_BYTE_RADIX add swap mem_store
+    # The 51 u32 limbs occupy seven blocks; the five unused Felts stay zero in this call context.
+    push.HASH_INPUT push.SECRET_INIT_CV padw padw
+    repeat.SECRET_HASH_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+end
+
+# Hash 175 capsule limbs followed by one zero Felt, under the 699-byte framing.
+# Input: [ptr, ...]. Output: [ciphertext_digest(4), ...].
+# The inner encoder leaves the last Felt zero; encapsulate writes it explicitly in caller memory.
+proc hash_ciphertext(ptr: ptr<felt>) -> eidos::Digest
+    push.CIPHERTEXT_INIT_CV padw padw
+    repeat.CIPHERTEXT_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+end

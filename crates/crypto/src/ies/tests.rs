@@ -13,7 +13,7 @@ use crate::{
             KeyExchangeKey as KeyExchangeKey25519, PUBLIC_KEY_BYTES as X25519_PUBLIC_KEY_BYTES,
         },
     },
-    ies::{keys::EphemeralPublicKey, *},
+    ies::{keys::PublicEncapsulation, *},
     utils::{Deserializable, DeserializationError, Serializable, SliceReader},
 };
 
@@ -366,7 +366,7 @@ mod x25519_xchacha_tests {
 
         let mut sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
 
-        let eph_bytes = sealed.ephemeral_key.to_bytes();
+        let eph_bytes = sealed.encapsulation.to_bytes();
         let mut eph_array = [0u8; 32];
         eph_array.copy_from_slice(&eph_bytes);
 
@@ -379,9 +379,9 @@ mod x25519_xchacha_tests {
         assert_ne!(altered, eph_array);
 
         let altered_key =
-            EphemeralPublicKey::from_bytes(IesScheme::X25519XChaCha20Poly1305, &altered).unwrap();
+            PublicEncapsulation::from_bytes(IesScheme::X25519XChaCha20Poly1305, &altered).unwrap();
 
-        sealed.ephemeral_key = altered_key;
+        sealed.encapsulation = altered_key;
 
         let result = unsealing_key.unseal_bytes(sealed);
         assert!(result.is_err());
@@ -730,14 +730,14 @@ mod ephemeral_public_key_tests {
     #[test]
     fn test_k256_ephemeral_public_key_rejects_invalid_length() {
         let bytes = vec![0_u8; K256_PUBLIC_KEY_BYTES + 1];
-        assert!(EphemeralPublicKey::from_bytes(IesScheme::K256XChaCha20Poly1305, &bytes).is_err());
+        assert!(PublicEncapsulation::from_bytes(IesScheme::K256XChaCha20Poly1305, &bytes).is_err());
     }
 
     #[test]
     fn test_x25519_ephemeral_public_key_rejects_invalid_length() {
         let bytes = vec![0_u8; X25519_PUBLIC_KEY_BYTES + 1];
         assert!(
-            EphemeralPublicKey::from_bytes(IesScheme::X25519XChaCha20Poly1305, &bytes).is_err()
+            PublicEncapsulation::from_bytes(IesScheme::X25519XChaCha20Poly1305, &bytes).is_err()
         );
     }
 }
@@ -828,7 +828,7 @@ mod protocol_tests {
     use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     #[test]
-    fn test_ephemeral_key_serialization_k256() {
+    fn test_encapsulation_serialization_k256() {
         let mut rng = test_rng(0x1039);
         let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
@@ -836,16 +836,16 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, b"test").unwrap();
 
         // Extract ephemeral key from sealed message
-        let ephemeral_bytes = sealed.ephemeral_key.to_bytes();
-        let scheme = sealed.ephemeral_key.scheme();
+        let ephemeral_bytes = sealed.encapsulation.to_bytes();
+        let scheme = sealed.encapsulation.scheme();
 
         // Deserialize and compare
-        let reconstructed = EphemeralPublicKey::from_bytes(scheme, &ephemeral_bytes).unwrap();
-        assert_eq!(sealed.ephemeral_key, reconstructed);
+        let reconstructed = PublicEncapsulation::from_bytes(scheme, &ephemeral_bytes).unwrap();
+        assert_eq!(sealed.encapsulation, reconstructed);
     }
 
     #[test]
-    fn test_ephemeral_key_serialization_x25519() {
+    fn test_encapsulation_serialization_x25519() {
         let mut rng = test_rng(0x103a);
         let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
@@ -853,12 +853,12 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, b"test").unwrap();
 
         // Extract ephemeral key from sealed message
-        let ephemeral_bytes = sealed.ephemeral_key.to_bytes();
-        let scheme = sealed.ephemeral_key.scheme();
+        let ephemeral_bytes = sealed.encapsulation.to_bytes();
+        let scheme = sealed.encapsulation.scheme();
 
         // Deserialize and compare
-        let reconstructed = EphemeralPublicKey::from_bytes(scheme, &ephemeral_bytes).unwrap();
-        assert_eq!(sealed.ephemeral_key, reconstructed);
+        let reconstructed = PublicEncapsulation::from_bytes(scheme, &ephemeral_bytes).unwrap();
+        assert_eq!(sealed.encapsulation, reconstructed);
     }
 
     proptest! {
@@ -874,7 +874,7 @@ mod protocol_tests {
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
 
             // Verify scheme consistency
-            let scheme_from_key = sealed.ephemeral_key.scheme();
+            let scheme_from_key = sealed.encapsulation.scheme();
             let scheme_from_message = sealed.scheme();
             prop_assert_eq!(scheme_from_key, scheme_from_message);
 
@@ -941,6 +941,12 @@ mod protocol_tests {
             SealingKey::Ecgfp5Eidos(sk.public_key()),
             UnsealingKey::Ecgfp5Eidos(sk),
             IesScheme::Ecgfp5Eidos,
+        );
+        let sk = crate::kem::ntru_hps509::SecretKey::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::NtruEidos(sk.public_key().clone()),
+            UnsealingKey::NtruEidos(sk),
+            IesScheme::NtruEidos,
         );
     }
 }
@@ -1089,6 +1095,7 @@ mod keys_serialization_tests {
             (4, IesScheme::K256AeadEidos),
             (5, IesScheme::X25519AeadEidos),
             (6, IesScheme::Ecgfp5Eidos),
+            (7, IesScheme::NtruEidos),
         ] {
             assert_eq!(u8::from(scheme), tag);
             assert_eq!(IesScheme::try_from(tag).unwrap(), scheme);

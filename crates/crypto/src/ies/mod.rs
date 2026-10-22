@@ -1,6 +1,6 @@
 //! Integrated Encryption Scheme (IES) utilities.
 //!
-//! This module combines elliptic-curve Diffie–Hellman (ECDH) key agreement with authenticated
+//! This module combines key agreement or key encapsulation with authenticated
 //! encryption (AEAD) to provide sealed boxes that offer confidentiality and integrity for messages.
 //! It exposes a simple API via [`SealingKey`], [`UnsealingKey`], [`SealedMessage`], and
 //! [`IesError`].
@@ -8,6 +8,8 @@
 //! [`IesScheme::Ecgfp5Eidos`] uses EcGFp5 agreement and Eidos extract/expand. Its
 //! [`ecgfp5_eidos`] module also provides the Felt envelope used by the core library's MASM
 //! procedures. Convert that envelope into [`SealedMessage`] to open it with [`UnsealingKey`].
+//! [`IesScheme::NtruEidos`] provides NTRU-HPS509 encapsulation with Eidos encryption; its
+//! [`ntru_eidos::Envelope`] uses the same conversions for MASM output.
 //!
 //! # Examples
 //!
@@ -33,8 +35,10 @@
 
 mod crypto_box;
 pub mod ecgfp5_eidos;
+mod eidos_envelope;
 mod keys;
 mod message;
+pub mod ntru_eidos;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +62,7 @@ pub enum IesScheme {
     K256AeadEidos = 4,
     X25519AeadEidos = 5,
     Ecgfp5Eidos = 6,
+    NtruEidos = 7,
 }
 
 impl TryFrom<u8> for IesScheme {
@@ -69,6 +74,7 @@ impl TryFrom<u8> for IesScheme {
             4 => Ok(IesScheme::K256AeadEidos),
             5 => Ok(IesScheme::X25519AeadEidos),
             6 => Ok(IesScheme::Ecgfp5Eidos),
+            7 => Ok(IesScheme::NtruEidos),
             _ => Err(IesError::UnsupportedScheme),
         }
     }
@@ -94,6 +100,7 @@ impl IesScheme {
             IesScheme::K256AeadEidos => "K256+AeadEidos",
             IesScheme::X25519AeadEidos => "X25519+AeadEidos",
             IesScheme::Ecgfp5Eidos => "EcGFp5+Eidos",
+            IesScheme::NtruEidos => "NTRU-HPS509+Eidos",
         }
     }
 }
@@ -116,6 +123,8 @@ pub enum IesError {
     InvalidNonce,
     #[error("ephemeral public key deserialization failed")]
     EphemeralPublicKeyDeserializationFailed,
+    #[error("invalid key encapsulation")]
+    InvalidEncapsulation,
     #[error("scheme mismatch")]
     SchemeMismatch,
     #[error("unsupported scheme")]

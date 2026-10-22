@@ -11,4 +11,5 @@ mod eidos;
 mod eidos_domain_constants;
 mod eidos_hashes;
 mod hashes;
+mod ntru;
 mod sha256;

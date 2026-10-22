@@ -10,6 +10,7 @@ pub mod ecdh;
 #[cfg(feature = "constraints-tools")]
 pub mod evaluator_regen;
 pub mod handlers;
+pub mod kem;
 
 extern crate alloc;
 

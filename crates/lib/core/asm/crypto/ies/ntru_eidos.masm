@@ -1,0 +1,184 @@
+#! Encrypts Felt messages with the recipient's NTRU public key.
+#!
+#! Encapsulation uses the recipient's public key and fresh randomness to produce a shared secret
+#! and a capsule (KEM ciphertext). The shared secret, public-key commitment, context digest, and
+#! capsule digest determine the AEAD key and nonce.
+#! The context is also authenticated as associated data; it is not encrypted.
+#!
+#! The output envelope contains the capsule, encrypted message, and authentication tag.
+#! The recipient uses its private key to recover the shared secret from the capsule and derive
+#! the same key and nonce.
+#! Decode the envelope with Rust's `ies::ntru_eidos::Envelope::from_elements` and open it with
+#! `ies::ntru_eidos::open`, supplying the recipient's secret key and the same context.
+
+use miden::core::crypto::aead_eidos
+use miden::core::crypto::hashes::eidos
+use miden::core::crypto::kem::ntru_hps509
+
+const DOMAIN_TAG = 0x00001401
+const CONTEXT_ROLE = 5
+const ENVELOPE_MAGIC = 0x4e545255
+const ENVELOPE_VERSION = 1
+const HEADER_LEN = 4
+const KEM_BUFFER_LEN = 176
+const PAYLOAD_OFFSET = HEADER_LEN + KEM_BUFFER_LEN
+const TAG_LEN = 2
+const ENVELOPE_ROUNDING_BIAS = TAG_LEN + 3 # Include the tag, then round up to four Felts.
+const AUTH_FRAME_LEN = 6 # AEAD's four-Felt nonce and two length Felts.
+const MAX_AUTHENTICATED_INPUT_FELTS = 268435456 # 2^28
+const KDF_BLOCKS = 2
+# Eidos::init_chaining_word_with_params(NTRU_HPS509_EIDOS, [role, 16, 0]).
+# Key and nonce hash the same 16-Felt input under roles 7 and 10, respectively.
+const KEY_INIT_CV = [
+    13503953893947610113, 11912009168875159559, 11170449401267093520, 6620516959492505600
+]
+const NONCE_INIT_CV = [
+    13503953893947610113, 11912009168875159562, 11170449401267093520, 6620516959492505600
+]
+
+# loc[0..16] = [shared_secret(4), public_key(4), context_digest(4), ciphertext_digest(4)]
+# loc[16..20] = [source, plaintext_len, context, context_len]
+# loc[20] = destination
+const SHARED_SECRET = 0
+const PUBLIC_KEY = 4
+const CONTEXT_DIGEST = 8
+const CIPHERTEXT_DIGEST = 12
+const SOURCE = 16
+const PLAINTEXT_LEN = 17
+const CONTEXT = 18
+const CONTEXT_LEN = 19
+const DESTINATION = 20
+
+#! Encrypts the plaintext at source and authenticates the context as associated data.
+#!
+#! Input:  [public_key(4), source, plaintext_len, context, context_len, destination, ...]
+#! Output: [...]
+#!
+#! The public_key input is the commitment returned by Rust's `PublicKey::to_commitment`.
+#! Prepare advice with `PublicKey::encapsulate_with_advice`.
+#! Writes this envelope at destination:
+#! [magic, 1, plaintext_len, 0]
+#! [encapsulation: 175 little-endian u32 Felts, 0]
+#! [encrypted message: 2 * plaintext_len u32 Felts]
+#! [tag: 2 Felts, zero padding to a multiple of four Felts]
+#! Each plaintext Felt is split into two u32 limbs for AEAD, hence the doubled ciphertext length.
+#!
+#! Pointers must be word-aligned u32 values. Non-empty input ranges and the full envelope must
+#! lie below the local frame without overflowing u32. The destination must not overlap either
+#! input. Lengths must fit in u32 and satisfy 6 + context_len + 2 * plaintext_len <= 2^28.
+#! These conditions are checked before consuming advice or writing memory.
+#!
+#! Invocation: exec
+@locals(24)
+pub proc seal(
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+)
+    dup.5 u32assert.err="NTRU-Eidos plaintext length must fit in a u32"
+    dup.8 u32assert.err="NTRU-Eidos context length must fit in a u32"
+    swap mul.2 add add.AUTH_FRAME_LEN push.MAX_AUTHENTICATED_INPUT_FELTS lte
+    assert.err="NTRU-Eidos authentication input exceeds its supported length"
+
+    # For n plaintext Felts, reserve the prefix, 2*n ciphertext limbs, and two tag Felts.
+    # Round the total up to a word: 4 * floor((180 + 2*n + 2 + 3) / 4).
+    dup.5 mul.2 add.PAYLOAD_OFFSET add.ENVELOPE_ROUNDING_BIAS u32div.4 mul.4 movdn.9
+    # => [public_key(4), source, plaintext_len, context, context_len,
+    #     destination, envelope_len, ...]
+    locaddr.0 dup.6 dup.6 exec.assert_range
+    locaddr.0 dup.8 dup.8 exec.assert_range
+    locaddr.0 dup.10 dup.10 exec.assert_range
+    dup.9 dup.9 dup.7 dup.7 exec.assert_disjoint
+    dup.9 dup.9 dup.9 dup.9 exec.assert_disjoint
+    movup.9 drop
+
+    loc_storew_le.PUBLIC_KEY dropw
+    loc_storew_le.SOURCE dropw loc_store.DESTINATION
+    loc_load.DESTINATION add.HEADER_LEN padw loc_loadw_le.PUBLIC_KEY
+    exec.ntru_hps509::encapsulate
+    loc_storew_le.SHARED_SECRET dropw loc_storew_le.CIPHERTEXT_DIGEST dropw
+
+    loc_load.CONTEXT_LEN loc_load.CONTEXT exec.hash_context
+    loc_storew_le.CONTEXT_DIGEST dropw
+
+    # key   = H_key(shared_secret || public_key || context_digest || ciphertext_digest)
+    # nonce = H_nonce(shared_secret || public_key || context_digest || ciphertext_digest)
+    locaddr.SHARED_SECRET push.NONCE_INIT_CV padw padw
+    repeat.KDF_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+    locaddr.SHARED_SECRET push.KEY_INIT_CV padw padw
+    repeat.KDF_BLOCKS mem_stream compress end
+    dropw dropw movup.4 drop
+    # => [key(4), nonce(4), ...]
+    loc_load.DESTINATION add.PAYLOAD_OFFSET movdn.8
+    padw loc_loadw_le.SOURCE movdnw.2
+    exec.aead_eidos::encrypt_with_ad
+    loc_load.PLAINTEXT_LEN loc_load.DESTINATION exec.write_envelope_metadata
+    padw loc_storew_le.SHARED_SECRET dropw
+end
+
+# Hash the context with its length in the initial CV. Set up the complete-block range and tail
+# for hash_elements_with_state; the empty context still needs one zero-block compression.
+# Input: [context, context_len, ...]. Output: [context_digest(4), ...].
+proc hash_context(context: ptr<felt>, context_len: u32) -> eidos::Digest
+    dup.1 eq.0 movdn.2
+    dup.1 u32mod.8
+    dup.2 u32div.8 mul.8 dup.2 add
+    movup.2
+    # => [context, end_full_blocks, remainder, context_len, is_empty, ...]
+    push.0 movup.4 push.CONTEXT_ROLE.DOMAIN_TAG
+    exec.eidos::init_chaining_word_with_params
+    padw padw movup.15
+    if.true compress end
+    exec.eidos::hash_elements_with_state
+end
+
+# Write the header, tag, and word-alignment padding around the ciphertext.
+# Input: [destination, plaintext_len, tag0, tag1, ...]. Output: [...].
+proc write_envelope_metadata(destination: ptr<felt>, plaintext_len: u32, tag: aead_eidos::Tag)
+    dup.1 push.0 swap push.ENVELOPE_VERSION.ENVELOPE_MAGIC
+    dup.4 mem_storew_le dropw
+    dup.1 mul.2 add.PAYLOAD_OFFSET add
+    # An even plaintext length leaves two padding Felts after the tag; an odd length leaves none.
+    swap u32mod.2 eq.0 movdn.3
+    # => [tag_ptr, tag0, tag1, needs_padding, ...]
+    dup movdn.3 mem_store
+    dup.1 add.1 mem_store
+    swap
+    if.true
+        push.0 dup.1 add.2 mem_store
+        push.0 dup.1 add.3 mem_store
+    end
+    drop
+end
+
+# Checks a word-aligned pointer and a non-empty range's last address.
+# Input: [ptr, len, local_start, ...]. Output: [...].
+proc assert_range(ptr: ptr<felt>, len: u32, local_start: ptr<felt>)
+    u32assert.err="NTRU-Eidos pointer must fit in a u32"
+    dup u32mod.4 assertz.err="NTRU-Eidos pointer must be word-aligned"
+    dup.1 neq.0
+    if.true
+        swap sub.1 u32overflowing_add
+        assertz.err="NTRU-Eidos memory range exceeds the u32 address space"
+        u32gt assert.err="NTRU-Eidos memory ranges must stay below the local frame"
+    else
+        drop drop drop
+    end
+end
+
+# Both ranges have already passed assert_range.
+# Input: [input_ptr, input_len, output_ptr, output_len, ...]. Output: [...].
+proc assert_disjoint(input: ptr<felt>, input_len: u32, output: ptr<felt>, output_len: u32)
+    dup.1 neq.0
+    if.true
+        dup dup.2 add dup.3 lte movdn.4
+        movup.2 movup.3 add swap lte
+        swap drop or assert.err="NTRU-Eidos destination overlaps an input"
+    else
+        dropw
+    end
+end

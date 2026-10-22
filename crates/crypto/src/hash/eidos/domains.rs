@@ -136,6 +136,20 @@ crate::eidos_domain_registry! {
                 description: "EcGFp5-Eidos byte-message application-context commitment.",
                 schema: "param0 = context length in bytes; param1 = 0; param2 = 0; payload = application context",
             }
+            pub NTRU_HPS509_PUBLIC_KEY: NtruHps509PublicKeyDomain {
+                local_id: 0x0013,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "NTRU-HPS-2048-509 public-key commitment.",
+                schema: "param0 = 512; param1 = 0; param2 = 0; payload = 509 coefficients in [0, 2048), followed by three zeros",
+            }
+            pub NTRU_HPS509_EIDOS: NtruHps509EidosDomain {
+                local_id: 0x0014,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "NTRU-HPS-2048-509 encapsulation and Eidos encryption.",
+                schema: "param0 = role; param1 = input length; param2 = 0; roles 1 (KEM secret), 2 (fallback), 8 (encapsulation), 11 (byte context) pack four bytes per Felt and count bytes; roles 4 (product transcript), 5 (Felt context), 7 (key), 10 (nonce) count Felts; zero-pad the final eight-Felt block, including one block for empty input",
+            }
         }
     }
 }

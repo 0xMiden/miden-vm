@@ -11,7 +11,7 @@ use miden_crypto::hash::eidos::{
         AEAD_CTR_KEY, AEAD_MAC_KEY, ECGFP5_PREPROCESSED_PUBLIC_KEY, ECGFP5_PUBLIC_KEY,
         ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY, ECGFP5_SEAL_NONCE,
         FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE, LMCS_LEAF, MMR_PEAKS,
-        SMT_BUCKET_LEAF,
+        NTRU_HPS509_EIDOS, NTRU_HPS509_PUBLIC_KEY, SMT_BUCKET_LEAF,
     },
 };
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
@@ -27,6 +27,8 @@ const AEAD: &str = include_str!("../../asm/crypto/aead_eidos/primitives.masm");
 const ECGFP5_IES: &str = include_str!("../../asm/crypto/ies/ecgfp5_eidos.masm");
 const ECGFP5_TABLES: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/tables.masm");
 const ECGFP5_DIRECT: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/direct.masm");
+const NTRU_KEM: &str = include_str!("../../asm/crypto/kem/ntru_hps509.masm");
+const NTRU_IES: &str = include_str!("../../asm/crypto/ies/ntru_eidos.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
 const KECCAK: &str = include_str!("../../asm/precompiles/hashes/keccak256.masm");
 const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
@@ -162,6 +164,29 @@ fn ecgfp5_generator_commitment_matches_rust() {
 
 #[test]
 fn masm_initial_chaining_words_match_rust() {
+    assert_word(
+        NTRU_KEM,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(NTRU_HPS509_PUBLIC_KEY, 512),
+    );
+    for (source, name, role, len) in [
+        (NTRU_KEM, "PRODUCT_INIT_CV", 4, 1588),
+        (NTRU_KEM, "SECRET_INIT_CV", 1, 204),
+        (NTRU_KEM, "CIPHERTEXT_INIT_CV", 8, 699),
+        (NTRU_IES, "KEY_INIT_CV", 7, 16),
+        (NTRU_IES, "NONCE_INIT_CV", 10, 16),
+    ] {
+        assert_word(
+            source,
+            name,
+            Eidos::init_chaining_word_with_params(NTRU_HPS509_EIDOS, [role, len, 0]),
+        );
+    }
+    assert_eq!(
+        masm_scalar(NTRU_IES, "DOMAIN_TAG"),
+        domain_tag(NTRU_HPS509_EIDOS).as_canonical_u64()
+    );
+    assert_eq!(masm_scalar(NTRU_IES, "CONTEXT_ROLE"), 5);
     assert_word(
         ECGFP5_DIRECT,
         "PUBLIC_KEY_INIT_CV",

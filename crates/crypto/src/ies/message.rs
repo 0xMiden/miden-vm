@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 
-use super::{IesScheme, keys::EphemeralPublicKey};
+use super::{IesScheme, keys::PublicEncapsulation};
 use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // SEALED MESSAGE
@@ -14,8 +14,8 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
     miden_test_serialization_macros::serialization_test
 )]
 pub struct SealedMessage {
-    /// Ephemeral public key (determines scheme and provides key material)
-    pub(super) ephemeral_key: EphemeralPublicKey,
+    /// Ephemeral point or KEM ciphertext used to recover the shared secret.
+    pub(super) encapsulation: PublicEncapsulation,
     /// Scheme-specific ciphertext encoding, including its authentication tag.
     pub(super) ciphertext: Vec<u8>,
 }
@@ -23,7 +23,7 @@ pub struct SealedMessage {
 impl SealedMessage {
     /// Returns the scheme used to create this sealed message.
     pub(super) fn scheme(&self) -> IesScheme {
-        self.ephemeral_key.scheme()
+        self.encapsulation.scheme()
     }
 
     /// Returns the scheme name used to create this sealed message.
@@ -42,17 +42,16 @@ mod sealed_message_arbitrary {
     use proptest::prelude::*;
 
     use super::SealedMessage;
-    use crate::ies::keys::EphemeralPublicKey;
+    use crate::ies::keys::PublicEncapsulation;
 
     impl Arbitrary for SealedMessage {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // The reader re-parses the ephemeral key under the scheme byte, so use a valid
-            // key (its own covered strategy); the ciphertext payload is any-valid bytes.
-            (any::<EphemeralPublicKey>(), proptest::collection::vec(any::<u8>(), 0..=32))
-                .prop_map(|(ephemeral_key, ciphertext)| Self { ephemeral_key, ciphertext })
+            // The reader validates the public encapsulation under the scheme byte.
+            (any::<PublicEncapsulation>(), proptest::collection::vec(any::<u8>(), 0..=32))
+                .prop_map(|(encapsulation, ciphertext)| Self { encapsulation, ciphertext })
                 .boxed()
         }
     }
@@ -63,7 +62,7 @@ impl Serializable for SealedMessage {
         let scheme = self.scheme();
         target.write_u8(scheme as u8);
 
-        self.ephemeral_key.to_bytes().write_into(target);
+        self.encapsulation.to_bytes().write_into(target);
         self.ciphertext.write_into(target);
     }
 }
@@ -77,14 +76,14 @@ impl Deserializable for SealedMessage {
             },
         };
 
-        let eph_key_bytes = Vec::<u8>::read_from(source)?;
-        let ephemeral_key =
-            EphemeralPublicKey::from_bytes(scheme, &eph_key_bytes).map_err(|e| {
-                DeserializationError::InvalidValue(format!("Invalid ephemeral key: {e}"))
+        let encapsulation_bytes = Vec::<u8>::read_from(source)?;
+        let encapsulation =
+            PublicEncapsulation::from_bytes(scheme, &encapsulation_bytes).map_err(|e| {
+                DeserializationError::InvalidValue(format!("Invalid public encapsulation: {e}"))
             })?;
 
         let ciphertext = Vec::<u8>::read_from(source)?;
 
-        Ok(Self { ephemeral_key, ciphertext })
+        Ok(Self { encapsulation, ciphertext })
     }
 }

@@ -360,6 +360,8 @@ generated MASM constants.
 | `0x0010` | 1       | `ECGFP5_PUBLIC_KEY`    | `FeltSequence` |
 | `0x0011` | 1       | `ECGFP5_PREPROCESSED_PUBLIC_KEY` | `FeltSequence` |
 | `0x0012` | 1       | `ECGFP5_SEAL_BYTE_CONTEXT` | `ByteString` |
+| `0x0013` | 1       | `NTRU_HPS509_PUBLIC_KEY` | `FeltSequence` |
+| `0x0014` | 1       | `NTRU_HPS509_EIDOS` | `Custom` |
 
 ## `miden-vm` local registry
 
