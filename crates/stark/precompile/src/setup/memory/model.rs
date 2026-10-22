@@ -16,6 +16,7 @@
 //! instead by [`SAFETY_NUMERATOR`] / [`SAFETY_DENOMINATOR`], a documented guess rather than a
 //! measurement.
 
+#[cfg(test)]
 use miden_air_source::precompile::{
     air::{ChipletAir, NUM_CHIPLETS},
     primitives::byte_pair_lut::TRACE_HEIGHT,
@@ -26,11 +27,10 @@ use miden_core::{
     proof::HashFunction,
 };
 #[cfg(test)]
+use miden_stark::air::{BaseAir, LiftedAir};
+#[cfg(test)]
 use miden_stark::log_quotient_degree;
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    pcs::PcsParams,
-};
+use miden_stark::pcs::PcsParams;
 
 // CONSTANTS
 // ================================================================================================
@@ -96,7 +96,8 @@ pub fn prover_peak_bytes(
 ///
 /// This path reads trace widths only and never evaluates AIR constraints. The caller supplies
 /// the compiled relation's quotient chunk count, a positive power of two.
-pub fn prover_peak_bytes_with_quotient_chunks(
+#[cfg(test)]
+fn prover_peak_bytes_with_quotient_chunks(
     heights: &[usize; NUM_CHIPLETS],
     params: &PcsParams,
     hash_fn: HashFunction,

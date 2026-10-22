@@ -54,7 +54,8 @@ fn trace_memory_budget_uses_compiled_geometry_without_allocating() {
     let params = pcs_params();
     ALLOCATIONS.set(Some(0));
     let peak = black_box(memory::prover_peak_bytes(black_box(&[1024, 2048, 4096, 65536]), &params));
-    let max_height = black_box(memory::max_any_height_for_budget(black_box(1 << 30), &params));
+    let model = black_box(memory::memory_model(&params).expect("valid memory model"));
+    let max_height = black_box(model.max_any_height_for_budget(black_box(1 << 30)));
     let allocations = ALLOCATIONS.replace(None).unwrap();
 
     assert!(peak.is_some());

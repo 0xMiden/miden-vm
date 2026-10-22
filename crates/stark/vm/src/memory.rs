@@ -89,11 +89,6 @@ pub fn memory_model(params: &PcsParams) -> Option<ProverMemoryModel<MIDEN_AIR_CO
     ))
 }
 
-/// Permissive single-AIR height cap for this model and byte limit.
-pub fn max_any_height_for_budget(budget_bytes: u64, params: &PcsParams) -> usize {
-    memory_model(params).map_or(0, |model| model.max_any_height_for_budget(budget_bytes))
-}
-
 /// Default maximum modelled peak memory, preserving the existing 64 GiB policy.
 pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
@@ -191,7 +186,7 @@ mod tests {
             heights[cheapest] = n;
             let budget = prover_peak_bytes(&heights, &params).expect("fits in u64");
             assert_eq!(
-                max_any_height_for_budget(budget, &params),
+                memory_model(&params).unwrap().max_any_height_for_budget(budget),
                 n,
                 "round trip failed for n = {n}"
             );
@@ -203,7 +198,7 @@ mod tests {
         let params = pcs_params();
         for n in [0usize, 1, 7, 100, 1 << 10, 1 << 20] {
             let budget = prover_peak_bytes(&[n; MIDEN_AIR_COUNT], &params).expect("fits in u64");
-            let any = max_any_height_for_budget(budget, &params);
+            let any = memory_model(&params).unwrap().max_any_height_for_budget(budget);
             assert!(
                 any >= n,
                 "max_any_height_for_budget({budget}) = {any} rejects uniform height {n}"

@@ -5,10 +5,7 @@ mod model;
 use miden_air::precompile::{NUM_CHIPLETS, protocol};
 use miden_core::proof::HashFunction;
 pub use miden_stark::pcs::PcsParams;
-pub use model::{
-    SAFETY_DENOMINATOR, SAFETY_NUMERATOR, prover_peak_bytes_for_shape,
-    prover_peak_bytes_with_quotient_chunks,
-};
+pub use model::{SAFETY_DENOMINATOR, SAFETY_NUMERATOR, prover_peak_bytes_for_shape};
 
 /// Peak prover memory, in bytes, for the given canonical padded trace heights.
 /// The quotient geometry is compiled at build time; repeated estimates do not evaluate AIRs.
