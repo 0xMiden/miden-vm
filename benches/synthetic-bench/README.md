@@ -205,9 +205,9 @@ small compression targets cannot be matched. See [`src/snippets.rs`](src/snippet
 
 ## Snapshot schema
 
-A snapshot maps scenario names to objects containing `provenance: "producer_measured"` and
-`trace`. All four AIR totals and all five `chiplets_shape` fields are required. Other scenario
-fields, such as transaction-stage cycle counts, are ignored.
+A snapshot maps scenario names to objects containing a `trace` section with row counts measured
+by executing the producer workload. All four AIR totals and all five `chiplets_shape` fields
+are required. Other scenario fields, such as transaction-stage cycle counts, are ignored.
 
 The loader rejects missing or unknown trace fields. Eidos compression counts must be multiples
 of 32, and the And8 height must be 65,536. Counts must fit without overflow when added or padded.
@@ -219,7 +219,6 @@ For example, the measured Falcon workload for consuming one P2ID note has:
 ```json
 {
   "consume single P2ID note with Falcon signing": {
-    "provenance": "producer_measured",
     "trace": {
       "core_rows": 43619,
       "chiplets_rows": 5559,
