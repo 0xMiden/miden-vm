@@ -3,7 +3,7 @@
 use std::{vec, vec::Vec};
 
 use miden_air::lookup::{
-    LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+    LookupAir, LookupMessage, ProverLookupBuilder,
     debug::{ValidateLayout, ValidateLookupAir},
 };
 use miden_core::{
@@ -14,30 +14,36 @@ use miden_core::{
 use miden_crypto::stark::air::ConstraintDegrees;
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles_air::hash::{
-    chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
+    chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
+    chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::EcPointMsg,
+    ec::{EcPointMsg, add::EcGroupAddMsg},
     logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
-    tests::{assert_same_rational_fold, bus_balance::session_stack_residual},
+    tests::{
+        assert_same_rational_fold, bus_balance::session_stack_residual, lookup_column_folds,
+        lookup_fractions,
+    },
     transcript::{
         eidos::{EidosDigest, trace::EidosRequires},
         eval::{
-            COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
-            COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_PAI, COL_IS_IS,
-            COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN,
-            COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
-            NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CONTEXT_GROUP_PTR,
+            COL_EC_CREATE_GROUP_PTR, COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR,
+            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0, COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL, COL_IS_PINNED,
+            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
+            COL_LHS_BEGIN, COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR,
+            COL_RHS_BEGIN, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
     },
     uint::{
         UintValMsg,
+        add::UintAddMsg,
         mul::UintMulMsg,
         trace::{UintPtr, UintStoreRequires},
     },
@@ -57,7 +63,10 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
     let traces = session.finish(root);
     traces.check();
     let mains = traces.mains();
-    assert_eq!(mains[0].values[NODE_COL_OFFSET + KECCAK_OUT_MULT], Felt::from_u32(5));
+    assert_eq!(
+        mains[0].values[(NODE_ROW_START + 6) * CNS_COLS + KECCAK_OUT_MULT],
+        Felt::from_u32(5)
+    );
 
     let mut rng = StdRng::seed_from_u64(3787);
     let alpha = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
@@ -72,7 +81,7 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
         .position(|row| row[COL_OUT_MULT] == Felt::from_u32(2))
         .unwrap();
     for (chip, offset) in [
-        (0, NODE_COL_OFFSET + KECCAK_OUT_MULT),
+        (0, (NODE_ROW_START + 6) * CNS_COLS + KECCAK_OUT_MULT),
         (4, shared_and * NUM_MAIN_COLS + COL_OUT_MULT),
     ] {
         for delta in [Felt::ONE, -Felt::ONE] {
@@ -98,7 +107,7 @@ fn shared_assertions_balance_actual_operand_uses() {
     use miden_precompiles::{K1_BASE_BOUND_PTR, K1_GROUP_PTR};
 
     use crate::{
-        hash::{chunk, keccak::node},
+        hash::{chunk_node, keccak::node},
         math::U256,
     };
 
@@ -139,11 +148,14 @@ fn shared_assertions_balance_actual_operand_uses() {
     assert_eq!(multiplicity(point_equal.hash()), Felt::from(2u32));
     assert_eq!(multiplicity(zero.hash()), Felt::from(3u32));
     // Two computation requests, three binding uses, one Keccak provider row.
-    assert_eq!(mains[0].values[chunk::NUM_MAIN_COLS + node::COL_OUT_MULT], Felt::from(3u32));
+    assert_eq!(
+        super::chunk_node_sponge::read_node(mains[0], 0)[node::COL_OUT_MULT],
+        Felt::from(3u32)
+    );
     let node_rows = mains[0]
         .values
-        .chunks_exact(mains[0].width)
-        .filter(|row| row[chunk::NUM_MAIN_COLS + node::COL_ACT] == Felt::ONE)
+        .chunks_exact(mains[0].width * 32)
+        .filter(|row| row[chunk_node::COL_NODE_ACT] == Felt::ONE)
         .count();
     assert_eq!(node_rows, 1);
 
@@ -196,13 +208,13 @@ const TYPED_RELATION_COL: usize = 3;
 fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
-    assert_eq!(air.width(), 37);
-    assert_eq!(air.aux_width(), 10);
+    assert_eq!(air.width(), 39);
+    assert_eq!(air.aux_width(), 8);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
             &air
         ),
-        &[2, 2, 2, 1, 1, 1, 1, 1, 2, 2]
+        &[2, 2, 2, 1, 1, 1, 2, 2]
     );
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -226,31 +238,9 @@ fn shape_and_degree_match_design() {
 }
 
 fn typed_relation_fold(row: Vec<Felt>, challenges: &Challenges<QuadFelt>) -> (QuadFelt, QuadFelt) {
-    let air = TranscriptEvalAir;
     let main = RowMajorMatrix::new(row, NUM_MAIN_COLS);
-    let periodic = air.periodic_columns();
-    let fractions = build_lookup_fractions(&air, &main, None, &periodic, challenges);
-    fold_fractions(fractions_at(&fractions, 0, TYPED_RELATION_COL))
-}
-
-fn fractions_at(
-    fractions: &LookupFractions<Felt, QuadFelt>,
-    row: usize,
-    column: usize,
-) -> &[(Felt, QuadFelt)] {
-    let count_idx = row * fractions.num_columns() + column;
-    let start = fractions.counts()[..count_idx].iter().sum::<usize>();
-    let end = start + fractions.counts()[count_idx];
-    &fractions.fractions()[start..end]
-}
-
-fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
-    fractions.iter().fold(
-        (QuadFelt::ZERO, QuadFelt::ONE),
-        |(numerator, denominator), &(multiplicity, encoded)| {
-            (numerator * encoded + denominator * multiplicity, denominator * encoded)
-        },
-    )
+    let fractions = lookup_fractions(&TranscriptEvalAir, &main, challenges);
+    lookup_column_folds(&fractions)[0][TYPED_RELATION_COL]
 }
 
 #[test]
@@ -297,6 +287,7 @@ fn typed_relation_column_preserves_each_selected_message() {
     assert_selected(uint_leaf, uint_leaf_denominator, "UintVal branch");
 
     let mut uint_mul = payload.clone();
+    uint_mul[COL_IS_UINT_OP] = Felt::ONE;
     uint_mul[COL_IS_MUL] = Felt::ONE;
     let uint_mul_denominator = UintMulMsg {
         kappa_a: Felt::ONE,
@@ -327,6 +318,44 @@ fn typed_relation_column_preserves_each_selected_message() {
         }
         .encode(&challenges);
         assert_selected(ec_point, denominator, context);
+    }
+
+    for is_sub in [false, true] {
+        let mut uint = payload.clone();
+        uint[COL_IS_UINT_OP] = Felt::ONE;
+        uint[COL_IS_SUB] = Felt::from(u8::from(is_sub));
+        uint[if is_sub { COL_IS_UINT_SUB } else { COL_IS_UINT_ADD }] = Felt::ONE;
+        let (a_ptr, b_ptr, c_ptr) = if is_sub {
+            (uint[COL_B_PTR], uint[COL_PTR], uint[COL_A_PTR])
+        } else {
+            (uint[COL_A_PTR], uint[COL_B_PTR], uint[COL_PTR])
+        };
+        let denominator = UintAddMsg {
+            bound_ptr: uint[COL_BOUND_PTR],
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            nz: Felt::ZERO,
+        }
+        .encode(&challenges);
+        assert_selected(uint, denominator, "Uint add/sub branch");
+
+        let mut ec = payload.clone();
+        ec[COL_IS_EC_OP] = Felt::ONE;
+        ec[COL_IS_SUB] = Felt::from(u8::from(is_sub));
+        let (p_ptr, r_ptr) = if is_sub {
+            (ec[COL_PTR], ec[COL_A_PTR])
+        } else {
+            (ec[COL_A_PTR], ec[COL_PTR])
+        };
+        let denominator = EcGroupAddMsg {
+            group_ptr: ec[COL_EC_CONTEXT_GROUP_PTR],
+            p_ptr,
+            q_ptr: ec[COL_B_PTR],
+            r_ptr,
+        }
+        .encode(&challenges);
+        assert_selected(ec, denominator, "EC add/sub branch");
     }
 
     assert_same_rational_fold(

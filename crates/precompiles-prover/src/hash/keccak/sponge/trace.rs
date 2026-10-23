@@ -14,7 +14,7 @@
 //! invocation (CR-dedup invariant).
 //!
 //! [`generate_trace_padded_to`] consumes a `SpongeRequires` and walks records in
-//! allocation order, stamping the 49-column trace; trailing rows up
+//! allocation order, stamping the 40-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
 use alloc::vec::Vec;
@@ -29,10 +29,10 @@ use crate::{
             reference::{KECCAK_RC, keccak_f1600, keccak_round},
             round::{NUM_ROUNDS, RoundRequires},
             sponge::{
-                CHUNK_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT, COL_CHUNK_PTR,
-                COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
-                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS, PADDED_BYTES_RANGE,
-                SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
+                CHUNK_BYTES_RANGE, COL_ACT, COL_BYTES_LEFT, COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL,
+                COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_PAD_BLOCK, COL_IS_ZERO,
+                COL_OFFSET_PRODUCT, COL_PAD_LO, COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS,
+                OFFSET_BITS_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
@@ -274,7 +274,7 @@ pub fn keccak_oracle(input: &[u8]) -> KeccakDigest {
 /// `round_req` (24 `require_round` calls per block, threading state
 /// through `keccak_round` + `KECCAK_RC`) and `bpl_req` for the per-row
 /// `BytePairLut` byte requires the sponge AIR consumes directly:
-/// rate-XORin (verbatim Xor, or the pad row's canonical-input checks and state Xor) and
+/// rate-XORin (including the delimited suffix on the pad row) and
 /// the lane-16 0x80 Xor on last blocks.
 fn compute_block_snapshots_driving(
     inv: &Invocation,
@@ -297,9 +297,7 @@ fn compute_block_snapshots_driving(
                 if is_verbatim {
                     *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, chunk_lane);
                 } else if is_pad_row {
-                    require_logic64(bpl_req, BytePairOp::Xor, chunk_lane, 0);
-                    let padded = (!andnot_mask(layout.byte_offset) & chunk_lane)
-                        | padding_mask(layout.byte_offset);
+                    let padded = chunk_lane | padding_mask(layout.byte_offset);
                     *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, padded);
                 }
                 // past-pad: no XOR, no BytePairLut emission.
@@ -352,8 +350,7 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
                 if is_verbatim {
                     *lane ^= chunk_lane;
                 } else if is_pad_row {
-                    let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
-                    let padded = cleared ^ padding_mask(layout.byte_offset);
+                    let padded = chunk_lane | padding_mask(layout.byte_offset);
                     *lane ^= padded;
                 }
             }
@@ -404,9 +401,7 @@ pub(crate) fn generate_trace_padded_to(
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     // Period-absolute state, updated across the whole trace.
-    // `bytes_left` is tracked as a `Felt` to keep the chain in
-    // field arithmetic — it goes negative past the last input byte
-    // and ≡ −136·M mod p over the cyclic wrap.
+    // Track bytes_left in Felt because rate rows continue decrementing after the message ends.
     let mut row = 0usize;
     let mut chunk_ptr: u64 = 0;
     let mut bytes_left = Felt::ZERO;
@@ -457,12 +452,18 @@ pub(crate) fn generate_trace_padded_to(
                 };
                 r[COL_IS_CHUNK_AVAIL] = Felt::from((slot < avail_end) as u8);
                 if is_last_block {
-                    r[COL_B_BEGIN + layout.byte_offset] = Felt::ONE;
+                    r[COL_IS_PAD_BLOCK] = Felt::ONE;
+                    for bit in 0..3 {
+                        r[OFFSET_BITS_RANGE.start + bit] =
+                            Felt::from(((layout.byte_offset >> bit) & 1) as u8);
+                    }
+                    r[COL_OFFSET_PRODUCT] = Felt::from((layout.byte_offset & 3 == 3) as u8);
+                    if slot == layout.pad_lane_idx {
+                        write_u64(&mut r, COL_PAD_LO, padding_mask(layout.byte_offset));
+                    }
                 }
 
                 let chunk_lane = if consume { tape.next().unwrap_or(0) } else { 0 };
-                write_u64_bytes(&mut r, CHUNK_BYTES_RANGE.start, chunk_lane);
-
                 fill_state_lane_row(
                     &mut r,
                     slot,
@@ -495,13 +496,14 @@ pub(crate) fn generate_trace_padded_to(
         );
     }
 
-    // Trailing inactive rows: act = 0; bytes_left chain still decrements
-    // per rate slot to close the cyclic wrap, chunk_ptr holds steady.
+    // Inactive rows use is_zero = 1 to disable absorption lookups. Their byte count is free;
+    // the chunk cursor holds its last value.
     while row < height {
         let mut r = [Felt::ZERO; NUM_MAIN_COLS];
         r[COL_SPONGE_SEQ_ID] = Felt::new(row as u64).expect("row index fits");
         r[COL_BYTES_LEFT] = bytes_left;
         r[COL_CHUNK_PTR] = Felt::new(chunk_ptr).expect("chunk_ptr fits");
+        r[COL_IS_ZERO] = Felt::ONE;
         trace.extend(r);
         if row % SPONGE_PERIOD < RATE_LANES {
             bytes_left -= eight;
@@ -536,8 +538,7 @@ fn pack_chunk_tape_from_bytes(input: &[u8], chunk_lanes: usize) -> impl Iterator
         .take(chunk_lanes)
 }
 
-/// Fill the state-lane and per-row intermediate columns for one row,
-/// writing into the row's column slice directly.
+/// Fills input-state, padded-input, and current-permutation output lanes for one row.
 #[allow(clippy::too_many_arguments)]
 fn fill_state_lane_row(
     r: &mut [Felt],
@@ -547,66 +548,42 @@ fn fill_state_lane_row(
     chunk_lane: u64,
     state_at_block_start: &[u64; 25],
     post_xorin_this_block: &[u64; 25],
-    perm_out_last_block: &[u64; 25],
+    perm_out: &[u64; 25],
 ) {
-    let is_rate_slot = slot < RATE_LANES;
-    let is_capacity_slot = (RATE_LANES..RATE_LANES + 8).contains(&slot);
-    let is_lane16_0x80 = slot == 25;
+    let padded = if is_last_block && slot == layout.pad_lane_idx {
+        chunk_lane | padding_mask(layout.byte_offset)
+    } else {
+        chunk_lane
+    };
+    write_u64_bytes(r, CHUNK_BYTES_RANGE.start, padded);
 
-    if is_rate_slot {
+    if slot < RATE_LANES {
         let state_prev = state_at_block_start[slot];
-        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
-        let (state_new, padded) = if is_last_block && slot == layout.pad_lane_idx {
-            // Pad row.
-            let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
-            let padded = cleared ^ padding_mask(layout.byte_offset);
-            (state_prev ^ padded, padded)
-        } else if is_last_block && slot > layout.pad_lane_idx {
-            // Past-pad: state_new = state_prev.
-            (state_prev, 0)
+        let state_new = if is_last_block && slot > layout.pad_lane_idx {
+            state_prev
         } else {
-            // Verbatim XORin.
-            (state_prev ^ chunk_lane, chunk_lane)
+            state_prev ^ padded
         };
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
-        write_u64_bytes(r, PADDED_BYTES_RANGE.start, padded);
-        if is_last_block {
-            // Squeeze provides the perm-`last`'s output for
-            // non-digest lanes (slots [4, 17) of the last block).
-            // Filling all slots simplifies the per-row code; the
-            // bus gate (`p_squeeze_active`) decides which actually
-            // fire.
-            write_u64(r, COL_STATE_OUT_LO, perm_out_last_block[slot]);
-        }
-    } else if is_capacity_slot {
-        // Capacity passthrough: state_new = state_prev.
+        write_u64(r, COL_STATE_OUT_LO, perm_out[slot]);
+    } else if slot < RATE_LANES + 8 {
         let state_prev = state_at_block_start[slot];
         write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_prev);
-        if is_last_block {
-            write_u64(r, COL_STATE_OUT_LO, perm_out_last_block[slot]);
-        }
-    } else if is_lane16_0x80 {
-        // Lane-16 0x80 row: `state_prev` = lane-16 intermediate
-        // (post-rate-XORin, pre-`0x80` mixin); `state_new` =
-        // state_prev XOR pad_const. The bus consume of `state_prev`
-        // matches the lane-16 rate-XORin row's provide at the same
-        // Memory64 address (`100·sponge_seq_id − 2484`), so the
-        // post-XORin value pinned here must match what the rate
-        // row produced. The shared `xor-state` mult is gated by
-        // `is_last_block_period`, but trace generation fills the
-        // values uniformly for layout consistency.
+        write_u64(r, COL_STATE_OUT_LO, perm_out[slot]);
+    } else if slot == 25 {
+        // On the final block, slot 25 adds the trailing 0x80 to lane 16 after rate absorption.
+        // Its Memory64 read ties this intermediate state to the value produced at slot 16.
         let state_prev = post_xorin_this_block[LANE_16];
-        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let state_new = if is_last_block {
-            write_u64_bytes(r, PADDED_BYTES_RANGE.start, PAD_CONST);
             state_prev ^ PAD_CONST
         } else {
             state_prev
         };
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
     }
-    // Slots 26..32 (NOP slack): all column values left at zero.
 }
 
 fn write_u64(row: &mut [Felt], col_lo: usize, value: u64) {
@@ -620,12 +597,6 @@ fn write_u64_bytes(row: &mut [Felt], bytes_start: usize, value: u64) {
     for (i, b) in value.to_le_bytes().into_iter().enumerate() {
         row[bytes_start + i] = Felt::from(b);
     }
-}
-
-/// `0xFFFF_FFFF_FFFF_FFFF << (8·byte_offset)` — its complement preserves
-/// the low `byte_offset` input bytes and clears the padding suffix.
-fn andnot_mask(byte_offset: usize) -> u64 {
-    u64::MAX << (8 * byte_offset)
 }
 
 /// `0x01 << (8·byte_offset)` — places the leading `0x01` pad byte

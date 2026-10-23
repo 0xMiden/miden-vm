@@ -39,8 +39,8 @@ use crate::{
 };
 
 pub const NUM_MAIN_COLS: usize = 37;
-pub const NUM_AUX_COLS: usize = 14;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+pub const NUM_AUX_COLS: usize = 6;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2; NUM_AUX_COLS];
 
 pub const COL_ACT: usize = 0;
 pub const COL_BLOCK_ID: usize = 1;
@@ -426,335 +426,475 @@ fn halves_be<E: Algebra<Felt>, V: Clone + Into<E>>(bytes: &[V; 8]) -> [E; 2] {
     [pack(&bytes[4..]), pack(&bytes[..4])]
 }
 
-/// Append this band's lookup columns to the enclosing AIR's single LogUp recurrence.
-pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
-    builder: &mut LB,
-    main_col_offset: usize,
-    periodic_col_offset: usize,
-) {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-    let periods = builder.periodic_values();
-    let p: [LB::Expr; NUM_PERIODIC_COLS] =
-        array::from_fn(|i| periods[periodic_col_offset + i].into());
-    for index in 0..NUM_AUX_COLS {
-        let degree = lookup_batch_degree(index, 1);
-        let group = match index {
-            0 => "sha512-words",
-            1 => "sha512-state",
-            2 => "sha512-digest-and-input",
-            3..=5 => "sha512-chunks",
-            6..=7 => "sha512-assertion",
-            8..=11 => "sha512-bytes",
-            12..=13 => "sha512-length",
-            _ => unreachable!(),
+#[derive(Clone, Copy)]
+enum Term {
+    Input,
+    Incoming,
+    Previous,
+    DigestWord,
+    RawBlock,
+    DigestBlock,
+    RawInit,
+    DigestInit,
+    RawDigest,
+    FullDigest,
+    NodeInit,
+    NodeBlock,
+    NodeOut,
+    Truth,
+    RawByte(usize),
+    DigestByte(usize),
+    LeftLow,
+    LeftHigh,
+    LengthHigh,
+    Resume,
+    Continue,
+}
+
+impl Term {
+    const fn multiplicity_degree(self) -> usize {
+        match self {
+            Self::Input | Self::Incoming | Self::RawByte(_) | Self::LeftLow | Self::LeftHigh => 0,
+            _ => 1,
+        }
+    }
+}
+
+// Each phase selects at most twelve affine messages. Pairing adjacent terms needs six columns.
+// Subtracting event rows from the raw and digest masks makes the phase alternatives disjoint.
+const PHASE_TERMS: [&[Term]; 9] = {
+    use Term::*;
+    [
+        &[
+            Input,
+            Resume,
+            RawByte(0),
+            RawByte(1),
+            RawByte(2),
+            RawByte(3),
+            RawByte(4),
+            RawByte(5),
+            RawByte(6),
+            RawByte(7),
+            LeftLow,
+            LeftHigh,
+        ],
+        &[
+            Input,
+            RawBlock,
+            RawByte(0),
+            RawByte(1),
+            RawByte(2),
+            RawByte(3),
+            RawByte(4),
+            RawByte(5),
+            RawByte(6),
+            RawByte(7),
+            LeftLow,
+            LeftHigh,
+        ],
+        &[
+            Input,
+            LengthHigh,
+            RawByte(0),
+            RawByte(1),
+            RawByte(2),
+            RawByte(3),
+            RawByte(4),
+            RawByte(5),
+            RawByte(6),
+            RawByte(7),
+            LeftLow,
+            LeftHigh,
+        ],
+        &[
+            Input,
+            RawByte(0),
+            RawByte(1),
+            RawByte(2),
+            RawByte(3),
+            RawByte(4),
+            RawByte(5),
+            RawByte(6),
+            RawByte(7),
+            LeftLow,
+            LeftHigh,
+        ],
+        &[Incoming, Previous],
+        &[
+            DigestWord,
+            DigestBlock,
+            DigestByte(0),
+            DigestByte(1),
+            DigestByte(2),
+            DigestByte(3),
+            DigestByte(4),
+            DigestByte(5),
+            DigestByte(6),
+            DigestByte(7),
+        ],
+        &[
+            DigestWord,
+            DigestByte(0),
+            DigestByte(1),
+            DigestByte(2),
+            DigestByte(3),
+            DigestByte(4),
+            DigestByte(5),
+            DigestByte(6),
+            DigestByte(7),
+        ],
+        &[RawInit, DigestInit, RawDigest, FullDigest, NodeInit, NodeBlock, NodeOut, Truth],
+        &[Continue],
+    ]
+};
+
+fn phase_masks<E: PrimeCharacteristicRing>(p: &[E; NUM_PERIODIC_COLS]) -> [E; 9] {
+    use program::*;
+    [
+        p[P_FIRST].clone(),
+        p[P_CHUNK_EMIT].clone(),
+        p[P_RAW_LAST].clone(),
+        p[P_RAW].clone() - p[P_FIRST].clone() - p[P_CHUNK_EMIT].clone() - p[P_RAW_LAST].clone(),
+        p[P_STATE].clone(),
+        p[P_DIGEST_EMIT].clone(),
+        p[P_DIGEST].clone() - p[P_DIGEST_EMIT].clone(),
+        p[P_BIND].clone(),
+        p[P_LAST].clone(),
+    ]
+}
+
+/// Degree after the activity and row-phase selectors. Each message has an affine denominator.
+pub(super) fn lookup_column_degree(index: usize, continuation: bool) -> Deg {
+    let mut result = Deg { v: 0, u: 0 };
+    for terms in PHASE_TERMS {
+        let Some(pair) = terms.chunks(2).nth(index) else {
+            continue;
         };
-        builder.next_column(
-            |col| {
-                col.group(
-                    group,
-                    |g| {
-                        g.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |batch| {
-                                eval_lookup_batch(
-                                    batch,
-                                    index,
-                                    &local,
-                                    &next,
-                                    &p,
-                                    local[COL_ACT].into(),
-                                    1,
-                                );
-                            },
-                            degree,
-                        );
-                    },
-                    degree,
-                );
+        let mut count = 0;
+        let mut mult = 0;
+        for &term in pair {
+            if !continuation && matches!(term, Term::Resume | Term::Continue) {
+                continue;
+            }
+            count += 1;
+            mult = mult.max(term.multiplicity_degree());
+        }
+        if count > 0 {
+            result.v = result.v.max(2 + mult + count - 1);
+            result.u = result.u.max(2 + count);
+        }
+    }
+    result
+}
+
+/// Add IO alternatives under the fixed row masks. `continuation` transports state across the
+/// compression rows in the composite AIR; standalone IO uses adjacent-row constraints instead.
+pub(super) fn eval_lookup_group<G, V>(
+    group: &mut G,
+    index: usize,
+    local: &[V; NUM_MAIN_COLS],
+    next: &[V; NUM_MAIN_COLS],
+    p: &[G::Expr; NUM_PERIODIC_COLS],
+    act: G::Expr,
+    continuation: bool,
+) where
+    G: LookupGroup,
+    G::Expr: Algebra<Felt>,
+    V: Copy + Into<G::Expr>,
+{
+    for (mask, terms) in phase_masks(p).into_iter().zip(PHASE_TERMS) {
+        let Some(pair) = terms.chunks(2).nth(index) else {
+            continue;
+        };
+        let selected =
+            |term: &&Term| continuation || !matches!(term, Term::Resume | Term::Continue);
+        let count = pair.iter().filter(selected).count();
+        if count == 0 {
+            continue;
+        }
+        let mult = pair
+            .iter()
+            .filter(selected)
+            .map(|term| term.multiplicity_degree())
+            .max()
+            .unwrap();
+        let degree = Deg { v: 2 + mult + count - 1, u: 2 + count };
+        group.batch(
+            "io-phase",
+            act.clone() * mask,
+            |batch| {
+                for &term in pair.iter().filter(selected) {
+                    eval_term(batch, term, local, next, p);
+                }
             },
             degree,
         );
     }
 }
 
-/// Return the post-batch degree annotation for one of the fixed IO lookup columns.
-pub(super) fn lookup_batch_degree(index: usize, activity_degree: usize) -> Deg {
-    debug_assert!(index < NUM_AUX_COLS);
-    debug_assert!(activity_degree <= 1);
-    let (v, u) = match index {
-        0 => (2, 1),
-        1 | 2 | 4 | 5 => (4, 2),
-        3 => (4, 2),
-        6 => (3, 1),
-        7 => (4, 2),
-        8..=11 => (4, 2),
-        12 => (3, 2),
-        13 => (3, 1),
-        _ => unreachable!(),
-    };
-    Deg { v: v - (1 - activity_degree), u }
-}
-
-/// Emit one fixed IO lookup batch. The caller owns the enclosing column, group, and batch flag.
-/// These interactions bind the locally checked padding to compression words, connect chaining
-/// states between blocks, and authenticate the Eidos assertion consumed by the deferred VM.
-/// Negative multiplicities provide SHA words/truth claims; positive ones request matching words,
-/// Eidos records, or range-table entries. Activity may be gated by the enclosing composite batch.
-pub(super) fn eval_lookup_batch<B, V>(
+/// Emit one IO interaction with activity and row-phase selection supplied by the enclosing batch.
+/// Negative multiplicities provide records; positive ones consume matching records.
+fn eval_term<B, V>(
     batch: &mut B,
-    index: usize,
+    term: Term,
     local: &[V; NUM_MAIN_COLS],
     next: &[V; NUM_MAIN_COLS],
     p: &[B::Expr; NUM_PERIODIC_COLS],
-    act: B::Expr,
-    activity_degree: usize,
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
     V: Copy + Into<B::Expr>,
 {
     let e = |i: usize| -> B::Expr { local[i].into() };
-    let one = B::Expr::ONE;
-    let d = |v: usize, u: usize| Deg { v: v - (1 - activity_degree), u };
+    let final_block = e(COL_FINAL_BLOCK);
+    let degree = Deg { v: term.multiplicity_degree(), u: 1 };
     let word = |block_id, addr, lo, hi| Sha512WordMsg { block_id, addr, lo, hi };
-    match index {
-        // Supply the padded word checked by the local equations to this block's INPUT slot.
-        0 => batch.insert(
+    match term {
+        Term::Input => batch.insert(
             "input",
-            B::Expr::ZERO - act * p[program::P_RAW].clone(),
+            -B::Expr::ONE,
             word(
                 e(COL_BLOCK_ID),
                 p[program::P_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE),
                 e(COL_WORD_LO),
                 e(COL_WORD_HI),
             ),
-            d(2, 1),
+            degree,
         ),
-        1 => {
-            // Supply all eight incoming state words. Except at an invocation's first block,
-            // require the very same halves as outputs of block_id - 1, enforcing SHA chaining.
-            let state = act * p[program::P_STATE].clone();
-            let previous_state = state.clone() * (one - e(COL_FIRST_BLOCK));
-            batch.insert(
-                "incoming",
-                B::Expr::ZERO - state,
-                word(
-                    e(COL_BLOCK_ID),
-                    p[program::P_STATE_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE + 16),
-                    e(COL_STATE_LO),
-                    e(COL_STATE_HI),
-                ),
-                d(2, 1),
-            );
-            batch.insert(
-                "previous",
-                previous_state,
-                word(
-                    e(COL_BLOCK_ID) - B::Expr::ONE,
-                    p[program::P_STATE_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
-                    e(COL_STATE_LO),
-                    e(COL_STATE_HI),
-                ),
-                d(3, 1),
-            );
-        },
-        2 => {
-            // Consume the final block's eight output words using big-endian digest-byte packing.
-            // The raw-block interaction separately binds message bytes, without SHA padding,
-            // to the Eidos input chain using the little-endian packing in chunk_block.
-            let digest = act.clone() * p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK);
-            let raw_emit = act * e(COL_CHUNK_ACTIVE) * p[program::P_CHUNK_EMIT].clone();
-            let digest_bytes: [V; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
-            let digest_expr: [B::Expr; 8] = digest_bytes.map(Into::into);
-            let digest_be: [B::Expr; 2] = halves_be(&digest_expr);
+        Term::Incoming => batch.insert(
+            "incoming",
+            -B::Expr::ONE,
+            word(
+                e(COL_BLOCK_ID),
+                p[program::P_STATE_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE + 16),
+                e(COL_STATE_LO),
+                e(COL_STATE_HI),
+            ),
+            degree,
+        ),
+        // Incoming publishes this block's initial state. Non-first blocks authenticate the same
+        // words against the preceding block's outputs, enforcing SHA chaining.
+        Term::Previous => batch.insert(
+            "previous",
+            B::Expr::ONE - e(COL_FIRST_BLOCK),
+            word(
+                e(COL_BLOCK_ID) - B::Expr::ONE,
+                p[program::P_STATE_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
+                e(COL_STATE_LO),
+                e(COL_STATE_HI),
+            ),
+            degree,
+        ),
+        Term::DigestWord => {
+            let bytes: [V; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
+            let [lo, hi] = halves_be(&bytes);
             batch.insert(
                 "digest-word",
-                digest,
+                final_block,
                 word(
                     e(COL_BLOCK_ID),
                     p[program::P_DIGEST_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
-                    digest_be[0].clone(),
-                    digest_be[1].clone(),
+                    lo,
+                    hi,
                 ),
-                d(3, 1),
-            );
-            batch.insert(
-                "raw-block",
-                raw_emit,
-                EidosBlockMsg {
-                    compression_id: e(COL_INPUT_EIDOS),
-                    block: chunk_block(
-                        local,
-                        next,
-                        COL_CHUNK_HEAD_RAW,
-                        COL_PREVIOUS_RAW,
-                        COL_RAW_BEGIN,
-                    ),
-                },
-                d(3, 1),
+                degree,
             );
         },
-        3 => {
-            // At invocation end, INPUT_EIDOS is the tail. Its distance from INPUT_HEAD counts
-            // the zero-padded chunks; eight felts per chunk fixes the CHUNKS frame's length.
-            let end = act.clone() * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
-            let digest_emit = act * e(COL_FINAL_BLOCK) * p[program::P_DIGEST_EMIT].clone();
-            batch.insert(
-                "raw-init",
-                end,
-                EidosInitMsg {
-                    compression_id: e(COL_INPUT_HEAD),
-                    initial_cv: chunks_initial_cv(
-                        (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + B::Expr::ONE)
-                            * B::Expr::from(Felt::from(8u8)),
-                    ),
-                },
-                d(3, 1),
-            );
-            // Bind the 64 digest bytes as two consecutive Eidos blocks, emitted on rows 26 and 30.
-            batch.insert(
-                "digest-block",
-                digest_emit,
-                EidosBlockMsg {
-                    compression_id: e(COL_DIGEST_EIDOS) + p[program::P_DIGEST_CYCLE_OFFSET].clone(),
-                    block: chunk_block(
-                        local,
-                        next,
-                        COL_CHUNK_HEAD_DIGEST,
-                        COL_PREVIOUS_DIGEST,
-                        COL_DIGEST_BEGIN,
-                    ),
-                },
-                d(3, 1),
-            );
-        },
-        4 => {
-            // The digest chain always hashes sixteen packed felts. Bind the input commitment
-            // to both its head and tail, so it cannot be replaced by an unrelated chain output.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
-            batch.insert(
-                "digest-init",
-                end.clone(),
-                EidosInitMsg {
-                    compression_id: e(COL_DIGEST_EIDOS),
-                    initial_cv: chunks_initial_cv(B::Expr::from(Felt::from(16u8))),
-                },
-                d(3, 1),
-            );
-            batch.insert(
-                "raw-digest",
-                end,
-                EidosOutMsg {
-                    chain_head_id: e(COL_INPUT_HEAD),
-                    compression_id: e(COL_INPUT_EIDOS),
-                    digest: array::from_fn(|i| e(COL_H_INPUT + i)),
-                },
-                d(3, 1),
-            );
-        },
-        5 => {
-            // Authenticate the complete two-block digest chain, then initialize the assertion
-            // with its domain, operation, and exact message length. CHUNKS padding alone would
-            // not distinguish a short message from the same bytes followed by zero bytes.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
-            let assert_frame = [
-                B::Expr::from(Sha512Precompile::domain().as_felt()),
-                B::Expr::from(Felt::from_u32(Sha512Precompile::ASSERT_OP_ID)),
-                e(COL_LEN),
-                B::Expr::ZERO,
-            ];
-            batch.insert(
-                "full-digest",
-                end.clone(),
-                EidosOutMsg {
-                    chain_head_id: e(COL_DIGEST_EIDOS),
-                    compression_id: e(COL_DIGEST_EIDOS) + B::Expr::ONE,
-                    digest: array::from_fn(|i| e(COL_H_DIGEST + i)),
-                },
-                d(3, 1),
-            );
-            batch.insert(
-                "node-init",
-                end,
-                EidosInitMsg {
-                    compression_id: e(COL_NODE_EIDOS),
-                    initial_cv: initial_cv_from_frame(assert_frame),
-                },
-                d(3, 1),
-            );
-        },
-        6 => {
-            // The assertion's single Eidos block contains the authenticated input commitment
-            // followed by the authenticated digest commitment, in the deferred node's order.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
-            batch.insert(
-                "node-block",
-                end,
-                EidosBlockMsg {
-                    compression_id: e(COL_NODE_EIDOS),
-                    block: array::from_fn(|i| {
-                        if i < 4 {
-                            e(COL_H_INPUT + i)
-                        } else {
-                            e(COL_H_DIGEST + i - 4)
-                        }
-                    }),
-                },
-                d(3, 1),
-            );
-        },
-        7 => {
-            // Authenticate that assertion node's output and provide its truth once per consumer.
-            // OUT_MULT is zero on other owned rows, as enforced by the local constraints.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
-            let h_sha512 = H_SHA512_COLS.map(e);
-            batch.insert(
-                "node-out",
-                end,
-                EidosOutMsg {
-                    chain_head_id: e(COL_NODE_EIDOS),
-                    compression_id: e(COL_NODE_EIDOS),
-                    digest: h_sha512.clone(),
-                },
-                d(3, 1),
-            );
+        Term::RawBlock => batch.insert(
+            "raw-block",
+            e(COL_CHUNK_ACTIVE),
+            EidosBlockMsg {
+                compression_id: e(COL_INPUT_EIDOS),
+                block: chunk_block(
+                    local,
+                    next,
+                    COL_CHUNK_HEAD_RAW,
+                    COL_PREVIOUS_RAW,
+                    COL_RAW_BEGIN,
+                ),
+            },
+            degree,
+        ),
+        Term::DigestBlock => batch.insert(
+            "digest-block",
+            final_block,
+            EidosBlockMsg {
+                compression_id: e(COL_DIGEST_EIDOS) + p[program::P_DIGEST_CYCLE_OFFSET].clone(),
+                block: chunk_block(
+                    local,
+                    next,
+                    COL_CHUNK_HEAD_DIGEST,
+                    COL_PREVIOUS_DIGEST,
+                    COL_DIGEST_BEGIN,
+                ),
+            },
+            degree,
+        ),
+        // On the binding row, INPUT_EIDOS is the chain tail. INPUT_EIDOS - INPUT_HEAD + 1
+        // counts the zero-padded chunks; each contributes eight felts to the CHUNKS frame length.
+        Term::RawInit => batch.insert(
+            "raw-init",
+            final_block,
+            EidosInitMsg {
+                compression_id: e(COL_INPUT_HEAD),
+                initial_cv: chunks_initial_cv(
+                    (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + B::Expr::ONE) * B::Expr::from_u8(8),
+                ),
+            },
+            degree,
+        ),
+        Term::DigestInit => batch.insert(
+            "digest-init",
+            final_block,
+            EidosInitMsg {
+                compression_id: e(COL_DIGEST_EIDOS),
+                initial_cv: chunks_initial_cv(B::Expr::from_u8(16)),
+            },
+            degree,
+        ),
+        Term::RawDigest => batch.insert(
+            "raw-digest",
+            final_block,
+            EidosOutMsg {
+                chain_head_id: e(COL_INPUT_HEAD),
+                compression_id: e(COL_INPUT_EIDOS),
+                digest: array::from_fn(|i| e(COL_H_INPUT + i)),
+            },
+            degree,
+        ),
+        Term::FullDigest => batch.insert(
+            "full-digest",
+            final_block,
+            EidosOutMsg {
+                chain_head_id: e(COL_DIGEST_EIDOS),
+                compression_id: e(COL_DIGEST_EIDOS) + B::Expr::ONE,
+                digest: array::from_fn(|i| e(COL_H_DIGEST + i)),
+            },
+            degree,
+        ),
+        // Bind the exact byte length: CHUNKS zero-padding alone cannot distinguish a message
+        // from the same bytes followed by zeros.
+        Term::NodeInit => batch.insert(
+            "node-init",
+            final_block,
+            EidosInitMsg {
+                compression_id: e(COL_NODE_EIDOS),
+                initial_cv: initial_cv_from_frame([
+                    B::Expr::from(Sha512Precompile::domain().as_felt()),
+                    B::Expr::from_u32(Sha512Precompile::ASSERT_OP_ID),
+                    e(COL_LEN),
+                    B::Expr::ZERO,
+                ]),
+            },
+            degree,
+        ),
+        // Hash the authenticated input commitment followed by the digest commitment.
+        Term::NodeBlock => batch.insert(
+            "node-block",
+            final_block,
+            EidosBlockMsg {
+                compression_id: e(COL_NODE_EIDOS),
+                block: array::from_fn(|i| e(COL_H_INPUT + i)),
+            },
+            degree,
+        ),
+        Term::NodeOut => batch.insert(
+            "node-out",
+            final_block,
+            EidosOutMsg {
+                chain_head_id: e(COL_NODE_EIDOS),
+                compression_id: e(COL_NODE_EIDOS),
+                digest: H_SHA512_COLS.map(e),
+            },
+            degree,
+        ),
+        Term::Truth => {
+            // The local out_mult pin makes this zero outside the final binding row.
             batch.insert(
                 "truth",
-                B::Expr::ZERO - e(COL_OUT_MULT),
-                BindingMsg::truth(h_sha512),
-                Deg { v: 1, u: 1 },
+                -e(COL_OUT_MULT),
+                BindingMsg::truth(H_SHA512_COLS.map(e)),
+                degree,
             );
         },
-        8..=11 => {
-            // Raw and final-digest stages share the same byte cells and denominators. The
-            // periodic stages are disjoint; binding rows contain arbitrary felts and are excluded.
-            let i = 2 * (index - 8);
-            let byte = |offset| {
-                BytePairLutMsg::from_xor(
-                    B::Expr::ZERO,
-                    e(COL_RAW_BEGIN + i + offset),
-                    e(COL_RAW_BEGIN + i + offset),
-                )
+        Term::RawByte(i) | Term::DigestByte(i) => {
+            let mult = if matches!(term, Term::DigestByte(_)) {
+                final_block
+            } else {
+                B::Expr::ONE
             };
-            let active = act
-                * (p[program::P_RAW].clone() + p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK));
-            batch.insert("byte", active.clone(), byte(0), d(3, 1));
-            batch.insert("byte", active, byte(1), d(3, 1));
+            batch.insert(
+                "byte",
+                mult,
+                BytePairLutMsg::from_xor(B::Expr::ZERO, e(COL_RAW_BEGIN + i), e(COL_RAW_BEGIN + i)),
+                degree,
+            );
         },
-        12 => {
-            // Together with LEFT = lo16 + 2^16*hi16, enforce a nonnegative u32 remaining count.
-            let raw = act * p[program::P_RAW].clone();
-            batch.insert("left-low", raw.clone(), Range16Msg { w: e(COL_LEFT_LO16) }, d(2, 1));
-            batch.insert("left-high", raw, Range16Msg { w: e(COL_LEFT_HI16) }, d(2, 1));
+        Term::LeftLow | Term::LeftHigh => {
+            let col = if matches!(term, Term::LeftLow) {
+                COL_LEFT_LO16
+            } else {
+                COL_LEFT_HI16
+            };
+            batch.insert("left", B::Expr::ONE, Range16Msg { w: e(col) }, degree);
         },
-        13 => {
-            // Bound the final length word below 2^48, excluding a field-modulus alias for 8*LEN.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_RAW_LAST].clone();
-            batch.insert("length-high", end, Range16Msg { w: e(COL_WORD_HI) }, d(3, 1));
+        Term::LengthHigh => {
+            batch.insert("length-high", final_block, Range16Msg { w: e(COL_WORD_HI) }, degree)
         },
-        _ => unreachable!(),
+        Term::Resume | Term::Continue => {
+            // Resume compares the preceding block's tail ID, before this block's first active
+            // chunk advances it. Subtract that increment when matching continuation state.
+            let resume = matches!(term, Term::Resume);
+            let (mult, block_id, input_eidos) = if resume {
+                (
+                    B::Expr::ONE - e(COL_FIRST_BLOCK),
+                    e(COL_BLOCK_ID),
+                    e(COL_INPUT_EIDOS) - e(COL_CHUNK_ACTIVE),
+                )
+            } else {
+                (final_block - B::Expr::ONE, e(COL_BLOCK_ID) + B::Expr::ONE, e(COL_INPUT_EIDOS))
+            };
+            batch.insert(
+                "continuation",
+                mult,
+                super::Sha512IoContinuation {
+                    block_id,
+                    input_eidos,
+                    len: e(COL_LEN),
+                    left: e(COL_LEFT),
+                    before: e(COL_BEFORE),
+                    input_head: e(COL_INPUT_HEAD),
+                },
+                degree,
+            );
+        },
+    }
+}
+
+pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
+    builder: &mut LB,
+    main_col_offset: usize,
+    periodic_col_offset: usize,
+) {
+    let local = current_main(builder.main(), main_col_offset);
+    let next = next_main(builder.main(), main_col_offset);
+    let p = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
+    let act: LB::Expr = local[COL_ACT].into();
+    for index in 0..NUM_AUX_COLS {
+        let degree = lookup_column_degree(index, false);
+        builder.next_column(
+            |column| {
+                column.group(
+                    "sha512-io",
+                    |group| {
+                        eval_lookup_group(group, index, &local, &next, &p, act.clone(), false);
+                    },
+                    degree,
+                );
+            },
+            degree,
+        );
     }
 }
 

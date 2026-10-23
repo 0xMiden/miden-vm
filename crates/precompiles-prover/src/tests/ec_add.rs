@@ -624,10 +624,9 @@ fn inactive_block_cannot_provide_ecgroupadd() {
 #[test]
 fn log_quotient_degree_matches_design_target() {
     assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
-    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 10);
-    // Flattened via `frac_col!` into 10 aux columns (col 0 carries the `EcGroupAdd` provide alone,
-    // the rest each carry a pair), so every closing constraint stays
-    // at degree ≤ 3 → log_quotient_degree = 1.
+    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 8);
+    // Three selector groups and five pairs keep closing constraints at degree three. Dividing by
+    // the trace vanishing polynomial leaves two quotient chunks, so log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
 }
 

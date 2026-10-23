@@ -12,7 +12,9 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError};
+use miden_lifted_air::{
+    BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
+};
 
 use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
@@ -98,6 +100,26 @@ impl ChipletAir {
         ]
     }
 
+    /// Evaluate the handwritten constraint definitions used to generate native and ACE evaluators.
+    ///
+    /// Use [`HandwrittenChipletAir`] when a generator or equivalence check requires an AIR value.
+    pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        match self {
+            ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
+            ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
+            ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
+            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
+            ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
+            ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
+            ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
+            ChipletAir::EcPointStoreGroups => eval_lifted(&EcPointStoreGroupsAir, builder),
+            ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
+            ChipletAir::EcMsm => eval_lifted(&EcMsmAir, builder),
+            ChipletAir::Sha512 => eval_lifted(&Sha512Air, builder),
+            ChipletAir::Sha256 => eval_lifted(&Sha256Air, builder),
+        }
+    }
+
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
     /// `BytePairLut` commits its main and preprocessed traces at
@@ -130,6 +152,22 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    fn constraint_degree(&self) -> ConstraintDegrees {
+        let (base, ext) = match self {
+            Self::ChunkNodeSponge | Self::Sha512 | Self::Sha256 => (5, 5),
+            Self::EidosCompression
+            | Self::TranscriptEval
+            | Self::UintStoreMul
+            | Self::UintAdd
+            | Self::EcGroupAdd
+            | Self::EcMsm => (3, 3),
+            Self::KeccakRound => (2, 5),
+            Self::BytePairLut => (0, 3),
+            Self::EcPointStoreGroups => (2, 3),
+        };
+        ConstraintDegrees { base, ext }
+    }
+
     fn max_periodic_length(&self) -> usize {
         delegate!(self, max_periodic_length)
     }
@@ -172,19 +210,97 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
-            ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
-            ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
-            ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
-            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
-            ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
-            ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
-            ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
-            ChipletAir::EcPointStoreGroups => eval_lifted(&EcPointStoreGroupsAir, builder),
-            ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
-            ChipletAir::EcMsm => eval_lifted(&EcMsmAir, builder),
-            ChipletAir::Sha512 => eval_lifted(&Sha512Air, builder),
-            ChipletAir::Sha256 => eval_lifted(&Sha256Air, builder),
+            Self::ChunkNodeSponge => crate::generated::eval_chunk_node_sponge(builder),
+            Self::EidosCompression => crate::generated::eval_eidos_compression(builder),
+            Self::KeccakRound => crate::generated::eval_keccak_round(builder),
+            Self::BytePairLut => crate::generated::eval_byte_pair_lut(builder),
+            Self::TranscriptEval => crate::generated::eval_transcript_eval(builder),
+            Self::UintStoreMul => crate::generated::eval_uint_store_mul(builder),
+            Self::UintAdd => crate::generated::eval_uint_add(builder),
+            Self::EcPointStoreGroups => crate::generated::eval_ec_point_store_groups(builder),
+            Self::EcGroupAdd => crate::generated::eval_ec_group_add(builder),
+            Self::EcMsm => crate::generated::eval_ec_msm(builder),
+            Self::Sha512 => crate::generated::eval_sha512(builder),
+            Self::Sha256 => crate::generated::eval_sha256(builder),
         }
+    }
+}
+
+/// [`ChipletAir`] evaluated from its handwritten constraint definitions.
+///
+/// Artifact generation and the reference side of equivalence checks must use this wrapper so
+/// they remain anchored to the source AIR rather than capturing generated evaluator output.
+#[derive(Clone, Debug)]
+pub struct HandwrittenChipletAir(pub ChipletAir);
+
+impl BaseAir<Felt> for HandwrittenChipletAir {
+    fn width(&self) -> usize {
+        self.0.width()
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        self.0.preprocessed_trace()
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        self.0.preprocessed_width()
+    }
+
+    fn num_public_values(&self) -> usize {
+        self.0.num_public_values()
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        self.0.periodic_columns()
+    }
+}
+
+impl LiftedAir<Felt, QuadFelt> for HandwrittenChipletAir {
+    fn max_periodic_length(&self) -> usize {
+        self.0.max_periodic_length()
+    }
+
+    fn num_randomness(&self) -> usize {
+        self.0.num_randomness()
+    }
+
+    fn aux_width(&self) -> usize {
+        self.0.aux_width()
+    }
+
+    fn num_aux_values(&self) -> usize {
+        self.0.num_aux_values()
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
+
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        self.0.build_aux_trace_with_preprocessed(
+            main,
+            preprocessed,
+            air_inputs,
+            aux_inputs,
+            challenges,
+        )
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        self.0.eval_handwritten(builder);
     }
 }
 
@@ -478,6 +594,35 @@ mod tests {
             &aux_refs,
             &oversized_height,
         );
+    }
+
+    #[test]
+    fn each_chiplet_preserves_its_degree_and_quotient_budget() {
+        use miden_lifted_air::ConstraintDegrees;
+        let expected = [
+            (5, 5, 2),
+            (3, 3, 1),
+            (2, 5, 2),
+            (0, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (2, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (5, 5, 2),
+            (5, 5, 2),
+        ];
+        for (air, (base, ext, log_quotient)) in ChipletAir::all().into_iter().zip(expected) {
+            let derived = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+            assert_eq!(derived, ConstraintDegrees { base, ext }, "{air:?}");
+            assert_eq!(air.constraint_degree(), derived, "{air:?}: declared degree");
+            assert_eq!(
+                miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air),
+                log_quotient,
+                "{air:?}: quotient factor"
+            );
+        }
     }
 
     /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.

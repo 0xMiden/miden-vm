@@ -7,8 +7,8 @@ fn usage() {
     println!("  regenerate-evaluator [--check|--write]");
     println!();
     println!("Options:");
-    println!("  --check   Verify the checked-in generated evaluators (default)");
-    println!("  --write   Rebuild and write the generated evaluators");
+    println!("  --check   Verify the checked-in MVM and PVM evaluators (default)");
+    println!("  --write   Rebuild and write the MVM and PVM evaluators");
     println!("  -h, --help  Show this message");
 }
 

@@ -89,7 +89,7 @@
 //!
 //! The 21 main columns comprise three row-hosted cells, four operand-coordinate pointers, three
 //! curve-parameter pointers, five case flags, `act`, `mints`, two reused ordering-limb cells, and
-//! the beta/lambda pointers. The AIR also uses 11 LogUp auxiliary columns and four periodic
+//! the beta/lambda pointers. The AIR also uses eight LogUp auxiliary columns and four periodic
 //! one-hots.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
@@ -255,22 +255,12 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: 10 columns, flattened via `frac_col!` over the 19 fractions so
-// every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
-// = 1:
-// - col 0: the `EcGroupAdd` provide, alone.
-// - col 1: the `p` / `q` operand `EcPoint` consumes.
-// - col 2: the live-result and cancel-PAI-result `EcPoint` consumes.
-// - col 3: the `EcGroup` consume + the cancel `y₁+y₂≡0` certificate.
-// - col 4: the generic case's `d`-subtract + chord certificates.
-// - col 5: the double case's tangent-numerator + slope-pin certificates.
-// - col 6: the generic case's `t`-add + fused `x₃` mul-subtract.
-// - col 7: the shared tail's `e`-subtract + fused `y₃` mul-subtract.
-// - col 8: the double case's fused `x₃` mul-subtract + result-membership cert provide.
-// - col 9: the closure-cert ptr-ordering Range16 limb pair, on result and term rows.
-const NUM_LOGUP_COLS: usize = 10;
-const AUX_WIDTH: usize = 10;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+// Three selector groups hold one fraction per active row; five ordinary columns hold two
+// fractions each. Column zero is the centered accumulator. Every closing constraint has degree
+// three, so the AIR retains a twofold quotient evaluation domain.
+const NUM_LOGUP_COLS: usize = 8;
+const AUX_WIDTH: usize = NUM_LOGUP_COLS;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 1, 1, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -360,9 +350,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         // pointer equalities therefore establish the required value equalities at degree two:
         //  - `x_eq` (double ∨ cancel): `x₁ = x₂`, what makes the tail's `t = x₁ + x₂` the doubling
         //    `2x₁` and grounds the chord/tangent.
-        //  - `dbl`: `y₁ = y₂`, which (with `inv·y ≡ b ≠ 0` ⟹ `y ≠ 0`) rules out the `P, −P` cancel
-        //    branch, so the tangent is the genuine one — an in-cell `p = q` cannot forge a wrong
-        //    tangent.
+        //  - `dbl`: `y₁ = y₂`. The tangent lookups below rule out zero y on the authenticated
+        //    smooth curve, so this case cannot substitute the cancellation branch.
         let px_eq: AB::Expr = local[COL_PX].into();
         let qx_eq: AB::Expr = local[COL_QX].into();
         let py_eq: AB::Expr = local[COL_PY].into();
@@ -508,29 +497,178 @@ where
         let three: LB::Expr = LB::Expr::from(Felt::from(3u32));
 
         let f2 = Deg { v: 2, u: 1 };
-        let single_deg = Deg { v: 1, u: 2 };
+        let group_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
+        let cert_group: LB::Expr = local[CELL_GROUP].into();
+        let cert_r: LB::Expr = local[CELL_R].into();
+        let cert_gate = sel[PCOL_RES].clone() * mints.clone();
+        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints;
 
-        // col 0: the `EcGroupAdd` provide, alone.
-        frac_col!(
-            builder,
-            "ec-add-bindings",
-            single_deg,
-            (
-                "provide-ecgroupadd",
-                neg_mult * at_res.clone(),
-                EcGroupAddMsg {
-                    group_ptr: group_local.clone(),
-                    p_ptr: p_ptr.clone(),
-                    q_ptr: q_ptr.clone(),
-                    r_ptr: r_local.clone(),
-                },
-                f2
-            ),
+        // Each group selects at most one affine denominator, so its closing constraint has
+        // degree three. Row roles are fixed one-hots. The Boolean case flags and their sum
+        // equation make generic, double, and cancel disjoint, including the two-PAI case.
+        builder.next_column(
+            |column| {
+                column.group(
+                    "ec-add-rows",
+                    |group| {
+                        group.insert(
+                            "provide-ecgroupadd",
+                            at_res.clone(),
+                            neg_mult,
+                            || EcGroupAddMsg {
+                                group_ptr: group_local.clone(),
+                                p_ptr: p_ptr.clone(),
+                                q_ptr: q_ptr.clone(),
+                                r_ptr: r_local.clone(),
+                            },
+                            group_deg,
+                        );
+                        group.insert(
+                            "consume-ecpoint-r",
+                            at_tail,
+                            tail.clone(),
+                            || EcPointMsg {
+                                point_ptr: r_next,
+                                group_ptr: group_next,
+                                x_ptr: x3_local,
+                                y_ptr: y3_local,
+                                is_pai: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                        group.insert(
+                            "consume-e-sub",
+                            at_slope.clone(),
+                            tail.clone(),
+                            || UintAddMsg {
+                                bound_ptr: bound.clone(),
+                                a_ptr: x3_next.clone(),
+                                b_ptr: e.clone(),
+                                c_ptr: px.clone(),
+                                nz: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                    },
+                    group_deg,
+                );
+            },
+            group_deg,
         );
-        // col 1 (paired, lqd-1): the `p` / `q` operand `EcPoint` consumes.
-        // The case flags ARE the is_pai fields — a forged claim matches no
-        // row.
+        builder.next_column(
+            |column| {
+                column.group(
+                    "ec-add-cases",
+                    |group| {
+                        group.insert(
+                            "consume-d-sub",
+                            generic.clone(),
+                            at_slope.clone(),
+                            || UintAddMsg {
+                                bound_ptr: bound.clone(),
+                                a_ptr: px.clone(),
+                                b_ptr: slope_aux.clone(),
+                                c_ptr: qx.clone(),
+                                nz: one.clone(),
+                            },
+                            group_deg,
+                        );
+                        group.insert(
+                            "consume-tangent-s",
+                            dbl.clone(),
+                            at_slope.clone(),
+                            || UintMulMsg {
+                                kappa_a: three,
+                                kappa_c: one.clone(),
+                                a_ptr: px.clone(),
+                                b_ptr: px.clone(),
+                                c_ptr: a_ptr.clone(),
+                                r_ptr: slope_aux.clone(),
+                                bound_ptr: bound.clone(),
+                                is_sub: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                        group.insert(
+                            "consume-ecpoint-r-pai",
+                            cancel.clone(),
+                            at_res.clone(),
+                            || EcPointMsg {
+                                point_ptr: r_local,
+                                group_ptr: group_local.clone(),
+                                x_ptr: zero.clone(),
+                                y_ptr: zero.clone(),
+                                is_pai: one.clone(),
+                            },
+                            group_deg,
+                        );
+                    },
+                    group_deg,
+                );
+            },
+            group_deg,
+        );
+        builder.next_column(
+            |column| {
+                column.group(
+                    "ec-add-cases",
+                    |group| {
+                        group.insert(
+                            "consume-chord",
+                            generic.clone(),
+                            at_slope.clone(),
+                            || UintMulMsg {
+                                kappa_a: one.clone(),
+                                kappa_c: one.clone(),
+                                a_ptr: lambda.clone(),
+                                b_ptr: slope_aux.clone(),
+                                c_ptr: py.clone(),
+                                r_ptr: qy.clone(),
+                                bound_ptr: bound.clone(),
+                                is_sub: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                        // Together with consume-tangent-s, zero y would force 3*x^2 + a = 0.
+                        // An authenticated point with y = 0 cannot satisfy this on a smooth
+                        // curve, so doubling needs no separate nonzero-y witness.
+                        group.insert(
+                            "consume-tangent-2ly",
+                            dbl.clone(),
+                            at_slope.clone(),
+                            || UintMulMsg {
+                                kappa_a: two.clone(),
+                                kappa_c: zero.clone(),
+                                a_ptr: lambda.clone(),
+                                b_ptr: py.clone(),
+                                c_ptr: bound.clone(),
+                                r_ptr: slope_aux.clone(),
+                                bound_ptr: bound.clone(),
+                                is_sub: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                        group.insert(
+                            "consume-cancel-zero",
+                            cancel,
+                            at_res.clone(),
+                            || UintAddMsg {
+                                bound_ptr: bound.clone(),
+                                a_ptr: py.clone(),
+                                b_ptr: qy.clone(),
+                                c_ptr: zero.clone(),
+                                nz: zero.clone(),
+                            },
+                            group_deg,
+                        );
+                    },
+                    group_deg,
+                );
+            },
+            group_deg,
+        );
+        // Authenticate both operands, including their point-at-infinity flags.
         frac_col!(
             builder,
             "ec-add-bindings",
@@ -560,39 +698,7 @@ where
                 f2
             ),
         );
-        // col 2 (paired, lqd-1): the live result binds the computed
-        // coordinates; cancel resolves to the group's PAI row.
-        frac_col!(
-            builder,
-            "ec-add-bindings",
-            pair_deg,
-            (
-                "consume-ecpoint-r",
-                tail.clone() * at_tail,
-                EcPointMsg {
-                    point_ptr: r_next,
-                    group_ptr: group_next,
-                    x_ptr: x3_local,
-                    y_ptr: y3_local,
-                    is_pai: zero.clone(),
-                },
-                f2
-            ),
-            (
-                "consume-ecpoint-r-pai",
-                cancel.clone() * at_res.clone(),
-                EcPointMsg {
-                    point_ptr: r_local,
-                    group_ptr: group_local.clone(),
-                    x_ptr: zero.clone(),
-                    y_ptr: zero.clone(),
-                    is_pai: one.clone(),
-                },
-                f2
-            ),
-        );
-        // col 3 (paired, lqd-1): the group binding + cancel's `y₁+y₂≡0`
-        // certificate (the is_c_zero negation tuple).
+        // Bind curve parameters and the generic x-coordinate sum.
         frac_col!(
             builder,
             "ec-add-bindings",
@@ -612,110 +718,6 @@ where
                 f2
             ),
             (
-                "consume-cancel-zero",
-                cancel.clone() * at_res.clone(),
-                UintAddMsg {
-                    bound_ptr: bound.clone(),
-                    a_ptr: py.clone(),
-                    b_ptr: qy.clone(),
-                    c_ptr: zero.clone(),
-                    nz: zero.clone(),
-                },
-                f2
-            ),
-        );
-
-        // col 4 (paired, lqd-1): generic's d = x₂ − x₁ (the arrangement
-        // x₁ + d ≡ x₂, certified `d ≠ 0` — `nz = 1` — in place of the
-        // separate inverse modmul disequality) and the chord λ·d + y₁ ≡ y₂.
-        frac_col!(
-            builder,
-            "ec-add-slope",
-            pair_deg,
-            (
-                "consume-d-sub",
-                generic.clone() * at_slope.clone(),
-                UintAddMsg {
-                    bound_ptr: bound.clone(),
-                    a_ptr: px.clone(),
-                    b_ptr: slope_aux.clone(),
-                    c_ptr: qx.clone(),
-                    nz: one.clone(),
-                },
-                f2
-            ),
-            (
-                "consume-chord",
-                generic.clone() * at_slope.clone(),
-                UintMulMsg {
-                    kappa_a: one.clone(),
-                    kappa_c: one.clone(),
-                    a_ptr: lambda.clone(),
-                    b_ptr: slope_aux.clone(),
-                    c_ptr: py.clone(),
-                    r_ptr: qy.clone(),
-                    bound_ptr: bound.clone(),
-                    is_sub: zero.clone(),
-                },
-                f2
-            ),
-        );
-        // col 5 (paired, lqd-1): double's s ≡ 3·x² + a and its slope pin
-        // 2·λ·y ≡ s = 3x² + a. No `y₁ ≠ 0` witness is needed: at `y = 0`,
-        // the slope pin forces `s = 3x² + a = 0`, which together with the
-        // curve equation `y² = x³ + ax + b` (giving `x³ + ax + b = 0`)
-        // makes `x` a common root of the curve polynomial and its
-        // derivative — impossible on a smooth curve (`4a³ + 27b² ≠ 0`). A
-        // `y = 0` self-add thus can only take `cancel` (2·(2-torsion) =
-        // ∞); this rests on the same anchored-curve smoothness assumption
-        // as the `b ≠ 0` guard the disequality MACs rest on.
-        frac_col!(
-            builder,
-            "ec-add-slope",
-            pair_deg,
-            (
-                "consume-tangent-s",
-                dbl.clone() * at_slope.clone(),
-                UintMulMsg {
-                    kappa_a: three,
-                    kappa_c: one.clone(),
-                    a_ptr: px.clone(),
-                    b_ptr: px.clone(),
-                    c_ptr: a_ptr,
-                    r_ptr: slope_aux.clone(),
-                    bound_ptr: bound.clone(),
-                    is_sub: zero.clone(),
-                },
-                f2
-            ),
-            (
-                "consume-tangent-2ly",
-                dbl.clone() * at_slope.clone(),
-                UintMulMsg {
-                    kappa_a: two.clone(),
-                    kappa_c: zero.clone(),
-                    a_ptr: lambda.clone(),
-                    b_ptr: py.clone(),
-                    c_ptr: bound.clone(),
-                    r_ptr: slope_aux.clone(),
-                    bound_ptr: bound.clone(),
-                    is_sub: zero.clone(),
-                },
-                f2
-            ),
-        );
-        // The double/cancel `x₁ = x₂` and double's `y₁ = y₂` equalities are
-        // native degree-2 constraints (see Phase 1), so no is_b_zero certs
-        // here.
-
-        // col 6 (paired, lqd-1): the shared tail. generic forms
-        // `t = x₁ + x₂` then the fused `x₃ = λ² − t`. Mutually exclusive
-        // with double's fused x₃ (col 8) — exactly one fires per live op.
-        frac_col!(
-            builder,
-            "ec-add-tail",
-            pair_deg,
-            (
                 "consume-t-add",
                 generic.clone() * at_slope.clone(),
                 UintAddMsg {
@@ -727,6 +729,12 @@ where
                 },
                 f2
             ),
+        );
+        // Authenticate the generic x result and the shared y result.
+        frac_col!(
+            builder,
+            "ec-add-tail",
+            pair_deg,
             (
                 "consume-x3-macsub-gen",
                 generic.clone() * at_slope.clone(),
@@ -739,25 +747,6 @@ where
                     r_ptr: x3_next.clone(),
                     bound_ptr: bound.clone(),
                     is_sub: one.clone(),
-                },
-                f2
-            ),
-        );
-        // col 7 (paired, lqd-1): e = x₁ − x₃ (x₃ + e ≡ x₁), then the fused
-        // y₃ = λ·e − y₁ — shared by both live cases.
-        frac_col!(
-            builder,
-            "ec-add-tail",
-            pair_deg,
-            (
-                "consume-e-sub",
-                tail.clone() * at_slope.clone(),
-                UintAddMsg {
-                    bound_ptr: bound.clone(),
-                    a_ptr: x3_next.clone(),
-                    b_ptr: e.clone(),
-                    c_ptr: px.clone(),
-                    nz: zero.clone(),
                 },
                 f2
             ),
@@ -777,10 +766,7 @@ where
                 f2
             ),
         );
-        // col 8: pair doubling's fused x3 MAC with the fresh result's membership certificate.
-        let cert_group: LB::Expr = local[CELL_GROUP].into();
-        let cert_r: LB::Expr = local[CELL_R].into();
-        let cert_gate = sel[PCOL_RES].clone() * mints.clone();
+        // Authenticate the doubled x result and provide any fresh membership certificate.
         frac_col!(
             builder,
             "ec-add-tail",
@@ -807,13 +793,7 @@ where
                 f2
             ),
         );
-
-        // ---- col 9: the mint column. Four Range16 consumes per block for the
-        //      limbs of r−p−1 and r−q−1 (reconstructed in the main AIR),
-        //      proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op — the
-        //      well-foundedness the certificate rests on. All gated
-        //      `(at_res + at_term) · mints`: one limb pair on each row.
-        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints;
+        // Check both ordering limbs on result and term rows to ground certificate induction.
         frac_col!(
             builder,
             "ec-add-mint",

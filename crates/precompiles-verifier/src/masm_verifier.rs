@@ -33,13 +33,16 @@ use miden_crypto::{
 use miden_lifted_air::{LiftedAir, Statement};
 use miden_lifted_stark::VerifierInstance;
 use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
     stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
-use crate::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
+use crate::{
+    ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit},
+    ace_constants::PVM_EIDOS_PREPROCESSED_COMMITMENT,
+};
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
@@ -155,7 +158,6 @@ fn build_verifier_advice(
         precompile_pcs_params(),
         crate::ace_constants::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed::eidos();
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
@@ -173,7 +175,7 @@ fn build_verifier_advice(
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(preprocessed.commitment()))?;
+        VerifierInstance::new(&config, &statement, Some(PVM_EIDOS_PREPROCESSED_COMMITMENT.into()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;

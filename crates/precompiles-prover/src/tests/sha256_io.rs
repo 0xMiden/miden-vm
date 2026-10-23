@@ -324,7 +324,7 @@ fn sha256_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
         "noncanonical length alias must be rejected through lookup constraints"
     );
     // A legal high-word Range16 value can still hide a non-u32 low word in the field equality.
-    // Only the compression band's byte-checked INPUTs bind both words to real SHA words.
+    // The compression band's u16-bounded INPUTs bind both words to real SHA words.
     let mut bad = main.clone();
     let bad_lo = Felt::from_u32(65 * 8) - Felt::new_unchecked(1u64 << 32);
     bad.values[47 * io::NUM_MAIN_COLS + io::COL_WORD] = bad_lo;
@@ -355,5 +355,11 @@ fn sha256_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
         bad.values[row * io::NUM_MAIN_COLS + col] -= Felt::ONE;
         bad.values[row * io::NUM_MAIN_COLS + col + 1] += Felt::from_u32(256);
         assert!(!balanced(&bad), "non-byte digits cannot change the endian interpretation");
+    }
+    for column in io::COL_DIGEST_XOR {
+        let mut bad = main.clone();
+        bad.values[52 * io::NUM_MAIN_COLS + column] += Felt::ONE;
+        crate::tests::check_local(Sha256IoAir, &bad);
+        assert!(!balanced(&bad), "the XOR table must authenticate each digest scratch cell");
     }
 }

@@ -1,23 +1,23 @@
-//! Keccak round program: 128 slots, encoded as 11 length-128 periodic
+//! Keccak round program: 128 slots, encoded as 24 length-128 periodic
 //! columns over the chiplet's trace.
 //!
-//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The eleven
-//! columns are:
+//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. Its operation columns are:
 //!
 //! - `is_xor`, `is_andnot`, `is_rol` — selector flags. A fused XORROL row sets both `is_xor` and
 //!   `is_rol`.
 //! - `is_xorrol` — 1 exactly on fused XORROL rows (= `is_xor · is_rol`, precomputed). Lets the
 //!   chiplet recover a one-per-row "reads src_a" count from the otherwise-overlapping selectors
 //!   without a degree bump.
-//! - `swap` — 1 on fused XORROL slots whose true rotation `ρ ≥ 32` (see [`COL_SWAP`]).
-//! - `rot_high` — 1 when the reduced shift is at least 16 (see [`COL_ROT_HIGH`]).
 //! - `back_a`, `back_b` — source A / B back-offsets (`src_addr = ip - back`).
-//! - `k` — ROL shift multiplier `2^s` (0 when `is_rol = 0`).
 //! - `dst_mult` — destination provide multiplicity (0 on NOP rows).
 //! - `p_last` — 1 at slot 127 (the round's last slot), 0 elsewhere. Used as the round-boundary
 //!   indicator for the `act` within-round constant constraint: a row with `p_last = 1` is the row
 //!   whose transition into the next slot crosses a round boundary, so `act` is allowed to change
 //!   there.
+//!
+//! The remaining columns select each half's split byte and supply coefficients for the rotation
+//! correction `ROL(x, s) - x`. The coefficients include the operation selector and any half swap,
+//! so the AIR only multiplies each fixed coefficient by one witness value.
 //!
 //! Slot layout (period 128):
 //!
@@ -43,15 +43,30 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::Felt;
+use miden_core::{Felt, field::Field};
 
 use crate::relations::ProvideMult;
 
-/// Length of one round's preprocessed period.
+/// Length of one round's periodic program.
 pub const ROUND_PERIOD: usize = 128;
 
-/// Number of preprocessed columns produced by [`round_program`].
-pub const NUM_PERIODIC_COLS: usize = 11;
+/// Number of periodic columns produced by [`round_program`].
+pub const NUM_PERIODIC_COLS: usize = 24;
+
+/// Selectors for the split byte within either 32-bit half; all zero on byte-aligned rotations.
+pub const COL_ROT_BYTE_BEGIN: usize = 8;
+/// High-bit mask for the split byte; zero on byte-aligned rotations.
+pub const COL_ROT_MASK: usize = 12;
+/// Coefficients of the same half's four XOR bytes in the rotation correction.
+pub const COL_OUTPUT_SAME: usize = 13;
+/// Coefficients of the opposite half's four XOR bytes in the rotation correction.
+pub const COL_OUTPUT_OTHER: usize = 17;
+/// Coefficient of the same half's masked-byte XOR in the rotation correction.
+pub const COL_OUTPUT_MASK_SAME: usize = 21;
+/// Coefficient of the opposite half's masked-byte XOR in the rotation correction.
+pub const COL_OUTPUT_MASK_OTHER: usize = 22;
+/// Constant term of the rotation correction, shared by both halves.
+pub const COL_OUTPUT_BIAS: usize = 23;
 
 /// Column indices in the periodic table.
 pub const COL_IS_XOR: usize = 0;
@@ -59,27 +74,18 @@ pub const COL_IS_ANDNOT: usize = 1;
 pub const COL_IS_ROL: usize = 2;
 pub const COL_BACK_A: usize = 3;
 pub const COL_BACK_B: usize = 4;
-pub const COL_K: usize = 5;
-pub const COL_DST_MULT: usize = 6;
+pub const COL_DST_MULT: usize = 5;
 /// 1 exactly on fused XORROL slots (= `is_xor · is_rol`). A XORROL row
 /// sets both `is_xor` and `is_rol`, so `is_xor + is_andnot + is_rol`
 /// counts it twice; subtracting this column recovers the true
 /// one-read-per-row `src_a` multiplicity at degree 1.
-pub const COL_IS_XORROL: usize = 8;
-/// 1 on fused XORROL slots whose true rotation `ρ ≥ 32`, where the chiplet
-/// shift is `ρ − 32 ≤ 30` and the rolled output's 32-bit halves are swapped
-/// (`ROL(x, ρ) = halfswap(ROL(x, ρ − 32))`). The round commits the true `c`
-/// for the Memory64 result.
-pub const COL_SWAP: usize = 9;
-/// 1 on rotation slots whose reduced shift is at least 16. Such slots omit the zero low
-/// u16 limb of each biased half; smaller shifts omit the zero high limb instead.
-pub const COL_ROT_HIGH: usize = 10;
+pub const COL_IS_XORROL: usize = 7;
 /// 1 at slot 127 of each round (the round's last slot), 0 elsewhere.
 /// Gates the round-boundary toggles of [`act`](super::COL_ACT): the
 /// within-round-constant constraint multiplies the column difference
 /// by `(1 - p_last)`, which vanishes exactly at the row whose
 /// transition into the next slot crosses a round boundary.
-pub const COL_P_LAST: usize = 7;
+pub const COL_P_LAST: usize = 6;
 
 // SLOT-LAYOUT CONSTANTS
 // ================================================================================================
@@ -222,13 +228,12 @@ impl Source {
 /// `c = ROL(a OP b, s)`:
 ///
 /// - `Nop`: all selectors and dst_mult zero. RC slot or padding.
-/// - `Xor`: pure XOR (`is_xor = 1`, `k = 0`).
-/// - `Andnot`: pure ANDNOT (`is_andnot = 1`, `k = 0`).
-/// - `Rol(s)`: pure ROL (`is_rol = 1`). Generated programs use `s ∈ [1, 30]` and `k = 2^s`. Reads
-///   only src_a.
+/// - `Xor`: pure XOR (`is_xor = 1`).
+/// - `Andnot`: pure ANDNOT (`is_andnot = 1`).
+/// - `Rol(s)`: pure ROL (`is_rol = 1`). Generated programs use `s ∈ [1, 30]`. Reads only src_a.
 /// - `XorRol(s)`: fused XOR-then-ROL for the true Keccak rotation `s` (`is_xor = 1`, `is_rol = 1`).
-///   Generated programs use `s ≥ 1`, derive `(chiplet_shift, swap)` through `rol_decompose(s)`, and
-///   encode `k = 2^chiplet_shift`.
+///   Generated programs use `s ≥ 1` and derive the reduced shift and half swap with
+///   `rol_decompose(s)` when constructing the fixed rotation coefficients.
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     Nop,
@@ -436,8 +441,8 @@ fn emit_apply_rpi(s: &mut [SlotSpec; ROUND_PERIOD], out_x: usize, out_y: usize) 
     // (x, y), +1 arg for (x−1, y), +2 arg for (x−2, y)).
     let final_mult = 3;
 
-    // Full-range rotation in one fused op. For ρ > 30, a 32-bit half-swap reduces the limb
-    // decomposition to `ρ − 32 ≤ 30` (see `rol_decompose` and `COL_SWAP`). Keccak's rotation
+    // Full-range rotation in one fused op. For ρ > 30, a 32-bit half-swap reduces the rotation
+    // shift to `ρ − 32 ≤ 30` (see `rol_decompose`). Keccak's rotation
     // table has no values in [31, 35], so every reduced shift stays within that bound.
     let op = if rho == 0 {
         Op::Xor // Lane (0, 0): plain XOR, no rotation.
@@ -461,41 +466,92 @@ pub fn rol_decompose(s: u32) -> (u32, bool) {
     if s >= 32 { (s - 32, true) } else { (s, false) }
 }
 
+/// Split-byte index and high-bit mask for a reduced rotation of a 32-bit half.
+/// Byte-aligned rotations return `(0, 0)`; their lookup uses the fixed tuple `(0, 0, 0)`.
+///
+/// # Panics
+/// Panics if `shift > 30`.
+pub fn rotation_mask_parameters(shift: u32) -> (usize, u8) {
+    assert!(shift <= 30);
+    let cut = 32 - shift;
+    let bits = cut % 8;
+    if bits == 0 {
+        (0, 0)
+    } else {
+        ((cut / 8) as usize, u8::MAX ^ ((1u8 << bits) - 1))
+    }
+}
+
 // PERIODIC-COLUMN MATERIALIZATION
 // ================================================================================================
 
-/// Build the 11 periodic columns (one per row of the per-row format)
-/// for one Keccak round. Returned in canonical column order
-/// (`is_xor`, `is_andnot`, `is_rol`, `back_a`, `back_b`, `k`,
-/// `dst_mult`, `p_last`, `is_xorrol`, `swap`, `rot_high`).
+/// Build the operation, address, and rotation-coefficient columns for one Keccak round.
 pub fn round_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
     let table = slot_table();
     let mut cols: [Vec<Felt>; NUM_PERIODIC_COLS] =
         core::array::from_fn(|_| vec![Felt::ZERO; ROUND_PERIOD]);
 
     for (slot, spec) in table.iter().enumerate() {
-        let (is_xor, is_andnot, is_rol, is_xorrol, k, swap) = match spec.op {
-            Op::Nop => (0, 0, 0, 0, 0u64, false),
-            Op::Xor => (1, 0, 0, 0, 0, false),
-            Op::Andnot => (0, 1, 0, 0, 0, false),
-            Op::Rol(s) => (0, 0, 1, 0, 1u64 << s, false),
-            Op::XorRol(s) => {
-                let (shift, swap) = rol_decompose(s);
-                (1, 0, 1, 1, 1u64 << shift, swap)
-            },
+        let (is_xor, is_andnot, is_rol, is_xorrol) = match spec.op {
+            Op::Nop => (0, 0, 0, 0),
+            Op::Xor => (1, 0, 0, 0),
+            Op::Andnot => (0, 1, 0, 0),
+            Op::Rol(_) => (0, 0, 1, 0),
+            Op::XorRol(_) => (1, 0, 1, 1),
         };
         cols[COL_IS_XOR][slot] = Felt::from(is_xor as u8);
         cols[COL_IS_ANDNOT][slot] = Felt::from(is_andnot as u8);
         cols[COL_IS_ROL][slot] = Felt::from(is_rol as u8);
         cols[COL_IS_XORROL][slot] = Felt::from(is_xorrol as u8);
-        cols[COL_SWAP][slot] = Felt::from(swap as u8);
-        cols[COL_ROT_HIGH][slot] = Felt::from((is_rol != 0 && k >= 1 << 16) as u8);
         cols[COL_BACK_A][slot] =
             Felt::new(spec.src_a.back_off(slot)).expect("back_a fits in canonical Goldilocks");
         cols[COL_BACK_B][slot] =
             Felt::new(spec.src_b.back_off(slot)).expect("back_b fits in canonical Goldilocks");
-        cols[COL_K][slot] = Felt::new(k).expect("k fits in canonical Goldilocks");
         cols[COL_DST_MULT][slot] = Felt::from(spec.dst_mult);
+        if let Op::Rol(s) | Op::XorRol(s) = spec.op {
+            let (shift, swap) = rol_decompose(s);
+            let cut = 32 - shift;
+            let (byte, mask) = rotation_mask_parameters(shift);
+            let mut carry = [Felt::ZERO; 4];
+            for (i, coefficient) in carry.iter_mut().enumerate() {
+                if 8 * i as u32 >= cut {
+                    *coefficient = Felt::from(1u32 << (8 * i as u32 - cut));
+                }
+            }
+            let mut mask_coefficient = Felt::ZERO;
+            let mut bias = Felt::ZERO;
+            if mask != 0 {
+                let coefficient = Felt::from(1u32 << (cut % 8 + 1)).inverse();
+                cols[COL_ROT_BYTE_BEGIN + byte][slot] = Felt::ONE;
+                cols[COL_ROT_MASK][slot] = Felt::from(mask);
+                carry[byte] = coefficient;
+                mask_coefficient = -coefficient;
+                bias = Felt::from(mask) * coefficient;
+            }
+
+            // Before the half swap, each output is k*x - 2^32*carry + opposite_carry.
+            // The split-byte identity (byte + mask - xor)/2 supplies the fractional-byte
+            // contribution to each carry. Expand the fixed coefficients here, and subtract x
+            // so the AIR can add this correction to its ordinary logic result.
+            let two_32 = Felt::new_unchecked(1u64 << 32);
+            let k = Felt::from(1u32 << shift);
+            for (i, carry) in carry.into_iter().enumerate() {
+                let weight = Felt::from(1u32 << (8 * i));
+                let same = k * weight - two_32 * carry;
+                let (same, other) = if swap { (carry, same) } else { (same, carry) };
+                cols[COL_OUTPUT_SAME + i][slot] = same - weight;
+                cols[COL_OUTPUT_OTHER + i][slot] = other;
+            }
+            let same = -two_32 * mask_coefficient;
+            let (same, other) = if swap {
+                (mask_coefficient, same)
+            } else {
+                (same, mask_coefficient)
+            };
+            cols[COL_OUTPUT_MASK_SAME][slot] = same;
+            cols[COL_OUTPUT_MASK_OTHER][slot] = other;
+            cols[COL_OUTPUT_BIAS][slot] = (Felt::ONE - two_32) * bias;
+        }
     }
 
     // `p_last` fires at the round's last slot (slot 127) — the row
@@ -561,22 +617,6 @@ mod tests {
         let cols = round_program();
         for (i, col) in cols.iter().enumerate() {
             assert_eq!(col.len(), ROUND_PERIOD, "col {i} length");
-        }
-    }
-
-    #[test]
-    fn compact_rotation_branch_matches_every_scheduled_shift() {
-        let columns = round_program();
-        for (index, slot) in slots().iter().enumerate() {
-            let high = match slot.op {
-                Op::Rol(s) | Op::XorRol(s) => {
-                    let shift = rol_decompose(s).0;
-                    assert!((1..=30).contains(&shift));
-                    shift >= 16
-                },
-                _ => false,
-            };
-            assert_eq!(columns[COL_ROT_HIGH][index], Felt::from(high as u8));
         }
     }
 }

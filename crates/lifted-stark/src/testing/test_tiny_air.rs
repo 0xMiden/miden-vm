@@ -33,6 +33,8 @@ struct TinyAir {
     /// Pre-computed periodic column data.
     periodic_cols: Vec<Vec<Felt>>,
     num_public_values: usize,
+    /// Offset the first auxiliary witness value without changing its constraint.
+    aux_offset: Felt,
 }
 
 impl TinyAir {
@@ -46,7 +48,11 @@ impl TinyAir {
                 col
             })
             .collect();
-        Self { periodic_cols, num_public_values: 1 }
+        Self {
+            periodic_cols,
+            num_public_values: 1,
+            aux_offset: Felt::ZERO,
+        }
     }
 }
 
@@ -84,7 +90,12 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        tiny_aux(main, challenges[0] + QuadFelt::from(air_inputs.iter().copied().sum::<Felt>()))
+        let (mut trace, values) = tiny_aux(
+            main,
+            challenges[0] + QuadFelt::from(air_inputs.iter().copied().sum::<Felt>()),
+        );
+        trace.values[0] += QuadFelt::from(self.aux_offset);
+        (trace, values)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -391,6 +402,22 @@ fn three_traces_shuffled_order() {
 fn periodic_columns_reversed_order() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8), trace_of_height(4)]);
+}
+
+#[test]
+#[should_panic(expected = "ext constraint not satisfied")]
+fn constraint_checker_rejects_invalid_aux_trace() {
+    let air = TinyAir {
+        aux_offset: Felt::ONE,
+        ..TinyAir::new([])
+    };
+    let prover_statement = tiny_prover_statement(
+        vec![air],
+        vec![trace_of_height(4)],
+        vec![(0, vec![Felt::from_u64(START)])],
+    )
+    .unwrap();
+    crate::debug::check_constraints(&prover_statement, test_challenger());
 }
 
 #[test]

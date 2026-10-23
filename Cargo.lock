@@ -2543,12 +2543,14 @@ name = "miden-precompiles-air"
 version = "1.0.0-rc.1"
 dependencies = [
  "miden-air",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
  "miden-utils-sync",
+ "p3-field",
  "p3-security",
  "ruint",
 ]

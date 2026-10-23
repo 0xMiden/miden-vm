@@ -28,8 +28,8 @@ use crate::{
 };
 
 pub const NUM_MAIN_COLS: usize = 39;
-pub const NUM_AUX_COLS: usize = 9;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 1, 1];
+pub const NUM_AUX_COLS: usize = 4;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2; NUM_AUX_COLS];
 pub const COL_BLOCK_ID: usize = 0;
 pub const COL_ACT: usize = 1;
 pub const COL_PHASE_BEGIN: usize = 2;
@@ -48,6 +48,7 @@ pub const COL_SRC_B: usize = 25;
 pub const COL_ROL_K: usize = 26;
 pub const COL_A_BEGIN: usize = 27;
 pub const COL_B_BEGIN: usize = 31;
+/// XOR bytes on logic rows; two little-endian u16 limbs on ADD, INPUT, and CONST rows.
 pub const COL_R_BEGIN: usize = 35;
 // ROL has no second operand; ADD has no rotation parameter.
 pub const COL_ROT_BEGIN: usize = COL_B_BEGIN;
@@ -233,6 +234,11 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let hash_phase = phases[program::PHASE_HASH].clone();
     let round: AB::Expr = local[COL_META_T].into();
     let input_word: AB::Expr = local[COL_META_INPUT_WORD].into();
+    // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
+    // IO uses this cell only in the padding phase, where word_phase is zero.
+    builder.assert_zero(
+        word_phase.clone() * input_word.clone() * (input_word.clone() - AB::Expr::ONE),
+    );
     builder.assert_zero(
         word_phase.clone()
             * (round.clone()
@@ -306,7 +312,7 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
 
     let a: AB::Expr = pack_le(&local[COL_A_BEGIN..COL_A_BEGIN + 4], 256);
     let b: AB::Expr = pack_le(&local[COL_B_BEGIN..COL_B_BEGIN + 4], 256);
-    let r: AB::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 4], 256);
+    let r: AB::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
     builder.when(program_gate * is_add.clone()).assert_bool(local[COL_CARRY]);
     let carry: AB::Expr = local[COL_CARRY].into();
@@ -332,52 +338,113 @@ pub(super) enum LookupKind {
     Input,
     Destination,
     Sources,
-    Byte(usize),
-    BytePair(usize),
+    LogicPair(usize),
+    ValuePair,
     RangePair(usize),
     MetadataProvider,
     MetadataConsumer,
 }
 
-/// Compression batches that share a lookup column with an IO batch in the composite AIR.
-pub(super) const SHARED_BATCHES: [LookupKind; 11] = [
-    LookupKind::Input,
-    LookupKind::Destination,
-    LookupKind::Sources,
-    LookupKind::Byte(0),
-    LookupKind::Byte(1),
-    LookupKind::Byte(2),
-    LookupKind::Byte(3),
-    LookupKind::RangePair(0),
-    LookupKind::RangePair(1),
-    LookupKind::MetadataProvider,
-    LookupKind::MetadataConsumer,
-];
-
-pub(super) const fn lookup_batch_degree(kind: LookupKind, activity_degree: usize) -> Deg {
-    match kind {
-        LookupKind::Destination => Deg { v: 3 + activity_degree, u: 2 },
-        LookupKind::Sources => Deg { v: 2 + activity_degree, u: 2 },
-        LookupKind::Input => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::Byte(_) => Deg { v: 1 + activity_degree, u: 2 },
-        LookupKind::BytePair(_) => Deg { v: 3 + activity_degree, u: 4 },
-        LookupKind::RangePair(_) => Deg { v: 2 + activity_degree, u: 2 },
-        LookupKind::MetadataProvider | LookupKind::MetadataConsumer => {
-            Deg { v: 2 + activity_degree, u: 1 }
-        },
+pub(super) const fn lookup_column_degree(index: usize) -> Deg {
+    match index {
+        0 => Deg { v: 5, u: 4 },
+        1 => Deg { v: 4, u: 4 },
+        2 | 3 => Deg { v: 3, u: 4 },
+        _ => panic!("invalid SHA-256 lookup column"),
     }
 }
 
-fn lookup_entry_degree(kind: LookupKind, activity_degree: usize) -> Deg {
-    match kind {
-        LookupKind::Destination => lookup_batch_degree(kind, activity_degree),
-        LookupKind::Sources => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::Input | LookupKind::Byte(_) => lookup_batch_degree(kind, activity_degree),
-        LookupKind::BytePair(_) => Deg { v: 1 + activity_degree, u: 2 },
-        LookupKind::RangePair(_) => Deg { v: 1 + activity_degree, u: 1 },
-        LookupKind::MetadataProvider | LookupKind::MetadataConsumer => {
-            lookup_batch_degree(kind, activity_degree)
+/// Select metadata on a NOP word-round row. The hold equations bind the same metadata
+/// across all sixteen word-round rows, so authentication on lane fourteen covers the whole round.
+fn metadata_gate<E: Algebra<Felt>, V: Copy + Into<E>>(
+    local: &[V; NUM_MAIN_COLS],
+    p: &[E; NUM_PERIODIC_COLS],
+) -> E {
+    let word_template = program::TEMPLATE_BEGIN + program::PHASE_WORDS * program::TEMPLATE_COLS;
+    let word_nop = E::ONE - (0..7).map(|i| p[word_template + i].clone()).sum::<E>();
+    let word: E = local[COL_PHASE_BEGIN + program::PHASE_WORDS].into();
+    let hash: E = local[COL_PHASE_BEGIN + program::PHASE_HASH].into();
+    word * word_nop + hash * p[program::COL_HASH_FIRST].clone()
+}
+
+pub(super) fn eval_lookup_group<G, V>(
+    group: &mut G,
+    index: usize,
+    local: &[V; NUM_MAIN_COLS],
+    periodic: &[G::Expr; NUM_PERIODIC_COLS],
+    act: G::Expr,
+) where
+    G: LookupGroup,
+    G::Expr: Algebra<Felt>,
+    V: Copy + Into<G::Expr>,
+{
+    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].into() };
+    let emit = |group: &mut G, flag: G::Expr, kinds: &[LookupKind], degree| {
+        group.batch(
+            "compression",
+            flag,
+            |batch| {
+                for &kind in kinds {
+                    eval_lookup_batch(batch, kind, local, periodic);
+                }
+            },
+            degree,
+        );
+    };
+    match index {
+        0 => emit(
+            group,
+            act,
+            &[LookupKind::Destination, LookupKind::MetadataProvider],
+            lookup_column_degree(index),
+        ),
+        1 => {
+            let reads = opcode(program::T_IS_XOR)
+                + opcode(program::T_IS_AND)
+                + opcode(program::T_IS_ANDNOT)
+                + opcode(program::T_IS_ADD)
+                + opcode(program::T_IS_ROL);
+            emit(group, act.clone() * reads, &[LookupKind::Sources], Deg { v: 4, u: 4 });
+            emit(
+                group,
+                act.clone() * opcode(program::T_IS_INPUT),
+                &[LookupKind::Input],
+                Deg { v: 2, u: 3 },
+            );
+            emit(
+                group,
+                act * metadata_gate(local, periodic),
+                &[LookupKind::MetadataConsumer],
+                Deg { v: 3, u: 4 },
+            );
         },
+        2 | 3 => {
+            let pair = index - 2;
+            let logic = opcode(program::T_IS_XOR)
+                + opcode(program::T_IS_AND)
+                + opcode(program::T_IS_ANDNOT);
+            emit(
+                group,
+                act.clone() * logic,
+                &[LookupKind::LogicPair(pair)],
+                lookup_column_degree(index),
+            );
+            if pair == 0 {
+                emit(
+                    group,
+                    act.clone() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
+                    &[LookupKind::ValuePair],
+                    lookup_column_degree(index),
+                );
+            }
+            emit(
+                group,
+                act * opcode(program::T_IS_ROL),
+                &[LookupKind::RangePair(pair)],
+                lookup_column_degree(index),
+            );
+        },
+        _ => unreachable!(),
     }
 }
 
@@ -387,8 +454,6 @@ pub(super) fn eval_lookup_batch<B, V>(
     kind: LookupKind,
     local: &[V; NUM_MAIN_COLS],
     periodic: &[B::Expr; NUM_PERIODIC_COLS],
-    act: B::Expr,
-    activity_degree: usize,
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
@@ -396,7 +461,13 @@ pub(super) fn eval_lookup_batch<B, V>(
 {
     let v = |index: usize| -> B::Expr { local[index].into() };
     let p = |index: usize| -> B::Expr { periodic[index].clone() };
-    let entry_degree = lookup_entry_degree(kind, activity_degree);
+    let act = B::Expr::ONE;
+    let entry_degree = match kind {
+        LookupKind::Destination => Deg { v: 3, u: 2 },
+        LookupKind::MetadataProvider => Deg { v: 2, u: 1 },
+        LookupKind::Sources => Deg { v: 1, u: 1 },
+        _ => Deg { v: 0, u: 1 },
+    };
 
     match kind {
         LookupKind::Destination => {
@@ -426,11 +497,23 @@ pub(super) fn eval_lookup_batch<B, V>(
                 .sum::<B::Expr>()
                 + v(COL_CYCLE) * Felt::from(32u8)
                 + p(program::COL_LANE);
-            let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 4], 256);
+            let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
             let limbs: [V; 4] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
             let rotated = rotated_word(&limbs, v(COL_ROL_K));
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            let out = r.clone() + is_rol * (rotated - r);
+            let x: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 4], 256);
+            let a: B::Expr = pack_le(&local[COL_A_BEGIN..COL_A_BEGIN + 4], 256);
+            let b: B::Expr = pack_le(&local[COL_B_BEGIN..COL_B_BEGIN + 4], 256);
+            let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
+            let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
+            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.clone() + is_andnot.clone();
+            let half = B::Expr::from(Felt::new_unchecked(0x7fff_ffff_8000_0001));
+            // With X = A xor B, the semantic words are AND=(A+B-X)/2 and ANDNOT=(X-A+B)/2.
+            let out = r.clone()
+                + logic * (x.clone() - r.clone())
+                + is_and * (a.clone() + b.clone() - x.clone() * Felt::from_u8(3)) * half.clone()
+                + is_andnot * (b - a - x) * half
+                + is_rol * (rotated - r);
             batch.insert(
                 "dst",
                 -act * dst_mult,
@@ -446,13 +529,10 @@ pub(super) fn eval_lookup_batch<B, V>(
             let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
             let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
-            let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            let reads_a =
-                is_xor.clone() + is_and.clone() + is_andnot.clone() + is_add.clone() + is_rol;
             let reads_b = is_xor + is_and + is_andnot + is_add;
             batch.insert(
                 "src_a",
-                act.clone() * reads_a,
+                act.clone(),
                 Sha256WordMsg {
                     block_id: bid.clone(),
                     addr: v(COL_SRC_A),
@@ -473,72 +553,37 @@ pub(super) fn eval_lookup_batch<B, V>(
         },
         LookupKind::Input => {
             let bid = v(COL_BLOCK_ID);
-            let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 4], 256);
-            let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
+            let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
             let ext_addr = B::Expr::from(Felt::from(INPUT_ADDR_BASE)) + v(COL_SRC_A);
             batch.insert(
                 "input",
-                act * is_input,
+                act,
                 Sha256WordMsg { block_id: bid, addr: ext_addr, value: r },
                 entry_degree,
             );
         },
-        LookupKind::Byte(index) | LookupKind::BytePair(index) => {
-            let bid_kind = matches!(kind, LookupKind::BytePair(_));
-            let pair_indices = if bid_kind {
-                [index * 2, index * 2 + 1]
-            } else {
-                [index, index]
-            };
-            let is_xor = v(COL_PROG_BEGIN + program::T_IS_XOR);
-            let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
-            let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
-            let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
-            let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
-            let logic = is_xor.clone() + is_and.clone() + is_andnot.clone();
-            // Constant packed words are fixed by the AIR. Rotation inputs are already u32
-            // on the source bus, and their outputs use the range-checked u16 decomposition.
-            let value = is_add.clone() + is_input.clone();
-            let a: [V; 4] = array::from_fn(|i| local[COL_A_BEGIN + i]);
-            let b: [V; 4] = array::from_fn(|i| local[COL_B_BEGIN + i]);
-            let r: [V; 4] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-            for i in pair_indices {
-                let lut_a = (is_xor.clone() + is_andnot.clone()) * v_at(&a, i)
-                    + is_and.clone() * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i));
-                let b_value = logic.clone() * v_at(&b, i) + value.clone() * v_at(&r, i);
-                // The table stores `lut_a xor b_value`. ANDNOT results map through
-                // `a - b + 2r`; AND reads `lut_a = 255 - a`, so it uses the same identity.
-                let r_i = v_at(&r, i);
-                let x = r_i.clone()
-                    + is_andnot.clone() * (v_at(&a, i) - v_at(&b, i) + r_i.clone())
-                    + is_and.clone()
-                        * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i) - v_at(&b, i) + r_i);
+        LookupKind::LogicPair(index) => {
+            for i in [2 * index, 2 * index + 1] {
                 batch.insert(
                     "byte",
-                    act.clone()
-                        * (is_xor.clone()
-                            + is_and.clone()
-                            + is_andnot.clone()
-                            + is_add.clone()
-                            + is_input.clone()),
-                    BytePairLutMsg::from_xor(lut_a, b_value, x),
+                    B::Expr::ONE,
+                    BytePairLutMsg::from_xor(
+                        v(COL_A_BEGIN + i),
+                        v(COL_B_BEGIN + i),
+                        v(COL_R_BEGIN + i),
+                    ),
                     entry_degree,
                 );
-                if !bid_kind {
-                    break;
-                }
             }
         },
-        LookupKind::RangePair(index) => {
-            let limbs: [V; 4] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-            let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            for i in [index * 2, index * 2 + 1] {
-                batch.insert(
-                    "limb",
-                    act.clone() * is_rol.clone(),
-                    Range16Msg { w: v_at(&limbs, i) },
-                    entry_degree,
-                );
+        LookupKind::ValuePair | LookupKind::RangePair(_) => {
+            let (begin, pair) = match kind {
+                LookupKind::ValuePair => (COL_R_BEGIN, 0),
+                LookupKind::RangePair(pair) => (COL_ROT_BEGIN, pair),
+                _ => unreachable!(),
+            };
+            for i in [2 * pair, 2 * pair + 1] {
+                batch.insert("limb", B::Expr::ONE, Range16Msg { w: v(begin + i) }, entry_degree);
             }
         },
         LookupKind::MetadataProvider => {
@@ -565,13 +610,9 @@ pub(super) fn eval_lookup_batch<B, V>(
         },
         LookupKind::MetadataConsumer => {
             let bid = v(COL_BLOCK_ID);
-            let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
-            let consumer = act
-                * (phases[program::PHASE_WORDS].clone() * p(program::COL_WORD_FIRST)
-                    + phases[program::PHASE_HASH].clone() * p(program::COL_HASH_FIRST));
             batch.insert(
                 "consumer",
-                consumer,
+                B::Expr::ONE,
                 Sha256RoundMetadata {
                     block_id: bid,
                     t: v(COL_META_T),
@@ -587,46 +628,22 @@ pub(super) fn eval_lookup_batch<B, V>(
     }
 }
 
-fn v_at<E, V: Copy + Into<E>>(values: &[V; 4], index: usize) -> E {
-    values[index].into()
-}
-
 pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let periods = builder.periodic_values();
-    let periodic: [LB::Expr; NUM_PERIODIC_COLS] =
-        array::from_fn(|i| periods[periodic_col_offset + i].into());
+    let local = current_main(builder.main(), main_col_offset);
+    let periodic = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
     let act: LB::Expr = local[COL_ACT].into();
-    let batches = [
-        LookupKind::Destination,
-        LookupKind::Sources,
-        LookupKind::Input,
-        LookupKind::BytePair(0),
-        LookupKind::BytePair(1),
-        LookupKind::RangePair(0),
-        LookupKind::RangePair(1),
-        LookupKind::MetadataProvider,
-        LookupKind::MetadataConsumer,
-    ];
-    for kind in batches {
-        let degree = lookup_batch_degree(kind, 1);
+    for index in 0..NUM_AUX_COLS {
+        let degree = lookup_column_degree(index);
         builder.next_column(
             |column| {
                 column.group(
                     "sha256",
                     |group| {
-                        group.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |batch| {
-                                eval_lookup_batch(batch, kind, &local, &periodic, act.clone(), 1);
-                            },
-                            degree,
-                        );
+                        eval_lookup_group(group, index, &local, &periodic, act.clone());
                     },
                     degree,
                 );

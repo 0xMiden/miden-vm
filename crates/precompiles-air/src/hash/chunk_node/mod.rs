@@ -1,29 +1,36 @@
-//! Chunk and Keccak transcript-DAG node bands sharing one row range,
-//! composed into the merged hash chiplet by
-//! [`crate::hash::chunk_node_sponge::ChunkNodeSpongeAir`].
+//! Chunk and Keccak-node records serialized into idle sponge cells.
 //!
-//! Both are period-1 (no periodic columns) and run simultaneously on the same rows in disjoint
-//! column ranges. Main columns 0..12 use [`chunk::ChunkAir`]'s layout; columns 12..44 use
-//! [`node::KeccakNodeAir`]'s layout shifted by [`NODE_COL_OFFSET`]. Both layouts are evaluated
-//! directly on every row.
+//! Each 32-row sponge period reserves rows 17 through 23 for one seven-phase node record, row 24
+//! for a chunk, and rows 26 through 31 for six more chunks. Six persistent columns carry the node
+//! heads/activity and chunk sequence/id/activity. The payload cells are shared with the sponge.
 //!
-//! The 22 lookup interactions are repacked into six columns with shape `[3, 3, 4, 4, 4, 4]`.
-//! Column 0 contains three linear chunk-memory interactions and drives the centered accumulator.
-//! The four four-interaction columns reach degree five, which is the composite's degree bound.
+//! Node phases authenticate the request and chunk count (17), permutation count (18), digest
+//! lanes and their Eidos block (19..21), input and digest hashes (21..23), then the node hash
+//! and truth binding (23). The eight-felt digest and node blocks read four local payload cells
+//! and four cells from the next phase. Hold equations keep metadata live through its last use;
+//! namespace heads advance only after their last consumer.
 
+use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{Felt, deferred::DEFERRED_CHUNKS_DOMAIN, field::PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    deferred::DEFERRED_CHUNKS_DOMAIN,
+    field::{Algebra, PrimeCharacteristicRing},
+};
 use miden_lifted_air::{AirBuilder, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
 
 use crate::{
     hash::{
-        chunk::{self, ChunkChainMsg},
-        keccak::{node, sponge::KeccakSpongeMsg},
+        chunk::ChunkChainMsg,
+        keccak::{
+            node,
+            sponge::{self, KeccakSpongeMsg},
+        },
         memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     },
-    logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
+    logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
     primitives::byte_pair_lut::BytePairLutMsg,
     transcript::{
         binding::BindingMsg,
@@ -33,457 +40,395 @@ use crate::{
     utils::{current_main, next_main},
 };
 
-// COLUMN LAYOUT
-// ================================================================================================
+pub const NUM_MAIN_COLS: usize = 47;
+pub const NUM_AUX_COLS: usize = 2;
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3];
+pub const COL_NODE_ACT: usize = 40;
+pub const COL_SPONGE_HEAD: usize = 41;
+pub const COL_CHUNK_HEAD: usize = 42;
+pub const COL_CHUNK_SEQ: usize = 43;
+pub const COL_CHUNK_ID: usize = 44;
+pub const COL_CHUNK_ACT: usize = 45;
+pub const COL_NODE_PERMS: usize = 16;
+pub const COL_NODE_ID: usize = COL_NODE_PERMS;
+pub const COL_NODE_CHUNKS: usize = 17;
+pub const COL_INPUT_ID: usize = 18;
+pub const COL_OUT_MULT: usize = COL_INPUT_ID;
+pub const COL_LEN: usize = 19;
+pub const COL_DIGEST_ID: usize = 20;
+pub const PAYLOAD: [usize; 4] = [21, 22, 23, 46];
+pub const COL_REMAINDER: usize = PAYLOAD[0];
+pub const COL_CHUNKS_INV: usize = PAYLOAD[1];
+/// ChunkAir's twelve logical columns on the capacity row.
+pub const CHUNK_CAPACITY_COLUMNS: [usize; 12] = [43, 44, 45, 16, 17, 18, 19, 20, 21, 22, 23, 46];
+/// ChunkAir's twelve logical columns on rows 26 through 31.
+pub const CHUNK_LATE_COLUMNS: [usize; 12] = [43, 44, 45, 14, 15, 24, 25, 26, 27, 28, 29, 30];
+pub const NODE_ROW_START: usize = 17;
+pub const CHUNK_ROWS: [usize; 7] = [24, 26, 27, 28, 29, 30, 31];
 
-/// Keccak-node's main columns start after the chunk columns.
-pub const NODE_COL_OFFSET: usize = chunk::NUM_MAIN_COLS;
+const PERIODIC_OFFSET: usize = sponge::NUM_PERIODIC_COLS;
+const P_CHUNK_CAPACITY: usize = 7;
+const P_CHUNK_LATE: usize = 8;
+const P_NEXT_CHUNK: usize = 9;
+const _: () = assert!(sponge::NUM_MAIN_COLS == 40 && sponge::SPONGE_PERIOD == 32);
 
-pub const NUM_MAIN_COLS: usize = chunk::NUM_MAIN_COLS + node::NUM_MAIN_COLS;
-
-/// Eight auxiliary columns. Together with the sponge's 12 columns, these give the composite its
-/// 20-column auxiliary trace.
-pub const NUM_AUX_COLS: usize = 8;
-
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3, 4, 4, 4, 4, 2, 1];
-
-// CONSTRAINTS
-// ================================================================================================
-
-/// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    // Chunk constraints.
-    {
-        let local: [AB::Var; chunk::NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-        let next: [AB::Var; chunk::NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-
-        let chunk_seq_id: AB::Expr = local[chunk::COL_CHUNK_SEQ_ID].into();
-        let chunk_seq_id_next: AB::Expr = next[chunk::COL_CHUNK_SEQ_ID].into();
-        let absorption_id: AB::Expr = local[chunk::COL_ABSORPTION_ID].into();
-        let absorption_id_next: AB::Expr = next[chunk::COL_ABSORPTION_ID].into();
-        let act: AB::Expr = local[chunk::COL_ACT].into();
-        let act_next: AB::Expr = next[chunk::COL_ACT].into();
-        let is_head: AB::Expr = local[chunk::COL_IS_HEAD].into();
-        let is_head_next: AB::Expr = next[chunk::COL_IS_HEAD].into();
-
-        builder.when_first_row().assert_zero(chunk_seq_id.clone());
-
-        builder
-            .when_transition()
-            .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
-
-        builder.when_transition().assert_zero(
-            (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
-        );
-
-        builder.assert_bool(local[chunk::COL_ACT]);
-        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
-
-        builder.assert_bool(local[chunk::COL_IS_HEAD]);
-        builder.assert_zero(is_head * (AB::Expr::ONE - act));
+pub(crate) fn periodic_columns() -> Vec<Vec<Felt>> {
+    let mut columns = vec![vec![Felt::ZERO; 32]; 10];
+    for phase in 0..7 {
+        columns[phase][NODE_ROW_START + phase] = Felt::ONE;
     }
+    columns[P_CHUNK_CAPACITY][24] = Felt::ONE;
+    columns[P_CHUNK_LATE][26..32].fill(Felt::ONE);
+    for row in CHUNK_ROWS {
+        columns[P_NEXT_CHUNK][row - 1] = Felt::ONE;
+    }
+    columns
+}
 
-    // Keccak-node constraints.
-    {
-        let local: [AB::Var; node::NUM_MAIN_COLS] =
-            current_main(builder.main(), main_col_offset + NODE_COL_OFFSET);
-        let next: [AB::Var; node::NUM_MAIN_COLS] =
-            next_main(builder.main(), main_col_offset + NODE_COL_OFFSET);
+pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+    let p: [AB::Expr; 10] =
+        array::from_fn(|i| builder.periodic_values()[PERIODIC_OFFSET + i].into());
+    let last: AB::Expr = builder.periodic_values()[sponge::program::COL_LAST].into();
+    let v = |i: usize| -> AB::Expr { local[i].into() };
+    let nv = |i: usize| -> AB::Expr { next[i].into() };
+    let one = AB::Expr::ONE;
+    let node_act = v(COL_NODE_ACT);
+    builder.assert_bool(local[COL_NODE_ACT]);
+    builder
+        .when_transition()
+        .assert_zero((one.clone() - node_act.clone()) * nv(COL_NODE_ACT));
+    builder
+        .when_transition()
+        .assert_zero((one.clone() - last) * (nv(COL_NODE_ACT) - node_act.clone()));
+    for column in [COL_SPONGE_HEAD, COL_CHUNK_HEAD, COL_CHUNK_SEQ] {
+        builder.when_first_row().assert_zero(local[column]);
+    }
+    builder.when_transition().assert_zero(
+        nv(COL_SPONGE_HEAD)
+            - v(COL_SPONGE_HEAD)
+            - p[3].clone() * v(COL_NODE_PERMS) * Felt::from_u8(32),
+    );
+    builder
+        .when_transition()
+        .assert_zero(nv(COL_CHUNK_HEAD) - v(COL_CHUNK_HEAD) - p[6].clone() * v(COL_NODE_CHUNKS));
 
-        let act: AB::Expr = local[node::COL_ACT].into();
-        let act_next: AB::Expr = next[node::COL_ACT].into();
-        let out_mult: AB::Expr = local[node::COL_OUT_MULT].into();
+    // Each value is held from its first authenticated use through its last consumer. These
+    // intervals stop before the same cells take a new role or become chunk payload.
+    for (column, phases) in [
+        (COL_NODE_PERMS, &[0, 1, 2, 4, 5][..]),
+        (COL_NODE_CHUNKS, &[0, 1, 2, 3, 4, 5][..]),
+        (COL_INPUT_ID, &[0, 1, 2, 3][..]),
+        (COL_LEN, &[0, 1, 2, 3, 4][..]),
+        (COL_DIGEST_ID, &[2, 3, 4][..]),
+    ] {
+        let hold = phases.iter().map(|&i| p[i].clone()).sum::<AB::Expr>();
+        builder.when_transition().assert_zero(hold * (nv(column) - v(column)));
+    }
+    node::eval_chunk_count(
+        builder,
+        p[0].clone() * node_act.clone(),
+        v(COL_LEN),
+        v(COL_NODE_CHUNKS),
+        v(COL_CHUNKS_INV),
+        v(COL_REMAINDER),
+    );
+    builder.assert_zero(p[6].clone() * (one.clone() - node_act) * v(COL_OUT_MULT));
 
-        let sponge_seq_id_head: AB::Expr = local[node::COL_SPONGE_SEQ_ID_HEAD].into();
-        let sponge_seq_id_head_next: AB::Expr = next[node::COL_SPONGE_SEQ_ID_HEAD].into();
-        let n_sponge_perms: AB::Expr = local[node::COL_N_SPONGE_PERMS].into();
-
-        let chunk_seq_id_head: AB::Expr = local[node::COL_CHUNK_SEQ_ID_HEAD].into();
-        let chunk_seq_id_head_next: AB::Expr = next[node::COL_CHUNK_SEQ_ID_HEAD].into();
-        let n_chunks: AB::Expr = local[node::COL_N_CHUNKS].into();
-
-        let _ = next[node::COL_ABSORPTION_ID_CHUNKS];
-
-        builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
-        builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
-
-        builder.assert_bool(local[node::COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
-        node::eval_chunk_count(builder, &local);
-
-        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
-
+    let chunk = p[P_CHUNK_CAPACITY].clone() + p[P_CHUNK_LATE].clone();
+    let entering = p[P_NEXT_CHUNK].clone();
+    let chunk_act = v(COL_CHUNK_ACT);
+    builder.assert_bool(local[COL_CHUNK_ACT]);
+    builder
+        .when_transition()
+        .assert_zero((one.clone() - chunk_act.clone()) * nv(COL_CHUNK_ACT));
+    builder
+        .when_transition()
+        .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ACT) - chunk_act.clone()));
+    builder
+        .when_transition()
+        .assert_zero(nv(COL_CHUNK_SEQ) - v(COL_CHUNK_SEQ) - chunk);
+    builder
+        .when_transition()
+        .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID)));
+    for (mask, columns, entry_mask) in [
+        (p[P_CHUNK_CAPACITY].clone(), CHUNK_CAPACITY_COLUMNS, p[6].clone()),
+        (p[P_CHUNK_LATE].clone(), CHUNK_LATE_COLUMNS, entering - p[6].clone()),
+    ] {
+        let head = v(columns[3]);
+        builder.assert_zero(mask.clone() * head.clone() * (head.clone() - one.clone()));
+        builder.assert_zero(mask * head * (one.clone() - chunk_act.clone()));
         builder.when_transition().assert_zero(
-            act_next.clone()
-                * (sponge_seq_id_head_next
-                    - sponge_seq_id_head
-                    - AB::Expr::from(Felt::from(32u8)) * n_sponge_perms),
+            entry_mask
+                * (one.clone() - nv(columns[3]))
+                * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID) - one.clone()),
         );
-        builder
-            .when_transition()
-            .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
     }
 }
 
-// LOOKUPS
-// ================================================================================================
+pub(crate) fn eval_lookups<LB: LookupBuilder<F = Felt>>(builder: &mut LB) {
+    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+    let p: [LB::Expr; 10] =
+        array::from_fn(|i| builder.periodic_values()[PERIODIC_OFFSET + i].into());
+    for index in 0..NUM_AUX_COLS {
+        let degree = Deg { v: 4 + index, u: 4 };
+        builder.next_column(
+            |column| {
+                column.group(
+                    "chunk-and-node",
+                    |group| {
+                        for (mask, columns) in [
+                            (p[P_CHUNK_CAPACITY].clone(), CHUNK_CAPACITY_COLUMNS),
+                            (p[P_CHUNK_LATE].clone(), CHUNK_LATE_COLUMNS),
+                        ] {
+                            group.batch(
+                                "chunk",
+                                mask,
+                                |batch| {
+                                    emit_chunk(batch, index, &columns.map(|c| local[c]));
+                                },
+                                degree,
+                            );
+                        }
+                        if index == 0 {
+                            for (phase, mask) in p[..7].iter().enumerate() {
+                                let count = if phase < 5 { 3 } else { 2 };
+                                let phase_degree = Deg { v: count + 1, u: count + 1 };
+                                group.batch(
+                                    "node",
+                                    mask.clone(),
+                                    |batch| {
+                                        emit_node(batch, phase, &local, &next);
+                                    },
+                                    phase_degree,
+                                );
+                            }
+                        }
+                    },
+                    degree,
+                )
+            },
+            degree,
+        );
+    }
+}
 
-/// Evaluate this component's LogUp columns in a main-trace column band.
-pub(crate) fn eval_lookups<LB>(builder: &mut LB, main_col_offset: usize)
+fn emit_chunk<B: LookupBatch, V: Copy + Into<B::Expr>>(batch: &mut B, index: usize, local: &[V; 12])
 where
-    LB: LookupBuilder<F = Felt>,
+    B::Expr: Algebra<Felt>,
 {
-    // Chunk lookups.
-    let local: [LB::Var; chunk::NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-
-    let chunk_seq_id: LB::Expr = local[chunk::COL_CHUNK_SEQ_ID].into();
-    let absorption_id: LB::Expr = local[chunk::COL_ABSORPTION_ID].into();
-    let act: LB::Expr = local[chunk::COL_ACT].into();
-    let is_head: LB::Expr = local[chunk::COL_IS_HEAD].into();
-    let f: [LB::Expr; chunk::NUM_F] = array::from_fn(|i| local[chunk::COL_F_BEGIN + i].into());
-
-    let chunk_addr_base =
-        Felt::new(CHUNK_ADDR_BASE).expect("CHUNK_ADDR_BASE fits in canonical Goldilocks");
-    let addr0 = LB::Expr::from(chunk_addr_base) + LB::Expr::from(Felt::from(4u8)) * chunk_seq_id;
-    let addr1 = addr0.clone() + LB::Expr::ONE;
-    let addr2 = addr0.clone() + LB::Expr::from(Felt::from(2u8));
-    let addr3 = addr0.clone() + LB::Expr::from(Felt::from(3u8));
-
-    let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
-
-    let pos_act: LB::Expr = act.clone();
-    let pos_act_head: LB::Expr = act * is_head;
-
-    let interaction_deg = Deg { v: 1, u: 1 };
-    let emit_deg = Deg { v: 2, u: 1 };
-    let triple_deg = Deg { v: 3, u: 3 };
-    let emit_triple_deg = Deg { v: 4, u: 3 };
-    let quad_deg = Deg { v: 4, u: 4 };
-
-    // col 0 (running sum): three linear Memory64 interactions. The denominator product has degree
-    // three, so the ungated centered recurrence has degree four.
-    frac_col!(
-        builder,
-        "memory64",
-        triple_deg,
-        (
-            "lane0",
-            neg_act.clone(),
+    let v = |i: usize| -> B::Expr { local[i].into() };
+    let act = v(2);
+    let base = B::Expr::from_u64(CHUNK_ADDR_BASE) + v(0) * B::Expr::from_u8(4);
+    let linear = Deg { v: 1, u: 1 };
+    let lanes = if index == 0 { 0..3 } else { 3..4 };
+    for lane in lanes {
+        batch.insert(
+            "chunk-lane",
+            -act.clone(),
             Memory64Msg {
-                addr: addr0,
-                lo: f[0].clone(),
-                hi: f[1].clone()
+                addr: base.clone() + B::Expr::from_usize(lane),
+                lo: v(4 + 2 * lane),
+                hi: v(5 + 2 * lane),
             },
-            interaction_deg
-        ),
-        (
-            "lane1",
-            neg_act.clone(),
-            Memory64Msg {
-                addr: addr1,
-                lo: f[2].clone(),
-                hi: f[3].clone()
-            },
-            interaction_deg
-        ),
-        (
-            "lane2",
-            neg_act.clone(),
-            Memory64Msg {
-                addr: addr2,
-                lo: f[4].clone(),
-                hi: f[5].clone()
-            },
-            interaction_deg
-        ),
-    );
-
-    let neg_act_head: LB::Expr = LB::Expr::ZERO - pos_act_head;
-    // col 1: the remaining chunk interactions. The ChunkChain emission
-    // has degree-2 multiplicity, so this ordinary column has numerator
-    // degree 4 and denominator degree 3.
-    frac_col!(
-        builder,
-        "chunk-flatten",
-        emit_triple_deg,
-        (
-            "lane3",
-            neg_act,
-            Memory64Msg {
-                addr: addr3,
-                lo: f[6].clone(),
-                hi: f[7].clone()
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-block",
-            pos_act.clone(),
+            linear,
+        );
+    }
+    if index == 1 {
+        batch.insert(
+            "chunk-block",
+            act.clone(),
             EidosBlockMsg {
-                compression_id: absorption_id.clone(),
-                block: f
+                compression_id: v(1),
+                block: array::from_fn(|i| v(4 + i)),
             },
-            interaction_deg
-        ),
-        (
-            "emit",
-            neg_act_head,
-            ChunkChainMsg {
-                chunk_seq_id_head: local[chunk::COL_CHUNK_SEQ_ID].into(),
-                absorption_id_head: absorption_id,
-            },
-            emit_deg
-        ),
-    );
-
-    // Keccak-node lookups.
-    let local: [LB::Var; node::NUM_MAIN_COLS] =
-        current_main(builder.main(), main_col_offset + NODE_COL_OFFSET);
-
-    let act: LB::Expr = local[node::COL_ACT].into();
-    let sponge_seq_id_head: LB::Expr = local[node::COL_SPONGE_SEQ_ID_HEAD].into();
-    let n_sponge_perms: LB::Expr = local[node::COL_N_SPONGE_PERMS].into();
-    let chunk_seq_id_head: LB::Expr = local[node::COL_CHUNK_SEQ_ID_HEAD].into();
-    let n_chunks: LB::Expr = local[node::COL_N_CHUNKS].into();
-    let absorption_id_chunks: LB::Expr = local[node::COL_ABSORPTION_ID_CHUNKS].into();
-    let len_bytes: LB::Expr = local[node::COL_LEN_BYTES].into();
-    let absorption_id_digest_chunks: LB::Expr = local[node::COL_ABSORPTION_ID_DIGEST_CHUNKS].into();
-    let absorption_id_keccak: LB::Expr = local[node::COL_ABSORPTION_ID_KECCAK].into();
-
-    let d: [LB::Expr; node::NUM_D] = array::from_fn(|i| local[node::COL_D_BEGIN + i].into());
-    let h_input_chunks: [LB::Expr; node::NUM_HASH] =
-        array::from_fn(|i| local[node::COL_H_INPUT_CHUNKS_BEGIN + i].into());
-    let h_digest_chunks: [LB::Expr; node::NUM_HASH] =
-        array::from_fn(|i| local[node::COL_H_DIGEST_CHUNKS_BEGIN + i].into());
-    let h_keccak: [LB::Expr; node::NUM_HASH] =
-        array::from_fn(|i| local[node::COL_H_KECCAK_BEGIN + i].into());
-
-    let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
-    let pos_act: LB::Expr = act.clone();
-    let pos_act_x2: LB::Expr = LB::Expr::from(Felt::from(2u8)) * act;
-    let out_mult: LB::Expr = local[node::COL_OUT_MULT].into();
-    let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
-
-    let chunk_ptr_head: LB::Expr = LB::Expr::from(Felt::from(4u8)) * chunk_seq_id_head.clone();
-    let absorption_id_chunks_tail: LB::Expr =
-        absorption_id_chunks.clone() + n_chunks.clone() - LB::Expr::ONE;
-    let digest_addr_base: LB::Expr = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id_head
-        + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
-        - LB::Expr::from(Felt::from(128u8));
-
-    let chunks_frame = [
-        LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
-        LB::Expr::from(Felt::from(8u8)) * n_chunks,
-        LB::Expr::ZERO,
-        LB::Expr::ZERO,
-    ];
-    let digest_chunks_frame = [
-        LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
-        LB::Expr::from(Felt::from(8u8)),
-        LB::Expr::ZERO,
-        LB::Expr::ZERO,
-    ];
-    let keccak_frame = [
-        LB::Expr::from(Keccak256Precompile::domain().as_felt()),
-        LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_OP_ID)),
-        len_bytes.clone(),
-        LB::Expr::ZERO,
-    ];
-    let chunks_initial_cv = initial_cv_from_frame(chunks_frame);
-    let digest_chunks_initial_cv = initial_cv_from_frame(digest_chunks_frame);
-    let keccak_initial_cv = initial_cv_from_frame(keccak_frame);
-    let addr_lane =
-        |j: u8| -> LB::Expr { digest_addr_base.clone() + LB::Expr::from(Felt::from(j)) };
-
-    // col 2: node request, truth binding, chunk-chain consume, and remainder check.
-    let remainder: LB::Expr = local[node::COL_LAST_CHUNK_REM].into();
-    frac_col!(
-        builder,
-        "handshake-and-chunks-digest",
-        quad_deg,
-        (
-            "ks-request",
-            neg_act.clone(),
-            KeccakSpongeMsg {
-                sponge_seq_id: local[node::COL_SPONGE_SEQ_ID_HEAD].into(),
-                chunk_ptr: chunk_ptr_head,
-                len_bytes: len_bytes.clone()
-            },
-            interaction_deg
-        ),
-        (
-            "binding-truth",
-            neg_out_mult,
-            BindingMsg::truth(h_keccak.clone()),
-            interaction_deg
-        ),
-        (
+            linear,
+        );
+        batch.insert(
             "chunk-chain",
-            pos_act.clone(),
+            -act * v(3),
             ChunkChainMsg {
-                chunk_seq_id_head: chunk_seq_id_head.clone(),
-                absorption_id_head: absorption_id_chunks.clone()
+                chunk_seq_id_head: v(0),
+                absorption_id_head: v(1),
             },
-            interaction_deg
-        ),
-        (
-            "chunk-remainder",
-            pos_act.clone(),
-            BytePairLutMsg::from_xor(
-                remainder.clone(),
-                LB::Expr::from(Felt::from(31u8)) - remainder,
-                LB::Expr::from(Felt::from(31u8)),
-            ),
-            interaction_deg
-        ),
-    );
+            Deg { v: 2, u: 1 },
+        );
+    }
+}
 
-    // col 3: the input-chunks boundary and the first two D limbs.
-    frac_col!(
-        builder,
-        "input-chunks-and-d-limbs",
-        quad_deg,
-        (
-            "eidos-out-h-input-chunks",
-            pos_act.clone(),
-            EidosOutMsg {
-                chain_head_id: absorption_id_chunks.clone(),
-                compression_id: absorption_id_chunks_tail,
-                digest: h_input_chunks.clone()
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-init-input-chunks",
-            pos_act.clone(),
-            EidosInitMsg {
-                compression_id: absorption_id_chunks,
-                initial_cv: chunks_initial_cv
-            },
-            interaction_deg
-        ),
-        (
-            "d-lane-0",
-            pos_act_x2.clone(),
-            Memory64Msg {
-                addr: addr_lane(0),
-                lo: d[0].clone(),
-                hi: d[1].clone()
-            },
-            interaction_deg
-        ),
-        (
-            "d-lane-1",
-            pos_act_x2.clone(),
-            Memory64Msg {
-                addr: addr_lane(1),
-                lo: d[2].clone(),
-                hi: d[3].clone()
-            },
-            interaction_deg
-        ),
-    );
-
-    // col 4: the remaining D limbs and the digest-chunks block and initial CV.
-    frac_col!(
-        builder,
-        "d-limbs-and-digest-chunks",
-        quad_deg,
-        (
-            "d-lane-2",
-            pos_act_x2.clone(),
-            Memory64Msg {
-                addr: addr_lane(2),
-                lo: d[4].clone(),
-                hi: d[5].clone()
-            },
-            interaction_deg
-        ),
-        (
-            "d-lane-3",
-            pos_act_x2,
-            Memory64Msg {
-                addr: addr_lane(3),
-                lo: d[6].clone(),
-                hi: d[7].clone()
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-block",
-            pos_act.clone(),
-            EidosBlockMsg {
-                compression_id: absorption_id_digest_chunks.clone(),
-                block: d
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-init-digest-chunks",
-            pos_act.clone(),
-            EidosInitMsg {
-                compression_id: absorption_id_digest_chunks.clone(),
-                initial_cv: digest_chunks_initial_cv
-            },
-            interaction_deg
-        ),
-    );
-
-    // col 5: the digest-chunks output and the Keccak block, initial CV, and output.
-    frac_col!(
-        builder,
-        "digest-and-keccak-eidos",
-        quad_deg,
-        (
-            "eidos-out-digest-chunks",
-            pos_act.clone(),
-            EidosOutMsg {
-                chain_head_id: absorption_id_digest_chunks.clone(),
-                compression_id: absorption_id_digest_chunks,
-                digest: h_digest_chunks.clone()
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-block-keccak",
-            pos_act.clone(),
-            EidosBlockMsg {
-                compression_id: absorption_id_keccak.clone(),
-                block: array::from_fn(|idx| {
-                    if idx < 4 {
-                        h_input_chunks[idx].clone()
-                    } else {
-                        h_digest_chunks[idx - 4].clone()
-                    }
-                })
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-init-keccak",
-            pos_act.clone(),
-            EidosInitMsg {
-                compression_id: absorption_id_keccak.clone(),
-                initial_cv: keccak_initial_cv
-            },
-            interaction_deg
-        ),
-        (
-            "eidos-out-keccak",
-            pos_act,
-            EidosOutMsg {
-                chain_head_id: absorption_id_keccak.clone(),
-                compression_id: absorption_id_keccak,
-                digest: h_keccak
-            },
-            interaction_deg
-        ),
-    );
-
-    node::eval_sponge_perm_count(builder, &local);
+fn emit_node<B: LookupBatch, V: Copy + Into<B::Expr>>(
+    batch: &mut B,
+    phase: usize,
+    local: &[V; NUM_MAIN_COLS],
+    next: &[V; NUM_MAIN_COLS],
+) where
+    B::Expr: Algebra<Felt>,
+{
+    let v = |i: usize| -> B::Expr { local[i].into() };
+    let nv = |i: usize| -> B::Expr { next[i].into() };
+    let act = v(COL_NODE_ACT);
+    let degree = Deg { v: 1, u: 1 };
+    let payload = || PAYLOAD.map(v);
+    let chunks_cv = |n| {
+        initial_cv_from_frame([
+            B::Expr::from(DEFERRED_CHUNKS_DOMAIN),
+            n,
+            B::Expr::ZERO,
+            B::Expr::ZERO,
+        ])
+    };
+    match phase {
+        0 => {
+            batch.insert(
+                "ks-request",
+                -act.clone(),
+                KeccakSpongeMsg {
+                    sponge_seq_id: v(COL_SPONGE_HEAD),
+                    chunk_ptr: v(COL_CHUNK_HEAD) * B::Expr::from_u8(4),
+                    len_bytes: v(COL_LEN),
+                },
+                degree,
+            );
+            batch.insert(
+                "chunk-chain",
+                act.clone(),
+                ChunkChainMsg {
+                    chunk_seq_id_head: v(COL_CHUNK_HEAD),
+                    absorption_id_head: v(COL_INPUT_ID),
+                },
+                degree,
+            );
+            batch.insert(
+                "chunk-remainder",
+                act,
+                BytePairLutMsg::from_xor(
+                    v(COL_REMAINDER),
+                    B::Expr::from_u8(31) - v(COL_REMAINDER),
+                    B::Expr::from_u8(31),
+                ),
+                degree,
+            );
+        },
+        1 => {
+            for message in node::sponge_perm_count_messages(v(COL_LEN), v(COL_NODE_PERMS)) {
+                batch.insert("sponge-count", act.clone(), message, degree);
+            }
+        },
+        2 | 3 => {
+            let addr = v(COL_SPONGE_HEAD) * B::Expr::from_u8(100)
+                + v(COL_NODE_PERMS) * B::Expr::from_u16(3200)
+                - B::Expr::from_u8(128);
+            for lane in 0..2 {
+                batch.insert(
+                    "digest-lane",
+                    act.clone(),
+                    Memory64Msg {
+                        addr: addr.clone() + B::Expr::from_usize(2 * (phase - 2) + lane),
+                        lo: v(PAYLOAD[2 * lane]),
+                        hi: v(PAYLOAD[2 * lane + 1]),
+                    },
+                    degree,
+                );
+            }
+            if phase == 2 {
+                batch.insert(
+                    "digest-block",
+                    act,
+                    EidosBlockMsg {
+                        compression_id: v(COL_DIGEST_ID),
+                        block: array::from_fn(|i| {
+                            if i < 4 { v(PAYLOAD[i]) } else { nv(PAYLOAD[i - 4]) }
+                        }),
+                    },
+                    degree,
+                );
+            } else {
+                batch.insert(
+                    "digest-init",
+                    act,
+                    EidosInitMsg {
+                        compression_id: v(COL_DIGEST_ID),
+                        initial_cv: chunks_cv(B::Expr::from_u8(8)),
+                    },
+                    degree,
+                );
+            }
+        },
+        4 => {
+            batch.insert(
+                "input-out",
+                act.clone(),
+                EidosOutMsg {
+                    chain_head_id: v(COL_INPUT_ID),
+                    compression_id: v(COL_INPUT_ID) + v(COL_NODE_CHUNKS) - B::Expr::ONE,
+                    digest: payload(),
+                },
+                degree,
+            );
+            batch.insert(
+                "node-block",
+                act.clone(),
+                EidosBlockMsg {
+                    compression_id: v(COL_NODE_ID),
+                    block: array::from_fn(
+                        |i| {
+                            if i < 4 { v(PAYLOAD[i]) } else { nv(PAYLOAD[i - 4]) }
+                        },
+                    ),
+                },
+                degree,
+            );
+            batch.insert(
+                "input-init",
+                act,
+                EidosInitMsg {
+                    compression_id: v(COL_INPUT_ID),
+                    initial_cv: chunks_cv(v(COL_NODE_CHUNKS) * B::Expr::from_u8(8)),
+                },
+                degree,
+            );
+        },
+        5 => {
+            batch.insert(
+                "digest-out",
+                act.clone(),
+                EidosOutMsg {
+                    chain_head_id: v(COL_DIGEST_ID),
+                    compression_id: v(COL_DIGEST_ID),
+                    digest: payload(),
+                },
+                degree,
+            );
+            batch.insert(
+                "node-init",
+                act,
+                EidosInitMsg {
+                    compression_id: v(COL_NODE_ID),
+                    initial_cv: initial_cv_from_frame([
+                        B::Expr::from(Keccak256Precompile::domain().as_felt()),
+                        B::Expr::from_u32(Keccak256Precompile::ASSERT_OP_ID),
+                        v(COL_LEN),
+                        B::Expr::ZERO,
+                    ]),
+                },
+                degree,
+            );
+        },
+        6 => {
+            batch.insert(
+                "node-out",
+                act,
+                EidosOutMsg {
+                    chain_head_id: v(COL_NODE_ID),
+                    compression_id: v(COL_NODE_ID),
+                    digest: payload(),
+                },
+                degree,
+            );
+            batch.insert("binding-truth", -v(COL_OUT_MULT), BindingMsg::truth(payload()), degree);
+        },
+        _ => unreachable!(),
+    }
 }

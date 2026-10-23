@@ -7,6 +7,7 @@ extern crate std;
 pub mod air;
 pub mod ec;
 pub mod fixed;
+mod generated;
 pub mod hash;
 pub mod logup;
 pub mod math;
@@ -21,5 +22,5 @@ pub mod transcript;
 pub mod uint;
 pub mod utils;
 
-pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+pub use air::{ChipletAir, ChipletMultiAir, HandwrittenChipletAir, NUM_CHIPLETS};
 pub use protocol::PVM_RELATION_DIGEST;

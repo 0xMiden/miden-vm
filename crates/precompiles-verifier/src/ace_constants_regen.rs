@@ -3,15 +3,15 @@
 //! One order-invariant circuit serves every proof ordering, so `--write` builds that circuit,
 //! mints its digest and the relation digest derived from it, and emits the memory layout, the
 //! out-of-domain ingest hook, and the constraint evaluator from the same circuit metadata.
-//! `--check` recomputes the same artifacts, compares the digests and circuit shape against the
-//! constants compiled into `ace_constants.rs`, then byte-compares every rendered file against its
-//! checked-in copy. For `ace_constants.rs` and `sys/pvm/mod.masm` themselves the byte comparison
-//! is close to tautological, since their rendering substitutes those already-checked values into
-//! the checked-in file's own template; the real coverage for those two paths is the value
-//! comparison above, not the byte comparison.
+//! `--check` recomputes the same artifacts, compares the digests, setup commitments and circuit
+//! shape against the constants compiled into `ace_constants.rs`, then byte-compares every rendered
+//! file against its checked-in copy. For `ace_constants.rs` and `sys/pvm/mod.masm` the byte
+//! comparison is close to tautological, since their rendering substitutes those already-checked
+//! values into the checked-in file's own template; the real coverage for those two paths is the
+//! value comparison above, not the byte comparison.
 
 use std::{
-    fmt::Write as _,
+    fmt::{Display, Write as _},
     format, io, println,
     string::{String, ToString},
     vec::Vec,
@@ -25,12 +25,18 @@ use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_lifted_air::BaseAir;
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
+use miden_precompiles_air::{
+    ChipletAir, NUM_CHIPLETS,
+    preprocessed::build_uncached,
+    security as pvm_security,
+    stark_config::{blake3_256_config, eidos_config, keccak_config, precompile_pcs_params},
+};
 
 use crate::{
     ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},
     ace_constants::{
-        GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
+        GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_BLAKE3_PREPROCESSED_COMMITMENT,
+        PVM_CIRCUIT_SHAPE, PVM_EIDOS_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
         PVM_RELATION_DIGEST, relation_digest_for_circuit,
     },
     pvm_ood_frames::{
@@ -78,13 +84,8 @@ struct GeneratedArtifacts {
     circuit_digest: Word,
     /// Relation digest binding that circuit into the Fiat-Shamir transcript.
     relation_digest: [Felt; 4],
-    /// Commitment to the preprocessed (setup) LDE tree under the Eidos config —
-    /// the configuration an in-VM verifier targets.
-    ///
-    /// This is a trusted verifier input rather than proof data: the Rust verifier
-    /// rebuilds the bundle locally, but a MASM verifier has no way to, so it must be
-    /// pinned as a protocol constant and observed into the transcript.
-    preprocessed_commitment: Word,
+    /// Trusted setup roots for native verification and Eidos recursive verification.
+    preprocessed_commitments: PreprocessedCommitments,
     /// Shape of the encoded circuit stream.
     shape: CircuitShape,
     /// Generated PVM relation layout, derived from the ACE `InputLayout`.
@@ -255,7 +256,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+        precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -266,7 +267,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     };
     let circuit_digest = circuit.commitment;
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
-    let preprocessed_commitment = preprocessed_commitment(relation_digest);
+    let preprocessed_commitments = preprocessed_commitments(relation_digest);
 
     let geometry = PvmOodGeometry::from_input_layout(input_layout)?;
     let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
@@ -287,7 +288,10 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
     for (prefix, word) in [
         ("RELATION_DIGEST", Word::new(relation_digest)),
-        ("PREPROCESSED_COMMITMENT", preprocessed_commitment),
+        (
+            "PREPROCESSED_COMMITMENT",
+            Word::new(preprocessed_commitments.eidos.map(Felt::new_unchecked)),
+        ),
     ] {
         for (index, felt) in word.iter().enumerate() {
             replace_masm_const(
@@ -327,20 +331,26 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
 
     let mut constants_rs = read_generated_file(CONSTANTS_PATH)?;
-    for (name, word) in [
-        ("PVM_RELATION_DIGEST", Word::new(relation_digest)),
-        ("PVM_ACE_CIRCUIT_DIGEST", circuit_digest),
-        ("PVM_PREPROCESSED_COMMITMENT", preprocessed_commitment),
+    for (name, limbs) in [
+        ("PVM_RELATION_DIGEST", relation_digest.map(|felt| felt.as_canonical_u64())),
+        ("PVM_ACE_CIRCUIT_DIGEST", circuit_digest.map(|felt| felt.as_canonical_u64())),
+        ("PVM_EIDOS_PREPROCESSED_COMMITMENT", preprocessed_commitments.eidos),
+        ("PVM_KECCAK_PREPROCESSED_COMMITMENT", preprocessed_commitments.keccak),
     ] {
-        replace_limb_array_const(&mut constants_rs, name, &word)?;
+        replace_array_const(&mut constants_rs, name, &limbs)?;
     }
+    replace_array_const(
+        &mut constants_rs,
+        "PVM_BLAKE3_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.blake3,
+    )?;
     replace_shape_const(&mut constants_rs, shape)?;
     let protocol_rs = render_protocol(&relation_digest);
 
     Ok(GeneratedArtifacts {
         circuit_digest,
         relation_digest,
-        preprocessed_commitment,
+        preprocessed_commitments,
         shape,
         layout_masm,
         ood_frames_masm,
@@ -352,19 +362,23 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     })
 }
 
-/// Commitment to the setup (preprocessed) trace tree under the Eidos config.
+struct PreprocessedCommitments {
+    blake3: [u8; 32],
+    eidos: [u64; 4],
+    keccak: [u64; 4],
+}
+
+/// Recompute setup commitments with the production configuration factories.
 ///
-/// Built through the same cache the prover and Rust verifier use, seeded with the freshly
-/// minted relation digest, so the config matches production exactly and the minted constant
-/// is by construction the value they observe into the transcript. (The commitment itself
-/// is digest-independent; threading the digest avoids relying on that property here.)
-fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
-    let params = miden_precompiles_air::stark_config::precompile_pcs_params();
-    let config = miden_precompiles_air::stark_config::eidos_config(params, digest);
-    // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
-    let commitment: [u64; 4] =
-        miden_precompiles_air::preprocessed::build_uncached(&config).commitment().into();
-    Word::new(commitment.map(Felt::new_unchecked))
+/// The fresh relation digest keeps these configurations aligned with the generated protocol.
+/// Byte and u64 hash limbs stay in their native representations; only Eidos limbs are field values.
+fn preprocessed_commitments(digest: [Felt; 4]) -> PreprocessedCommitments {
+    let params = precompile_pcs_params();
+    PreprocessedCommitments {
+        blake3: build_uncached(&blake3_256_config(params, digest)).commitment().into(),
+        eidos: build_uncached(&eidos_config(params, digest)).commitment().into(),
+        keccak: build_uncached(&keccak_config(params, digest)).commitment().into(),
+    }
 }
 
 /// Relation-local scratch that follows the ACE READ section, in allocation order.
@@ -691,15 +705,17 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
     for (name, actual, expected) in [
         ("PVM_RELATION_DIGEST", PVM_RELATION_DIGEST, artifacts.relation_digest),
         ("PVM_ACE_CIRCUIT_DIGEST", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
-        (
-            "PVM_PREPROCESSED_COMMITMENT",
-            PVM_PREPROCESSED_COMMITMENT,
-            *artifacts.preprocessed_commitment,
-        ),
     ] {
         if actual.map(Felt::new_unchecked) != expected {
             return Err(format!("{name} in {CONSTANTS_PATH} is stale"));
         }
+    }
+    let commitments = &artifacts.preprocessed_commitments;
+    if PVM_BLAKE3_PREPROCESSED_COMMITMENT != commitments.blake3
+        || PVM_EIDOS_PREPROCESSED_COMMITMENT != commitments.eidos
+        || PVM_KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
+    {
+        return Err(format!("preprocessed commitments in {CONSTANTS_PATH} are stale"));
     }
     if PVM_CIRCUIT_SHAPE
         != (
@@ -759,7 +775,7 @@ fn write_generated_file(relative: &str, contents: &str) -> io::Result<()> {
 fn replace_masm_const(
     content: &mut String,
     name: &str,
-    value: impl core::fmt::Display,
+    value: impl Display,
     path: &str,
 ) -> Result<(), String> {
     let prefix = format!("const {name} = ");
@@ -807,10 +823,13 @@ fn render_protocol(relation_digest: &[Felt; 4]) -> String {
     )
 }
 
-/// Rewrite the initializer of a `pub const NAME: [u64; 4]` declaration.
-fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) -> Result<(), String> {
-    let body: String =
-        word.iter().map(|felt| format!("\n    {},", felt.as_canonical_u64())).collect();
+/// Rewrite an array initializer without changing the constant's declared type.
+fn replace_array_const(
+    content: &mut String,
+    name: &str,
+    values: &[impl Display],
+) -> Result<(), String> {
+    let body: String = values.iter().map(|value| format!("\n    {value},")).collect();
     replace_const_initializer(content, name, "[", "];", &format!("{body}\n"))
 }
 
@@ -868,12 +887,10 @@ fn replace_const_initializer(
 mod tests {
     use std::string::String;
 
-    use miden_core::{Felt, Word};
-
     use super::{
         CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PVM_DEEP_QUERIES_PATH,
         PvmOodGeometry, PvmReadLayout, apply_pvm_deep_query_geometry, pvm_scratch_allocation,
-        read_generated_file, render_pvm_deep_queries, replace_limb_array_const, replace_masm_const,
+        read_generated_file, render_pvm_deep_queries, replace_array_const, replace_masm_const,
         replace_shape_const,
     };
 
@@ -932,11 +949,16 @@ mod tests {
     #[test]
     fn generated_rust_constants_are_rewritten_in_place() {
         let mut source = String::from(
-            "/// doc\npub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [0, 0, 0, 0];\n\npub const \
+            "/// doc\npub const PVM_KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = [0, 0, 0, 0];\n\npub const \
              PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (0, 0, 0);\n",
         );
-        let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap();
+        // Keccak digest limbs need not be canonical field elements.
+        replace_array_const(
+            &mut source,
+            "PVM_KECCAK_PREPROCESSED_COMMITMENT",
+            &[u64::MAX, 2, 3, 4],
+        )
+        .unwrap();
         replace_shape_const(
             &mut source,
             CircuitShape {
@@ -948,8 +970,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             source,
-            "/// doc\npub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    1,\n    2,\n    3,\n    \
-             4,\n];\n\npub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (5, 6, 8);\n"
+            "/// doc\npub const PVM_KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = [\n    \
+             18446744073709551615,\n    2,\n    3,\n    4,\n];\n\npub const PVM_CIRCUIT_SHAPE: \
+             (usize, usize, usize) = (5, 6, 8);\n"
         );
     }
 
@@ -961,8 +984,7 @@ mod tests {
             "pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [1, 2, 3, 4];\n\npub const \
              PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n",
         );
-        let word = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_RELATION_DIGEST", &word).unwrap();
+        replace_array_const(&mut source, "PVM_RELATION_DIGEST", &[5u64, 6, 7, 8]).unwrap();
         assert_eq!(
             source,
             "pub const PVM_RELATION_DIGEST: [u64; 4] = [\n    5,\n    6,\n    7,\n    8,\n];\n\n\
@@ -972,7 +994,6 @@ mod tests {
 
     #[test]
     fn generated_rust_constant_replacement_fails_closed_when_absent_or_malformed() {
-        let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
         let following = "pub const OTHER: [u64; 4] = [9, 8, 7, 6];\n";
         for (malformed, expected_error) in [
             (String::new(), "not found"),
@@ -991,7 +1012,8 @@ mod tests {
             let original = source.clone();
 
             let error =
-                replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap_err();
+                replace_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &[1u64, 2, 3, 4])
+                    .unwrap_err();
 
             assert!(error.contains(expected_error), "unexpected error: {error}");
             assert_eq!(source, original);
