@@ -359,9 +359,9 @@ fn test_operation_encoded_size_push_varint_boundaries() {
 
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let forest = canonicalized_for_test(forest);
+    assert_size_hints_match_serialized_lengths(&forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
-    assert_eq!(forest.get_size_hint(), bytes.len());
 
     let view = MastForestWireView::new(&bytes).unwrap();
     assert_eq!(view.node_count(), forest.nodes().len());
@@ -389,22 +389,22 @@ fn canonicalized_for_test(forest: &MastForest) -> MastForest {
 }
 
 #[test]
-fn mast_forest_size_hint_matches_serialized_len() {
+fn mast_forest_size_hints_match_serialized_lengths() {
     let mut forest = MastForest::new();
-    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+    assert_size_hints_match_serialized_lengths(&forest);
 
     let external = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
     forest.make_root(external);
-    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+    assert_size_hints_match_serialized_lengths(&forest);
 
     let block = BasicBlockNodeBuilder::new(sample_basic_block_operations_all_variants())
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block);
-    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+    assert_size_hints_match_serialized_lengths(&forest);
 
     forest.advice_map.insert(Word::default(), Vec::<Felt>::new());
-    assert_eq!(forest.get_size_hint(), forest.to_bytes().len());
+    assert_size_hints_match_serialized_lengths(&forest);
 
     for count in [0, 1, 127, 128, 255, 256] {
         let mut forest = forest.clone();
@@ -416,8 +416,32 @@ fn mast_forest_size_hint_matches_serialized_len() {
             let key = Word::new([Felt::from_u32(i as u32), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
             forest.advice_map.insert(key, vec![Felt::from_u32(42); count]);
         }
-        assert_eq!(forest.get_size_hint(), forest.to_bytes().len(), "count: {count}");
+        assert_size_hints_match_serialized_lengths(&forest);
     }
+}
+
+#[test]
+fn mast_forest_hashless_size_hint_preserves_external_digests() {
+    for count in [1, 127, 128, 255, 256] {
+        let mut forest = MastForest::new();
+        for i in 0..count {
+            let digest = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            let external = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest).unwrap();
+            forest.make_root(external);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+        assert_eq!(forest.hashless_size_hint(), forest.get_size_hint());
+    }
+}
+
+fn assert_size_hints_match_serialized_lengths(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_into(&mut bytes);
+    assert_eq!(forest.get_size_hint(), bytes.len());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    assert_eq!(forest.hashless_size_hint(), hashless_bytes.len());
 }
 
 #[test]

@@ -225,6 +225,12 @@ impl Serializable for MastForest {
 
     /// Returns the exact serialized size in bytes without allocating or serializing the forest.
     fn get_size_hint(&self) -> usize {
+        self.serialized_size_hint(false)
+    }
+}
+
+impl MastForest {
+    pub(super) fn serialized_size_hint(&self, hashless: bool) -> usize {
         let node_count = self.nodes.len();
         let external_count = self.nodes.iter().take_while(|node| node.is_external()).count();
         let internal_count = node_count - external_count;
@@ -242,14 +248,13 @@ impl Serializable for MastForest {
             })
             .sum();
         size += basic_block_len.get_size_hint() + basic_block_len;
-        // Every node has one fixed-width entry and one digest, including external nodes.
-        size += node_count * (MastNodeEntry::SERIALIZED_SIZE + Word::SERIALIZED_SIZE);
+        size += node_count * MastNodeEntry::SERIALIZED_SIZE;
+        let digest_count = if hashless { external_count } else { node_count };
+        size += digest_count * Word::SERIALIZED_SIZE;
         size += self.advice_map.get_size_hint();
         size
     }
-}
 
-impl MastForest {
     /// Internal serialization with options.
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.

@@ -661,6 +661,14 @@ impl MastForest {
     pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
         serialization::write_hashless_into(self, target);
     }
+
+    /// Returns the exact size in bytes produced by [`Self::write_hashless`] without allocating
+    /// or serializing the forest.
+    ///
+    /// This includes external node digests and omits rebuildable internal node hashes.
+    pub fn hashless_size_hint(&self) -> usize {
+        self.serialized_size_hint(true)
+    }
 }
 
 /// Validation methods
