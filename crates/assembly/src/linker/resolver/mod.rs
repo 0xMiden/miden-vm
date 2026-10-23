@@ -104,8 +104,8 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
         match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Constant(_)) => return Ok(()),
             SymbolItem::Constant(item) => {
-                let expr = item.value.clone();
-                let eval_span = item.value.span();
+                let expr = item.value().clone();
+                let eval_span = item.value().span();
                 if let Some(start) = self.cache.evaluating_constants.get(&gid).copied() {
                     return Err(ConstEvalError::eval_cycle(start, span, self).into());
                 }

@@ -359,6 +359,22 @@ fn simple_constant() -> TestResult {
 }
 
 #[test]
+fn typed_constant_assembles() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    const N: u8 = 42
+    begin
+        push.N
+    end"
+    );
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
 fn enum_explicit_discriminants() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
@@ -1383,6 +1399,62 @@ fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
     Assembler::new(context.source_manager())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
         .assemble_program("program", program)?;
+
+    Ok(())
+}
+
+#[test]
+fn link_time_event_constant_alias_resolves() -> TestResult {
+    let context = TestContext::default();
+    let events = parse_module!(
+        &context,
+        r#"
+            namespace lib::events
+
+            pub const EVENT = event("lib::something_happened")
+
+            pub proc noop
+                nop
+            end
+        "#
+    );
+    let lib = Assembler::new(context.source_manager()).assemble_library(
+        "lib",
+        events,
+        None::<Box<Module>>,
+    )?;
+
+    let source = source_file!(
+        &context,
+        r#"
+            use {EVENT} from lib::events
+
+            const ALIAS = EVENT
+
+            begin
+                emit.ALIAS
+            end
+        "#
+    );
+    let module = context.parse_program(source)?;
+    let alias = module.constants().find(|constant| constant.name().as_str() == "ALIAS").unwrap();
+    assert_eq!(alias.kind(), crate::ast::ConstantKind::Untyped);
+    assert_eq!(alias.event_id(), None);
+    assert!(matches!(alias.value(), crate::ast::ConstantExpr::Var(_)));
+
+    let program = Assembler::new(context.source_manager())
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", module)?
+        .unwrap_program();
+    let expected = context.assemble(source_file!(
+        &context,
+        r#"
+            begin
+                emit.event("lib::something_happened")
+            end
+        "#
+    ))?;
+    assert_eq!(program.hash(), expected.hash());
 
     Ok(())
 }

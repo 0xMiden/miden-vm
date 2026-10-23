@@ -12,6 +12,7 @@
 
 #### Features
 
+- [BREAKING] Added parser, AST, and formatter support for optional constant type annotations (`const NAME: TYPE = expr`). Replaced the public AST `Constant` API with `ConstantDecl`, backed by `ConstantDefinition`, and added `ConstantKind` classification. Callers must update imports, construction, and field access to use the new API. Constants without type annotations remain supported. Annotated constants are accepted by the assembler, but annotations do not yet enforce type constraints or affect constant evaluation. Package formats are unchanged ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
 - Restored the standalone `miden_crypto::hash::poseidon2` API, including its original digest format, Plonky3 adapters, and SIMD implementations, for applications with existing Poseidon2 commitments.
 - [BREAKING] Added compact `SmtWitness` transport and CLI input support, including `MerkleData::SmtWitness` and stricter partial-SMT validation. Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes ([#4043](https://github.com/0xMiden/miden-vm/pull/4043)).
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).

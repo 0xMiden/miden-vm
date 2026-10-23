@@ -3,10 +3,11 @@ use std::mem;
 use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        BeginBlock, Block, DoWhileOp, IfOp, Import, ImportKind, ImportSpecifier, Instruction,
-        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, Visibility, WhileOp,
+        AdviceMap, BeginBlock, Block, Constant, DoWhileOp, IfOp, Import, ImportKind,
+        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeAnnotation,
+        TypeBody, TypeDecl, Visibility, WhileOp,
     },
-    rowan::{NodeOrToken, ast::AstNode},
+    rowan::{Direction, NodeOrToken, ast::AstNode},
 };
 
 use crate::config::Config;
@@ -209,11 +210,9 @@ fn render_item(item: &Item, indent: usize, config: &Config) -> String {
         Item::ExternPackage(package) => render_line_form(package.syntax(), indent),
         Item::Submodule(submodule) => render_line_form(submodule.syntax(), indent),
         Item::Import(import) => render_import(import, indent, config),
-        Item::Constant(constant) => render_value_declaration(constant.syntax(), indent, config),
+        Item::Constant(constant) => render_constant(constant, indent, config),
         Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent, config),
-        Item::AdviceMap(advice_map) => {
-            render_value_declaration(advice_map.syntax(), indent, config)
-        },
+        Item::AdviceMap(advice_map) => render_advice_map(advice_map, indent, config),
         Item::BeginBlock(begin) => render_begin_block(begin, indent, config),
         Item::Procedure(procedure) => render_procedure(procedure, indent, config),
     };
@@ -232,12 +231,18 @@ fn render_visibility_comments(visibility: Option<Visibility>, indent: usize) -> 
     let Some(visibility) = visibility else {
         return Vec::new();
     };
+    visibility_comment_tokens(&visibility)
+        .iter()
+        .map(|token| format!("{}{}", indent_string(indent), trimmed_comment(token)))
+        .collect()
+}
+
+fn visibility_comment_tokens(visibility: &Visibility) -> Vec<SyntaxToken> {
     let node = visibility.syntax();
     let mut comments = node
         .descendants_with_tokens()
         .filter_map(NodeOrToken::into_token)
         .filter(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
-        .map(|token| format!("{}{}", indent_string(indent), trimmed_comment(&token)))
         .collect::<Vec<_>>();
 
     if let Some(parent) = node.parent() {
@@ -251,7 +256,7 @@ fn render_visibility_comments(visibility: Option<Visibility>, indent: usize) -> 
                 break;
             }
             if matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) {
-                comments.push(format!("{}{}", indent_string(indent), trimmed_comment(&token)));
+                comments.push(token);
             }
         }
     }
@@ -434,48 +439,140 @@ fn render_single_token(token: SyntaxToken) -> String {
     render_token_sequence(&[token])
 }
 
-fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -> String {
-    let Some(value) = direct_child_of_kind(node, SyntaxKind::Expr) else {
-        return render_line_form(node, indent);
+fn render_constant(constant: &Constant, indent: usize, config: &Config) -> String {
+    let (Some(_), Some(value)) = (constant.name_token(), constant.expr()) else {
+        return render_line_form(constant.syntax(), indent);
     };
 
-    let prefix_tokens = significant_tokens_before_child(node, &value);
-    let value_tokens = significant_tokens(&value);
-
-    let compact = format!(
-        "{}{}",
-        indent_string(indent),
-        render_token_sequence(&combine_tokens(&prefix_tokens, &value_tokens))
-    );
-
-    let mut rendered = if has_comment_token(&value) {
-        let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_expression_with_comments(&value, indent + config.indent_size(), config)
-            .join("\n");
-        format!("{header}\n{body}")
-    } else if line_length(&compact) <= config.max_line_length() {
-        compact
-    } else if config.overflow_delimited_expr()
-        && let Some(rendered) =
-            render_wrapped_value_call(&prefix_tokens, &value_tokens, indent, config)
+    let prefix_tokens = declaration_prefix_tokens(constant.syntax(), value.syntax());
+    let header = if let Some(annotation) = constant.type_annotation()
+        && !has_comment_tokens(&prefix_tokens)
     {
-        rendered
+        render_annotated_constant_prefix(&prefix_tokens, &annotation, indent, config)
     } else {
-        let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_token_lines(&value_tokens, indent + config.indent_size(), true, config)
-            .join("\n");
-        format!("{header}\n{body}")
+        render_declaration_prefix(&prefix_tokens, indent, config)
     };
 
-    if let Some(comment) = direct_comment_token(node) {
+    let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
+    if let Some(comment) = comment_after_child(value.syntax()) {
         append_inline_comment(&mut rendered, &comment);
     }
-
     rendered
 }
 
+fn render_annotated_constant_prefix(
+    tokens: &[SyntaxToken],
+    annotation: &TypeAnnotation,
+    indent: usize,
+    config: &Config,
+) -> String {
+    let tokens = significant_tokens_from(tokens.iter().cloned());
+    let annotation_range = annotation.syntax().text_range();
+    let type_start =
+        tokens.partition_point(|token| token.text_range().start() <= annotation_range.start());
+    let type_end =
+        tokens.partition_point(|token| token.text_range().start() < annotation_range.end());
+    let type_tokens = &tokens[type_start..type_end];
+
+    let head = format!("{}{}", indent_string(indent), render_token_sequence(&tokens[..type_start]));
+    let assignment = render_token_sequence(&tokens[type_end..]);
+    let compact_type = render_inline_type_body(type_tokens);
+    let compact = format!("{head} {compact_type} {assignment}");
+    if line_length(&compact) <= config.max_line_length() {
+        return compact;
+    }
+
+    let wrapped_type =
+        render_wrapped_braced_type_body(type_tokens, indent, config).unwrap_or_else(|| {
+            format!("\n{}{}", indent_string(indent + config.indent_size()), compact_type)
+        });
+    format!("{head}{wrapped_type} {assignment}")
+}
+
+fn render_declaration_prefix(tokens: &[SyntaxToken], indent: usize, config: &Config) -> String {
+    if has_comment_tokens(tokens) {
+        let mut rendered =
+            render_token_stream_with_comments(tokens, indent, SpacingStyle::Default, config)
+                .join("\n");
+
+        // A trailing header comment needs a newline to avoid commenting out the initializer.
+        if tokens
+            .iter()
+            .rev()
+            .find(|token| !matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline))
+            .is_some_and(|token| {
+                matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+            })
+        {
+            rendered.push('\n');
+        }
+        rendered
+    } else {
+        format!(
+            "{}{}",
+            indent_string(indent),
+            render_token_sequence(&significant_tokens_from(tokens.iter().cloned()))
+        )
+    }
+}
+
+fn render_advice_map(advice_map: &AdviceMap, indent: usize, config: &Config) -> String {
+    let Some(value) = advice_map.value_expr() else {
+        return render_line_form(advice_map.syntax(), indent);
+    };
+
+    let prefix_tokens = declaration_prefix_tokens(advice_map.syntax(), value.syntax());
+    let header = render_declaration_prefix(&prefix_tokens, indent, config);
+
+    let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
+    if let Some(comment) = comment_after_child(value.syntax()) {
+        append_inline_comment(&mut rendered, &comment);
+    }
+    rendered
+}
+
+fn render_assigned_value(
+    header: String,
+    value: &SyntaxNode,
+    indent: usize,
+    config: &Config,
+) -> String {
+    let has_comments = has_comment_token(value);
+    if has_comments || header.ends_with('\n') {
+        let body = if has_comments {
+            render_expression_with_comments(value, indent + config.indent_size(), config)
+        } else {
+            render_token_lines(
+                &significant_tokens(value),
+                indent + config.indent_size(),
+                false,
+                config,
+            )
+        }
+        .join("\n");
+        let separator = if header.ends_with('\n') { "" } else { "\n" };
+        return format!("{header}{separator}{body}");
+    }
+
+    let value_tokens = significant_tokens(value);
+    let compact = format!("{header} {}", render_token_sequence(&value_tokens));
+    if line_length(compact.lines().last().unwrap_or_default()) <= config.max_line_length() {
+        return compact;
+    }
+
+    if config.overflow_delimited_expr()
+        && let Some(rendered) = render_wrapped_value_call(&header, &value_tokens, indent, config)
+    {
+        return rendered;
+    }
+
+    let body =
+        render_token_lines(&value_tokens, indent + config.indent_size(), true, config).join("\n");
+    format!("{header}\n{body}")
+}
+
 fn render_wrapped_value_call(
-    prefix_tokens: &[SyntaxToken],
+    prefix: &str,
     value_tokens: &[SyntaxToken],
     indent: usize,
     config: &Config,
@@ -486,9 +583,8 @@ fn render_wrapped_value_call(
         return None;
     }
 
-    let header_tokens = combine_tokens(prefix_tokens, &value_tokens[..=open_index]);
-    let header = format!("{}{}", indent_string(indent), render_token_sequence(&header_tokens));
-    if line_length(&header) > config.max_line_length() {
+    let header = format!("{prefix} {}", render_token_sequence(&value_tokens[..=open_index]));
+    if line_length(header.lines().last().unwrap_or_default()) > config.max_line_length() {
         return None;
     }
 
@@ -564,7 +660,8 @@ fn render_type_body(
         .filter_map(NodeOrToken::into_token)
         .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment));
 
-    let compact_body = render_inline_type_body(body);
+    let tokens = significant_tokens(body.syntax());
+    let compact_body = render_inline_type_body(&tokens);
     if !has_multiline_body
         && !has_comment
         && prefix_width + 1 + line_length(&compact_body) <= config.max_line_length()
@@ -573,7 +670,7 @@ fn render_type_body(
     }
 
     if !has_multiline_body && !has_comment {
-        if let Some(braced_body) = render_wrapped_braced_type_body(body, indent, config) {
+        if let Some(braced_body) = render_wrapped_braced_type_body(&tokens, indent, config) {
             return braced_body;
         }
         return format!("\n{}{}", indent_string(indent + config.indent_size()), compact_body);
@@ -1126,14 +1223,15 @@ fn render_compact_tokens(node: &SyntaxNode) -> String {
     render_token_sequence(&significant_tokens(node))
 }
 
+/// Renders a braced type body with one item per line. `tokens` contains significant tokens from
+/// a type declaration body or constant annotation.
 fn render_wrapped_braced_type_body(
-    body: &TypeBody,
+    tokens: &[SyntaxToken],
     indent: usize,
     config: &Config,
 ) -> Option<String> {
-    let tokens = significant_tokens(body.syntax());
     let (open_index, close_index) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
+        outer_group_indices(tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
 
     let prefix_tokens = &tokens[..=open_index];
     let suffix_tokens = &tokens[close_index..];
@@ -1162,12 +1260,13 @@ fn render_wrapped_braced_type_body(
     Some(rendered)
 }
 
-fn render_inline_type_body(body: &TypeBody) -> String {
-    let tokens = significant_tokens(body.syntax());
+/// Renders a type body inline. `tokens` contains significant tokens from a type declaration body
+/// or constant annotation.
+fn render_inline_type_body(tokens: &[SyntaxToken]) -> String {
     let Some((open_index, close_index)) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
+        outer_group_indices(tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
     else {
-        return render_token_sequence(&tokens);
+        return render_token_sequence(tokens);
     };
 
     let prefix = render_token_sequence(&tokens[..=open_index]);
@@ -1450,8 +1549,12 @@ fn has_comment_token(node: &SyntaxNode) -> bool {
 }
 
 fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
-    node.descendants_with_tokens()
-        .filter_map(NodeOrToken::into_token)
+    significant_tokens_from(node.descendants_with_tokens().filter_map(NodeOrToken::into_token))
+}
+
+fn significant_tokens_from(tokens: impl IntoIterator<Item = SyntaxToken>) -> Vec<SyntaxToken> {
+    tokens
+        .into_iter()
         .filter(|token| {
             !token.kind().is_trivia()
                 && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
@@ -1459,32 +1562,38 @@ fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
         .collect()
 }
 
-fn significant_tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
+/// Collects tokens before `child`, excluding visibility comments as they are rendered separately.
+fn declaration_prefix_tokens(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
     let mut tokens = Vec::new();
+    let mut in_visibility_prologue = false;
 
     for element in node.children_with_tokens() {
         match element {
             NodeOrToken::Node(candidate) if candidate == *child => break,
-            NodeOrToken::Node(candidate) => tokens.extend(significant_tokens(&candidate)),
-            NodeOrToken::Token(token)
-                if !token.kind().is_trivia()
-                    && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
-            {
-                tokens.push(token)
+            NodeOrToken::Node(candidate) => {
+                in_visibility_prologue = candidate.kind() == SyntaxKind::Visibility;
+                let candidate_tokens =
+                    candidate.descendants_with_tokens().filter_map(NodeOrToken::into_token);
+                tokens.extend(candidate_tokens.filter(|token| {
+                    !in_visibility_prologue
+                        || !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+                }));
             },
-            NodeOrToken::Token(_) => (),
+            NodeOrToken::Token(token) => {
+                if !token.kind().is_trivia() {
+                    in_visibility_prologue = false;
+                }
+                if in_visibility_prologue
+                    && matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+                {
+                    continue;
+                }
+                tokens.push(token);
+            },
         }
     }
 
     tokens
-}
-
-fn direct_child_of_kind(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-    node.children().find(|child| child.kind() == kind)
-}
-
-fn combine_tokens(prefix: &[SyntaxToken], suffix: &[SyntaxToken]) -> Vec<SyntaxToken> {
-    prefix.iter().cloned().chain(suffix.iter().cloned()).collect()
 }
 
 fn trim_outer_whitespace_tokens(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
@@ -1620,6 +1729,15 @@ fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
     }
 
     items
+}
+
+fn comment_after_child(child: &SyntaxNode) -> Option<String> {
+    child
+        .siblings_with_tokens(Direction::Next)
+        .skip(1)
+        .filter_map(NodeOrToken::into_token)
+        .find(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        .map(|token| trimmed_comment(&token))
 }
 
 fn direct_comment_token(node: &SyntaxNode) -> Option<String> {
@@ -1846,10 +1964,10 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         Tombstone | Error | SourceFile | Doc | Namespace | ExternPackage | Submodule | Import
         | ImportList | ImportSpecifier | Constant | TypeDecl | AdviceMap | BeginBlock
         | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp | DoWhileOp
-        | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
-        | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
-        | Colon | DotDotDot | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow
-        | Semicolon | Slash | SlashSlash | Star => match previous_kind {
+        | RepeatOp | Instruction | Path | Expr | TypeBody | TypeAnnotation | Whitespace
+        | Newline | Comment | DocComment | Ident | SpecialIdent | Number | QuotedIdent
+        | QuotedString | At | Bang | Colon | DotDotDot | Equal | LBrace | LBracket | LParen
+        | Minus | Plus | RArrow | Semicolon | Slash | SlashSlash | Star => match previous_kind {
             Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
             DotDot => false,
             Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
@@ -1954,7 +2072,14 @@ end
     }
 
     fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) -> String {
-        let config = Config::default();
+        assert_format_idempotent_with_config(input, label, &Config::default())
+    }
+
+    fn assert_format_idempotent_with_config(
+        input: &str,
+        label: impl core::fmt::Display,
+        config: &Config,
+    ) -> String {
         let parse = parse_text(input);
         assert!(
             !parse.has_errors(),
@@ -1962,7 +2087,7 @@ end
             parse.diagnostics()
         );
 
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted = format_syntax(config, &parse.syntax());
         let reparsed = parse_text(&formatted);
         assert!(
             !reparsed.has_errors(),
@@ -1970,7 +2095,7 @@ end
             reparsed.diagnostics()
         );
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(config, &reparsed.syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent for {label}");
         formatted
     }
@@ -2396,6 +2521,434 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn formats_comments_inside_constant_visibility_once() {
+        let source = "\
+pub # after pub
+( # qualifier open
+package # package scope
+) const X = 1
+";
+        let expected = "\
+# after pub
+# qualifier open
+# package scope
+pub(package) const X = 1
+";
+
+        assert_eq!(assert_format_idempotent(source, "constant visibility comments"), expected);
+    }
+
+    #[test]
+    fn preserves_constant_header_comments_matching_visibility_comments() {
+        let source = "pub # same\nconst X # same\n= 1\n";
+        let expected = "# same\npub\nconst X # same\n= 1\n";
+
+        assert_eq!(assert_format_idempotent(source, "matching constant comments"), expected);
+    }
+
+    #[test]
+    fn preserves_comments_outside_constant_annotations() {
+        for (source, expected) in [
+            ("const X = # explanation\n1\n", "const X = # explanation\n    1\n"),
+            ("const X # explanation\n= 1\n", "const X # explanation\n= 1\n"),
+            ("const # explanation\nX=1\n", "const # explanation\nX = 1\n"),
+            ("pub const X # explanation\n:u32=1\n", "pub const X # explanation\n: u32 = 1\n"),
+            (
+                "pub const X:u32= # explanation\n1\n",
+                "pub const X : u32 = # explanation\n    1\n",
+            ),
+            (
+                "const X =\n# explanation\n# more detail\n1\n",
+                "const X =\n# explanation\n# more detail\n    1\n",
+            ),
+            ("const X # name\n= # value\n1\n", "const X # name\n= # value\n    1\n"),
+            ("const X\n=\n1\n", "const X = 1\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
+    fn preserves_constant_header_and_value_comments() {
+        let source = "\
+const WORD = # initializer
+[
+# first element
+1,2,3,4
+] # word
+";
+        let expected = "\
+const WORD = # initializer
+  [
+    # first element
+    1, 2, 3, 4
+  ] # word
+";
+        let config = Config {
+            indent_size: Some(2),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "constant header and value", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn preserves_comments_inside_constant_annotations() {
+        let source = "\
+pub const WORD: [
+# element type
+felt; # element count
+4
+] = [1, 2, 3, 4] # word
+";
+        let expected = "\
+pub const WORD : [
+    # element type
+    felt ; # element count
+    4
+] = [1, 2, 3, 4] # word
+";
+
+        assert_eq!(assert_format_idempotent(source, "commented annotation"), expected);
+    }
+
+    #[test]
+    fn preserves_comments_after_constant_annotations() {
+        let source = "\
+const WORD: [felt; 4] # word type
+= [1, 2, 3, 4]
+";
+        let expected = "\
+const WORD : [felt ; 4] # word type
+= [1, 2, 3, 4]
+";
+
+        assert_eq!(assert_format_idempotent(source, "annotation tail comment"), expected);
+    }
+
+    #[test]
+    fn preserves_annotation_and_value_comments_together() {
+        let source = "\
+const WORD: [
+felt; # element count
+4
+] = [
+# first element
+1, 2, 3, 4
+] # word
+";
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] =
+    [
+        # first element
+        1, 2, 3, 4
+    ] # word
+";
+
+        assert_eq!(assert_format_idempotent(source, "annotation and value comments"), expected);
+    }
+
+    #[test]
+    fn wraps_typed_constant_values_with_multiline_headers() {
+        let source = "\
+const WORD: [
+felt; # element count
+4
+] = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")
+";
+        let config = Config {
+            max_line_length: Some(78),
+            ..Config::default()
+        };
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] =
+    word(
+        \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+    )
+";
+        let formatted = assert_format_idempotent_with_config(source, "long typed value", &config);
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let config = Config {
+            overflow_delimited_expr: Some(true),
+            ..config
+        };
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] = word(
+    \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+)
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "overflow typed value", &config);
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+    }
+
+    #[test]
+    fn formats_constant_type_annotations_with_keyword_path_component() {
+        for (source, expected) in [
+            ("const X: parts::type = 1\n", "const X : parts::type = 1\n"),
+            ("const X: ptr<parts::type> = 1\n", "const X : ptr<parts::type> = 1\n"),
+            ("const X: type::Item = 1\n", "const X : type::Item = 1\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
+    fn keeps_short_struct_annotations_inline() {
+        let source = "pub const VALUE:struct{field:u32}=1\n";
+        let expected = "pub const VALUE : struct { field: u32 } = 1\n";
+
+        assert_eq!(assert_format_idempotent(source, "short struct annotation"), expected);
+    }
+
+    #[test]
+    fn wraps_long_struct_annotations_before_placing_initializers() {
+        let source = "const VALUE: struct { first_field: u32, second_field: u32, third_field: u32, fourth_field: u32, fifth_field: u32 } = 1\n";
+        let expected = "\
+const VALUE : struct {
+    first_field: u32,
+    second_field: u32,
+    third_field: u32,
+    fourth_field: u32,
+    fifth_field: u32,
+} = 1
+";
+        let formatted = assert_format_idempotent(source, "long struct annotation");
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= Config::default().max_line_length()));
+    }
+
+    #[test]
+    fn wraps_struct_annotations_with_custom_width_and_indent() {
+        let source =
+            "pub(package) const VALUE: struct { first: u32, second: u32, third: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(50),
+            indent_size: Some(2),
+            ..Config::default()
+        };
+        let expected = "\
+pub(package) const VALUE : struct {
+  first: u32,
+  second: u32,
+  third: u32,
+} = 1
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "custom struct annotation", &config);
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+    }
+
+    #[test]
+    fn includes_assignment_in_struct_annotation_width() {
+        let source = "const VALUE: struct { a: u32, b: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(40),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    a: u32,
+    b: u32,
+} = 1
+";
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "annotation assignment width", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn keeps_nested_type_commas_inside_wrapped_annotation_fields() {
+        let source = "const VALUE: struct { location: ptr<u8, addrspace(byte)>, other: u32 } = 1\n";
+        let config = Config {
+            max_line_length: Some(60),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    location: ptr<u8, addrspace(byte)>,
+    other: u32,
+} = 1
+";
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "nested annotation type", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn wraps_large_initializers_after_wrapping_struct_annotations() {
+        let source = "const VALUE: struct { first_field: u32, second_field: u32, third_field: u32, fourth_field: u32, fifth_field: u32 } = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")\n";
+        let config = Config {
+            max_line_length: Some(78),
+            ..Config::default()
+        };
+        let expected = "\
+const VALUE : struct {
+    first_field: u32,
+    second_field: u32,
+    third_field: u32,
+    fourth_field: u32,
+    fifth_field: u32,
+} =
+    word(
+        \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+    )
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "wrapped annotation and value", &config);
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+    }
+
+    #[test]
+    fn formats_compact_typed_constants() {
+        let source = "\
+pub const WORD:[felt;4]=[1,2,3,4]
+const VALUE:u32=42
+const MULTILINE: [
+felt;
+4
+] = [1, 2, 3, 4]
+";
+        let expected = "\
+pub const WORD : [felt ; 4] = [1, 2, 3, 4]
+const VALUE : u32 = 42
+const MULTILINE : [felt ; 4] = [1, 2, 3, 4]
+";
+
+        assert_eq!(assert_format_idempotent(source, "compact typed constants"), expected);
+    }
+
+    #[test]
+    fn preserves_explicit_advice_map_keys_and_comments() {
+        let source = "\
+adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000)=[1,2] # table
+adv_map COMMENTED(
+# key
+0x0200000000000000020000000000000002000000000000000200000000000000
+) = [1, 2] # commented table
+";
+        let expected = "\
+adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000) = [1, 2] # table
+adv_map COMMENTED(
+    # key
+    0x0200000000000000020000000000000002000000000000000200000000000000
+) = [1, 2] # commented table
+";
+
+        assert_eq!(assert_format_idempotent(source, "explicit advice map keys"), expected);
+    }
+
+    #[test]
+    fn preserves_newlines_after_advice_map_header_comments() {
+        for (source, expected) in [
+            ("adv_map T = # explanation\n[1,2]\n", "adv_map T = # explanation\n    [1, 2]\n"),
+            (
+                "adv_map T =\n# explanation\n[1,2]\n",
+                "adv_map T =\n# explanation\n    [1, 2]\n",
+            ),
+            (
+                "adv_map T = # explanation\n# more detail\n  [1,2]\n",
+                "adv_map T = # explanation\n# more detail\n    [1, 2]\n",
+            ),
+            ("adv_map T =\n[1,2]\n", "adv_map T = [1, 2]\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
+    fn preserves_advice_map_header_and_value_comments() {
+        let source = "\
+adv_map T = # explanation
+[
+# first element
+1,2
+] # table
+";
+        let expected = "\
+adv_map T = # explanation
+  [
+    # first element
+    1, 2
+  ] # table
+";
+        let config = Config {
+            indent_size: Some(2),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "advice map header and value", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn wraps_advice_map_values_after_header_comments() {
+        for (source, expected) in [
+            (
+                "adv_map T = # explanation\n[11111111,22222222,33333333,44444444]\n",
+                "\
+adv_map T = # explanation
+    [
+        11111111,
+        22222222,
+        33333333,
+        44444444
+    ]
+",
+            ),
+            (
+                "adv_map T = # explanation\nfoo(11111111,22222222,33333333,44444444)\n",
+                "\
+adv_map T = # explanation
+    foo(
+        11111111,
+        22222222,
+        33333333,
+        44444444
+    )
+",
+            ),
+        ] {
+            for overflow_delimited_expr in [false, true] {
+                let config = Config {
+                    max_line_length: Some(32),
+                    overflow_delimited_expr: Some(overflow_delimited_expr),
+                    ..Config::default()
+                };
+                let formatted = assert_format_idempotent_with_config(source, source, &config);
+                assert_eq!(formatted, expected);
+                assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+            }
+        }
     }
 
     #[test]
