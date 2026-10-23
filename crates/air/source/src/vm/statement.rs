@@ -18,7 +18,7 @@ use p3_challenger::CanObserve;
 
 use super::{
     AIRS, AUX_DEFERRED_ROOT, AUX_KERNEL_DIGESTS, AUX_PROGRAM_HASH, Felt, MidenAir,
-    NUM_PUBLIC_VALUES, hash_kernel_digests,
+    NUM_PUBLIC_VALUES,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     trace,
 };
@@ -159,4 +159,37 @@ pub fn eval_external<EF: ExtensionField<Felt>>(
     }
 
     Ok(vec![weighted_aux_sum + boundary_correction])
+}
+
+// KERNEL DIGEST SUMMARY HASH
+// ================================================================================================
+
+/// Computes `kernel_H`, the fixed-size commitment to the kernel-procedure digests.
+///
+/// This is the canonical [`KernelDescriptor::commitment`] value expressed over the flattened digest
+/// felts: the domain-tagged linear hash (`hash_elements_in_domain` with
+/// [`miden_core::program::KERNEL_DOMAIN_TAG`]) of `kernel_felts`. The empty digest list yields
+/// the canonical empty-input value under the same domain.
+///
+/// `kernel_H` is absorbed into the Fiat-Shamir transcript in place of the unbounded kernel
+/// digest list, committing to the kernel with a fixed-size value.
+pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
+    assert!(
+        kernel_felts.len().is_multiple_of(WORD_SIZE),
+        "kernel digest felts must be whole words"
+    );
+    assert!(
+        kernel_felts.len() <= KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE,
+        "kernel digest felts exceed KernelDescriptor::MAX_NUM_PROCEDURES"
+    );
+
+    hash_kernel_input_felts(kernel_felts)
+}
+
+fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
+    miden_core::chiplets::hasher::hash_elements_in_domain(
+        kernel_felts,
+        miden_core::program::domain::KERNEL_COMMITMENT,
+    )
+    .into()
 }
