@@ -99,7 +99,8 @@ impl PackageRecord {
 /// A type alias for all known canonical semantic versions of a specific package.
 ///
 /// Each semantic version maps to at most one canonical published artifact. The exact artifact
-/// identity, including content digest, is stored in the corresponding [`PackageRecord`].
+/// identity, including content digest, is stored in the corresponding [`PackageRecord`]. Build
+/// metadata does not define a distinct canonical semantic version.
 pub type PackageVersions = BTreeMap<SemVer, PackageRecord>;
 
 /// A read-only package registry interface used for querying package metadata and versions.
