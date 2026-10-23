@@ -4,9 +4,34 @@ extern crate alloc;
 extern crate std;
 use alloc::{borrow::Cow, vec::Vec};
 
-pub use definitions::*;
 use miden_air_definitions as definitions;
+pub use miden_air_definitions::{
+    AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+    AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, And8LookupAir,
+    And8LookupCols, And8LookupPreprocessedCols, BitwiseCols, ChipletCols, ChipletsAir,
+    ControllerCols, CoreAir, CoreCols, DecoderCols, EidosCompressionAir, EidosCompressionCols,
+    KernelRomCols, LOGUP_AUX_TRACE_WIDTH, MemoryCols, MidenAirBuilder, NUM_EIDOS_COMPRESSION_COLS,
+    NUM_PUBLIC_VALUES, PublicInputs, QuadFeltExpr, StackCols, SystemCols, and8_lookup,
+    eidos_compression, geometry, hash_kernel_digests, logup, lookup, trace,
+};
+pub use miden_core::{
+    Felt,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::ToElements,
+};
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
+use miden_lifted_stark::air::ReductionError;
+pub use miden_lifted_stark::{
+    StarkConfig,
+    air::{
+        AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
+        LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
+    },
+    debug,
+    pcs::PcsParams,
+};
+use p3_challenger::CanObserve;
+
 mod degrees {
     use miden_lifted_air::ConstraintDegrees;
 
@@ -26,8 +51,6 @@ pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/evaluators.rs"));
 }
-use miden_lifted_stark::air::ReductionError;
-use p3_challenger::CanObserve;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {
     Core,
@@ -68,9 +91,6 @@ impl MidenAir {
     pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         LiftedAir::<Felt, miden_core::field::QuadFelt>::eval(&self.definition(), builder)
     }
-}
-
-impl MidenAir {
     pub const fn from_definition(air: definitions::MidenAir) -> Self {
         match air {
             definitions::MidenAir::Core => Self::Core,
