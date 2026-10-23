@@ -631,15 +631,6 @@ mod tests {
         );
         assert_eq!(borrowed.0.values, actual.values);
         assert_eq!(borrowed.1, aux_values);
-        let handwritten = crate::HandwrittenMidenAir(air).build_aux_trace_with_preprocessed(
-            &main,
-            Some(&preprocessed),
-            &[],
-            &[],
-            &challenges,
-        );
-        assert_eq!(handwritten.0.values, actual.values);
-        assert_eq!(handwritten.1, aux_values);
 
         assert_eq!(aux_values, [sigma_prime]);
         assert_eq!(actual.height(), num_rows);

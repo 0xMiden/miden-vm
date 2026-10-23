@@ -1,18 +1,21 @@
 //! Traced PCS run for profiling with `tracing-subscriber`.
 //!
-//! Runs the lifted PCS open (Goldilocks + Poseidon2, arity-4) at log heights 16, 18, 20
+//! Runs the lifted PCS open (Goldilocks + Eidos, arity-4) at log heights 16, 18, 20
 //! with a tracing subscriber that prints hierarchical span timings.
 //!
 //! Run with:
 //! ```bash
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-lifted-stark --bench pcs_trace --features testing,concurrent
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench \
+//!     --bench pcs_trace --features concurrent
 //! ```
 
+#[path = "support/eidos.rs"]
+mod eidos;
 use std::time::Instant;
 
+use eidos::{Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_lifted_stark::testing::{
     LOG_HEIGHTS, Lmcs, LmcsTree, PcsParams, RELATIVE_SPECS, canonical_domain,
-    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
     generate_matrices_from_specs, open_with_channel,
 };
 use miden_stark_transcript::ProverTranscript;

@@ -1,7 +1,7 @@
 use miden_ace_codegen::{AceCircuit, AceConfig, AceError};
 use miden_core::field::QuadFelt;
 
-use crate::{AIRS, HandwrittenMidenAir};
+use crate::AIRS;
 
 /// Per-AIR preprocessed, main, and aux regions are padded to this width before concatenation.
 const LMCS_ALIGNMENT: usize = 8;
@@ -11,8 +11,7 @@ const LMCS_ALIGNMENT: usize = 8;
 pub fn build_canonical_multi_air_ace_circuit(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = AIRS.map(HandwrittenMidenAir);
-    miden_ace_codegen::build_canonical_multi_air_ace_circuit(&airs, config, LMCS_ALIGNMENT)
+    miden_ace_codegen::build_canonical_multi_air_ace_circuit(&AIRS, config, LMCS_ALIGNMENT)
 }
 
 #[cfg(test)]

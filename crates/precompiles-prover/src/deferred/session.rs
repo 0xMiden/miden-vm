@@ -189,6 +189,70 @@ pub(crate) fn prove(
     })
 }
 
+/// Phase boundaries for measuring the Eidos precompile prover.
+#[cfg(feature = "testing")]
+pub mod testing {
+    use miden_core::utils::Matrix;
+
+    use super::{PrecompileLimits, WitnessSession, import_witnesses_with_roots};
+    use crate::{
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction, PrecompileProof,
+        PrecompileProvingError, PrecompileWitness, session::SessionTraces,
+    };
+
+    /// Checked and lowered precompile work, before main-trace allocation.
+    pub struct PreparedSession(WitnessSession);
+
+    /// Main traces and public roots, before STARK generation.
+    pub struct PreparedTraces {
+        traces: SessionTraces,
+        roots: alloc::vec::Vec<miden_core::Word>,
+    }
+
+    /// Imports witnesses with explicit per-witness limits and the default Eidos memory budget.
+    pub fn import(
+        witnesses: alloc::vec::Vec<PrecompileWitness>,
+        limits: &PrecompileLimits,
+    ) -> Result<PreparedSession, PrecompileProvingError> {
+        let imported = import_witnesses_with_roots(witnesses, limits, None)?;
+        crate::check_memory_budget(
+            imported.estimated_prover_memory(HashFunction::Eidos),
+            DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+        )?;
+        Ok(PreparedSession(imported))
+    }
+
+    impl PreparedSession {
+        /// Allocates and fills the main traces for all PVM AIRs in canonical instance order.
+        pub fn build_trace(self) -> PreparedTraces {
+            let imported = self.0;
+            PreparedTraces {
+                traces: imported.session.finish(imported.root),
+                roots: imported.roots,
+            }
+        }
+    }
+
+    impl PreparedTraces {
+        /// Returns `(height, width)` for each main trace in canonical AIR instance order.
+        pub fn main_trace_shapes(&self) -> alloc::vec::Vec<(usize, usize)> {
+            self.traces
+                .mains()
+                .iter()
+                .map(|matrix| (matrix.height(), matrix.width()))
+                .collect()
+        }
+
+        /// Generates the Eidos STARK and packages the ordered public roots.
+        pub fn prove(self) -> Result<PrecompileProof, PrecompileProvingError> {
+            Ok(PrecompileProof {
+                proof: self.traces.prove_stark(HashFunction::Eidos)?,
+                roots: self.roots,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn import_witnesses(
     witnesses: Vec<PrecompileWitness>,

@@ -20,7 +20,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use miden_lifted_stark::testing::{
     FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, FriFold, LOG_HEIGHTS, PARALLEL_STR,
     TEST_SEED,
-    configs::goldilocks_poseidon2::{Felt, QuadFelt},
+    configs::{Felt, QuadFelt},
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{RngExt, SeedableRng, distr::StandardUniform, rngs::SmallRng};

@@ -6,16 +6,6 @@ use miden_lifted_air::{
     BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
 
-use crate::precompiles::{
-    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-    hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
-        sha512::Sha512Air,
-    },
-    primitives::byte_pair_lut::BytePairLutAir,
-    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
-};
 #[allow(clippy::eq_op)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/pvm_evaluators.rs"));
@@ -93,61 +83,48 @@ impl ChipletAir {
     }
 }
 
-macro_rules! delegate {
-    ($self:ident, $method:ident $(, $arg:expr)*) => {
-        match $self {
-            ChipletAir::ChunkNodeSponge => ChunkNodeSpongeAir.$method($($arg),*),
-            ChipletAir::EidosCompression => EidosCompressionAir.$method($($arg),*),
-            ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
-            ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
-            ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
-            ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
-            ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
-            ChipletAir::EcPointStoreGroups => EcPointStoreGroupsAir.$method($($arg),*),
-            ChipletAir::EcGroupAdd => EcGroupAddAir.$method($($arg),*),
-            ChipletAir::EcMsm => EcMsmAir.$method($($arg),*),
-            ChipletAir::Sha512 => Sha512Air.$method($($arg),*),
-            ChipletAir::Sha256 => Sha256Air.$method($($arg),*),
-        }
-    };
-}
-
 impl BaseAir<Felt> for ChipletAir {
     fn width(&self) -> usize {
-        delegate!(self, width)
+        self.definition().width()
     }
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        delegate!(self, preprocessed_trace)
+        self.definition().preprocessed_trace()
     }
     fn preprocessed_width(&self) -> usize {
-        delegate!(self, preprocessed_width)
+        self.definition().preprocessed_width()
     }
     fn num_public_values(&self) -> usize {
-        delegate!(self, num_public_values)
+        self.definition().num_public_values()
     }
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        delegate!(self, periodic_columns)
+        self.definition().periodic_columns().into_owned().into()
     }
 }
 
-include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
+mod degrees {
+    use miden_lifted_air::ConstraintDegrees;
+
+    use super::ChipletAir;
+
+    include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
+}
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
-        generated_degrees(self)
+        degrees::generated_degrees(self)
     }
 
     fn max_periodic_length(&self) -> usize {
-        delegate!(self, max_periodic_length)
+        self.definition().max_periodic_length()
     }
 
     fn num_randomness(&self) -> usize {
-        delegate!(self, num_randomness)
+        self.definition().num_randomness()
     }
     fn aux_width(&self) -> usize {
-        delegate!(self, aux_width)
+        self.definition().aux_width()
     }
     fn num_aux_values(&self) -> usize {
-        delegate!(self, num_aux_values)
+        self.definition().num_aux_values()
     }
     fn build_aux_trace(
         &self,
@@ -156,7 +133,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
         aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        delegate!(self, build_aux_trace, main, air_inputs, aux_inputs, challenges)
+        self.definition().build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
     fn build_aux_trace_with_preprocessed(
         &self,
@@ -166,14 +143,12 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
         aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        delegate!(
-            self,
-            build_aux_trace_with_preprocessed,
+        self.definition().build_aux_trace_with_preprocessed(
             main,
             preprocessed,
             air_inputs,
             aux_inputs,
-            challenges
+            challenges,
         )
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

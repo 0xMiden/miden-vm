@@ -1,6 +1,6 @@
 [package]
 name = "miden-air"
-version = "1.0.0"
+version.workspace = true
 description = "Production VM and precompile AIRs and build-generated artifacts"
 documentation = "https://docs.rs/miden-air"
 readme = "README.md"

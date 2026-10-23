@@ -14,7 +14,7 @@ use miden_air::{
     ace::RecursiveAceCircuit,
     config::{self, PROTOCOL_ID, relation_digest},
 };
-use miden_air_definitions::{AIRS, HandwrittenMidenAir, MidenAir};
+use miden_air_definitions::{AIRS, MidenAir};
 use miden_core::{Felt, WORD_SIZE, Word, program::KernelDescriptor};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use p3_air::BaseAir;
@@ -468,7 +468,7 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
         quotient_lmcs_init_cv: chaining_word(geometry.quotient_width)?,
         preprocessed_comment: format!(
             "    # AND8 preprocessed matrix: {} columns, padded to {} base felts by LMCS.",
-            BaseAir::<Felt>::preprocessed_width(&HandwrittenMidenAir(MidenAir::And8Lookup)),
+            BaseAir::<Felt>::preprocessed_width(&MidenAir::And8Lookup),
             geometry.preprocessed_width
         ),
         main_comment: format!(
@@ -528,7 +528,7 @@ fn render_constraints_eval_file(
 pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), String> {
     let captured = AIRS
         .iter()
-        .map(|air| CapturedAir::new(&HandwrittenMidenAir(*air)))
+        .map(CapturedAir::new)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     let airs = captured.iter().collect::<Vec<_>>();
@@ -685,11 +685,7 @@ mod tests {
     fn deep_query_loader_repeats_follow_air_geometry() {
         let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
             .expect("recursive ACE circuit");
-        let captured = AIRS
-            .iter()
-            .map(|air| CapturedAir::new(&HandwrittenMidenAir(*air)))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let captured = AIRS.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>().unwrap();
         let refs = captured.iter().collect::<Vec<_>>();
         let compiled = CompiledRelation::from_captured(&refs, LMCS_ALIGNMENT).unwrap();
         let geometry =

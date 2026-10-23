@@ -3,16 +3,6 @@
 use p3_challenger::CanObserve;
 use p3_field::Field;
 
-/// Fields of the default statement binding, in transcript order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StatementField {
-    PublicValuesLength,
-    PublicValues,
-    MaxAuxInputs,
-    AuxInputsLength,
-    AuxInputs,
-}
-
 /// Static dimensions of the default statement and its instance-shape suffix.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StatementEncoding {
@@ -23,14 +13,6 @@ pub struct StatementEncoding {
 }
 
 impl StatementEncoding {
-    pub const FIELDS: [StatementField; 5] = [
-        StatementField::PublicValuesLength,
-        StatementField::PublicValues,
-        StatementField::MaxAuxInputs,
-        StatementField::AuxInputsLength,
-        StatementField::AuxInputs,
-    ];
-
     pub const fn statement_len(self) -> usize {
         3 + self.num_public_values + self.num_aux_inputs
     }
@@ -40,40 +22,26 @@ impl StatementEncoding {
         self.statement_len() + 1 + self.num_airs
     }
 
-    /// Emit the default binding. The fixed field order is also consumed by code generators.
+    /// Emit the default binding in protocol order.
     #[inline]
     pub fn observe<F: Field, C: CanObserve<F>>(
         self,
         challenger: &mut C,
-        mut air_inputs: impl Iterator<Item = F>,
+        air_inputs: impl Iterator<Item = F>,
         aux_inputs: &[F],
     ) {
         debug_assert_eq!(aux_inputs.len(), self.num_aux_inputs, "auxiliary input count");
-        for field in Self::FIELDS {
-            match field {
-                StatementField::PublicValuesLength => {
-                    challenger.observe(F::from_usize(self.num_public_values))
-                },
-                StatementField::PublicValues => {
-                    let mut count = 0;
-                    for value in air_inputs.by_ref() {
-                        challenger.observe(value);
-                        count += 1;
-                    }
-                    debug_assert_eq!(count, self.num_public_values, "public value count");
-                },
-                StatementField::MaxAuxInputs => {
-                    challenger.observe(F::from_usize(self.max_aux_inputs))
-                },
-                StatementField::AuxInputsLength => {
-                    challenger.observe(F::from_usize(self.num_aux_inputs))
-                },
-                StatementField::AuxInputs => {
-                    for &value in aux_inputs {
-                        challenger.observe(value);
-                    }
-                },
-            }
+        challenger.observe(F::from_usize(self.num_public_values));
+        let mut count = 0;
+        for value in air_inputs {
+            challenger.observe(value);
+            count += 1;
+        }
+        debug_assert_eq!(count, self.num_public_values, "public value count");
+        challenger.observe(F::from_usize(self.max_aux_inputs));
+        challenger.observe(F::from_usize(self.num_aux_inputs));
+        for &value in aux_inputs {
+            challenger.observe(value);
         }
     }
 }

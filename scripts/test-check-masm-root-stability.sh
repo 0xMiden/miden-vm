@@ -8,7 +8,8 @@ printf '[tag]\n\tgpgsign = true\n' > "$test_root/global.gitconfig"
 export GIT_CONFIG_GLOBAL="$test_root/global.gitconfig"
 
 test_repo="$test_root/repo"
-mkdir -p "$test_repo/scripts" "$test_repo/crates/lib/core/asm" "$test_root/bin"
+mkdir -p "$test_repo/scripts" "$test_repo/crates/lib/core/asm" \
+    "$test_repo/crates/verifier-codegen/src" "$test_root/bin"
 git init -q "$test_repo"
 git -C "$test_repo" config user.name "MAST root gate test"
 git -C "$test_repo" config user.email "mast-root-gate@example.invalid"
@@ -23,7 +24,10 @@ printf '// tag = "v0.35.0"\n' > "$test_repo/scripts/check-masm-export-digests.rs
 printf '[package]\nname = "miden-core"\nversion = "0.35.0"\n' \
     > "$test_repo/crates/lib/core/asm/miden-project.toml"
 printf '[workspace.package]\nversion = "0.35.0"\n' > "$test_repo/Cargo.toml"
-git -C "$test_repo" add Cargo.toml scripts crates/lib/core/asm/miden-project.toml
+# Both snapshots already track the complete verifier. Release checks must compare it directly,
+# even when the generator still supports staging for other tooling.
+printf '// "--stage"\n' > "$test_repo/crates/verifier-codegen/src/main.rs"
+git -C "$test_repo" add Cargo.toml scripts crates
 git -C "$test_repo" commit -qm 'Create release baseline'
 git -C "$test_repo" tag v0.35.0
 
@@ -33,10 +37,18 @@ set -euo pipefail
 [[ "$#" -eq 7 && "$1" == run && "$2" == stable && "$3" == cargo && "$4" == -Zscript ]]
 [[ "${RUSTC_BOOTSTRAP:-}" == 1 && -z "${RUSTC_WRAPPER:-}" ]]
 [[ -f "$5" && -f "$6" && -f "$7" ]]
+[[ "$6" == */baseline/crates/lib/core/asm/miden-project.toml ]]
+[[ "$7" == "$ROOT_CHECK_CURRENT_PROJECT" ]]
 printf '%s\n' "$*" > "$ROOT_CHECK_STUB_LOG"
 exit "$ROOT_CHECK_STUB_STATUS"
 STUB
-chmod +x "$test_root/bin/rustup"
+cat > "$test_root/bin/cargo" <<'STUB'
+#!/usr/bin/env bash
+echo 'Release compatibility checks must not regenerate tracked MASM' >&2
+exit 1
+STUB
+chmod +x "$test_root/bin/rustup" "$test_root/bin/cargo"
+export ROOT_CHECK_CURRENT_PROJECT="$test_repo/crates/lib/core/asm/miden-project.toml"
 export PATH="$test_root/bin:$PATH"
 export ROOT_CHECK_STUB_LOG="$test_root/comparator-called"
 
@@ -70,14 +82,33 @@ check_result 0
 set_version 0.35.1
 check_result 7
 
-set_version 1.0.0
-rm -f "$ROOT_CHECK_STUB_LOG"
-(cd "$test_repo" && ROOT_CHECK_STUB_STATUS=7 \
-    bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1
-if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
-    echo 'The 0.x to 1.0.0 transition unexpectedly ran the comparator' >&2
-    exit 1
-fi
+for version in 1.0.0-rc.0 1.0.0-rc.10 1.0.0; do
+    set_version "$version"
+    rm -f "$ROOT_CHECK_STUB_LOG"
+    (cd "$test_repo" && ROOT_CHECK_STUB_STATUS=7 \
+        bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1
+    if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
+        echo "The 0.x to $version transition unexpectedly ran the comparator" >&2
+        exit 1
+    fi
+done
+
+set_version 1.0.1-rc.0
+check_result 7
+
+for version in 1.0.0-rc.01 1.0.0-rc. 1.0.0-alpha.0; do
+    set_version "$version"
+    rm -f "$ROOT_CHECK_STUB_LOG"
+    if (cd "$test_repo" && ROOT_CHECK_STUB_STATUS=0 \
+        bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1; then
+        echo "Invalid release version $version unexpectedly passed" >&2
+        exit 1
+    fi
+    if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
+        echo "Invalid release version $version unexpectedly ran the comparator" >&2
+        exit 1
+    fi
+done
 
 set_version 1.1.0
 check_result 7

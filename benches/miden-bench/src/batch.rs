@@ -1,6 +1,6 @@
 //! Batch STARK AIR wrappers, lookup implementations, and prove/verify runner.
 
-use miden_lifted_stark::{air::BaseAir, testing::airs::poseidon2::NUM_POSEIDON2_COLS};
+use miden_lifted_stark::air::BaseAir;
 use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_batch_stark::{ProverData, StarkInstance, prove_batch, verify_batch};
 use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
@@ -15,7 +15,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use tracing::info_span;
 
 use crate::{
-    BatchPoseidon2Air, Felt, GlRoundConstants, QuadFelt, RunResult,
+    Felt, QuadFelt, RunResult,
     cli::{AirType, Cli, TraceSpec},
 };
 
@@ -92,7 +92,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MidenWithLookups {
 #[derive(Clone)]
 enum BatchBenchAir {
     Keccak(KeccakWithLookup),
-    Poseidon2(Box<BatchPoseidon2Air>),
     Blake3,
     Miden(MidenWithLookups),
 }
@@ -101,7 +100,6 @@ impl<F> BaseAir<F> for BatchBenchAir {
     fn width(&self) -> usize {
         match self {
             Self::Keccak(a) => BaseAir::<F>::width(a),
-            Self::Poseidon2(_) => NUM_POSEIDON2_COLS,
             Self::Blake3 => NUM_BLAKE3_COLS,
             Self::Miden(a) => BaseAir::<F>::width(a),
         }
@@ -112,7 +110,6 @@ impl<AB: AirBuilder<F = Felt> + InteractionBuilder> Air<AB> for BatchBenchAir {
     fn eval(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => Air::eval(a, builder),
-            Self::Poseidon2(a) => Air::eval(a.as_ref(), builder),
             Self::Blake3 => Air::eval(&Blake3Air {}, builder),
             Self::Miden(a) => Air::eval(a, builder),
         }
@@ -165,7 +162,6 @@ pub(crate) fn run_batch<SC>(
     config: &SC,
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     cli: &Cli,
 ) -> RunResult
 where
@@ -182,10 +178,6 @@ where
         .iter()
         .map(|spec| match spec.air_type {
             AirType::Keccak => BatchBenchAir::Keccak(KeccakWithLookup),
-            AirType::Poseidon2 => {
-                let c = constants.as_ref().expect("poseidon2 constants required");
-                BatchBenchAir::Poseidon2(Box::new(BatchPoseidon2Air::new(c.clone())))
-            },
             AirType::Blake3 => BatchBenchAir::Blake3,
             AirType::Miden => BatchBenchAir::Miden(MidenWithLookups {
                 width: spec.width,
@@ -227,35 +219,9 @@ where
 // Batch config constructors (called from main)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn run_batch_poseidon2(
-    specs: &[TraceSpec],
-    traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
-    log_blowup: u8,
-    cli: &Cli,
-) -> RunResult {
-    use miden_lifted_stark::testing::configs::goldilocks_poseidon2 as gl;
-    use p3_symmetric::PaddingFreeSponge;
-
-    let (perm, _, compress) = gl::test_components();
-    let leaf = PaddingFreeSponge::<_, { gl::WIDTH }, { gl::RATE }, { gl::DIGEST }>::new(perm);
-    let config = batch_config!(
-        gl::PackedFelt,
-        gl::PackedFelt,
-        { gl::DIGEST },
-        leaf,
-        compress,
-        gl::test_challenger(),
-        log_blowup,
-        cli
-    );
-    run_batch(&config, specs, traces, constants, cli)
-}
-
 pub(crate) fn run_batch_keccak(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -277,13 +243,12 @@ pub(crate) fn run_batch_keccak(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }
 
 pub(crate) fn run_batch_blake3(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -304,13 +269,12 @@ pub(crate) fn run_batch_blake3(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }
 
 pub(crate) fn run_batch_blake3_192(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -331,5 +295,5 @@ pub(crate) fn run_batch_blake3_192(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }

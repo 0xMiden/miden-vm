@@ -19,11 +19,13 @@ parse_version() {
     local prefix="$2"
     local major minor patch
 
-    IFS=. read -r major minor patch <<<"$version"
-    if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ || ! "$patch" =~ ^[0-9]+$ ]]; then
+    if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
         echo "::error::could not parse semantic version '$version'"
         exit 1
     fi
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
 
     eval "${prefix}_major=\$major"
     eval "${prefix}_minor=\$minor"
@@ -40,25 +42,6 @@ latest_release_tag_on_head() {
         | sort -V \
         | tail -n1 \
         || true
-}
-
-# The core library's recursive verifier modules are generated from the AIRs. When a checkout
-# generates them, stage its complete assembly tree and compare that project instead of the
-# handwritten sources.
-assembled_project() {
-    local checkout="$1"
-    local relative_project="$2"
-    local staged="$3"
-
-    if [[ "$relative_project" == "crates/lib/core/asm/miden-project.toml" ]] \
-        && grep -q -- '"--stage"' "$checkout/crates/verifier-codegen/src/main.rs" 2>/dev/null; then
-        RUSTC_WRAPPER= CARGO_TARGET_DIR="$staged-target" cargo run --quiet --locked \
-            --manifest-path "$checkout/Cargo.toml" --package miden-verifier-codegen \
-            -- --stage "$checkout/crates/lib/core/asm" "$staged" >&2 || return 1
-        echo "$staged/miden-project.toml"
-    else
-        echo "$checkout/$relative_project"
-    fi
 }
 
 parse_version "$workspace_version" current
@@ -123,12 +106,10 @@ for project in "${projects[@]}"; do
     fi
 
     echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
-    baseline_assembled="$(assembled_project "$workdir/baseline" "$relative_project" "$workdir/staged-baseline")"
-    current_assembled="$(assembled_project "$repo_root" "$relative_project" "$workdir/staged-current")"
     RUSTC_BOOTSTRAP=1 RUSTC_WRAPPER= rustup run stable cargo -Zscript \
         "$check_script" \
-        "$baseline_assembled" \
-        "$current_assembled"
+        "$baseline_project" \
+        "$current_project"
 done
 
 echo "MASM release compatibility checks passed against $baseline_tag"

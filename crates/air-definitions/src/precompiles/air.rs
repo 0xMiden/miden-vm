@@ -199,14 +199,12 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
 #[derive(Debug, Clone)]
 pub struct ChipletMultiAir {
     airs: Vec<ChipletAir>,
-    boundary: crate::precompiles::relation::AuxBoundaryPlan,
 }
 
 impl ChipletMultiAir {
     pub fn new() -> Self {
         let airs = ChipletAir::all().to_vec();
-        let boundary = crate::precompiles::relation::AuxBoundaryPlan::for_airs(&airs);
-        Self { airs, boundary }
+        Self { airs }
     }
 }
 
@@ -302,7 +300,26 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
             return Err(format!("expected no auxiliary inputs, got {}", aux_inputs.len()).into());
         }
 
-        let weighted_aux_sum = self.boundary.reduce(aux_values, log_trace_heights)?;
+        let mut weighted_aux_sum = QuadFelt::ZERO;
+        for (index, ((air, values), &log_height)) in
+            self.airs.iter().zip(aux_values).zip(log_trace_heights).enumerate()
+        {
+            let expected = air.num_aux_values();
+            if values.len() != expected {
+                return Err(format!(
+                    "AIR {index} expects {expected} auxiliary boundary values, got {}",
+                    values.len()
+                )
+                .into());
+            }
+            let length = 1u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
+                ReductionError::from(format!(
+                    "AIR {index} log trace height {log_height} does not fit in u64"
+                ))
+            })?;
+            weighted_aux_sum +=
+                values.iter().copied().sum::<QuadFelt>() * Felt::new_unchecked(length);
+        }
         Ok(vec![weighted_aux_sum + fixed_boundary_correction(challenges)?])
     }
 }
