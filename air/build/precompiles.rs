@@ -5,7 +5,7 @@ use miden_air_definitions::precompiles::{
     geometry,
     relation::{AIRS, CapturedPvmRelation},
 };
-use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
+use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
 pub fn generate() {
     println!("cargo:rerun-if-changed=build/precompiles.rs");
@@ -27,7 +27,7 @@ pub fn generate() {
             constraints: air.constraints(),
         })
         .collect();
-    write("evaluators.rs", emit_module("", &evals));
+    write("evaluators.rs", emit_optimized_module("", &evals));
     let degree_arms = AIRS
         .iter()
         .zip(captured.airs())
