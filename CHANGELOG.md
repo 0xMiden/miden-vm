@@ -7,7 +7,7 @@
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 - Added PVM benchmarks and updated synthetic transaction and recursive verification benchmarks for Eidos ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 
-## v1.0.0-rc.0 (2026-10-21)
+## v1.0.0-rc.0 (2026-10-22)
 
 #### Features
 
