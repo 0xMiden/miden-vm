@@ -4,17 +4,19 @@
 //! polynomials at different trace sizes.
 //!
 //! ```bash
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench quotient_commit --features testing
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench --bench quotient_commit
 //! ```
 
+#[path = "support/eidos.rs"]
+mod eidos;
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use eidos as gl;
 use miden_lifted_stark::{
     GenericStarkConfig,
     testing::{
-        QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, canonical_domain, commit_quotient,
-        configs::goldilocks_poseidon2 as gl, log2_strict_u8,
+        QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, canonical_domain, commit_quotient, log2_strict_u8,
     },
 };
 use p3_dft::Radix2DitParallel;

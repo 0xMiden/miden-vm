@@ -47,16 +47,14 @@ tracing.workspace   = true
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
 p3-commit.workspace      = true
-p3-fri.workspace         = true
 p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace   = true
 
 # Third-party
-criterion.workspace          = true
-proptest.workspace           = true
-tracing-subscriber.workspace = true
+criterion.workspace = true
+proptest.workspace  = true
 
 [features]
 concurrent = ["p3-maybe-rayon/parallel"]
@@ -65,42 +63,12 @@ testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-kec
 
 [[bench]]
 harness           = false
-name              = "quotient_commit"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
-name              = "merkle_commit"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
 name              = "fri_fold"
 required-features = ["testing"]
 
 [[bench]]
 harness           = false
-name              = "deep_quotient"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
-name              = "pcs"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
-name              = "pcs_trace"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
-name              = "plonky3"
-required-features = ["testing"]
-
-[[bench]]
-harness           = false
-name              = "per_air_degree_opt"
+name              = "mmcs_compare"
 required-features = ["testing"]
 
 [lints]

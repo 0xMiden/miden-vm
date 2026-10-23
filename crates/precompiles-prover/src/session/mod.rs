@@ -632,7 +632,7 @@ pub struct SessionTraces {
 
 impl SessionTraces {
     /// Borrows the twelve main traces in [`Self::into_mains`] order.
-    #[cfg(any(test, debug_assertions))]
+    #[cfg(any(test, debug_assertions, feature = "testing"))]
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,

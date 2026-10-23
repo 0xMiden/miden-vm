@@ -1,13 +1,12 @@
 //! Illustrates the per-AIR quotient-degree optimization.
 //!
-//! This bench compares two synthetic configurations of the **same** code path,
-//! toggled via [`OverrideLogQuotientDegree`]. It is **not** a comparison against
-//! the codebase's pre-PR state; it isolates the speedup attributable to evaluating
-//! a low-degree AIR on its native quotient domain rather than the global one.
+//! Compares per-AIR quotient degrees against a common maximum degree using
+//! [`OverrideConstraintDegree`]. The low-degree AIR uses its own quotient domain before its
+//! quotient is lifted to the common commitment domain.
 //!
 //! Runs `prove` with two AIRs:
-//! - Core AIR: width 72, max constraint degree 9 (so `D = 8`).
-//! - Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
+//! - Synthetic Core AIR: width 72, max constraint degree 9 (so `D = 8`).
+//! - Synthetic Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
 //!
 //! Two variants:
 //! - **Baseline**: both AIRs are forced to `constraint_degree = 9` (so `D = 8`). Chip's constraints
@@ -20,21 +19,21 @@
 //!
 //! Run:
 //! ```bash
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-lifted-stark \
-//!     --bench per_air_degree_opt --features testing,concurrent
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench \
+//!     --bench per_air_degree_opt --features concurrent
 //! ```
 
+#[path = "support/eidos.rs"]
+mod eidos;
 use std::{borrow::Cow, time::Instant};
 
+use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_lifted_air::{
     AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
 };
 use miden_lifted_stark::{
     GenericStarkConfig, ProverInstance,
-    testing::{
-        MultiAir, PcsParams, ProverStatement, Statement,
-        configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
-    },
+    testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};

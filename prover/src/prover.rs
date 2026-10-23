@@ -22,6 +22,7 @@ use crate::{config, prove_stark};
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Prover {
     hash_fn: HashFunction,
+    hash_lde_blocks: bool,
     max_prover_memory_bytes: u64,
     max_precompile_prover_memory_bytes: u64,
     verification_precompile_limits: PrecompileLimits,
@@ -45,6 +46,7 @@ impl Prover {
     pub fn new() -> Self {
         Self {
             hash_fn: HashFunction::Eidos,
+            hash_lde_blocks: false,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
             verification_precompile_limits:
@@ -63,6 +65,16 @@ impl Prover {
     #[must_use]
     pub const fn with_hash_fn(mut self, hash_fn: HashFunction) -> Self {
         self.hash_fn = hash_fn;
+        self
+    }
+
+    /// Sets whether MVM proving hashes completed blocks during the final trace LDE.
+    ///
+    /// Disabled by default. This changes scheduling while preserving commitments and proof format.
+    /// Hash configurations without block support use eager hashing. PVM proving is unaffected.
+    #[must_use]
+    pub const fn with_hash_lde_blocks(mut self, enabled: bool) -> Self {
+        self.hash_lde_blocks = enabled;
         self
     }
 
@@ -234,7 +246,8 @@ impl Prover {
 
         let proof_bytes = match self.hash_fn {
             HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(params, config::RELATION_DIGEST);
+                let mut config = config::blake3_256_config(params, config::RELATION_DIGEST);
+                config.hash_lde_blocks = self.hash_lde_blocks;
                 prove_stark(
                     &config,
                     core_matrix,
@@ -246,7 +259,8 @@ impl Prover {
                 )
             },
             HashFunction::Keccak => {
-                let config = config::keccak_config(params, config::RELATION_DIGEST);
+                let mut config = config::keccak_config(params, config::RELATION_DIGEST);
+                config.hash_lde_blocks = self.hash_lde_blocks;
                 prove_stark(
                     &config,
                     core_matrix,
@@ -258,7 +272,8 @@ impl Prover {
                 )
             },
             HashFunction::Eidos => {
-                let config = config::eidos_config(params, config::RELATION_DIGEST);
+                let mut config = config::eidos_config(params, config::RELATION_DIGEST);
+                config.hash_lde_blocks = self.hash_lde_blocks;
                 prove_stark(
                     &config,
                     core_matrix,

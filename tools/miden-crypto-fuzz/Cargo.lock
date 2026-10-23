@@ -535,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "1.0.0-rc.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "blake3",
  "cc",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "1.0.0-rc.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "1.0.0-rc.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "1.0.0-rc.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "1.0.0-rc.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "p3-field",
  "p3-symmetric",
