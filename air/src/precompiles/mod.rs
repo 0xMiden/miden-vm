@@ -1,8 +1,11 @@
 // Authored chiplet AIRs, bus messages, and fixed protocol data. `ChipletAir` and
 // `ChipletMultiAir` are defined in `air`: they evaluate constraints with the build-generated
 // evaluators.
+#[cfg(any(test, feature = "compiler"))]
+pub use miden_air_definitions::precompiles::geometry;
 pub use miden_air_definitions::precompiles::{
-    ace, ec, fixed, hash, logup, math, policy, primitives, relations, transcript, uint, utils,
+    ace, ec, fixed, hash, logup, math, policy, primitives, relation, relations, transcript, uint,
+    utils,
 };
 pub mod air;
 pub mod preprocessed;
