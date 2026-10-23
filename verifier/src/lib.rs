@@ -17,7 +17,7 @@ use miden_core::{
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
-use miden_crypto::stark::{
+use miden_lifted_stark::{
     PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData,
     verifier::VerifierError,
 };
@@ -876,7 +876,7 @@ mod tests {
         )
         .unwrap();
 
-        let commitment = miden_crypto::stark::Preprocessed::build(&statement, &config)
+        let commitment = miden_lifted_stark::Preprocessed::build(&statement, &config)
             .map(|preprocessed| preprocessed.commitment());
 
         assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));

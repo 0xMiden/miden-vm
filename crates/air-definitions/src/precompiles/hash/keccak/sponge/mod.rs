@@ -1,0 +1,808 @@
+//! Keccak sponge chiplet.
+//!
+//! Sponge AIR over the [round chiplet's](super::round) 25-round /
+//! 3200-IP permutation cycle. One row per state lane, period 32 →
+//! α = 100.
+
+pub mod message;
+pub mod program;
+
+use alloc::{borrow::Cow, vec::Vec};
+use core::{array, ops::Range};
+
+pub use message::KeccakSpongeMsg;
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
+};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
+pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
+
+use crate::precompiles::{
+    hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+    logup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
+    },
+    primitives::byte_pair_lut::BytePairLutMsg,
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, halves_le, next_main},
+};
+
+// MAIN COLUMN LAYOUT
+// ================================================================================================
+//
+// 49 main witness columns split into four groups:
+//
+// - Structural (5):    sponge_seq_id, act, bytes_left, is_first_block_of_invocation, chunk_ptr.
+// - Padding state (10): is_zero_p, is_chunk_avail, b_0..b_7.
+// - Squeeze value (2): state_out as u32 lo/hi.
+// - Byte lanes (32): chunk, state_prev, state_new, padded — each an 8-byte little-endian
+//   decomposition. Their u32 halves are reconstructed linearly where needed.
+//
+// Structural columns.
+// --------------------------------------------------------------------
+
+/// Global sponge row counter, +1 per row. Plays the role of the round
+/// chiplet's `ip`; every per-row address is a degree-1 expression in
+/// `sponge_seq_id` and the period-32 `p_idx`. Carried in the
+/// `KeccakSponge` request tuple so the transcript chiplet can derive
+/// the digest address in the round chiplet's IP space.
+pub const COL_SPONGE_SEQ_ID: usize = 0;
+/// Sticky-downward activity flag. Multiplied into every bus mult so
+/// trace-tail rows contribute zero regardless of other witness state.
+pub const COL_ACT: usize = 1;
+/// Bytes remaining to absorb at row `r`. Pinned to `len_bytes` at the
+/// first row of each invocation by the `KeccakSponge` bus require,
+/// decrements by 8 per rate XORin row, holds on non-absorb rows.
+pub const COL_BYTES_LEFT: usize = 2;
+/// 1 throughout the first absorption period of an invocation, 0 on
+/// every other period within the invocation. Gates the prev-perm
+/// consume *off* on first-block state-lane rows, the capacity-init
+/// "provide 0" *on*, and the `state_prev = 0` local pin.
+pub const COL_IS_FIRST_BLOCK_OF_INVOCATION: usize = 3;
+/// Sponge-side cursor into the chunk chiplet's flat Memory64 tape.
+/// Pinned to the invocation's chunk-tape base by the `KeccakSponge`
+/// request at the first row of each invocation; increments by
+/// `(p_rate_block + p_extra · b_sum) · is_chunk_avail` within the
+/// invocation (rate rows on every block, plus the last block's extra
+/// rows mopping up overshoot lanes); jumps freely at invocation seams
+/// (the chain is gated off there — see the `chunk_ptr` increment chain
+/// in `eval`). Used as the address
+/// offset in `chunk-consume-addr = CHUNK_ADDR_BASE + chunk_ptr`.
+pub const COL_CHUNK_PTR: usize = 4;
+
+// Padding state machine columns.
+// --------------------------------------------------------------------
+
+/// Past-pad indicator on rate XORin rows; monotone non-decreasing
+/// across the 32 rows of the period. On rows past slot 17 it equals
+/// `is_last_block_period`.
+pub const COL_IS_ZERO: usize = 5;
+/// Chunks-available indicator on rate XORin rows; monotone
+/// non-increasing within the period (once chunks run out, they stay
+/// out — a single contiguous prefix). A rate row (or, on the last block,
+/// an extra row) with `is_chunk_avail = 1` consumes a tape lane; the flag
+/// is forced to 1 on every rate row whose lane carries message bytes. On a
+/// last block that overshoots the rate, the prefix carries through the
+/// inert capacity / 0x80 rows so the rate rows and the extra rows [26,29)
+/// stay one prefix.
+pub const COL_IS_CHUNK_AVAIL: usize = 6;
+/// First column of the unary `b_j` selector bits for
+/// `byte_offset ∈ [0, 7]`. The 8 selectors occupy
+/// `COL_B_BEGIN .. COL_B_BEGIN + NUM_B_SELECTORS`. Per-invocation
+/// broadcast: exactly one fires on the last absorption period, none
+/// fire elsewhere. The inline sum `Σ_j b_j` is the canonical
+/// `is_last_block_period` signal across the period.
+pub const COL_B_BEGIN: usize = 7;
+/// Number of unary `b_j` selector columns (one per `byte_offset`
+/// value in `[0, 8)`).
+pub const NUM_B_SELECTORS: usize = 8;
+/// Range covered by the `b_j` selectors:
+/// `COL_B_RANGE = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS)`.
+pub const COL_B_RANGE: Range<usize> = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS);
+
+// Squeeze-value columns.
+// --------------------------------------------------------------------
+
+/// Perm-n's last-perm output for lane `p_idx`, consumed from Memory64
+/// by the squeeze on last-block state-lane rows. Bus-pinned by the
+/// round chiplet's perm-n output provide (at IP `n·3200 + 3072 + p_idx`,
+/// mult 2). Unconstrained when the squeeze gate is off.
+pub const COL_STATE_OUT_LO: usize = 15;
+pub const COL_STATE_OUT_HI: usize = 16;
+
+// Byte-decomposed lane columns.
+// --------------------------------------------------------------------
+//
+// `chunk`, `state_prev`, `state_new`, and `padded` are stored as
+// 8-byte little-endian decompositions. The `BytePairLut` requests verify
+// each input byte and absorb XOR directly, while [`halves_le`] reconstructs
+// the u32 halves used by Memory64 and the local state constraints.
+pub const CHUNK_BYTES_RANGE: Range<usize> = 17..25;
+pub const STATE_PREV_BYTES_RANGE: Range<usize> = 25..33;
+pub const STATE_NEW_BYTES_RANGE: Range<usize> = 33..41;
+/// Shared XOR operand: padded chunk on the pad row, raw chunk on verbatim rows,
+/// and the final 0x80 mask on the last block's lane-16 row.
+pub const PADDED_BYTES_RANGE: Range<usize> = 41..49;
+
+/// Total number of main witness columns (5 structural + 10 padding-state + 2 squeeze-value + 32
+/// byte-lane columns).
+pub const NUM_MAIN_COLS: usize = 49;
+
+// AUX / PUBLIC LAYOUT
+// ================================================================================================
+
+/// Aux columns. The lookup fractions are flattened directly into 10
+/// product-closed columns:
+///
+/// - col 0 (centered running sum): Memory64 `new-state` + `prev-perm`; their ungated recurrence
+///   closes at degree 4.
+/// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
+/// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
+/// - cols 3–5: canonical pad-row input-byte checks, grouped as 3/3/2 fractions.
+/// - cols 6–8: shared `xor-state` for pad, verbatim, and lane-16 rows, grouped as 3/3/2 fractions.
+///   The normalized operand occupies [`PADDED_BYTES_RANGE`], keeping every message linear.
+/// - col 9: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+///   → degree 5).
+///
+/// The maximum LogUp constraint degree is five, giving `log_quotient_degree = 2`. Reducing it
+/// further would require witness-decomposing the degree-four `squeeze` and `chunk-consume`
+/// multiplicities.
+pub const NUM_AUX_COLS: usize = 10;
+
+// One accumulator combines the Memory64, BytePairLut, and KeccakSponge interactions. Encoded bus
+// prefixes keep the three relations distinct under the shared LogUp challenges.
+
+// PERIODIC COLUMN INDICES (re-exported from `program`)
+// ================================================================================================
+
+pub use program::{
+    COL_CAPACITY as PCOL_CAPACITY, COL_EXTRA as PCOL_EXTRA, COL_FIRST as PCOL_FIRST,
+    COL_IDX as PCOL_IDX, COL_LAST as PCOL_LAST, COL_PAD_0X80 as PCOL_PAD_0X80,
+    COL_RATE_BLOCK as PCOL_RATE_BLOCK, COL_RC_ACTIVE as PCOL_RC_ACTIVE, COL_RC_HI as PCOL_RC_HI,
+    COL_RC_LO as PCOL_RC_LO, COL_SQUEEZE_ACTIVE as PCOL_SQUEEZE_ACTIVE,
+};
+
+// AIR
+// ================================================================================================
+
+/// Keccak sponge chiplet AIR. Period-32 program (one period = one
+/// Keccak permutation) drives rate XORin / capacity passthrough /
+/// padding state machine over the
+/// [`Memory64`](crate::precompiles::hash::memory64) bus, verifying its own pad/absorb
+/// input bytes and XOR ops directly against
+/// [`BytePairLut`](crate::precompiles::primitives::byte_pair_lut), with the
+/// per-invocation request consumed from the
+/// [`KeccakSponge`](crate::precompiles::relations::BusId::KeccakSponge) bus.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct KeccakSpongeAir;
+
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::new(sponge_program);
+
+impl BaseAir<Felt> for KeccakSpongeAir {
+    fn width(&self) -> usize {
+        NUM_MAIN_COLS
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
+    }
+}
+
+/// Low u32 half of the lane-16 trailing-`0x80` constant (= `0`).
+pub const PAD_CONST_LO: u32 = 0;
+/// High u32 half of the lane-16 trailing-`0x80` constant
+/// (`0x80 << 56` falls in the top byte of the hi half).
+pub const PAD_CONST_HI: u32 = 0x8000_0000;
+/// Byte `i` (LSB-first) of the lane-16 trailing-`0x80` constant.
+pub const PAD_CONST_BYTES: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0x80];
+
+// LIFTED AIR
+// ================================================================================================
+
+impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
+    fn max_periodic_length(&self) -> usize {
+        SPONGE_PERIOD
+    }
+
+    fn num_randomness(&self) -> usize {
+        NUM_RANDOMNESS
+    }
+
+    fn aux_width(&self) -> usize {
+        NUM_AUX_COLS
+    }
+
+    fn num_aux_values(&self) -> usize {
+        NUM_LOGUP_VALUES
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        crate::precompiles::logup::build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        eval_main(builder, 0);
+
+        // Phase 2: LogUp.
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
+        <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
+    }
+}
+
+/// Evaluate this component's base constraints in a main-trace column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    // Phase 1: local row constraints.
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    // Next-row window: the same 49 columns at row r+1. Cyclic at
+    // row N-1 (`when_transition` gates out the wrap explicitly
+    // where needed; other transition constraints rely on
+    // `p_last`/`p_rate_block` factors making the wrap vacuous).
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+
+    let periodic = builder.periodic_values();
+    let p_first: AB::Expr = periodic[PCOL_FIRST].into();
+    let p_last: AB::Expr = periodic[PCOL_LAST].into();
+    let p_rate_block: AB::Expr = periodic[PCOL_RATE_BLOCK].into();
+    let p_capacity: AB::Expr = periodic[PCOL_CAPACITY].into();
+    let p_pad_0x80: AB::Expr = periodic[PCOL_PAD_0X80].into();
+    let p_extra: AB::Expr = periodic[PCOL_EXTRA].into();
+    let p_state_lane: AB::Expr = p_rate_block.clone() + p_capacity.clone();
+
+    // Frequently-used local / next-row expressions.
+    let act: AB::Expr = local[COL_ACT].into();
+    let act_next: AB::Expr = next[COL_ACT].into();
+    let sponge_seq_id: AB::Expr = local[COL_SPONGE_SEQ_ID].into();
+    let sponge_seq_id_next: AB::Expr = next[COL_SPONGE_SEQ_ID].into();
+    let bytes_left: AB::Expr = local[COL_BYTES_LEFT].into();
+    let bytes_left_next: AB::Expr = next[COL_BYTES_LEFT].into();
+    let chunk_ptr: AB::Expr = local[COL_CHUNK_PTR].into();
+    let chunk_ptr_next: AB::Expr = next[COL_CHUNK_PTR].into();
+    let is_first_block: AB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
+    let is_first_block_next: AB::Expr = next[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
+    let is_zero: AB::Expr = local[COL_IS_ZERO].into();
+    let is_zero_next: AB::Expr = next[COL_IS_ZERO].into();
+    let is_chunk_avail: AB::Expr = local[COL_IS_CHUNK_AVAIL].into();
+    let is_chunk_avail_next: AB::Expr = next[COL_IS_CHUNK_AVAIL].into();
+    let chunk_bytes: [AB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
+    let state_prev_bytes: [AB::Var; 8] =
+        array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
+    let state_new_bytes: [AB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
+    let [chunk_lo, chunk_hi]: [AB::Expr; 2] = halves_le(&chunk_bytes, 256);
+    let [state_prev_lo, state_prev_hi]: [AB::Expr; 2] = halves_le(&state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [AB::Expr; 2] = halves_le(&state_new_bytes, 256);
+
+    // Σ b_j (= `is_last_block_period`) and Σ j·b_j (= byte_offset).
+    let mut b_sum = AB::Expr::ZERO;
+    let mut b_weighted = AB::Expr::ZERO;
+    for (j, col) in COL_B_RANGE.enumerate() {
+        let b_j: AB::Expr = local[col].into();
+        b_sum += b_j.clone();
+        b_weighted += AB::Expr::from(Felt::from(j as u32)) * b_j;
+    }
+
+    // Normalize the shared XOR operand outside the pad row, whose value is pinned by
+    // the arithmetic padding constraints below. The periodic rate/lane-16 selectors are disjoint,
+    // so these two ties can share one degree-three constraint per byte.
+    let verbatim = p_rate_block.clone() * (AB::Expr::ONE - is_zero_next.clone());
+    let lane16 = p_pad_0x80 * b_sum.clone();
+    for i in 0..8 {
+        let padded: AB::Expr = local[PADDED_BYTES_RANGE.start + i].into();
+        builder.assert_zero(
+            verbatim.clone() * (padded.clone() - chunk_bytes[i].into())
+                + lane16.clone() * (padded - AB::Expr::from(Felt::from(PAD_CONST_BYTES[i]))),
+        );
+    }
+
+    // On a pad transition, the Boolean, period-constant b selectors sum to one: their
+    // sum equals the monotone is_zero flag on the following non-rate rows. Retain input
+    // bytes before the selected position, insert 1 there, and clear the remaining bytes.
+    // Canonical input-byte lookups are still required; packed Memory64 halves alone do
+    // not establish the range of each digit.
+    let pad_mult = act.clone() * p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
+    for i in 0..8 {
+        let keep: AB::Expr = ((i + 1)..8).map(|j| AB::Expr::from(local[COL_B_BEGIN + j])).sum();
+        let padded: AB::Expr = local[PADDED_BYTES_RANGE.start + i].into();
+        builder.assert_zero(
+            pad_mult.clone() * (padded - chunk_bytes[i].into() * keep - local[COL_B_BEGIN + i]),
+        );
+    }
+
+    // Boundary (`when_first_row`) ---------------------------
+    // `sponge_seq_id` starts at 0 (row counter convention). No
+    // `chunk_ptr` boundary: the chunk-tape base is pinned per
+    // invocation by the `KeccakSponge` request (the first
+    // invocation supplies base 0 by convention), and the chain is
+    // relaxed at invocation seams — see the `chunk_ptr` chain below.
+    builder.when_first_row().assert_zero(sponge_seq_id.clone());
+
+    // Activity ----------------------------------------------
+    // Binary: act ∈ {0, 1}. Deg 2.
+    builder.assert_bool(local[COL_ACT]);
+    // Sticky-downward: forbids 0 → 1 within [0, N-2]. The cyclic
+    // wrap is intentionally unconstrained so a 1's-prefix / 0's-
+    // suffix trace cycles back to `act_0 = 1` on the next loop.
+    builder
+        .when_transition()
+        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+    // Drop placement: the unique 1 → 0 transition must land at
+    // slot 31 (where `p_last = 1`) of a last-block period
+    // (`Σ b_j = 1`). Equivalent to `act · (1 - act')` under the
+    // sticky-down constraint above; the linear form costs one
+    // fewer witness multiplication.
+    builder
+        .when_transition()
+        .assert_zero((act.clone() - act_next) * (AB::Expr::ONE - p_last.clone() * b_sum.clone()));
+
+    // Row counter -------------------------------------------
+    // sponge_seq_id' - sponge_seq_id - 1 = 0. Deg 1.
+    // `when_transition` keeps the cyclic wrap (which would force
+    // sponge_seq_id_0 = N) unconstrained.
+    builder
+        .when_transition()
+        .assert_zero(sponge_seq_id_next - sponge_seq_id - AB::Expr::ONE);
+
+    // `is_first_block_of_invocation` structure --------------
+    builder.assert_bool(local[COL_IS_FIRST_BLOCK_OF_INVOCATION]);
+    // Constant within period. `(1 - p_last)` makes the wrap
+    // vacuous (p_last_{N-1} = 1) and lets `is_first_block` toggle
+    // at period boundaries.
+    builder.assert_zero(
+        (AB::Expr::ONE - p_last.clone()) * (is_first_block_next.clone() - is_first_block.clone()),
+    );
+
+    // `bytes_left` decrement chain --------------------------
+    // Both branches are gated by `act`: on dead rows `bytes_left` is
+    // unconstrained, so the all-dead (zero-invocation) trace is
+    // admissible — the only valid empty-transcript trace.
+    // On active rows the chain is identical, so it still forbids the
+    // `act = 1 ∧ is_first_block = 0` cyclic-fixed-point forgery via the
+    // `M · 136 ≢ 0 mod p` argument (`act` doesn't weaken it — the forgery
+    // it rules out is fully active). Dead rows are bus-inert, so leaving
+    // `bytes_left` free there is sound.
+    //
+    // Absorb row (`p_rate_block = 1`): decrements by 8.
+    builder.assert_zero(
+        act.clone()
+            * p_rate_block.clone()
+            * (bytes_left_next.clone() - bytes_left.clone() + AB::Expr::from(Felt::from(8u8))),
+    );
+    // Non-absorb row + no invocation boundary at next row: holds steady.
+    let enters_new_invocation = p_last.clone() * is_first_block_next.clone();
+    builder.assert_zero(
+        act.clone()
+            * (AB::Expr::ONE - enters_new_invocation.clone())
+            * (AB::Expr::ONE - p_rate_block.clone())
+            * (bytes_left_next - bytes_left.clone()),
+    );
+
+    // `chunk_ptr` increment chain ---------------------------
+    // Within an invocation: chunk_ptr' - chunk_ptr -
+    // (p_rate_block + p_extra · b_sum) · is_chunk_avail = 0 (advance
+    // by 1 per consumed chunk lane). Rate rows consume on every
+    // block; the extra rows consume the last block's overshoot
+    // lanes (gated to the last block by `b_sum`), so `chunk_ptr`
+    // walks all 4·num_chunks tape lanes contiguously. Gated off at
+    // invocation seams (`enters_new_invocation`), where the
+    // `KeccakSponge` request re-pins chunk_ptr to the next
+    // invocation's chunk-tape base. No global enumeration from 0 —
+    // per-invocation overlap/gap freedom is enforced by Memory64
+    // bus balance against the chunk chiplet's contiguous emissions,
+    // not by the chain. `when_transition` also keeps the cyclic
+    // wrap unconstrained.
+    builder.when_transition().assert_zero(
+        (AB::Expr::ONE - enters_new_invocation)
+            * (chunk_ptr_next
+                - chunk_ptr
+                - (p_rate_block.clone() + p_extra.clone() * b_sum.clone())
+                    * is_chunk_avail.clone()),
+    );
+
+    // Chunk zero-fill on `is_chunk_avail = 0` --------------
+    // Pin `chunk_lo = chunk_hi = 0` so the witness is canonical. Ungated —
+    // pinning chunk to 0 on non-rate / dead rows is benign since those
+    // rows never consume the chunk columns elsewhere.
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo.clone());
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi.clone());
+
+    // Message lanes come from the tape ----------------------
+    // A rate row whose lane carries message bytes must consume a tape
+    // lane: every verbatim row, and the pad row unless the pad sits at
+    // byte 0. Otherwise such a row would absorb a zero lane while the
+    // skipped tape lanes are consumed later, on rows that ignore them.
+    let b_0: AB::Expr = local[COL_B_BEGIN].into();
+    let carries_message =
+        (AB::Expr::ONE - is_zero.clone()) - (is_zero_next.clone() - is_zero.clone()) * b_0;
+    builder.assert_zero(
+        act.clone()
+            * p_rate_block.clone()
+            * carries_message
+            * (AB::Expr::ONE - is_chunk_avail.clone()),
+    );
+
+    // Tape bytes after the message are zero -----------------
+    // The chunk encoding zero-pads the last chunk: a lane consumed past
+    // the pad is zero, and so are the pad lane's bytes from the pad
+    // position on (`chunk = cleared`). The arithmetic padding pins
+    // `padded = cleared + b` on the pad row, so `cleared = padded − b`; the
+    // canonical input-byte lookups make the packed equality hold digit-wise.
+    let past_pad = (p_rate_block.clone() + p_extra) * is_zero.clone();
+    builder.assert_zero(act.clone() * past_pad.clone() * chunk_lo.clone());
+    builder.assert_zero(act.clone() * past_pad * chunk_hi.clone());
+    let pad_row = p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
+    let padded_bytes: [AB::Var; 8] = array::from_fn(|i| local[PADDED_BYTES_RANGE.start + i]);
+    let b_bits: [AB::Var; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
+    let [padded_lo, padded_hi]: [AB::Expr; 2] = halves_le(&padded_bytes, 256);
+    let [b_lo, b_hi]: [AB::Expr; 2] = halves_le(&b_bits, 256);
+    let cleared_lo_local = padded_lo - b_lo;
+    let cleared_hi_local = padded_hi - b_hi;
+    builder.assert_zero(act.clone() * pad_row.clone() * (chunk_lo - cleared_lo_local));
+    builder.assert_zero(act.clone() * pad_row * (chunk_hi - cleared_hi_local));
+
+    // Padding state machine ---------------------------------
+    // Binarity.
+    builder.assert_bool(local[COL_IS_ZERO]);
+    builder.assert_bool(local[COL_IS_CHUNK_AVAIL]);
+    for col in COL_B_RANGE {
+        builder.assert_bool(local[col]);
+    }
+
+    // `is_zero` non-decreasing within period.
+    builder.assert_zero(
+        (AB::Expr::ONE - p_last.clone()) * is_zero.clone() * (AB::Expr::ONE - is_zero_next.clone()),
+    );
+    // `is_chunk_avail` non-increasing within period.
+    builder.assert_zero(
+        (AB::Expr::ONE - p_last.clone()) * (AB::Expr::ONE - is_chunk_avail) * is_chunk_avail_next,
+    );
+    // Period boundary: pad hasn't fired yet at slot 0.
+    builder.assert_zero(p_first * is_zero.clone());
+    // Selector bits constant within period.
+    for col in COL_B_RANGE {
+        let b_j: AB::Expr = local[col].into();
+        let b_j_next: AB::Expr = next[col].into();
+        builder.assert_zero((AB::Expr::ONE - p_last.clone()) * (b_j_next - b_j));
+    }
+    // Selector sum ties to `is_zero` on non-absorb rows.
+    builder.assert_zero((AB::Expr::ONE - p_rate_block.clone()) * (b_sum.clone() - is_zero.clone()));
+
+    // Pad-must-fire (gated by `act`) ------------------------
+    // At slot 31 of any *active* period followed by a new
+    // invocation, force `is_zero = 1` (the pad fired earlier in
+    // this period) — i.e. a new invocation may only start right
+    // after a last block, so no invocation is truncated. Covers
+    // active→active seams. The last active invocation's last block
+    // is instead pinned by `act` drop placement (act may drop only
+    // after a `b_sum = 1` period). The `act` gate makes the cyclic
+    // wrap from the trailing dead pad region into row 0 vacuous
+    // (dead rows carry `is_zero = 0`), so an invocation set whose
+    // total block count isn't a power of two — padded out with dead
+    // rows — is admissible. Without the gate the wrap would demand
+    // `is_zero = 1` on the final dead row.
+    builder.assert_zero(act * p_last * is_first_block_next * (AB::Expr::ONE - is_zero.clone()));
+
+    // Pad-lane tie-down -------------------------------------
+    // On the unique pad transition row (`p_rate_block = 1`,
+    // `is_pad = 1`), pin `byte_offset = bytes_left`. Vacuous
+    // everywhere else. The `p_rate_block` gate also absorbs
+    // the period-wrap `is_pad = −1` case, which always lands
+    // on `p_idx = 31` where `p_rate_block = 0`.
+    let is_pad: AB::Expr = is_zero_next - is_zero.clone();
+    builder.assert_zero(p_rate_block.clone() * is_pad * (b_weighted - bytes_left));
+
+    // state_prev = 0 on first-block state-lane rows ---------
+    builder.assert_zero(p_state_lane.clone() * is_first_block.clone() * state_prev_lo.clone());
+    builder.assert_zero(p_state_lane * is_first_block * state_prev_hi.clone());
+
+    // State propagation (no BytePairLut request fires) --------
+    // Past-pad rate XORin rows: `state_new = state_prev`.
+    builder.assert_zero(
+        p_rate_block.clone() * is_zero.clone() * (state_new_lo.clone() - state_prev_lo.clone()),
+    );
+    builder.assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
+    // Capacity rows: identity passthrough.
+    builder.assert_zero(p_capacity.clone() * (state_new_lo - state_prev_lo));
+    builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
+}
+
+// LOOKUP AIR
+// ================================================================================================
+
+/// Exact per-column insert counts. The 16 byte-table fractions occupy
+/// two sets of 3/3/2 batches, sharing the state XOR across all absorption/padding modes.
+/// The degree-4 `squeeze` remains alone and the
+/// degree-4 `chunk-consume` remains paired, keeping every constraint at
+/// degree 5 or below.
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [
+    2, 3, 1, // Memory64 state, rc/lane-16, squeeze.
+    3, 3, 2, 3, 3, 2, // Canonical input bytes + shared state XOR.
+    2, // KeccakSponge request + chunk consume.
+];
+
+impl<LB> LookupAir<LB> for KeccakSpongeAir
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        eval_lookups(builder, 0);
+    }
+}
+
+/// Evaluate this component's LogUp columns in a main-trace column band.
+pub(crate) fn eval_lookups<LB>(builder: &mut LB, main_col_offset: usize)
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+    let periodic = builder.periodic_values();
+    let p_first: LB::Expr = periodic[PCOL_FIRST].into();
+    let p_rate_block: LB::Expr = periodic[PCOL_RATE_BLOCK].into();
+    let p_capacity: LB::Expr = periodic[PCOL_CAPACITY].into();
+    let p_rc_active: LB::Expr = periodic[PCOL_RC_ACTIVE].into();
+    let p_squeeze_active: LB::Expr = periodic[PCOL_SQUEEZE_ACTIVE].into();
+    let p_pad_0x80: LB::Expr = periodic[PCOL_PAD_0X80].into();
+    let p_extra: LB::Expr = periodic[PCOL_EXTRA].into();
+    let p_idx: LB::Expr = periodic[PCOL_IDX].into();
+    let rc_lo: LB::Expr = periodic[PCOL_RC_LO].into();
+    let rc_hi: LB::Expr = periodic[PCOL_RC_HI].into();
+    let p_state_lane: LB::Expr = p_rate_block.clone() + p_capacity;
+
+    let act: LB::Expr = local[COL_ACT].into();
+    let sponge_seq_id: LB::Expr = local[COL_SPONGE_SEQ_ID].into();
+    let chunk_ptr: LB::Expr = local[COL_CHUNK_PTR].into();
+    let bytes_left: LB::Expr = local[COL_BYTES_LEFT].into();
+    let is_first_block: LB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
+    let is_chunk_avail: LB::Expr = local[COL_IS_CHUNK_AVAIL].into();
+    let is_zero: LB::Expr = local[COL_IS_ZERO].into();
+    let is_zero_next: LB::Expr = next[COL_IS_ZERO].into();
+    let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].into();
+    let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].into();
+    let padded_bytes: [LB::Var; 8] = array::from_fn(|i| local[PADDED_BYTES_RANGE.start + i]);
+    let chunk_bytes: [LB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
+    let state_prev_bytes: [LB::Var; 8] =
+        array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
+    let state_new_bytes: [LB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
+    let [chunk_lo, chunk_hi]: [LB::Expr; 2] = halves_le(&chunk_bytes, 256);
+    let [state_prev_lo, state_prev_hi]: [LB::Expr; 2] = halves_le(&state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [LB::Expr; 2] = halves_le(&state_new_bytes, 256);
+
+    let b_sum: LB::Expr = COL_B_RANGE.map(|col| LB::Expr::from(local[col])).sum();
+
+    // Derived multiplicity signals.
+    let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
+    let is_first_row_of_invocation: LB::Expr = p_first * is_first_block;
+    let is_pad: LB::Expr = is_zero_next - is_zero.clone();
+    let is_absorb: LB::Expr = LB::Expr::ONE - is_zero;
+
+    // Per-row address expressions.
+    let hundred_seq = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id.clone();
+    let ninety_nine_idx = LB::Expr::from(Felt::from(99u8)) * p_idx.clone();
+    let addr_state_lane_prev =
+        hundred_seq.clone() - ninety_nine_idx.clone() - LB::Expr::from(Felt::from(128u8));
+    let addr_state_lane_new = hundred_seq.clone() - ninety_nine_idx.clone();
+    let addr_rc = hundred_seq.clone()
+        + LB::Expr::from(Felt::from(28u8)) * p_idx
+        + LB::Expr::from(Felt::from(25u8));
+    let addr_squeeze = hundred_seq.clone() - ninety_nine_idx + LB::Expr::from(Felt::from(3072u32));
+    let addr_lane16 = hundred_seq - LB::Expr::from(Felt::from(2484u32));
+    let chunk_addr_base =
+        Felt::new(CHUNK_ADDR_BASE).expect("CHUNK_ADDR_BASE fits in canonical Goldilocks");
+    let addr_chunk = LB::Expr::from(chunk_addr_base) + chunk_ptr.clone();
+
+    // Per-message multiplicity factors, all gated by `act`.
+    let mult_prev_perm: LB::Expr = LB::Expr::from(Felt::from(2u8)) * act.clone() * is_intra;
+    let mult_new_state: LB::Expr = LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone();
+    let mult_rc: LB::Expr =
+        LB::Expr::ZERO - LB::Expr::from(Felt::from(1u8)) * act.clone() * p_rc_active;
+    let mult_squeeze: LB::Expr =
+        LB::Expr::from(Felt::from(2u8)) * act.clone() * p_squeeze_active * b_sum.clone();
+    let mult_lane16_consume: LB::Expr =
+        LB::Expr::from(Felt::from(2u8)) * act.clone() * b_sum.clone();
+    let mult_lane16_provide: LB::Expr =
+        LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone() * b_sum.clone();
+
+    let new_state_deg = Deg { v: 2, u: 1 };
+    let selected_interaction_deg = Deg { v: 3, u: 1 };
+    let squeeze_interaction_deg = Deg { v: 4, u: 1 };
+    let chunk_interaction_deg = Deg { v: 4, u: 1 };
+    // Direct product batching preserves each original fraction. Group and column hints encode the
+    // per-entry multiplicity and denominator degrees listed below.
+    let pair_deg = Deg { v: 4, u: 2 };
+    let triple_deg = Deg { v: 5, u: 3 };
+    let solo_deg = Deg { v: 4, u: 1 };
+    let mixed_deg = Deg { v: 5, u: 2 };
+
+    // col 0 (centered running sum): Memory64 state-lane new-state + prev-perm. Their ungated
+    // recurrence closes at degree four.
+    frac_col!(
+        builder,
+        "memory64",
+        pair_deg,
+        (
+            "new-state",
+            p_state_lane.clone() * mult_new_state.clone(),
+            Memory64Msg {
+                addr: addr_state_lane_new.clone(),
+                lo: state_new_lo.clone(),
+                hi: state_new_hi.clone(),
+            },
+            new_state_deg
+        ),
+        (
+            "prev-perm",
+            p_state_lane.clone() * mult_prev_perm.clone(),
+            Memory64Msg {
+                addr: addr_state_lane_prev.clone(),
+                lo: state_prev_lo.clone(),
+                hi: state_prev_hi.clone(),
+            },
+            selected_interaction_deg
+        ),
+    );
+    // col 1: Memory64 state-lane rc + lane-16 0x80 consume / provide.
+    frac_col!(
+        builder,
+        "memory64",
+        triple_deg,
+        (
+            "rc",
+            p_state_lane.clone() * mult_rc.clone(),
+            Memory64Msg {
+                addr: addr_rc.clone(),
+                lo: rc_lo.clone(),
+                hi: rc_hi.clone()
+            },
+            selected_interaction_deg
+        ),
+        (
+            "lane16-consume",
+            p_pad_0x80.clone() * mult_lane16_consume.clone(),
+            Memory64Msg {
+                addr: addr_lane16.clone(),
+                lo: state_prev_lo.clone(),
+                hi: state_prev_hi.clone(),
+            },
+            selected_interaction_deg
+        ),
+        (
+            "lane16-provide",
+            p_pad_0x80.clone() * mult_lane16_provide.clone(),
+            Memory64Msg {
+                addr: addr_lane16.clone(),
+                lo: state_new_lo.clone(),
+                hi: state_new_hi.clone(),
+            },
+            selected_interaction_deg
+        ),
+    );
+    // col 2: Memory64 squeeze — a degree-4 multiplicity, alone (closing 4).
+    frac_col!(
+        builder,
+        "memory64",
+        solo_deg,
+        (
+            "squeeze",
+            p_state_lane.clone() * mult_squeeze.clone(),
+            Memory64Msg {
+                addr: addr_squeeze.clone(),
+                lo: state_out_lo.clone(),
+                hi: state_out_hi.clone()
+            },
+            squeeze_interaction_deg
+        ),
+    );
+
+    // cols 3..8: canonical pad-row inputs, then state XORs. Both families fire on
+    // pad rows, so retain each fraction in a product batch with a constant batch flag.
+    let pad_mult = p_rate_block.clone() * is_pad * act.clone();
+    let xor_mult = (p_rate_block.clone() * is_absorb + p_pad_0x80 * b_sum.clone()) * act.clone();
+    for (canonical_input, mult) in [(true, pad_mult), (false, xor_mult)] {
+        for start in (0..8).step_by(3) {
+            let end = (start + 3).min(8);
+            let deg = if end - start == 3 { triple_deg } else { pair_deg };
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "byte-pair-lut",
+                        |group| {
+                            group.batch(
+                                "f",
+                                LB::Expr::ONE,
+                                |batch| {
+                                    for i in start..end {
+                                        let (name, msg) = if canonical_input {
+                                            (
+                                                "canonical-input-byte",
+                                                BytePairLutMsg::from_xor(
+                                                    chunk_bytes[i].into(),
+                                                    LB::Expr::ZERO,
+                                                    chunk_bytes[i].into(),
+                                                ),
+                                            )
+                                        } else {
+                                            (
+                                                "xor-state",
+                                                BytePairLutMsg::from_xor(
+                                                    state_prev_bytes[i].into(),
+                                                    padded_bytes[i].into(),
+                                                    state_new_bytes[i].into(),
+                                                ),
+                                            )
+                                        };
+                                        batch.insert(
+                                            name,
+                                            mult.clone(),
+                                            msg,
+                                            selected_interaction_deg,
+                                        );
+                                    }
+                                },
+                                deg,
+                            );
+                        },
+                        deg,
+                    );
+                },
+                deg,
+            );
+        }
+    }
+
+    // col 9: the KeccakSponge request + the chunk consume (a degree-4
+    // multiplicity, paired → closing 5). Two independent inserts on
+    // different buses, bus-prefix-distinguished encodings keeping the
+    // contributions algebraically distinct.
+    frac_col!(
+        builder,
+        "ks-and-chunk",
+        mixed_deg,
+        (
+            "ks-request",
+            act.clone() * is_first_row_of_invocation.clone(),
+            KeccakSpongeMsg {
+                sponge_seq_id: sponge_seq_id.clone(),
+                chunk_ptr: chunk_ptr.clone(),
+                len_bytes: bytes_left.clone(),
+            },
+            selected_interaction_deg
+        ),
+        (
+            "chunk-consume",
+            act.clone()
+                * (p_rate_block.clone() + p_extra.clone() * b_sum.clone())
+                * is_chunk_avail.clone(),
+            Memory64Msg {
+                addr: addr_chunk.clone(),
+                lo: chunk_lo.clone(),
+                hi: chunk_hi.clone()
+            },
+            chunk_interaction_deg
+        ),
+    );
+}

@@ -1,0 +1,297 @@
+use {
+    AUX_TRACE_COM_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
+use miden::core::stark::random_coin
+use miden::core::sys::pvm::layout
+
+#! An address in the PVM fixed environment, carried as a 32-bit bus-message value.
+type EnvironmentPtr = u32
+
+#! Fixed-environment unsigned integer and its domain-bound pointer.
+type UintValPayload = struct {
+    ptr: EnvironmentPtr,
+    bound_ptr: EnvironmentPtr,
+    value: u256,
+}
+
+#! Fixed elliptic-curve group parameters, represented by their environment pointers.
+type EcGroupPayload = struct {
+    group: EnvironmentPtr,
+    a: EnvironmentPtr,
+    b: EnvironmentPtr,
+    bound: EnvironmentPtr,
+    scalar_bound: EnvironmentPtr,
+    beta: EnvironmentPtr,
+    lambda: EnvironmentPtr,
+}
+
+# Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
+const UINT_VAL_BUS_SCALE = {{ uint_val_bus_scale }}
+const EC_GROUP_BUS_SCALE = {{ ec_group_bus_scale }}
+# MAX_LOGUP_MESSAGE_WIDTH = {{ max_logup_message_width }}
+
+# Number of chiplet instances in the relation, each contributing one boundary value.
+# NUM_CHIPLETS = {{ num_chiplets }}
+# Complete words spanned by the proof-ordered, two-felt normalized boundary sums.
+# NUM_AUX_VALUE_WORDS = {{ num_aux_value_words }}
+
+#! Load one normalized committed LogUp sum and scale both extension coordinates by the chiplet's
+#! row count `n = 2^log_height`.
+#!
+#! `boundary_offset` is `2k` for canonical instance index `k`, so the caller must have scattered
+#! the sums to their canonical addresses first.
+#!
+#! Input:  [boundary_offset, log_height, ...]
+#! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
+proc load_weighted_aux_sum(boundary_offset: u8, log_height: u8) -> types::QuadFelt
+    swap pow2
+    exec.layout::aux_bus_boundary_ptr movup.2 add
+
+    dup mem_load
+    dup.2 mul
+
+    swap add.1 mem_load
+    movup.2 mul swap
+end
+
+#! Reads the normalized boundary sum submitted at one position of the proof order.
+#!
+#! Input:  [proof_order_position, ...]
+#! Output: [sigma_prime_0, sigma_prime_1, ...]
+proc load_boundary_pair(proof_order_position: u8) -> types::QuadFelt
+    mul.2 exec.layout::aux_bus_boundary_ptr add
+
+    dup add.1 mem_load
+    swap mem_load
+end
+
+#! Moves each normalized boundary sum from its proof-order slot to its canonical instance-order
+#! slot.
+#!
+#! The proof submits one sum per chiplet ordered by trace height, so the absorb above stores them
+#! in that order. The constraint circuit instead reads chiplet `k`'s sum at
+#! `AUX_BUS_BOUNDARY_PTR + 2k`, the address `InputKey::AuxBusBoundary(k)` names, with `k` the
+#! canonical instance index. The `pos_by_id` table staged once per proof by
+#! `ood_frames::stage_proof_order_maps` supplies these positions.
+#!
+#! Every sum is read onto the operand stack before any is written back, so the region is permuted
+#! in place without scratch memory. The AIR heights and their proof-order positions must already
+#! be staged; the sums must already be absorbed.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc scatter_aux_bus_boundary()
+{{ scatter_boundaries }}
+end
+
+#! Observes the PVM auxiliary trace commitment and its normalized LogUp values.
+#!
+#! The advice provider supplies the commitment followed by each chiplet's exposed value in proof
+#! order. Every chiplet exposes one `sigma_prime = sigma / n`, which is weighted by that chiplet's
+#! trace length before closing the external LogUp identity.
+#!
+#! The compiler emits exactly the four-felt commitment and two coordinates per AIR.
+#! Complete words use optimized observation; a final two-coordinate tail is absorbed as scalars
+#! without padding, matching the native transcript before it samples composition challenges.
+#!
+#! Once absorbed, the values are moved to the canonical addresses the constraint circuit reads
+#! them from.
+#!
+#! The hook also adds the verifier-side consumes for the fixed uint/curve environment and asserts
+#! `fixed_boundary_correction + sum_i(n_i * sigma_prime_i) == 0` coordinate-wise.
+#!
+#! Precondition:  input_len=0 (the main commitment was flushed before this hook).
+#! Postcondition: input_len=(4 + 2*N) mod 8, output_len=0.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc observe_aux_trace()
+    # Draw [alpha, beta] and store [beta0, beta1, alpha0, alpha1] at the staged PVM READ boundary.
+    exec.random_coin::generate_aux_randomness
+
+    # The nineteen fixed-environment consumes depend on the sampled challenges but not on proof data.
+    exec.compute_fixed_boundary_correction
+
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+    assertz.err="PVM observe_aux_trace: input buffer must be empty"
+    # Store and absorb the commitment plus every proof-ordered boundary value.
+    padw adv_loadw
+    mem_storew_le.AUX_TRACE_COM_PTR
+    exec.random_coin::eidos_observe_word
+{{ observe_boundaries }}
+
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+    push.{{ buffered_aux_value_count }} assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
+    assertz.err="PVM observe_aux_trace: observed input exposed stale output"
+
+    # The transcript has now seen the wire order, so the sums may move to the canonical addresses
+    # the constraint circuit reads them from. Everything below indexes the region by canonical
+    # instance index, so this must precede the weighted sum, not follow it.
+    exec.scatter_aux_bus_boundary
+
+    # Scale chiplet k's normalized sum, now at offset 2k, by chiplet k's trace length. Each call
+    # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
+{{ weight_boundaries }}
+
+    exec.layout::c_total_ptr add.1 mem_load
+    exec.layout::c_total_ptr mem_load
+    ext2add
+    assertz.err="PVM fixed-boundary mismatch: correction + weighted LogUp sum coord 0"
+    assertz.err="PVM fixed-boundary mismatch: correction + weighted LogUp sum coord 1"
+end
+
+#! Computes gamma = beta^18 for `MAX_LOGUP_MESSAGE_WIDTH`.
+#!
+#! Four squarings produce beta^16; the retained beta^2 supplies the remaining factor. The result
+#! is stored as `[gamma0, gamma1, 0, 0]`.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc compute_bus_gamma()
+    exec.load_beta
+    dup.1 dup.1 ext2mul   # beta^2
+    dup.1 dup.1           # retain beta^2
+    dup.1 dup.1 ext2mul   # beta^4, beta^2
+    dup.1 dup.1 ext2mul   # beta^8
+    dup.1 dup.1 ext2mul   # beta^16
+    ext2mul                # beta^18
+    push.0.0 movup.3 movup.3
+    exec.layout::bus_gamma_ptr mem_storew_le
+    dropw
+end
+
+#! Loads beta from `[beta0, beta1, alpha0, alpha1]`.
+#!
+#! Input:  [...]
+#! Output: [beta0, beta1, ...]
+proc load_beta() -> types::QuadFelt
+    exec.layout::aux_rand_elem_ptr add.1 mem_load
+    exec.layout::aux_rand_elem_ptr mem_load
+end
+
+#! Loads alpha from `[beta0, beta1, alpha0, alpha1]`.
+#!
+#! Input:  [...]
+#! Output: [alpha0, alpha1, ...]
+proc load_alpha() -> types::QuadFelt
+    exec.layout::aux_rand_elem_ptr add.3 mem_load
+    exec.layout::aux_rand_elem_ptr add.2 mem_load
+end
+
+#! Loads gamma from its relation-local scratch word.
+#!
+#! Input:  [...]
+#! Output: [gamma0, gamma1, ...]
+proc load_gamma() -> types::QuadFelt
+    exec.layout::bus_gamma_ptr add.1 mem_load
+    exec.layout::bus_gamma_ptr mem_load
+end
+
+#! Horner-folds a UintVal payload `(ptr, bound_ptr, c0, ..., c7)`.
+#!
+#! Keeps beta below the accumulator so all nine multiplications reuse the same stack copy.
+#!
+#! Input:  [beta0, beta1, m0, ..., m9, ...]
+#! Output: [msg0, msg1, beta0, beta1, ...]
+proc fold_uint_val_payload(
+    beta: types::QuadFelt,
+    payload: UintValPayload,
+) -> (types::QuadFelt, types::QuadFelt)
+    movup.11 push.0 swap
+    dup.3 dup.3 ext2mul movup.12 add
+    dup.3 dup.3 ext2mul movup.11 add
+    dup.3 dup.3 ext2mul movup.10 add
+    dup.3 dup.3 ext2mul movup.9 add
+    dup.3 dup.3 ext2mul movup.8 add
+    dup.3 dup.3 ext2mul movup.7 add
+    dup.3 dup.3 ext2mul movup.6 add
+    dup.3 dup.3 ext2mul movup.5 add
+    dup.3 dup.3 ext2mul movup.4 add
+end
+
+#! Horner-folds an EcGroup payload
+#! `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr, beta_ptr, lambda_ptr)`.
+#!
+#! Keeps beta below the accumulator so all six multiplications reuse the same stack copy.
+#!
+#! Input:  [beta0, beta1, m0, ..., m6, ...]
+#! Output: [msg0, msg1, beta0, beta1, ...]
+proc fold_ec_group_payload(
+    beta: types::QuadFelt,
+    payload: EcGroupPayload,
+) -> (types::QuadFelt, types::QuadFelt)
+    movup.8 push.0 swap
+    dup.3 dup.3 ext2mul movup.9 add
+    dup.3 dup.3 ext2mul movup.8 add
+    dup.3 dup.3 ext2mul movup.7 add
+    dup.3 dup.3 ext2mul movup.6 add
+    dup.3 dup.3 ext2mul movup.5 add
+    dup.3 dup.3 ext2mul movup.4 add
+end
+
+#! Computes the domain prefix `alpha + i*gamma`.
+#!
+#! Input:  [i, ...]
+#! Output: [prefix0, prefix1, ...]
+proc compute_bus_prefix(bus_id_plus_one: u8) -> types::QuadFelt
+    exec.load_gamma
+    # => [gamma0, gamma1, i, ...]
+    dup.2 mul
+    # => [i*gamma0, gamma1, i, ...]
+    movup.2 movup.2 mul swap
+    # => [i*gamma0, i*gamma1, ...]
+    exec.load_alpha
+    ext2add
+end
+
+#! Adds a cached bus prefix to a message, inverts the result, and adds it to the running sum.
+#!
+#! Input:  [msg0, msg1, beta0, beta1, sum0, sum1, prefix0, prefix1, ...]
+#! Output: [sum0, sum1, beta0, beta1, prefix0, prefix1, ...]
+proc add_cached_prefix_inverse_to_sum(
+    message: types::QuadFelt,
+    beta: types::QuadFelt,
+    sum: types::QuadFelt,
+    prefix: types::QuadFelt,
+) -> (types::QuadFelt, types::QuadFelt, types::QuadFelt)
+    dup.7 dup.7
+    ext2add ext2inv
+    movup.5 movup.5 ext2add
+end
+
+#! Computes the nineteen fixed-environment boundary consumes and stores their inverse sum.
+#!
+#! The sixteen UintVal messages bind the eight fixed domain bounds (including the P-256 base and
+#! scalar bounds), the A/B coefficients of secp256k1, Ed25519 and P-256, and secp256k1's GLV
+#! beta/lambda constants. Three EcGroup messages bind the secp256k1, Ed25519 and P-256 groups to
+#! those pointers. The literals must encode the fixed messages produced by
+#! `miden_precompiles_air::fixed::{fixed_uintval_msgs, fixed_ecgroup_msgs}`.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc compute_fixed_boundary_correction()
+    exec.compute_bus_gamma
+    exec.load_beta
+    push.0.0
+    push.UINT_VAL_BUS_SCALE exec.compute_bus_prefix
+    movdn.5 movdn.5
+    # => [sum0, sum1, beta0, beta1, uint_prefix0, uint_prefix1]
+    # Each literal push covers beta with the payload. Lift beta back above the payload for the
+    # fold; the running sum and cached prefix stay beneath it.
+
+{{ fixed_uint_consumes }}
+
+    # Discard the cached UintVal prefix; the EcGroup messages use a different one.
+    movup.5 drop movup.4 drop
+
+{{ fixed_ec_consumes }}
+
+    exec.layout::c_total_ptr mem_store
+    exec.layout::c_total_ptr add.1 mem_store
+    drop drop
+end

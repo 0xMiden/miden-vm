@@ -8,10 +8,7 @@ use miden_core::{
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
-use miden_crypto::stark::{
-    Preprocessed, StarkConfig,
-    challenger::{CanObserve, FieldChallenger},
-};
+use miden_lifted_stark::{Preprocessed, StarkConfig};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
 use miden_utils_testing::{
@@ -19,6 +16,7 @@ use miden_utils_testing::{
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
+use p3_challenger::{CanObserve, FieldChallenger};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
@@ -30,6 +28,7 @@ mod isolation;
 mod proof_order_maps;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
+mod pvm_geometry;
 mod pvm_public_inputs;
 mod pvm_scatter_bench;
 mod pvm_settlement;
@@ -46,7 +45,7 @@ mod vm_sigma_scatter;
 use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 
 pub(crate) fn pvm_layout_const(name: &str) -> u32 {
-    let source = include_str!("../../asm/sys/pvm/layout.masm");
+    let source = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/layout.masm"));
     let prefix = format!("const {name} = ");
     let region_prefix = format!("### {name}: ");
     let value = source
@@ -64,7 +63,7 @@ pub(crate) fn pvm_layout_const(name: &str) -> u32 {
 }
 
 pub(crate) fn vm_layout_const(name: &str) -> u32 {
-    let source = include_str!("../../asm/sys/vm/layout.masm");
+    let source = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/layout.masm"));
     let prefix = format!("const {name} = ");
     let value = source
         .lines()
@@ -1776,8 +1775,8 @@ fn quotient_recomposition_constants_match_derivation() {
     // has arity = blowup = 8, so deriving all three from the blowup would produce the
     // same numbers and conceal the conflation that breaks relations where they differ.
     let masm = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/asm/sys/vm/constraints_eval.masm"
+        env!("MIDEN_CORE_ASM_DIR"),
+        "/sys/vm/constraints_eval.masm"
     ))
     .expect("read generated VM constraints evaluator");
     let masm_const = |name: &str| -> u64 {
@@ -1798,10 +1797,10 @@ fn quotient_recomposition_constants_match_derivation() {
 
     let log_quotient_degree = miden_air::AIRS
         .iter()
-        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
-    let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
         config::pcs_params().log_blowup(),
     )
@@ -1849,12 +1848,12 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
         (
             "vm",
             vm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/vm/constraints_eval.masm"),
+            include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/constraints_eval.masm")),
         ),
         (
             "pvm",
             pvm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+            include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/constraints_eval.masm")),
         ),
     ] {
         let num_airs = masm_const(evaluator, "NUM_AIRS", relation);

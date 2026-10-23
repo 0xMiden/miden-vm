@@ -89,28 +89,7 @@ jobs:
         run: make test NEXTEST_PROFILE=ci
       - name: Build core library and generate documentation
         run: |
-          # Build core library with documentation generation enabled
-          MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
-      - name: Check for documentation changes in crates/lib/core/docs
-        run: |
-          if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then
-            echo "ERROR: Found uncommitted changes in crates/lib/core/docs/"
-            echo "This indicates that the assembly source code has changed but the documentation was not updated."
-            echo "Please commit the generated documentation changes before merging."
-            echo ""
-            echo "To fix this:"
-            echo "1. Run: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib"
-            echo "2. Commit the changes in crates/lib/core/docs/"
-            echo ""
-            echo "Uncommitted changes:"
-            git status crates/lib/core/docs
-            echo ""
-            echo "Diff:"
-            git diff crates/lib/core/docs
-            exit 1
-          else
-            echo "No documentation changes in crates/lib/core/docs/ - OK"
-          fi
+          make check-core-docs
 
   crypto-test:
     name: crypto test on warpbuild
@@ -259,8 +238,26 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check recursive constraint artifacts for drift
-        run: make check-constraints
+      - name: Check generated evaluators and assembled verifiers
+        run: make check-verifiers
+      - name: Check runtime dependency boundaries
+        run: |
+          for package in miden-air miden-crypto; do
+            cargo tree --locked --package "$package" --no-default-features --edges normal --prefix none > runtime-dependencies.txt
+            if grep -E '^miden-(constraint-compiler|verifier-codegen) ' runtime-dependencies.txt; then
+              echo "Compiler tooling leaked into $package runtime dependencies" >&2
+              exit 1
+            fi
+            if [ "$package" = miden-crypto ] && grep -E '^miden-lifted-stark ' runtime-dependencies.txt; then
+              echo "The STARK engine leaked into crypto dependencies" >&2
+              exit 1
+            fi
+          done
+          rm runtime-dependencies.txt
+      - name: Ensure builds leave source files unchanged
+        run: |
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
 
   pvm-checks:
     name: PVM checks

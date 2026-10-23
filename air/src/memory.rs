@@ -2,6 +2,8 @@
 //!
 //! Derives AIR-specific quantities (widths, quotient degree) from the [`BaseAir`] /
 //! [`LiftedAir`] impls over [`AIRS`], and protocol quantities from [`PcsParams`].
+//! The runtime AIR facade supplies build-generated constraint degrees, so budget queries never
+//! perform symbolic AIR evaluation.
 //!
 //! [`prover_peak_bytes`] models the allocations that dominate peak usage: each main and aux
 //! trace held at its 1x buffer plus its blowup-factor LDE, the quotient accumulator, and every
@@ -19,7 +21,7 @@
 //! footprint.
 
 use miden_core::field::{BasedVectorSpace, QuadFelt};
-use miden_crypto::stark::{log_quotient_degree, pcs::PcsParams};
+use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
 
 use crate::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 

@@ -33,11 +33,13 @@ const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
 const SHA512: &str = include_str!("../../asm/precompiles/hashes/sha512.masm");
 const RANDOM_COIN: &str = include_str!("../../asm/stark/random_coin.masm");
 const SYS: &str = include_str!("../../asm/sys/mod.masm");
-const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
+const VM: &str = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/mod.masm"));
 const CLAIM: &str = include_str!("../../asm/sys/vm/claim.masm");
 const FRI: &str = include_str!("../../asm/pcs/fri/frie2f4.masm");
-const VM_DEEP_QUERIES: &str = include_str!("../../asm/sys/vm/deep_queries.masm");
-const PVM_DEEP_QUERIES: &str = include_str!("../../asm/sys/pvm/deep_queries.masm");
+const VM_DEEP_QUERIES: &str =
+    include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/deep_queries.masm"));
+const PVM_DEEP_QUERIES: &str =
+    include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/deep_queries.masm"));
 
 fn parse_u64(value: &str) -> u64 {
     let value = value.trim().trim_end_matches(',');
@@ -293,13 +295,25 @@ fn masm_initial_chaining_words_match_rust() {
     assert_word(CLAIM, "CLAIM_INIT_CV", Eidos::init_chaining_word(EXECUTION_CLAIM, 40));
 
     assert_word(FRI, "FRI_ROW_HASH_INIT_CV", Eidos::init_chaining_word(LMCS_LEAF, 8));
+    use miden_air::{AIRS, MidenAir};
+    use miden_core::field::QuadFelt;
+    use miden_lifted_stark::air::{BaseAir, LiftedAir};
+    let row_width = |width: fn(&MidenAir) -> usize| -> usize {
+        AIRS.iter().map(|air| width(air).next_multiple_of(EIDOS_BLOCK_WIDTH)).sum()
+    };
     for (name, len) in [
-        ("EIDOS_LMCS_INIT_CV_8", 8),
-        ("EIDOS_LMCS_INIT_CV_16", 16),
-        ("EIDOS_LMCS_INIT_CV_64", 64),
-        ("EIDOS_LMCS_INIT_CV_192", 192),
+        ("PREPROCESSED_LMCS_INIT_CV", row_width(BaseAir::<Felt>::preprocessed_width)),
+        ("MAIN_LMCS_INIT_CV", row_width(BaseAir::<Felt>::width)),
+        (
+            "AUX_LMCS_INIT_CV",
+            row_width(|air| LiftedAir::<Felt, QuadFelt>::aux_width(air) * 2),
+        ),
+        (
+            "QUOTIENT_LMCS_INIT_CV",
+            miden_air::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
+        ),
     ] {
-        assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
+        assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len as u32));
     }
     for (cv_name, blocks_name) in [
         ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),

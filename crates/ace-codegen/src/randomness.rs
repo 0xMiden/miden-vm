@@ -3,11 +3,14 @@
 //! The ACE circuit expands (alpha, beta) into the full coefficient
 //! vector `[alpha, 1, beta, beta^2, ...]` used by the constraint system.
 
+#[cfg(feature = "compiler")]
 use miden_crypto::field::Field;
 
+use crate::layout::InputRegion;
+#[cfg(feature = "compiler")]
 use crate::{
     dag::{DagBuilder, NodeId},
-    layout::{InputKey, InputLayout, InputRegion},
+    layout::{InputKey, InputLayout},
 };
 
 /// Derive alpha/beta input indices from a randomness region.
@@ -26,6 +29,7 @@ pub(crate) fn aux_rand_indices(randomness: InputRegion) -> (usize, usize) {
 /// internally expands beta into powers `[1, beta, beta^2, ...]` via symbolic
 /// multiplication. This means the DAG will contain nodes for `beta^k` built
 /// from `AuxRandBeta`, which is correct.
+#[cfg(feature = "compiler")]
 pub(crate) fn lower_challenge<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
