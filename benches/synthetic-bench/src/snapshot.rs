@@ -1,7 +1,7 @@
 //! Snapshot schema for the VM-side synthetic benchmark.
 //!
 //! A producer JSON file (e.g. `bench-tx.json` from `protocol/bin/bench-transaction/`) maps
-//! scenario keys to entries. Each entry supplies provenance metadata and a `trace` section.
+//! scenario keys to entries with measured row counts in a `trace` section.
 //!
 //! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
 //! `eidos_compression_rows`, `byte_pair_lookup_rows`). `chiplets_shape` (nested under `trace`) is
@@ -33,27 +33,10 @@ pub const DEFAULT_SCENARIOS: &[&str] = &[
 /// The JSON stores the breakdown under `trace.chiplets_shape`; this type exposes it as `shape`.
 #[derive(Debug, Clone)]
 pub struct TraceSnapshot {
-    /// The row counts must come from execution of the producer workload.
-    pub provenance: SnapshotProvenance,
     /// Hard-target totals. The verifier's bracket check operates on these.
     pub trace: TraceTotals,
     /// Advisory per-chiplet breakdown used by the solver for shaping.
     pub shape: TraceBreakdown,
-}
-
-/// Origin of a snapshot's trace-row counts.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SnapshotProvenance {
-    ProducerMeasured,
-}
-
-impl SnapshotProvenance {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::ProducerMeasured => "producer_measured",
-        }
-    }
 }
 
 /// Hard-target aggregates -- the verifier's primary contract.
@@ -161,7 +144,8 @@ impl TraceShape {
 impl TraceSnapshot {
     /// Load every scenario in a producer JSON file, returning `(scenario_key, snapshot)` pairs in
     /// alphabetical order. Each scenario's trace section is extracted; cycle counts and other
-    /// per-scenario fields are ignored.
+    /// per-scenario fields are ignored. Row counts must come from execution of the producer
+    /// workload.
     pub fn load_all(path: impl AsRef<Path>) -> Result<Vec<(String, Self)>, SnapshotError> {
         let path_str = path.as_ref().display().to_string();
         let bytes = std::fs::read(path.as_ref())
@@ -210,14 +194,7 @@ impl TraceSnapshot {
                     return Err(SnapshotError::InvalidAirRows { scenario: key, field, rows });
                 }
             }
-            out.push((
-                key,
-                TraceSnapshot {
-                    provenance: entry.provenance,
-                    trace,
-                    shape,
-                },
-            ));
+            out.push((key, TraceSnapshot { trace, shape }));
         }
         Ok(out)
     }
@@ -229,11 +206,9 @@ impl TraceSnapshot {
 }
 
 /// Each scenario entry in a producer JSON. The producer also writes cycle counts at the top level
-/// (`prologue`, `epilogue`, ...), but the consumer ignores everything except provenance and
-/// `trace`.
+/// (`prologue`, `epilogue`, ...), but the consumer only reads `trace`.
 #[derive(Deserialize)]
 struct RawScenarioEntry {
-    provenance: SnapshotProvenance,
     trace: RawTrace,
 }
 
@@ -416,15 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unmeasured_provenance() {
-        assert_eidos_snapshot_parse_error(
-            "unmeasured-provenance",
-            r#"{"unmeasured": {"provenance": "derived_pending_producer_port", "trace": {}}}"#,
-            "unknown variant",
-        );
-    }
-
-    #[test]
     fn rejects_a_variable_and8_height() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots/bench-tx.json");
         let mut json: serde_json::Value =
@@ -441,7 +407,6 @@ mod tests {
     fn rejects_overflowing_chiplet_totals() {
         let snapshot = serde_json::json!({
             "overflow": {
-                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 64,
                     "chiplets_rows": 0,
@@ -480,7 +445,7 @@ mod tests {
         let snapshot: serde_json::Value =
             serde_json::from_str(include_str!("../snapshots/bench-tx.json")).unwrap();
         for (parent, field) in [
-            ("", "provenance"),
+            ("", "trace"),
             ("/trace", "eidos_compression_rows"),
             ("/trace/chiplets_shape", "kernel_rom_rows"),
         ] {
@@ -524,7 +489,6 @@ mod tests {
         // chiplets_rows says 500 but the breakdown sums to 11 (10 + 0 + 0 + 0 + 0 + 1).
         let mismatched = r#"{
             "broken": {
-                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 500,
@@ -549,7 +513,6 @@ mod tests {
     fn rejects_misaligned_eidos_compression_rows() {
         let misaligned = r#"{
             "broken": {
-                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 11,
@@ -576,7 +539,6 @@ mod tests {
         // tolerate.
         let realistic = r#"{
             "consume single P2ID note": {
-                "provenance": "producer_measured",
                 "prologue": 3501,
                 "notes_processing": 1761,
                 "epilogue": { "total": 72351 },
