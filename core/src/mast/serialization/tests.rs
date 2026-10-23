@@ -444,6 +444,44 @@ fn assert_size_hints_match_serialized_lengths(forest: &MastForest) {
     assert_eq!(forest.hashless_size_hint(), hashless_bytes.len());
 }
 
+fn forest_exceeding_u32_serialized_size() -> MastForest {
+    let mut forest = MastForest::new();
+    let root = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    forest.roots = vec![root; 262_144];
+
+    let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+    for i in 0..4095u32 {
+        let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        forest.advice_map.insert(key, Arc::clone(&values));
+    }
+
+    let advice_size = forest.advice_map.get_size_hint() as u64;
+    assert!(u32::try_from(advice_size).is_ok());
+    // The map fits in 32 bits, but the additional roots push the forest over the limit.
+    assert!(advice_size + forest.roots.len() as u64 * 4 > u64::from(u32::MAX));
+    forest
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.get_size_hint() as u64 > u64::from(u32::MAX));
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_hashless_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.hashless_size_hint() as u64 > u64::from(u32::MAX));
+}
+
 #[test]
 fn test_mast_forest_view_trait_matches_serialized_view() {
     let mut forest = MastForest::new();
