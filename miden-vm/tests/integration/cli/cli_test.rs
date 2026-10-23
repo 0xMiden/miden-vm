@@ -190,6 +190,31 @@ fn cli_bundle_debug() {
 }
 
 #[test]
+fn cli_bundle_without_output_derives_name_from_root() {
+    let working_dir = TempDir::new().unwrap();
+    let lib_dir = working_dir.path().join("lib");
+    fs::create_dir_all(&lib_dir).unwrap();
+
+    let mut expected_outputs = Vec::new();
+    for name in ["foo", "bar"] {
+        let root = lib_dir.join(format!("{name}.masm"));
+        fs::copy(fixture("tests/integration/cli/data/lib/mod.masm"), &root).unwrap();
+
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg("bundle").arg(&root).arg("--namespace").arg("lib");
+        cmd.assert().success();
+
+        expected_outputs.push(lib_dir.join(format!("{name}.masp")));
+    }
+
+    // Both bundles must survive side by side, and no fixed `out.masp` must be written.
+    for output in &expected_outputs {
+        assert!(output.is_file(), "expected {} to be written", output.display());
+    }
+    assert!(!lib_dir.join("out.masp").exists());
+}
+
+#[test]
 fn rejects_oversized_kernel_packages_in_run_prove_and_verify() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("program.masm");

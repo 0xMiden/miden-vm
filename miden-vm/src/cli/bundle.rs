@@ -53,14 +53,11 @@ impl BundleCmd {
             return Err(Report::msg("`root` must be a '.masm' file."));
         }
 
-        // write the masp output
+        // write the masp output, defaulting to the root file name with a `.masp` extension so
+        // bundling two roots in the same directory does not overwrite the first result
         let output_file = match &self.output {
-            Some(output) => output,
-            None => {
-                let parent =
-                    &self.root.parent().ok_or("Invalid output path").map_err(Report::msg)?;
-                &parent.join("out").with_extension(Package::EXTENSION)
-            },
+            Some(output) => output.clone(),
+            None => self.root.with_extension(Package::EXTENSION),
         };
 
         if self.kernel {

@@ -4,6 +4,7 @@
 
 #### Changes
 
+- Derive the default `bundle` output name from the root file (`foo.masm` -> `foo.masp`) instead of always writing `out.masp`, so bundling several roots in one directory no longer overwrites earlier results ([#3801](https://github.com/0xMiden/miden-vm/issues/3801)).
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 - Added PVM benchmarks and updated synthetic transaction and recursive verification benchmarks for Eidos ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
