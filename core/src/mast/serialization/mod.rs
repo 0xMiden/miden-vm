@@ -224,6 +224,10 @@ impl Serializable for MastForest {
     }
 
     /// Returns the exact serialized size in bytes without allocating or serializing the forest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the serialized size exceeds [`usize::MAX`].
     fn get_size_hint(&self) -> usize {
         self.serialized_size_hint(false)
     }
@@ -235,10 +239,6 @@ impl MastForest {
         let external_count = self.nodes.iter().take_while(|node| node.is_external()).count();
         let internal_count = node_count - external_count;
 
-        let mut size = MAGIC.len() + size_of::<u8>() + VERSION.len();
-        size += internal_count.get_size_hint() + external_count.get_size_hint();
-        size += self.roots.len().get_size_hint() + self.roots.len() * size_of::<u32>();
-
         let basic_block_len: usize = self
             .nodes
             .iter()
@@ -246,13 +246,36 @@ impl MastForest {
                 MastNode::Block(block) => Some(basic_block_data_len(block)),
                 _ => None,
             })
-            .sum();
-        size += basic_block_len.get_size_hint() + basic_block_len;
-        size += node_count * MastNodeEntry::SERIALIZED_SIZE;
+            .try_fold(0usize, usize::checked_add)
+            .expect("MAST forest serialized size exceeds usize::MAX");
         let digest_count = if hashless { external_count } else { node_count };
-        size += digest_count * Word::SERIALIZED_SIZE;
-        size += self.advice_map.get_size_hint();
-        size
+        let roots_size = self
+            .roots
+            .len()
+            .checked_mul(size_of::<u32>())
+            .expect("MAST forest serialized size exceeds usize::MAX");
+        let entries_size = node_count
+            .checked_mul(MastNodeEntry::SERIALIZED_SIZE)
+            .expect("MAST forest serialized size exceeds usize::MAX");
+        let digests_size = digest_count
+            .checked_mul(Word::SERIALIZED_SIZE)
+            .expect("MAST forest serialized size exceeds usize::MAX");
+
+        [
+            MAGIC.len() + size_of::<u8>() + VERSION.len(),
+            internal_count.get_size_hint(),
+            external_count.get_size_hint(),
+            self.roots.len().get_size_hint(),
+            roots_size,
+            basic_block_len.get_size_hint(),
+            basic_block_len,
+            entries_size,
+            digests_size,
+            self.advice_map.get_size_hint(),
+        ]
+        .into_iter()
+        .try_fold(0usize, usize::checked_add)
+        .expect("MAST forest serialized size exceeds usize::MAX")
     }
 
     /// Internal serialization with options.

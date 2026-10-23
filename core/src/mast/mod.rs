@@ -666,6 +666,10 @@ impl MastForest {
     /// or serializing the forest.
     ///
     /// This includes external node digests and omits rebuildable internal node hashes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the serialized size exceeds [`usize::MAX`].
     pub fn hashless_size_hint(&self) -> usize {
         self.serialized_size_hint(true)
     }

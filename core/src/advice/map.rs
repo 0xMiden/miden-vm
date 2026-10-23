@@ -205,12 +205,20 @@ impl Serializable for AdviceMap {
     }
 
     /// Returns the exact serialized size in bytes without allocating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the serialized size exceeds [`usize::MAX`].
     fn get_size_hint(&self) -> usize {
-        let mut size = self.0.len().get_size_hint();
-        for (key, values) in &self.0 {
-            size += key.get_size_hint() + values.as_ref().get_size_hint();
-        }
-        size
+        self.0
+            .iter()
+            .try_fold(self.0.len().get_size_hint(), |size, (key, values)| {
+                let values_size = values.len().checked_mul(Felt::min_serialized_size())?;
+                size.checked_add(key.get_size_hint())?
+                    .checked_add(values.len().get_size_hint())?
+                    .checked_add(values_size)
+            })
+            .expect("advice map serialized size exceeds usize::MAX")
     }
 }
 
@@ -244,6 +252,29 @@ mod tests {
         let map2 = AdviceMap::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(map1, map2);
+    }
+
+    #[test]
+    #[cfg_attr(
+        target_pointer_width = "32",
+        should_panic(expected = "advice map serialized size exceeds usize::MAX")
+    )]
+    fn size_hint_for_shared_values_exceeding_u32() {
+        // The values occupy 1 MiB, but serializing every reference would exceed 4 GiB.
+        let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+        let map: AdviceMap = (0..4096u32)
+            .map(|i| {
+                let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+                (key, Arc::clone(&values))
+            })
+            .collect();
+
+        let size = map.get_size_hint();
+        let expected = map.len().get_size_hint() as u64
+            + 4096
+                * (Word::SERIALIZED_SIZE as u64 + values.len().get_size_hint() as u64 + 1_048_576);
+        assert!(expected > u64::from(u32::MAX));
+        assert_eq!(size as u64, expected);
     }
 
     #[test]
