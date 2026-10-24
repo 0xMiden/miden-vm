@@ -42,18 +42,20 @@ impl BasicBlockDataBuilder {
 
 /// Returns the serialized size of a basic block in the node data section.
 pub(super) fn basic_block_data_len(basic_block: &BasicBlockNode) -> usize {
-    let mut op_count = 0usize;
-    let mut ops_size = 0usize;
-    for op in basic_block.operations() {
-        op_count += 1;
-        ops_size += op.encoded_size();
-    }
+    let (op_count, ops_size) = basic_block
+        .operations()
+        .try_fold((0usize, 0usize), |(op_count, ops_size), op| {
+            Some((op_count.checked_add(1)?, ops_size.checked_add(op.encoded_size())?))
+        })
+        .expect("basic block serialized size exceeds usize::MAX");
 
-    let num_batches = basic_block.num_op_batches();
-    let mut size = op_count.get_size_hint() + ops_size;
-    size += size_of::<u32>();
-    size += 5 * num_batches;
-    size
+    basic_block
+        .num_op_batches()
+        .checked_mul(BATCH_METADATA_BYTES_PER_BATCH)
+        .and_then(|size| size.checked_add(size_of::<u32>()))
+        .and_then(|size| size.checked_add(op_count.get_size_hint()))
+        .and_then(|size| size.checked_add(ops_size))
+        .expect("basic block serialized size exceeds usize::MAX")
 }
 
 /// Mutators

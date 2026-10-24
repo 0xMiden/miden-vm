@@ -359,6 +359,7 @@ fn test_operation_encoded_size_push_varint_boundaries() {
 
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let forest = canonicalized_for_test(forest);
+    assert_size_hints_match_serialized_lengths(&forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
 
@@ -385,6 +386,100 @@ fn canonicalized_for_test(forest: &MastForest) -> MastForest {
         forest.advice_map().clone(),
     )
     .unwrap()
+}
+
+#[test]
+fn mast_forest_size_hints_match_serialized_lengths() {
+    let mut forest = MastForest::new();
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let external = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let block = BasicBlockNodeBuilder::new(sample_basic_block_operations_all_variants())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    forest.advice_map.insert(Word::default(), Vec::<Felt>::new());
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    for count in [0, 1, 127, 128, 255, 256] {
+        let mut forest = forest.clone();
+        let block = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(42)); 300])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.roots.extend(core::iter::repeat_n(block, count));
+        for i in 0..count {
+            let key = Word::new([Felt::from_u32(i as u32), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            forest.advice_map.insert(key, vec![Felt::from_u32(42); count]);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+    }
+}
+
+#[test]
+fn mast_forest_hashless_size_hint_preserves_external_digests() {
+    for count in [1, 127, 128, 255, 256] {
+        let mut forest = MastForest::new();
+        for i in 0..count {
+            let digest = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            let external = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest).unwrap();
+            forest.make_root(external);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+        assert_eq!(forest.hashless_size_hint(), forest.get_size_hint());
+    }
+}
+
+fn assert_size_hints_match_serialized_lengths(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_into(&mut bytes);
+    assert_eq!(forest.get_size_hint(), bytes.len());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    assert_eq!(forest.hashless_size_hint(), hashless_bytes.len());
+}
+
+fn forest_exceeding_u32_serialized_size() -> MastForest {
+    let mut forest = MastForest::new();
+    let root = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    forest.roots = vec![root; 262_144];
+
+    let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+    for i in 0..4095u32 {
+        let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        forest.advice_map.insert(key, Arc::clone(&values));
+    }
+
+    let advice_size = forest.advice_map.get_size_hint() as u64;
+    assert!(u32::try_from(advice_size).is_ok());
+    // The map fits in 32 bits, but the additional roots push the forest over the limit.
+    assert!(advice_size + forest.roots.len() as u64 * 4 > u64::from(u32::MAX));
+    forest
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.get_size_hint() as u64 > u64::from(u32::MAX));
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_hashless_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.hashless_size_hint() as u64 > u64::from(u32::MAX));
 }
 
 #[test]
