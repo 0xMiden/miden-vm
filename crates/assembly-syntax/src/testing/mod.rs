@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod context;
 mod pattern;
+#[cfg(all(feature = "arbitrary", test))]
+pub mod roundtrip;
 
 #[cfg(test)]
 pub use self::context::SyntaxTestContext;

@@ -18,6 +18,14 @@ use crate::{
 /// Represents a constant expression or value in Miden Assembly syntax.
 #[derive(Clone)]
 #[repr(u8)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_constant_expr",
+        print = "crate::prettier::PrettyPrint::to_pretty_string",
+        accept = "crate::testing::roundtrip::is_masm_text"
+    )
+)]
 pub enum ConstantExpr {
     /// A literal [`Felt`] value.
     Int(Span<IntValue>),

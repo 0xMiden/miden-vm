@@ -616,6 +616,11 @@ impl crate::prettier::PrettyPrint for PointerType {
 
         let doc = const_text("ptr<") + self.pointee.render();
         if let Some(addrspace) = self.addrspace.as_ref() {
+            // The MASM syntax spells the element address space `felt`, not `element`
+            let addrspace = match addrspace {
+                AddressSpace::Byte => "byte",
+                AddressSpace::Element => "felt",
+            };
             doc + const_text(", ") + text(format!("addrspace({addrspace})")) + const_text(">")
         } else {
             doc + const_text(">")
