@@ -13,10 +13,10 @@ use crate::templates::{PvmAuxTraceTemplate, PvmPublicInputsTemplate};
 /// The PVM statement schema and its one-boundary-value-per-instance protocol.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PvmProtocolPlan {
-    pub(crate) num_airs: usize,
-    pub(crate) num_public_values: usize,
-    pub(crate) max_aux_inputs: usize,
-    pub(crate) num_aux_inputs: usize,
+    num_airs: usize,
+    num_public_values: usize,
+    max_aux_inputs: usize,
+    num_aux_inputs: usize,
 }
 
 impl PvmProtocolPlan {
@@ -42,7 +42,7 @@ impl PvmProtocolPlan {
         .validate()
     }
 
-    pub(crate) fn validate(self) -> Result<Self, String> {
+    fn validate(self) -> Result<Self, String> {
         if !(1..=16).contains(&self.num_airs) {
             return Err("PVM protocol requires between one and sixteen AIR instances".into());
         }

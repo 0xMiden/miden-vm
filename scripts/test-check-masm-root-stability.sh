@@ -48,7 +48,7 @@ echo 'Release compatibility checks must not regenerate tracked MASM' >&2
 exit 1
 STUB
 chmod +x "$test_root/bin/rustup" "$test_root/bin/cargo"
-export ROOT_CHECK_CURRENT_PROJECT="$test_repo/crates/lib/core/asm/miden-project.toml"
+export ROOT_CHECK_CURRENT_PROJECT="$(git -C "$test_repo" rev-parse --show-toplevel)/crates/lib/core/asm/miden-project.toml"
 export PATH="$test_root/bin:$PATH"
 export ROOT_CHECK_STUB_LOG="$test_root/comparator-called"
 

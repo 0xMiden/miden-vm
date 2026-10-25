@@ -3,11 +3,24 @@ use miden_core::program::KernelDescriptor;
 
 const SECURITY_ESTIMATOR_PATH: &str = "stark/security.masm";
 const RELATION_DIGEST_PATH: &str = "sys/vm/mod.masm";
+const PUBLIC_INPUTS_PATH: &str = "sys/vm/public_inputs.masm";
 const GENERIC_UTILS_PATH: &str = "stark/utils.masm";
 
 #[test]
 fn security_masm_constants_and_envelope_match_air() {
     security_masm_matches_air().unwrap();
+}
+
+#[test]
+fn public_inputs_air_count_matches_air() {
+    let public_inputs = read_file(PUBLIC_INPUTS_PATH).unwrap();
+    let actual =
+        parse_masm_const::<usize>(&public_inputs, "NUM_MIDEN_AIRS", PUBLIC_INPUTS_PATH).unwrap();
+    assert_eq!(
+        actual,
+        miden_air::MIDEN_AIR_COUNT,
+        "NUM_MIDEN_AIRS in {PUBLIC_INPUTS_PATH} is stale",
+    );
 }
 
 fn read_file(path: &str) -> std::io::Result<String> {
