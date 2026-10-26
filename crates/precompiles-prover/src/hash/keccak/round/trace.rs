@@ -14,15 +14,23 @@ use crate::{
 /// Interleave the per-lane column bands into one `NUM_MAIN_COLS`-wide
 /// row-major matrix, each lane's `LANE_WIDTH` cells placed at its band base.
 fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMajorMatrix<Felt> {
+    use miden_crypto::parallel::*;
     let mut trace = vec![Felt::ZERO; height * NUM_MAIN_COLS];
-    for r in 0..height {
-        let row_start = r * NUM_MAIN_COLS;
-        for (lane, cells) in lane_cells.iter().enumerate() {
-            let base = lane_base(lane);
-            let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
-            trace[row_start + base..row_start + base + LANE_WIDTH].copy_from_slice(src);
-        }
-    }
+    // Each task copies enough contiguous rows to amortize scheduling and retain locality.
+    const CHUNK_ROWS: usize = 1024;
+    trace
+        .par_chunks_mut(CHUNK_ROWS * NUM_MAIN_COLS)
+        .enumerate()
+        .for_each(|(chunk, rows)| {
+            for (offset, row) in rows.as_chunks_mut::<NUM_MAIN_COLS>().0.iter_mut().enumerate() {
+                let r = chunk * CHUNK_ROWS + offset;
+                for (lane, cells) in lane_cells.iter().enumerate() {
+                    let base = lane_base(lane);
+                    let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
+                    row[base..base + LANE_WIDTH].copy_from_slice(src);
+                }
+            }
+        });
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
