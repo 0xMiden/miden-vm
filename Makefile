@@ -18,6 +18,7 @@ help:
 	@printf "  make test-crypto                 # Test specialized crypto feature configurations\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
+	@printf "  make test-prover-service         # Test prover service crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
@@ -284,7 +285,8 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-debug \
 		--exclude miden-debug-dap \
 		--exclude miden-debug-engine \
-		--exclude miden-debug-lit-support
+		--exclude miden-debug-lit-support \
+		--exclude miden-prover-service
 
 .PHONY: build-target-miden
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)

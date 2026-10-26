@@ -77,6 +77,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - uses: ./.github/actions/setup-protoc
       - name: Clippy
         run: |
           rustup update --no-self-update stable
@@ -109,6 +110,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - uses: ./.github/actions/setup-protoc
       - name: Build docs
         run: |
           rustup +stable update --no-self-update

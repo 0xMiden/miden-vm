@@ -37,6 +37,7 @@
 - Added per-AIR precomputation of challenge-only terms to native MVM and PVM constraint evaluation ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
 - [BREAKING] Added AIR-owned `LiftedAir::EvalData` and `prepare(EvalInputs)`; `eval` requires the prepared data. Removed `precompute_challenge_terms` and `eval_with_challenge_terms` ([#4141](https://github.com/0xMiden/miden-vm/pull/4141)).
 - Improved native VM and PVM proving through interleaved LogUp batch inversion and quotient-buffer reuse. PVM STORE/MUL auxiliary traces are allocated at their final width to avoid copying lookup columns. Parallelized PVM integer and Keccak trace packing in concurrent builds ([#4095](https://github.com/0xMiden/miden-vm/pull/4095)).
+- [BREAKING] The proving service requires exactly one request message for proving and health RPCs. It rejects trailing messages and bounds aggregate uploads by the configured message limit plus the five-byte gRPC header.
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).

@@ -1,0 +1,49 @@
+[package]
+name = "miden-prover-service"
+version.workspace = true
+description = "Remote proving of Miden VM execution witnesses"
+documentation = "https://docs.rs/miden-prover-service"
+categories = ["cryptography", "network-programming"]
+keywords = ["miden", "prover", "grpc"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+http-body = "1"
+miden-core = { workspace = true, features = ["std"] }
+miden-precompiles = { workspace = true, features = ["std"] }
+miden-precompiles-stark = { workspace = true, features = ["prover", "std"] }
+miden-processor = { workspace = true, features = ["std"] }
+miden-prover = { workspace = true, features = ["concurrent"] }
+prost = { version = "0.14", default-features = false, features = ["derive", "std"] }
+thiserror = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio-stream = { version = "0.1", default-features = false, features = ["net"] }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "transport"] }
+tonic-health = "0.14"
+tonic-prost = "0.14"
+tower = { version = "0.5", default-features = false, features = ["util"] }
+tracing = { workspace = true, features = ["std"] }
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+
+[dev-dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http2"] }
+hyper-util = { version = "0.1", default-features = false, features = ["client", "http2", "tokio"] }
+miden-assembly.workspace = true
+miden-core-lib = { workspace = true, features = ["std"] }
+miden-verifier = { workspace = true, features = ["std"] }
+
+[package.metadata.cargo-shear]
+# The generated gRPC codec refers to this crate.
+ignored = ["tonic-prost"]
