@@ -8,6 +8,7 @@
 
 #### Fixes
 
+- Updated `zstd-sys` to 2.1.2 to address [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410).
 - Restored exact `Serializable::get_size_hint` implementations for `MastForest` and `AdviceMap`, and added `MastForest::hashless_size_hint` to size hashless payloads without allocation or serialization ([#4080](https://github.com/0xMiden/miden-vm/pull/4080)).
 
 ## v0.36.2 (2026-10-20)
