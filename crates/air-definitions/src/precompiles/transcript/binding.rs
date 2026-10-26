@@ -14,9 +14,9 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
+use crate::{
+    lookup::{Challenges, LookupMessage},
+    precompiles::relations::BusId,
 };
 
 /// Typed value a node binds to on the [`Binding`](BusId::Binding) bus.

@@ -90,19 +90,21 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_lifted_stark::air::ExtensionBuilder;
+use miden_lifted_air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
-use crate::precompiles::{
-    logup::{
+use crate::{
+    lookup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
+        LookupColumn, LookupGroup, LookupMessage,
     },
-    primitives::byte_pair_lut::Range16Msg,
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::{UintLimbsMsg, UintValMsg},
-    utils::{current_main, next_main},
+    precompiles::{
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+        primitives::byte_pair_lut::Range16Msg,
+        relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        uint::{UintLimbsMsg, UintValMsg},
+        utils::{current_main, next_main},
+    },
 };
 
 // MESSAGES

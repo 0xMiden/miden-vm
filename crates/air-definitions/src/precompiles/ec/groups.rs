@@ -25,14 +25,17 @@ use miden_core::{
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 
-use crate::precompiles::{
-    ec::EcGroupMsg,
-    logup::{
+use crate::{
+    lookup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
+        LookupGroup,
     },
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
+    precompiles::{
+        ec::EcGroupMsg,
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        utils::{current_main, next_main},
+    },
 };
 
 // COLUMN LAYOUT
@@ -96,7 +99,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&EcGroupsAir, main, challenges)
+        crate::lookup::build_logup_aux_trace(&EcGroupsAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

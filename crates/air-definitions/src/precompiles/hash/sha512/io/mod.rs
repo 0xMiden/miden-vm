@@ -22,20 +22,23 @@ use miden_precompiles::Sha512Precompile;
 use miden_utils_sync::LazyLock;
 pub use program::{IO_PERIOD, NUM_PERIODIC_COLS, io_program};
 
-use crate::precompiles::{
-    hash::sha512::compression::{INPUT_ADDR_BASE, OUTPUT_SLOTS, Sha512WordMsg},
-    logup::{
+use crate::{
+    lookup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
+        LookupGroup, build_logup_aux_trace,
     },
-    primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::{
-        binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
-        initial_cv_from_frame,
+    precompiles::{
+        hash::sha512::compression::{INPUT_ADDR_BASE, OUTPUT_SLOTS, Sha512WordMsg},
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+        primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        transcript::{
+            binding::BindingMsg,
+            eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+            initial_cv_from_frame,
+        },
+        utils::{current_main, halves_le, next_main},
     },
-    utils::{current_main, halves_le, next_main},
 };
 
 pub const NUM_MAIN_COLS: usize = 37;

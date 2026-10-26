@@ -21,23 +21,25 @@ use miden_core::{
 use miden_lifted_air::{AirBuilder, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
 
-use crate::precompiles::{
-    hash::{
-        chunk::ChunkChainMsg,
-        keccak::{
-            node,
-            sponge::{self, KeccakSpongeMsg},
+use crate::{
+    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
+    precompiles::{
+        hash::{
+            chunk::ChunkChainMsg,
+            keccak::{
+                node,
+                sponge::{self, KeccakSpongeMsg},
+            },
+            memory64::{CHUNK_ADDR_BASE, Memory64Msg},
         },
-        memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+        primitives::byte_pair_lut::BytePairLutMsg,
+        transcript::{
+            binding::BindingMsg,
+            eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+            initial_cv_from_frame,
+        },
+        utils::{current_main, next_main},
     },
-    logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-    primitives::byte_pair_lut::BytePairLutMsg,
-    transcript::{
-        binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
-        initial_cv_from_frame,
-    },
-    utils::{current_main, next_main},
 };
 
 pub const NUM_MAIN_COLS: usize = 47;

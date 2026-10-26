@@ -23,6 +23,10 @@
 //! sized to [`MAX_MESSAGE_WIDTH`] / [`NUM_BUS_IDS`] so prover and
 //! verifier see identical prefixes.
 
+use miden_core::field::QuadFelt;
+
+use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
+
 /// Emit one **flattened** LogUp column — a single batch of its fractions —
 /// inside a chiplet's `LookupAir::eval` (where the builder param is `LB` and
 /// the `LookupColumn` / `LookupGroup` / `LookupBatch` traits are in scope).
@@ -45,7 +49,6 @@ macro_rules! frac_col {
     };
 }
 pub(crate) use frac_col;
-use miden_core::field::QuadFelt;
 
 // Re-export miden-vm's framework so chiplets only need one `use`.
 pub use crate::lookup::{
@@ -54,7 +57,6 @@ pub use crate::lookup::{
     accumulate, build_logup_aux_trace, build_logup_aux_trace_with_preprocessed,
     build_lookup_fractions,
 };
-use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 
 // CHALLENGES
 // ================================================================================================

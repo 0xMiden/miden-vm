@@ -31,11 +31,12 @@ use miden_core::{
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 
 use crate::{
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, LookupMessage, build_logup_aux_trace,
+    },
     precompiles::{
-        logup::{
-            ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-            LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
-        },
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
         relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
         utils::{current_main, next_main},
     },
@@ -326,7 +327,7 @@ where
     E: PrimeCharacteristicRing,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &crate::lookup::Challenges<EF>) -> EF {
         let fields: [E; 9] = array::from_fn(|idx| {
             if idx == 0 {
                 self.compression_cycle_id.clone()
@@ -504,9 +505,9 @@ mod tests {
         EidosOutMsg, FullCvMsg, INTERFACE_AUX_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, PVM_AUX_COLS,
         get_periodic_column_values,
     };
-    use crate::precompiles::{
-        logup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
-        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    use crate::{
+        lookup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
+        precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     };
 
     struct InterfaceConstraintEvalBuilder {

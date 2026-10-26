@@ -1,3 +1,4 @@
+pub mod ace;
 pub mod air;
 pub mod ec;
 pub mod fixed;
@@ -6,6 +7,7 @@ pub mod geometry;
 pub mod hash;
 pub mod logup;
 pub mod math;
+pub mod policy;
 pub mod primitives;
 pub mod relation;
 pub mod relations;
@@ -14,7 +16,3 @@ pub mod uint;
 pub mod utils;
 
 pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
-
-pub mod policy;
-
-pub mod ace;
