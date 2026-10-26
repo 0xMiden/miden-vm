@@ -17,8 +17,8 @@ use miden_stark::{
 use p3_challenger::CanObserve;
 
 use super::{
-    AIRS, AUX_DEFERRED_ROOT, AUX_KERNEL_DIGESTS, AUX_PROGRAM_HASH, Felt, MidenAir,
-    NUM_PUBLIC_VALUES,
+    AIRS, Felt, MidenAir,
+    inputs::{AUX_DEFERRED_ROOT, AUX_KERNEL_DIGESTS, AUX_PROGRAM_HASH, NUM_PUBLIC_VALUES},
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     trace,
 };

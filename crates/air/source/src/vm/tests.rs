@@ -9,7 +9,10 @@ use miden_core::{
 };
 use miden_stark::lookup::Challenges;
 
-use super::logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
+use super::{
+    inputs::AUX_KERNEL_DIGESTS,
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
+};
 use p3_challenger::CanObserve;
 
 use super::*;

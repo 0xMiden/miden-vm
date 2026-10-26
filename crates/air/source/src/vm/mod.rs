@@ -2,7 +2,6 @@
 
 pub mod ace;
 mod airs;
-mod boundary;
 mod constraints;
 mod execution_trace;
 pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
@@ -40,7 +39,6 @@ pub use constraints::{
     system::columns::SystemCols,
 };
 pub use inputs::{NUM_PUBLIC_VALUES, PublicInputs};
-use inputs::{AUX_DEFERRED_ROOT, AUX_KERNEL_DIGESTS, AUX_PROGRAM_HASH};
 pub use miden_core::{
     Felt,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
