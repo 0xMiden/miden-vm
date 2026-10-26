@@ -7,25 +7,27 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_PERIOD,
-    UintStoreMulAir,
+    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_LOGUP_COLS, NUM_MAIN_COLS,
+    STORE_PERIOD, UintStoreMulAir,
 };
-use crate::precompiles::{
-    logup::build_logup_aux_trace,
-    uint::mul::{
-        COL_ACT as M_COL_ACT, COL_BORROW as M_COL_BORROW, COL_KAPPA_A as M_COL_KAPPA_A,
-        GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A, ROW_B,
-        ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP, TERM_CELL_KAPPA_C_SIGNED,
-    },
+use crate::precompiles::uint::mul::{
+    COL_ACT as M_COL_ACT, COL_BORROW as M_COL_BORROW, COL_KAPPA_A as M_COL_KAPPA_A, GAMMA_OFFSET,
+    GAMMA_SLOTS, NUM_GAMMA, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q,
+    ROW_R, S_KEEP, TERM_CELL_KAPPA_C_SIGNED,
 };
 
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreMulAir, main, challenges);
-    let logup_width = logup.width();
-    let n = main.height();
+    let (mut aux, sigma) = miden_stark::lookup::build_logup_aux_trace_with_width(
+        &UintStoreMulAir,
+        main,
+        None,
+        challenges,
+        AUX_WIDTH,
+    );
+    assert_eq!(aux.width(), AUX_WIDTH);
     let beta = challenges[1];
 
     // STORE's own register math (mirrors `uint::trace::build_aux`
@@ -60,15 +62,12 @@ pub(crate) fn build_aux(
         by_row
     };
 
-    let mut data = Vec::with_capacity(AUX_WIDTH * n);
     let mut store_id = QuadFelt::ZERO;
     let mut mul_id = QuadFelt::ZERO;
     let mut mul_s = QuadFelt::ZERO;
-    for r in 0..n {
-        data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
-        data.push(store_id);
-        data.push(mul_id);
-        data.push(mul_s);
+    for r in 0..main.height() {
+        let row = &mut aux.values[r * AUX_WIDTH..(r + 1) * AUX_WIDTH];
+        row[NUM_LOGUP_COLS..].copy_from_slice(&[store_id, mul_id, mul_s]);
 
         // STORE contrib.
         let store_cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
@@ -162,5 +161,5 @@ pub(crate) fn build_aux(
         mul_s = mul_s * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (aux, sigma)
 }

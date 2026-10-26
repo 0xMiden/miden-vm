@@ -33,8 +33,9 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 // TOP-LEVEL DRIVER
 // ================================================================================================
 
-/// Build the auxiliary trace and its normalized sum `sigma_prime = sigma / num_rows`.
+/// Build the LogUp auxiliary columns and their normalized sum `sigma_prime = sigma / num_rows`.
 ///
+/// The matrix has `main.height()` rows and `air.column_shape().len()` columns.
 /// Returns `(aux_trace, vec![sigma_prime])`. The first two `challenges` are `alpha` and `beta`,
 /// in the same order as the constraint builder. Each task collects and accumulates one row
 /// chunk, releasing its fractions before the global centered prefix scan.
@@ -55,6 +56,8 @@ where
 
 /// Build a LogUp auxiliary trace from a setup trace already held by the prover.
 ///
+/// Returns the auxiliary trace and normalized sum described by [`build_logup_aux_trace`], using
+/// the same challenge ordering.
 /// `preprocessed` must be the trace declared by `air`, or `None` when the AIR
 /// has no preprocessed columns.
 pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
@@ -62,6 +65,33 @@ pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
     main: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
     challenges: &[EF],
+) -> (RowMajorMatrix<EF>, Vec<EF>)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
+    let aux_width = air.column_shape().len();
+    build_logup_aux_trace_with_width(air, main, preprocessed, challenges, aux_width)
+}
+
+/// Build a LogUp auxiliary trace with the requested final width.
+///
+/// The matrix has `main.height()` rows and `aux_width` columns. LogUp columns occupy the prefix
+/// `0..air.column_shape().len()`. Any trailing columns are zero-filled and excluded from the
+/// LogUp recurrence and its normalized sum. The return value, setup trace and challenges
+/// follow [`build_logup_aux_trace_with_preprocessed`].
+///
+/// # Panics
+///
+/// Panics if `aux_width` is smaller than `air.column_shape().len()`.
+pub fn build_logup_aux_trace_with_width<A, F, EF>(
+    air: &A,
+    main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    challenges: &[EF],
+    aux_width: usize,
 ) -> (RowMajorMatrix<EF>, Vec<EF>)
 where
     F: Field,
@@ -88,22 +118,26 @@ where
         assert_eq!(trace.width(), preprocessed_width, "LogUp preprocessed width mismatch");
         assert_eq!(trace.height(), num_rows, "LogUp preprocessed height mismatch");
     }
+    let num_cols = air.column_shape().len();
+    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
+    assert!(
+        aux_width >= num_cols,
+        "auxiliary trace width must accommodate all LogUp columns",
+    );
 
     let alpha = challenges[0];
     let beta = challenges[1];
     let lookup_challenges =
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
     let periodic = air.periodic_columns();
-    let num_cols = air.column_shape().len();
-    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
 
-    let mut output = EF::zero_vec(num_rows * num_cols);
+    let mut output = EF::zero_vec(num_rows * aux_width);
     let mut row_totals = EF::zero_vec(num_rows);
     let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
 
     use miden_crypto::parallel::*;
     let chunks = output
-        .par_chunks_mut(chunk_rows * num_cols)
+        .par_chunks_mut(chunk_rows * aux_width)
         .zip(row_totals.par_chunks_mut(chunk_rows));
 
     chunks.enumerate().for_each(|(chunk_idx, (out, totals))| {
@@ -116,11 +150,18 @@ where
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
         );
-        accumulate_fraction_chunk(chunk.fractions(), chunk.counts(), num_cols, out, totals);
+        accumulate_fraction_chunk(
+            chunk.fractions(),
+            chunk.counts(),
+            num_cols,
+            aux_width,
+            out,
+            totals,
+        );
     });
 
-    let sigma_prime = write_centered_accumulator(&row_totals, &mut output, num_cols);
-    (RowMajorMatrix::new(output, num_cols), vec![sigma_prime])
+    let sigma_prime = write_centered_accumulator(&row_totals, &mut output, aux_width);
+    (RowMajorMatrix::new(output, aux_width), vec![sigma_prime])
 }
 
 // LOOKUP FRACTIONS
@@ -377,7 +418,14 @@ where
         let frac_hi = row_frac_offsets[row_hi];
         let chunk_fracs = &flat_fractions[frac_lo..frac_hi];
         let chunk_counts = &flat_counts[row_lo * num_cols..row_hi * num_cols];
-        accumulate_fraction_chunk(chunk_fracs, chunk_counts, num_cols, chunk_out, totals_slice);
+        accumulate_fraction_chunk(
+            chunk_fracs,
+            chunk_counts,
+            num_cols,
+            num_cols,
+            chunk_out,
+            totals_slice,
+        );
     };
 
     #[cfg(not(feature = "concurrent"))]
@@ -407,11 +455,13 @@ fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
     fractions: &[(F, EF)],
     counts: &[usize],
     num_cols: usize,
+    row_width: usize,
     output: &mut [EF],
     totals: &mut [EF],
 ) {
     debug_assert_eq!(counts.len(), totals.len() * num_cols);
-    debug_assert_eq!(output.len(), counts.len());
+    debug_assert_eq!(output.len(), totals.len() * row_width);
+    debug_assert!(row_width >= num_cols);
     if fractions.is_empty() {
         return;
     }
@@ -419,8 +469,10 @@ fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
     let mut scratch = vec![EF::ZERO; fractions.len()];
     invert_and_scale(fractions, &mut scratch);
     let mut cursor = 0;
-    for ((row_counts, out), total) in
-        counts.chunks_exact(num_cols).zip(output.chunks_exact_mut(num_cols)).zip(totals)
+    for ((row_counts, out), total) in counts
+        .chunks_exact(num_cols)
+        .zip(output.chunks_exact_mut(row_width))
+        .zip(totals)
     {
         let mut row_total = EF::ZERO;
         for (column, &count) in row_counts.iter().enumerate() {
