@@ -18,6 +18,8 @@ pub(crate) mod ace;
 pub(crate) mod ace_constants;
 #[cfg(feature = "constants-tools")]
 pub mod ace_constants_regen;
+#[cfg(feature = "constants-tools")]
+mod fixed_boundary_codegen;
 #[cfg(feature = "std")]
 pub mod masm_verifier;
 #[cfg(any(test, feature = "constants-tools"))]
