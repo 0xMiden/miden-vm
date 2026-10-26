@@ -441,8 +441,7 @@ where
     //   2. If D_j < D_max, upsample Q_j to the per-trace target domain.
     //   3. Cyclically extend the accumulator and Horner-fold: acc <- acc * beta + Q_j.
     //
-    // Pre-allocate with LDE capacity so commit_quotient's resize doesn't reallocate.
-    let mut accumulator: Vec<EF> = Vec::with_capacity(max_quotient_height * blowup);
+    let mut accumulator: Vec<EF> = Vec::new();
 
     // Pre-compute per-AIR constraint layouts.
     let layouts: Vec<_> = proof_ordered_airs
