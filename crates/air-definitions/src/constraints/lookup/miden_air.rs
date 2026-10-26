@@ -105,7 +105,6 @@ mod tests {
         NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
-            eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
             lookup::{
                 BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
                 main_air::MAIN_COLUMN_SHAPE,
@@ -115,6 +114,7 @@ mod tests {
             Challenges, build_lookup_fractions,
             debug::{ValidateLayout, ValidateLookupAir},
         },
+        shared::eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
         trace::AUX_TRACE_RAND_CHALLENGES,
     };
 

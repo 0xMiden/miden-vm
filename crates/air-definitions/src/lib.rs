@@ -8,7 +8,6 @@ extern crate std;
 
 pub mod ace;
 mod airs;
-mod boundary;
 mod constraints;
 pub mod geometry;
 mod inputs;
@@ -37,8 +36,6 @@ pub use constraints::{
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
-    eidos_compression,
-    eidos_compression::{EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     ext_field::QuadFeltExpr,
     stack::columns::StackCols,
     system::columns::SystemCols,
@@ -59,5 +56,8 @@ pub use miden_lifted_stark::{
     pcs::PcsParams,
 };
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT};
-pub use shared::config;
+pub use shared::{
+    config, eidos_compression,
+    eidos_compression::{EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
+};
 pub use statement::{MidenMultiAir, hash_kernel_digests};
