@@ -11,6 +11,7 @@
 
 #### Fixes
 
+- Updated `zstd-sys` to 2.1.2 to address [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
 ## v1.0.0-rc.0 (2026-10-21)
