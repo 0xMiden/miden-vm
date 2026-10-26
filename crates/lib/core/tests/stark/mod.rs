@@ -68,7 +68,15 @@ pub(crate) fn vm_layout_const(name: &str) -> u32 {
     let prefix = format!("const {name} = ");
     let value = source
         .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
+        .chain(include_str!("../../asm/sys/vm/parameters.masm").lines())
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("pub ")
+                .unwrap_or(line)
+                .strip_prefix(&prefix)?
+                .parse::<u64>()
+                .ok()
+        })
         .unwrap_or_else(|| panic!("missing generated VM layout constant {name}"));
     u32::try_from(value).expect("VM layout pointer must fit in u32")
 }

@@ -5,10 +5,9 @@
 //! out-of-domain ingest hook, and the constraint evaluator from the same circuit metadata.
 //! `--check` recomputes the same artifacts, compares the digests and circuit shape against the
 //! constants compiled into `ace_constants.rs`, then byte-compares every rendered file against its
-//! checked-in copy. For `ace_constants.rs` and `sys/pvm/mod.masm` themselves the byte comparison
-//! is close to tautological, since their rendering substitutes those already-checked values into
-//! the checked-in file's own template; the real coverage for those two paths is the value
-//! comparison above, not the byte comparison.
+//! checked-in copy. The relation wrapper and query loaders import generated parameters; their
+//! procedure bodies are not regeneration inputs. The tool updates constant initializers in the
+//! native `ace_constants.rs` module; its API documentation is handwritten.
 
 use std::{
     fmt::Write as _,
@@ -21,9 +20,9 @@ use miden_ace_codegen::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
     render_masm_constraints_eval,
 };
-use miden_core::{Felt, Word, crypto::hash::Eidos};
+use miden_core::{Felt, Word, crypto::hash::Eidos, utils::Matrix};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_air::BaseAir;
+use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
 
@@ -42,10 +41,10 @@ use crate::{
 const CONSTANTS_PATH: &str = "src/ace_constants.rs";
 const PROTOCOL_PATH: &str = "../precompiles-air/src/protocol.rs";
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../lib/core/asm/sys/pvm/constraints_eval.masm";
-const PVM_DEEP_QUERIES_PATH: &str = "../lib/core/asm/sys/pvm/deep_queries.masm";
+const PVM_PARAMETERS_PATH: &str = "../lib/core/asm/sys/pvm/parameters.masm";
+const PVM_FIXED_BOUNDARY_PATH: &str = "../lib/core/asm/sys/pvm/fixed_boundary.masm";
 const PVM_LAYOUT_PATH: &str = "../lib/core/asm/sys/pvm/layout.masm";
 const PVM_OOD_FRAMES_PATH: &str = "../lib/core/asm/sys/pvm/ood_frames.masm";
-const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 
 /// Fixed 4-Ki-felt boundary after the VM relation's reserved ACE stream region. The PVM's complete
 /// READ section starts here; its aux-randomness anchor is later because four public EF inputs
@@ -91,13 +90,12 @@ struct GeneratedArtifacts {
     layout_masm: String,
     /// Generated PVM out-of-domain ingest hook, derived from the chiplet widths.
     ood_frames_masm: String,
-    /// Hand-written DEEP-query implementation with its row-block counts and typed LMCS frames
-    /// updated from the same committed-row widths.
-    deep_queries_masm: String,
+    /// Protocol constants and query geometry for the PVM MASM verifier.
+    parameters_masm: String,
+    /// Fixed-environment catalogue expanded into the assembly reduction templates.
+    fixed_boundary_masm: String,
     /// Generated PVM constraint evaluator, rendered from the same circuit metadata.
     constraints_eval_masm: String,
-    /// Hand-written relation wrapper with its generated protocol constants updated.
-    relation_mod_masm: String,
     /// Hand-written constants module with its generated values updated.
     constants_rs: String,
     /// PVM AIR protocol module with the canonical-circuit relation digest updated.
@@ -276,55 +274,14 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     let scratch = pvm_scratch_allocation(&read_layout, stream_len)?;
     let ood_frames_masm =
         render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))?;
-    let deep_queries_masm = render_pvm_deep_queries(&geometry)?;
+    let parameters_masm =
+        render_pvm_parameters(&geometry, relation_digest, preprocessed_commitment)?;
     let constraints_eval_masm = render_pvm_constraints_eval(
         shape,
         circuit_digest,
         quotient_inputs,
         read_layout.fold_coefficient_offset,
     )?;
-
-    let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
-    for (prefix, word) in [
-        ("RELATION_DIGEST", Word::new(relation_digest)),
-        ("PREPROCESSED_COMMITMENT", preprocessed_commitment),
-    ] {
-        for (index, felt) in word.iter().enumerate() {
-            replace_masm_const(
-                &mut relation_mod_masm,
-                &format!("{prefix}_{index}"),
-                felt.as_canonical_u64(),
-                PVM_RELATION_MOD_PATH,
-            )?;
-        }
-    }
-    for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
-        (
-            "NUM_COMPOSED_CONSTRAINTS",
-            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
-        ),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
-        ),
-        (
-            "NUM_DEEP_TERMS",
-            u64::from(
-                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
-            ),
-        ),
-        (
-            "LOOKUP_FRACTIONS_PER_ROW",
-            u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
-        ),
-        (
-            "FIXED_BOUNDARY_LOOKUP_TERMS",
-            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        ),
-    ] {
-        replace_masm_const(&mut relation_mod_masm, name, value, PVM_RELATION_MOD_PATH)?;
-    }
 
     let mut constants_rs = read_generated_file(CONSTANTS_PATH)?;
     for (name, word) in [
@@ -344,9 +301,9 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         shape,
         layout_masm,
         ood_frames_masm,
-        deep_queries_masm,
+        parameters_masm,
+        fixed_boundary_masm: crate::fixed_boundary_codegen::render_fixed_boundary()?,
         constraints_eval_masm,
-        relation_mod_masm,
         constants_rs,
         protocol_rs,
     })
@@ -485,23 +442,21 @@ fn render_pvm_layout(
         .filter(|end| *end >= scatter_table.pipe_digests.start)
         .ok_or_else(|| "PVM scatter-table digest range is empty".to_string())?;
 
-    let mut out = String::new();
-    writeln!(out, "# GENERATED by `{GENERATED_BY}` — do not edit by hand.")
-        .expect("writing to String cannot fail");
-    out.push_str("### PVM relation memory layout.\n");
-    out.push_str("###\n");
-    out.push_str("### The ACE READ section is one dense vector of quadratic-extension inputs.\n");
-    out.push_str("### Every boundary below is derived from the PVM circuit's InputLayout; each\n");
-    writeln!(
-        out,
-        "### input occupies two base-field felts. The complete allocation, including relation-local\n### scratch after the stream, is the half-open range {PVM_READ_START}..{allocation_end}."
-    )
-    .expect("writing to String cannot fail");
-    out.push_str("### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()\n");
-    out.push_str(
-        "### order; the PVM wrapper supplies the relation count and that shared base.\n\n",
+    let mut out = format!(
+        r#"# GENERATED by `{GENERATED_BY}` — do not edit by hand.
+### PVM relation memory layout.
+###
+### The ACE READ section is one dense vector of quadratic-extension inputs.
+### Every boundary below is derived from the PVM circuit's InputLayout; each
+### input occupies two base-field felts. The complete allocation, including relation-local
+### scratch after the stream, is the half-open range {PVM_READ_START}..{allocation_end}.
+### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
+### order; the PVM wrapper supplies the relation count and that shared base.
+
+use miden::core::stark::types
+
+"#
     );
-    out.push_str("use miden::core::stark::types\n\n");
 
     for region in &layout.regions {
         writeln!(
@@ -527,63 +482,50 @@ fn render_pvm_layout(
             out.push('\n');
         }
     }
-    writeln!(
+    write!(
         out,
-        "### {stream_len} felts: {}..{stream_end}.\nconst ACE_CIRCUIT_STREAM_PTR = {}\n",
-        layout.stream_ptr, layout.stream_ptr
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {bus_gamma_ptr}..{c_total_ptr}. Stores gamma = beta^18.\nconst BUS_GAMMA_PTR = {bus_gamma_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {c_total_ptr}..{current_trace_row_ptr}. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.\nconst C_TOTAL_PTR = {c_total_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {} felts: {current_trace_row_ptr}..{preprocessed_com_ptr}. Stores one opened query row in commitment-group order.\nconst CURRENT_TRACE_ROW_PTR = {current_trace_row_ptr}\n",
-        layout.query_row_felts
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### 4 felts: {preprocessed_com_ptr}..{ood_scatter_table_ptr}. Stores the trusted preprocessed-tree commitment for DEEP openings.\nconst PREPROCESSED_COM_PTR = {preprocessed_com_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {OOD_SCATTER_TABLE_FELTS} felts: {ood_scatter_table_ptr}..{proof_order_positions_ptr}. Out-of-domain ingest scatter table:\n\
-         ###\n\
-         ###   +0            base address of the out-of-domain row being ingested\n\
-         ###   +{pair_start:<3}.. +{pair_end:<6}per proof position, in stream order: (row-relative destination, digest address)\n\
-         ###   +{digest_start:<3}.. +{digest_end:<6}`pipe_k` procedure digests reached by `dynexec`, one word each\n\
-         ###\n\
-         ### The internal offsets and the reserve's sufficiency are owned by the regeneration tool,\n\
-         ### which derives them from the chiplet widths and fills `sys/pvm/ood_frames.masm`\n\
-         ### accordingly.\nconst OOD_SCATTER_TABLE_PTR = {ood_scatter_table_ptr}\n",
+        r#"### {stream_len} felts: {stream_ptr}..{stream_end}.
+const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
+
+### 4 felts: {bus_gamma_ptr}..{c_total_ptr}. Stores gamma = beta^18.
+const BUS_GAMMA_PTR = {bus_gamma_ptr}
+
+### 4 felts: {c_total_ptr}..{current_trace_row_ptr}. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
+const C_TOTAL_PTR = {c_total_ptr}
+
+### {query_row_felts} felts: {current_trace_row_ptr}..{preprocessed_com_ptr}. Stores one opened query row in commitment-group order.
+const CURRENT_TRACE_ROW_PTR = {current_trace_row_ptr}
+
+### 4 felts: {preprocessed_com_ptr}..{ood_scatter_table_ptr}. Stores the trusted preprocessed-tree commitment for DEEP openings.
+const PREPROCESSED_COM_PTR = {preprocessed_com_ptr}
+
+### {OOD_SCATTER_TABLE_FELTS} felts: {ood_scatter_table_ptr}..{proof_order_positions_ptr}. Out-of-domain ingest scatter table:
+###
+###   +0            base address of the out-of-domain row being ingested
+###   +{pair_start:<3}.. +{pair_end:<6}per proof position, in stream order: (row-relative destination, digest address)
+###   +{digest_start:<3}.. +{digest_end:<6}`pipe_k` procedure digests reached by `dynexec`, one word each
+###
+### The internal offsets and the reserve's sufficiency are owned by the regeneration tool,
+### which derives them from the chiplet widths and fills `sys/pvm/ood_frames.masm`
+### accordingly.
+const OOD_SCATTER_TABLE_PTR = {ood_scatter_table_ptr}
+
+### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each
+### chiplet, in ChipletAir::all() order, within the height-sorted proof order.
+### {proof_order_liveness}
+### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both
+### ingest scatters.
+const PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}
+
+### {NUM_CHIPLETS} felts: {proof_order_ids_ptr}..{allocation_end}. `id_by_pos`: the
+### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;
+### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.
+const PROOF_ORDER_IDS_PTR = {proof_order_ids_ptr}
+"#,
+        stream_ptr = layout.stream_ptr,
+        query_row_felts = layout.query_row_felts,
         pair_start = scatter_table.proof_order_pairs.start,
         digest_start = scatter_table.pipe_digests.start,
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each\n\
-         ### chiplet, in ChipletAir::all() order, within the height-sorted proof order.\n\
-         ### {proof_order_liveness}\n\
-         ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both\n\
-         ### ingest scatters.\nconst PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}\n"
-    )
-    .expect("writing to String cannot fail");
-    writeln!(
-        out,
-        "### {NUM_CHIPLETS} felts: {proof_order_ids_ptr}..{allocation_end}. `id_by_pos`: the\n\
-         ### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;\n\
-         ### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.\n\
-         const PROOF_ORDER_IDS_PTR = {proof_order_ids_ptr}\n"
     )
     .expect("writing to String cannot fail");
 
@@ -593,22 +535,18 @@ fn render_pvm_layout(
         ("preprocessed_current_ptr", "PREPROCESSED_CURRENT_PTR"),
         ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR"),
         ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR"),
+        ("ace_circuit_stream_ptr", "ACE_CIRCUIT_STREAM_PTR"),
+        ("bus_gamma_ptr", "BUS_GAMMA_PTR"),
+        ("c_total_ptr", "C_TOTAL_PTR"),
+        ("current_trace_row_ptr", "CURRENT_TRACE_ROW_PTR"),
+        ("preprocessed_com_ptr", "PREPROCESSED_COM_PTR"),
+        ("ood_scatter_table_ptr", "OOD_SCATTER_TABLE_PTR"),
+        ("proof_order_positions_ptr", "PROOF_ORDER_POSITIONS_PTR"),
+        ("proof_order_ids_ptr", "PROOF_ORDER_IDS_PTR"),
     ] {
-        writeln!(out, "pub proc {accessor}() -> types::Address\n    push.{constant}\nend\n")
+        writeln!(out, "\npub proc {accessor}() -> types::Address\n    push.{constant}\nend")
             .expect("writing to String cannot fail");
     }
-    out.push_str("pub proc ace_circuit_stream_ptr() -> types::Address\n    push.ACE_CIRCUIT_STREAM_PTR\nend\n");
-    out.push_str("\npub proc bus_gamma_ptr() -> types::Address\n    push.BUS_GAMMA_PTR\nend\n");
-    out.push_str("\npub proc c_total_ptr() -> types::Address\n    push.C_TOTAL_PTR\nend\n");
-    out.push_str("\npub proc current_trace_row_ptr() -> types::Address\n    push.CURRENT_TRACE_ROW_PTR\nend\n");
-    out.push_str(
-        "\npub proc preprocessed_com_ptr() -> types::Address\n    push.PREPROCESSED_COM_PTR\nend\n",
-    );
-    out.push_str("\npub proc ood_scatter_table_ptr() -> types::Address\n    push.OOD_SCATTER_TABLE_PTR\nend\n");
-    out.push_str("\npub proc proof_order_positions_ptr() -> types::Address\n    push.PROOF_ORDER_POSITIONS_PTR\nend\n");
-    out.push_str(
-        "\npub proc proof_order_ids_ptr() -> types::Address\n    push.PROOF_ORDER_IDS_PTR\nend\n",
-    );
 
     Ok(out)
 }
@@ -638,40 +576,111 @@ fn render_pvm_constraints_eval(
     .map_err(|err| err.to_string())
 }
 
-fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> {
-    let mut deep_queries = read_generated_file(PVM_DEEP_QUERIES_PATH)?;
-    apply_pvm_deep_query_geometry(&mut deep_queries, geometry)?;
-    Ok(deep_queries)
-}
-
-fn apply_pvm_deep_query_geometry(
-    deep_queries: &mut String,
+fn render_pvm_parameters(
     geometry: &PvmOodGeometry,
-) -> Result<(), String> {
-    for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
-        if !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
+    relation_digest: [Felt; 4],
+    preprocessed_commitment: Word,
+) -> Result<String, String> {
+    let mut output = String::from(
+        "# Generated by `make regenerate-pvm-constants`. Do not edit.\n\n\
+         # Protocol commitments under the native Eidos configuration.\n",
+    );
+    for (prefix, word) in [
+        ("RELATION_DIGEST", Word::new(relation_digest)),
+        ("PREPROCESSED_COMMITMENT", preprocessed_commitment),
+    ] {
+        for (index, felt) in word.iter().enumerate() {
+            writeln!(output, "pub const {prefix}_{index} = {}", felt.as_canonical_u64()).unwrap();
+        }
+    }
+    output.push_str("\n# Security descriptor from miden_precompiles_air::security.\n");
+    for (name, value) in [
+        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
+        (
+            "NUM_COMPOSED_CONSTRAINTS",
+            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
+        ),
+        (
+            "MAX_CONSTRAINT_DEGREE",
+            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
+        ),
+        (
+            "NUM_DEEP_TERMS",
+            u64::from(
+                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
+            ),
+        ),
+        (
+            "LOOKUP_FRACTIONS_PER_ROW",
+            u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
+        ),
+        (
+            "FIXED_BOUNDARY_LOOKUP_TERMS",
+            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+        ),
+    ] {
+        writeln!(output, "pub const {name} = {value}").unwrap();
+    }
+
+    output.push_str("\n# Bus-domain scale factors: BusId + 1 from the native relation registry.\n");
+    for (name, bus) in [
+        ("UINT_VAL_BUS_SCALE", miden_precompiles_air::relations::BusId::UintVal),
+        ("EC_GROUP_BUS_SCALE", miden_precompiles_air::relations::BusId::EcGroup),
+    ] {
+        writeln!(output, "pub const {name} = {}", bus as usize + 1).unwrap();
+    }
+
+    let setup_height = miden_precompiles_air::primitives::byte_pair_lut::TRACE_HEIGHT;
+    if !setup_height.is_power_of_two() {
+        return Err("BytePairLut setup height must be a power of two".into());
+    }
+    let log_height = setup_height.ilog2();
+    let depth = log_height
+        + u32::from(miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup());
+    let index_mask = 1u64
+        .checked_shl(depth)
+        .and_then(|size| u32::try_from(size - 1).ok())
+        .ok_or_else(|| "PVM preprocessed LDE depth exceeds u32 indices".to_string())?;
+    output.push_str("\n# BytePairLut setup height and PCS-expanded Merkle tree.\n");
+    writeln!(output, "pub const PREPROCESSED_TRACE_LOG_HEIGHT = {log_height}").unwrap();
+    writeln!(output, "pub const PREPROCESSED_TREE_DEPTH = {depth}").unwrap();
+    writeln!(output, "pub const PREPROCESSED_INDEX_MASK = {index_mask}").unwrap();
+
+    output.push_str(
+        "\n# Minimum log2 heights for non-fixed AIRs, indexed in ChipletAir::all() order.\n\
+         # The row bound is max(2, longest periodic cycle, preprocessed trace height).\n",
+    );
+    for (index, air) in ChipletAir::all().iter().enumerate() {
+        if air.fixed_log_height().is_some() {
+            continue;
+        }
+        let preprocessed_height = air.preprocessed_trace().map_or(0, |trace| trace.height());
+        let min_height = air.max_periodic_length().max(2).max(preprocessed_height);
+        if !min_height.is_power_of_two() {
             return Err(format!(
-                "PVM {blocks_name} width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
+                "PVM {air:?} minimum trace height {min_height} is not a power of two"
             ));
         }
-        replace_masm_const(
-            deep_queries,
-            blocks_name,
-            width / EIDOS_BLOCK_WIDTH,
-            PVM_DEEP_QUERIES_PATH,
-        )?;
+        writeln!(output, "pub const MIN_LOG_HEIGHT_{index} = {}", min_height.ilog2()).unwrap();
+    }
 
+    output.push_str(
+        "\n# Query-row blocks and LMCS leaf frames, in commitment-group order.\n\
+                     # Each block contains eight base felts.\n",
+    );
+    for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
+        if width == 0 || !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
+            return Err(format!(
+                "PVM {blocks_name} width {width} must be a positive multiple of {EIDOS_BLOCK_WIDTH}"
+            ));
+        }
         let encoded_len = u32::try_from(width)
             .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
         let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
-        replace_masm_const(
-            deep_queries,
-            init_cv_name,
-            masm_word_literal(init_cv),
-            PVM_DEEP_QUERIES_PATH,
-        )?;
+        writeln!(output, "pub const {blocks_name} = {}", width / EIDOS_BLOCK_WIDTH).unwrap();
+        writeln!(output, "pub const {init_cv_name} = {}", masm_word_literal(init_cv)).unwrap();
     }
-    Ok(())
+    Ok(output)
 }
 
 fn max_periodic_cycle_len_log() -> Result<u32, String> {
@@ -715,10 +724,10 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
         (CONSTANTS_PATH, &artifacts.constants_rs),
         (PROTOCOL_PATH, &artifacts.protocol_rs),
         (PVM_LAYOUT_PATH, &artifacts.layout_masm),
-        (PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm),
+        (PVM_PARAMETERS_PATH, &artifacts.parameters_masm),
+        (PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm),
         (PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm),
         (PVM_CONSTRAINTS_EVAL_PATH, &artifacts.constraints_eval_masm),
-        (PVM_RELATION_MOD_PATH, &artifacts.relation_mod_masm),
     ] {
         if read_generated_file(path)? != *rendered {
             return Err(format!("{path} is stale; run `make regenerate-pvm-constants`"));
@@ -732,10 +741,10 @@ fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
     write_generated_file(CONSTANTS_PATH, &artifacts.constants_rs)?;
     write_generated_file(PROTOCOL_PATH, &artifacts.protocol_rs)?;
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
-    write_generated_file(PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm)?;
+    write_generated_file(PVM_PARAMETERS_PATH, &artifacts.parameters_masm)?;
+    write_generated_file(PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm)?;
     write_generated_file(PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;
     write_generated_file(PVM_CONSTRAINTS_EVAL_PATH, &artifacts.constraints_eval_masm)?;
-    write_generated_file(PVM_RELATION_MOD_PATH, &artifacts.relation_mod_masm)?;
     Ok(())
 }
 
@@ -753,31 +762,6 @@ fn write_generated_file(relative: &str, contents: &str) -> io::Result<()> {
     std::fs::write(&path, contents)
         .map_err(|err| io::Error::new(err.kind(), format!("failed to write {path}: {err}")))?;
     println!("wrote {path}");
-    Ok(())
-}
-
-fn replace_masm_const(
-    content: &mut String,
-    name: &str,
-    value: impl core::fmt::Display,
-    path: &str,
-) -> Result<(), String> {
-    let prefix = format!("const {name} = ");
-    let mut declarations = content
-        .match_indices(&prefix)
-        .filter(|(start, _)| *start == 0 || content.as_bytes()[start - 1] == b'\n');
-    let line_start = declarations
-        .next()
-        .map(|(start, _)| start)
-        .ok_or_else(|| format!("{name} not found in {path}"))?;
-    if declarations.next().is_some() {
-        return Err(format!("{name} is declared more than once in {path}"));
-    }
-    let line_end = content[line_start..]
-        .find('\n')
-        .map(|offset| line_start + offset)
-        .unwrap_or(content.len());
-    content.replace_range(line_start..line_end, &format!("{prefix}{value}"));
     Ok(())
 }
 
@@ -871,10 +855,8 @@ mod tests {
     use miden_core::{Felt, Word};
 
     use super::{
-        CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PVM_DEEP_QUERIES_PATH,
-        PvmOodGeometry, PvmReadLayout, apply_pvm_deep_query_geometry, pvm_scratch_allocation,
-        read_generated_file, render_pvm_deep_queries, replace_limb_array_const, replace_masm_const,
-        replace_shape_const,
+        CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PvmReadLayout,
+        pvm_scratch_allocation, replace_limb_array_const, replace_shape_const,
     };
 
     #[test]
@@ -890,7 +872,7 @@ mod tests {
         assert_eq!(
             scratch.proof_order_ids_ptr - scratch.proof_order_positions_ptr,
             PROOF_ORDER_POSITIONS_FELTS,
-            "the ten live pos_by_id cells must be padded from 10 to 12 felts"
+            "pos_by_id must reserve its word-aligned extent before id_by_pos"
         );
         assert_eq!(
             scratch.allocation_end - scratch.proof_order_ids_ptr,
@@ -898,35 +880,6 @@ mod tests {
             "id_by_pos must reserve exactly one cell per chiplet"
         );
         assert!(scratch.allocation_end <= NEXT_VM_REGION_START);
-    }
-
-    #[test]
-    fn relation_constants_are_replaced_without_touching_the_wrapper() {
-        let mut source = String::from(
-            "before\nconst RELATION_DIGEST_0 = 1\nconst PREPROCESSED_COMMITMENT_3 = 2\nafter\n",
-        );
-        replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap();
-        replace_masm_const(&mut source, "PREPROCESSED_COMMITMENT_3", 99, "test.masm").unwrap();
-        assert_eq!(
-            source,
-            "before\nconst RELATION_DIGEST_0 = 42\nconst PREPROCESSED_COMMITMENT_3 = 99\nafter\n"
-        );
-    }
-
-    #[test]
-    fn relation_constant_replacement_fails_closed_when_a_constant_is_missing() {
-        let mut source = String::from("const RELATION_DIGEST_0 = 1\n");
-        let error = replace_masm_const(&mut source, "PREPROCESSED_COMMITMENT_0", 42, "test.masm")
-            .unwrap_err();
-        assert!(error.contains("PREPROCESSED_COMMITMENT_0 not found"));
-    }
-
-    #[test]
-    fn relation_constant_replacement_rejects_duplicate_declarations() {
-        let mut source = String::from("const RELATION_DIGEST_0 = 1\nconst RELATION_DIGEST_0 = 2\n");
-        let error =
-            replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap_err();
-        assert!(error.contains("RELATION_DIGEST_0 is declared more than once"));
     }
 
     #[test]
@@ -997,29 +950,5 @@ mod tests {
             assert_eq!(source, original);
             assert!(source.ends_with(following));
         }
-    }
-
-    #[test]
-    fn checked_in_pvm_deep_query_geometry_is_idempotent_under_rendering() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
-        let checked_in = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
-
-        assert_eq!(render_pvm_deep_queries(&geometry).unwrap(), checked_in);
-    }
-
-    #[test]
-    fn pvm_deep_query_renderer_repairs_block_count_and_lmcs_cv_together() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
-        let expected = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
-        let mut stale = expected.clone();
-
-        replace_masm_const(&mut stale, "AUX_ROW_DOUBLE_WORDS", 1, PVM_DEEP_QUERIES_PATH).unwrap();
-        replace_masm_const(&mut stale, "AUX_LMCS_INIT_CV", "[1, 2, 3, 4]", PVM_DEEP_QUERIES_PATH)
-            .unwrap();
-
-        apply_pvm_deep_query_geometry(&mut stale, &geometry).unwrap();
-        assert_eq!(stale, expected);
     }
 }

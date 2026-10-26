@@ -6,22 +6,21 @@ use {
     TMP3_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
+use {
+    AUX_LMCS_INIT_CV,
+    AUX_ROW_DOUBLE_WORDS,
+    MAIN_LMCS_INIT_CV,
+    MAIN_ROW_DOUBLE_WORDS,
+    PREPROCESSED_INDEX_MASK,
+    PREPROCESSED_LMCS_INIT_CV,
+    PREPROCESSED_ROW_DOUBLE_WORDS,
+    PREPROCESSED_TREE_DEPTH,
+    QUOTIENT_LMCS_INIT_CV,
+    QUOTIENT_ROW_DOUBLE_WORDS,
+} from miden::core::sys::pvm::parameters
 use miden::core::crypto::hashes::eidos
 use miden::core::stark::deep_queries
 use miden::core::sys::pvm::layout
-
-# The BytePairLut setup trace has 2^16 rows and the PCS uses log_blowup = 3, so its committed
-# LDE tree has depth 19. Full-domain query indices project to this tree by retaining the low
-# 19 bits, exactly as lifted-stark's TreeIndices::fold_to_depth does in natural domain order.
-const PREPROCESSED_TREE_DEPTH = 19
-const PREPROCESSED_INDEX_MASK = 524287
-
-# One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
-# Each double word is one eight-felt Eidos compression block.
-const PREPROCESSED_ROW_DOUBLE_WORDS = 1
-const MAIN_ROW_DOUBLE_WORDS = 73
-const AUX_ROW_DOUBLE_WORDS = 39
-const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS
 # =================================================================================================
@@ -31,19 +30,13 @@ const MAIN_LEAF_VALUE_MISMATCH = "main query leaf hash mismatch"
 const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
 const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
-# Registered LMCS leaf initial chaining words, generated from the PVM row widths above.
-const PREPROCESSED_LMCS_INIT_CV = [13503953893947607809, 11912009168875159560, 11170449401267093504, 6620516959492505600]
-const MAIN_LMCS_INIT_CV = [13503953893947607809, 11912009168875160136, 11170449401267093504, 6620516959492505600]
-const AUX_LMCS_INIT_CV = [13503953893947607809, 11912009168875159864, 11170449401267093504, 6620516959492505600]
-const QUOTIENT_LMCS_INIT_CV = [13503953893947607809, 11912009168875159560, 11170449401267093504, 6620516959492505600]
-
 # MAIN PROCEDURE
 # =================================================================================================
 
 #! Computes the PVM DEEP composition-polynomial FRI queries.
 #!
 #! The opened row is reduced in commitment-group order: preprocessed, main, auxiliary, quotient.
-#! The preprocessed group authenticates at its setup-fixed depth using the low 19 bits of the
+#! The preprocessed group authenticates at its setup-fixed depth using the low bits of the
 #! full-domain query index; every other group authenticates at the full query depth.
 #!
 #! Inputs:  [Y, query_ptr, query_end_ptr, W, query_ptr]
@@ -98,7 +91,7 @@ end
 # =================================================================================================
 
 #! Starts the row reduction with the setup-fixed preprocessed trace. The Merkle lookup uses
-#! `index & ((1 << 19) - 1)`, while the original full-depth index remains on the stack for the
+#! `index & PREPROCESSED_INDEX_MASK`, while the original full-depth index remains on the stack for the
 #! other commitment groups and the final DEEP-domain evaluation.
 proc process_preprocessed_trace(
     scratch: word,

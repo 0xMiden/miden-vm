@@ -2,6 +2,14 @@ use {
     LOG_AIR_TRACE_LENGTHS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
+use {
+    ACE_CIRCUIT_STREAM_PTR,
+    AUXILIARY_ACE_INPUTS_PTR,
+    AUX_BUS_BOUNDARY_PTR,
+    OOD_EVALUATIONS_PTR,
+    PROOF_ORDER_IDS_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
+} from miden::core::sys::vm::parameters
 
 ### Memory-map constants and accessors specific to the Miden VM relation.
 ###
@@ -48,72 +56,46 @@ const BOUNDARY_INPUTS_PTR = 3223322836
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
 const KERNEL_WITNESS_PTR = 3223322844
 
-### Out-of-domain ingest scatter table and proof-order maps, immediately after the VM control
-### frame. Reserves 64 felts:
-###
-###   +0            base address of the out-of-domain row being ingested
-###   +4  .. +19    per proof position, in stream order: (row-relative destination, digest address)
-###   +20 .. +43    `pipe_k` procedure digests reached by `dynexec`, one word each
-###   +44 .. +47    `pos_by_id`: each AIR's proof position, in instance order
-###   +48 .. +51    `id_by_pos`: the AIR committed at each proof position
-###
-### The internal offsets and the reserve's sufficiency are owned by the regeneration tool, which
-### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.
+### Out-of-domain ingest scatter table and proof-order maps, after the VM control frame.
+### Regeneration checks the reservation; `parameters.masm` describes its size and internal offsets.
 const OOD_SCATTER_TABLE_PTR = 3223323864
-
-### Proof-order maps inside the reserve above, staged once per proof by
-### `sys/vm/ood_frames.masm::stage_proof_order_maps` from the transcript-bound AIR heights.
-### `pos_by_id[k]` is AIR `k`'s position in the height-sorted proof order; `id_by_pos[p]` is the
-### AIR committed at proof position `p`. The scatter staging and the auxiliary-boundary placement
-### read `pos_by_id`; the fold-coefficient staging reads `id_by_pos`.
-const PROOF_ORDER_POSITIONS_PTR = 3223323908
-const PROOF_ORDER_IDS_PTR = 3223323912
 
 ## VM ACE READ section
 ##
-## Starts at 3225419776 = 2**31 + 2**30 + 2**22. The 32 fixed-length public-input
-## felts grow backward from AUX_RAND_ELEM_PTR; the remaining regions grow forward.
-## The relation's statement block is not part of this section.
+## Stack I/O public values occupy the region immediately before AUX_RAND_ELEM_PTR. The relation's
+## statement block is stored separately, outside ACE READ. Each ACE input slot stores a quadratic
+## extension element (two base felts); base-field public values occupy (value, 0) slots.
+## The fixed public-value count and its storage size are recorded in `parameters.masm`.
 ##
-##   pi_ptr             -->  [ stack I/O public inputs  ]
-##   AUX_RAND_ELEM_PTR  -->  [ aux randomness           ]  4 felts
-##                           [ alignment pad            ]  4 felts
-##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  1120 felts
-##   AUX_BUS_BOUNDARY_PTR -> [ four LogUp finals        ]  8 felts
-##   AUXILIARY_ACE_INPUTS_PTR
-##                       --> [ fixed stark vars         ]  slots 0..9
-##                           [ core selectors           ]  slots 10..12
-##                           [ chiplets selectors       ]  slots 13..15
-##                           [ Eidos compression selectors        ]  slots 16..18
-##                           [ And8 selectors           ]  slots 19..21
-##                           [ per-AIR fold coefficients]  slots 22..25
-##                           [ alignment pad            ]  slots 26..27
-##   ACE_CIRCUIT_STREAM_PTR
-##                       --> [ stream + reserved tail up to the fixed PVM allocation ]
+## Memory order, from low to high addresses:
+##
+##   pi_ptr                   --> [ stack I/O public inputs                  ]
+##   AUX_RAND_ELEM_PTR        --> [ lookup randomness: beta, alpha           ]
+##                                [ alignment padding                        ]
+##   OOD_EVALUATIONS_PTR      --> [ current OOD row                          ]
+##                                [ next OOD row                             ]
+##   AUX_BUS_BOUNDARY_PTR     --> [ normalized LogUp finals, one per AIR     ]
+##   AUXILIARY_ACE_INPUTS_PTR --> [ shared STARK variables                   ]
+##                                [ Core selectors                           ]
+##                                [ Chiplets selectors                       ]
+##                                [ Eidos compression selectors              ]
+##                                [ And8 selectors                           ]
+##                                [ per-AIR fold coefficients                ]
+##                                [ alignment padding                        ]
+##   ACE_CIRCUIT_STREAM_PTR   --> [ ACE instruction stream                   ]
+##                                [ reserved tail to fixed PVM READ base     ]
+##
+## Each OOD row contains aligned preprocessed, main, auxiliary-coordinate, and quotient groups,
+## in that order. LogUp finals, selectors, and fold coefficients use canonical AIR instance order.
+## Each selector group contains first-row, last-row, and transition selectors. `parameters.masm`
+## records the region boundaries, row widths, and auxiliary slot counts derived from InputLayout.
 
 ### Two extension-field elements: beta followed by alpha, four base felts total.
+### Fixed READ anchor: 2^31 + 2^30 + 2^22 = 3225419776.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations in the VM ACE READ section. Each aligned current/next row has
-### 280 scalar evaluations: 8 preprocessed, 192 main, 64 auxiliary-coordinate, and 16
-### quotient. Each evaluation is quadratic-extension valued, so advice supplies 560 base felts
-### per row.
-const OOD_EVALUATIONS_PTR = 3225419784
-
-### Four LogUp finals, one per AIR in canonical instance order (8 base felts). The proof submits
-### them in the height-sorted proof order; `sys/vm/aux_trace.masm` scatters them here.
-const AUX_BUS_BOUNDARY_PTR = 3225420904
-
-### Twenty-eight extension-field stark-var slots: 10 fixed slots, three selector slots and one
-### multi-air fold coefficient for each of the four AIRs, and two alignment slots.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420912
-
-### ACE circuit stream, sized by the generated evaluator's `ACE_STREAM_BLOCKS`. The reserved tail
-### beyond the stream keeps the PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
-const ACE_CIRCUIT_STREAM_PTR = 3225420968
-
-### Scratch row for DEEP query openings: 8 preprocessed, 192 main, 64
-### auxiliary-coordinate, and 16 quotient felts (280 total).
+### Scratch row for DEEP query openings, in preprocessed/main/auxiliary/quotient order.
+### Its AIR-derived width is recorded in `parameters.masm`.
 const CURRENT_TRACE_ROW_PTR = 3238002688
 
 pub proc set_core_trace_length_log(height: u8)
@@ -155,10 +137,12 @@ pub proc aux_rand_elem_ptr() -> ptr<types::QuadFelt>
     push.AUX_RAND_ELEM_PTR
 end
 
+### Normalized LogUp finals, one extension element per AIR in canonical instance order.
 pub proc aux_bus_boundary_ptr() -> types::Address
     push.AUX_BUS_BOUNDARY_PTR
 end
 
+### Fixed STARK variables, per-AIR selectors, and fold coefficients in ACE input order.
 pub proc auxiliary_ace_inputs_ptr() -> types::Address
     push.AUXILIARY_ACE_INPUTS_PTR
 end
@@ -167,6 +151,7 @@ pub proc ace_circuit_stream_ptr() -> types::Address
     push.ACE_CIRCUIT_STREAM_PTR
 end
 
+### Current and next aligned OOD rows, with one QuadFelt per scalar evaluation.
 pub proc ood_evaluations_ptr() -> ptr<types::QuadFelt>
     push.OOD_EVALUATIONS_PTR
 end
@@ -175,10 +160,14 @@ pub proc ood_scatter_table_ptr() -> types::Address
     push.OOD_SCATTER_TABLE_PTR
 end
 
+### Maps each AIR instance to its height-sorted proof position.
+### Read by ood_frames::stage_ood_scatter_table and aux_trace::scatter_aux_bus_boundary.
 pub proc proof_order_positions_ptr() -> types::Address
     push.PROOF_ORDER_POSITIONS_PTR
 end
 
+### Maps each height-sorted proof position to its AIR instance.
+### Read by constraints_eval::stage_air_fold_coefficients.
 pub proc proof_order_ids_ptr() -> types::Address
     push.PROOF_ORDER_IDS_PTR
 end
