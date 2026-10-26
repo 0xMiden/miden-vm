@@ -3,8 +3,11 @@
 This unpublished tool runs the compiler's advice analysis for
 [VM #3710](https://github.com/0xMiden/miden-vm/issues/3710) and
 [compiler #1209](https://github.com/0xMiden/compiler/issues/1209).
-It analyzes `crates/lib/core/asm/miden-project.toml` directly, without filtering
+It reads `crates/lib/core/asm/miden-project.toml` directly, without filtering
 source files or creating an adapter project.
+
+Core analysis on VM `next` is blocked by the compiler pin's VM 0.35 instruction
+set. See [Current validation](#current-validation) for the first parser failure.
 
 ## Running it
 
@@ -78,9 +81,15 @@ No release workflows or branch protections change in this branch.
 
 ## Current validation
 
-The VM 0.36 core source runs with the compiler's existing VM 0.35 dependencies.
-Both modes report 12 diagnostics and 359 skipped procedures, and exit with status 1.
-The reports comprise six operation sinks and six public-return advisories. They need
+The VM `next` branch uses version 1.0.0-rc.1. The pinned compiler still uses VM 0.35
+and cannot parse the `compress` instruction in `sys/vm/ood_frames.masm`.
+Both modes exit with status 2 before taint analysis starts. The core scan has no
+finding or coverage counts on `next`. The compiler must support the VM 1.0
+instruction set before this tool can analyze the current core library.
+
+The last VM 0.36 core scan completed with the same compiler pin. Both modes reported
+12 diagnostics and 359 skipped procedures, and exited with status 1.
+The reports comprised six operation sinks and six public-return advisories. They need
 triage before classification as MASM defects. The 117 root failures cause another
 242 callers to be skipped. Root failures include 46 analysis-size limits and
 67 stack/signature inference failures, with four unsupported constructs.
@@ -96,4 +105,4 @@ Argument errors and missing or malformed manifests must return status 2 in both 
 Target tests distinguish the default library from an executable with findings.
 They also cover the first executable default and reject unknown target names.
 The CLI passes formatting and Clippy with warnings denied. Both scripts pass
-ShellCheck, and the manual workflow passes Actionlint. Hosted CI has not run.
+ShellCheck, and the manual workflow passes Actionlint.

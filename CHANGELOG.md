@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+#### Features
+
 - Added a standalone core MASM advice-analysis CLI with target selection and compact reports ([#4011](https://github.com/0xMiden/miden-vm/pull/4011)).
 
 #### Changes
