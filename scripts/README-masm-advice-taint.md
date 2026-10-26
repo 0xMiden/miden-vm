@@ -94,9 +94,11 @@ triage before classification as MASM defects. The 117 root failures cause anothe
 242 callers to be skipped. Root failures include 46 analysis-size limits and
 67 stack/signature inference failures, with four unsupported constructs.
 
-Local evidence is in
+Evidence from the current VM `next` scan is in
 `target/masm-advice-lint/evidence/core-taint-compact.txt` and
 `target/masm-advice-lint/evidence/core-taint-verbose.txt`.
+Both files contain the parser failure described above. Each evidence run overwrites
+both files.
 The CLI cases cover clean code, sink findings,
 grouped returns, and advice passing through declared word and pointer arguments.
 They verify that skipped dependencies cause failure even when unrelated code is clean.
