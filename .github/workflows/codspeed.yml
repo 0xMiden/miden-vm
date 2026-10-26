@@ -141,7 +141,7 @@ jobs:
           test -x target/codspeed/walltime/${{ matrix.package }}/${{ matrix.bench }}
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
+        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
         with:
           mode: walltime
           run: cargo codspeed run --measurement-mode walltime -p ${{ matrix.package }} --bench ${{ matrix.bench }}
@@ -176,7 +176,7 @@ jobs:
         run: cargo codspeed build --locked --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
+        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
         with:
           mode: walltime
           run: cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
