@@ -3455,6 +3455,7 @@ dependencies = [
 name = "miden-prover-service"
 version = "1.0.0-rc.1"
 dependencies = [
+ "clap",
  "http-body",
  "http-body-util",
  "hyper",
@@ -3478,6 +3479,7 @@ dependencies = [
  "tonic-prost-build",
  "tower",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6405,6 +6407,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys",
