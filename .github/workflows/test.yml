@@ -88,6 +88,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Build tests
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
@@ -250,6 +251,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Run doc-tests
         run: make test-docs
 
@@ -339,6 +341,7 @@ jobs:
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-hack
+      - uses: ./.github/actions/setup-protoc
       - name: Check all feature combinations
         run: make check-features
 

@@ -65,6 +65,11 @@ skip = [
     { name = "num-bigint" },
     # Allow duplicate shlex versions from bindgen/librocksdb-sys and cc
     { name = "shlex" },
+    # prost-build -> petgraph 0.8 requires these older build dependencies.
+    # Remove both exceptions when prost-build upgrades petgraph and no longer
+    # needs separate hashbrown/foldhash versions.
+    { name = "hashbrown", version = "=0.15.5" },
+    { name = "foldhash", version = "=0.1.5" },
 ]
 skip-tree = [
     # Allow getrandom v0.3.x for now - will be updated when miden-crypto upgrades
