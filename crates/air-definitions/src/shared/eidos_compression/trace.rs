@@ -521,7 +521,7 @@ pub(super) fn write_footer_rows<T, R>(
     );
 }
 
-fn write_core_footer_rows<T, R, W>(
+pub(super) fn write_core_footer_rows<T, R, W>(
     rows: &mut [T],
     block: [u32; 16],
     h: [u32; 8],
@@ -556,36 +556,6 @@ fn write_core_footer_rows<T, R, W>(
         }
         write_footer_cv_coordinates(row, footer, h);
     }
-}
-
-/// Writes the shared footer cells from an independently supplied final working state.
-///
-/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
-/// must populate the interface-specific footer cells before the encoder derives the remaining
-/// witness coordinates.
-#[doc(hidden)]
-#[cfg(any(test, feature = "testing"))]
-pub fn write_core_felt_footer_rows<R, W>(
-    rows: &mut [EidosCompressionFeltRow],
-    block: [u32; 16],
-    h: [u32; 8],
-    final_v: [u32; 16],
-    compression_cycle_id: u64,
-    recorder: &mut R,
-    write_footer_interface: &mut W,
-) where
-    R: ByteLookupRecorder,
-    W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
-{
-    write_core_footer_rows(
-        rows,
-        block,
-        h,
-        final_v,
-        compression_cycle_id,
-        recorder,
-        write_footer_interface,
-    );
 }
 
 fn write_mvm_footer_interface<T: TraceRow>(row: &mut T, output: &[u64; 4], mode: TraceMode) {

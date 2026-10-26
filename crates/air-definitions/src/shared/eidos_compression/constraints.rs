@@ -170,23 +170,6 @@ pub(crate) fn enforce_footer_rows<AB>(
     enforce_footer_cycle_advance::<AB>(builder, local, next, selectors);
 }
 
-/// Enforces the footer constraints shared with the PVM compression AIR.
-///
-/// The MVM mode column must be zero so that the shared output slots carry the ordinary digest.
-#[cfg(any(test, feature = "testing"))]
-pub(crate) fn enforce_common_footer_rows<AB>(
-    builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
-    selectors: &EidosCompressionSelectors<AB::Expr>,
-) where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    enforce_core_footer_rows(builder, local, next, selectors, |builder, footer, packed_output| {
-        enforce_mvm_footer_output(builder, local, selectors, footer, packed_output);
-    });
-}
-
 /// Enforces the shared footer constraints and delegates output binding to the caller.
 ///
 /// `enforce_output` receives each footer index and its packed compression output, after that
@@ -502,7 +485,7 @@ fn enforce_footer_row_inputs<AB>(
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
 }
 
-fn enforce_mvm_footer_output<AB>(
+pub(super) fn enforce_mvm_footer_output<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     selectors: &EidosCompressionSelectors<AB::Expr>,

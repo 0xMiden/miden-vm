@@ -123,8 +123,6 @@ pub mod core {
     /// One-cycle witness encoding for the shared compression layout.
     #[doc(hidden)]
     pub mod trace {
-        #[cfg(any(test, feature = "testing"))]
-        pub use super::super::trace::write_core_felt_footer_rows;
         pub use super::super::trace::{
             ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
             retag_felt_trace_block_cycle_id, write_core_felt_trace_block_into_zeroed_with_lookups,
@@ -132,39 +130,10 @@ pub mod core {
     }
 }
 
-/// Test-only access to the shared compression constraints.
+/// Test-only access to the shared compression constraints and witness encoder.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
-pub mod testing {
-    use miden_core::Felt;
-    use miden_lifted_stark::air::LiftedAirBuilder;
-
-    pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
-
-    pub const MVM_MODE_COL: usize = super::layout::F_MODE_COL;
-
-    pub fn enforce_fused_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        super::constraints::enforce_fused_rows(builder, local, next, selectors);
-    }
-
-    pub fn enforce_common_footer_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        super::constraints::enforce_common_footer_rows(builder, local, next, selectors);
-    }
-}
+pub mod testing;
 
 pub use layout::NUM_COLS;
 pub use lookup::EidosCompressionCols;
