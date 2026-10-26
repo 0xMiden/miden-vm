@@ -23,11 +23,19 @@ pub use program::{
     Slot, compression_program, real_slot_count, slots,
 };
 
+use miden_stark::lookup::{
+    ConstraintLookupBuilder,
+    Deg,
+    LookupAir,
+    LookupBatch,
+    LookupBuilder,
+    LookupColumn,
+    LookupGroup,
+    LookupMessage,
+    build_logup_aux_trace,
+};
 use crate::precompiles::{
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, halves_le, next_main, pack_le},
@@ -79,7 +87,7 @@ where
     E: Algebra<E>,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &miden_stark::lookup::Challenges<EF>) -> EF {
         challenges.encode(
             BusId::Sha512Word as usize,
             [self.block_id.clone(), self.addr.clone(), self.lo.clone(), self.hi.clone()],
@@ -106,7 +114,7 @@ where
     E: Algebra<E>,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &miden_stark::lookup::Challenges<EF>) -> EF {
         challenges.encode(
             BusId::Sha512RoundMetadata as usize,
             [

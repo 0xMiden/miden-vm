@@ -1,3 +1,4 @@
+pub mod ace;
 pub mod air;
 pub mod ec;
 pub mod fixed;
@@ -16,4 +17,3 @@ pub mod utils;
 
 pub use air::{ChipletAir, NUM_CHIPLETS};
 
-pub mod ace;

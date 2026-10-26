@@ -3,15 +3,19 @@
 use miden_core::Felt;
 
 use super::layout::AUX_COLS;
+use miden_stark::lookup::LookupBuilder;
 use crate::{
     precompiles::{
-        logup::LookupBuilder,
         primitives::byte_pair_lut::eidos::{self, Relation},
         relations::BusId,
     },
     shared::eidos::{
-        EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign,
-        NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
+        EidosCompressionCols,
+        EidosCompressionSelectors,
+        LookupMultiplicitySign,
+        NarrowLookupConfig,
+        XorExpression,
+        emit_narrow_lookup_columns,
     },
 };
 

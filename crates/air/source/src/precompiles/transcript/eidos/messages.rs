@@ -6,10 +6,8 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
-};
+use miden_stark::lookup::{Challenges, LookupMessage};
+use crate::precompiles::relations::BusId;
 
 /// LogUp message for one Eidos message block.
 #[derive(Debug, Clone)]

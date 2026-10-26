@@ -3,18 +3,30 @@ use miden_ace::CompiledRelation;
 use miden_core::{Felt, field::QuadFelt};
 use p3_security::budget::{AirShape, LookupShape};
 
+use miden_stark::lookup::{LookupAir, ProverLookupBuilder};
 use crate::precompiles::{
     ChipletAir,
-    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
+    ec::{
+        add::EcGroupAddAir,
+        msm::EcMsmAir,
+        point_store_groups::EcPointStoreGroupsAir,
+    },
     hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
+        chunk_node_sponge::ChunkNodeSpongeAir,
+        keccak::round::KeccakRoundAir,
+        sha256::Sha256Air,
         sha512::Sha512Air,
     },
-    logup::{LookupAir, ProverLookupBuilder},
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
-    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
+    transcript::{
+        eidos::EidosCompressionAir,
+        eval::TranscriptEvalAir,
+    },
+    uint::{
+        add::UintAddAir,
+        store_mul::UintStoreMulAir,
+    },
 };
 #[cfg(feature = "compiler")]
 use crate::shared::geometry::NUM_OOD_POINTS;

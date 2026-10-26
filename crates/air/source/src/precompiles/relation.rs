@@ -1,9 +1,12 @@
 //! Canonical AIR order, height rules, and compiler capture of the precompile relation.
 
+#[cfg(feature = "compiler")]
+mod compiler;
+
 use alloc::vec::Vec;
 
 #[cfg(feature = "compiler")]
-use miden_ace::{AceError, CapturedAir, CompiledRelation};
+pub use compiler::CapturedPvmRelation;
 use miden_core::utils::Matrix;
 use miden_stark::air::{BaseAir, LiftedAir};
 
@@ -58,28 +61,4 @@ pub enum HeightRule {
 pub struct RelationProtocol {
     pub heights: Vec<HeightRule>,
     pub max_periodic_log: u32,
-}
-
-/// One symbolic capture of each AIR, shared by the compiler backends.
-#[cfg(feature = "compiler")]
-pub struct CapturedPvmRelation {
-    airs: Vec<CapturedAir>,
-}
-
-#[cfg(feature = "compiler")]
-impl CapturedPvmRelation {
-    pub fn airs(&self) -> &[CapturedAir] {
-        &self.airs
-    }
-
-    pub fn new() -> Result<Self, AceError> {
-        Ok(Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect::<Result<_, _>>()?,
-        })
-    }
-
-    pub fn compile(&self) -> Result<CompiledRelation<'_>, AceError> {
-        let airs: Vec<_> = self.airs.iter().collect();
-        CompiledRelation::from_captured(&airs, crate::precompiles::ace::LMCS_ALIGNMENT)
-    }
 }

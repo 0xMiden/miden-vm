@@ -13,10 +13,8 @@
 
 use miden_core::field::Algebra;
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
-};
+use miden_stark::lookup::{Challenges, LookupMessage};
+use crate::precompiles::relations::BusId;
 
 /// LogUp message for the [`ChunkChain`](BusId::ChunkChain) relation: a
 /// 2-tuple `(chunk_seq_id_head, absorption_id_head)` binding the head of

@@ -72,11 +72,19 @@ use miden_core::{
 use miden_stark::air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
+use miden_stark::lookup::{
+    Challenges,
+    ConstraintLookupBuilder,
+    Deg,
+    LookupAir,
+    LookupBatch,
+    LookupBuilder,
+    LookupColumn,
+    LookupGroup,
+    LookupMessage,
+};
 use crate::precompiles::{
-    logup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},

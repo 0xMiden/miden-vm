@@ -22,12 +22,19 @@ use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 pub use program::{IO_PERIOD, NUM_PERIODIC_COLS, io_program};
 
+use miden_stark::lookup::{
+    ConstraintLookupBuilder,
+    Deg,
+    LookupAir,
+    LookupBatch,
+    LookupBuilder,
+    LookupColumn,
+    LookupGroup,
+    build_logup_aux_trace,
+};
 use crate::precompiles::{
     hash::sha512::compression::{INPUT_ADDR_BASE, OUTPUT_SLOTS, Sha512WordMsg},
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
