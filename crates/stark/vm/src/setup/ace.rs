@@ -34,8 +34,8 @@ mod tests {
 
     #[test]
     fn cached_circuit_matches_independent_authored_capture() {
-        let authored = build_recursive_verifier_ace_circuit()
-            .expect("authored recursive ACE circuit");
+        let authored =
+            build_recursive_verifier_ace_circuit().expect("authored recursive ACE circuit");
         assert_eq!(*super::shared_recursive_circuit(), authored);
     }
 }

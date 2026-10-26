@@ -17,6 +17,10 @@ use super::{
 /// One row of the Eidos compression main trace over the VM base field.
 pub type EidosCompressionFeltRow = [Felt; NUM_COLS];
 
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub use super::testing::write_core_felt_footer_rows;
+
 const CANONICALITY_HIGH_WORD_MAX: u64 = u32::MAX as u64;
 const INV_TWO_POW_16: Felt = Felt::new_unchecked(18_446_462_594_437_939_201);
 const INV_TWO_POW_24: Felt = Felt::new_unchecked(18_446_742_969_902_956_801);
@@ -308,36 +312,6 @@ pub(crate) fn write_core_footer_rows<T, R, W>(
         }
         write_footer_cv_coordinates(row, footer, h);
     }
-}
-
-/// Writes the shared footer cells from an independently supplied final working state.
-///
-/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
-/// must populate the interface-specific footer cells before the encoder derives the remaining
-/// witness coordinates.
-#[doc(hidden)]
-#[cfg(any(test, feature = "testing"))]
-pub fn write_core_felt_footer_rows<R, W>(
-    rows: &mut [EidosCompressionFeltRow],
-    block: [u32; 16],
-    h: [u32; 8],
-    final_v: [u32; 16],
-    compression_cycle_id: u64,
-    recorder: &mut R,
-    write_footer_interface: &mut W,
-) where
-    R: ByteLookupRecorder,
-    W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
-{
-    write_core_footer_rows(
-        rows,
-        block,
-        h,
-        final_v,
-        compression_cycle_id,
-        recorder,
-        write_footer_interface,
-    );
 }
 
 fn write_footer_xor_slots<T, R>(
