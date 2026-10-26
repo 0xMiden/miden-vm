@@ -756,6 +756,8 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Fixed(8)),
         ("vm/parameters.masm", "OOD_EVALUATIONS_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
         ("vm/parameters.masm", "AUX_BUS_BOUNDARY_PTR", 0, Fixed(8)),
+        // 10 shared STARK slots + 3 selectors per AIR + 4 fold coefficients + 2 padding slots,
+        // each occupying two base felts: (10 + 3 * 4 + 4 + 2) * 2 = 56.
         ("vm/parameters.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(56)),
         // Fixed VM stream reservation ending at the PVM allocation.
         ("vm/parameters.masm", "ACE_CIRCUIT_STREAM_PTR", 0, UntilAddress(PVM_FRAME_START)),

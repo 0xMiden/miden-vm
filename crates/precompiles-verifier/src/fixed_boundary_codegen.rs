@@ -9,7 +9,7 @@ use std::{
 };
 
 use miden_precompiles_air::{
-    fixed::{self, FixedEcGroup, FixedUint},
+    fixed::{self, CurveId, FixedEcGroup, FixedUint, FixedUintKind},
     relations::MAX_MESSAGE_WIDTH,
 };
 
@@ -24,8 +24,8 @@ pub(crate) fn render_fixed_boundary() -> Result<String, String> {
         return Err("update compute_bus_gamma for the new PVM message width".into());
     }
     let mut uints: Vec<_> = fixed::fixed_uint_records().collect();
-    // The sum also accepts native catalogue order. Sorting bounds before dependents, then by
-    // address, preserves the accepted executable identity; the field sum does not require it.
+    // Message order does not affect the sum, but it is part of the PVM verifier root.
+    // Emit bounds before dependents, each sorted by address.
     uints.sort_by_key(|entry| (entry.ptr != entry.bound_ptr, entry.ptr));
     let groups: Vec<_> = fixed::fixed_ecgroup_records().collect();
     let body = render_messages(&uints, &groups)?;
@@ -77,7 +77,7 @@ fn render_messages(uints: &[FixedUint], groups: &[FixedEcGroup]) -> Result<Strin
 /// `c7` first so it is deepest in the payload expected by `fold_uint_val_payload`.
 fn render_uint(template: &str, uint: &FixedUint) -> Result<String, String> {
     let mut values = vec![
-        ("label".into(), uint.kind.to_string()),
+        ("label".into(), fixed_uint_label(uint.kind)),
         ("ptr".into(), uint.ptr.to_string()),
         ("bound_ptr".into(), uint.bound_ptr.to_string()),
         ("push_payload".into(), push_uint_payload(uint)),
@@ -89,6 +89,23 @@ fn render_uint(template: &str, uint: &FixedUint) -> Result<String, String> {
             .map(|(index, limb)| (format!("c{index}"), format!("0x{limb:08X}"))),
     );
     render_template(template, &values)
+}
+
+fn fixed_uint_label(kind: FixedUintKind) -> String {
+    match kind {
+        FixedUintKind::Bound(domain) => format!("{domain:?} bound"),
+        FixedUintKind::CoefficientA(CurveId::Ed25519) => {
+            "Ed25519 short-Weierstrass coefficient A".into()
+        },
+        FixedUintKind::CoefficientB(CurveId::Ed25519) => {
+            "Ed25519 short-Weierstrass coefficient B".into()
+        },
+        FixedUintKind::CoefficientA(CurveId::P256) => "P256 coefficient A = p - 3".into(),
+        FixedUintKind::CoefficientA(curve) => format!("{curve:?} coefficient A"),
+        FixedUintKind::CoefficientB(curve) => format!("{curve:?} coefficient B"),
+        FixedUintKind::GlvBeta(curve) => format!("{curve:?} GLV beta"),
+        FixedUintKind::GlvLambda(curve) => format!("{curve:?} GLV lambda"),
+    }
 }
 
 /// Emits pushes placing `[ptr, bound_ptr, c0, ..., c7]` above the caller's stack.
@@ -113,13 +130,15 @@ fn push_uint_payload(uint: &FixedUint) -> String {
     output
 }
 
+/// Unused bindings are allowed: templates may omit labels or use individual limbs instead of
+/// `push_payload`. Any unresolved placeholder is an error.
 fn render_template(template: &str, values: &[(String, String)]) -> Result<String, String> {
     let mut output = template.to_string();
     for (name, value) in values {
         let placeholder = format!("{{{{{name}}}}}");
         output = output.replace(&placeholder, value);
     }
-    if output.contains("{{") || output.contains("}}") {
+    if output.contains("{{") {
         return Err("unexpanded fixed-boundary template placeholder".into());
     }
     Ok(output)
@@ -128,6 +147,13 @@ fn render_template(template: &str, values: &[(String, String)]) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_preserves_nested_struct_braces() {
+        let template = "type Payload = struct { inner: struct { value: felt }}\npush.{{ptr}}";
+        let rendered = render_template(template, &[("ptr".into(), "42".into())]).unwrap();
+        assert_eq!(rendered, "type Payload = struct { inner: struct { value: felt }}\npush.42");
+    }
 
     #[test]
     fn uint_template_can_omit_comment_bindings_but_rejects_unknown_bindings() {

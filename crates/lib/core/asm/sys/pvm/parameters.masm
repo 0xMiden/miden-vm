@@ -27,6 +27,20 @@ pub const PREPROCESSED_TRACE_LOG_HEIGHT = 16
 pub const PREPROCESSED_TREE_DEPTH = 19
 pub const PREPROCESSED_INDEX_MASK = 524287
 
+# Minimum log2 heights for non-fixed AIRs, indexed in ChipletAir::all() order.
+# The row bound is max(2, longest periodic cycle, preprocessed trace height).
+pub const MIN_LOG_HEIGHT_0 = 5
+pub const MIN_LOG_HEIGHT_1 = 5
+pub const MIN_LOG_HEIGHT_2 = 7
+pub const MIN_LOG_HEIGHT_4 = 1
+pub const MIN_LOG_HEIGHT_5 = 3
+pub const MIN_LOG_HEIGHT_6 = 1
+pub const MIN_LOG_HEIGHT_7 = 1
+pub const MIN_LOG_HEIGHT_8 = 2
+pub const MIN_LOG_HEIGHT_9 = 1
+pub const MIN_LOG_HEIGHT_10 = 7
+pub const MIN_LOG_HEIGHT_11 = 7
+
 # Query-row blocks and LMCS leaf frames, in commitment-group order.
 # Each block contains eight base felts.
 pub const PREPROCESSED_ROW_DOUBLE_WORDS = 1

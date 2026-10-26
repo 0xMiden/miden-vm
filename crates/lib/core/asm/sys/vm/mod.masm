@@ -37,7 +37,7 @@ pub mod ood_frames
 pub mod parameters
 pub mod public_inputs
 
-# The verifier does not grind lookup challenges.
+# Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 
 # One block-hash seed and two deferred-root terms, consumed in public_inputs.masm.

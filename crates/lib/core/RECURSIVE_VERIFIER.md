@@ -27,10 +27,19 @@ against them. The PVM layout is generated as a complete module.
 
 ## Assumptions to review
 
+`vm/public_inputs.masm` defines the VM's bus prefix factors, AIR count, and stack I/O count.
+These must match the native bus identifiers plus one, `MIDEN_AIR_COUNT`, and `NUM_PUBLIC_VALUES`,
+respectively. The constants are maintained manually; `make check-constraints` checks the AIR count.
+
+The module's `compute_bus_gamma` routine is specialized to `gamma = beta^16`. The assertion in
+`air/src/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
+requires updating both the routine and the assertion.
+
 Generation requires `MAX_MESSAGE_WIDTH == 18`, matching the PVM gamma addition chain for `beta^18`.
-Update the chain and its guard together if the message width changes. When changing the PVM AIR set,
-review height loading in `pvm/mod.masm`, the AIR count in `pvm/public_inputs.masm`, and boundary
-processing in `pvm/aux_trace.masm`; these procedures are not generated from the AIR set.
+Update the chain and its guard together if the message width changes. PVM height minima are generated
+from native AIR definitions. When changing the PVM AIR set, review height loading and fixed-height
+checks in `pvm/mod.masm`, the AIR count in `pvm/public_inputs.masm`, and boundary processing in
+`pvm/aux_trace.masm`; these procedures are not generated from the AIR set.
 
 ## Edit and verification loop
 

@@ -4,10 +4,9 @@
 //! preseeds fixed curve groups in the EC group table, and records external `UintVal` / `EcGroup`
 //! demands. Matching positive consumes are injected by `ChipletMultiAir::eval_external`.
 
-use core::fmt;
-
 use miden_core::Felt;
-use miden_precompiles::{CurveId, Limbs, UintDomain};
+use miden_precompiles::Limbs;
+pub use miden_precompiles::{CurveId, UintDomain};
 
 use crate::{ec::EcGroupMsg, uint::UintValMsg};
 
@@ -26,27 +25,9 @@ pub enum FixedUintKind {
     GlvLambda(CurveId),
 }
 
-impl fmt::Display for FixedUintKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Bound(domain) => write!(f, "{domain:?} bound"),
-            Self::CoefficientA(CurveId::Ed25519) => {
-                f.write_str("Ed25519 short-Weierstrass coefficient A")
-            },
-            Self::CoefficientB(CurveId::Ed25519) => {
-                f.write_str("Ed25519 short-Weierstrass coefficient B")
-            },
-            Self::CoefficientA(CurveId::P256) => f.write_str("P256 coefficient A = p - 3"),
-            Self::CoefficientA(curve) => write!(f, "{curve:?} coefficient A"),
-            Self::CoefficientB(curve) => write!(f, "{curve:?} coefficient B"),
-            Self::GlvBeta(curve) => write!(f, "{curve:?} GLV beta"),
-            Self::GlvLambda(curve) => write!(f, "{curve:?} GLV lambda"),
-        }
-    }
-}
-
 /// Fixed unsigned integer installed by the prover and consumed at the verifier boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FixedUint {
     /// Identity retained for consumers that need to describe the entry.
     pub kind: FixedUintKind,
@@ -126,6 +107,8 @@ pub fn fixed_uintval_msgs() -> impl Iterator<Item = UintValMsg<Felt>> {
 }
 
 /// Fixed curve identity and its verifier-side group message.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FixedEcGroup {
     /// Curve whose short-Weierstrass parameters the message identifies.
     pub curve: CurveId,

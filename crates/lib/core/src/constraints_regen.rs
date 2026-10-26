@@ -255,6 +255,8 @@ struct VmGeometry {
     auxiliary_ace_inputs_ptr: usize,
     ace_circuit_stream_ptr: usize,
     ood_scatter_table_ptr: usize,
+    /// Felt offset of AIR 0's first selector from `auxiliary_ace_inputs_ptr`.
+    air_selector_offset: usize,
     /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`.
     fold_coefficient_offset: usize,
 }
@@ -396,6 +398,11 @@ impl VmGeometry {
         let aux_bus_boundary_index =
             require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
         let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
+        let air_selector_offset = input_layout_extent(
+            auxiliary_ace_inputs_index,
+            require_input_index(input_layout, InputKey::IsFirstAir(0))?,
+            "per-AIR selectors",
+        )?;
         let fold_coefficient_index =
             require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
         let fold_coefficient_offset = input_layout_extent(
@@ -443,6 +450,7 @@ impl VmGeometry {
             auxiliary_ace_inputs_ptr,
             ace_circuit_stream_ptr,
             ood_scatter_table_ptr,
+            air_selector_offset,
             fold_coefficient_offset,
         })
     }
@@ -626,6 +634,46 @@ fn render_vm_parameters(
         geometry.main_width,
         geometry.aux_width,
         geometry.quotient_width
+    )
+    .unwrap();
+    let shared_stark_slots = geometry.air_selector_offset / EXT_DEGREE;
+    let selector_slots = geometry
+        .fold_coefficient_offset
+        .checked_sub(geometry.air_selector_offset)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "VM ACE fold coefficients precede per-AIR selectors",
+            )
+        })?
+        / EXT_DEGREE;
+    let auxiliary_felts = geometry
+        .ace_circuit_stream_ptr
+        .checked_sub(geometry.auxiliary_ace_inputs_ptr)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "VM ACE circuit stream precedes auxiliary inputs",
+            )
+        })?;
+    let auxiliary_slots = auxiliary_felts / EXT_DEGREE;
+    let padding_slots = auxiliary_slots
+        .checked_sub(shared_stark_slots)
+        .and_then(|slots| slots.checked_sub(selector_slots))
+        .and_then(|slots| slots.checked_sub(MIDEN_AIR_COUNT))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "VM ACE auxiliary allocation cannot fit STARK variables, selectors, and \
+                 fold coefficients",
+            )
+        })?;
+    writeln!(
+        output,
+        "# Auxiliary ACE inputs, in memory order (one slot = {EXT_DEGREE} base felts):\n\
+         #   {shared_stark_slots} shared STARK slots; {selector_slots} selectors for {MIDEN_AIR_COUNT} AIRs;\n\
+         #   {MIDEN_AIR_COUNT} fold coefficients; {padding_slots} alignment slots.\n\
+         #   Total: {auxiliary_slots} slots ({auxiliary_felts} base felts)."
     )
     .unwrap();
     for (name, value) in [
@@ -982,48 +1030,50 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         return Err(format!("MAX_POW_BITS in {SECURITY_ESTIMATOR_PATH} is stale"));
     }
 
-    let descriptor_literals: [(&str, u64); 9] = [
-        ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
-        ("MAX_MESSAGE_WIDTH", miden_air::security::LOOKUP_SHAPE.max_message_width as u64),
+    let parameters = read_file(VM_PARAMETERS_PATH).map_err(|err| err.to_string())?;
+    let wrapper_source = (&wrapper, VM_WRAPPER_PATH);
+    let parameters_source = (&parameters, VM_PARAMETERS_PATH);
+    for (name, (source, path), expected) in [
+        ("LOOKUP_POW_BITS", wrapper_source, miden_air::security::LOOKUP_POW_BITS as u64),
+        (
+            "MAX_MESSAGE_WIDTH",
+            parameters_source,
+            miden_air::security::LOOKUP_SHAPE.max_message_width as u64,
+        ),
         (
             "NUM_COMPOSED_CONSTRAINTS",
+            parameters_source,
             miden_air::security::AIR_SHAPE.num_composed_constraints as u64,
         ),
         (
             "MAX_CONSTRAINT_DEGREE",
+            parameters_source,
             miden_air::security::AIR_SHAPE.max_constraint_degree as u64,
         ),
         (
             "NUM_DEEP_TERMS",
+            parameters_source,
             miden_air::security::AIR_SHAPE
                 .num_deep_terms
                 .expect("the MVM uses DEEP composition") as u64,
         ),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
+            wrapper_source,
             miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
+            parameters_source,
             miden_air::security::LOOKUP_SHAPE.fractions_per_row as u64,
         ),
-        ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
-        ("LOG_HEIGHT_MAX", estimator_heights),
-    ];
-
-    let parameters = read_file(VM_PARAMETERS_PATH).map_err(|err| err.to_string())?;
-    for (name, expected) in descriptor_literals {
-        let (source, path) = if matches!(
-            name,
-            "MAX_NUM_KERNEL_PROCEDURES"
-                | "LOG_HEIGHT_MAX"
-                | "LOOKUP_POW_BITS"
-                | "CORE_BOUNDARY_LOOKUP_TERMS"
-        ) {
-            (&wrapper, VM_WRAPPER_PATH)
-        } else {
-            (&parameters, VM_PARAMETERS_PATH)
-        };
+        (
+            "MAX_NUM_KERNEL_PROCEDURES",
+            wrapper_source,
+            KernelDescriptor::MAX_NUM_PROCEDURES as u64,
+        ),
+        ("LOG_HEIGHT_MAX", wrapper_source, estimator_heights),
+    ] {
         let actual = parse_masm_const::<u64>(source, name, path)?;
         if actual != expected {
             return Err(format!("{name} in {path} is stale"));
@@ -1238,7 +1288,7 @@ mod tests {
         );
     }
 
-    /// A geometry whose only meaningful axis is the preprocessed occupancy under test.
+    /// Synthetic row widths with configurable preprocessed occupancy and the VM auxiliary layout.
     fn scatter_test_geometry(preprocessed_widths: &[usize]) -> VmGeometry {
         let preprocessed_widths = preprocessed_widths.to_vec();
         let main_widths = vec![8; preprocessed_widths.len()];
@@ -1263,9 +1313,11 @@ mod tests {
             ood_evaluations_ptr: 0,
             aux_bus_boundary_ptr: 0,
             auxiliary_ace_inputs_ptr: 0,
-            ace_circuit_stream_ptr: 0,
+            // Auxiliary slots: 10 shared, 12 selectors, 4 fold coefficients, 2 padding.
+            ace_circuit_stream_ptr: 28 * EXT_DEGREE,
             ood_scatter_table_ptr: 0,
-            fold_coefficient_offset: 0,
+            air_selector_offset: 10 * EXT_DEGREE,
+            fold_coefficient_offset: 22 * EXT_DEGREE,
         }
     }
 
@@ -1298,14 +1350,48 @@ mod tests {
     }
 
     #[test]
+    fn auxiliary_input_layout_rejects_reversed_or_truncated_regions() {
+        let assert_rejected = |geometry: &VmGeometry, expected: &str| {
+            let error = render_vm_parameters(geometry, &[Felt::ZERO; 4], &[0; 4]).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), expected);
+        };
+
+        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
+        geometry.air_selector_offset = geometry.fold_coefficient_offset + EXT_DEGREE;
+        assert_rejected(&geometry, "VM ACE fold coefficients precede per-AIR selectors");
+
+        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
+        geometry.auxiliary_ace_inputs_ptr = geometry.ace_circuit_stream_ptr + EXT_DEGREE;
+        assert_rejected(&geometry, "VM ACE circuit stream precedes auxiliary inputs");
+
+        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
+        geometry.ace_circuit_stream_ptr = geometry.fold_coefficient_offset;
+        assert_rejected(
+            &geometry,
+            "VM ACE auxiliary allocation cannot fit STARK variables, selectors, and \
+             fold coefficients",
+        );
+    }
+
+    #[test]
     fn proof_order_map_pointers_must_fit_u32_memory() {
         let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
         let table_felts = vm_scatter_plan(&geometry).unwrap().table_felts();
         // Exercise the first pointer exceeding u32, then only the second. On a 32-bit host,
         // checked usize addition rejects these cases before the encoded-address range check.
-        for offset in [table_felts - 1, table_felts + MIDEN_AIR_COUNT - 1] {
+        for (offset, name) in [
+            (table_felts - 1, "PROOF_ORDER_POSITIONS_PTR"),
+            (table_felts + MIDEN_AIR_COUNT - 1, "PROOF_ORDER_IDS_PTR"),
+        ] {
             geometry.ood_scatter_table_ptr = u32::MAX as usize - offset;
-            assert!(render_vm_parameters(&geometry, &[Felt::ZERO; 4], &[0; 4]).is_err());
+            let error = render_vm_parameters(&geometry, &[Felt::ZERO; 4], &[0; 4]).unwrap_err();
+            let expected = if usize::BITS == 32 {
+                "VM proof-order map overflows".into()
+            } else {
+                format!("VM {name} exceeds u32 memory")
+            };
+            assert_eq!(error.to_string(), expected);
         }
     }
 }

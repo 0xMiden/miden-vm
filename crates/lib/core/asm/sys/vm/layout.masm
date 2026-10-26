@@ -88,7 +88,7 @@ const OOD_SCATTER_TABLE_PTR = 3223323864
 ## Each OOD row contains aligned preprocessed, main, auxiliary-coordinate, and quotient groups,
 ## in that order. LogUp finals, selectors, and fold coefficients use canonical AIR instance order.
 ## Each selector group contains first-row, last-row, and transition selectors. `parameters.masm`
-## derives the region boundaries and row widths from InputLayout.
+## records the region boundaries, row widths, and auxiliary slot counts derived from InputLayout.
 
 ### Two extension-field elements: beta followed by alpha, four base felts total.
 ### Fixed READ anchor: 2^31 + 2^30 + 2^22 = 3225419776.

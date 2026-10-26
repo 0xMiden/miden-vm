@@ -130,7 +130,7 @@ pub proc observe_aux_trace()
     # Draw [alpha, beta] and store [beta0, beta1, alpha0, alpha1] at the staged PVM READ boundary.
     exec.random_coin::generate_aux_randomness
 
-    # The nineteen fixed-environment consumes depend on the sampled challenges but not on proof data.
+    # The fixed-environment consumes depend on the sampled challenges but not on proof data.
     exec.fixed_boundary::compute_fixed_boundary_correction
 
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR

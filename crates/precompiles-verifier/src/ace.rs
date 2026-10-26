@@ -636,14 +636,17 @@ mod tests {
         let masm_minima: Vec<u64> = airs
             .iter()
             .enumerate()
-            .map(|(i, air)| {
-                // Fixed-height instances are pinned as equalities in the wrapper; the shared
-                // derivation still supplies the same value.
-                if air.fixed_log_height().is_some() {
-                    assert_eq!(i, 3, "the wrapper pins only BytePairLut at a fixed height");
+            .map(|(index, air)| {
+                let wrapper_checks_equality = matches!(air, ChipletAir::BytePairLut);
+                assert_eq!(
+                    air.fixed_log_height().is_some(),
+                    wrapper_checks_equality,
+                    "the PVM wrapper's height check for {air:?} differs from its native policy"
+                );
+                if wrapper_checks_equality {
                     masm_const(PVM_PARAMETERS_PATH, "PREPROCESSED_TRACE_LOG_HEIGHT")
                 } else {
-                    masm_const(PVM_WRAPPER_PATH, &alloc::format!("MIN_LOG_HEIGHT_{i}"))
+                    masm_const(PVM_PARAMETERS_PATH, &alloc::format!("MIN_LOG_HEIGHT_{index}"))
                 }
             })
             .collect();
@@ -749,43 +752,45 @@ mod tests {
             "the grinding bound drifted from the estimator envelope"
         );
 
-        for (name, expected) in [
-            ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
-            ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
+        for (name, path, expected) in [
+            ("LOOKUP_POW_BITS", PVM_WRAPPER_PATH, u64::from(pvm_security::LOOKUP_POW_BITS)),
+            (
+                "MAX_MESSAGE_WIDTH",
+                PVM_PARAMETERS_PATH,
+                u64::from(pvm_security::LOOKUP_SHAPE.max_message_width),
+            ),
             (
                 "NUM_COMPOSED_CONSTRAINTS",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
             ),
             (
                 "MAX_CONSTRAINT_DEGREE",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
             ),
             (
                 "NUM_DEEP_TERMS",
+                PVM_PARAMETERS_PATH,
                 u64::from(
                     pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
                 ),
             ),
             (
                 "LOOKUP_FRACTIONS_PER_ROW",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
                 "FIXED_BOUNDARY_LOOKUP_TERMS",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
             ),
         ] {
             assert_eq!(
-                masm_const(
-                    if name == "LOOKUP_POW_BITS" {
-                        PVM_WRAPPER_PATH
-                    } else {
-                        PVM_PARAMETERS_PATH
-                    },
-                    name,
-                ),
+                masm_const(path, name),
                 expected,
-                "PVM wrapper {name} drifted from its native security constant"
+                "{name} in {path} drifted from its native PVM security constant"
             );
         }
     }
