@@ -238,8 +238,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check generated evaluators and assembled verifiers
-        run: make check-verifiers
+      - name: Check generated verifier MASM freshness
+        run: cargo run --locked --package miden-verifier-codegen -- --check crates/lib/core/asm
       - name: Check runtime dependency boundaries
         run: |
           for package in miden-air miden-crypto; do

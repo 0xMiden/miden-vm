@@ -4,8 +4,14 @@
 
 #### Changes
 
+- [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions::precompiles`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, metadata, and canonical ACE without adding compiler tooling to runtime dependencies; complete generated verifier MASM remains tracked and checked against regeneration. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
+- Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 - Added PVM benchmarks and updated synthetic transaction and recursive verification benchmarks for Eidos ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
+
+#### Fixes
+
+- Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
 ## v1.0.0-rc.0 (2026-10-21)
 
@@ -53,7 +59,6 @@
 - Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Optimized PVM by reducing AIR widths and lookup costs ([#4027](https://github.com/0xMiden/miden-vm/pull/4027)).
-- [BREAKING] Generate VM/PVM evaluators, ACE streams, and recursive verifier MASM at build time from shared AIR definitions. Removed manual regeneration tools and the `constraints-tools`/`constants-tools` features. Relation digests and verifier roots are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 - [BREAKING] Reduced emitted VM operations for immediate exponentiation, u32max, and comparisons against zero. Verifier roots change. ([#4049](https://github.com/0xMiden/miden-vm/pull/4049)).
 
 #### Fixes

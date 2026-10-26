@@ -133,24 +133,6 @@ impl InputLayout {
         self.regions.quotient_curr.width
     }
 
-    /// Starts of the preprocessed, main, and auxiliary coordinate READ regions.
-    /// Empty regions still have a defined start.
-    pub fn trace_starts(&self, offset: usize) -> Option<[usize; 3]> {
-        match offset {
-            0 => Some([
-                self.regions.preprocessed_curr.offset,
-                self.regions.main_curr.offset,
-                self.regions.aux_curr.offset,
-            ]),
-            1 => Some([
-                self.regions.preprocessed_next.offset,
-                self.regions.main_next.offset,
-                self.regions.aux_next.offset,
-            ]),
-            _ => None,
-        }
-    }
-
     /// Map a logical `InputKey` into the flat input index, if present.
     pub fn index(&self, key: InputKey) -> Option<usize> {
         self.mapper().index_of(key)

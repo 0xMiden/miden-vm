@@ -71,23 +71,11 @@ impl CapturedAir {
         &self.constraints
     }
 
-    pub fn counts(&self) -> InputCounts {
-        self.counts
-    }
-
     pub fn degrees(&self) -> ConstraintDegrees {
         self.degrees
     }
 
-    pub fn periodic_columns(&self) -> &[Vec<Felt>] {
-        &self.periodic_columns
-    }
-
-    pub fn max_periodic_length(&self) -> usize {
-        self.max_periodic_length
-    }
-
-    pub fn constraint_counts(&self) -> ConstraintCounts {
+    pub(crate) fn constraint_counts(&self) -> ConstraintCounts {
         ConstraintCounts {
             base: self.constraints.base_roots.len(),
             ext: self.constraints.ext_roots.len(),
@@ -339,7 +327,8 @@ impl<'a> CompiledRelation<'a> {
         })
     }
 
-    pub fn airs(&self) -> &[&'a CapturedAir] {
+    #[cfg(test)]
+    pub(crate) fn airs(&self) -> &[&'a CapturedAir] {
         &self.airs
     }
 

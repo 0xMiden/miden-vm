@@ -185,7 +185,6 @@ fn bench_one_scenario(
     let prover = Prover::new().with_hash_fn(BENCH_HASH).with_hash_lde_blocks(hash_lde_blocks);
     println!("BENCH_SYNTH_CONFIG hash_lde_blocks={}", u8::from(hash_lde_blocks));
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
-    println!("    provenance: {}", snapshot.provenance.label());
     println!(
         "    trace:   core={} chiplets={} eidos_compression={} and8={} (padded_total={})",
         snapshot.trace.core_rows,

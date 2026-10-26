@@ -22,10 +22,10 @@ const GENERATED_BY: &str = "miden-verifier-codegen";
 const STAGING_STAMP: &str = ".miden-verifier-codegen-stage";
 
 /// One rendered module: its path below the assembly root and its source.
-pub type RenderedModule = (PathBuf, String);
+type RenderedModule = (PathBuf, String);
 
 /// Render every specialized verifier module from the AIR definitions and the templates.
-pub fn render_verifier_masm() -> Result<Vec<RenderedModule>, String> {
+fn render_verifier_masm() -> Result<Vec<RenderedModule>, String> {
     let mut modules = Vec::new();
     vm::render(&mut modules)?;
     pvm::render(&mut modules)?;
