@@ -1,3 +1,5 @@
+//! Production precompile AIR adapters and build-generated evaluation.
+
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::precompiles as definitions;
@@ -6,10 +8,13 @@ use miden_stark::air::{
     BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
 
+include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
+
 #[allow(clippy::eq_op)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/pvm_evaluators.rs"));
 }
+
 /// Number of AIR instances in the precompile relation.
 pub const NUM_CHIPLETS: usize = definitions::NUM_CHIPLETS;
 
@@ -73,8 +78,6 @@ impl BaseAir<Felt> for ChipletAir {
         self.0.periodic_columns()
     }
 }
-
-include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn constraint_degree(&self) -> ConstraintDegrees {

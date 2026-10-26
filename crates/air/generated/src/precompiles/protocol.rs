@@ -132,6 +132,8 @@ static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_i
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::precompiles::ace::build_pvm_recursive_verifier_ace_circuit;
+
     use super::*;
     use crate::precompiles::policy;
 
@@ -139,9 +141,7 @@ mod tests {
 
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
-        let independent =
-            miden_air_definitions::precompiles::ace::build_pvm_recursive_verifier_ace_circuit()
-                .unwrap();
+        let independent = build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 

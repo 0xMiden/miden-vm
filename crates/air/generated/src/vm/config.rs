@@ -96,7 +96,7 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec::Vec};
 
-    use miden_air_definitions::vm::ace;
+    use miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit;
     use miden_core::{Felt, field::QuadFelt};
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn relation_digest_matches_current_air() {
         let circuit =
-            ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
+            build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
         let digest = miden_stark::config::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
@@ -143,7 +143,7 @@ mod tests {
     /// would let a proof be verified against a circuit the protocol constant never committed to.
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
-        let expected: Vec<u64> = ace::build_recursive_verifier_ace_circuit()
+        let expected: Vec<u64> = build_recursive_verifier_ace_circuit()
             .expect("recursive-verifier ACE circuit")
             .commitment
             .iter()

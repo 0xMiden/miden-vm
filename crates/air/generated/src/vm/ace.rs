@@ -12,12 +12,13 @@ pub static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/ace_i
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit;
+
     use super::*;
 
     #[test]
     fn embedded_circuit_matches_independent_capture() {
-        let independent =
-            miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit().unwrap();
+        let independent = build_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(
             ACE_CIRCUIT_SHAPE,
             (independent.num_inputs, independent.num_eval_gates, independent.stream_len)
