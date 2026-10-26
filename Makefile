@@ -461,6 +461,16 @@ check-bench: ## Builds all benchmarks
 bench: ## Benchmarks either a specific bench or all; accepts 'benchmark=' to select a benchmark
 	cargo bench --profile optimized --features internal $(if $(benchmark),--bench $(benchmark),)
 
+PROVER_PERF_RESULTS ?= target/prover-service-perf
+PROVER_PERF_FLAGS ?=
+
+.PHONY: bench-prover-service test-prover-service-perf
+bench-prover-service: ## Compares service and native proving; pass PROVER_PERF_FLAGS=--enforce to fail on regressions
+	python3 scripts/prover_service_perf.py "$(PROVER_PERF_RESULTS)" $(PROVER_PERF_FLAGS)
+
+test-prover-service-perf: ## Tests the performance comparison and invalid-result handling
+	python3 -B -m unittest discover -s scripts -p test_prover_service_perf.py
+
 # ============================================================
 # Fuzzing targets
 # ============================================================

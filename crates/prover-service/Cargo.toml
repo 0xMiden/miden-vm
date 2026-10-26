@@ -53,6 +53,7 @@ tracing-subscriber.workspace = true
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
+codspeed-criterion-compat.workspace = true
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-util = { version = "0.1", default-features = false, features = ["client", "http2", "tokio"] }
@@ -60,6 +61,10 @@ miden-assembly.workspace = true
 miden-core-lib = { workspace = true, features = ["std"] }
 miden-verifier = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "process"] }
+
+[[bench]]
+name = "proving_service"
+harness = false
 
 [package.metadata.cargo-shear]
 # The generated gRPC codec refers to this crate.

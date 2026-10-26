@@ -2899,6 +2899,7 @@ name = "miden-prover-service"
 version = "1.0.0-rc.1"
 dependencies = [
  "clap",
+ "codspeed-criterion-compat",
  "http-body",
  "http-body-util",
  "hyper",
