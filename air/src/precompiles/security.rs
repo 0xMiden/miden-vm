@@ -10,12 +10,12 @@
 
 use miden_core::proof::HashFunction;
 use miden_lifted_stark::pcs::PcsParams;
+pub use p3_security::budget::{
+    AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
+};
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
-pub use crate::shared::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
-};
+pub use crate::shared::security::ProofSecurityParameters;
 use crate::{
     precompiles::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
     shared::security::{

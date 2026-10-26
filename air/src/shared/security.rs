@@ -1,4 +1,5 @@
 //! Security contracts shared by the VM and precompile relations.
+
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
@@ -12,10 +13,15 @@ use p3_security::{
     budget::report::{COLLISION_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
     fixed,
 };
+
+/// Base field elements per challenge-field element.
+const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
+
 pub const COMMITMENT_ALIGNMENT: usize = super::config::SPONGE_RATE;
 pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance();
 pub const OOD_POW_BITS: u32 = 0;
 pub const LOOKUP_POW_BITS: u32 = 0;
+
 /// Security parameters of a verified Miden STARK proof.
 ///
 /// Native MVM and PVM verifiers return these parameters after deriving them from the proof, the
@@ -88,9 +94,6 @@ pub fn security_report_with_hash(
         _ => term,
     }))
 }
-
-/// Base field elements per challenge-field element.
-const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Maps PCS parameters onto the protocol parameters the round budget reads.
 ///

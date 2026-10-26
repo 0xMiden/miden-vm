@@ -7,8 +7,6 @@
 use miden_air_definitions::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
 use miden_lifted_stark::pcs::PcsParams;
-#[cfg(test)]
-use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
@@ -398,6 +396,8 @@ pub fn security_report(
 
 #[cfg(test)]
 mod tests {
+    use p3_security::budget::report::QUERY_LABEL;
+
     use super::*;
 
     /// Power-of-two error coefficients make the root-counting bounds exact without using the

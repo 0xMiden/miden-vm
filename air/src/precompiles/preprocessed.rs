@@ -8,17 +8,19 @@
 use alloc::vec;
 use core::ops::Deref;
 
+use miden_air_definitions::{
+    precompiles::logup::NUM_PUBLIC_VALUES,
+    shared::config::{
+        Blake3Config, EidosConfig, KeccakConfig, blake3_256_config, eidos_config, keccak_config,
+    },
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::Statement;
 use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
 
 use crate::precompiles::{
     ChipletAir, ChipletMultiAir,
-    logup::NUM_PUBLIC_VALUES,
-    stark_config::{
-        Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
-        eidos_config, keccak_config, precompile_pcs_params,
-    },
+    stark_config::{PRECOMPILE_RELATION_DIGEST, precompile_pcs_params},
 };
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
