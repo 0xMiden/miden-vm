@@ -131,6 +131,8 @@ pub fn recursive_circuit() -> PvmRecursiveAceCircuit {
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::compiler::precompiles::build_pvm_recursive_verifier_ace_circuit;
+
     use super::*;
     use crate::precompiles::{policy, stark_config};
 
@@ -138,8 +140,7 @@ mod tests {
 
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
-        let independent =
-            crate::precompiles::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let independent = build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 

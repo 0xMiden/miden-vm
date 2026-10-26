@@ -6,9 +6,12 @@ use alloc::{
 use std::{fmt::Write as _, fs, io, println};
 
 use miden_ace_codegen::{
-    CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
-    LayoutKind, MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig,
-    RecursiveAceCircuit, RelationGeometry, render_masm_constraints_eval, render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit,
+    compiler::{
+        CapturedAir, CompiledRelation, FoldCoefficientStaging, LayoutKind,
+        MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
+        render_masm_constraints_eval, render_proof_order_maps,
+    },
 };
 use miden_air::{
     MIDEN_AIR_COUNT,

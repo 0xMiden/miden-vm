@@ -18,7 +18,7 @@ use miden_air::precompiles::ChipletAir;
 use miden_air::precompiles::NUM_CHIPLETS;
 pub use miden_air::precompiles::ace::PvmRecursiveAceCircuit;
 #[cfg(test)]
-use miden_air_definitions::precompiles::ace::{
+use miden_air_definitions::compiler::precompiles::{
     build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
 };
 
@@ -204,7 +204,7 @@ mod tests {
             }
             let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
 
-            let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+            let direct = miden_ace_codegen::compiler::testing::eval_multi_air_constraints(
                 &airs,
                 canonical_layout,
                 &canonical_inputs,

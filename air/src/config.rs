@@ -58,7 +58,7 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec, vec::Vec};
 
-    use miden_air_definitions::ace::build_recursive_verifier_ace_circuit;
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
     use miden_core::{Felt, field::QuadFelt};
     use miden_lifted_air::Statement;
     use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs, pcs::PcsParams};

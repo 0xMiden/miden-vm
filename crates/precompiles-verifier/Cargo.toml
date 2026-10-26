@@ -49,7 +49,7 @@ wincode.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
-miden-air = { workspace = true, features = ["std", "compiler"] }
+miden-air = { workspace = true, features = ["std"] }
 miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-ace-codegen = { workspace = true, features = ["testing"] }
 

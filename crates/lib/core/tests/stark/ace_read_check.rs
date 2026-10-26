@@ -3,8 +3,12 @@
 //! The check extracts the flat ACE input vector from memory, verifies its structural and selector
 //! invariants, and evaluates the same ACE circuit in Rust.
 
-use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit};
+use miden_ace_codegen::{
+    InputKey, InputLayout,
+    compiler::{AceConfig, LayoutKind},
+};
+use miden_air::{MIDEN_AIR_COUNT, ProofOrder};
+use miden_air_definitions::compiler::vm::build_canonical_multi_air_ace_circuit;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},

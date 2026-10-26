@@ -10,10 +10,13 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceCircuit, AceConfig, InputKey, InputLayout, LayoutKind,
-    circuit::emit_circuit,
-    dag::NodeKind,
-    pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
+    InputKey, InputLayout,
+    compiler::{
+        AceCircuit, AceConfig, LayoutKind,
+        circuit::emit_circuit,
+        dag::NodeKind,
+        pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
+    },
 };
 
 // Base and extension field types for tests.
@@ -528,7 +531,7 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
         let expected = expected - quotient_binding;
         assert_eq!(circuit.eval(&inputs).unwrap(), expected);
         assert_eq!(
-            crate::testing::eval_multi_air_constraints(
+            crate::compiler::testing::eval_multi_air_constraints(
                 &airs,
                 circuit.layout(),
                 &inputs,
@@ -575,7 +578,7 @@ fn multi_air_concatenates_distinct_public_inputs() {
         }
         assert_eq!(circuit.eval(&inputs).unwrap(), expected);
         assert_eq!(
-            crate::testing::eval_multi_air_constraints(
+            crate::compiler::testing::eval_multi_air_constraints(
                 &airs,
                 circuit.layout(),
                 &inputs,
@@ -618,7 +621,7 @@ fn mixed_air_periods_use_one_shared_basis() {
     let expected = period_four * ef(7) + period_thirty_two;
     assert_eq!(circuit.eval(&inputs).unwrap(), expected);
     assert_eq!(
-        crate::testing::eval_multi_air_constraints(
+        crate::compiler::testing::eval_multi_air_constraints(
             &airs,
             circuit.layout(),
             &inputs,
@@ -783,7 +786,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
 /// representation choice must actually exercise it alongside the standalone forms.
 #[test]
 fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
-    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
 
     let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
     let columns = data.columns();
@@ -848,7 +851,7 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
 /// kind of column must not change that.
 #[test]
 fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
-    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
 
     let mut one_hot = vec![F::ZERO; 8];
     one_hot[5] = F::ONE;
@@ -917,7 +920,7 @@ fn test_encoded_circuit_structure() {
 
 #[test]
 fn stream_geometry_rejects_the_node_id_packing_bound() {
-    use crate::encode::StreamGeometry;
+    use crate::compiler::encode::StreamGeometry;
 
     // Valid streams have an even node count because READ and EVAL rows are word-aligned. Thus,
     // 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30-wire bound.
@@ -958,7 +961,7 @@ fn canonical_builder_air_count_is_independent_of_order_maps() {
 
 #[test]
 fn compiled_relation_reuses_capture_and_pads_each_air_row() {
-    use crate::{CapturedAir, CompiledRelation};
+    use crate::compiler::{CapturedAir, CompiledRelation};
     let first = TestAir {
         main: 3,
         aux: 1,
@@ -994,7 +997,7 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
 fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
     use miden_lifted_stark::air::ConstraintDegrees;
 
-    use crate::CapturedAir;
+    use crate::compiler::CapturedAir;
     for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {
         let air = TestAir {
             selector,
@@ -1012,7 +1015,7 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
 
 #[test]
 fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
-    use crate::{CapturedAir, CompiledRelation};
+    use crate::compiler::{CapturedAir, CompiledRelation};
     let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
     let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
     let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
@@ -1076,7 +1079,7 @@ impl LiftedAir<F, EF> for CountedCubicAir {
 
 #[test]
 fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
-    use crate::{CapturedAir, CompiledRelation};
+    use crate::compiler::{CapturedAir, CompiledRelation};
     let air = CountedCubicAir {
         eval_count: std::sync::atomic::AtomicUsize::new(0),
     };

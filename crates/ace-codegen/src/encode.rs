@@ -14,18 +14,14 @@ use alloc::vec::Vec;
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 
 use crate::AceError;
-#[cfg(feature = "compiler")]
-mod compiler;
-#[cfg(all(test, feature = "compiler"))]
-pub(crate) use compiler::StreamGeometry;
 
 // NOTE: `num_vars`/`num_const_nodes` count extension-field (EF) nodes, while the
 // instruction stream (`instructions.len()`) is measured in base field elements.
 
 /// Number of base field elements per extension field element.
-const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
+pub(crate) const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
-const ACE_READ_ROW_EF_NODES: usize = 2;
+pub(crate) const ACE_READ_ROW_EF_NODES: usize = 2;
 /// Instruction stream padding unit in base felts (adv_pipe block size), so that
 /// the constants+ops stream can be read in aligned chunks.
 pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
@@ -38,9 +34,9 @@ pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
 /// base-field operation rows (including padding ops).
 #[derive(Debug, Clone)]
 pub struct EncodedCircuit {
-    num_vars: usize,
-    num_ops: usize,
-    instructions: Vec<Felt>,
+    pub(crate) num_vars: usize,
+    pub(crate) num_ops: usize,
+    pub(crate) instructions: Vec<Felt>,
 }
 
 /// Encoded recursive-verifier circuit and the metadata consumed by MASM.

@@ -1,12 +1,7 @@
 //! Canonical AIR order and protocol policy of the precompile relation.
 
-#[cfg(feature = "compiler")]
-mod compiler;
-
 use alloc::vec::Vec;
 
-#[cfg(feature = "compiler")]
-pub use compiler::CapturedPvmRelation;
 use miden_core::utils::Matrix;
 use miden_lifted_air::{BaseAir, LiftedAir};
 

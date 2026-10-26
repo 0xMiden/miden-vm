@@ -16,11 +16,16 @@ use std::{
 };
 
 use miden_ace_codegen::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
-    MasmConstraintsEvalConfig, render_masm_constraints_eval,
+    EXT_DEGREE, InputKey, InputLayout,
+    compiler::{
+        FoldCoefficientStaging, LayoutKind, MasmConstraintsEvalConfig, render_masm_constraints_eval,
+    },
 };
 use miden_air::precompiles::{NUM_CHIPLETS, security as pvm_security};
-use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation, HeightRule};
+use miden_air_definitions::{
+    compiler::precompiles::CapturedPvmRelation,
+    precompiles::relation::{self, HeightRule},
+};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
@@ -725,8 +730,8 @@ fn masm_word_literal(word: Word) -> String {
 
 #[cfg(test)]
 mod tests {
-    use miden_ace_codegen::LayoutKind;
-    use miden_air_definitions::precompiles::relation::CapturedPvmRelation;
+    use miden_ace_codegen::compiler::LayoutKind;
+    use miden_air_definitions::compiler::precompiles::CapturedPvmRelation;
 
     use super::{
         NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PvmReadLayout, pvm_scratch_allocation,

@@ -209,7 +209,7 @@ mod tests {
     use miden_core::field::QuadFelt;
 
     use super::normalize_dag;
-    use crate::{InputKey, dag::DagBuilder};
+    use crate::{InputKey, compiler::dag::DagBuilder};
 
     #[test]
     fn factors_single_use_products() {
@@ -259,7 +259,7 @@ mod tests {
                 .nodes
                 .iter()
                 .enumerate()
-                .any(|(index, node)| matches!(node, crate::NodeKind::Mul(_, _))
+                .any(|(index, node)| matches!(node, crate::compiler::NodeKind::Mul(_, _))
                     && fanout[index] == 2),
             "the shared product must keep both consumers"
         );

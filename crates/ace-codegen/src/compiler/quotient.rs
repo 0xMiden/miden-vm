@@ -7,7 +7,7 @@
 use miden_crypto::field::{ExtensionField, Field};
 
 use crate::{
-    dag::{DagBuilder, NodeId},
+    compiler::dag::{DagBuilder, NodeId},
     layout::{InputKey, InputLayout},
 };
 

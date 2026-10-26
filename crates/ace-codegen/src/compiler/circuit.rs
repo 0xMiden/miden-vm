@@ -9,7 +9,7 @@ use miden_crypto::field::Field;
 
 use crate::{
     AceError, InputLayout,
-    dag::{AceDag, NodeId, NodeKind},
+    compiler::dag::{AceDag, NodeId, NodeKind},
 };
 
 /// Arithmetic operations supported by the ACE circuit.

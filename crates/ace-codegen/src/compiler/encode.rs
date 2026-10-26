@@ -5,10 +5,10 @@ use alloc::{format, string::ToString, vec::Vec};
 use miden_core::Felt;
 use miden_crypto::field::ExtensionField;
 
-use super::{ACE_READ_ROW_EF_NODES, ADV_PIPE_BLOCK_FELTS, BASE_FELTS_PER_EF, EncodedCircuit};
 use crate::{
     AceError,
-    circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    compiler::circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    encode::{ACE_READ_ROW_EF_NODES, ADV_PIPE_BLOCK_FELTS, BASE_FELTS_PER_EF, EncodedCircuit},
 };
 
 /// Constants are padded to an even number of EF nodes (full READ rows).

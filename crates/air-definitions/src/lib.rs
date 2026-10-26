@@ -8,6 +8,8 @@ extern crate std;
 
 pub mod ace;
 mod airs;
+#[cfg(feature = "compiler")]
+pub mod compiler;
 mod constraints;
 pub mod geometry;
 mod inputs;
