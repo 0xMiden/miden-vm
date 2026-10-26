@@ -151,6 +151,8 @@ mod tests {
 
     const PVM_WRAPPER_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
+    const PVM_PARAMETERS_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/parameters.masm");
     const SECURITY_ESTIMATOR_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/stark/security.masm");
     const GENERIC_UTILS_PATH: &str =
@@ -450,15 +452,17 @@ mod tests {
     }
 
     #[test]
-    fn pvm_aux_hook_matches_the_logup_registry() {
-        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
+    fn pvm_fixed_boundary_scales_match_the_logup_registry() {
+        use miden_precompiles_air::relations::BusId;
 
-        const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
-
-        assert_eq!(masm_const(HOOK_PATH, "UINT_VAL_BUS_SCALE"), BusId::UintVal as u64 + 1);
-        assert_eq!(masm_const(HOOK_PATH, "EC_GROUP_BUS_SCALE"), BusId::EcGroup as u64 + 1);
-        assert_eq!(masm_const(HOOK_PATH, "MAX_LOGUP_MESSAGE_WIDTH"), MAX_MESSAGE_WIDTH as u64);
+        assert_eq!(
+            masm_const(PVM_PARAMETERS_PATH, "UINT_VAL_BUS_SCALE"),
+            BusId::UintVal as u64 + 1
+        );
+        assert_eq!(
+            masm_const(PVM_PARAMETERS_PATH, "EC_GROUP_BUS_SCALE"),
+            BusId::EcGroup as u64 + 1
+        );
     }
 
     #[test]
@@ -470,8 +474,6 @@ mod tests {
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
-        const RELATION_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
         let multi_air = ChipletMultiAir::new();
         let num_public_values: usize =
@@ -482,7 +484,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
         for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
+                masm_const(PVM_PARAMETERS_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
                 expected,
                 "PVM trusted setup commitment limb {i} drifted"
             );
@@ -568,7 +570,7 @@ mod tests {
         };
 
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/parameters.masm");
 
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
@@ -637,17 +639,18 @@ mod tests {
             .map(|(i, air)| {
                 // Fixed-height instances are pinned as equalities in the wrapper; the shared
                 // derivation still supplies the same value.
-                let name = match air.fixed_log_height() {
-                    Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
-                    None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
-                };
-                masm_const(PVM_WRAPPER_PATH, &name)
+                if air.fixed_log_height().is_some() {
+                    assert_eq!(i, 3, "the wrapper pins only BytePairLut at a fixed height");
+                    masm_const(PVM_PARAMETERS_PATH, "PREPROCESSED_TRACE_LOG_HEIGHT")
+                } else {
+                    masm_const(PVM_WRAPPER_PATH, &alloc::format!("MIN_LOG_HEIGHT_{i}"))
+                }
             })
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
         for (i, expected) in PVM_RELATION_DIGEST.into_iter().enumerate() {
             assert_eq!(
-                masm_const(PVM_WRAPPER_PATH, &alloc::format!("RELATION_DIGEST_{i}")),
+                masm_const(PVM_PARAMETERS_PATH, &alloc::format!("RELATION_DIGEST_{i}")),
                 expected,
                 "PVM wrapper RELATION_DIGEST limb {i} drifted"
             );
@@ -736,7 +739,7 @@ mod tests {
         // BytePairLut has a fixed log height of 16, so the maximum PVM trace height can never fall
         // below the estimator's minimum of 6.
         assert!(
-            masm_const(PVM_WRAPPER_PATH, "FIXED_LOG_HEIGHT_3")
+            masm_const(PVM_PARAMETERS_PATH, "PREPROCESSED_TRACE_LOG_HEIGHT")
                 >= masm_const(SECURITY_ESTIMATOR_PATH, "MIN_LOG_HEIGHT"),
             "the PVM height floor fell below the estimator envelope"
         );
@@ -773,7 +776,14 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                masm_const(PVM_WRAPPER_PATH, name),
+                masm_const(
+                    if name == "LOOKUP_POW_BITS" {
+                        PVM_WRAPPER_PATH
+                    } else {
+                        PVM_PARAMETERS_PATH
+                    },
+                    name,
+                ),
                 expected,
                 "PVM wrapper {name} drifted from its native security constant"
             );

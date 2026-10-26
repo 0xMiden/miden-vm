@@ -8,6 +8,8 @@ the `masm_verifier` module builds host inputs for the in-VM PVM verifier.
 
 The crate also owns the canonical PVM ACE circuit constants. The
 `constants-tools` feature enables the constants and MASM artifact generator.
+See [Maintaining recursive-verifier MASM](../lib/core/RECURSIVE_VERIFIER.md) for the parameter and
+template sources and the edit/regenerate/test workflow.
 
 The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
 input `abc`. Check or regenerate the proof and its deferred root with:

@@ -9,25 +9,37 @@ use {
     RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
-pub mod aux_trace
-pub mod constraints_eval
-pub mod deep_queries
-pub mod layout
-pub mod ood_frames
-pub mod public_inputs
-
+use {
+    FIXED_BOUNDARY_LOOKUP_TERMS,
+    LOOKUP_FRACTIONS_PER_ROW,
+    MAX_CONSTRAINT_DEGREE,
+    MAX_MESSAGE_WIDTH,
+    NUM_COMPOSED_CONSTRAINTS,
+    NUM_DEEP_TERMS,
+    PREPROCESSED_COMMITMENT_0,
+    PREPROCESSED_COMMITMENT_1,
+    PREPROCESSED_COMMITMENT_2,
+    PREPROCESSED_COMMITMENT_3,
+    PREPROCESSED_TRACE_LOG_HEIGHT,
+    RELATION_DIGEST_0,
+    RELATION_DIGEST_1,
+    RELATION_DIGEST_2,
+    RELATION_DIGEST_3,
+} from miden::core::sys::pvm::parameters
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
-# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
-# zero because Lifted STARK does not grind lookup challenges.
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod fixed_boundary
+pub mod layout
+pub mod ood_frames
+pub mod parameters
+pub mod public_inputs
+
+# The verifier does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
-const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 857
-const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 914
-const LOOKUP_FRACTIONS_PER_ROW = 291
-const FIXED_BOUNDARY_LOOKUP_TERMS = 19
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
@@ -44,7 +56,6 @@ const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 const MIN_LOG_HEIGHT_0 = 5
 const MIN_LOG_HEIGHT_1 = 5
 const MIN_LOG_HEIGHT_2 = 7
-const FIXED_LOG_HEIGHT_3 = 16
 const MIN_LOG_HEIGHT_4 = 1
 const MIN_LOG_HEIGHT_5 = 3
 const MIN_LOG_HEIGHT_6 = 1
@@ -53,19 +64,6 @@ const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 const MIN_LOG_HEIGHT_10 = 7
 const MIN_LOG_HEIGHT_11 = 7
-
-# PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = 5618632176883261929
-const RELATION_DIGEST_1 = 5091169848121332946
-const RELATION_DIGEST_2 = 9110857118546866548
-const RELATION_DIGEST_3 = 100418585322354598
-
-# Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
-# `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
-const PREPROCESSED_COMMITMENT_0 = 1070440981155119101
-const PREPROCESSED_COMMITMENT_1 = 2022626773377316756
-const PREPROCESSED_COMMITMENT_2 = 6941685244114430330
-const PREPROCESSED_COMMITMENT_3 = 5172579525468662096
 
 #! Loads the fixed PVM relation context.
 #!
@@ -84,7 +82,7 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
     push.MIN_LOG_HEIGHT_2 exec.load_air_height
-    push.FIXED_LOG_HEIGHT_3 exec.load_fixed_air_height
+    push.PREPROCESSED_TRACE_LOG_HEIGHT exec.load_fixed_air_height
     push.MIN_LOG_HEIGHT_4 exec.load_air_height
     push.MIN_LOG_HEIGHT_5 exec.load_air_height
     push.MIN_LOG_HEIGHT_6 exec.load_air_height

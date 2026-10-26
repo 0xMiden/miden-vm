@@ -20,8 +20,8 @@ const HEIGHTS: [u64; 12] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const MAIN_COMMITMENT: [u64; 4] = [201, 202, 203, 204];
 
 fn pvm_masm_const(name: &str) -> u64 {
-    let source = include_str!("../../asm/sys/pvm/mod.masm");
-    let prefix = format!("const {name} = ");
+    let source = include_str!("../../asm/sys/pvm/parameters.masm");
+    let prefix = format!("pub const {name} = ");
     source
         .lines()
         .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
