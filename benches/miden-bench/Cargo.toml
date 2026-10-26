@@ -12,6 +12,8 @@ version.workspace      = true
 
 [dependencies]
 # Internal
+miden-air.workspace = true
+miden-core.workspace = true
 miden-lifted-stark = { features = ["testing"], workspace = true }
 
 # Plonky3
@@ -24,13 +26,11 @@ p3-commit.workspace        = true
 p3-dft.workspace           = true
 p3-field.workspace         = true
 p3-fri.workspace           = true
-p3-goldilocks.workspace    = true
 p3-keccak.workspace        = true
 p3-keccak-air.workspace    = true
 p3-lookup.workspace        = true
 p3-matrix.workspace        = true
 p3-merkle-tree.workspace   = true
-p3-poseidon2-air.workspace = true
 p3-symmetric.workspace     = true
 p3-uni-stark.workspace     = true
 
@@ -42,9 +42,38 @@ tracing.workspace            = true
 tracing-forest               = { features = ["ansi", "smallvec"], workspace = true }
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+criterion.workspace             = true
+miden-lifted-air.workspace       = true
+miden-stark-transcript.workspace = true
+
 [features]
 concurrent = ["miden-lifted-stark/concurrent"]
 default    = []
+
+[[bench]]
+harness = false
+name    = "quotient_commit"
+
+[[bench]]
+harness = false
+name    = "merkle_commit"
+
+[[bench]]
+harness = false
+name    = "deep_quotient"
+
+[[bench]]
+harness = false
+name    = "pcs"
+
+[[bench]]
+harness = false
+name    = "pcs_trace"
+
+[[bench]]
+harness = false
+name    = "per_air_degree_opt"
 
 [lints]
 workspace = true

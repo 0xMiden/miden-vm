@@ -1,6 +1,6 @@
 [package]
 name = "miden-test-serialization-macros"
-version = "1.0.0"
+version.workspace = true
 description = "Proc macros for serialization round-trip testing in Miden VM"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]

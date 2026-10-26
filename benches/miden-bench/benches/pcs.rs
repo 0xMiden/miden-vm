@@ -1,15 +1,17 @@
 //! Lifted PCS open benchmarks at different folding arities.
 //!
 //! ```bash
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench pcs --features testing
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-bench --bench pcs
 //! ```
 
+#[path = "support/eidos.rs"]
+mod eidos;
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use eidos::{Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_lifted_stark::testing::{
     BENCH_PCS_PARAMS, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS, canonical_domain,
-    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
     generate_matrices_from_specs, open_with_channel, total_elements,
 };
 use miden_stark_transcript::ProverTranscript;
@@ -25,7 +27,7 @@ fn bench_pcs(c: &mut Criterion) {
         let domain = canonical_domain::<Felt>(log_lde_height, 0);
         let shift = domain.lde_shift();
         let max_lde_size = 1usize << log_lde_height;
-        let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/poseidon2/{PARALLEL_STR}");
+        let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/eidos/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
 
         let matrix_groups: Vec<Vec<RowMajorMatrix<Felt>>> =

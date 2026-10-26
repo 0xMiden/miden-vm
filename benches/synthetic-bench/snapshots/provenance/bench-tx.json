@@ -1,0 +1,12 @@
+{
+  "schema": "eidos-four-air-v1",
+  "protocol_head": "e9852edb7a77c4b350873ee2453ade850dbb6513",
+  "vm_revision": "832a6d1f96ed6308a05b2a5f8256800ca70e4d85",
+  "snapshot_sha256": "9ca4dde5bb6a44f4815eabad3e4f40841500019a889ab0e6aedcbafc7f9b5e24",
+  "producer_command": "cargo run --locked --profile test-dev -p bench-transaction --features concurrent",
+  "signing_schemes": [
+    "Falcon512-Eidos",
+    "ECDSA-secp256k1-Keccak"
+  ],
+  "scenario_count": 44
+}

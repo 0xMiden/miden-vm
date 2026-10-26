@@ -1,21 +1,19 @@
 //! Synthetic VM benchmark driven by row-count snapshots.
 //!
-//! Pipeline each bench run:
-//!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
-//!      snapshots in this run).
-//!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
-//!      load every scenario it contains and: solve for per-snippet iteration counts, emit the
-//!      resulting MASM program, check it lands in the scenario's padded-trace bracket, and run four
-//!      Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
+//! Each run calibrates snippet costs against the VM, selects producer scenarios, and synthesizes
+//! their workloads. All four independently padded AIR heights must match before timing the
+//! `exec`, `trace_prep`, `prove`, and `verify` axes.
 //!
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
 //!   every `snapshots/*.json` in the manifest dir is used.
 //! - `SYNTH_SCENARIO`: if set, restrict to scenarios whose slugified key contains this slugified
 //!   substring (case- and separator-insensitive; `"P2ID"`, `"p2id"`, `"P2ID note"`, and
-//!   `"p2id-note"` all match `"consume single P2ID note"`).
+//!   `"p2id-note"` all match `"consume single P2ID note"`). Without a filter, selects the six
+//!   default Falcon/ECDSA P2ID scenarios.
 //! - `SYNTH_BENCH_AXES`: comma-separated axes to run. Supported values are `exec`, `trace_prep`,
 //!   `prove`, `verify`, and `all`. Defaults to all axes.
+//! - `SYNTH_HASH_LDE_BLOCKS`: enable blockwise LDE hashing with `1`; defaults to `0`.
 //! - `SYNTH_SAMPLE_SIZE`: Criterion sample size. Defaults to 30.
 //! - `SYNTH_MEASUREMENT_TIME_SECS`: Criterion measurement time per benchmark. Defaults to 30.
 //! - `SYNTH_WARM_UP_TIME_SECS`: Criterion warm-up time per benchmark. Defaults to 1.
@@ -35,11 +33,10 @@ use miden_vm::{
     prove_sync,
 };
 use miden_vm_synthetic_bench::{
-    calibrator::{Calibration, calibrate, measure_program},
-    snapshot::TraceSnapshot,
-    snippets::{SNIPPETS, memory_max_iters},
-    solver::{Plan, emit, solve},
-    verifier::VerificationReport,
+    calibrator::{Calibration, calibrate},
+    snapshot::{DEFAULT_SCENARIOS, TraceSnapshot},
+    snippets::SNIPPETS,
+    workload::{load_scenarios, slugify, synthesize},
 };
 
 /// Hash function used for STARK `prove` and `verify` axes.
@@ -116,54 +113,14 @@ fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) 
 }
 
 fn execute_and_prove(
+    prover: &Prover,
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (StackOutputs, ExecutionProof) {
-    prove_sync(
-        &Prover::new().with_hash_fn(BENCH_HASH),
-        program,
-        stack_inputs,
-        advice_inputs,
-        host,
-        ExecutionOptions::default(),
-    )
-    .expect("execute and prove program")
-}
-
-fn resolve_snapshot_paths() -> Vec<PathBuf> {
-    if let Ok(explicit) = std::env::var("SYNTH_SNAPSHOT") {
-        return vec![PathBuf::from(explicit)];
-    }
-    let snapshots_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("snapshots");
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&snapshots_dir)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", snapshots_dir.display()))
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-        .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "no snapshots found under {}", snapshots_dir.display());
-    paths
-}
-
-/// Lower-case ASCII slug; non-alphanumerics collapse to single `-` separators.
-fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut last_was_dash = true;
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            last_was_dash = false;
-        } else if !last_was_dash {
-            out.push('-');
-            last_was_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    out
+    prove_sync(prover, program, stack_inputs, advice_inputs, host, ExecutionOptions::default())
+        .expect("execute and prove program")
 }
 
 fn synthetic_bench(c: &mut Criterion) {
@@ -191,39 +148,20 @@ fn synthetic_bench(c: &mut Criterion) {
         );
     }
 
-    // Slugify the filter so substring-matching is case- and separator-insensitive
-    // (`SYNTH_SCENARIO=P2ID` matches `consume-single-p2id-note` etc.).
-    let scenario_filter = std::env::var("SYNTH_SCENARIO").ok().map(|s| slugify(&s));
-    let mut benched_anything = false;
-    for path in resolve_snapshot_paths() {
-        let producer_stem =
-            path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-        let mut scenarios = TraceSnapshot::load_all(&path)
-            .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
-        scenarios.sort_by_key(|(_, snap)| snap.trace.chiplets_rows);
-        for (scenario_key, snapshot) in scenarios {
-            let scenario_slug = slugify(&scenario_key);
-            if let Some(filter) = &scenario_filter
-                && !scenario_slug.contains(filter.as_str())
-            {
-                continue;
-            }
-            bench_one_scenario(
-                c,
-                &calibration,
-                &producer_stem,
-                &scenario_key,
-                &scenario_slug,
-                &snapshot,
-                &axes,
-                sample_size,
-                measurement_time_secs,
-                warm_up_time_secs,
-            );
-            benched_anything = true;
-        }
+    for scenario in load_scenarios(DEFAULT_SCENARIOS) {
+        bench_one_scenario(
+            c,
+            &calibration,
+            &scenario.producer,
+            &scenario.name,
+            &slugify(&scenario.name),
+            &scenario.snapshot,
+            &axes,
+            sample_size,
+            measurement_time_secs,
+            warm_up_time_secs,
+        );
     }
-    assert!(benched_anything, "no scenarios matched (filter: {scenario_filter:?})");
 }
 
 fn bench_one_scenario(
@@ -238,14 +176,15 @@ fn bench_one_scenario(
     measurement_time_secs: u64,
     warm_up_time_secs: u64,
 ) {
+    let hash_lde_blocks = match std::env::var("SYNTH_HASH_LDE_BLOCKS") {
+        Ok(value) if value == "0" => false,
+        Ok(value) if value == "1" => true,
+        Err(std::env::VarError::NotPresent) => false,
+        _ => panic!("SYNTH_HASH_LDE_BLOCKS must be 0 or 1"),
+    };
+    let prover = Prover::new().with_hash_fn(BENCH_HASH).with_hash_lde_blocks(hash_lde_blocks);
+    println!("BENCH_SYNTH_CONFIG hash_lde_blocks={}", u8::from(hash_lde_blocks));
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
-    println!("    provenance: {}", snapshot.provenance.label());
-    if snapshot.provenance.is_provisional() {
-        println!(
-            "    WARNING: target rows were derived from a pre-Eidos capture; results are \
-             provisional synthetic calibration, not producer measurements"
-        );
-    }
     println!(
         "    trace:   core={} chiplets={} eidos_compression={} and8={} (padded_total={})",
         snapshot.trace.core_rows,
@@ -271,16 +210,15 @@ fn bench_one_scenario(
         );
     }
 
-    let target_shape = snapshot.shape();
-    let plan = solve(calibration, &target_shape);
-    assert_counters_fit(&plan);
+    let synthesized = synthesize(calibration, snapshot);
+    let plan = &synthesized.plan;
 
     println!("\n=== plan");
     for snippet in SNIPPETS {
         println!("    {:<14} iters={}", snippet.name, plan.iters(snippet.name),);
     }
 
-    let source = emit(&plan);
+    let source = synthesized.source;
     if std::env::var("SYNTH_MASM_WRITE").is_ok() {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
@@ -291,13 +229,7 @@ fn bench_one_scenario(
         println!("\n=== wrote MASM dump to {}", out.display());
     }
 
-    let actual = measure_program(&source).expect("measure emitted program");
-    let report = VerificationReport::new(target_shape, actual);
-    println!("\n=== verification\n{report}");
-    assert!(
-        report.brackets_match(),
-        "emitted program lands in a different padded-trace bracket than the scenario target",
-    );
+    println!("\n=== verification\n{}", synthesized.report);
 
     let program = Assembler::default()
         .assemble_program("program", &source)
@@ -363,6 +295,7 @@ fn bench_one_scenario(
                 },
                 |(host, program, stack, advice)| {
                     black_box(execute_and_prove(
+                        &prover,
                         program,
                         stack.take().unwrap(),
                         advice.take().unwrap(),
@@ -376,8 +309,13 @@ fn bench_one_scenario(
 
     if axes.contains("verify") {
         let mut host = DefaultHost::default();
-        let (stack_outputs, proof) =
-            execute_and_prove(&program, StackInputs::default(), AdviceInputs::default(), &mut host);
+        let (stack_outputs, proof) = execute_and_prove(
+            &prover,
+            &program,
+            StackInputs::default(),
+            AdviceInputs::default(),
+            &mut host,
+        );
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::from(program.clone()),
             StackInputs::default(),
@@ -393,18 +331,6 @@ fn bench_one_scenario(
     }
 
     group.finish();
-}
-
-/// Panic if the memory snippet's plan would overflow its address counter beyond `u32::MAX`.
-fn assert_counters_fit(plan: &Plan) {
-    let memory = plan.iters("memory");
-    assert!(
-        memory <= memory_max_iters(),
-        "memory iters ({}) would overflow its u32 address counter (max {}); \
-         revisit the banded-address start constants",
-        memory,
-        memory_max_iters(),
-    );
 }
 
 criterion_group!(benches, synthetic_bench);

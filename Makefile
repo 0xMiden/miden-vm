@@ -359,6 +359,9 @@ recursive-verifier-regeneration-handoff:
 		'  3. Verify the pinned PVM fixture: make check-pvm-proof-fixture' \
 		'Review generated docs; update roots or the fixture only when the corresponding change is intentional.'
 
+.PHONY: check-pvm-artifacts
+check-pvm-artifacts: check-precompile-masm check-pvm-constants check-pvm-proof-fixture ## Check generated artifacts for this release line
+
 .PHONY: check-pvm-constants
 check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check

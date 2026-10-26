@@ -19,6 +19,9 @@ serde_json      = { workspace = true, features = ["std"] }
 thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+miden-vm-precompiles-bench = { path = "../precompiles-bench" }
+miden-precompiles-air = { workspace = true }
+miden-lifted-stark = { workspace = true }
 codspeed-criterion-compat = { workspace = true }
 miden-air = { workspace = true }
 miden-assembly = { workspace = true, features = ["std"] }

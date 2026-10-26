@@ -12,6 +12,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
+    precompile_limits::PrecompileArgs,
     utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
@@ -42,15 +43,18 @@ pub struct RunCmd {
     #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
     max_advice_size: usize,
 
-    /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
+    /// Maximum modelled peak memory for VM trace construction (512M, 32Gi)
     ///
-    /// Excludes fixed preprocessed setup and precompile proving.
+    /// Does not cover precompile proving or total process memory.
     #[arg(
         long = "max-prover-memory",
         default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
         value_parser = parse_byte_size
     )]
     max_prover_memory: u64,
+
+    #[command(flatten)]
+    precompile_limits: PrecompileArgs,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -67,16 +71,18 @@ pub struct RunCmd {
 
 impl RunCmd {
     fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
-        ExecutionOptions::new(
+        let options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
         .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
-        .map_err(|err| Report::msg(format!("{err}")))
+        .map_err(|err| Report::msg(format!("{err}")))?;
+        Ok(self.precompile_limits.apply_to(options))
     }
 
     pub fn execute(&self) -> Result<(), Report> {
+        let execution_options = self.get_execution_options()?;
         println!("===============================================================================");
         println!("Run program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -93,8 +99,8 @@ impl RunCmd {
 
         // use a single match expression based on file extension
         let (trace, program_hash) = match ext.as_str() {
-            "masp" => run_masp_program(self)?,
-            "masm" => run_masm_program(self)?,
+            "masp" => run_masp_program(self, execution_options)?,
+            "masm" => run_masm_program(self, execution_options)?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -155,14 +161,16 @@ impl RunCmd {
 // ================================================================================================
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
+fn run_masp_program(
+    params: &RunCmd,
+    exec_options: ExecutionOptions,
+) -> Result<(VmTrace, [u8; 32]), Report> {
     let program = get_masp_program(&params.program_file)?;
 
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let exec_options = params.get_execution_options()?;
     let advice_inputs = input_data
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;
@@ -184,7 +192,10 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 }
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
+fn run_masm_program(
+    params: &RunCmd,
+    exec_options: ExecutionOptions,
+) -> Result<(VmTrace, [u8; 32]), Report> {
     for lib in &params.library_paths {
         if !lib.is_file() {
             let name = lib.display();
@@ -212,7 +223,6 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 
     // fetch the stack and program inputs from the arguments
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let exec_options = params.get_execution_options()?;
     let advice_inputs = input_data
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;
