@@ -100,29 +100,21 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage,
+    },
+};
 use miden_utils_sync::LazyLock;
 
-use miden_stark::lookup::{
-    Challenges,
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-    LookupMessage,
-};
 use crate::precompiles::{
     ec::{EcGroupMsg, EcPointMsg},
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::{
-        add::UintAddMsg,
-        mul::UintMulMsg,
-    },
+    uint::{add::UintAddMsg, mul::UintMulMsg},
     utils::{current_main, next_main},
 };
 

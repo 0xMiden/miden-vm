@@ -35,33 +35,23 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-
-use miden_stark::lookup::{
-    Challenges,
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-    LookupMessage,
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage,
+    },
 };
+
 use crate::precompiles::{
     ec::{
-        EcGroupMsg,
-        EcPointMsg,
+        EcGroupMsg, EcPointMsg,
         add::{EcGroupAddMsg, EcOnCurveCertMsg},
     },
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::{
-        UintValMsg,
-        add::UintAddMsg,
-        mul::UintMulMsg,
-    },
+    uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
     utils::{current_main, next_main},
 };
 

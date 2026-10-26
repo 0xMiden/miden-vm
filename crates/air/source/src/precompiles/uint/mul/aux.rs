@@ -6,13 +6,13 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_stark::lookup::build_logup_aux_trace;
 
 use super::{
     AUX_WIDTH, COL_ACT, COL_BORROW, COL_KAPPA_A, GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA,
     NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP,
     TERM_CELL_KAPPA_C_SIGNED, UintMulAir,
 };
-use miden_stark::lookup::build_logup_aux_trace;
 
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,

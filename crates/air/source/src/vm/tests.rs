@@ -8,14 +8,13 @@ use miden_core::{
     program::{KernelDescriptor, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_stark::lookup::Challenges;
+use p3_challenger::CanObserve;
 
 use super::{
     inputs::AUX_KERNEL_DIGESTS,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
+    *,
 };
-use p3_challenger::CanObserve;
-
-use super::*;
 
 #[test]
 fn core_shape_and_degree_match_design() {
@@ -76,8 +75,7 @@ fn eval_external_weights_normalized_sums_by_trace_length() {
     );
     let mut boundary_correction = QuadFelt::ZERO;
     for air in AIRS {
-        boundary_correction +=
-            air.boundary_correction(&lookup_challenges, &aux_inputs).unwrap();
+        boundary_correction += air.boundary_correction(&lookup_challenges, &aux_inputs).unwrap();
     }
 
     let result = statement::eval_external(
@@ -219,8 +217,7 @@ fn observe_matches_execution_claim_commitment() {
     };
     let kernel = KernelDescriptor::from_hashes(vec![word(50), word(60)]).unwrap();
     let program_hash = word(1);
-    let stack_inputs =
-        StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6)]).unwrap();
+    let stack_inputs = StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6)]).unwrap();
     let stack_outputs = StackOutputs::new(&[Felt::new_unchecked(7)]).unwrap();
     let deferred_root = word(90);
 
@@ -249,9 +246,7 @@ fn observe_matches_execution_claim_commitment() {
 }
 
 #[test]
-#[should_panic(
-    expected = "aux inputs shorter than the fixed program-hash + deferred-root prefix"
-)]
+#[should_panic(expected = "aux inputs shorter than the fixed program-hash + deferred-root prefix")]
 fn observe_rejects_short_aux_inputs() {
     #[derive(Default)]
     struct FeltSink {

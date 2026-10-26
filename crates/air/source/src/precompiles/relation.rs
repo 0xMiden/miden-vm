@@ -1,12 +1,7 @@
-//! Canonical AIR order, height rules, and compiler capture of the precompile relation.
-
-#[cfg(feature = "compiler")]
-mod compiler;
+//! Canonical AIR order and height rules of the precompile relation.
 
 use alloc::vec::Vec;
 
-#[cfg(feature = "compiler")]
-pub use compiler::CapturedPvmRelation;
 use miden_core::utils::Matrix;
 use miden_stark::air::{BaseAir, LiftedAir};
 

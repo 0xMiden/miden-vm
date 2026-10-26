@@ -10,17 +10,12 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage},
+};
 use miden_utils_sync::LazyLock;
 
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBuilder,
-    LookupColumn,
-    LookupMessage,
-};
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},

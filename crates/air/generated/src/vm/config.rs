@@ -96,7 +96,7 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec::Vec};
 
-    use miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit;
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
     use miden_core::{Felt, field::QuadFelt};
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \

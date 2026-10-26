@@ -15,8 +15,8 @@
 use std::{format, string::String, vec::Vec};
 
 use crate::{
-    AceError,
-    proof_order::{MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, sorting_network},
+    AceError, MAX_ORDER_AIRS,
+    compiler::proof_order::{PROOF_ORDER_KEY_STRIDE, sorting_network},
 };
 
 /// Relation-specific inputs to [`render_proof_order_maps`].

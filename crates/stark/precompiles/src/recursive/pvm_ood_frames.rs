@@ -16,8 +16,8 @@ use alloc::{
 use core::{fmt::Write as _, ops::Range};
 
 use miden_ace::{
-    EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
-    render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout,
+    compiler::{OodScatterPlan, ProofOrderMapsConfig, RelationGeometry, render_proof_order_maps},
 };
 use miden_air::precompiles::NUM_CHIPLETS;
 
@@ -276,9 +276,9 @@ use miden::core::sys::pvm::layout
 mod tests {
     use alloc::vec;
 
-    use miden_ace::LayoutKind;
-    use miden_air_definitions::precompiles::{
-        ace::build_canonical_precompile_ace_circuit, relation::CapturedPvmRelation,
+    use miden_ace::compiler::LayoutKind;
+    use miden_air_definitions::compiler::precompiles::{
+        CapturedPvmRelation, build_canonical_precompile_ace_circuit,
     };
 
     use super::*;

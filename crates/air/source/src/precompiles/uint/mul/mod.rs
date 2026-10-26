@@ -90,20 +90,15 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage,
+    },
+};
 use miden_utils_sync::LazyLock;
 
-use miden_stark::lookup::{
-    Challenges,
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-    LookupMessage,
-};
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::Range16Msg,

@@ -21,8 +21,8 @@
 //! `bytes_left_0`.
 
 use miden_core::field::Algebra;
-
 use miden_stark::lookup::{Challenges, LookupMessage};
+
 use crate::precompiles::relations::BusId;
 
 /// LogUp message for the per-invocation Keccak sponge request: a 3-tuple

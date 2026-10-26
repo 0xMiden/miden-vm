@@ -5,8 +5,8 @@
 //! chain's terminal chaining value.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
-
 use miden_stark::lookup::{Challenges, LookupMessage};
+
 use crate::precompiles::relations::BusId;
 
 /// LogUp message for one Eidos message block.

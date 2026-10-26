@@ -12,7 +12,8 @@ use miden_stark::{
 use super::{MidenAir, MidenAirBuilder, boundary::ReduceBoundaryBuilder};
 use crate::vm::{
     constraints::{
-        self, columns::CoreCols,
+        self,
+        columns::CoreCols,
         lookup::main_air::{MainLookupAir, MainLookupBuilder},
     },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},

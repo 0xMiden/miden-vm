@@ -1,12 +1,7 @@
-//! Runtime circuit representation and optional compiler for the precompile relation.
+//! Runtime circuit representation for the precompile relation.
+//!
+//! Circuit construction lives in `crate::compiler::precompiles` with the `compiler` feature.
 
-#[cfg(feature = "compiler")]
-mod compiler;
-
-#[cfg(feature = "compiler")]
-pub use compiler::{
-    build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
-};
 pub use miden_ace::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 
 /// Per-AIR trace regions are padded to this width before concatenation.

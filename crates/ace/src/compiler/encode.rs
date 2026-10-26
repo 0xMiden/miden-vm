@@ -1,18 +1,19 @@
-//! Compiler-side circuit encoding and chiplet padding rules.
+//! Compiler-side ACE stream construction and node packing.
 
 use alloc::{format, string::ToString, vec::Vec};
 
 use miden_crypto::{Felt, field::ExtensionField};
 
-use super::{ACE_READ_ROW_EF_NODES, ADV_PIPE_BLOCK_FELTS, BASE_FELTS_PER_EF, EncodedCircuit};
 use crate::{
     AceError,
-    circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    compiler::circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    encode::{ACE_READ_ROW_EF_NODES, ADV_PIPE_BLOCK_FELTS, BASE_FELTS_PER_EF, EncodedCircuit},
     instruction::{MAX_ID, encode_instruction},
 };
 
 /// Constants are padded to an even number of EF nodes (full READ rows).
-const CONST_EF_ALIGN: usize = 2;
+pub(crate) const CONST_EF_ALIGN: usize = 2;
+
 /// Maximum number of circuit nodes accepted by the ACE runtime.
 ///
 /// Packed node ids occupy 30 bits, but `eval_circuit` requires the total number of READ and EVAL

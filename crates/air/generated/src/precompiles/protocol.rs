@@ -132,7 +132,7 @@ static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_i
 
 #[cfg(test)]
 mod tests {
-    use miden_air_definitions::precompiles::ace::build_pvm_recursive_verifier_ace_circuit;
+    use miden_air_definitions::compiler::precompiles::build_pvm_recursive_verifier_ace_circuit;
 
     use super::*;
     use crate::precompiles::policy;

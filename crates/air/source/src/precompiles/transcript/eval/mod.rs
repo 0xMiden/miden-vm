@@ -70,17 +70,14 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{CurvePrecompile, UintPrecompile};
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
 };
+
 use crate::precompiles::{
     ec::{
         EcPointMsg,
@@ -95,11 +92,7 @@ use crate::precompiles::{
         initial_cv_from_frame,
         nodes::UintOpId,
     },
-    uint::{
-        UintValMsg,
-        add::UintAddMsg,
-        mul::UintMulMsg,
-    },
+    uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
     utils::{current_main, next_main},
 };
 

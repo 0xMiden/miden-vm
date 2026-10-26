@@ -3,7 +3,7 @@
 //! The AIR shape entering the security calculation is stored in [`AIR_SHAPE`], allowing the MASM
 //! estimator to use it without evaluating the AIRs symbolically. Runtime security reporting lives
 //! in the VM STARK backend. Independent comparison checks use
-//! `miden_air_definitions::vm::geometry::derive_air_shape`.
+//! `miden_air_definitions::compiler::vm::derive_air_shape`.
 
 use miden_core::proof::HashFunction;
 /// Types describing the generated AIR and lookup shapes.

@@ -1,17 +1,21 @@
-#[cfg(feature = "compiler")]
-use miden_ace::CompiledRelation;
-#[cfg(feature = "compiler")]
+//! Symbolic circuit construction and compiled geometry for the authored VM relation.
+
+mod multi_air;
+mod recursive;
+
+pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use p3_security::budget::{AirShape, LookupShape};
 
-#[cfg(feature = "compiler")]
-use crate::shared::geometry::NUM_OOD_POINTS;
-#[cfg(feature = "compiler")]
-use crate::vm::AIRS;
-#[cfg(feature = "compiler")]
-use crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH;
+pub use self::{
+    multi_air::build_canonical_multi_air_ace_circuit,
+    recursive::{build_recursive_verifier_ace_circuit, recursive_verifier_ace_config},
+};
+use crate::{
+    shared::geometry::NUM_OOD_POINTS,
+    vm::{AIRS, logup::MIDEN_MAX_MESSAGE_WIDTH},
+};
 
 /// Derive the security shape for tooling and differential validation.
-#[cfg(feature = "compiler")]
 pub fn derive_air_shape() -> AirShape {
     crate::shared::geometry::derive_air_shape(
         &AIRS,
@@ -27,7 +31,6 @@ pub fn derive_air_shape() -> AirShape {
 }
 
 /// Security shape from the same captured relation used for evaluators and ACE generation.
-#[cfg(feature = "compiler")]
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
     let geometry = relation.geometry();
     let fractions_per_row: usize =

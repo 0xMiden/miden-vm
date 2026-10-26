@@ -4,7 +4,10 @@ use miden_constraint_compiler::ir::{CapturedConstraints, Graph, Leaf, Node, OpKi
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
-use crate::{AceCircuit, AceConfig, AceError, EXT_DEGREE, InputCounts, LayoutKind};
+use crate::{
+    AceError, EXT_DEGREE, InputCounts,
+    compiler::{AceCircuit, AceConfig, LayoutKind},
+};
 
 fn invalid(message: impl Into<String>) -> AceError {
     AceError::InvalidInputLayout { message: message.into() }
@@ -334,7 +337,7 @@ impl<'a> CompiledRelation<'a> {
     }
 
     pub fn build_circuit(&self, layout: LayoutKind) -> Result<AceCircuit<QuadFelt>, AceError> {
-        crate::pipeline::build_circuit_for_relation(
+        crate::compiler::pipeline::build_circuit_for_relation(
             self,
             AceConfig {
                 num_quotient_chunks: self.geometry.num_quotient_chunks,

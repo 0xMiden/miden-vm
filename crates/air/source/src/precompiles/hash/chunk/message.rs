@@ -12,8 +12,8 @@
 //! inter-chunk addresses by construction. See the design notes.
 
 use miden_core::field::Algebra;
-
 use miden_stark::lookup::{Challenges, LookupMessage};
+
 use crate::precompiles::relations::BusId;
 
 /// LogUp message for the [`ChunkChain`](BusId::ChunkChain) relation: a

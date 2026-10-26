@@ -28,19 +28,14 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
-
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-    LookupMessage,
-    build_logup_aux_trace,
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, LookupMessage, build_logup_aux_trace,
+    },
 };
+
 use crate::{
     precompiles::{
         logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
@@ -501,8 +496,9 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_stark::air::{
-        AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
+    use miden_stark::{
+        air::{AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow},
+        lookup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
     };
 
     use super::{
@@ -510,7 +506,6 @@ mod tests {
         EidosOutMsg, FullCvMsg, INTERFACE_AUX_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, PVM_AUX_COLS,
         get_periodic_column_values,
     };
-    use miden_stark::lookup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage};
     use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 
     struct InterfaceConstraintEvalBuilder {

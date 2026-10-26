@@ -4,11 +4,8 @@ pub mod ace;
 mod airs;
 mod constraints;
 mod execution_trace;
-pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
-pub mod geometry;
 mod inputs;
 pub mod logup;
-use miden_stark::lookup;
 #[cfg(test)]
 mod lookup_tests;
 mod proof_order;
@@ -38,6 +35,7 @@ pub use constraints::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
+pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
 pub use inputs::{NUM_PUBLIC_VALUES, PublicInputs};
 pub use miden_core::{
     Felt,

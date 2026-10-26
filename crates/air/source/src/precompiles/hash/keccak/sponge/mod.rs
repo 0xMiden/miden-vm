@@ -16,19 +16,16 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-};
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},

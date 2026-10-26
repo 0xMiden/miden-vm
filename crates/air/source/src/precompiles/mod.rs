@@ -16,4 +16,3 @@ pub mod uint;
 pub mod utils;
 
 pub use air::{ChipletAir, NUM_CHIPLETS};
-

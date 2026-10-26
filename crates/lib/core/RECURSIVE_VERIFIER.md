@@ -3,7 +3,9 @@
 Ordinary library builds assemble the tracked `.masm` files. Regeneration is explicit.
 
 The generators capture the authored AIRs in `crates/air/source` once and derive widths,
-quotient geometry, security metadata, and the canonical ACE circuit from that capture. Cargo builds
+quotient geometry, security metadata, and the canonical ACE circuit from that capture. Optional
+authored relation compiler entry points live in `miden_air_definitions::compiler::{vm, precompiles}`.
+Cargo builds
 the native evaluators and embedded ACE streams from the same capture into `OUT_DIR`, so they have
 no regeneration step.
 

@@ -6,10 +6,12 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
+};
 use miden_utils_sync::LazyLock;
 
-use miden_stark::lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder};
 use crate::precompiles::{
     hash::{
         chunk_node,

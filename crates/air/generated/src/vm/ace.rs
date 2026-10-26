@@ -1,6 +1,6 @@
 //! Build-compiled recursive-verifier circuit data.
 //!
-//! Authored circuit construction lives in [`miden_air_definitions::vm::ace`].
+//! Authored circuit construction lives in `miden_air_definitions::compiler::vm`.
 pub use miden_air_definitions::vm::ace::RecursiveAceCircuit;
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
@@ -12,7 +12,7 @@ pub static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/ace_i
 
 #[cfg(test)]
 mod tests {
-    use miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit;
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
 
     use super::*;
 

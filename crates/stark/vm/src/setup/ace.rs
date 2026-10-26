@@ -30,9 +30,11 @@ pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
+
     #[test]
     fn cached_circuit_matches_independent_authored_capture() {
-        let authored = miden_air_definitions::vm::ace::build_recursive_verifier_ace_circuit()
+        let authored = build_recursive_verifier_ace_circuit()
             .expect("authored recursive ACE circuit");
         assert_eq!(*super::shared_recursive_circuit(), authored);
     }

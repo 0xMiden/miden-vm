@@ -10,7 +10,7 @@ use miden_crypto::field::Field;
 pub(crate) use crate::instruction::Op as AceOp;
 use crate::{
     AceError, InputLayout,
-    dag::{AceDag, NodeId, NodeKind},
+    compiler::dag::{AceDag, NodeId, NodeKind},
 };
 
 /// Nodes in the emitted ACE circuit.

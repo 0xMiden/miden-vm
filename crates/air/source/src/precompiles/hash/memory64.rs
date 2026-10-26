@@ -22,8 +22,8 @@
 //! widths; this one carries 64-bit values.
 
 use miden_core::field::Algebra;
-
 use miden_stark::lookup::{Challenges, LookupMessage};
+
 use crate::precompiles::relations::BusId;
 
 /// Base address for the chunk chiplet's flat input-tape sub-namespace.

@@ -4,7 +4,7 @@ This crate exposes the production VM and precompile AIRs through `vm` and `preco
 
 `vm::MidenAir` and `precompiles::ChipletAir` wrap their authored AIRs, delegating metadata and auxiliary-trace construction while dispatching constraint evaluation and degrees to generated code. This crate defines the concrete `MultiAir` adapters; `miden-air-definitions` supplies statement validation, VM claim observation, and the VM/PVM external assertions. The native engine and recursive verifier derive proof order from trace heights.
 
-Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. Compiler tooling is a build dependency; runtime consumers use the generated artifacts. The recursive verifier MASM in the core library imports parameters generated from the same captures; see [Maintaining recursive-verifier MASM](../../lib/core/RECURSIVE_VERIFIER.md).
+Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. The source crate exposes optional capture and circuit construction through `compiler::vm` and `compiler::precompiles`. Compiler tooling is a build dependency; runtime consumers use the generated artifacts. The recursive verifier MASM in the core library imports parameters generated from the same captures; see [Maintaining recursive-verifier MASM](../../lib/core/RECURSIVE_VERIFIER.md).
 
 Relation setup and transcript-domain adapters live in `miden-vm-stark` and `miden-precompiles-stark`. Shared AIR contracts, transcript channels, lookup mechanisms, configuration factories, and security estimators live in `miden-stark`.
 

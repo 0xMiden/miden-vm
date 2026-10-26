@@ -26,53 +26,29 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 use miden_utils_sync::LazyLock;
 
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-};
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{
-        UintLimbsMsg,
-        UintValMsg,
+        UintLimbsMsg, UintValMsg,
         mul::{
-            COL_A_PTR as M_COL_A_PTR,
-            COL_ACT as M_COL_ACT,
-            COL_B_PTR as M_COL_B_PTR,
-            COL_BORROW as M_COL_BORROW,
-            COL_BOUND_PTR as M_COL_BOUND_PTR,
-            COL_KAPPA_A as M_COL_KAPPA_A,
-            COL_R_PTR as M_COL_R_PTR,
-            GAMMA_OFFSET,
-            GAMMA_SLOTS,
-            NUM_CELLS as MUL_NUM_CELLS,
-            NUM_GAMMA,
-            NUM_MAIN_COLS as MUL_NUM_MAIN_COLS,
-            NUM_Q_LIMBS,
-            PERIOD as MUL_PERIOD,
-            ROW_A,
-            ROW_B,
-            ROW_C,
-            ROW_P,
-            ROW_Q,
-            ROW_R,
-            S_KEEP,
-            TERM_CELL_C_PTR,
-            TERM_CELL_IS_SUB,
-            TERM_CELL_KAPPA_C,
-            TERM_CELL_KAPPA_C_SIGNED,
-            TERM_CELL_MULT,
-            UintMulMsg,
+            COL_A_PTR as M_COL_A_PTR, COL_ACT as M_COL_ACT, COL_B_PTR as M_COL_B_PTR,
+            COL_BORROW as M_COL_BORROW, COL_BOUND_PTR as M_COL_BOUND_PTR,
+            COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR, GAMMA_OFFSET, GAMMA_SLOTS,
+            NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS,
+            PERIOD as MUL_PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP,
+            TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED,
+            TERM_CELL_MULT, UintMulMsg,
         },
     },
     utils::{current_main, next_main},

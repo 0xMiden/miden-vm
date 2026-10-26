@@ -108,9 +108,8 @@ use super::{
     periodic::build_periodic_nodes,
 };
 use crate::{
+    compiler::{quotient::build_quotient_recomposition_dag, randomness},
     layout::{InputKey, InputLayout},
-    quotient::build_quotient_recomposition_dag,
-    randomness,
 };
 
 /// Build the verifier-equivalent root expression DAG (see the module docs)

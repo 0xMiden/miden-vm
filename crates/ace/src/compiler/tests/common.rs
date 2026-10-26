@@ -1,14 +1,14 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
 
-pub use crate::testing::eval_folded_constraints;
+pub use crate::compiler::testing::eval_folded_constraints;
 use crate::{
     InputLayout,
-    dag::{NodeId, NodeKind},
+    compiler::dag::{NodeId, NodeKind},
 };
 
 pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
-    crate::testing::eval_periodic_values::<Felt, QuadFelt>(periodic_columns, z_k)
+    crate::compiler::testing::eval_periodic_values::<Felt, QuadFelt>(periodic_columns, z_k)
 }
 
 pub fn eval_dag(
@@ -33,5 +33,5 @@ pub fn eval_dag(
 }
 
 pub fn eval_quotient(layout: &InputLayout, inputs: &[QuadFelt]) -> QuadFelt {
-    crate::testing::eval_quotient::<Felt, QuadFelt>(layout, inputs)
+    crate::compiler::testing::eval_quotient::<Felt, QuadFelt>(layout, inputs)
 }

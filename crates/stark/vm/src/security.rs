@@ -10,9 +10,9 @@ use miden_air::vm::{
     config,
     security::{COMMITMENT_ALIGNMENT, LOOKUP_POW_BITS},
 };
-use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 #[cfg(test)]
-use miden_air_definitions::vm::geometry::derive_air_shape;
+use miden_air_definitions::compiler::vm::derive_air_shape;
+use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
 #[cfg(test)]
 use miden_stark::security::security_report_with_hash;

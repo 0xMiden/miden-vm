@@ -11,9 +11,11 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
+};
 
-use miden_stark::lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder};
 use crate::precompiles::{
     ec::{self, groups},
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},

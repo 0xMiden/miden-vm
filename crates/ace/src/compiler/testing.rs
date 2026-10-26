@@ -13,7 +13,7 @@ use miden_stark::air::symbolic::{
 };
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
-use crate::{AceDag, AceError, InputCounts, InputKey, InputLayout};
+use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
 
 /// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
 ///
@@ -391,17 +391,17 @@ where
     let mut values: Vec<EF> = vec![EF::ZERO; dag.nodes().len()];
     for (idx, node) in dag.nodes().iter().enumerate() {
         let value = match node {
-            crate::dag::NodeKind::Input(key) => {
+            crate::compiler::dag::NodeKind::Input(key) => {
                 let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
                     message: format!("missing input key in layout: {key:?}"),
                 })?;
                 inputs[input_idx]
             },
-            crate::dag::NodeKind::Constant(c) => *c,
-            crate::dag::NodeKind::Add(a, b) => values[a.index()] + values[b.index()],
-            crate::dag::NodeKind::Sub(a, b) => values[a.index()] - values[b.index()],
-            crate::dag::NodeKind::Mul(a, b) => values[a.index()] * values[b.index()],
-            crate::dag::NodeKind::Neg(a) => -values[a.index()],
+            crate::compiler::dag::NodeKind::Constant(c) => *c,
+            crate::compiler::dag::NodeKind::Add(a, b) => values[a.index()] + values[b.index()],
+            crate::compiler::dag::NodeKind::Sub(a, b) => values[a.index()] - values[b.index()],
+            crate::compiler::dag::NodeKind::Mul(a, b) => values[a.index()] * values[b.index()],
+            crate::compiler::dag::NodeKind::Neg(a) => -values[a.index()],
         };
         values[idx] = value;
     }

@@ -19,9 +19,11 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, LiftedAirBuilder},
+    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
+};
 
-use miden_stark::lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 use crate::precompiles::{
     hash::{
         chunk::ChunkChainMsg,

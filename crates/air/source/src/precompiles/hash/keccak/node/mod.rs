@@ -41,23 +41,16 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-
-use miden_stark::lookup::{
-    ConstraintLookupBuilder,
-    Deg,
-    LookupAir,
-    LookupBatch,
-    LookupBuilder,
-    LookupColumn,
-    LookupGroup,
-};
-use crate::precompiles::{
-    hash::{
-        chunk::ChunkChainMsg,
-        keccak::sponge::KeccakSpongeMsg,
-        memory64::Memory64Msg,
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
     },
+};
+
+use crate::precompiles::{
+    hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},

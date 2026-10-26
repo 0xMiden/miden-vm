@@ -3,7 +3,7 @@
 use alloc::vec;
 
 use miden_air_definitions::precompiles::hash::sha256::io;
-use miden_core::{Felt, field::PrimeCharacteristicRing, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 use super::trace::{Sha256IoRequires, populate_rows};
 use crate::prover::primitives::byte_pair_lut::BytePairLutRequires;

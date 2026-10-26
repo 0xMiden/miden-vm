@@ -1,4 +1,7 @@
-use miden_ace::{AceConfig, AceError, LayoutKind};
+use miden_ace::{
+    AceError,
+    compiler::{AceConfig, LayoutKind},
+};
 use miden_core::{Felt, field::QuadFelt};
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
