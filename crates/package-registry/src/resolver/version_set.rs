@@ -5,7 +5,12 @@ use pubgrub::VersionSet as _;
 use smallvec::{SmallVec, smallvec};
 
 use super::pubgrub_compat::SemverPubgrub;
-use crate::{SemVer, Version, VersionReq, VersionRequirement};
+use crate::{SemVer, Version, VersionReq, VersionRequirement, semver::BuildMetadata};
+
+fn without_build_metadata(mut version: SemVer) -> SemVer {
+    version.build = BuildMetadata::EMPTY;
+    version
+}
 
 /// This type is an implementation detail of the dependency resolver provided by
 /// [`super::InMemoryPackageRegistry`].
@@ -91,7 +96,9 @@ impl VersionSet {
 
         for version in versions {
             if version.digest.as_ref() == Some(&digest) {
-                range = range.union(&SemverPubgrub::singleton(version.version.clone()));
+                range = range.union(&SemverPubgrub::singleton(without_build_metadata(
+                    version.version.clone(),
+                )));
                 matched = true;
             }
         }
@@ -123,7 +130,7 @@ impl From<Word> for VersionSet {
 impl From<SemVer> for VersionSet {
     fn from(value: SemVer) -> Self {
         Self {
-            range: SemverPubgrub::singleton(value),
+            range: SemverPubgrub::singleton(without_build_metadata(value)),
             digests: smallvec![],
         }
     }
@@ -133,7 +140,7 @@ impl From<Version> for VersionSet {
     fn from(value: Version) -> Self {
         let Version { version, digest } = value;
         Self {
-            range: SemverPubgrub::singleton(version),
+            range: SemverPubgrub::singleton(without_build_metadata(version)),
             digests: SmallVec::from_iter(digest),
         }
     }
@@ -244,10 +251,11 @@ impl pubgrub::VersionSet for VersionSet {
     }
 
     fn contains(&self, v: &Self::V) -> bool {
+        let version = without_build_metadata(v.version.clone());
         if self.digests.is_empty() {
-            self.range.contains(&v.version)
+            self.range.contains(&version)
         } else if let Some(digest) = v.digest.as_ref() {
-            self.digests.contains(digest) && self.range.contains(&v.version)
+            self.digests.contains(digest) && self.range.contains(&version)
         } else {
             false
         }
@@ -259,6 +267,33 @@ mod tests {
     use miden_core::crypto::hash::Eidos;
 
     use super::*;
+
+    #[test]
+    fn singleton_contains_versions_with_equal_semver_precedence() {
+        let first = "1.0.0+first".parse::<Version>().unwrap();
+        let second = "1.0.0+second".parse::<Version>().unwrap();
+        let set = VersionSet::singleton(first.clone());
+
+        assert_eq!(first, second);
+        assert!(set.contains(&second), "set {set} should contain {second}");
+
+        let prerelease = VersionSet::singleton("1.0.0-rc.1+first".parse().unwrap());
+        let equivalent_prerelease = "1.0.0-rc.1+second".parse().unwrap();
+        assert!(
+            prerelease.contains(&equivalent_prerelease),
+            "set {prerelease} should contain {equivalent_prerelease}"
+        );
+
+        let digest = Eidos::hash(b"same-digest");
+        let digest_set =
+            VersionSet::singleton(Version::new("1.0.0+first".parse().unwrap(), digest));
+        let same_digest = Version::new("1.0.0+second".parse().unwrap(), digest);
+        let different_digest =
+            Version::new("1.0.0+second".parse().unwrap(), Eidos::hash(b"different-digest"));
+
+        assert!(digest_set.contains(&same_digest));
+        assert!(!digest_set.contains(&different_digest));
+    }
 
     #[test]
     fn version_set_contains_requires_both_digest_and_semver() {
