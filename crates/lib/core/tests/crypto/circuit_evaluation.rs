@@ -1,4 +1,8 @@
-use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
+use miden_ace_codegen::{
+    InputKey,
+    compiler::{AceCircuit, AceConfig, LayoutKind},
+};
+use miden_air_definitions::compiler::vm::build_canonical_multi_air_ace_circuit;
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStack,
@@ -94,7 +98,7 @@ fn multi_air_eval_circuit_masm() {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
     };
-    let circuit = miden_air::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
+    let circuit = build_canonical_multi_air_ace_circuit(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);

@@ -1,10 +1,10 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_definitions::{
-    AIRS,
-    ace::{CapturedAir, CompiledRelation, LayoutKind},
-    config,
+use miden_ace_codegen::{
+    RecursiveAceCircuit,
+    compiler::{CapturedAir, CompiledRelation, LayoutKind},
 };
+use miden_air_definitions::{AIRS, compiler::vm, config};
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
 #[path = "build/precompiles.rs"]
@@ -51,12 +51,9 @@ fn main() {
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
     let relation =
         CompiledRelation::from_captured(&airs, config::SPONGE_RATE).expect("compile VM relation");
-    write(
-        "air_shape.rs",
-        format!("{:?}", miden_air_definitions::geometry::air_shape(&relation)),
-    );
+    write("air_shape.rs", format!("{:?}", vm::air_shape(&relation)));
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
-    let circuit: miden_air_definitions::ace::RecursiveAceCircuit = relation
+    let circuit: RecursiveAceCircuit = relation
         .build_circuit(LayoutKind::Masm)
         .expect("canonical VM ACE circuit")
         .to_ace()

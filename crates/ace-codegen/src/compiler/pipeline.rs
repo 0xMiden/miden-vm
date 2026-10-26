@@ -10,11 +10,14 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_stark::air::LiftedAir;
 
 use crate::{
-    AceError, CapturedAir, CompiledRelation, EXT_DEGREE,
-    circuit::{AceCircuit, emit_circuit},
-    dag::{
-        AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir,
-        normalize_dag,
+    AceError, EXT_DEGREE,
+    compiler::{
+        CapturedAir, CompiledRelation,
+        circuit::{AceCircuit, emit_circuit},
+        dag::{
+            AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir,
+            normalize_dag,
+        },
     },
     layout::{InputCounts, InputKey, InputLayout},
 };

@@ -19,9 +19,8 @@ use super::{
     periodic::build_periodic_nodes,
 };
 use crate::{
+    compiler::{quotient::build_quotient_recomposition_dag, randomness},
     layout::{InputKey, InputLayout},
-    quotient::build_quotient_recomposition_dag,
-    randomness,
 };
 
 /// Lower a base-field symbolic expression into DAG nodes.

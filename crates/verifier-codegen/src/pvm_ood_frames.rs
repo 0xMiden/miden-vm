@@ -16,8 +16,8 @@ use std::{
 };
 
 use miden_ace_codegen::{
-    EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
-    render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout,
+    compiler::{OodScatterPlan, ProofOrderMapsConfig, RelationGeometry, render_proof_order_maps},
 };
 #[cfg(test)]
 use miden_air::precompiles::NUM_CHIPLETS;
@@ -266,14 +266,16 @@ use miden::core::sys::pvm::layout
 
 #[cfg(test)]
 mod tests {
-    use miden_air::precompiles::ace::build_canonical_precompile_ace_circuit;
+    use miden_ace_codegen::compiler::LayoutKind;
+    use miden_air_definitions::compiler::precompiles::{
+        CapturedPvmRelation, build_canonical_precompile_ace_circuit,
+    };
 
     use super::*;
     fn live_geometry() -> PvmOodGeometry {
-        let captured =
-            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
+        let captured = CapturedPvmRelation::new().unwrap();
         let compiled = captured.compile().unwrap();
-        let canonical = compiled.build_circuit(miden_ace_codegen::LayoutKind::Masm).unwrap();
+        let canonical = compiled.build_circuit(LayoutKind::Masm).unwrap();
         PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout()).unwrap()
     }
     /// A group every chiplet occupies is indexed correctly by proof-order position, and one with a
@@ -335,8 +337,7 @@ mod tests {
     fn geometry_derivation_cross_checks_the_input_layout() {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
-        let captured =
-            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
+        let captured = CapturedPvmRelation::new().unwrap();
         let compiled = captured.compile().unwrap();
         assert!(PvmOodGeometry::from_compiled(compiled.geometry(), layout).is_ok());
         assert_eq!(

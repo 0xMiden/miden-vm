@@ -7,12 +7,16 @@ use std::{
 
 use askama::Template;
 use miden_ace_codegen::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
-    MasmConstraintsEvalConfig, RecursiveAceCircuit as PvmRecursiveAceCircuit,
-    render_masm_constraints_eval,
+    EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit as PvmRecursiveAceCircuit,
+    compiler::{
+        FoldCoefficientStaging, LayoutKind, MasmConstraintsEvalConfig, render_masm_constraints_eval,
+    },
 };
 use miden_air::precompiles::security as pvm_security;
-use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation};
+use miden_air_definitions::{
+    compiler::precompiles::{CapturedPvmRelation, air_shape},
+    precompiles::relation,
+};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
@@ -176,7 +180,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
     let source = compiled.build_circuit(LayoutKind::Masm).map_err(|e| e.to_string())?;
     let num_airs = compiled.geometry().airs.len();
     let protocol = relation::protocol();
-    let air_shape = miden_air_definitions::precompiles::geometry::air_shape(&compiled);
+    let air_shape = air_shape(&compiled);
     let lookup_shape = air_shape.lookup.ok_or("PVM relation requires lookup security data")?;
     let input_layout = source.layout();
     let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)

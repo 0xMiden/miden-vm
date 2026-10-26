@@ -1,9 +1,9 @@
 use miden_ace_codegen::InputKey;
 use miden_air::precompiles::{
     ChipletAir, NUM_CHIPLETS,
-    ace::build_canonical_precompile_ace_circuit,
     protocol::{PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST},
 };
+use miden_air_definitions::compiler::precompiles::build_canonical_precompile_ace_circuit;
 use miden_core::{Felt, field::QuadFelt};
 
 const PVM_WRAPPER_PATH: &str = concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm");

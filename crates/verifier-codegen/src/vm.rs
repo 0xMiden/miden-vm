@@ -6,12 +6,15 @@ use std::{
 
 use askama::Template;
 use miden_ace_codegen::{
-    CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
-    LayoutKind, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry, render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit,
+    compiler::{
+        CapturedAir, CompiledRelation, FoldCoefficientStaging, LayoutKind,
+        MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
+        render_masm_constraints_eval, render_proof_order_maps,
+    },
 };
 use miden_air::{
     MIDEN_AIR_COUNT,
-    ace::RecursiveAceCircuit,
     config::{self, PROTOCOL_ID, relation_digest},
 };
 use miden_air_definitions::{AIRS, MidenAir};
@@ -504,7 +507,7 @@ fn render_constraints_eval_file(
     geometry: &VmGeometry,
     max_cycle_len_log: u32,
 ) -> io::Result<String> {
-    miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
+    render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: crate::GENERATED_BY,
         layout_module: "miden::core::sys::vm::layout",
         num_inputs: circuit.num_inputs,
@@ -603,7 +606,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use miden_air_definitions::ace::{
+    use miden_air_definitions::compiler::vm::{
         build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
     };
 

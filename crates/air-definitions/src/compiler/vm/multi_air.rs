@@ -1,4 +1,7 @@
-use miden_ace_codegen::{AceCircuit, AceConfig, AceError};
+use miden_ace_codegen::{
+    AceError,
+    compiler::{AceCircuit, AceConfig},
+};
 use miden_core::field::QuadFelt;
 
 use crate::AIRS;
@@ -11,12 +14,16 @@ const LMCS_ALIGNMENT: usize = 8;
 pub fn build_canonical_multi_air_ace_circuit(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError> {
-    miden_ace_codegen::build_canonical_multi_air_ace_circuit(&AIRS, config, LMCS_ALIGNMENT)
+    miden_ace_codegen::compiler::build_canonical_multi_air_ace_circuit(
+        &AIRS,
+        config,
+        LMCS_ALIGNMENT,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use miden_ace_codegen::{InputKey, LayoutKind};
+    use miden_ace_codegen::{InputKey, compiler::LayoutKind};
 
     use super::*;
     use crate::MIDEN_AIR_COUNT;

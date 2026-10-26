@@ -1,9 +1,9 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_ace_codegen::{LayoutKind, RecursiveAceCircuit};
-use miden_air_definitions::precompiles::{
-    geometry,
-    relation::{AIRS, CapturedPvmRelation},
+use miden_ace_codegen::{RecursiveAceCircuit, compiler::LayoutKind};
+use miden_air_definitions::{
+    compiler::precompiles::{CapturedPvmRelation, air_shape},
+    precompiles::relation::AIRS,
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
@@ -63,7 +63,7 @@ pub fn generate() {
         format!(
             "pub const PROTOCOL: ProtocolMetadata = ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {} }};",
             (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len),
-            geometry::air_shape(&compiled),
+            air_shape(&compiled),
             compiled.geometry().raw_widths(),
             compiled.geometry().num_quotient_chunks
         ),

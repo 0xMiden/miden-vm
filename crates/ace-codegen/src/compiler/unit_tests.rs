@@ -5,9 +5,12 @@ use miden_crypto::field::{Field, PrimeCharacteristicRing};
 use proptest::prelude::*;
 
 use crate::{
-    AceCircuit, InputCounts, InputKey, InputLayout,
-    circuit::emit_circuit,
-    dag::{DagBuilder, normalize_dag},
+    InputCounts, InputKey, InputLayout,
+    compiler::{
+        AceCircuit,
+        circuit::emit_circuit,
+        dag::{DagBuilder, normalize_dag},
+    },
 };
 
 /// Minimal layout with only public inputs populated.
@@ -412,7 +415,7 @@ fn sub_interns_a_real_root_for_a_constant_left_operand() {
 
     assert_eq!(dag.root(), root, "the subtraction must be the DAG root");
     assert!(
-        matches!(dag.nodes[root.index()], crate::dag::NodeKind::Sub(a, b) if a == zero && b == qv),
+        matches!(dag.nodes[root.index()], crate::compiler::dag::NodeKind::Sub(a, b) if a == zero && b == qv),
         "a constant left operand must not rewrite the root away from Sub"
     );
 }

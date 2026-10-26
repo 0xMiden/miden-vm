@@ -6,7 +6,10 @@
 //! the Rust stable sort by `(height, instance index)` and against each other as inverses, for every
 //! VM order, the PVM structured sample, seeded random heights, and tied heights.
 
-use miden_ace_codegen::{MAX_ORDER_AIRS, ProofOrderMapsConfig, render_proof_order_maps};
+use miden_ace_codegen::{
+    MAX_ORDER_AIRS,
+    compiler::{ProofOrderMapsConfig, render_proof_order_maps},
+};
 use miden_core::Felt;
 
 use super::{
