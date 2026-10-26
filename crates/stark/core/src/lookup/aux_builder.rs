@@ -533,38 +533,49 @@ where
     debug_assert_eq!(scratch.len(), chunk_fracs.len());
     debug_assert!(!chunk_fracs.is_empty());
 
-    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ (prefix products of denominators).
-    let mut acc = chunk_fracs[0].1;
-    scratch[0] = acc;
-    for i in 1..chunk_fracs.len() {
-        acc *= chunk_fracs[i].1;
-        scratch[i] = acc;
+    // Interleave four independent product chains within each row chunk.
+    // Each scratch cell holds the product of preceding denominators in its lane.
+    const LANES: usize = 4;
+    let (groups, tail) = chunk_fracs.as_chunks::<LANES>();
+    let (prefixes, tail_prefixes) = scratch.as_chunks_mut::<LANES>();
+    let mut products = [EF::ONE; LANES];
+    for (group, prefix) in groups.iter().zip(prefixes.iter_mut()) {
+        *prefix = products;
+        for lane in 0..LANES {
+            products[lane] *= group[lane].1;
+        }
+    }
+    for (lane, &(_, denominator)) in tail.iter().enumerate() {
+        tail_prefixes[lane] = products[lane];
+        products[lane] *= denominator;
     }
 
-    // One field inversion — amortised over the whole chunk.
-    let mut running_inv = scratch[scratch.len() - 1]
-        .try_inverse()
-        .expect("LogUp denominator product must be non-zero for the sampled challenges");
+    // Include the tail in the same inversion. Unused lanes of a short chunk need no inverse.
+    let active_lanes = chunk_fracs.len().min(LANES);
+    let mut inverses = [EF::ONE; LANES];
+    p3_field::batch_multiplicative_inverse_general(
+        &products[..active_lanes],
+        &mut inverses[..active_lanes],
+        |product| {
+            product
+                .try_inverse()
+                .expect("LogUp denominator product must be non-zero for the sampled challenges")
+        },
+    );
 
-    // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
-    //
-    // Loop invariant (entering iteration i, for i = n-1 down to 1):
-    //     running_inv = (d₀ · d₁ · … · dᵢ)⁻¹
-    //     scratch[i-1] = d₀ · d₁ · … · dᵢ₋₁  (left over from the forward pass)
-    //
-    // Then:
-    //     dᵢ⁻¹ = scratch[i-1] · running_inv
-    //     (prefix-product cancels every factor except dᵢ⁻¹ inside running_inv).
-    // We scale by mᵢ (EF × F, cheaper than EF × EF) to yield the fraction directly, then
-    // fold dᵢ into running_inv so the invariant holds for iteration i-1.
-    // After the loop: running_inv = d₀⁻¹, ready for the i = 0 case below.
-    for i in (1..chunk_fracs.len()).rev() {
-        let (m_i, d_i) = chunk_fracs[i];
-        scratch[i] = scratch[i - 1] * running_inv * m_i;
-        running_inv *= d_i;
+    // In each lane, prefix * inverse is the current denominator's inverse. Removing that
+    // denominator from the lane product advances the invariant to its preceding element.
+    for (lane, &(multiplicity, denominator)) in tail.iter().enumerate() {
+        tail_prefixes[lane] *= inverses[lane] * multiplicity;
+        inverses[lane] *= denominator;
     }
-    // i = 0: running_inv = d₀⁻¹.
-    scratch[0] = running_inv * chunk_fracs[0].0;
+    for (group, prefix) in groups.iter().zip(prefixes.iter_mut()).rev() {
+        for lane in 0..LANES {
+            let (multiplicity, denominator) = group[lane];
+            prefix[lane] *= inverses[lane] * multiplicity;
+            inverses[lane] *= denominator;
+        }
+    }
 }
 
 // TESTS
@@ -954,11 +965,44 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "LogUp denominator product must be non-zero")]
     fn accumulate_rejects_zero_denominator() {
-        let mut fractions = fixture([1, 1], 1);
-        fractions.fractions.push((Felt::ONE, QuadFelt::ZERO));
-        fractions.counts.extend([1, 0]);
-        let _ = accumulate(&fractions);
+        for zero_index in 0..9 {
+            let mut fractions = fixture([1, 1], 9);
+            for row in 0..9 {
+                let denominator = if row == zero_index {
+                    QuadFelt::ZERO
+                } else {
+                    QuadFelt::ONE
+                };
+                fractions.fractions.push((Felt::ONE, denominator));
+                fractions.counts.extend([1, 0]);
+            }
+            assert!(
+                std::panic::catch_unwind(|| accumulate(&fractions)).is_err(),
+                "zero denominator at position {zero_index} was accepted",
+            );
+        }
+    }
+
+    #[test]
+    fn scaled_inverses_match_individual_inversion_across_group_boundaries() {
+        let mut rng = Lcg(0x3141_5926_5358_9793);
+        for len in (1..=17).chain([511, 512, 513]) {
+            let fractions: Vec<_> = (0..len)
+                .map(|i| {
+                    let multiplicity = if i % 3 == 0 { Felt::ZERO } else { rng.felt() };
+                    let denominator = rng.quad();
+                    assert_ne!(denominator, QuadFelt::ZERO);
+                    (multiplicity, denominator)
+                })
+                .collect();
+            let mut actual = vec![QuadFelt::ZERO; len];
+            invert_and_scale(&fractions, &mut actual);
+            for (i, (&value, &(multiplicity, denominator))) in
+                actual.iter().zip(&fractions).enumerate()
+            {
+                assert_eq!(value, denominator.inverse() * multiplicity, "length {len}, index {i}");
+            }
+        }
     }
 }
