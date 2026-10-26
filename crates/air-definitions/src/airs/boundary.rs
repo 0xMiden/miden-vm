@@ -1,7 +1,7 @@
 //! Reduction of VM LogUp boundary interactions into their external correction.
 
 use miden_core::{Felt, field::ExtensionField};
-use miden_lifted_stark::air::ReductionError;
+use miden_lifted_air::ReductionError;
 
 use crate::lookup::{BoundaryBuilder, Challenges, LookupMessage};
 

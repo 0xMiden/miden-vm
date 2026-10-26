@@ -11,15 +11,15 @@
 //!   [`crate::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
+use columns::{ChipletCols, CoreCols};
 
-use crate::{ChipletCols, CoreCols, MidenAirBuilder};
+use crate::airs::MidenAirBuilder;
 
 pub mod and8_lookup;
 pub mod chiplets;
 pub mod columns;
 pub mod constants;
 pub mod decoder;
-pub use crate::shared::eidos_compression;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;

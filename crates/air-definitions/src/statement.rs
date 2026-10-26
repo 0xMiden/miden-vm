@@ -7,7 +7,7 @@ use miden_core::{
     field::ExtensionField,
     program::{KernelDescriptor, NUM_CLAIM_ELEMENTS},
 };
-use miden_lifted_stark::air::{LiftedAir, MultiAir, ReductionError};
+use miden_lifted_air::{LiftedAir, MultiAir, ReductionError};
 use p3_challenger::CanObserve;
 
 use crate::{
@@ -29,19 +29,13 @@ use crate::{
 ///
 /// Instance order is `[Core, Chiplets, EidosCompression, And8Lookup]`; every per-AIR slice follows
 /// that ordering.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct MidenMultiAir;
 
 impl MidenMultiAir {
     /// Construct the Miden multi-AIR statement marker.
     pub const fn new() -> Self {
         Self
-    }
-}
-
-impl Default for MidenMultiAir {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -219,10 +213,6 @@ pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
         "kernel digest felts exceed KernelDescriptor::MAX_NUM_PROCEDURES"
     );
 
-    hash_kernel_input_felts(kernel_felts)
-}
-
-fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
     miden_core::chiplets::hasher::hash_elements_in_domain(
         kernel_felts,
         miden_core::program::domain::KERNEL_COMMITMENT,
