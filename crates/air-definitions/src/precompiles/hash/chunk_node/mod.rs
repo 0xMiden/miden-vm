@@ -17,20 +17,23 @@ use miden_core::{Felt, deferred::DEFERRED_CHUNKS_DOMAIN, field::PrimeCharacteris
 use miden_lifted_air::{AirBuilder, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
 
-use crate::precompiles::{
-    hash::{
-        chunk::{self, ChunkChainMsg},
-        keccak::{node, sponge::KeccakSpongeMsg},
-        memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+use crate::{
+    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
+    precompiles::{
+        hash::{
+            chunk::{self, ChunkChainMsg},
+            keccak::{node, sponge::KeccakSpongeMsg},
+            memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+        },
+        logup::frac_col,
+        primitives::byte_pair_lut::BytePairLutMsg,
+        transcript::{
+            binding::BindingMsg,
+            eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+            initial_cv_from_frame,
+        },
+        utils::{current_main, next_main},
     },
-    logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
-    primitives::byte_pair_lut::BytePairLutMsg,
-    transcript::{
-        binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
-        initial_cv_from_frame,
-    },
-    utils::{current_main, next_main},
 };
 
 // COLUMN LAYOUT

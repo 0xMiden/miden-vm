@@ -43,20 +43,23 @@ use miden_core::{
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
 
-use crate::precompiles::{
-    hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
-    logup::{
+use crate::{
+    lookup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
+        LookupGroup,
     },
-    primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::{
-        binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
-        initial_cv_from_frame,
+    precompiles::{
+        hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
+        primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        transcript::{
+            binding::BindingMsg,
+            eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+            initial_cv_from_frame,
+        },
+        utils::{current_main, next_main},
     },
-    utils::{current_main, next_main},
 };
 
 // MAIN COLUMN LAYOUT
@@ -247,7 +250,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&KeccakNodeAir, main, challenges)
+        crate::lookup::build_logup_aux_trace(&KeccakNodeAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

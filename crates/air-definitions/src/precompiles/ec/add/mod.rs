@@ -103,16 +103,19 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
-use crate::precompiles::{
-    ec::{EcGroupMsg, EcPointMsg},
-    logup::{
+use crate::{
+    lookup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
+        LookupColumn, LookupGroup, LookupMessage,
     },
-    primitives::byte_pair_lut::Range16Msg,
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::{add::UintAddMsg, mul::UintMulMsg},
-    utils::{current_main, next_main},
+    precompiles::{
+        ec::{EcGroupMsg, EcPointMsg},
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
+        primitives::byte_pair_lut::Range16Msg,
+        relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        uint::{add::UintAddMsg, mul::UintMulMsg},
+        utils::{current_main, next_main},
+    },
 };
 
 // MESSAGES
@@ -320,7 +323,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&EcGroupAddAir, main, challenges)
+        crate::lookup::build_logup_aux_trace(&EcGroupAddAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

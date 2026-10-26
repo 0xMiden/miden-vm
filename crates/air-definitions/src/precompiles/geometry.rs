@@ -5,18 +5,20 @@ use p3_security::budget::{AirShape, LookupShape};
 
 #[cfg(feature = "compiler")]
 use crate::geometry::NUM_OOD_POINTS;
-use crate::precompiles::{
-    ChipletAir,
-    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-    hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
-        sha512::Sha512Air,
+use crate::{
+    lookup::{LookupAir, ProverLookupBuilder},
+    precompiles::{
+        ChipletAir,
+        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
+        hash::{
+            chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
+            sha256::Sha256Air, sha512::Sha512Air,
+        },
+        primitives::byte_pair_lut::BytePairLutAir,
+        relations::MAX_MESSAGE_WIDTH,
+        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
+        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
     },
-    logup::{LookupAir, ProverLookupBuilder},
-    primitives::byte_pair_lut::BytePairLutAir,
-    relations::MAX_MESSAGE_WIDTH,
-    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
 /// Derive the full member's security shape for tooling and differential validation.

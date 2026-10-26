@@ -4,8 +4,8 @@ use miden_core::Felt;
 
 use super::layout::AUX_COLS;
 use crate::{
+    lookup::LookupBuilder,
     precompiles::{
-        logup::LookupBuilder,
         primitives::byte_pair_lut::eidos::{self, Relation},
         relations::BusId,
     },

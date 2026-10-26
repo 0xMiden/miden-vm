@@ -11,13 +11,16 @@ use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
-use crate::precompiles::{
-    hash::{
-        chunk_node,
-        keccak::sponge::{self, sponge_program},
+use crate::{
+    lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
+    precompiles::{
+        hash::{
+            chunk_node,
+            keccak::sponge::{self, sponge_program},
+        },
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     },
-    logup::{ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
 
 /// First main-trace column of the sponge band.
@@ -81,7 +84,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&ChunkNodeSpongeAir, main, challenges)
+        crate::lookup::build_logup_aux_trace(&ChunkNodeSpongeAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

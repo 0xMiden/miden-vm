@@ -94,14 +94,17 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_utils_sync::LazyLock;
 
-use crate::precompiles::{
-    logup::{
+use crate::{
+    lookup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
+        LookupColumn, LookupGroup, LookupMessage,
     },
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::UintValMsg,
-    utils::{current_main, next_main},
+    precompiles::{
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+        relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        uint::UintValMsg,
+        utils::{current_main, next_main},
+    },
 };
 
 // MESSAGES
@@ -316,7 +319,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&UintAddAir, main, challenges)
+        crate::lookup::build_logup_aux_trace(&UintAddAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

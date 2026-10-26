@@ -22,9 +22,9 @@
 
 use miden_core::field::Algebra;
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
+use crate::{
+    lookup::{Challenges, LookupMessage},
+    precompiles::relations::BusId,
 };
 
 /// LogUp message for the per-invocation Keccak sponge request: a 3-tuple

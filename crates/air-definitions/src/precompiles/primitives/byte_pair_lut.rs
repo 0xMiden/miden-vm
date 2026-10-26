@@ -38,14 +38,17 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
-use crate::precompiles::{
-    logup::{
+use crate::{
+    lookup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-        build_logup_aux_trace, build_logup_aux_trace_with_preprocessed, frac_col,
+        LookupColumn, LookupGroup, LookupMessage, build_logup_aux_trace,
+        build_logup_aux_trace_with_preprocessed,
     },
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::current_main,
+    precompiles::{
+        logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
+        relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        utils::current_main,
+    },
 };
 
 // OPERATION

@@ -23,9 +23,9 @@
 
 use miden_core::field::Algebra;
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
+use crate::{
+    lookup::{Challenges, LookupMessage},
+    precompiles::relations::BusId,
 };
 
 /// Base address for the chunk chiplet's flat input-tape sub-namespace.

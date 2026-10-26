@@ -14,17 +14,20 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError};
 
-use crate::precompiles::{
-    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-    fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
-    hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
-        sha512::Sha512Air,
+use crate::{
+    lookup::{Challenges, LookupMessage},
+    precompiles::{
+        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
+        fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
+        hash::{
+            chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
+            sha256::Sha256Air, sha512::Sha512Air,
+        },
+        logup::lookup_challenges_from_slice,
+        primitives::byte_pair_lut::{self, BytePairLutAir},
+        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
+        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
     },
-    logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
-    primitives::byte_pair_lut::{self, BytePairLutAir},
-    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
 /// Number of AIR instances in the precompile relation.

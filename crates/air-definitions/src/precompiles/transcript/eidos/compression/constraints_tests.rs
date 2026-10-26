@@ -5,7 +5,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_lifted_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use miden_lifted_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
 
 use super::{
     constraints::{enforce_footer_rows, enforce_fused_rows},

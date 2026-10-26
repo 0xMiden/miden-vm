@@ -10,9 +10,9 @@ use super::{
     AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_PERIOD,
     UintStoreMulAir,
 };
-use crate::precompiles::{
-    logup::build_logup_aux_trace,
-    uint::mul::{
+use crate::{
+    lookup::build_logup_aux_trace,
+    precompiles::uint::mul::{
         COL_ACT as M_COL_ACT, COL_BORROW as M_COL_BORROW, COL_KAPPA_A as M_COL_KAPPA_A,
         GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A, ROW_B,
         ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP, TERM_CELL_KAPPA_C_SIGNED,

@@ -12,7 +12,7 @@ use super::{
     NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP,
     TERM_CELL_KAPPA_C_SIGNED, UintMulAir,
 };
-use crate::precompiles::logup::build_logup_aux_trace;
+use crate::lookup::build_logup_aux_trace;
 
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
