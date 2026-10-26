@@ -16,9 +16,15 @@ use p3_field::{ExtensionField, Field};
 use crate::{log_quotient_degree, pcs::PcsParams};
 
 const DIGEST_BYTES: u64 = 32;
+// Keccak's 1600-bit state is the largest leaf-hashing state used by Miden's configurations.
+const MAX_LEAF_STATE_BYTES: u64 = 200;
 // The digest-tree allowance already charges one digest per leaf.
-const EXTRA_LEAF_SCRATCH_BYTES: u64 = 200 - DIGEST_BYTES;
+const EXTRA_LEAF_SCRATCH_BYTES: u64 = MAX_LEAF_STATE_BYTES - DIGEST_BYTES;
 const TREE_BYTES_PER_LEAF: u64 = 2 * DIGEST_BYTES;
+// Main, auxiliary, and quotient LMCS trees coexist at proof-opening time.
+const PROOF_LMCS_TREES_AT_PEAK: u64 = 3;
+const SAFETY_NUMERATOR: u64 = 5;
+const SAFETY_DENOMINATOR: u64 = 4;
 
 /// Estimates peak proving memory from padded heights in [`MultiAir::airs`] order.
 ///
@@ -70,7 +76,7 @@ where
     // leaf-hashing scratch buffer. The preprocessed bundle adds its own tree and setup scratch.
     let proof_bytes_per_lde_row = extension_bytes
         .checked_mul(max_quotient_degree)?
-        .checked_add(3 * TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES)?;
+        .checked_add(PROOF_LMCS_TREES_AT_PEAK * TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES)?;
     let setup_bytes_per_lde_row = TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES;
     let shared_bytes = max_height
         .checked_mul(proof_bytes_per_lde_row)?
@@ -78,8 +84,8 @@ where
         .checked_mul(blowup)?;
     trace_bytes
         .checked_add(shared_bytes)?
-        .checked_mul(5)
-        .map(|bytes| bytes.div_ceil(4))
+        .checked_mul(SAFETY_NUMERATOR)
+        .map(|bytes| bytes.div_ceil(SAFETY_DENOMINATOR))
 }
 
 /// Largest single-AIR height that can fit the budget, choosing the cheapest AIR while holding
@@ -136,6 +142,7 @@ mod tests {
         width: usize,
         aux_width: usize,
         preprocessed_width: usize,
+        constraint_degree: u64,
     }
 
     impl BaseAir<Felt> for TestAir {
@@ -177,7 +184,7 @@ mod tests {
 
         fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
             let value: AB::Expr = builder.main().current_slice()[0].into();
-            builder.assert_zero(value.square());
+            builder.assert_zero(value.exp_u64(self.constraint_degree));
         }
     }
 
@@ -200,11 +207,13 @@ mod tests {
                     width: 3,
                     aux_width: 1,
                     preprocessed_width: 0,
+                    constraint_degree: 2,
                 },
                 TestAir {
                     width: 1,
                     aux_width: 2,
                     preprocessed_width: 3,
+                    constraint_degree: 5,
                 },
             ],
         }
@@ -230,14 +239,52 @@ mod tests {
     }
 
     #[test]
+    fn pinned_bytes_for_unequal_heights_and_quotient_degrees() {
+        let mut multi_air = multi_air();
+        // Felt/QuadFelt occupy 8/16 bytes. With blowup 8 and heights [16, 8]:
+        // - main + auxiliary + preprocessed traces and LDEs: 5_760 + 4_608 = 10_368;
+        // - three proof trees: 16 * 8 * (3 * 2 * 32) = 24_576;
+        // - proof leaf scratch: 16 * 8 * (200 - 32) = 21_504;
+        // - setup tree and scratch: 8 * 8 * (2 * 32 + 200 - 32) = 14_848;
+        // - quotient accumulator: 16 * 8 * 16 * max_quotient_degree = 2_048 * degree.
+        // Apply 5/4 to these independently calculated totals. Do not derive expectations
+        // from the estimator's constants or helpers: omitting any charge must fail this test.
+        for (constraint_degrees, log_quotient_degrees, expected) in [
+            ([2, 2], [0, 0], 91_680),
+            ([2, 3], [0, 1], 94_240),
+            ([2, 5], [0, 2], 99_360),
+            ([9, 2], [3, 0], 109_600),
+        ] {
+            for (air, degree) in multi_air.airs.iter_mut().zip(constraint_degrees) {
+                air.constraint_degree = degree;
+            }
+            assert_eq!(
+                multi_air.airs.each_ref().map(log_quotient_degree::<Felt, QuadFelt, _>),
+                log_quotient_degrees
+            );
+            assert_eq!(estimate(&multi_air, [16, 8], &params(3)), Some(expected));
+        }
+
+        multi_air.airs[0].constraint_degree = 2;
+        multi_air.airs[1].constraint_degree = 5;
+        // Swap heights: traces cost 12_096; proof trees/scratch still cost 46_080;
+        // setup tree/scratch now cost 29_696; quotient costs 8_192. Total * 5/4 = 120_080.
+        assert_eq!(estimate(&multi_air, [8, 16], &params(3)), Some(120_080));
+        // At blowup 2, [16, 8] costs 3_456 in traces, 11_520 in proof trees/scratch,
+        // 3_712 in setup tree/scratch, and 2_048 in quotient: total * 5/4 = 25_920.
+        assert_eq!(estimate(&multi_air, [16, 8], &params(1)), Some(25_920));
+    }
+
+    #[test]
     fn preprocessed_dimensions_are_charged_without_allocating_traces() {
         let mut multi_air = multi_air();
-        let with_setup = estimate(&multi_air, [16, 8], &params(3)).unwrap();
+        assert_eq!(estimate(&multi_air, [16, 8], &params(3)), Some(99_360));
         multi_air.airs[1].preprocessed_width += 1;
-        assert!(estimate(&multi_air, [16, 8], &params(3)).unwrap() > with_setup);
+        // One more preprocessed column costs 8 rows * 9 * 8 bytes * 5/4 = 720 bytes.
+        assert_eq!(estimate(&multi_air, [16, 8], &params(3)), Some(100_080));
         multi_air.airs[1].preprocessed_width = 0;
-        let without_setup = estimate(&multi_air, [16, 8], &params(3)).unwrap();
-        assert!(with_setup > without_setup);
+        // Removing setup drops 1_728 trace bytes plus 14_848 tree/scratch bytes, before 5/4.
+        assert_eq!(estimate(&multi_air, [16, 8], &params(3)), Some(78_640));
     }
 
     #[test]
