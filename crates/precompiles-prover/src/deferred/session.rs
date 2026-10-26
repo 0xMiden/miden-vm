@@ -201,7 +201,10 @@ pub(crate) fn prove(
 pub mod testing {
     use miden_core::utils::Matrix;
 
-    use super::{PrecompileLimits, WitnessSession, import_witnesses_with_roots};
+    use super::{
+        ChipletMultiAir, Felt, PrecompileLimits, QuadFelt, WitnessSession,
+        import_witnesses_with_roots, memory, precompile_pcs_params,
+    };
     use crate::{
         DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction, PrecompileProof,
         PrecompileProvingError, PrecompileWitness, session::SessionTraces,
@@ -222,10 +225,22 @@ pub mod testing {
         limits: &PrecompileLimits,
     ) -> Result<PreparedSession, PrecompileProvingError> {
         let imported = import_witnesses_with_roots(witnesses, limits, None)?;
-        crate::check_memory_budget(
-            imported.estimated_prover_memory(HashFunction::Eidos),
-            DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
-        )?;
+        let heights = imported
+            .session
+            .trace_heights()
+            .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+        let estimated_bytes = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+            &ChipletMultiAir::new(),
+            &heights,
+            &precompile_pcs_params(),
+        )
+        .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+        if estimated_bytes > DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES {
+            return Err(PrecompileProvingError::MemoryBudgetExceeded {
+                estimated_bytes,
+                budget_bytes: DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+            });
+        }
         Ok(PreparedSession(imported))
     }
 
