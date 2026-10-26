@@ -603,7 +603,9 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use miden_air::ace::{build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config};
+    use miden_air_definitions::ace::{
+        build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
+    };
 
     use super::*;
     /// A group every AIR occupies is indexed correctly by proof-order position, and one with a

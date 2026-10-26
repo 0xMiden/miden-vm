@@ -4,21 +4,20 @@
 //! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
+use miden_air_definitions::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
 use miden_lifted_stark::pcs::PcsParams;
-#[cfg(test)]
-use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
+use crate::config;
 pub use crate::shared::security::{
     CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS, ProofSecurityParameters, protocol_params,
     security_report_with_hash,
 };
-use crate::{config, geometry::NUM_OOD_POINTS};
 
 /// Column alignment of the commitment scheme, in base field elements.
 ///
@@ -397,6 +396,8 @@ pub fn security_report(
 
 #[cfg(test)]
 mod tests {
+    use p3_security::budget::report::QUERY_LABEL;
+
     use super::*;
 
     /// Power-of-two error coefficients make the root-counting bounds exact without using the

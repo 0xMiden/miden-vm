@@ -3,7 +3,13 @@
 //! The digests and commitments below name the relation that proofs are bound to. They are pinned
 //! so that any change to the AIRs or the ACE circuit surfaces as a failing test; the tests in this
 //! module recompute every value from the AIR definitions.
-pub use miden_air_definitions::config::*;
+
+pub use miden_air_definitions::shared::config::{
+    Blake3Config, DEEP_POW_BITS, DIGEST_WIDTH, EidosConfig, EidosLmcs, FOLDING_POW_BITS,
+    KeccakConfig, LOG_BLOWUP, LOG_FOLDING_ARITY, MidenStarkConfig, PROTOCOL_ID, RelationDigest,
+    SPONGE_RATE, blake3_256_config, eidos_config, keccak_config, observe_protocol_params,
+    pcs_params, relation_digest,
+};
 use miden_core::Felt;
 
 /// RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
@@ -52,11 +58,13 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec, vec::Vec};
 
+    use miden_air_definitions::ace::build_recursive_verifier_ace_circuit;
     use miden_core::{Felt, field::QuadFelt};
+    use miden_lifted_air::Statement;
     use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs, pcs::PcsParams};
     use p3_challenger::CanObserve;
 
-    use crate::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement, ace};
+    use crate::{MidenMultiAir, NUM_PUBLIC_VALUES};
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
                                in air/src/config.rs and update \
@@ -90,7 +98,7 @@ mod tests {
     #[test]
     fn relation_digest_matches_current_air() {
         let circuit =
-            ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
+            build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
         let digest = super::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
@@ -112,7 +120,7 @@ mod tests {
     /// would let a proof be verified against a circuit the protocol constant never committed to.
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
-        let expected: Vec<u64> = ace::build_recursive_verifier_ace_circuit()
+        let expected: Vec<u64> = build_recursive_verifier_ace_circuit()
             .expect("recursive-verifier ACE circuit")
             .commitment
             .iter()

@@ -1,5 +1,11 @@
 //! Circuit adapters and embedded recursive-verifier instructions.
-pub use miden_air_definitions::ace::*;
+
+pub use miden_ace_codegen::RecursiveAceCircuit;
+#[cfg(feature = "compiler")]
+pub use miden_air_definitions::ace::{
+    CapturedAir, CompiledRelation, LayoutKind, build_canonical_multi_air_ace_circuit,
+    build_recursive_verifier_ace_circuit, recursive_verifier_ace_config,
+};
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
 const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =
@@ -36,6 +42,8 @@ pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::ace::build_recursive_verifier_ace_circuit;
+
     use super::*;
 
     #[test]

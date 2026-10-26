@@ -2,12 +2,9 @@
 //!
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
+use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 use miden_core::{Felt, Word};
-
-use crate::{
-    precompiles::ace::PvmRecursiveAceCircuit,
-    shared::security::{AirShape, LookupShape},
-};
+use p3_security::budget::{AirShape, LookupShape};
 
 /// Pinned identity of the precompile relation (raw canonical u64 limbs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,6 +81,8 @@ impl ProtocolMetadata {
 
 include!(concat!(env!("OUT_DIR"), "/pvm_protocol.rs"));
 
+static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_instructions.rs"));
+
 /// Encoded circuit shape of the precompile relation.
 pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = PROTOCOL.circuit_shape;
 
@@ -106,8 +105,6 @@ pub fn recursive_circuit() -> PvmRecursiveAceCircuit {
         instructions: ACE_INSTRUCTIONS.iter().copied().map(Felt::new_unchecked).collect(),
     }
 }
-
-static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_instructions.rs"));
 
 #[cfg(test)]
 mod tests {

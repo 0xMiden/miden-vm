@@ -1,3 +1,5 @@
+//! Production precompile AIR adapters and build-generated evaluation.
+
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::precompiles as definitions;
@@ -6,10 +8,19 @@ use miden_lifted_air::{
     BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
 
+mod degrees {
+    use miden_lifted_air::ConstraintDegrees;
+
+    use super::ChipletAir;
+
+    include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
+}
+
 #[allow(clippy::eq_op)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/pvm_evaluators.rs"));
 }
+
 /// Number of AIR instances in the precompile relation.
 pub const NUM_CHIPLETS: usize = definitions::NUM_CHIPLETS;
 
@@ -51,12 +62,12 @@ impl ChipletAir {
             Self::Sha256 => definitions::ChipletAir::Sha256,
         }
     }
-}
-impl ChipletAir {
+
     /// The twelve AIRs in canonical prover trace order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         definitions::ChipletAir::all().map(Self::from_definition)
     }
+
     pub fn from_definition(air: definitions::ChipletAir) -> Self {
         match air {
             definitions::ChipletAir::ChunkNodeSponge => Self::ChunkNodeSponge,
@@ -73,6 +84,7 @@ impl ChipletAir {
             definitions::ChipletAir::Sha256 => Self::Sha256,
         }
     }
+
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
     /// `BytePairLut` commits its main and preprocessed traces at
@@ -87,27 +99,24 @@ impl BaseAir<Felt> for ChipletAir {
     fn width(&self) -> usize {
         self.definition().width()
     }
+
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         self.definition().preprocessed_trace()
     }
+
     fn preprocessed_width(&self) -> usize {
         self.definition().preprocessed_width()
     }
+
     fn num_public_values(&self) -> usize {
         self.definition().num_public_values()
     }
+
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         self.definition().periodic_columns().into_owned().into()
     }
 }
 
-mod degrees {
-    use miden_lifted_air::ConstraintDegrees;
-
-    use super::ChipletAir;
-
-    include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
-}
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
         degrees::generated_degrees(self)
@@ -120,12 +129,15 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn num_randomness(&self) -> usize {
         self.definition().num_randomness()
     }
+
     fn aux_width(&self) -> usize {
         self.definition().aux_width()
     }
+
     fn num_aux_values(&self) -> usize {
         self.definition().num_aux_values()
     }
+
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
@@ -135,6 +147,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         self.definition().build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
+
     fn build_aux_trace_with_preprocessed(
         &self,
         main: &RowMajorMatrix<Felt>,
@@ -151,6 +164,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             challenges,
         )
     }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::ChunkNodeSponge => generated::eval_chunk_node_sponge(builder),
@@ -174,6 +188,7 @@ pub struct ChipletMultiAir {
     airs: Vec<ChipletAir>,
     definition: definitions::ChipletMultiAir,
 }
+
 impl ChipletMultiAir {
     pub fn new() -> Self {
         let definition = definitions::ChipletMultiAir::new();
@@ -185,19 +200,24 @@ impl ChipletMultiAir {
         &self.definition
     }
 }
+
 impl Default for ChipletMultiAir {
     fn default() -> Self {
         Self::new()
     }
 }
+
 impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     type Air = ChipletAir;
+
     fn airs(&self) -> &[ChipletAir] {
         &self.airs
     }
+
     fn max_aux_inputs(&self) -> usize {
         self.definition().max_aux_inputs()
     }
+
     fn observe<C: p3_challenger::CanObserve<Felt>>(
         &self,
         challenger: &mut C,
@@ -207,6 +227,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     ) {
         self.definition().observe(challenger, air_inputs, aux_inputs, heights)
     }
+
     fn eval_external(
         &self,
         challenges: &[QuadFelt],

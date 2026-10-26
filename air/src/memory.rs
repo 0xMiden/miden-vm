@@ -20,10 +20,14 @@
 //! modelled here, not total process RSS. It also does not cover the precompile prover's memory
 //! footprint.
 
-use miden_core::field::{BasedVectorSpace, QuadFelt};
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, QuadFelt},
+};
+use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
 
-use crate::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use crate::{AIRS, MIDEN_AIR_COUNT, MidenAir};
 
 // CONSTANTS
 // ================================================================================================
