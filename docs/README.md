@@ -51,7 +51,9 @@ override.
 
 The security overrides require `postcss-selector-parser` 7.1.6 or newer and
 Tinypool 2.1.2 or newer because the build dependencies still request older major
-versions. They also update `serialize-javascript` and the `uuid` dependency of
+versions. They require DOMPurify 3.4.17 or newer to address
+[GHSA-cg2g-xh64-v4q7](https://github.com/advisories/GHSA-cg2g-xh64-v4q7).
+They also update `serialize-javascript` and the `uuid` dependency of
 `sockjs` beyond the vulnerable versions required by their parents. Remove these
 overrides when upstream dependency ranges include patched versions.
 
