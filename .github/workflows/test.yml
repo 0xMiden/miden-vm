@@ -318,6 +318,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Run masm examples
         run: make run-examples
 
