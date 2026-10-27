@@ -56,6 +56,7 @@ miden-utils-sync.workspace = true
 # External dependencies
 derive_more.workspace = true
 log.workspace = true
+p3-matrix.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 

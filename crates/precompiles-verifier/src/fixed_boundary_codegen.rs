@@ -8,7 +8,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_precompiles_air::{
+use miden_air::precompiles::{
     fixed::{self, CurveId, FixedEcGroup, FixedUint, FixedUintKind},
     relations::MAX_MESSAGE_WIDTH,
 };

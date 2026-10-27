@@ -19,14 +19,14 @@ concurrent = [
     "std",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
-    "miden-precompiles-air/concurrent",
+    "miden-air/concurrent",
 ]
 fixture-tools = ["std", "dep:miden-precompiles-verifier"]
 testing = ["std"]
 std = [
     "miden-core/std",
     "miden-crypto/std",
-    "miden-precompiles-air/std",
+    "miden-air/std",
     "miden-precompiles/std",
     "miden-utils-sync/std",
     "thiserror/std",
@@ -37,7 +37,7 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
-miden-precompiles-air.workspace = true
+miden-air.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-verifier = { workspace = true, optional = true }
 miden-utils-sync.workspace = true
@@ -57,7 +57,6 @@ required-features = ["fixture-tools"]
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
 k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std", "testing"] }
-miden-precompiles-air = { workspace = true, features = ["testing"] }
 miden-precompiles-verifier = { workspace = true, features = ["std"] }
 proptest = { workspace = true, features = ["std"] }
 # Kept for upstream test files (e.g. the #3943 AIR-constraint tests) that still sample

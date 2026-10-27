@@ -1,6 +1,7 @@
 use core::num::NonZeroUsize;
 
 use super::{InputKey, SELECTORS_PER_AIR};
+#[cfg(any(test, feature = "compiler"))]
 use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
@@ -125,12 +126,20 @@ impl InputLayout {
         super::InputKeyMapper { layout: self }
     }
 
+    /// Number of quotient coordinate READ slots, including committed row padding.
+    ///
+    /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
+    pub fn quotient_width(&self) -> usize {
+        self.regions.quotient_curr.width
+    }
+
     /// Map a logical `InputKey` into the flat input index, if present.
     pub fn index(&self, key: InputKey) -> Option<usize> {
         self.mapper().index_of(key)
     }
 
     /// Validate internal layout invariants.
+    #[cfg(any(test, feature = "compiler"))]
     pub(crate) fn validate(&self) {
         let mut max_end = 0usize;
         for region in [
@@ -168,13 +177,13 @@ impl InputLayout {
         assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
 
         let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
-        assert_eq!(
-            self.regions.quotient_curr.width, quotient_width,
-            "quotient_curr width mismatch"
+        assert!(
+            self.regions.quotient_curr.width >= quotient_width,
+            "quotient_curr omits logical chunks"
         );
         assert_eq!(
-            self.regions.quotient_next.width, quotient_width,
-            "quotient_next width mismatch"
+            self.regions.quotient_next.width, self.regions.quotient_curr.width,
+            "quotient row widths differ"
         );
         assert_eq!(
             self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,

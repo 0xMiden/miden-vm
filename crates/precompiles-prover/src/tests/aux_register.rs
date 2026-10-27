@@ -11,8 +11,8 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_stark::air::ExtensionBuilder;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

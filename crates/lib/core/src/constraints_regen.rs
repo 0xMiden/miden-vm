@@ -1,34 +1,23 @@
 use alloc::{
     format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use std::{fmt::Write as _, fs, io, println};
 
 use miden_ace_codegen::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, OodScatterPlan,
-    ProofOrderMapsConfig, render_proof_order_maps,
+    CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
+    LayoutKind, MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig,
+    RecursiveAceCircuit, RelationGeometry, render_masm_constraints_eval, render_proof_order_maps,
 };
 use miden_air::{
-    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, Statement,
-    ace::{
-        RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
-    },
-    config::{self, relation_digest},
+    MIDEN_AIR_COUNT,
+    config::{self, PROTOCOL_ID, relation_digest},
 };
-use miden_core::{
-    Felt, WORD_SIZE, Word, crypto::hash::Eidos, field::QuadFelt, program::KernelDescriptor,
-};
-use miden_crypto::{
-    hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF},
-    stark::{
-        Preprocessed, QuotientRecompositionInputs, StarkConfig,
-        air::{BaseAir, LiftedAir},
-        lmcs::Lmcs,
-        quotient_recomposition_inputs,
-    },
-};
+use miden_air_definitions::AIRS;
+use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
+use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
+use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -36,8 +25,6 @@ pub enum Mode {
     Write,
 }
 
-const PROTOCOL_ID: u64 = 1;
-const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const VM_WRAPPER_PATH: &str = "asm/sys/vm/mod.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
@@ -48,7 +35,8 @@ const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 const PVM_LAYOUT_PATH: &str = "asm/sys/pvm/layout.masm";
 const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
 const GENERIC_UTILS_PATH: &str = "asm/stark/utils.masm";
-const LMCS_ALIGNMENT: usize = 8;
+/// Per-AIR trace regions are padded to the LMCS sponge rate before concatenation.
+const LMCS_ALIGNMENT: usize = config::SPONGE_RATE;
 
 /// Felts moved by one `adv_pipe`.
 ///
@@ -70,8 +58,13 @@ pub fn run(mode: Mode) -> Result<(), String> {
 }
 
 /// Runs the full regeneration flow.
+///
+/// Generation never accepts a new relation identity: the pinned digests in `miden_air::config`
+/// must already name the circuit the authored AIRs compile to.
 fn write() -> io::Result<()> {
     let artifact = compute_artifacts()?;
+    pinned_identity_matches_artifact(&artifact)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     write_artifacts(&artifact)
 }
 
@@ -86,11 +79,20 @@ fn check() -> Result<(), String> {
     Ok(())
 }
 
-/// Generate a full computed snapshot from the current AIR.
+/// Generate a full computed snapshot from the authored AIRs.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
+    let captured = AIRS
+        .iter()
+        .map(CapturedAir::new)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let airs: Vec<_> = captured.iter().collect();
+    let relation = CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
-    let source = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
+    let source = relation
+        .build_circuit(LayoutKind::Masm)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let input_layout = source.layout();
     let circuit = RecursiveAceCircuit::try_from(
@@ -115,31 +117,21 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
-    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
+    let vm_geometry = VmGeometry::from_compiled(relation.geometry(), input_layout)?;
+    let constraints_eval = render_constraints_eval_file(
+        &circuit,
+        quotient_inputs,
+        &vm_geometry,
+        max_periodic_cycle_len_log(relation.geometry())?,
+    )?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
 
-    let preprocessed_commitments = compute_preprocessed_commitments(relation_digest)?;
-
-    let vm_parameters =
-        render_vm_parameters(&vm_geometry, &relation_digest, &preprocessed_commitments.eidos)?;
-    let mut air_config = read_file(AIR_CONFIG_PATH)?;
-    replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
-    replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_DIGEST", &circuit_digest)?;
-    replace_u8_array_const(
-        &mut air_config,
-        "BLAKE3_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.blake3,
-    )?;
-    replace_u64_array_const(
-        &mut air_config,
-        "EIDOS_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.eidos,
-    )?;
-    replace_u64_array_const(
-        &mut air_config,
-        "KECCAK_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.keccak,
+    // The setup commitment is a trusted verifier input pinned in `miden_air::config`, whose tests
+    // rebuild it from the authored setup trace.
+    let vm_parameters = render_vm_parameters(
+        &vm_geometry,
+        &relation_digest,
+        &config::EIDOS_PREPROCESSED_COMMITMENT,
     )?;
 
     ensure_vm_ace_stream_fits(circuit.stream_len, vm_geometry.ace_circuit_stream_ptr)?;
@@ -150,61 +142,10 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         stream_blocks: circuit.stream_len / 8,
         circuit_digest,
         relation_digest,
-        preprocessed_commitments,
         constraints_eval,
-        air_config,
         vm_ood_frames,
         vm_parameters,
     })
-}
-
-struct PreprocessedCommitments {
-    blake3: [u8; 32],
-    eidos: [u64; 4],
-    keccak: [u64; 4],
-}
-
-type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
-
-fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
-    let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
-        MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
-        vec![],
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let params = config::pcs_params();
-    Ok(PreprocessedCommitments {
-        blake3: compute_preprocessed_commitment(
-            &statement,
-            &config::blake3_256_config(params, digest),
-        )?
-        .into(),
-        eidos: compute_preprocessed_commitment(&statement, &config::eidos_config(params, digest))?
-            .into(),
-        keccak: compute_preprocessed_commitment(
-            &statement,
-            &config::keccak_config(params, digest),
-        )?
-        .into(),
-    })
-}
-
-fn compute_preprocessed_commitment<SC>(
-    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
-    config: &SC,
-) -> io::Result<Commitment<SC>>
-where
-    SC: StarkConfig<Felt, QuadFelt>,
-{
-    Preprocessed::build(statement, config)
-        .map(|preprocessed| preprocessed.commitment())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "canonical verifier statement has no preprocessed trace",
-            )
-        })
 }
 
 fn ensure_vm_ace_stream_fits(stream_len: usize, stream_start: usize) -> io::Result<()> {
@@ -239,6 +180,7 @@ fn check_vm_ace_stream_capacity(
 const OOD_SCATTER_TABLE_FELTS: usize = 64;
 
 struct VmGeometry {
+    raw_preprocessed_widths: Vec<usize>,
     preprocessed_widths: Vec<usize>,
     preprocessed_width: usize,
     main_widths: Vec<usize>,
@@ -262,27 +204,26 @@ struct VmGeometry {
 }
 
 impl VmGeometry {
-    fn from_input_layout(input_layout: &InputLayout) -> io::Result<Self> {
-        let preprocessed_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
-            .collect();
-        let preprocessed_width: usize = preprocessed_widths.iter().sum();
-        let main_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
-            .collect();
-        let main_width: usize = main_widths.iter().sum();
-        let aux_widths: Vec<_> = AIRS
-            .iter()
-            .map(|air| {
-                (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
-                    .next_multiple_of(LMCS_ALIGNMENT)
-            })
-            .collect();
-        let aux_width: usize = aux_widths.iter().sum();
-        let aux_values: Vec<_> =
-            AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect();
+    fn from_compiled(compiled: &RelationGeometry, input_layout: &InputLayout) -> io::Result<Self> {
+        if compiled.airs.len() != MIDEN_AIR_COUNT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the compiled VM relation has {} AIRs, expected {MIDEN_AIR_COUNT}",
+                    compiled.airs.len()
+                ),
+            ));
+        }
+        let raw_preprocessed_widths: Vec<_> =
+            compiled.airs.iter().map(|air| air.preprocessed.raw_width).collect();
+        let preprocessed_widths: Vec<_> =
+            compiled.airs.iter().map(|air| air.preprocessed.width).collect();
+        let preprocessed_width = compiled.preprocessed_width;
+        let main_widths: Vec<_> = compiled.airs.iter().map(|air| air.main.width).collect();
+        let main_width = compiled.main_width;
+        let aux_widths: Vec<_> = compiled.airs.iter().map(|air| air.aux.width).collect();
+        let aux_width = compiled.aux_width;
+        let aux_values: Vec<_> = compiled.airs.iter().map(|air| air.num_aux_boundary).collect();
         if aux_values.as_slice() != [1usize; MIDEN_AIR_COUNT].as_slice() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -292,7 +233,7 @@ impl VmGeometry {
                 ),
             ));
         }
-        let quotient_width = input_layout.counts.num_quotient_chunks * EXT_DEGREE;
+        let quotient_width = compiled.quotient_width;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
 
         for (name, derived, actual) in [
@@ -434,6 +375,7 @@ impl VmGeometry {
         let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs, "ACE circuit stream")?;
 
         Ok(Self {
+            raw_preprocessed_widths,
             preprocessed_widths,
             preprocessed_width,
             main_widths,
@@ -552,13 +494,12 @@ fn render_vm_parameters(
     writeln!(output, "pub const AND8_LOOKUP_LOG_HEIGHT = {and8_log_height}").unwrap();
     writeln!(output, "pub const AND8_LDE_INDEX_MASK = {index_mask}").unwrap();
 
-    let raw_preprocessed: Vec<_> = AIRS.iter().map(BaseAir::<Felt>::preprocessed_width).collect();
     let air_names = AIRS.iter().map(|air| air.name()).collect::<Vec<_>>().join(", ");
     writeln!(output, "\n# Per-AIR widths in canonical order: {air_names}.").unwrap();
     writeln!(
         output,
         "# Preprocessed: {} raw columns -> {} aligned base felts = {}.",
-        format_sum(&raw_preprocessed),
+        format_sum(&geometry.raw_preprocessed_widths),
         format_sum(&geometry.preprocessed_widths),
         geometry.preprocessed_width,
     )
@@ -795,16 +736,13 @@ fn format_sum(parts: &[usize]) -> String {
 
 fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
-    write_file(AIR_CONFIG_PATH, &artifact.air_config)?;
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
     write_file(VM_PARAMETERS_PATH, &artifact.vm_parameters)?;
     println!(
         "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
-    println!("wrote air/src/config.rs (relation and ACE digests, preprocessed commitments)");
     println!("wrote VM recursive-verifier parameters and OOD-frame geometry");
-    println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
 }
 
@@ -816,15 +754,16 @@ fn render_constraints_eval_file(
     circuit: &RecursiveAceCircuit,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     geometry: &VmGeometry,
+    max_cycle_len_log: u32,
 ) -> io::Result<String> {
-    miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
+    render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
         layout_module: "miden::core::sys::vm::layout",
         num_inputs: circuit.num_inputs,
         num_eval_gates: circuit.num_eval_gates,
         stream_len: circuit.stream_len,
-        max_cycle_len_log: max_periodic_cycle_len_log(),
+        max_cycle_len_log,
         num_airs: MIDEN_AIR_COUNT,
         // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
         // evaluator stages them from the proof-order maps; that block is what makes the circuit
@@ -839,19 +778,14 @@ fn render_constraints_eval_file(
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
 }
 
-fn max_periodic_cycle_len_log() -> u32 {
-    let max_len = AIRS
-        .iter()
-        .flat_map(|air| <MidenAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
-        .map(|column| column.len())
-        .max()
-        .unwrap_or(1);
-
-    assert!(
-        max_len.is_power_of_two(),
-        "maximum AIR periodic cycle length must be a power of two"
-    );
-    max_len.ilog2()
+fn max_periodic_cycle_len_log(geometry: &RelationGeometry) -> io::Result<u32> {
+    if !geometry.shared_period.is_power_of_two() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "maximum AIR periodic cycle length must be a power of two",
+        ));
+    }
+    Ok(geometry.shared_period.ilog2())
 }
 
 /// Verify that the ACE circuit constants in `constraints_eval.masm` match the current AIR.
@@ -875,30 +809,31 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     relation_digest_matches_artifact(&artifact)
 }
 
-fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
-    let expected = artifact.relation_digest;
-
-    if config::RELATION_DIGEST != expected {
-        return Err("RELATION_DIGEST in air/src/config.rs is stale".into());
-    }
+/// Checks the pinned relation identity against the circuit the authored AIRs compile to.
+fn pinned_identity_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
+    const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
+                               in air/src/config.rs before regenerating";
     if config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
-        return Err(
+        return Err(format!(
             "ACE_CIRCUIT_DIGEST in air/src/config.rs is stale (it binds the transcript to the \
-             one circuit the recursive verifier evaluates)"
-                .into(),
-        );
+             one circuit the recursive verifier evaluates): expected {:?}; {UPDATE_HINT}",
+            artifact.circuit_digest.map(|felt| felt.as_canonical_u64())
+        ));
     }
+    if config::RELATION_DIGEST != artifact.relation_digest {
+        return Err(format!(
+            "RELATION_DIGEST in air/src/config.rs is stale: expected {:?}; {UPDATE_HINT}",
+            artifact.relation_digest.map(|felt| felt.as_canonical_u64())
+        ));
+    }
+    Ok(())
+}
+
+fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
+    pinned_identity_matches_artifact(artifact)?;
 
     if read_file(VM_PARAMETERS_PATH).map_err(|err| err.to_string())? != artifact.vm_parameters {
         return Err(format!("{VM_PARAMETERS_PATH} is stale"));
-    }
-
-    let commitments = &artifact.preprocessed_commitments;
-    if config::BLAKE3_PREPROCESSED_COMMITMENT != commitments.blake3
-        || config::EIDOS_PREPROCESSED_COMMITMENT != commitments.eidos
-        || config::KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
-    {
-        return Err("preprocessed commitments in air/src/config.rs are stale".into());
     }
 
     // The generated map/scatter hook is specialized to one block per AIR. A stale value would
@@ -1107,108 +1042,6 @@ where
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
 }
 
-fn replace_felt_array_const(
-    content: &mut String,
-    name: &str,
-    values: &[Felt; 4],
-) -> io::Result<()> {
-    let mut body: String = values
-        .iter()
-        .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
-        .collect();
-    body.push('\n');
-    replace_rust_array_const(content, "pub const", name, &body)
-}
-
-fn replace_u64_array_const(content: &mut String, name: &str, values: &[u64; 4]) -> io::Result<()> {
-    let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
-    body.push('\n');
-    replace_rust_array_const(content, "pub const", name, &body)
-}
-
-fn replace_u8_array_const(content: &mut String, name: &str, values: &[u8; 32]) -> io::Result<()> {
-    let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
-    body.push('\n');
-    replace_rust_array_const(content, "pub const", name, &body)
-}
-
-fn replace_rust_array_const(
-    content: &mut String,
-    declaration_prefix: &str,
-    name: &str,
-    body: &str,
-) -> io::Result<()> {
-    let marker = format!("{declaration_prefix} {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    if content[start + marker.len()..].contains(&marker) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{name} is declared more than once"),
-        ));
-    }
-
-    // These generated declarations keep `=` on the declaration line, while rustfmt may put the
-    // opening bracket on the next line. Anchoring the assignment to that line prevents a malformed
-    // declaration from borrowing an initializer from a later item.
-    let declaration_end = content[start..]
-        .find('\n')
-        .map(|offset| start + offset)
-        .unwrap_or(content.len());
-    let assign = content[start + marker.len()..declaration_end]
-        .find('=')
-        .map(|offset| start + marker.len() + offset)
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-
-    let init_start = content[assign + 1..]
-        .find(|character: char| !character.is_whitespace())
-        .map(|offset| assign + 1 + offset)
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    if content.as_bytes()[init_start] != b'[' {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{name} initializer not found"),
-        ));
-    }
-
-    // rustfmt either closes a short array on the opening line or places the top-level `];` at
-    // column zero. Array body lines are indented. Stop at the first other unindented line so a
-    // malformed target cannot consume syntax (including brackets in strings or comments) from a
-    // later item.
-    let first_line_end = content[init_start..]
-        .find('\n')
-        .map(|offset| init_start + offset)
-        .unwrap_or(content.len());
-    let mut terminator_end = content[init_start..first_line_end]
-        .find("];")
-        .map(|offset| init_start + offset + 2);
-    let mut line_start = first_line_end.saturating_add(1);
-    while terminator_end.is_none() && line_start < content.len() {
-        let line_end = content[line_start..]
-            .find('\n')
-            .map(|offset| line_start + offset)
-            .unwrap_or(content.len());
-        let line = &content[line_start..line_end];
-        if line.starts_with("];") {
-            terminator_end = Some(line_start + 2);
-        } else if !line.is_empty() && !line.as_bytes().first().is_some_and(u8::is_ascii_whitespace)
-        {
-            break;
-        }
-        line_start = line_end.saturating_add(1);
-    }
-    let terminator_end = terminator_end.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-    })?;
-    content.replace_range(assign..terminator_end, &format!("= [{body}];"));
-    Ok(())
-}
-
 fn read_file(rel_path: &str) -> io::Result<String> {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
     fs::read_to_string(&path)
@@ -1227,9 +1060,7 @@ struct ComputedArtifacts {
     stream_blocks: usize,
     circuit_digest: [Felt; 4],
     relation_digest: [Felt; 4],
-    preprocessed_commitments: PreprocessedCommitments,
     constraints_eval: String,
-    air_config: String,
     vm_ood_frames: String,
     vm_parameters: String,
 }
@@ -1239,33 +1070,6 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-
-    #[test]
-    fn generated_felt_array_replacement_is_rustfmt_safe_and_fails_closed() {
-        let values = [1, 2, 3, 4].map(Felt::new_unchecked);
-        let name = "RELATION_DIGEST";
-        let declaration = "pub const RELATION_DIGEST: [Felt; 4]";
-        let body = "\n    Felt::new_unchecked(1),\n    Felt::new_unchecked(2),\n    \
-                    Felt::new_unchecked(3),\n    Felt::new_unchecked(4),\n";
-        let following = "pub(crate) const UNTOUCHED: &str = \"];\";\n";
-
-        let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
-        replace_felt_array_const(&mut wrapped, name, &values).unwrap();
-        assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
-
-        let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
-        let original = malformed.clone();
-        let error = replace_felt_array_const(&mut malformed, name, &values).unwrap_err();
-        assert!(error.to_string().contains("terminator not found"));
-        assert_eq!(malformed, original);
-
-        let mut duplicate =
-            format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
-        let original = duplicate.clone();
-        let error = replace_felt_array_const(&mut duplicate, name, &values).unwrap_err();
-        assert!(error.to_string().contains("declared more than once"));
-        assert_eq!(duplicate, original);
-    }
 
     /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
     /// single occupant needs no table at all. Anything between the two would address past the
@@ -1299,6 +1103,7 @@ mod tests {
         let quotient_width = 8;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
         VmGeometry {
+            raw_preprocessed_widths: preprocessed_widths.clone(),
             preprocessed_widths,
             preprocessed_width,
             main_widths,

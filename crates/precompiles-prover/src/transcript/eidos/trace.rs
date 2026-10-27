@@ -3,9 +3,9 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
+use miden_air::precompiles::primitives::byte_pair_lut::eidos::Rotation;
 use miden_core::{Felt, Word, deferred::EidosFrame, utils::RowMajorMatrix};
 use miden_crypto::hash::eidos::Eidos;
-use miden_precompiles_air::primitives::byte_pair_lut::eidos::Rotation;
 
 use super::compression::{
     layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},

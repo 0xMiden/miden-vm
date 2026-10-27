@@ -1,3 +1,3 @@
-pub use miden_precompiles_air::uint::add::*;
+pub use miden_air::precompiles::uint::add::*;
 
 pub mod trace;
