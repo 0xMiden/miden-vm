@@ -27,7 +27,7 @@ pub use miden_core::{
         ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
 };
-pub use miden_core_lib::conjectured_security_estimator_root;
+pub use miden_core_lib::{conjectured_security_estimator_root, proven_security_estimator_root};
 pub use miden_precompiles::{
     CURVE_WORK, HASH_WORK, MSM_WORK, UINT_WORK, default_execution_precompile_limits,
     default_verification_precompile_limits,

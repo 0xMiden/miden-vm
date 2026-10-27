@@ -16,6 +16,7 @@ deferred root.
 | `sys::pvm::request_proof` | `[D, ...]` | `[D, ...]` |
 | `sys::pvm::verify_proof` | `[D, ...]` | `[security_descriptor(12), ...]` |
 | `stark::security::compute_conjectured_security_level` | `[security_descriptor(12), ...]` | `[level, ...]` |
+| `stark::security::compute_proven_security_level` | `[security_descriptor(12), ...]` | `[level, ...]` |
 
 Both verifiers consume their proof data from the advice stack.
 
@@ -33,9 +34,16 @@ Both verifiers return the same twelve-field descriptor, in this stack order:
  log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 ```
 
-These fields give our security estimator the parameters it needs to compute the proof's
-conjectured security level.
-Pass the descriptor unchanged to `compute_conjectured_security_level` and check the returned bit count against your required minimum security target for each MVM and PVM proof.
+Pass the descriptor unchanged to `compute_conjectured_security_level` or
+`compute_proven_security_level` and check the returned bit count against your required minimum
+security target for each MVM and PVM proof. The proven estimator selects the stronger complete
+unique- or list-decoding bound, rounded conservatively to whole bits. It retains the hash and
+Fiat-Shamir assumptions, including Eidos pseudorandomness. Because the descriptor omits the
+quotient-chunk count, the MASM estimate conservatively uses the verifier's maximum of eight
+chunks and constraint degree nine. Its arithmetic bounds can also make it slightly lower than
+the native proven estimate. Estimation is optional and does not change either verifier's
+root. Hosts can identify the proven estimator with
+`miden_core_lib::proven_security_estimator_root()`.
 Remember that the weakest proof limits the security of the whole.
 
 ## Example: settle a deferred execution
@@ -62,6 +70,10 @@ The adapter stores the MVM proof under `proof_request_key(verifier_root, claim_c
 supplies the claim preimage, kernel procedure list, and advice data. MASM derives the same key
 with `procref.vm::verify_proof` and takes `claim_commitment` as public input. If `proof` includes
 a PVM proof, supply it through the separate PVM request described below.
+
+This example enforces 96 bits of conjectured security. To enforce proven security, call
+`compute_proven_security_level` at both estimation sites and choose the application's required
+proven threshold; the same proof generally has a lower proven bound.
 
 ```masm title="settle_deferred.masm"
 use miden::core::sys

@@ -242,3 +242,272 @@ pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDesc
     u32min
     # => [level, ...]
 end
+
+# Conservative Q16 constants for the proven estimator. These are deliberately rounded in
+# the direction that lowers security: logs of error coefficients up, query rates down.
+const PROVEN_SAMPLE_BITS_FP = 8192000
+const PROVEN_AIR_BASE_FP = 8159232
+const PROVEN_LOOKUP_BASE_FP = 8224768
+const LOG2_THREE_LOWER_FP = 103872
+const LOG2_TEN_UPPER_FP = 217706
+const LOG2_CHORD_GAP_FP = 5641
+const LOG2_CHORD_OFFSET_FP = FP_ONE - LOG2_CHORD_GAP_FP
+const UDR_QUERY_RATE_FP = 54399
+const UDR_QUERY_CORRECTION_FP = 21011
+const OOD_CORRECTION_FP = 75640
+const LDR_QUERY_NUMERATOR_FP = 189097
+const LDR_QUERY_LIMIT_FP = 98304
+
+#! Monotone upper bound on `log2(x) * FP_ONE` for `1 <= x <= 65536`: the chord across each
+#! octave, raised by its largest gap below log2 (5641/FP_ONE, at most 0.086 bits excess).
+#! Inputs: [x, ...]. Outputs: [log_upper_fp, ...].
+proc proven_log2_upper(x: u32) -> u32
+    dup u32clz push.31 swap sub
+    dup mul.FP_ONE movdn.2
+    push.16 swap sub u32shl
+    add sub.LOG2_CHORD_OFFSET_FP
+end
+
+#! Monotone lower bound on the LDR query round, from log2(1+1/(2m)) <= 2*log2(e)*a/(a^2-1)
+#! with a=4m+1, rounded up; the numerator fits u32 for m<=1000.
+#! Inputs: [m, queries, query_grinding_fp, ...]. Outputs: [query_fp, ...].
+proc proven_ldr_query(m: u32, queries: u32, query_grinding_fp: u32) -> u32
+    mul.4 add.1
+    dup mul.LDR_QUERY_NUMERATOR_FP sub.1
+    swap dup mul sub.1 u32div add.1
+    push.LDR_QUERY_LIMIT_FP swap sub mul add
+end
+
+#! Evaluates a fixed LDR probe using precomputed U(2m+1) and per-query rate.
+#! Inputs: [rate,U,Q_left,B_left,E,G,queries,grinding,cap,...].
+#! Outputs: [Q_right,B_right,U,Q_left,B_left,E,G,queries,grinding,cap,...].
+proc proven_ldr_probe
+    dup.4 dup.2 sub
+    dup.6 dup.3 mul.3 sub u32min dup.9 u32min
+    dup.7 movup.2 mul dup.8 add
+end
+
+#! Evaluates M=min(1000,H/2). The six possible endpoints have fixed log/query bounds.
+#! Inputs: [h,Q_left,B_left,E,G,queries,grinding,cap,...].
+#! Outputs: [Q_M,B_M,U_M,Q_left,B_left,E,G,queries,grinding,cap,...].
+proc proven_ldr_endpoint
+    dup u32gte.11
+    if.true
+        drop push.723529.98256
+    else
+        dup eq.10
+        if.true
+            drop push.661065.98211
+        else
+            dup eq.9
+            if.true
+                drop push.595593.98119
+            else
+                dup eq.8
+                if.true
+                    drop push.530185.97935
+                else
+                    eq.7
+                    if.true
+                        push.464905.97568
+                    else
+                        push.399881.96838
+                    end
+                end
+            end
+        end
+    end
+    exec.proven_ldr_probe
+end
+
+#! Computes the proven security level: the better of the unique-decoding (UDR) and
+#! list-decoding (LDR) bounds for the descriptor returned by a successful MVM or PVM recursive
+#! verifier. It assumes log blowup 3, log folding arity 2, final degree log 7, two OOD points,
+#! and a 125-bit challenge support, as in the native proven report.
+#!
+#! The conjectured procedure validates the descriptor and supplies a cap K on both regimes.
+#! Within the envelope K is below the UDR composition, OOD, and folding terms, so UDR needs only
+#! its query and batching terms; reaching K or that batching bound skips LDR. LDR evaluates
+#! every round. Its composition, OOD, and lookup terms pay the list size `L+=(2m+1)*sqrt(2)`.
+#!
+#! LDR queries increase with m and every other term decreases. If M=min(1000,H/2) is
+#! query-bound it attains the LDR optimum; otherwise fixed probes bracket the crossing and a
+#! binary search over whole-bit levels finds the best integer m. Rounding is conservative, and
+#! for deployed shapes the result is at most one bit below native.
+#!
+#! Unsupported descriptors trap. Caller stack values and memory are preserved.
+#!
+#! Inputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [level, ...]
+#! Invocation: exec
+@locals(25)
+pub proc compute_proven_security_level(descriptor: types::StackSecurityDescriptor) -> u32
+    # Validate a stack copy. The last input stays as the result's placeholder, so dropping
+    # below the minimum stack depth adds no output padding.
+    repeat.12
+        dup.11
+    end
+    exec.compute_conjectured_security_level mul.FP_ONE loc_store.12
+    drop loc_store.1 drop loc_store.3
+    # => [max_message_width, boundary_terms, fractions_per_row, log_height, ...]
+
+    # Lookup before its list-size loss: 125.5 - U(A) - h - R, with the half bit from L+. It
+    # exceeds U(2M+1)+1/2 by over four bits, so the list-scaled subtractions cannot underflow.
+    add.2 dup.2 mul exec.proven_log2_upper movdn.3
+    exec.lookup_boundary_correction
+    # => [R, log_height, U(A), ...]
+    movup.2 add dup.1 mul.FP_ONE add
+    push.PROVEN_LOOKUP_BASE_FP swap sub loc_store.2
+    loc_store.7
+    loc_store.15 mul.FP_ONE loc_store.16 loc_store.10 dup loc_store.11
+    loc_load.7 pow2 loc_store.17
+
+    # UDR: log2(16/9)-log2(1+2/(9H)) >= 54399/FP_ONE - 21011/(H*FP_ONE).
+    push.UDR_QUERY_CORRECTION_FP sub.1 loc_load.17 u32div add.1
+    push.UDR_QUERY_RATE_FP swap sub
+    loc_load.15 mul loc_load.16 add loc_load.12 u32min loc_store.19
+    loc_load.3 neq.1
+    if.true
+        loc_load.3 sub.1 exec.proven_log2_upper loc_store.23
+        push.PROVEN_SAMPLE_BITS_FP loc_load.10 mul.FP_ONE add
+        loc_load.23 sub loc_load.7 add.3 mul.FP_ONE sub loc_store.18
+        loc_load.19 loc_load.18 u32min loc_store.19
+    else
+        # No batching challenge: this value cannot trigger the batching shortcut below.
+        push.0 loc_store.18
+    end
+
+    loc_load.19 loc_load.12 eq
+    loc_load.3 neq.1 loc_load.19 loc_load.18 eq and or
+    if.false
+        # E combines composition, OOD, and lookup before their common list-size loss
+        # U(2m+1)+1/2. OOD bounds log2(10H+8), allowing degree nine and eight quotient chunks.
+        loc_load.7 mul.FP_ONE add.LOG2_TEN_UPPER_FP
+        push.OOD_CORRECTION_FP sub.1 loc_load.17 u32div add.1 add
+        loc_load.1 sub.1 loc_load.17 u32div u32gte.8
+        if.true
+            loc_load.1 exec.proven_log2_upper u32max
+        end
+        # If composed<=8H, U(composed)<=h+3+5641/FP_ONE<h+log2(10), so OOD dominates.
+        push.PROVEN_AIR_BASE_FP swap sub
+        loc_load.2 u32min loc_store.13
+
+        # D constant bounds 2h+6-log2(H-1) by h+6+log2(e)/(H-1).
+        loc_load.7 add.6 mul.FP_ONE
+        push.LOG2_E_FP sub.1 loc_load.17 sub.1 u32div add.1 add loc_store.24
+        # G is the weaker of batching and folding before their common loss 3U(2m+1), from
+        # C=64H^2(2m+1)^3/(3(H-1)) lines. This folding term dominates Plonky3's n/|F| term.
+        push.16777216
+        loc_load.3 neq.1
+        if.true
+            push.PROVEN_SAMPLE_BITS_FP loc_load.10 mul.FP_ONE add
+            add.LOG2_THREE_LOWER_FP loc_load.23 sub loc_load.24 sub u32min
+        end
+        loc_load.7 u32gt.7
+        if.true
+            push.PROVEN_SAMPLE_BITS_FP loc_load.11 mul.FP_ONE add
+            loc_load.24 sub u32min
+        end
+        loc_store.14
+
+        # Q(M)<=B(M) gives Q(m)<=Q(M)<=B(M)<=B(m) for every m<=M, so M attains the optimum.
+        loc_load.12 loc_load.16 loc_load.15 loc_load.14 loc_load.13
+        push.0.0 loc_load.7 exec.proven_ldr_endpoint
+        # => [Q(M), B(M), U(2M+1), 0, 0, E, G, queries, grinding, K, ...]
+        dup dup.2 u32lte
+        if.true
+            u32min loc_load.19 u32max loc_store.19
+            dropw dropw
+        else
+            # The M endpoint stays below K for the probe chain. The lower endpoint uses exact
+            # constants for U(7) and its rational query rate.
+            movdn.9 movdn.9 movdn.9
+            push.185865.83671 exec.proven_ldr_probe
+            # => [Q(3), B(3), U(7), 0, 0, E, G, queries, grinding, K, Q(M), B(M), U(2M+1), ...]
+            dup dup.2 u32gte
+            if.true
+                # Query >= nonquery at m=3: every later m has a weaker nonquery bound.
+                drop loc_load.19 u32max loc_store.19
+                dropw dropw drop drop drop
+            else
+                # Fixed probes retain both endpoints and E/G/query constants on the stack.
+                # Adjacent nonquery losses and the final 35..M query increase are below
+                # three bits, so the resulting whole-bit search needs at most two tests.
+                movup.2 drop movup.2 drop movup.2 drop
+                push.243209.90727 exec.proven_ldr_probe
+                dup dup.2 u32lt
+                if.true
+                    movup.2 drop movup.2 drop movup.2 drop
+                    push.304649.94443 exec.proven_ldr_probe
+                    dup dup.2 u32lt
+                    if.true
+                        movup.2 drop movup.2 drop movup.2 drop
+                        push.368137.96354 exec.proven_ldr_probe
+                        dup dup.2 u32lt
+                        if.true
+                            movup.2 drop movup.2 drop movup.2 drop
+                            loc_load.7 u32gt.6
+                            if.true
+                                push.406025.96962 exec.proven_ldr_probe
+                                dup dup.2 u32lt
+                                if.true
+                                    movup.2 drop movup.2 drop movup.2 drop
+                                    dup.9 dup.9 dup.9
+                                end
+                            else
+                                dup.9 dup.9 dup.9
+                            end
+                        end
+                    end
+                end
+                loc_store.22 loc_store.24 loc_store.23 loc_store.21 loc_store.20
+                dropw dropw
+                # All earlier probes are query-bound and all later points are nonquery-bound.
+                # Lower=max(UDR,Q(left),min(Q(right),B(right))); upper=min(Q(right),B(left)).
+                loc_load.22 loc_load.24 u32min loc_load.21 u32max loc_load.19 u32max
+                u32shr.FP_SHIFT loc_store.19
+                loc_load.22 loc_load.20 u32min u32shr.FP_SHIFT loc_store.20
+
+                # Keep [lower, upper, U(2R+1), E, G, queries, query grinding] on the stack.
+                # Upper<=floor(B(3)), so E-T and G-T are nonnegative and budget>=U(7).
+                loc_load.16 loc_load.15 loc_load.14 loc_load.13 loc_load.23
+                loc_load.20 loc_load.19
+                dup dup.2 add add.1 u32div.2
+                dup.1 dup.3 u32lt
+                while.true
+                    # => [target_bits, lower, upper, U(2R+1), E, G, queries, grinding, ...]
+                    dup mul.FP_ONE dup.5 swap sub
+                    dup.1 mul.FP_ONE dup.7 swap sub u32div.3 u32min
+                    dup.4 u32min
+                    # budget=min(E-T,(G-T)/3,U(2R+1)). Its dyadic index is
+                    # k=floor((budget-5641)/FP_ONE), and the normalized mantissa is
+                    # FP_ONE+(budget-5641)%FP_ONE. Invert that affine piece exactly.
+                    sub.LOG2_CHORD_GAP_FP u32divmod.FP_ONE add.FP_ONE
+                    swap push.16 swap sub u32shr
+                    sub.1 u32div.2
+                    # Convert x_max to the greatest m with odd 2m+1<=x_max; test its query.
+                    dup.8 dup.8 movup.2 exec.proven_ldr_query
+                    dup dup.2 mul.FP_ONE u32gte
+                    if.true
+                        # For m below this one, queries are at most Q(m); above it,
+                        # nonquery<T<=Q(m). Thus floor(Q(m)) also bounds the optimum above.
+                        u32shr.FP_SHIFT movup.3 u32min swap movup.2 drop
+                    else
+                        # B(m)>=T>Q(m), so the failed target still supplies an attained
+                        # lower bound floor(Q(m)). Retain it while lowering upper to T-1.
+                        u32shr.FP_SHIFT movup.2 u32max
+                        swap sub.1 movup.2 drop swap
+                    end
+                    dup dup.2 add add.1 u32div.2
+                    dup.1 dup.3 u32lt
+                end
+                drop swap drop movdn.5 dropw drop
+                mul.FP_ONE loc_store.19
+            end
+        end
+    end
+    loc_load.19 loc_load.12 u32min u32shr.FP_SHIFT
+    swap drop
+end

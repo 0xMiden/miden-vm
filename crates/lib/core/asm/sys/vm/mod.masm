@@ -213,8 +213,9 @@ end
 #! Fiat-Shamir transcript. The maximum trace height is likewise transcript-bound. The remaining
 #! descriptor fields are fixed by this verifier's relation, except for the boundary count derived
 #! from the kernel witness authenticated against the claim. The caller passes the returned twelve
-#! elements unchanged to `stark::security::compute_conjectured_security_level`, then applies its
-#! own acceptance policy. The estimation formula and policy remain outside this procedure.
+#! elements unchanged to `stark::security::compute_conjectured_security_level` or
+#! `stark::security::compute_proven_security_level`, then applies its own acceptance policy. The
+#! estimation formula and policy remain outside this procedure.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this
 #! procedure.

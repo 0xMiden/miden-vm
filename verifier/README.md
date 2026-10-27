@@ -40,8 +40,10 @@ parameters, so callers can estimate the corresponding security levels themselves
 `parameters.conjectured_security_level()` or `parameters.proven_security_level()` for a whole-bit
 level. `parameters.proven_security_report()` exposes both unique- and list-decoding bounds and
 selects the stronger complete bound, including DEEP batching and lookup soundness. Proven bounds
-retain the hash and Fiat-Shamir assumptions, including Eidos pseudorandomness. These are native
-estimates; the recursive MASM estimator and built-in minimum policy use conjectured security.
+retain the hash and Fiat-Shamir assumptions, including Eidos pseudorandomness. Recursive consumers
+can pass the verified descriptor to `stark::security::compute_proven_security_level` and compare its
+conservative whole-bit bound with their own threshold. `miden_core_lib::proven_security_estimator_root()`
+exposes that procedure's root. The built-in native minimum policy uses conjectured security.
 Deferred verification exposes the authenticated obligation through
 `outstanding_precompile_root()`; complete verification returns no outstanding root. See the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof policy.
