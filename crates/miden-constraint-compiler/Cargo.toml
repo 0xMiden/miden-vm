@@ -24,3 +24,4 @@ miden-lifted-stark = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
+p3-field = { workspace = true }

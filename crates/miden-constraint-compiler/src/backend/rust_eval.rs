@@ -538,8 +538,14 @@ fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized
 
 #[cfg(test)]
 mod tests {
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::field::PrimeCharacteristicRing;
+
     use super::*;
-    use crate::ir::{GraphBuilder, OpCounts};
+    use crate::{
+        ir::{GraphBuilder, OpCounts},
+        testing::eval_graph,
+    };
 
     fn constraints(base: Vec<(NodeId, usize)>, ext: Vec<(NodeId, usize)>) -> CapturedConstraints {
         CapturedConstraints {
@@ -756,12 +762,77 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
             }],
         );
     }
+
+    /// Value of a planned rewrite. Scalar multiplications use the specialized
+    /// field methods that the emitted source calls.
+    fn eval_rewrite(values: &[QuadFelt], rewrite: &Rewrite) -> QuadFelt {
+        let value = |id: NodeId| values[id.index()];
+        let scalar = |c: u64| QuadFelt::from(Felt::from_u64(c));
+        match rewrite {
+            Rewrite::Square(x) => value(*x).square(),
+            Rewrite::Scalar { value: x, scalar: c, op, reversed } => {
+                let x = value(*x);
+                match (op, *c) {
+                    (OpKind::Mul, 2) => x.double(),
+                    (OpKind::Mul, 0x7fff_ffff_8000_0001) => x.halve(),
+                    (OpKind::Mul, c) if c.is_power_of_two() => {
+                        x.mul_2exp_u64(c.trailing_zeros().into())
+                    },
+                    (OpKind::Mul, c) => x * scalar(c),
+                    (OpKind::Add, c) => x + scalar(c),
+                    (OpKind::Sub, c) if *reversed => scalar(c) - x,
+                    (OpKind::Sub, c) => x - scalar(c),
+                    (OpKind::Neg, _) => unreachable!("scalar rewrites are binary"),
+                }
+            },
+            Rewrite::Factor { common, scalar: c, left, right } => {
+                c.map_or(value(*common), scalar) * (value(*left) + value(*right))
+            },
+            Rewrite::Sum(pieces) => pieces
+                .iter()
+                .map(|piece| match piece {
+                    Piece::Node(id) => value(*id),
+                    Piece::Dot { pairs, .. } => pairs
+                        .iter()
+                        .map(|&(id, coefficient)| {
+                            value(id)
+                                * match coefficient {
+                                    Coefficient::Node(c) => value(c),
+                                    Coefficient::Scalar(c) => scalar(c),
+                                    Coefficient::One => QuadFelt::ONE,
+                                }
+                        })
+                        .sum(),
+                })
+                .sum(),
+        }
+    }
+
+    /// Every planned rewrite must evaluate to the value of the node it replaces.
+    fn assert_rewrites_preserve_values(graph: &Graph, cons: &CapturedConstraints) {
+        let plan = Plan::new(graph, cons);
+        for seed in [0x243f6a8885a308d3, 0x13198a2e03707344] {
+            let values = eval_graph(graph, seed);
+            for (id, _) in graph.iter() {
+                if let Some(rewrite) = plan.rewrite(id) {
+                    assert_eq!(
+                        eval_rewrite(&values, &rewrite),
+                        values[id.index()],
+                        "node {} rewritten as {rewrite:?} (seed {seed:#x})",
+                        id.index(),
+                    );
+                }
+            }
+        }
+    }
+
     fn optimized(b: GraphBuilder, base: Vec<NodeId>, ext: Vec<NodeId>) -> String {
         let graph = b.freeze();
         let cons = constraints(
             base.iter().enumerate().map(|(i, &r)| (r, i)).collect(),
             ext.iter().enumerate().map(|(i, &r)| (r, base.len() + i)).collect(),
         );
+        assert_rewrites_preserve_values(&graph, &cons);
         let out = emit_optimized_module(
             "//! Test.\n",
             &[AirEvaluator {
