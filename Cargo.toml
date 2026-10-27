@@ -36,7 +36,6 @@ members = [
     "crates/utils-diagnostics",
     "crates/utils-indexing",
     "crates/utils-sync",
-    "crates/verifier-codegen",
     "miden-vm",
     "crates/precompiles",
     "crates/precompiles-verifier",
@@ -83,7 +82,6 @@ overflow-checks = true
 opt-level = 0
 
 [workspace.dependencies]
-askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0.0-rc.1", default-features = false }
 miden-air               = { path = "./air", version = "1.0.0-rc.1", default-features = false }

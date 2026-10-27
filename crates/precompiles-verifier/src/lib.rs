@@ -17,8 +17,14 @@ pub use miden_core::{
 pub(crate) mod ace;
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace_constants;
+#[cfg(feature = "constants-tools")]
+pub mod ace_constants_regen;
+#[cfg(feature = "constants-tools")]
+mod fixed_boundary_codegen;
 #[cfg(feature = "std")]
 pub mod masm_verifier;
+#[cfg(any(test, feature = "constants-tools"))]
+pub(crate) mod pvm_ood_frames;
 mod verify;
 
 pub use verify::{VerifyError, verify_deferred};

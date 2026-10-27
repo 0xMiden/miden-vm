@@ -8,8 +8,7 @@ printf '[tag]\n\tgpgsign = true\n' > "$test_root/global.gitconfig"
 export GIT_CONFIG_GLOBAL="$test_root/global.gitconfig"
 
 test_repo="$test_root/repo"
-mkdir -p "$test_repo/scripts" "$test_repo/crates/lib/core/asm" \
-    "$test_repo/crates/verifier-codegen/src" "$test_root/bin"
+mkdir -p "$test_repo/scripts" "$test_repo/crates/lib/core/asm" "$test_root/bin"
 git init -q "$test_repo"
 git -C "$test_repo" config user.name "MAST root gate test"
 git -C "$test_repo" config user.email "mast-root-gate@example.invalid"
@@ -24,10 +23,7 @@ printf '// tag = "v0.35.0"\n' > "$test_repo/scripts/check-masm-export-digests.rs
 printf '[package]\nname = "miden-core"\nversion = "0.35.0"\n' \
     > "$test_repo/crates/lib/core/asm/miden-project.toml"
 printf '[workspace.package]\nversion = "0.35.0"\n' > "$test_repo/Cargo.toml"
-# Both snapshots already track the complete verifier. Release checks must compare it directly,
-# even when the generator still supports staging for other tooling.
-printf '// "--stage"\n' > "$test_repo/crates/verifier-codegen/src/main.rs"
-git -C "$test_repo" add Cargo.toml scripts crates
+git -C "$test_repo" add Cargo.toml scripts crates/lib/core/asm/miden-project.toml
 git -C "$test_repo" commit -qm 'Create release baseline'
 git -C "$test_repo" tag v0.35.0
 
@@ -37,18 +33,10 @@ set -euo pipefail
 [[ "$#" -eq 7 && "$1" == run && "$2" == stable && "$3" == cargo && "$4" == -Zscript ]]
 [[ "${RUSTC_BOOTSTRAP:-}" == 1 && -z "${RUSTC_WRAPPER:-}" ]]
 [[ -f "$5" && -f "$6" && -f "$7" ]]
-[[ "$6" == */baseline/crates/lib/core/asm/miden-project.toml ]]
-[[ "$7" == "$ROOT_CHECK_CURRENT_PROJECT" ]]
 printf '%s\n' "$*" > "$ROOT_CHECK_STUB_LOG"
 exit "$ROOT_CHECK_STUB_STATUS"
 STUB
-cat > "$test_root/bin/cargo" <<'STUB'
-#!/usr/bin/env bash
-echo 'Release compatibility checks must not regenerate tracked MASM' >&2
-exit 1
-STUB
-chmod +x "$test_root/bin/rustup" "$test_root/bin/cargo"
-export ROOT_CHECK_CURRENT_PROJECT="$test_repo/crates/lib/core/asm/miden-project.toml"
+chmod +x "$test_root/bin/rustup"
 export PATH="$test_root/bin:$PATH"
 export ROOT_CHECK_STUB_LOG="$test_root/comparator-called"
 

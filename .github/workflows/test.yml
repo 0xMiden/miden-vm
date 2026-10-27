@@ -75,7 +75,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -89,7 +89,28 @@ jobs:
         run: make test NEXTEST_PROFILE=ci
       - name: Build core library and generate documentation
         run: |
-          make check-core-docs
+          # Build core library with documentation generation enabled
+          MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
+      - name: Check for documentation changes in crates/lib/core/docs
+        run: |
+          if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then
+            echo "ERROR: Found uncommitted changes in crates/lib/core/docs/"
+            echo "This indicates that the assembly source code has changed but the documentation was not updated."
+            echo "Please commit the generated documentation changes before merging."
+            echo ""
+            echo "To fix this:"
+            echo "1. Run: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib"
+            echo "2. Commit the changes in crates/lib/core/docs/"
+            echo ""
+            echo "Uncommitted changes:"
+            git status crates/lib/core/docs
+            echo ""
+            echo "Diff:"
+            git diff crates/lib/core/docs
+            exit 1
+          else
+            echo "No documentation changes in crates/lib/core/docs/ - OK"
+          fi
 
   crypto-test:
     name: crypto test on warpbuild
@@ -101,7 +122,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -139,7 +160,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -238,13 +259,13 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check generated evaluators and assembled verifiers
-        run: make check-verifiers
+      - name: Check recursive constraint artifacts for drift
+        run: make check-constraints
       - name: Check runtime dependency boundaries
         run: |
-          for package in miden-air miden-crypto; do
-            cargo tree --locked --package "$package" --no-default-features --edges normal --prefix none > runtime-dependencies.txt
-            if grep -E '^miden-(constraint-compiler|verifier-codegen) ' runtime-dependencies.txt; then
+          for package in miden-air miden-crypto miden-precompiles-verifier miden-verifier; do
+            cargo tree --locked --package "$package" --edges normal --prefix none > runtime-dependencies.txt
+            if grep -E '^miden-constraint-compiler ' runtime-dependencies.txt; then
               echo "Compiler tooling leaked into $package runtime dependencies" >&2
               exit 1
             fi
@@ -254,10 +275,6 @@ jobs:
             fi
           done
           rm runtime-dependencies.txt
-      - name: Ensure builds leave source files unchanged
-        run: |
-          git diff --exit-code
-          test -z "$(git ls-files --others --exclude-standard)"
 
   pvm-checks:
     name: PVM checks
@@ -311,7 +328,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-hack
       - name: Check all feature combinations

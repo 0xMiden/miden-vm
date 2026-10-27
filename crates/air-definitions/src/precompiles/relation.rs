@@ -73,7 +73,7 @@ pub struct AuxBoundaryPlan {
 }
 
 impl AuxBoundaryPlan {
-    pub fn for_airs(airs: &[ChipletAir]) -> Self {
+    fn for_airs(airs: &[ChipletAir]) -> Self {
         Self {
             values_per_air: airs.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect(),
             reduction: AuxBoundaryReduction::TraceLengthWeightedSum,

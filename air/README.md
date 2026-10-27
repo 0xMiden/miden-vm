@@ -1,7 +1,7 @@
 # Miden VM AIR
 This crate contains the production VM and precompile AIRs. Precompile APIs live in `miden_air::precompiles`; handwritten definitions live in `miden-air-definitions`, with shared configuration, Eidos equations, and lookup contracts owned there.
 
-Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. Compiler tooling is a build dependency and is optional for runtime consumers. Complete generated verifier MASM is tracked in the core library; `make regenerate-verifiers` updates it and `make check-verifiers` checks freshness and the explicit protocol identity pins.
+Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. Compiler tooling is a build dependency and is optional for runtime consumers. The recursive verifier MASM in the core library imports parameters generated from the same captures; see [Maintaining recursive-verifier MASM](../crates/lib/core/RECURSIVE_VERIFIER.md).
 
 AIR is a STARK-specific format of describing a computation. It consists of defining a set of constraints expressed as low-degree polynomials. Miden prover evaluates these polynomials over an execution trace produced by Miden processor and includes the results in the execution proof. To verify the proof, the verifier checks that the constraints are evaluated correctly against the execution trace committed to by the prover.
 

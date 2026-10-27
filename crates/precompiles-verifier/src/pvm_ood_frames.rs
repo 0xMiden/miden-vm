@@ -8,18 +8,17 @@
 //! Everything below is derived from the compiled relation's chiplet widths, so a chiplet width
 //! change moves the destinations, the `pipe_k` set and the dispatch table together.
 
-use core::{fmt::Write as _, ops::Range};
-use std::{
+use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
+use core::{fmt::Write as _, ops::Range};
 
 use miden_ace_codegen::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
     render_proof_order_maps,
 };
-#[cfg(test)]
 use miden_air::precompiles::NUM_CHIPLETS;
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
@@ -57,13 +56,20 @@ impl PvmOodGeometry {
         compiled: &RelationGeometry,
         layout: &InputLayout,
     ) -> Result<Self, String> {
+        if compiled.trace_alignment != LMCS_ALIGNMENT {
+            return Err(format!(
+                "the PVM relation is compiled with trace alignment {}, expected {LMCS_ALIGNMENT}",
+                compiled.trace_alignment
+            ));
+        }
         let preprocessed = compiled.airs.iter().map(|air| air.preprocessed.width).collect();
         let main = compiled.airs.iter().map(|air| air.main.width).collect();
         let aux = compiled.airs.iter().map(|air| air.aux.width).collect();
         let aux_values: Vec<_> = compiled.airs.iter().map(|air| air.num_aux_boundary).collect();
-        if aux_values.iter().any(|&count| count != 1) {
+        if aux_values.as_slice() != [1usize; NUM_CHIPLETS].as_slice() {
             return Err(format!(
-                "PVM boundary scatter requires one auxiliary value per AIR, got {aux_values:?}"
+                "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
+                 chiplet, got {aux_values:?}"
             ));
         }
         let geometry = Self {
@@ -147,6 +153,7 @@ impl PvmOodGeometry {
     /// These are base-field widths: auxiliary columns have already been expanded into extension
     /// coordinates above, while out-of-domain transport expands every evaluation once more in
     /// [`Self::row_felts`].
+    #[cfg(feature = "constants-tools")]
     pub(crate) fn deep_query_groups(&self) -> [(&'static str, &'static str, usize); 4] {
         [
             (
@@ -191,6 +198,7 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<OodScatterPlan, String>
 }
 
 /// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
+#[cfg(any(test, feature = "constants-tools"))]
 pub(crate) fn pvm_scatter_table_layout(
     geometry: &PvmOodGeometry,
 ) -> Result<PvmScatterTableLayout, String> {
@@ -220,7 +228,7 @@ pub(crate) fn render_pvm_ood_frames(
     let row_felts = geometry.row_felts();
     let row_blocks = geometry.row_blocks();
     let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
-        num_airs: geometry.main.len(),
+        num_airs: NUM_CHIPLETS,
         heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
         pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
         id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
@@ -249,7 +257,7 @@ use miden::core::sys::pvm::layout
 # split into {segments} segments ({dispatched} of them order-dependent).
 
 {procedures}"#,
-        generated_by = super::pvm::GENERATED_BY,
+        generated_by = crate::ace_constants::GENERATED_BY,
         preprocessed_parts = format_sum(&geometry.preprocessed),
         preprocessed = geometry.preprocessed.iter().sum::<usize>(),
         main_parts = format_sum(&geometry.main),
@@ -266,16 +274,63 @@ use miden::core::sys::pvm::layout
 
 #[cfg(test)]
 mod tests {
-    use miden_air::precompiles::ace::build_canonical_precompile_ace_circuit;
+    use alloc::vec;
+
+    use miden_ace_codegen::LayoutKind;
+    use miden_air_definitions::precompiles::{
+        ace::build_canonical_precompile_ace_circuit, relation::CapturedPvmRelation,
+    };
 
     use super::*;
-    fn live_geometry() -> PvmOodGeometry {
-        let captured =
-            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
-        let compiled = captured.compile().unwrap();
-        let canonical = compiled.build_circuit(miden_ace_codegen::LayoutKind::Masm).unwrap();
-        PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout()).unwrap()
+
+    const HOOK_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/ood_frames.masm");
+
+    pub(crate) fn live_geometry() -> PvmOodGeometry {
+        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
+        let compiled = captured.compile().expect("compiled PVM relation");
+        let canonical = compiled.build_circuit(LayoutKind::Masm).expect("PVM canonical circuit");
+        PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout())
+            .expect("PVM out-of-domain geometry")
     }
+
+    /// Pins the per-chiplet row geometry and dispatch plan derived from the canonical circuit
+    /// layout.
+    #[test]
+    fn pvm_row_geometry_is_the_one_the_hook_was_rendered_from() {
+        let geometry = live_geometry();
+        assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(geometry.main, vec![96, 112, 64, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
+        assert_eq!(geometry.aux, vec![40, 40, 24, 8, 24, 56, 8, 8, 24, 24, 32, 24]);
+        assert_eq!(geometry.quotient, 8);
+        assert_eq!(geometry.row_felts(), 1_824);
+        assert_eq!(geometry.row_blocks(), 228);
+
+        let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
+        assert_eq!(plan.segment_count(), 26, "one segment per occupied per-chiplet block");
+        assert_eq!(plan.dispatched_slots(), 24, "main and aux are the order-dependent groups");
+        assert_eq!(
+            pvm_scatter_table_layout(&geometry).unwrap(),
+            PvmScatterTableLayout {
+                proof_order_pairs: 4..52,
+                pipe_digests: 52..88,
+            }
+        );
+    }
+
+    /// The checked-in hook must be exactly what the current chiplet widths render.
+    #[test]
+    fn generated_pvm_ood_hook_is_up_to_date() {
+        // The generated layout pads `pos_by_id` to a word, so `id_by_pos` is word-aligned.
+        let rendered = render_pvm_ood_frames(&live_geometry(), true).expect("render the PVM hook");
+        let checked_in = std::fs::read_to_string(HOOK_PATH)
+            .unwrap_or_else(|err| panic!("failed to read {HOOK_PATH}: {err}"));
+        assert_eq!(
+            checked_in, rendered,
+            "asm/sys/pvm/ood_frames.masm is stale; run `make regenerate-pvm-constants`"
+        );
+    }
+
     /// A group every chiplet occupies is indexed correctly by proof-order position, and one with a
     /// single occupant needs no table at all. Anything between the two would address past the
     /// group's slots, so the renderer must refuse it instead of emitting it.
@@ -335,19 +390,16 @@ mod tests {
     fn geometry_derivation_cross_checks_the_input_layout() {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
-        let captured =
-            miden_air_definitions::precompiles::relation::CapturedPvmRelation::new().unwrap();
-        let compiled = captured.compile().unwrap();
-        assert!(PvmOodGeometry::from_compiled(compiled.geometry(), layout).is_ok());
+        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
+        let compiled = captured.compile().expect("compiled PVM relation");
+        let geometry =
+            PvmOodGeometry::from_compiled(compiled.geometry(), layout).expect("geometry");
         assert_eq!(
-            PvmOodGeometry::from_compiled(compiled.geometry(), layout)
-                .expect("geometry")
-                .row_felts()
-                / 2,
+            geometry.row_felts() / 2,
             layout.counts.preprocessed_width
                 + layout.counts.width
                 + layout.counts.aux_width * EXT_DEGREE
-                + layout.quotient_width(),
+                + layout.counts.num_quotient_chunks * EXT_DEGREE,
             "the derived row is not the sum of the layout's own commitment groups"
         );
     }

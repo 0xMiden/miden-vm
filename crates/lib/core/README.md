@@ -11,17 +11,14 @@ The second goal can be achieved because calls to procedures in the core library 
 
 `CoreLibrary` provides the `miden-core` Miden package (a `.masp` file) in addition to its associated event handlers. This package occupies the `miden::core` namespace.
 
-Generated core-library MASM can be inspected locally:
+Generated precompile math MASM can be inspected locally:
 
 ```sh
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
 
-Complete generated verifier MASM is tracked in `asm/sys/vm` and `asm/sys/pvm` beside handwritten assembly. The build assembles a copy under `OUT_DIR` (`MIDEN_CORE_ASM_DIR` for tests), without compiling AIR definitions. After changing the AIRs or typed templates, run `make regenerate-verifiers`, then `make check-verifiers` to check regeneration, independent evaluator checks, and pinned verifier roots. `make stage-verifiers DIR=<path>` checks and copies the complete tree for inspection or release tooling.
-
-Documentation builds also write under `OUT_DIR` by default. Run
-`make regenerate-core-docs` to update the published API documentation explicitly,
-or `make check-core-docs` to check it without changing the checkout.
+For recursive-verifier source ownership, generation rules, and focused checks, see
+[Maintaining recursive-verifier MASM](RECURSIVE_VERIFIER.md).
 
 ## Caller-maintained precompile roots
 

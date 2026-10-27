@@ -20,6 +20,10 @@ help:
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
+	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
+	@printf "  make check-pvm-constants         # Check PVM verifier MASM artifacts\n"
+	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
+	@printf "  make regenerate-pvm-constants    # Regenerate PVM verifier MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -37,7 +41,7 @@ FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,midenc-hir-type/arbitrary
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constants-tools,midenc-hir-type/arbitrary
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -260,8 +264,7 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
 		--exclude miden-bench \
-		--exclude miden-crypto-wycheproof-tests \
-		--exclude miden-verifier-codegen
+		--exclude miden-crypto-wycheproof-tests
 
 .PHONY: build-target-miden
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
@@ -331,37 +334,32 @@ exec-avx2: ## Builds an executable with AVX2 acceleration enabled
 exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
-.PHONY: stage-verifiers
-stage-verifiers: ## Write the core-library assembly tree with generated verifier modules to DIR
-	@test -n "$(DIR)" || { echo "usage: make stage-verifiers DIR=<new or staged directory>" >&2; exit 1; }
-	cargo run --locked --package miden-verifier-codegen -- --stage crates/lib/core/asm "$(DIR)"
+.PHONY: regenerate-constraints
+regenerate-constraints: ## Regenerate the checked-in VM verifier MASM artifacts
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
-.PHONY: regenerate-verifiers
-regenerate-verifiers: ## Regenerate tracked verifier MASM without accepting new protocol identities
-	cargo run --locked --package miden-verifier-codegen -- --write crates/lib/core/asm
+.PHONY: regenerate-pvm-constants
+regenerate-pvm-constants: ## Regenerate PVM verifier MASM artifacts
+	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
+	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
-.PHONY: check-verifiers
-check-verifiers: ## Check generated evaluators, tracked verifier MASM and pinned verifier roots
-	cargo run --locked --package miden-verifier-codegen -- --check crates/lib/core/asm
-	cargo test --locked --package miden-air --test generated_drift
-	cargo test --locked --package miden-air --test precompiles_generated_drift
-	cargo test --locked --package miden-verifier-codegen
-	cargo test --locked --package miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library
-
-.PHONY: regenerate-core-docs
-regenerate-core-docs: ## Update the published MASM API documentation explicitly
-	MIDEN_BUILD_LIB_DOCS=1 MIDEN_CORE_LIB_DOCS_DIR="$(CURDIR)/crates/lib/core/docs" cargo build --locked -p miden-core-lib
-
-.PHONY: check-core-docs
-check-core-docs: ## Check published MASM API documentation without writing source files
-	@set -eu; \
-	core_docs_tmp=$$(mktemp -d); \
-	trap 'rm -rf "$$core_docs_tmp"' EXIT INT TERM; \
-	MIDEN_BUILD_LIB_DOCS=1 MIDEN_CORE_LIB_DOCS_DIR="$$core_docs_tmp/docs" cargo build --locked -p miden-core-lib; \
-	diff -ru crates/lib/core/docs "$$core_docs_tmp/docs"
+.PHONY: recursive-verifier-regeneration-handoff
+recursive-verifier-regeneration-handoff:
+	@printf '%s\n' \
+		'' \
+		'Required manual post-regeneration steps:' \
+		'  1. Rebuild generated MASM docs: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib' \
+		'  2. Check embedded roots: cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library' \
+		'  3. Verify the pinned PVM fixture: make check-pvm-proof-fixture' \
+		'Review generated docs; update roots or the fixture only when the corresponding change is intentional.'
 
 .PHONY: check-pvm-artifacts
-check-pvm-artifacts: check-precompile-masm check-pvm-proof-fixture ## Check generated artifacts for this release line
+check-pvm-artifacts: check-precompile-masm check-pvm-constants check-pvm-proof-fixture ## Check generated artifacts for this release line
+
+.PHONY: check-pvm-constants
+check-pvm-constants: ## Check PVM verifier MASM artifacts and pinned relation identities for drift
+	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift
@@ -391,6 +389,9 @@ regenerate-pvm-proof-fixture: ## Regenerate the pinned Eidos PVM proof and defer
 check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root for drift
 	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
 
+.PHONY: check-constraints
+check-constraints: ## Check the checked-in VM verifier MASM artifacts and pinned relation identities for drift
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled

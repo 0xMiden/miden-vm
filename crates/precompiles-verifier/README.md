@@ -10,11 +10,10 @@ The handwritten AIRs and protocol policy live in `miden_air_definitions::precomp
 Cargo compiles the constraint evaluators and the ACE instruction stream into `OUT_DIR`.
 The relation digest, ACE circuit digest, and setup commitment are pinned in
 `miden_air::precompiles`; its tests and this crate's tests recompute them from the AIRs,
-so a relation change must update them deliberately. `miden-verifier-codegen` renders
-the tracked PVM verifier MASM from AIR metadata and typed templates during explicit regeneration.
-
-Run `make check-verifiers` to check evaluator equivalence, the generated verifier modules,
-and the pinned verifier roots.
+so a relation change must update them deliberately. The `constants-tools` feature enables the
+PVM MASM parameter and artifact generator. See
+[Maintaining recursive-verifier MASM](../lib/core/RECURSIVE_VERIFIER.md) for the parameter and
+template sources and the edit/regenerate/test workflow.
 
 The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
 input `abc`. Check or regenerate the proof and its deferred root with:

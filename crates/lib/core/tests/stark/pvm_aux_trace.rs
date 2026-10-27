@@ -423,6 +423,39 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 }
 
 #[test]
+fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
+    let mut source = String::from(
+        "use miden::core::sys::pvm::fixed_boundary\n\
+         use miden::core::sys::pvm::layout\n\
+         begin\n",
+    );
+    // Keep caller values in both the addressable stack window and the overflow table.
+    for value in 1..=24 {
+        writeln!(source, "push.{value}").unwrap();
+    }
+    source.push_str(
+        "push.13.11.19.17 exec.layout::aux_rand_elem_ptr mem_storew_le dropw\n\
+         exec.fixed_boundary::compute_fixed_boundary_correction\n",
+    );
+    for value in (1..=24).rev() {
+        writeln!(source, "push.{value} assert_eq").unwrap();
+    }
+    source.push_str("end");
+
+    let (output, _) = build_test!(&source).execute_for_output().unwrap();
+    let alpha = QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)]);
+    let beta = QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)]);
+    let expected = fixed_boundary_correction(alpha, beta);
+    let coordinates: &[Felt] = expected.as_basis_coefficients_slice();
+    for (coord, value) in coordinates.iter().enumerate() {
+        assert_eq!(
+            read_memory_felt(&output, pvm_layout_const("C_TOTAL_PTR") + coord as u32),
+            *value,
+        );
+    }
+}
+
+#[test]
 fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
     let log_heights = EIDOS_PRECEDES_ORDINARY_HEIGHTS;
     let (alpha, beta) = sampled_challenges(&log_heights);

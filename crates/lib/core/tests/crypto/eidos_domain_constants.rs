@@ -33,13 +33,11 @@ const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
 const SHA512: &str = include_str!("../../asm/precompiles/hashes/sha512.masm");
 const RANDOM_COIN: &str = include_str!("../../asm/stark/random_coin.masm");
 const SYS: &str = include_str!("../../asm/sys/mod.masm");
-const VM: &str = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/mod.masm"));
+const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
 const CLAIM: &str = include_str!("../../asm/sys/vm/claim.masm");
 const FRI: &str = include_str!("../../asm/pcs/fri/frie2f4.masm");
-const VM_DEEP_QUERIES: &str =
-    include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/deep_queries.masm"));
-const PVM_DEEP_QUERIES: &str =
-    include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/deep_queries.masm"));
+const VM_PARAMETERS: &str = include_str!("../../asm/sys/vm/parameters.masm");
+const PVM_PARAMETERS: &str = include_str!("../../asm/sys/pvm/parameters.masm");
 
 fn parse_u64(value: &str) -> u64 {
     let value = value.trim().trim_end_matches(',');
@@ -57,6 +55,7 @@ fn masm_scalar(source: &str, name: &str) -> u64 {
         .lines()
         .find_map(|line| {
             let line = line.trim();
+            let line = line.strip_prefix("pub ").unwrap_or(line);
             line.strip_prefix(&prefix).or_else(|| line.strip_prefix(&metadata_prefix))
         })
         .map(|value| parse_u64(value.split('#').next().expect("constant value")))
@@ -295,37 +294,19 @@ fn masm_initial_chaining_words_match_rust() {
     assert_word(CLAIM, "CLAIM_INIT_CV", Eidos::init_chaining_word(EXECUTION_CLAIM, 40));
 
     assert_word(FRI, "FRI_ROW_HASH_INIT_CV", Eidos::init_chaining_word(LMCS_LEAF, 8));
-    use miden_air::{AIRS, MidenAir};
-    use miden_core::field::QuadFelt;
-    use miden_lifted_stark::air::{BaseAir, LiftedAir};
-    let row_width = |width: fn(&MidenAir) -> usize| -> usize {
-        AIRS.iter().map(|air| width(air).next_multiple_of(EIDOS_BLOCK_WIDTH)).sum()
-    };
-    for (name, len) in [
-        ("PREPROCESSED_LMCS_INIT_CV", row_width(BaseAir::<Felt>::preprocessed_width)),
-        ("MAIN_LMCS_INIT_CV", row_width(BaseAir::<Felt>::width)),
-        (
-            "AUX_LMCS_INIT_CV",
-            row_width(|air| LiftedAir::<Felt, QuadFelt>::aux_width(air) * 2),
-        ),
-        (
-            "QUOTIENT_LMCS_INIT_CV",
-            miden_air::security::AIR_SHAPE.num_quotient_chunks as usize * 2,
-        ),
-    ] {
-        assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len as u32));
-    }
-    for (cv_name, blocks_name) in [
-        ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
-        ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
-        ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
-        ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
-    ] {
-        let blocks = u32::try_from(masm_scalar(PVM_DEEP_QUERIES, blocks_name))
-            .expect("PVM LMCS block count exceeds u32");
-        let encoded_len = blocks
-            .checked_mul(EIDOS_BLOCK_WIDTH as u32)
-            .expect("PVM LMCS encoded length exceeds u32");
-        assert_word(PVM_DEEP_QUERIES, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+    for parameters in [VM_PARAMETERS, PVM_PARAMETERS] {
+        for (cv_name, blocks_name) in [
+            ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
+            ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
+            ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
+            ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
+        ] {
+            let blocks = u32::try_from(masm_scalar(parameters, blocks_name))
+                .expect("LMCS block count exceeds u32");
+            let encoded_len = blocks
+                .checked_mul(EIDOS_BLOCK_WIDTH as u32)
+                .expect("LMCS encoded length exceeds u32");
+            assert_word(parameters, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+        }
     }
 }
