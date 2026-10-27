@@ -35,7 +35,7 @@ fn advice_budget_is_checked_before_merkle_loading_in_run_and_prove() {
     let masm_path = working_dir.path().join("budget.masm");
     let masp_path = working_dir.path().join("budget.masp");
     fs::write(&masm_path, source).unwrap();
-    miden_assembly::Assembler::default()
+    Assembler::default()
         .assemble_program("budget", source)
         .unwrap()
         .write_to_file(&masp_path)
