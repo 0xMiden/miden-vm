@@ -21,9 +21,9 @@ help:
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
-	@printf "  make check-pvm-constants         # Check PVM ACE constants and MASM artifacts\n"
+	@printf "  make check-pvm-constants         # Check PVM verifier MASM artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make regenerate-pvm-constants    # Regenerate PVM ACE constants and MASM artifacts\n"
+	@printf "  make regenerate-pvm-constants    # Regenerate PVM verifier MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -37,9 +37,6 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
-PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
-	crates/precompiles-air/src/protocol.rs
-
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
 
@@ -343,9 +340,8 @@ regenerate-constraints: ## Regenerate the checked-in VM verifier MASM artifacts
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: regenerate-pvm-constants
-regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
+regenerate-pvm-constants: ## Regenerate PVM verifier MASM artifacts
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
-	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: recursive-verifier-regeneration-handoff
@@ -362,7 +358,7 @@ recursive-verifier-regeneration-handoff:
 check-pvm-artifacts: check-precompile-masm check-pvm-constants check-pvm-proof-fixture ## Check generated artifacts for this release line
 
 .PHONY: check-pvm-constants
-check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
+check-pvm-constants: ## Check PVM verifier MASM artifacts and pinned relation identities for drift
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-precompile-masm
@@ -394,7 +390,7 @@ check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root f
 	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
 
 .PHONY: check-constraints
-check-constraints: ## Check the checked-in constraint artifacts for drift
+check-constraints: ## Check the checked-in VM verifier MASM artifacts and pinned relation identities for drift
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
 
 .PHONY: exec-info

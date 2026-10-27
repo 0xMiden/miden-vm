@@ -5,8 +5,8 @@
 //! closed at ingest: the transcript absorb and the DEEP Horner accumulation stay positional over
 //! the advice stream, and only `adv_pipe`'s destination is retargeted at segment boundaries.
 //!
-//! Everything below is derived from [`ChipletAir::all`]'s widths, so a chiplet width change moves
-//! the destinations, the `pipe_k` set and the dispatch table together.
+//! Everything below is derived from the compiled relation's chiplet widths, so a chiplet width
+//! change moves the destinations, the `pipe_k` set and the dispatch table together.
 
 use alloc::{
     format,
@@ -16,12 +16,10 @@ use alloc::{
 use core::{fmt::Write as _, ops::Range};
 
 use miden_ace_codegen::{
-    EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
+    EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
     render_proof_order_maps,
 };
-use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
+use miden_air::precompiles::NUM_CHIPLETS;
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
@@ -52,26 +50,22 @@ pub(crate) struct PvmOodGeometry {
 }
 
 impl PvmOodGeometry {
-    /// Derives the row geometry from the chiplet declarations and cross-checks it against the
-    /// circuit's own input layout.
-    pub(crate) fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
-        let airs = ChipletAir::all();
-        let mut preprocessed = Vec::with_capacity(NUM_CHIPLETS);
-        let mut main = Vec::with_capacity(NUM_CHIPLETS);
-        let mut aux = Vec::with_capacity(NUM_CHIPLETS);
-        let mut aux_values = Vec::with_capacity(NUM_CHIPLETS);
-        for air in airs.iter() {
-            preprocessed.push(
-                <ChipletAir as BaseAir<Felt>>::preprocessed_width(air)
-                    .next_multiple_of(LMCS_ALIGNMENT),
-            );
-            main.push(<ChipletAir as BaseAir<Felt>>::width(air).next_multiple_of(LMCS_ALIGNMENT));
-            aux.push(
-                (<ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air) * EXT_DEGREE)
-                    .next_multiple_of(LMCS_ALIGNMENT),
-            );
-            aux_values.push(<ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air));
+    /// Derives the row geometry from the compiled relation's chiplet widths and cross-checks it
+    /// against the circuit's own input layout.
+    pub(crate) fn from_compiled(
+        compiled: &RelationGeometry,
+        layout: &InputLayout,
+    ) -> Result<Self, String> {
+        if compiled.trace_alignment != LMCS_ALIGNMENT {
+            return Err(format!(
+                "the PVM relation is compiled with trace alignment {}, expected {LMCS_ALIGNMENT}",
+                compiled.trace_alignment
+            ));
         }
+        let preprocessed = compiled.airs.iter().map(|air| air.preprocessed.width).collect();
+        let main = compiled.airs.iter().map(|air| air.main.width).collect();
+        let aux = compiled.airs.iter().map(|air| air.aux.width).collect();
+        let aux_values: Vec<_> = compiled.airs.iter().map(|air| air.num_aux_boundary).collect();
         if aux_values.as_slice() != [1usize; NUM_CHIPLETS].as_slice() {
             return Err(format!(
                 "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
@@ -82,7 +76,7 @@ impl PvmOodGeometry {
             preprocessed,
             main,
             aux,
-            quotient: layout.counts.num_quotient_chunks * EXT_DEGREE,
+            quotient: compiled.quotient_width,
         };
 
         for (name, derived, actual) in [
@@ -282,15 +276,22 @@ use miden::core::sys::pvm::layout
 mod tests {
     use alloc::vec;
 
+    use miden_ace_codegen::LayoutKind;
+    use miden_air_definitions::precompiles::{
+        ace::build_canonical_precompile_ace_circuit, relation::CapturedPvmRelation,
+    };
+
     use super::*;
-    use crate::ace::build_canonical_precompile_ace_circuit;
 
     const HOOK_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/ood_frames.masm");
 
     pub(crate) fn live_geometry() -> PvmOodGeometry {
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
-        PvmOodGeometry::from_input_layout(canonical.layout()).expect("PVM out-of-domain geometry")
+        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
+        let compiled = captured.compile().expect("compiled PVM relation");
+        let canonical = compiled.build_circuit(LayoutKind::Masm).expect("PVM canonical circuit");
+        PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout())
+            .expect("PVM out-of-domain geometry")
     }
 
     /// Pins the per-chiplet row geometry and dispatch plan derived from the canonical circuit
@@ -389,9 +390,12 @@ mod tests {
     fn geometry_derivation_cross_checks_the_input_layout() {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
-        assert!(PvmOodGeometry::from_input_layout(layout).is_ok());
+        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
+        let compiled = captured.compile().expect("compiled PVM relation");
+        let geometry =
+            PvmOodGeometry::from_compiled(compiled.geometry(), layout).expect("geometry");
         assert_eq!(
-            PvmOodGeometry::from_input_layout(layout).expect("geometry").row_felts() / 2,
+            geometry.row_felts() / 2,
             layout.counts.preprocessed_width
                 + layout.counts.width
                 + layout.counts.aux_width * EXT_DEGREE

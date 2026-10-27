@@ -14,11 +14,16 @@ homepage.workspace = true
 repository.workspace = true
 
 [features]
-constants-tools = ["std", "miden-air/compiler", "miden-ace-codegen/compiler"]
 default = ["std"]
 concurrent = [
     "std",
     "miden-air/concurrent",
+]
+constants-tools = [
+    "std",
+    "dep:miden-air-definitions",
+    "miden-ace-codegen/compiler",
+    "miden-air-definitions/compiler",
 ]
 std = [
     "dep:miden-ace-codegen",
@@ -30,8 +35,8 @@ std = [
 ]
 
 [dependencies]
-miden-precompiles-air.workspace = true
 miden-ace-codegen = { workspace = true, optional = true }
+miden-air-definitions = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
@@ -46,6 +51,7 @@ wincode.workspace = true
 [dev-dependencies]
 insta.workspace = true
 miden-air = { workspace = true, features = ["std", "compiler"] }
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-ace-codegen = { workspace = true, features = ["testing"] }
 
 [[bin]]

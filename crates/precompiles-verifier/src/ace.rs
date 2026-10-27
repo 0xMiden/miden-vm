@@ -17,10 +17,10 @@ use alloc::vec::Vec;
 use miden_air::precompiles::ChipletAir;
 use miden_air::precompiles::NUM_CHIPLETS;
 pub use miden_air::precompiles::ace::PvmRecursiveAceCircuit;
-#[cfg(any(test, feature = "constants-tools"))]
-pub(crate) use miden_air::precompiles::ace::build_canonical_precompile_ace_circuit;
 #[cfg(test)]
-pub(crate) use miden_air::precompiles::ace::build_pvm_recursive_verifier_ace_circuit;
+use miden_air_definitions::precompiles::ace::{
+    build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
+};
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
