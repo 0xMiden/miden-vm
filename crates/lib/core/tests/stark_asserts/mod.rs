@@ -319,7 +319,7 @@ impl FoldRelation {
     fn pvm() -> Self {
         Self {
             relation: "pvm",
-            num_airs: miden_precompiles_air::NUM_CHIPLETS,
+            num_airs: miden_air::precompiles::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!("../../asm/sys/pvm/constraints_eval.masm"),
         }
@@ -573,10 +573,9 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
 
 /// Every fixed verifier-memory region must be declared, disjoint, and correctly sized.
 ///
-/// The memory map is split across the generic module and per-relation layouts, so no
-/// single file shows every address claim: a generic constant added at an address a
-/// relation already uses would assemble cleanly and corrupt that relation's state at run
-/// time. Both sides therefore share this semantic manifest.
+/// The generic module and each relation's layout and parameter modules share one memory map.
+/// A generic constant added at an address a relation already uses would assemble cleanly and
+/// corrupt that relation's state at runtime. This manifest checks allocations across those modules.
 ///
 /// Comparing start addresses is not enough — a constant landing *inside* a multi-felt
 /// region collides just as badly — so every fixed address declaration has an explicit,
@@ -699,8 +698,8 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
 
     /// `(path below asm/sys, name, offset from the declared address, extent)`.
     ///
-    /// Pointer-delimited extents keep the manifest tied to generated AIR geometry. New
-    /// relation-owned addresses must still be listed explicitly, including one-felt cells.
+    /// Pointer-delimited extents resolve across modules of the same relation. Each entry still
+    /// pins the declaring file, and every relation-owned address must be listed explicitly.
     const RELATION_REGIONS: &[(&str, &str, i64, RegionExtent)] = &[
         ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, Until("AUX_RAND_ELEM_PTR")),
         ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Until("PREPROCESSED_CURRENT_PTR")),
@@ -746,15 +745,22 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         // digests, followed by the two proof-order maps inside the same 64-felt reserve. Sits
         // immediately after the VM control frame, so it is outside the tiling above.
         ("vm/layout.masm", "OOD_SCATTER_TABLE_PTR", 0, Until("PROOF_ORDER_POSITIONS_PTR")),
-        ("vm/layout.masm", "PROOF_ORDER_POSITIONS_PTR", 0, Until("PROOF_ORDER_IDS_PTR")),
-        ("vm/layout.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(4)),
+        (
+            "vm/parameters.masm",
+            "PROOF_ORDER_POSITIONS_PTR",
+            0,
+            Until("PROOF_ORDER_IDS_PTR"),
+        ),
+        ("vm/parameters.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(4)),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
         ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Fixed(8)),
-        ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
-        ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, Fixed(8)),
-        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(56)),
+        ("vm/parameters.masm", "OOD_EVALUATIONS_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
+        ("vm/parameters.masm", "AUX_BUS_BOUNDARY_PTR", 0, Fixed(8)),
+        // 10 shared STARK slots + 3 selectors per AIR + 4 fold coefficients + 2 padding slots,
+        // each occupying two base felts: (10 + 3 * 4 + 4 + 2) * 2 = 56.
+        ("vm/parameters.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(56)),
         // Fixed VM stream reservation ending at the PVM allocation.
-        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, UntilAddress(PVM_FRAME_START)),
+        ("vm/parameters.masm", "ACE_CIRCUIT_STREAM_PTR", 0, UntilAddress(PVM_FRAME_START)),
         (
             "vm/layout.masm",
             "CURRENT_TRACE_ROW_PTR",
@@ -924,16 +930,20 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         }
     }
 
-    fn assert_tiled_frame(regions: &[&Region], source: &str, frame_start: u64, frame_end: u64) {
+    fn namespace(source: &str) -> &str {
+        source.split_once('/').expect("address source has a namespace").0
+    }
+
+    fn assert_tiled_frame(regions: &[&Region], owner: &str, frame_start: u64, frame_end: u64) {
         let mut frame_regions = Vec::new();
-        for region in regions.iter().filter(|region| region.source == source) {
+        for region in regions.iter().filter(|region| namespace(&region.source) == owner) {
             if region.lo < frame_end && frame_start <= region.hi {
                 assert!(
                     frame_start <= region.lo && region.hi < frame_end,
                     "{}:{} crosses the {} frame boundary",
                     region.source,
                     region.name,
-                    source
+                    owner
                 );
                 frame_regions.push(*region);
             }
@@ -945,11 +955,11 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
             assert_eq!(
                 region.lo, next,
                 "gap before {}:{} in the {} frame",
-                region.source, region.name, source
+                region.source, region.name, owner
             );
             next = region.hi.checked_add(1).expect("frame address overflows");
         }
-        assert_eq!(next, frame_end, "{source} frame does not end at its declared boundary");
+        assert_eq!(next, frame_end, "{owner} frame does not end at its declared boundary");
     }
 
     let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/asm"));
@@ -1014,18 +1024,30 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         }
     }
 
-    let extent_between =
-        |source: &str, declarations: &BTreeMap<String, u64>, start: &str, end: &str| {
-            let start_address = declarations
-                .get(start)
-                .unwrap_or_else(|| panic!("{source} is missing extent boundary {start}"));
-            let end_address = declarations
-                .get(end)
-                .unwrap_or_else(|| panic!("{source} is missing extent boundary {end}"));
-            end_address
-                .checked_sub(*start_address)
-                .unwrap_or_else(|| panic!("{source}:{end} precedes {start}"))
-        };
+    // Boundary names are shared by a relation's modules, with VM and PVM kept separate.
+    let mut relation_addresses = BTreeMap::new();
+    for (source, declarations) in &relation_declarations {
+        let owner = namespace(source);
+        for (name, &address) in declarations {
+            assert!(
+                relation_addresses.insert((owner, name.as_str()), address).is_none(),
+                "duplicate address name in relation {owner}: {name}"
+            );
+        }
+    }
+
+    let extent_between = |source: &str, start: &str, end: &str| {
+        let owner = namespace(source);
+        let start_address = relation_addresses
+            .get(&(owner, start))
+            .unwrap_or_else(|| panic!("{owner} relation is missing extent boundary {start}"));
+        let end_address = relation_addresses
+            .get(&(owner, end))
+            .unwrap_or_else(|| panic!("{owner} relation is missing extent boundary {end}"));
+        end_address
+            .checked_sub(*start_address)
+            .unwrap_or_else(|| panic!("{source}:{end} precedes {start}"))
+    };
 
     let mut relation_regions = Vec::new();
     for (source, declarations) in &relation_declarations {
@@ -1035,13 +1057,13 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                 .unwrap_or_else(|| panic!("unmanifested relation address: {source}:{name}"));
             let felts = match extent {
                 Fixed(felts) => felts,
-                Until(end) => extent_between(source, declarations, name, end),
+                Until(end) => extent_between(source, name, end),
                 UntilAddress(end) => end
                     .checked_sub(address)
                     .unwrap_or_else(|| panic!("{source}:{name} begins after its frame boundary")),
                 FractionOf { start, end, divisor } => {
                     assert_ne!(divisor, 0, "{source}:{name} has a zero extent divisor");
-                    let span = extent_between(source, declarations, start, end);
+                    let span = extent_between(source, start, end);
                     assert_eq!(
                         span % divisor,
                         0,
@@ -1104,15 +1126,10 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         );
     }
 
-    assert_tiled_frame(
-        &canonical_generic_regions,
-        "stark/constants.masm",
-        GENERIC_FRAME_START,
-        GENERIC_FRAME_END,
-    );
-    assert_tiled_frame(&relation_region_refs, "vm/layout.masm", GENERIC_FRAME_END, VM_FRAME_END);
-    assert_tiled_frame(&relation_region_refs, "vm/layout.masm", VM_ACE_READ_START, PVM_FRAME_START);
-    assert_tiled_frame(&relation_region_refs, "pvm/layout.masm", PVM_FRAME_START, pvm_frame_end);
+    assert_tiled_frame(&canonical_generic_regions, "stark", GENERIC_FRAME_START, GENERIC_FRAME_END);
+    assert_tiled_frame(&relation_region_refs, "vm", GENERIC_FRAME_END, VM_FRAME_END);
+    assert_tiled_frame(&relation_region_refs, "vm", VM_ACE_READ_START, PVM_FRAME_START);
+    assert_tiled_frame(&relation_region_refs, "pvm", PVM_FRAME_START, pvm_frame_end);
 
     let kernel_witness = relation_regions
         .iter()

@@ -8,8 +8,6 @@
 //! allocations such as FRI, DEEP, and per-AIR scratch. This is a capacity estimate, not a bound
 //! on total process RSS or concurrent proofs and cached setups for other configurations.
 
-use alloc::vec;
-
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir};
 use p3_field::{ExtensionField, Field};
 
@@ -40,6 +38,20 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
+    prover_peak_bytes_from_heights::<F, EF, _>(multi_air, heights.iter().copied(), params)
+}
+
+// An iterator lets capacity searches supply one nonzero height without allocating a height buffer.
+fn prover_peak_bytes_from_heights<F, EF, MA>(
+    multi_air: &MA,
+    heights: impl ExactSizeIterator<Item = usize>,
+    params: &PcsParams,
+) -> Option<u64>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
     let airs = multi_air.airs();
     if heights.len() != airs.len() {
         return None;
@@ -54,7 +66,7 @@ where
     let mut max_preprocessed_height = 0u64;
     let mut max_quotient_degree = 0u64;
 
-    for (air, &height) in airs.iter().zip(heights) {
+    for (air, height) in airs.iter().zip(heights) {
         let height = u64::try_from(height).ok()?;
         let width = u64::try_from(air.width()).ok()?;
         let aux_width = u64::try_from(air.aux_width()).ok()?;
@@ -100,12 +112,12 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    let mut heights = vec![0; multi_air.airs().len()];
+    let air_count = multi_air.airs().len();
     let mut best = 0;
-    for i in 0..heights.len() {
-        let mut fits = |height| {
-            heights[i] = height;
-            prover_peak_bytes::<F, EF, _>(multi_air, &heights, params)
+    for i in 0..air_count {
+        let fits = |height| {
+            let heights = (0..air_count).map(|index| if index == i { height } else { 0 });
+            prover_peak_bytes_from_heights::<F, EF, _>(multi_air, heights, params)
                 .is_some_and(|bytes| bytes <= budget_bytes)
         };
         let mut lo = 0;
@@ -122,7 +134,6 @@ where
             }
         }
         best = best.max(lo);
-        heights[i] = 0;
     }
     best
 }

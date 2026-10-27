@@ -1,10 +1,11 @@
 //! ACE circuit policy for the precompile chiplet multi-AIR proof.
 //!
-//! The relation uses [`ChipletAir::all`] as its stable instance order and canonical ACE fold order,
-//! and aligns each per-AIR trace region to eight base-field elements. The lifted STARK proof
-//! commits traces in ascending height order, which varies per workload, but one order-invariant
-//! circuit serves every ordering: the verifier lands each proof-ordered segment at the canonical
-//! address the circuit reads it from and stages each chiplet's fold coefficient by proof position.
+//! The relation uses [`miden_air::precompiles::ChipletAir::all`] as its stable instance order and
+//! canonical ACE fold order, and aligns each per-AIR trace region to eight base-field elements. The
+//! lifted STARK proof commits traces in ascending height order, which varies per workload, but one
+//! order-invariant circuit serves every ordering: the verifier lands each proof-ordered segment at
+//! the canonical address the circuit reads it from and stages each chiplet's fold coefficient by
+//! proof position.
 //!
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
@@ -12,75 +13,22 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_ace_codegen::{
-    AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
+#[cfg(test)]
+use miden_air::precompiles::ChipletAir;
+use miden_air::precompiles::NUM_CHIPLETS;
+pub use miden_air::precompiles::ace::PvmRecursiveAceCircuit;
+#[cfg(test)]
+use miden_air_definitions::precompiles::ace::{
+    build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
 };
-use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
-
-// MULTI-AIR ACE CIRCUIT
-// ================================================================================================
-
-/// Per-AIR trace regions are padded to this width before concatenation, matching the LMCS wire
-/// alignment used by the commitment scheme.
-const LMCS_ALIGNMENT: usize = 8;
-
-/// Number of quotient chunks the precompile relation commits to.
-///
-/// The lifted STARK verifier derives this quantity symbolically from the AIRs. Deriving it through
-/// the same implementation keeps the ACE circuit's READ layout coupled to the proof protocol.
-fn num_quotient_chunks() -> usize {
-    let max_log_quotient_degree = ChipletAir::all()
-        .iter()
-        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
-        .max()
-        .expect("the chiplet stack is non-empty");
-    1usize << max_log_quotient_degree
-}
-
-/// ACE codegen settings for the precompile chiplet relation.
-fn precompile_ace_config() -> AceConfig {
-    AceConfig {
-        num_quotient_chunks: num_quotient_chunks(),
-        layout: LayoutKind::Masm,
-    }
-}
-
-/// Builds the canonical (order-invariant) precompile chiplet ACE circuit.
-///
-/// Every chiplet's trace regions sit at its [`ChipletAir::all`] offset and every chiplet reads its
-/// fold coefficient from a dedicated slot, so one circuit serves every proof ordering. The caller
-/// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
-/// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
-pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = ChipletAir::all();
-    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
-}
-
-// RECURSIVE VERIFIER CIRCUIT
-// ================================================================================================
-
-pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
-
-/// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
-///
-/// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
-/// than rebuild it here.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    encoded.try_into()
-}
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(|| {
-        build_pvm_recursive_verifier_ace_circuit()
-            .expect("PVM recursive-verifier ACE circuit must build")
-    })
+    CIRCUIT.get_or_init(miden_air::precompiles::protocol::recursive_circuit)
 }
 
-/// Returns [`ChipletAir::all`] instance indices in committed-trace order.
+/// Returns [`miden_air::precompiles::ChipletAir::all`] instance indices in committed-trace order.
 pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize; NUM_CHIPLETS] {
     let mut order = core::array::from_fn(|index| index);
     order.sort_by_key(|&index| (log_heights[index], index));
@@ -141,6 +89,7 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace_codegen::InputKey;
+    use miden_air::precompiles::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
 
@@ -151,6 +100,8 @@ mod tests {
 
     const PVM_WRAPPER_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
+    const PVM_PARAMETERS_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/parameters.masm");
     const SECURITY_ESTIMATOR_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/stark/security.masm");
     const GENERIC_UTILS_PATH: &str =
@@ -309,9 +260,10 @@ mod tests {
         );
 
         let max = derived.iter().map(|(_, degree)| *degree).max().expect("non-empty stack");
+        assert!(max <= miden_air::precompiles::policy::LOG_BLOWUP);
         let expected_chunks = 1usize << max;
         assert_eq!(
-            precompile_ace_config().num_quotient_chunks,
+            miden_air::precompiles::protocol::metadata().num_quotient_chunks,
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
@@ -347,6 +299,12 @@ mod tests {
             circuit.num_eval_gates < 32_768,
             "the SHA program must not restore the 97,576-gate fixed verifier cost"
         );
+        // Encoded READ nodes include constants as well as the layout's variable inputs.
+        assert_eq!(
+            PVM_CIRCUIT_SHAPE,
+            (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len)
+        );
+        assert_eq!(circuit.stream_len % 8, 0, "ACE stream supports whole-block ingestion");
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
@@ -450,28 +408,28 @@ mod tests {
     }
 
     #[test]
-    fn pvm_aux_hook_matches_the_logup_registry() {
-        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
+    fn pvm_fixed_boundary_scales_match_the_logup_registry() {
+        use miden_air::precompiles::relations::BusId;
 
-        const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
-
-        assert_eq!(masm_const(HOOK_PATH, "UINT_VAL_BUS_SCALE"), BusId::UintVal as u64 + 1);
-        assert_eq!(masm_const(HOOK_PATH, "EC_GROUP_BUS_SCALE"), BusId::EcGroup as u64 + 1);
-        assert_eq!(masm_const(HOOK_PATH, "MAX_LOGUP_MESSAGE_WIDTH"), MAX_MESSAGE_WIDTH as u64);
+        assert_eq!(
+            masm_const(PVM_PARAMETERS_PATH, "UINT_VAL_BUS_SCALE"),
+            BusId::UintVal as u64 + 1
+        );
+        assert_eq!(
+            masm_const(PVM_PARAMETERS_PATH, "EC_GROUP_BUS_SCALE"),
+            BusId::EcGroup as u64 + 1
+        );
     }
 
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
+        use miden_air::precompiles::ChipletMultiAir;
         use miden_lifted_air::{BaseAir, MultiAir};
-        use miden_precompiles_air::ChipletMultiAir;
 
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
-        const RELATION_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
         let multi_air = ChipletMultiAir::new();
         let num_public_values: usize =
@@ -482,7 +440,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
         for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
+                masm_const(PVM_PARAMETERS_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
                 expected,
                 "PVM trusted setup commitment limb {i} drifted"
             );
@@ -563,12 +521,12 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-        use miden_precompiles_air::{
+        use miden_air::precompiles::{
             primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
         };
 
         const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/parameters.masm");
 
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
@@ -634,20 +592,24 @@ mod tests {
         let masm_minima: Vec<u64> = airs
             .iter()
             .enumerate()
-            .map(|(i, air)| {
-                // Fixed-height instances are pinned as equalities in the wrapper; the shared
-                // derivation still supplies the same value.
-                let name = match air.fixed_log_height() {
-                    Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
-                    None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
-                };
-                masm_const(PVM_WRAPPER_PATH, &name)
+            .map(|(index, air)| {
+                let wrapper_checks_equality = matches!(air, ChipletAir::BytePairLut);
+                assert_eq!(
+                    air.fixed_log_height().is_some(),
+                    wrapper_checks_equality,
+                    "the PVM wrapper's height check for {air:?} differs from its native policy"
+                );
+                if wrapper_checks_equality {
+                    masm_const(PVM_PARAMETERS_PATH, "PREPROCESSED_TRACE_LOG_HEIGHT")
+                } else {
+                    masm_const(PVM_PARAMETERS_PATH, &alloc::format!("MIN_LOG_HEIGHT_{index}"))
+                }
             })
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
         for (i, expected) in PVM_RELATION_DIGEST.into_iter().enumerate() {
             assert_eq!(
-                masm_const(PVM_WRAPPER_PATH, &alloc::format!("RELATION_DIGEST_{i}")),
+                masm_const(PVM_PARAMETERS_PATH, &alloc::format!("RELATION_DIGEST_{i}")),
                 expected,
                 "PVM wrapper RELATION_DIGEST limb {i} drifted"
             );
@@ -660,7 +622,7 @@ mod tests {
     /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
-        use miden_precompiles_air::security as pvm_security;
+        use miden_air::precompiles::security as pvm_security;
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -675,14 +637,15 @@ mod tests {
                 "DEEP_FIELD_BASE_BITS",
                 (sample_bits >> fractional_bits)
                     - u64::from(
-                        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+                        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
                     ),
             ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
             (
                 "MAX_CONSTRAINT_DEGREE",
-                (1u64 << miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup())
+                (1u64
+                    << miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup())
                     + 1,
             ),
         ] {
@@ -736,7 +699,7 @@ mod tests {
         // BytePairLut has a fixed log height of 16, so the maximum PVM trace height can never fall
         // below the estimator's minimum of 6.
         assert!(
-            masm_const(PVM_WRAPPER_PATH, "FIXED_LOG_HEIGHT_3")
+            masm_const(PVM_PARAMETERS_PATH, "PREPROCESSED_TRACE_LOG_HEIGHT")
                 >= masm_const(SECURITY_ESTIMATOR_PATH, "MIN_LOG_HEIGHT"),
             "the PVM height floor fell below the estimator envelope"
         );
@@ -746,36 +709,45 @@ mod tests {
             "the grinding bound drifted from the estimator envelope"
         );
 
-        for (name, expected) in [
-            ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
-            ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
+        for (name, path, expected) in [
+            ("LOOKUP_POW_BITS", PVM_WRAPPER_PATH, u64::from(pvm_security::LOOKUP_POW_BITS)),
+            (
+                "MAX_MESSAGE_WIDTH",
+                PVM_PARAMETERS_PATH,
+                u64::from(pvm_security::LOOKUP_SHAPE.max_message_width),
+            ),
             (
                 "NUM_COMPOSED_CONSTRAINTS",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
             ),
             (
                 "MAX_CONSTRAINT_DEGREE",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
             ),
             (
                 "NUM_DEEP_TERMS",
+                PVM_PARAMETERS_PATH,
                 u64::from(
                     pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
                 ),
             ),
             (
                 "LOOKUP_FRACTIONS_PER_ROW",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
                 "FIXED_BOUNDARY_LOOKUP_TERMS",
+                PVM_PARAMETERS_PATH,
                 u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
             ),
         ] {
             assert_eq!(
-                masm_const(PVM_WRAPPER_PATH, name),
+                masm_const(path, name),
                 expected,
-                "PVM wrapper {name} drifted from its native security constant"
+                "{name} in {path} drifted from its native PVM security constant"
             );
         }
     }
@@ -790,7 +762,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+            miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 
@@ -808,6 +780,7 @@ mod tests {
         );
     }
 
+    /// Proof ordering is stable for equal heights and sorts taller traces last.
     #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         let mut log_heights = [10u8; NUM_CHIPLETS];
@@ -828,8 +801,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
+        use miden_air::precompiles::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
         use miden_lifted_air::Statement;
-        use miden_precompiles_air::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
@@ -870,7 +843,7 @@ mod tests {
     }
 
     /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
-    /// Intentional changes require regenerated protocol constants and a breaking changelog entry.
+    /// Intentional changes require a protocol-version bump and a breaking changelog entry.
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
@@ -890,8 +863,7 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; run `make regenerate-pvm-constants` for an \
-             intentional protocol break"
+            "chiplet instance order moved; an intentional change requires a protocol-version bump"
         );
     }
 }

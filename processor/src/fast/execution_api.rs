@@ -163,7 +163,7 @@ impl FastProcessor {
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
         use miden_air::{MidenMultiAir, config};
         use miden_core::field::QuadFelt;
-        use miden_crypto::stark::memory;
+        use miden_lifted_stark::memory;
 
         use crate::trace::{
             MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,

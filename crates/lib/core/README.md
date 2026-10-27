@@ -11,11 +11,14 @@ The second goal can be achieved because calls to procedures in the core library 
 
 `CoreLibrary` provides the `miden-core` Miden package (a `.masp` file) in addition to its associated event handlers. This package occupies the `miden::core` namespace.
 
-Generated core-library MASM can be inspected locally:
+Generated precompile math MASM can be inspected locally:
 
 ```sh
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
+
+For recursive-verifier source ownership, generation rules, and focused checks, see
+[Maintaining recursive-verifier MASM](RECURSIVE_VERIFIER.md).
 
 ## Caller-maintained precompile roots
 

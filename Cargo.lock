@@ -2051,6 +2051,9 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
+ "p3-dft",
+ "p3-matrix",
  "proptest",
  "thiserror",
 ]
@@ -2061,15 +2064,41 @@ version = "1.0.0-rc.1"
 dependencies = [
  "insta",
  "miden-ace-codegen",
+ "miden-air-definitions",
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-test-serialization-macros",
- "miden-utils-indexing",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "p3-challenger",
  "p3-field",
  "p3-security",
+]
+
+[[package]]
+name = "miden-air-definitions"
+version = "1.0.0-rc.1"
+dependencies = [
+ "insta",
+ "miden-ace-codegen",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
+ "miden-stateful-hasher",
+ "miden-test-serialization-macros",
+ "miden-utils-indexing",
+ "miden-utils-sync",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-security",
+ "p3-symmetric",
  "proptest",
  "rand 0.10.2",
+ "ruint",
  "thiserror",
  "tracing",
 ]
@@ -2168,6 +2197,8 @@ version = "1.0.0-rc.1"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
+ "p3-field",
 ]
 
 [[package]]
@@ -2186,6 +2217,7 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
+ "p3-matrix",
  "proptest",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -2204,9 +2236,9 @@ dependencies = [
  "fs-err",
  "miden-ace-codegen",
  "miden-air",
+ "miden-air-definitions",
  "miden-assembly",
  "miden-assembly-syntax",
- "miden-constraint-compiler",
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",
@@ -2215,7 +2247,6 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-precompiles-verifier",
  "miden-processor",
@@ -2225,6 +2256,7 @@ dependencies = [
  "miden-verifier",
  "num",
  "p256",
+ "p3-challenger",
  "p3-security",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -2262,18 +2294,16 @@ dependencies = [
  "k256",
  "miden-crypto-derive",
  "miden-field",
- "miden-lifted-stark",
  "miden-serde-utils",
+ "miden-stateful-hasher",
  "miden-test-serialization-macros",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
  "p3-challenger",
- "p3-dft",
  "p3-goldilocks",
  "p3-keccak",
- "p3-matrix",
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
@@ -2539,21 +2569,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-air"
-version = "1.0.0-rc.1"
-dependencies = [
- "miden-air",
- "miden-core",
- "miden-crypto",
- "miden-lifted-air",
- "miden-lifted-stark",
- "miden-precompiles",
- "miden-utils-sync",
- "p3-security",
- "ruint",
-]
-
-[[package]]
 name = "miden-precompiles-prover"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -2564,7 +2579,6 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-utils-sync",
  "proptest",
@@ -2584,11 +2598,11 @@ dependencies = [
  "insta",
  "miden-ace-codegen",
  "miden-air",
+ "miden-air-definitions",
  "miden-core",
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
- "miden-precompiles-air",
  "miden-serde-utils",
  "serde",
  "serde-wincode",
@@ -2605,8 +2619,8 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-crypto",
  "miden-debug-types",
+ "miden-lifted-stark",
  "miden-mast-package",
  "miden-precompiles",
  "miden-test-serialization-macros",
@@ -2653,6 +2667,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
+ "miden-lifted-stark",
  "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",
@@ -2790,6 +2805,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
  "miden-precompiles",
  "miden-precompiles-verifier",
  "miden-serde-utils",
@@ -2848,10 +2864,10 @@ name = "miden-vm-precompiles-bench"
 version = "1.0.0-rc.1"
 dependencies = [
  "codspeed-criterion-compat",
+ "miden-air",
  "miden-core",
  "miden-core-lib",
  "miden-crypto",
- "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-vm",
  "p256",
@@ -2868,7 +2884,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-lifted-stark",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-processor",
  "miden-verifier",
@@ -5136,9 +5151,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "wincode"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d4abae4bfc30e59d97d3ea4924e5c5e7fede946390bffbd52c076c081b87a6c"
+checksum = "063b5affe63fb4e584a33101d8808f01f2348b4f533db6223bf27263a0fdb9e9"
 dependencies = [
  "pastey",
  "proc-macro2",
@@ -5360,9 +5375,9 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",

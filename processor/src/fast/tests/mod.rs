@@ -23,11 +23,11 @@ use miden_core::{
     program::StackInputs,
     serde::{Deserializable, Serializable},
 };
-use miden_crypto::stark::memory::prover_peak_bytes;
 use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
     Span, Uri,
 };
+use miden_lifted_stark::memory::prover_peak_bytes;
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
     debug_info::{

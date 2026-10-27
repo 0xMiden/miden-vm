@@ -8,6 +8,7 @@ members = [
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
+    "crates/air-definitions",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
@@ -37,7 +38,6 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "crates/precompiles",
-    "crates/precompiles-air",
     "crates/precompiles-verifier",
     "crates/precompiles-prover",
     "processor",
@@ -85,6 +85,7 @@ opt-level = 0
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0.0-rc.1", default-features = false }
 miden-air               = { path = "./air", version = "1.0.0-rc.1", default-features = false }
+miden-air-definitions   = { path = "./crates/air-definitions", version = "1.0.0-rc.1", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "1.0.0-rc.1", default-features = false }
@@ -101,7 +102,6 @@ miden-lifted-stark      = { path = "./crates/lifted-stark", version = "1.0.0-rc.
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0.0-rc.1", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1", default-features = false }
-miden-precompiles-air   = { path = "./crates/precompiles-air", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "1.0.0-rc.1", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0.0-rc.1", default-features = false }

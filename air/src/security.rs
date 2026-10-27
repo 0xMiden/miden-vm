@@ -4,214 +4,67 @@
 //! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
-use miden_core::{
-    field::{BasedVectorSpace, PrimeField64, QuadFelt},
-    proof::HashFunction,
-};
-use miden_crypto::stark::pcs::PcsParams;
+use miden_air_definitions::geometry::NUM_OOD_POINTS;
+use miden_core::proof::HashFunction;
+use miden_lifted_stark::pcs::PcsParams;
+#[cfg(test)]
+use p3_security::budget::report::QUERY_LABEL;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
-use p3_security::{
-    budget::report::{COLLISION_LABEL, LOOKUP_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
-    fixed,
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
+
+use crate::config;
+pub use crate::shared::security::{
+    CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS, ProofSecurityParameters, protocol_params,
+    security_report_with_hash,
 };
-
-use crate::{
-    AIRS, ConstraintCounts, ConstraintDegrees, Felt, HandwrittenMidenAir, MidenAir, config,
-    constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
-};
-
-/// Security parameters of a verified Miden STARK proof.
-///
-/// Native MVM and PVM verifiers return these parameters after deriving them from the proof, the
-/// commitment scheme used to verify it, and the AIR relation selected by the verifier. Callers
-/// pass the returned value to a security estimator and apply their own acceptance policy.
-/// Constructing this type directly does not authenticate its contents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProofSecurityParameters {
-    /// Protocol parameters bound by the proof transcript.
-    pub protocol_params: ProtocolParams,
-    /// Log2 of the configured final FRI polynomial degree.
-    pub log_final_degree: u32,
-    /// Instance shape derived from the proof and its commitment scheme.
-    pub instance_shape: InstanceShape,
-    /// Verified proof-hash configuration, which also selects the Fiat-Shamir challenger.
-    pub hash_fn: HashFunction,
-    /// Security-relevant shape of the AIR relation and commitment scheme.
-    pub air_shape: AirShape,
-    /// Number of out-of-domain points opened per committed column.
-    pub num_ood_points: u32,
-    /// Lookup fractions consumed once per proof in addition to the per-row fractions.
-    pub num_lookup_boundary_terms: u32,
-}
-
-/// Conservative Q16 lower bound on the log2 of the challenge-field cardinality.
-///
-/// The challenge field is the quadratic extension of the Goldilocks base field. This value doubles
-/// the rounded-down Q16 value for the base field. Rounding before doubling keeps the result
-/// conservative.
-pub const CHALLENGE_FIELD_BITS: u64 = EXTENSION_DEGREE as u64 * fixed::floor_log2(Felt::ORDER_U64);
-
-/// Size of the Eidos quadratic-extension challenge support, in Q16 bits.
-///
-/// Each basis coefficient is a uniform 63-bit integer under the Eidos pseudorandomness assumption,
-/// so the support has `2^126` elements. Root-counting bounds use this size; the FRI query rate uses
-/// the cardinality of the field in which the polynomials are defined instead.
-pub const EIDOS_CHALLENGE_SAMPLE_BITS: u64 = fixed::from_bits(63 * EXTENSION_DEGREE as u32);
-
-/// Computes conjectured security bounds for the proof's hash and challenger configuration.
-///
-/// Eidos root-counting bounds use its 126-bit sampling support. The FRI query rate still uses
-/// `instance.field_bits`, and the commitment cap uses `instance.collision_resistance`.
-pub fn security_report_with_hash(
-    params: &ProtocolParams,
-    instance: &InstanceShape,
-    air: &AirShape,
-    hash_fn: HashFunction,
-) -> SecurityReport {
-    match hash_fn {
-        HashFunction::Eidos => {},
-        HashFunction::Blake3_256 | HashFunction::Keccak => {
-            return p3_security::budget::security_report(params, instance, air);
-        },
-    }
-    let sampling_instance = InstanceShape {
-        field_bits: EIDOS_CHALLENGE_SAMPLE_BITS,
-        ..*instance
-    };
-    let report = p3_security::budget::security_report(params, &sampling_instance, air);
-    let cap = instance.cap();
-    let query_bits = u64::from(params.num_queries)
-        * fixed::bits_per_query(params.log_blowup, instance.field_bits)
-        + fixed::from_bits(params.query_pow_bits);
-    SecurityReport::new((*report.terms()).map(|term| match term.label {
-        QUERY_LABEL => SecurityTerm::new(QUERY_LABEL, query_bits.min(cap)),
-        COLLISION_LABEL => SecurityTerm::new(COLLISION_LABEL, cap),
-        // OOD rejection removes only base-field points. At most 2^63 of the 2^126 Eidos
-        // candidates are in the base field; one Q16 unit conservatively covers this conditioning.
-        OUT_OF_DOMAIN_LABEL => SecurityTerm::new(OUT_OF_DOMAIN_LABEL, term.bits.saturating_sub(1)),
-        _ => term,
-    }))
-}
-
-/// Number of out-of-domain points opened per committed column.
-///
-/// The AIRs use `local` and `next` rotations only.
-const NUM_OOD_POINTS: u32 = 2;
-
-/// Base field elements per challenge-field element.
-const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Column alignment of the commitment scheme, in base field elements.
 ///
-/// Eidos absorbs whole message blocks, so a committed matrix is padded up to a multiple of
-/// the block length.
-pub const COMMITMENT_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
+/// The commitment sponge absorbs whole rates, so a committed matrix is padded up to a multiple of
+/// the rate.
+pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 
 /// Shape of the Miden VM multi-AIR statement used by the security estimator.
 ///
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
-pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 631,
-    max_constraint_degree: 9,
-    num_quotient_chunks: 8,
-    max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(282),
-    lookup: Some(LOOKUP_SHAPE),
+pub const AIR_SHAPE: AirShape = include!(concat!(env!("OUT_DIR"), "/air_shape.rs"));
+
+/// Lookup shape generated from the authored AIR metadata.
+pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
+    Some(shape) => shape,
+    None => panic!("canonical AIR has lookup arguments"),
 };
 
-/// Lookup argument shape of the Miden VM multi-AIR statement, as stored in [`AIR_SHAPE`].
-pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 78,
-    max_message_width: 16,
-};
+/// Raw `(preprocessed, main, auxiliary)` widths of each AIR, compiled from the AIR definitions.
+const RAW_WIDTHS: &[(usize, usize, usize)] = &include!(concat!(env!("OUT_DIR"), "/raw_widths.rs"));
 
 /// Computes the AIR shape by symbolically evaluating every AIR in the statement.
 ///
 /// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
 /// AIR, so verifiers use the checked constant instead of calling this function.
+#[cfg(any(test, feature = "compiler"))]
 pub fn derive_air_shape() -> AirShape {
-    let mut num_constraints = 0;
-    let mut max_constraint_degree = 0;
-    let mut num_columns = 0;
-    let mut fractions_per_row = 0;
-
-    for air in AIRS {
-        let handwritten = HandwrittenMidenAir(air);
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&handwritten).total();
-        max_constraint_degree = max_constraint_degree
-            .max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&handwritten).max());
-        num_columns += column_count(air, COMMITMENT_ALIGNMENT);
-        fractions_per_row += air.column_shape().iter().sum::<usize>();
-    }
-    num_columns += quotient_column_count(max_constraint_degree, COMMITMENT_ALIGNMENT);
-
-    AirShape {
-        // One batching slot per AIR beyond the first sits alongside the constraints themselves:
-        // constraints are folded by powers of one challenge and the AIRs by a second, so a
-        // single-AIR statement needs no cross-AIR batching challenge.
-        num_composed_constraints: (num_constraints + AIRS.len() - 1) as u32,
-        max_constraint_degree: max_constraint_degree as u32,
-        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
-        max_combo: NUM_OOD_POINTS,
-        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: Some(LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        }),
-    }
+    miden_air_definitions::geometry::derive_air_shape()
 }
 
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
 /// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the AIRs' own width accessors — no symbolic constraint pass — reusing
-/// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
+/// from the compiler's stored raw widths and quotient chunk count. A native verifier
 /// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
 /// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
 /// for the Eidos-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    let mut num_columns = 0;
-    for air in AIRS {
-        num_columns += column_count(air, alignment);
-    }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
-
-    num_columns as u32 + NUM_OOD_POINTS
-}
-
-/// Committed base columns for one AIR: preprocessed, main, and auxiliary traces, each its own
-/// matrix within its commitment group and so each padded on its own.
-fn column_count(air: MidenAir, alignment: usize) -> usize {
-    use miden_crypto::stark::air::{BaseAir, LiftedAir};
-
-    aligned(BaseAir::<Felt>::preprocessed_width(&air), alignment)
-        + aligned(BaseAir::<Felt>::width(&air), alignment)
-        + aligned(LiftedAir::<Felt, QuadFelt>::aux_width(&air) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
-/// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
-fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
-/// a power of two.
-fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
-    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
-}
-
-/// Pads a committed width up to the commitment scheme's column alignment.
-///
-/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
-/// contributes batching slots.
-fn aligned(width: usize, alignment: usize) -> usize {
-    width.next_multiple_of(alignment)
+    miden_air_definitions::geometry::num_deep_terms_for_widths(
+        RAW_WIDTHS,
+        AIR_SHAPE.num_quotient_chunks as usize,
+        alignment,
+    )
 }
 
 // SECURITY MODEL CONSTANTS
@@ -513,25 +366,6 @@ pub fn conjectured_security_level_for_alignment(
         hash_fn,
     )
     .conjectured_security_level()
-}
-
-/// Maps PCS parameters onto the protocol parameters the round budget reads.
-///
-/// The transcript observes every field of [`PcsParams`], so computing a proof's security level
-/// under these parameters uses the parameters it was actually produced with.
-pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
-    ProtocolParams {
-        log_blowup: u32::from(params.log_blowup()),
-        log_folding_arity: u32::from(params.log_folding_arity()),
-        num_queries: params.num_queries() as u32,
-        query_pow_bits: params.query_pow_bits() as u32,
-        ood_pow_bits: OOD_POW_BITS,
-        deep_pow_bits: params.deep_pow_bits() as u32,
-        folding_pow_bits: params.folding_pow_bits() as u32,
-        // The protocol samples the lookup challenges directly after the main-trace commitment,
-        // with no grinding in between.
-        lookup_pow_bits: LOOKUP_POW_BITS,
-    }
 }
 
 /// Computes the conjectured security level of a Miden VM statement proof, for each protocol

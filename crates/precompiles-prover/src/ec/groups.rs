@@ -1,1 +1,1 @@
-pub use miden_precompiles_air::ec::groups::*;
+pub use miden_air::precompiles::ec::groups::*;

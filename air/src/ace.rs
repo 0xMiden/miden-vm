@@ -1,19 +1,48 @@
-//! ACE circuit integration for the Miden multi-AIR proof.
-//!
-//! The public API is split by responsibility:
-//! - `recursive` builds the encoded circuit consumed by the recursive verifier.
-//! - `multi_air` combines the per-AIR ACE DAGs into one multi-AIR circuit.
-//!
-//! The cross-AIR LogUp boundary identity is checked outside the circuit as
-//! `sum_i(n_i * sigma_prime_i) + c_boundary = 0`, where `sigma_prime_i` is AIR `i`'s
-//! normalized committed LogUp sum and `n_i` is its trace length.
+//! Circuit adapters and embedded recursive-verifier instructions.
+pub use miden_air_definitions::ace::*;
 
-mod multi_air;
-mod recursive;
+/// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
+const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =
+    include!(concat!(env!("OUT_DIR"), "/ace_circuit_shape.rs"));
 
-pub use multi_air::build_canonical_multi_air_ace_circuit;
+/// Encoded instruction stream of the build-compiled VM circuit, as canonical felt values.
+static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/ace_instructions.rs"));
+
+/// Materialize the build-compiled VM circuit without symbolic AIR capture at runtime.
+///
+/// The commitment is the pinned [`crate::config::ACE_CIRCUIT_DIGEST`]; the recursive verifier
+/// rejects a stream that does not hash to it.
+pub fn compiled_recursive_circuit() -> RecursiveAceCircuit {
+    let (num_inputs, num_eval_gates, stream_len) = ACE_CIRCUIT_SHAPE;
+    RecursiveAceCircuit {
+        num_inputs,
+        num_eval_gates,
+        stream_len,
+        commitment: miden_core::Word::new(crate::config::ACE_CIRCUIT_DIGEST),
+        instructions: ACE_INSTRUCTIONS
+            .iter()
+            .copied()
+            .map(miden_core::Felt::new_unchecked)
+            .collect(),
+    }
+}
+
+/// Returns the process-wide build-compiled VM circuit.
 #[cfg(feature = "std")]
-pub use recursive::shared_recursive_circuit;
-pub use recursive::{
-    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_ace_config,
-};
+pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
+    static CIRCUIT: std::sync::OnceLock<RecursiveAceCircuit> = std::sync::OnceLock::new();
+    CIRCUIT.get_or_init(compiled_recursive_circuit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_circuit_matches_independent_capture() {
+        let independent = build_recursive_verifier_ace_circuit().unwrap();
+        assert_eq!(compiled_recursive_circuit(), independent);
+        #[cfg(feature = "std")]
+        assert_eq!(shared_recursive_circuit(), &independent);
+    }
+}

@@ -21,7 +21,7 @@ const MIN_LOG_HEIGHTS: [u64; 12] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1, 7, 7];
 const HEIGHTS: [u64; 12] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14, 9, 8];
 
 fn masm_const(source: &str, name: &str) -> u64 {
-    let prefix = format!("const {name} = ");
+    let prefix = format!("pub const {name} = ");
     source
         .lines()
         .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
@@ -29,7 +29,7 @@ fn masm_const(source: &str, name: &str) -> u64 {
 }
 
 fn pvm_const(name: &str) -> u64 {
-    masm_const(include_str!("../../asm/sys/pvm/mod.masm"), name)
+    masm_const(include_str!("../../asm/sys/pvm/parameters.masm"), name)
 }
 
 fn pvm_word(prefix: &str) -> [u64; 4] {

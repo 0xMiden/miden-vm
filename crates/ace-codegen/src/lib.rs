@@ -1,6 +1,9 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
-//! The pipeline is:
+//! The default, `no_std` API provides encoded circuits and their input layouts.
+//! Enable `compiler` in build dependencies to capture AIRs and generate circuits.
+//!
+//! The compiler pipeline is:
 //! 1. Capture AIR constraints into the `miden-constraint-compiler` IR.
 //! 2. Lower the constraint graph into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
@@ -33,26 +36,41 @@
 //! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
 //! - `ood_scatter`: shared OOD scatter planning and MASM procedure generation.
 
+#![cfg_attr(not(feature = "compiler"), no_std)]
+
+extern crate alloc;
+
+use alloc::string::String;
+
 // Core IR and lowering.
+#[cfg(feature = "compiler")]
 mod circuit;
+#[cfg(feature = "compiler")]
 mod dag;
 
 // Input layout and encoding.
 mod encode;
 mod layout;
+#[cfg(feature = "compiler")]
 mod masm;
+#[cfg(feature = "compiler")]
 mod ood_scatter;
+#[cfg(feature = "compiler")]
 mod order_maps;
 mod proof_order;
+#[cfg(feature = "compiler")]
 mod quotient;
 mod randomness;
 
 // High-level orchestration.
+#[cfg(feature = "compiler")]
 mod pipeline;
+#[cfg(feature = "compiler")]
+mod protocol;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod unit_tests;
 
 /// Extension field degree (quadratic extension for Miden VM).
@@ -67,18 +85,17 @@ pub enum AceError {
     InvalidInputLayout { message: String },
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub mod testing;
 
 /// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
 /// production consumes the IR lowering through the pipeline.
-#[cfg(any(test, feature = "testing"))]
+#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
+#[cfg(feature = "compiler")]
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    encode::{EncodedCircuit, RecursiveAceCircuit},
-    layout::{InputCounts, InputKey, InputLayout},
     masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
     ood_scatter::OodScatterPlan,
     order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
@@ -86,5 +103,10 @@ pub use crate::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit,
     },
+    protocol::{AirGeometry, CapturedAir, CompiledRelation, RelationGeometry, RowSegment},
+};
+pub use crate::{
+    encode::{EncodedCircuit, RecursiveAceCircuit},
+    layout::{InputCounts, InputKey, InputLayout},
     proof_order::{MAX_ORDER_AIRS, factorial, order_from_tag, order_tag},
 };

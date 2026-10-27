@@ -1,5 +1,14 @@
 use alloc::{vec, vec::Vec};
 
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir, preprocessed,
+    security::{self, ProofSecurityParameters},
+    stark_config::{
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, precompile_pcs_params,
+    },
+    transcript::eidos::EidosDigest,
+};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -10,15 +19,6 @@ use miden_lifted_air::Statement;
 use miden_lifted_stark::{
     Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
     lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
-};
-use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, preprocessed,
-    security::{self, ProofSecurityParameters},
-    stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
-    },
-    transcript::eidos::EidosDigest,
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;

@@ -13,9 +13,15 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
+[features]
+testing = ["dep:p3-field"]
+
 [dependencies]
+p3-field = { workspace = true, optional = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
+miden-lifted-stark = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
+p3-field = { workspace = true }
