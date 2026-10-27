@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 use miden_ace_codegen::{LayoutKind, RecursiveAceCircuit};
 use miden_air_definitions::precompiles::{
-    geometry,
+    fixed, geometry,
     relation::{AIRS, CapturedPvmRelation},
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
@@ -58,14 +58,17 @@ pub fn generate() {
                 .collect::<Vec<_>>()
         ),
     );
+    let fixed_boundary_lookup_terms =
+        fixed::fixed_uintval_msgs().count() + fixed::fixed_ecgroup_msgs().count();
     write(
         "protocol.rs",
         format!(
-            "pub const PROTOCOL: ProtocolMetadata = ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {} }};",
+            "pub const PROTOCOL: ProtocolMetadata = ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {}, fixed_boundary_lookup_terms: {} }};",
             (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len),
             geometry::air_shape(&compiled),
             compiled.geometry().raw_widths(),
-            compiled.geometry().num_quotient_chunks
+            compiled.geometry().num_quotient_chunks,
+            fixed_boundary_lookup_terms
         ),
     );
 }

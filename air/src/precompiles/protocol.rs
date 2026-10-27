@@ -70,11 +70,14 @@ pub struct ProtocolMetadata {
     /// Raw `(preprocessed, main, auxiliary)` widths of each AIR, in canonical order.
     pub raw_widths: &'static [(usize, usize, usize)],
     pub num_quotient_chunks: usize,
+    /// One-time lookup fractions added at the boundary by the fixed `UintVal` and `EcGroup`
+    /// messages, counted from the fixed-message catalogue.
+    pub fixed_boundary_lookup_terms: u32,
 }
 
 impl ProtocolMetadata {
     pub fn num_deep_terms(&self, alignment: usize) -> u32 {
-        crate::geometry::num_deep_terms_for_widths(
+        miden_air_definitions::geometry::num_deep_terms_for_widths(
             self.raw_widths,
             self.num_quotient_chunks,
             alignment,
