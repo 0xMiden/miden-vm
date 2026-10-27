@@ -33,10 +33,20 @@ against them. The PVM layout is generated as a complete module.
 ## Pinned relation identities
 
 The relation digest, ACE circuit digest, and setup commitments are pinned in `air/src/config.rs`
-for the VM and `air/src/precompiles/protocol.rs` for the PVM. Both generators compare the compiled
-circuit with these pins and fail when they differ; they never rewrite them. The `miden-air`
-tests recompute every pin from the authored AIRs. An intentional relation change updates the pins
-first, then regenerates the MASM and updates the verifier roots in `core/src/proof.rs`.
+for the VM and `air/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
+to these values, and the generated MASM embeds them. Two checks guard the pins, for different
+reasons:
+
+- The `miden-air` tests detect drift. They recompute every pin from the authored AIRs, so an edit
+  that changes the relation fails `cargo test` even when nobody regenerates the MASM. They answer
+  whether the pins still name the relation the authored AIRs define.
+- The generators enforce change control. They compare the compiled circuit and relation digests
+  with the pins and fail when they differ, and they take the setup commitments from the pins as
+  trusted inputs. They read the pins but never write them, so regeneration cannot introduce a new
+  relation identity; it only carries an identity that was already accepted into the MASM.
+
+An intentional relation change therefore updates the pins first, as its own reviewable edit, then
+regenerates the MASM and updates the verifier roots in `core/src/proof.rs`.
 
 ## Assumptions to review
 

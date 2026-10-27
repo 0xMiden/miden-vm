@@ -126,12 +126,14 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 /// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
-/// `EcGroup` messages.
+/// Number of one-time lookup fractions added at the PVM boundary by fixed protocol data: one
+/// `UintVal` fraction per fixed uint ([`crate::precompiles::fixed::fixed_uintval_msgs`]) and one
+/// `EcGroup` fraction per fixed curve group ([`crate::precompiles::fixed::fixed_ecgroup_msgs`]).
+/// These are additional to the per-row fractions recorded in [`AIR_SHAPE`].
 ///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
-/// constant must equal the derived count.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 19;
+/// The build counts the fixed-message catalogue; the native estimator and the recursive verifier's
+/// security descriptor both use this value.
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = super::protocol::PROTOCOL.fixed_boundary_lookup_terms;
 
 /// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
@@ -167,25 +169,16 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
     }
 }
 
-/// Counts the lookup fractions added at the PVM boundary by fixed protocol data: one
-/// `UintVal` fraction per fixed uint ([`crate::precompiles::fixed::fixed_uintval_msgs`]) and one
-/// `EcGroup` fraction per fixed curve group ([`crate::precompiles::fixed::fixed_ecgroup_msgs`]).
-/// These are additional to the per-row fractions recorded in [`AIR_SHAPE`].
-fn fixed_boundary_fraction_count() -> u64 {
-    (crate::precompiles::fixed::fixed_uintval_msgs().count()
-        + crate::precompiles::fixed::fixed_ecgroup_msgs().count()) as u64
-}
-
 /// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
 /// via `log2(1 + x) <= x · log2(e)`.
 ///
 /// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
 /// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
-/// of [`fixed_boundary_fraction_count`] additional terms per proof. These terms are not included
+/// of [`FIXED_BOUNDARY_LOOKUP_TERMS`] additional terms per proof. These terms are not included
 /// in [`AIR_SHAPE`]'s per-row count, so their contribution is accounted for separately. Both
 /// divisions round up, which keeps the correction conservative.
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
-    let numerator = fixed_boundary_fraction_count() * LOG2_E;
+    let numerator = u64::from(FIXED_BOUNDARY_LOOKUP_TERMS) * LOG2_E;
     numerator
         .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)
@@ -301,17 +294,6 @@ mod tests {
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
-    }
-
-    /// Checks that the descriptor's fixed boundary count matches the number of fixed `UintVal` and
-    /// `EcGroup` messages.
-    #[test]
-    fn fixed_boundary_fraction_count_matches_snapshot() {
-        assert_eq!(
-            fixed_boundary_fraction_count(),
-            u64::from(FIXED_BOUNDARY_LOOKUP_TERMS),
-            "fixed boundary shape mismatch"
-        );
     }
 
     /// Every derived Rust security constant, checked against a fixed numeric snapshot.

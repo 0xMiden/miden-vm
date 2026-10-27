@@ -4,7 +4,20 @@ extern crate alloc;
 extern crate std;
 use alloc::{borrow::Cow, vec::Vec};
 
-pub use definitions::*;
+// Authored AIRs, trace layouts, and statement types. `MidenAir` and `MidenMultiAir` are
+// defined here: they evaluate constraints with the build-generated evaluators.
+pub use definitions::{
+    AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+    AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, AirBuilder,
+    And8LookupAir, And8LookupCols, And8LookupPreprocessedCols, BaseAir, BitwiseCols, ByteReader,
+    ByteWriter, ChipletCols, ChipletsAir, ConstraintCounts, ConstraintDegrees, ControllerCols,
+    CoreAir, CoreCols, DecoderCols, Deserializable, DeserializationError, EidosCompressionAir,
+    EidosCompressionCols, ExtensionBuilder, Felt, KernelRomCols, LOGUP_AUX_TRACE_WIDTH, LiftedAir,
+    LiftedAirBuilder, MemoryCols, MidenAirBuilder, MultiAir, NUM_EIDOS_COMPRESSION_COLS,
+    NUM_PUBLIC_VALUES, PcsParams, PermutationAirBuilder, ProverStatement, PublicInputs,
+    QuadFeltExpr, Serializable, StackCols, StarkConfig, Statement, SystemCols, ToElements,
+    and8_lookup, debug, eidos_compression, hash_kernel_digests, logup, lookup, trace,
+};
 use miden_air_definitions as definitions;
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
 mod degrees {
