@@ -167,7 +167,7 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
             .next_multiple_of(EIDOS_RATE),
     ];
     if variant == PvmAirVariant::ALL {
-        assert_eq!(widths, [8, 584, 312, 8], "full PVM commitment-group geometry changed");
+        assert_eq!(widths, [8, 528, 224, 8], "full PVM commitment-group geometry changed");
     }
     let [preprocessed_width, main_width, aux_width, quotient_width] = widths;
     let preprocessed = row(preprocessed_width, 100);

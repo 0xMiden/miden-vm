@@ -11,6 +11,7 @@ use {
     PREPROCESSED_LMCS_INIT_CV,
     PREPROCESSED_ROW_DOUBLE_WORDS,
     PREPROCESSED_TREE_DEPTH,
+    QUOTIENT_LMCS_INIT_CV,
 } from miden::core::sys::pvm::parameters
 use miden::core::crypto::hashes::eidos
 use miden::core::stark::deep_queries
@@ -152,8 +153,6 @@ proc process_main_trace(
     adv.push_mapval
 
     dropw
-    exec.layout::main_lmcs_init_cv
-    swapw padw
     exec.layout::main_query_loader_ptr dynexec
 
     swapw.2
@@ -181,8 +180,6 @@ proc process_aux_trace(
     adv.push_mapval
 
     dropw
-    exec.layout::aux_lmcs_init_cv
-    swapw padw
     exec.layout::aux_query_loader_ptr dynexec
 
     swapw.2
@@ -210,7 +207,8 @@ proc process_quotient_trace(
     adv.push_mapval
 
     dropw
-    exec.layout::quotient_lmcs_init_cv
+    # Every supported variant has one quotient block, checked by the regeneration tool.
+    push.QUOTIENT_LMCS_INIT_CV
     swapw padw
     adv_pipe
     horner_eval_base

@@ -55,28 +55,77 @@ end
 #! Output: [...]
 @locals(1)
 pub proc scatter_aux_bus_boundary()
-    # Read backwards so canonical instance zero ends up on top, without scratch memory.
-    exec.layout::num_airs
-    push.1
-    while.true
-        sub.1 dup exec.layout::proof_order_positions_ptr add mem_load
-        exec.load_boundary_pair
-        movup.2 dup neq.0
-    end
-    drop
-    exec.layout::num_airs u32div.2 loc_store.0
-    exec.layout::aux_bus_boundary_ptr
-    push.1
-    while.true
-        dup movdn.5 mem_storew_le dropw add.4
-        loc_load.0 sub.1 dup loc_store.0 neq.0
-    end
-    exec.layout::num_airs u32and.1
+    # Only the full relation has twelve AIRs (checked by the regeneration tool).
+    exec.layout::num_airs eq.12
     if.true
-        dup movdn.2 mem_store add.1 mem_store
+        exec.layout::proof_order_positions_ptr add.11 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.10 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.9 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.8 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.7 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.6 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.5 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.4 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.3 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.2 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr add.1 mem_load
+        exec.load_boundary_pair
+
+        exec.layout::proof_order_positions_ptr mem_load
+        exec.load_boundary_pair
+        # => [sigma_prime_0, ..., sigma_prime_11, ...] in canonical instance order
+
+        exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
+        exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
+        exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le dropw
+        exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le dropw
+        exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le dropw
+        exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le dropw
     else
+        # Read backwards so canonical instance zero ends up on top, without scratch memory.
+        exec.layout::num_airs
+        push.1
+        while.true
+            sub.1 dup exec.layout::proof_order_positions_ptr add mem_load
+            exec.load_boundary_pair
+            movup.2 dup neq.0
+        end
         drop
+        exec.layout::num_airs u32div.2 loc_store.0
+        exec.layout::aux_bus_boundary_ptr
+        push.1
+        while.true
+            dup movdn.5 mem_storew_le dropw add.4
+            loc_load.0 sub.1 dup loc_store.0 neq.0
+        end
+        exec.layout::num_airs u32and.1
+        if.true
+            dup movdn.2 mem_store add.1 mem_store
+        else
+            drop
+        end
     end
+
 end
 
 #! Observes the PVM auxiliary trace commitment and its selected normalized LogUp values.
@@ -141,15 +190,55 @@ pub proc observe_aux_trace()
     # instance index, so this must precede the weighted sum, not follow it.
     exec.scatter_aux_bus_boundary
 
-    # Weight every selected chiplet's normalized sum by its own trace length.
-    push.0.0
-    push.0 loc_store.0
-    push.1
-    while.true
-        push.LOG_AIR_TRACE_LENGTHS_PTR loc_load.0 add mem_load
-        loc_load.0 mul.2 exec.load_weighted_aux_sum
+    exec.layout::num_airs eq.12
+    if.true
+        # Scale chiplet k's normalized sum, now at offset 2k, by chiplet k's trace length. Each call
+        # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
+        mem_load.LOG_AIR_TRACE_LENGTHS_PTR push.0 exec.load_weighted_aux_sum
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_load push.2 exec.load_weighted_aux_sum
         ext2add
-        loc_load.0 add.1 dup loc_store.0 exec.layout::num_airs u32lt
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_load push.4 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_load push.6 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_load push.8 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_load push.10 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_load push.12 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_load push.14 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_load push.16 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_load push.18 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.10 mem_load push.20 exec.load_weighted_aux_sum
+        ext2add
+
+        push.LOG_AIR_TRACE_LENGTHS_PTR add.11 mem_load push.22 exec.load_weighted_aux_sum
+        ext2add
+    else
+        # Weight every selected chiplet's normalized sum by its own trace length.
+        push.0.0
+        push.0 loc_store.0
+        push.1
+        while.true
+            push.LOG_AIR_TRACE_LENGTHS_PTR loc_load.0 add mem_load
+            loc_load.0 mul.2 exec.load_weighted_aux_sum
+            ext2add
+            loc_load.0 add.1 dup loc_store.0 exec.layout::num_airs u32lt
+        end
     end
 
     exec.layout::c_total_ptr add.1 mem_load

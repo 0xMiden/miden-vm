@@ -48,7 +48,7 @@ const SECURITY_PARAM_COUNT: usize = 4;
 const SECURITY_PARAMS_OFFSET: usize = 1;
 const HEIGHTS_OFFSET: usize = SECURITY_PARAMS_OFFSET + SECURITY_PARAM_COUNT;
 
-/// Variant dispatch must keep the core trace small; omitting SHA keeps Keccak below 2^18 rows.
+/// Variant dispatch must not double the core trace; omitting SHA keeps Keccak below 2^18 rows.
 #[test]
 fn pvm_recursive_verifier_cost_is_bounded() {
     const SOURCE: &str = "
@@ -74,8 +74,8 @@ fn pvm_recursive_verifier_cost_is_bounded() {
         let trace = test.execute().expect("PVM proof must verify");
         let summary = trace.trace_len_summary();
         assert!(
-            summary.core_rows() < 70_000,
-            "variant {} must avoid per-block dispatch overhead: {summary:?}",
+            summary.core_height() <= 1 << 16,
+            "variant {} must keep small-proof recursion within 2^16 core rows: {summary:?}",
             variant.as_u8(),
         );
         if variant == PvmAirVariant::KECCAK {

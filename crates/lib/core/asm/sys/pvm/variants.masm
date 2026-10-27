@@ -361,6 +361,8 @@ proc load_ace_1823
 end
 
 proc load_query_21
+    push.6620516959492505600.11170449401267093504.11912009168875159720.13503953893947607809
+    swapw padw
     repeat.21
         adv_pipe
         horner_eval_base
@@ -369,6 +371,8 @@ proc load_query_21
 end
 
 proc load_query_22
+    push.6620516959492505600.11170449401267093504.11912009168875159728.13503953893947607809
+    swapw padw
     repeat.22
         adv_pipe
         horner_eval_base
@@ -377,6 +381,8 @@ proc load_query_22
 end
 
 proc load_query_23
+    push.6620516959492505600.11170449401267093504.11912009168875159736.13503953893947607809
+    swapw padw
     repeat.23
         adv_pipe
         horner_eval_base
@@ -385,6 +391,8 @@ proc load_query_23
 end
 
 proc load_query_24
+    push.6620516959492505600.11170449401267093504.11912009168875159744.13503953893947607809
+    swapw padw
     repeat.24
         adv_pipe
         horner_eval_base
@@ -393,6 +401,8 @@ proc load_query_24
 end
 
 proc load_query_25
+    push.6620516959492505600.11170449401267093504.11912009168875159752.13503953893947607809
+    swapw padw
     repeat.25
         adv_pipe
         horner_eval_base
@@ -401,6 +411,8 @@ proc load_query_25
 end
 
 proc load_query_26
+    push.6620516959492505600.11170449401267093504.11912009168875159760.13503953893947607809
+    swapw padw
     repeat.26
         adv_pipe
         horner_eval_base
@@ -409,6 +421,8 @@ proc load_query_26
 end
 
 proc load_query_27
+    push.6620516959492505600.11170449401267093504.11912009168875159768.13503953893947607809
+    swapw padw
     repeat.27
         adv_pipe
         horner_eval_base
@@ -417,6 +431,8 @@ proc load_query_27
 end
 
 proc load_query_28
+    push.6620516959492505600.11170449401267093504.11912009168875159776.13503953893947607809
+    swapw padw
     repeat.28
         adv_pipe
         horner_eval_base
@@ -425,6 +441,8 @@ proc load_query_28
 end
 
 proc load_query_41
+    push.6620516959492505600.11170449401267093504.11912009168875159880.13503953893947607809
+    swapw padw
     repeat.41
         adv_pipe
         horner_eval_base
@@ -433,6 +451,8 @@ proc load_query_41
 end
 
 proc load_query_46
+    push.6620516959492505600.11170449401267093504.11912009168875159920.13503953893947607809
+    swapw padw
     repeat.46
         adv_pipe
         horner_eval_base
@@ -441,6 +461,8 @@ proc load_query_46
 end
 
 proc load_query_48
+    push.6620516959492505600.11170449401267093504.11912009168875159936.13503953893947607809
+    swapw padw
     repeat.48
         adv_pipe
         horner_eval_base
@@ -449,6 +471,8 @@ proc load_query_48
 end
 
 proc load_query_53
+    push.6620516959492505600.11170449401267093504.11912009168875159976.13503953893947607809
+    swapw padw
     repeat.53
         adv_pipe
         horner_eval_base
@@ -457,6 +481,8 @@ proc load_query_53
 end
 
 proc load_query_54
+    push.6620516959492505600.11170449401267093504.11912009168875159984.13503953893947607809
+    swapw padw
     repeat.54
         adv_pipe
         horner_eval_base
@@ -465,6 +491,8 @@ proc load_query_54
 end
 
 proc load_query_59
+    push.6620516959492505600.11170449401267093504.11912009168875160024.13503953893947607809
+    swapw padw
     repeat.59
         adv_pipe
         horner_eval_base
@@ -473,6 +501,8 @@ proc load_query_59
 end
 
 proc load_query_61
+    push.6620516959492505600.11170449401267093504.11912009168875160040.13503953893947607809
+    swapw padw
     repeat.61
         adv_pipe
         horner_eval_base
@@ -481,6 +511,8 @@ proc load_query_61
 end
 
 proc load_query_66
+    push.6620516959492505600.11170449401267093504.11912009168875160080.13503953893947607809
+    swapw padw
     repeat.66
         adv_pipe
         horner_eval_base

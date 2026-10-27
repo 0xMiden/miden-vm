@@ -76,6 +76,9 @@ pub fn run(mode: Mode) -> Result<(), String> {
         let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), layout)?;
         let airs: Vec<_> =
             ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+        if (airs.len() == 12) != (variant == PvmAirVariant::ALL) {
+            return Err("PVM full-variant setup requires exactly twelve AIRs, uniquely".into());
+        }
         let shape = miden_air_definitions::precompiles::geometry::air_shape_for(&compiled, variant);
         if shape != miden_air::precompiles::protocol::metadata_for(variant).air_shape {
             return Err(format!(
@@ -212,8 +215,17 @@ pub fn run(mode: Mode) -> Result<(), String> {
         }
     }
     for (name, blocks) in loaders {
-        writeln!(variants, "proc load_{name}_{blocks}\n    repeat.{blocks}\n        adv_pipe")
-            .unwrap();
+        writeln!(variants, "proc load_{name}_{blocks}").unwrap();
+        if name == "query" {
+            // The fixed row length also fixes its LMCS frame. Load it here instead of
+            // reading the same trusted metadata word again for every query.
+            let encoded_len = u32::try_from(blocks * EIDOS_BLOCK_WIDTH as u64)
+                .map_err(|_| "PVM query loader length exceeds u32")?;
+            let cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
+            writeln!(variants, "    push.{}.{}.{}.{}\n    swapw padw", cv[3], cv[2], cv[1], cv[0])
+                .unwrap();
+        }
+        writeln!(variants, "    repeat.{blocks}\n        adv_pipe").unwrap();
         if name == "query" {
             variants.push_str("        horner_eval_base\n");
         }

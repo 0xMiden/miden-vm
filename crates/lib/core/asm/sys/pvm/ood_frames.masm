@@ -413,17 +413,18 @@ end
 
 # Input: [offsets_ptr, pipe_offsets_ptr, slots_ptr]. Every source is trusted selected metadata.
 proc stage_group
-    push.0
-    dup exec.layout::num_airs u32lt
+    # Destinations are disjoint; count down to avoid reloading the bound for each AIR.
+    exec.layout::num_airs
+    push.1
     while.true
+        sub.1
         dup exec.layout::proof_order_positions_ptr add mem_load mul.2 dup.4 add
         # [pair, i, offsets, pipe_offsets, slots]
         dup.1 dup.3 add mem_load
         dup.1 mem_store
         dup.1 dup.4 add mem_load exec.layout::ood_scatter_table_ptr add
         dup.1 add.1 mem_store
-        drop add.1
-        dup exec.layout::num_airs u32lt
+        drop dup neq.0
     end
     drop drop drop drop
 end

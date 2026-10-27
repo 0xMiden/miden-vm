@@ -80,13 +80,90 @@ proc stage_air_fold_coefficients
     padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR drop drop
     push.0.1
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
-    exec.layout::num_airs loc_store.0
-    push.1
-    while.true
-        dup.5 loc_load.0 sub.1 add mem_load mul.2 dup.5 add
+    # Only the full relation has twelve AIRs (checked by the regeneration tool).
+    exec.layout::num_airs eq.12
+    if.true
+        # Each step copies its coefficient and destination before storing c0 then c1.
+        # proof position 11: coefficient beta^0 to that AIR's slot
+        dup.5 add.11 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
         dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
         dup.3 dup.3 ext2mul
-        loc_load.0 sub.1 dup loc_store.0 neq.0
+        # proof position 10: coefficient beta^1 to that AIR's slot
+        dup.5 add.10 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 9: coefficient beta^2 to that AIR's slot
+        dup.5 add.9 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 8: coefficient beta^3 to that AIR's slot
+        dup.5 add.8 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 7: coefficient beta^4 to that AIR's slot
+        dup.5 add.7 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 6: coefficient beta^5 to that AIR's slot
+        dup.5 add.6 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 5: coefficient beta^6 to that AIR's slot
+        dup.5 add.5 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 4: coefficient beta^7 to that AIR's slot
+        dup.5 add.4 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 3: coefficient beta^8 to that AIR's slot
+        dup.5 add.3 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 2: coefficient beta^9 to that AIR's slot
+        dup.5 add.2 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 1: coefficient beta^10 to that AIR's slot
+        dup.5 add.1 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.3 dup.3 ext2mul
+        # proof position 0: coefficient beta^11 to that AIR's slot
+        dup.5 mem_load mul.2 dup.5 add
+        # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+        dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+        # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    else
+        exec.layout::num_airs loc_store.0
+        push.1
+        while.true
+            dup.5 loc_load.0 sub.1 add mem_load mul.2 dup.5 add
+            dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+            dup.3 dup.3 ext2mul
+            loc_load.0 sub.1 dup loc_store.0 neq.0
+        end
     end
     drop drop drop drop drop drop
 end

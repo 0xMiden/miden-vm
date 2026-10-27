@@ -9,7 +9,22 @@ use {
     RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
-use {FIXED_BOUNDARY_LOOKUP_TERMS, MAX_MESSAGE_WIDTH} from miden::core::sys::pvm::parameters
+use {
+    FIXED_BOUNDARY_LOOKUP_TERMS,
+    MAX_MESSAGE_WIDTH,
+    MIN_LOG_HEIGHT_0,
+    MIN_LOG_HEIGHT_1,
+    MIN_LOG_HEIGHT_2,
+    MIN_LOG_HEIGHT_4,
+    MIN_LOG_HEIGHT_5,
+    MIN_LOG_HEIGHT_6,
+    MIN_LOG_HEIGHT_7,
+    MIN_LOG_HEIGHT_8,
+    MIN_LOG_HEIGHT_9,
+    MIN_LOG_HEIGHT_10,
+    MIN_LOG_HEIGHT_11,
+    PREPROCESSED_TRACE_LOG_HEIGHT,
+} from miden::core::sys::pvm::parameters
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -48,20 +63,38 @@ pub proc load_air_context()
     push.0
     push.LOG_AIR_TRACE_LENGTHS_PTR
 
-    push.0 loc_store.0
-    push.1
-    while.true
-        exec.layout::air_fixed_log_heights_ptr loc_load.0 add mem_load
-        dup neq.0
-        if.true
-            exec.load_fixed_air_height
-        else
-            drop
-            exec.layout::air_min_log_heights_ptr loc_load.0 add mem_load
-            exec.load_air_height
+    # Only the full relation has twelve AIRs (checked by the regeneration tool).
+    exec.layout::num_airs eq.12
+    if.true
+        push.MIN_LOG_HEIGHT_0 exec.load_air_height
+        push.MIN_LOG_HEIGHT_1 exec.load_air_height
+        push.MIN_LOG_HEIGHT_2 exec.load_air_height
+        # BytePairLut must match its fixed setup height.
+        push.PREPROCESSED_TRACE_LOG_HEIGHT exec.load_fixed_air_height
+        push.MIN_LOG_HEIGHT_4 exec.load_air_height
+        push.MIN_LOG_HEIGHT_5 exec.load_air_height
+        push.MIN_LOG_HEIGHT_6 exec.load_air_height
+        push.MIN_LOG_HEIGHT_7 exec.load_air_height
+        push.MIN_LOG_HEIGHT_8 exec.load_air_height
+        push.MIN_LOG_HEIGHT_9 exec.load_air_height
+        push.MIN_LOG_HEIGHT_10 exec.load_air_height
+        push.MIN_LOG_HEIGHT_11 exec.load_air_height
+    else
+        push.0 loc_store.0
+        push.1
+        while.true
+            exec.layout::air_fixed_log_heights_ptr loc_load.0 add mem_load
+            dup neq.0
+            if.true
+                exec.load_fixed_air_height
+            else
+                drop
+                exec.layout::air_min_log_heights_ptr loc_load.0 add mem_load
+                exec.load_air_height
+            end
+            loc_load.0 add.1 dup loc_store.0
+            exec.layout::num_airs u32lt
         end
-        loc_load.0 add.1 dup loc_store.0
-        exec.layout::num_airs u32lt
     end
 
     drop
