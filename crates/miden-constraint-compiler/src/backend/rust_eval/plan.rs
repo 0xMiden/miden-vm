@@ -50,6 +50,11 @@ pub(super) enum Rewrite {
     Sum(Vec<Piece>),
 }
 
+/// The class of an arithmetic result: extension if either operand is.
+pub(super) fn join(a: Class, b: Class) -> Class {
+    if a == Class::Ext { a } else { b }
+}
+
 pub(super) struct Plan<'g> {
     graph: &'g Graph,
     uses: Vec<usize>,
@@ -199,14 +204,11 @@ impl<'g> Plan<'g> {
             for (common, left, other, right) in
                 [(a, b, c, d), (a, b, d, c), (b, a, c, d), (b, a, d, c)]
             {
-                if common == other
-                    && self.graph.class(common) == class
-                    && self.graph.class(left) == class
-                    && self.graph.class(right) == class
-                {
+                let sum = join(self.graph.class(left), self.graph.class(right));
+                if common == other && join(self.graph.class(common), sum) == class {
                     return Some(Rewrite::Factor {
                         common,
-                        scalar: self.constant(common),
+                        scalar: self.constant(common).filter(|_| class == Class::Base),
                         left,
                         right,
                     });

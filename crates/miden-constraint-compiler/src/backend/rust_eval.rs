@@ -389,10 +389,17 @@ impl<'g> Emitter<'g> {
                     let right = self.expr(right, class);
                     return format!("({left} + {right}) * Felt::from_u64({scalar})");
                 }
-                let common = self.expr(common, class);
-                let left = self.expr(left, class);
-                let right = self.expr(right, class);
-                format!("{common} * ({left} + {right})")
+                let factor = self.graph.class(common);
+                let sum = plan::join(self.graph.class(left), self.graph.class(right));
+                let common = self.expr(common, factor);
+                let left = self.expr(left, sum);
+                let right = self.expr(right, sum);
+                // `AB::ExprEF: Algebra<AB::Expr>` takes a base factor on the right.
+                if factor == Class::Base && sum == Class::Ext {
+                    format!("({left} + {right}) * {common}")
+                } else {
+                    format!("{common} * ({left} + {right})")
+                }
             },
             Rewrite::Sum(pieces) => {
                 let values: Vec<_> = pieces
@@ -1025,6 +1032,57 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         let out = optimized(b, vec![sum], vec![]);
         assert!(out.contains(") * Felt::from_u64(7)"), "{out}");
         assert!(!out.contains("AB::Expr::from(Felt::from_u64(7))"));
+    }
+
+    #[test]
+    fn optimized_factoring_spans_field_classes() {
+        let mut b = GraphBuilder::new();
+        // s*x + y*s: a base multiplicity shared by extension terms.
+        let s = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let x = b.leaf(Leaf::Challenge(0));
+        let y = b.leaf(Leaf::Aux { offset: 0, index: 0 });
+        let p = b.op(Class::Ext, OpKind::Mul, s, Some(x)).0;
+        let q = b.op(Class::Ext, OpKind::Mul, y, Some(s)).0;
+        let base_factor = b.op(Class::Ext, OpKind::Add, p, Some(q)).0;
+        // e*a + c*e: an extension factor shared by base terms.
+        let e = b.leaf(Leaf::Challenge(1));
+        let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
+        let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
+        let r = b.op(Class::Ext, OpKind::Mul, e, Some(a)).0;
+        let t = b.op(Class::Ext, OpKind::Mul, c, Some(e)).0;
+        let ext_factor = b.op(Class::Ext, OpKind::Add, r, Some(t)).0;
+        // All-base operands would factor to a base value for an extension node.
+        let u = b.op(Class::Ext, OpKind::Mul, s, Some(a)).0;
+        let v = b.op(Class::Ext, OpKind::Mul, c, Some(s)).0;
+        let base_only = b.op(Class::Ext, OpKind::Add, u, Some(v)).0;
+        // `AB::ExprEF` has no `Felt` product, so a literal factor stays an `AB::Expr`.
+        let seven = b.leaf(Leaf::BaseConst(7));
+        let w = b.op(Class::Ext, OpKind::Mul, seven, Some(x)).0;
+        let z = b.op(Class::Ext, OpKind::Mul, y, Some(seven)).0;
+        let literal_factor = b.op(Class::Ext, OpKind::Add, w, Some(z)).0;
+        let out = optimized(b, vec![], vec![base_factor, ext_factor, base_only, literal_factor]);
+        assert!(
+            out.contains(&format!(
+                "let e{} = (h1.dup() + Into::<AB::ExprEF>::into(h2)) * AB::Expr::from(h0);",
+                base_factor.index()
+            )),
+            "{out}"
+        );
+        assert!(out.contains(&format!(
+            "let e{} = h3.dup() * (AB::Expr::from(h4) + AB::Expr::from(h5));",
+            ext_factor.index()
+        )));
+        assert!(out.contains(&format!(
+            "let e{} = (h1.dup() + Into::<AB::ExprEF>::into(h2)) * h6.dup();",
+            literal_factor.index()
+        )));
+        assert!(!out.contains("* Felt::from_u64(7)"));
+        for product in [p, q, r, t, w, z] {
+            assert!(!out.contains(&format!("let e{} =", product.index())));
+        }
+        for product in [u, v] {
+            assert!(out.contains(&format!("let e{} =", product.index())));
+        }
     }
 
     #[test]
