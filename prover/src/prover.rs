@@ -1,10 +1,13 @@
 use alloc::{string::ToString, vec::Vec};
 
+use miden_air::MidenMultiAir;
 use miden_core::{
-    Word,
+    Felt, Word,
     deferred::PrecompileLimits,
+    field::QuadFelt,
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
+use miden_lifted_stark::memory;
 use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
     StackInputs, StackOutputs, SyncHost, VmWitness,
@@ -31,14 +34,13 @@ pub struct Prover {
 impl Prover {
     /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::memory`; it
-    /// is not a total process-RSS or allocator cap. In particular, the model excludes the fixed
-    /// And8 preprocessed setup, and the precompile prover's memory footprint is bounded separately
+    /// This bounds the approximate lifted-STARK VM allocations modelled by
+    /// `miden_lifted_stark::memory`, including the fixed And8 preprocessed setup. It is not a
+    /// total process-RSS or allocator cap. The precompile prover's memory is bounded separately
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
-    /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// precompile witness.
+    /// Default maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
         miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
@@ -92,8 +94,7 @@ impl Prover {
         self.max_prover_memory_bytes
     }
 
-    /// Sets the maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// precompile witness.
+    /// Sets the maximum modelled peak memory, in bytes, for proving a precompile witness.
     #[must_use]
     pub const fn with_max_precompile_prover_memory_bytes(
         mut self,
@@ -103,8 +104,7 @@ impl Prover {
         self
     }
 
-    /// Returns the maximum memory, in bytes, this prover is permitted to allocate for a proof
-    /// over a precompile witness.
+    /// Returns the maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const fn max_precompile_prover_memory_bytes(&self) -> u64 {
         self.max_precompile_prover_memory_bytes
     }
@@ -236,7 +236,13 @@ impl Prover {
             trace_len_summary.eidos_compression_rows(),
             trace_len_summary.byte_pair_lookup_rows(),
             trace_len_summary.padded_trace_len(),
-            trace_len_summary.prover_memory_bytes(&params)
+            trace_len_summary.padded_heights().and_then(|heights| {
+                memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+                    &MidenMultiAir::new(),
+                    heights,
+                    &params,
+                )
+            })
         );
 
         let precompile_root = trace.precompile_root();

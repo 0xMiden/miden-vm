@@ -5,7 +5,6 @@ pub use miden_air_definitions::precompiles::{
     ace, ec, fixed, hash, logup, math, policy, primitives, relations, transcript, uint, utils,
 };
 pub mod air;
-pub mod memory;
 pub mod preprocessed;
 pub mod protocol;
 pub mod security;

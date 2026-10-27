@@ -2620,6 +2620,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
+ "miden-lifted-stark",
  "miden-mast-package",
  "miden-precompiles",
  "miden-test-serialization-macros",

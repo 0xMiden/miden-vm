@@ -7,7 +7,13 @@ use std::{
     hint::black_box,
 };
 
-use miden_air::{config::pcs_params, memory};
+use miden_air::{
+    MidenMultiAir,
+    config::pcs_params,
+    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
+};
+use miden_core::{Felt, field::QuadFelt};
+use miden_lifted_stark::memory;
 
 thread_local! {
     static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };
@@ -51,12 +57,40 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[test]
 fn trace_memory_budget_uses_compiled_geometry_without_allocating() {
     let params = pcs_params();
+    let multi_air = MidenMultiAir;
     ALLOCATIONS.set(Some(0));
-    let peak = black_box(memory::prover_peak_bytes(black_box(&[1024, 2048, 4096, 65536]), &params));
-    let max_height = black_box(memory::max_any_height_for_budget(black_box(1 << 30), &params));
+    let peak = black_box(memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &multi_air,
+        black_box(&[1024, 2048, 4096, 65536]),
+        &params,
+    ));
+    let max_height = black_box(memory::max_any_height_for_budget::<Felt, QuadFelt, _>(
+        &multi_air,
+        black_box(1 << 30),
+        &params,
+    ));
     let allocations = ALLOCATIONS.replace(None).unwrap();
 
     assert!(peak.is_some());
     assert!(max_height > 0);
     assert_eq!(allocations, 0, "runtime memory budgeting must use compiled AIR geometry");
+}
+
+#[test]
+fn precompile_memory_budget_uses_compiled_geometry_without_allocating() {
+    let params = precompile_pcs_params();
+    // AIR construction allocates; count only the memory query.
+    let multi_air = ChipletMultiAir::new();
+    let heights = [1; NUM_CHIPLETS];
+
+    ALLOCATIONS.set(Some(0));
+    let peak = black_box(memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &multi_air,
+        black_box(&heights),
+        &params,
+    ));
+    let allocations = ALLOCATIONS.replace(None).unwrap();
+
+    assert!(peak.is_some());
+    assert_eq!(allocations, 0, "PVM memory budgeting must use compiled AIR geometry");
 }

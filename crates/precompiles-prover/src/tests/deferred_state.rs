@@ -3,7 +3,7 @@ use std::{format, string::String, vec, vec::Vec};
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_air::{
     lookup::Challenges,
-    precompiles::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params},
+    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
 };
 use miden_core::{
     Felt,
@@ -13,6 +13,7 @@ use miden_core::{
     serde::{Deserializable, Serializable},
     utils::Matrix,
 };
+use miden_lifted_stark::memory;
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
@@ -20,7 +21,7 @@ use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    PrecompileProvingError, check_memory_budget,
+    PrecompileProvingError,
     deferred::session::session_from_witnesses,
     hash::{
         chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
@@ -506,21 +507,6 @@ fn insufficient_budget_rejects_before_building_traces() {
     });
 }
 
-#[test]
-fn memory_estimate_overflow_is_distinct_from_exceeding_the_budget() {
-    assert!(matches!(
-        check_memory_budget(None, u64::MAX),
-        Err(PrecompileProvingError::MemoryEstimateOverflow)
-    ));
-    assert!(matches!(
-        check_memory_budget(Some(u64::MAX), u64::MAX - 1),
-        Err(PrecompileProvingError::MemoryBudgetExceeded {
-            estimated_bytes: u64::MAX,
-            budget_bytes
-        }) if budget_bytes == u64::MAX - 1
-    ));
-}
-
 /// Tests the exact byte-budget boundary computed from actual padded chiplet heights.
 #[test]
 fn prove_precompiles_with_budget_corner_cases() {
@@ -532,8 +518,9 @@ fn prove_precompiles_with_budget_corner_cases() {
         .finish();
     let heights: [usize; NUM_CHIPLETS] = traces.mains().map(Matrix::height);
     let params = precompile_pcs_params();
-    let exact_peak = memory::prover_peak_bytes(&heights, &params, HashFunction::Blake3_256)
-        .expect("modelled peak fits in u64");
+    let exact_peak =
+        memory::prover_peak_bytes::<Felt, QuadFelt, _>(&ChipletMultiAir::new(), &heights, &params)
+            .expect("modelled peak fits in u64");
 
     // At the exact peak, the budget check passes and the state proves.
     prove_precompiles_with_budget(
