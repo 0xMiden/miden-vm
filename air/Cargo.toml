@@ -47,7 +47,7 @@ p3-security.workspace = true
 miden-air-definitions = { workspace = true, features = ["compiler", "testing"] }
 insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
-miden-constraint-compiler.workspace = true
+miden-constraint-compiler = { workspace = true, features = ["testing"] }
 
 [build-dependencies]
 miden-air-definitions = { workspace = true, features = ["std", "compiler"] }

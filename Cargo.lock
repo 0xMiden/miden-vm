@@ -2198,6 +2198,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-lifted-stark",
+ "p3-field",
 ]
 
 [[package]]

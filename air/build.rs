@@ -5,7 +5,7 @@ use miden_air_definitions::{
     ace::{CapturedAir, CompiledRelation, LayoutKind},
     config,
 };
-use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
+use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
 #[path = "build/precompiles.rs"]
 mod precompiles;
@@ -36,7 +36,7 @@ fn main() {
             constraints: captured.constraints(),
         })
         .collect();
-    write("evaluators.rs", emit_module("", &evals));
+    write("evaluators.rs", emit_optimized_module("", &evals));
     let degree_arms = captured
         .iter()
         .map(|(air, captured)| format!("MidenAir::{} => {:?},", air.name(), captured.degrees()))
