@@ -69,6 +69,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Check benchmark runner preflight
+        run: |
+          if [ -f scripts/bench_eidos_vs_poseidon2.sh ]; then
+            bash -n scripts/bench_eidos_vs_poseidon2.sh
+            python3 -m unittest discover -s scripts/tests -v
+          fi
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
