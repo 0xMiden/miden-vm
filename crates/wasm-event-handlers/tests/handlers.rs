@@ -9,6 +9,7 @@ use std::{string::String, sync::Arc, vec::Vec};
 use miden_crypto::hash::{
     blake::Blake3_256,
     keccak::Keccak256,
+    poseidon2::Poseidon2,
     sha2::{Sha256, Sha512},
 };
 use miden_event_handler_abi::{ABI_VERSION, Status};
@@ -16,7 +17,7 @@ use miden_processor::{
     DefaultHost, FastProcessor, Felt, StackInputs, Word,
     advice::{AdviceInputs, AdviceMap, AdviceMutation, AdviceStack},
     crypto::{
-        hash::Poseidon2,
+        hash::Eidos,
         merkle::{InnerNodeInfo, MerkleStore},
     },
     event::{EventError, EventName},
@@ -480,7 +481,7 @@ fn status_calls_validate_output_pointers() {
 fn merkle_store_accepts_consistent_node() {
     let left = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
     let right = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
-    let value = Poseidon2::merge(&[left, right]);
+    let value = Eidos::merge(&[left, right]);
 
     let mut felts = Vec::new();
     for word in [value, left, right] {
@@ -531,7 +532,7 @@ fn mem_read_root_zero_fills_and_reports_out_of_bounds() {
 fn merkle_queries() {
     let left = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
     let right = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
-    let root = Poseidon2::merge(&[left, right]);
+    let root = Eidos::merge(&[left, right]);
     // A root no tree in the store has.
     let unknown = Word::new([9u64, 9, 9, 9].map(Felt::new_unchecked));
 
@@ -829,6 +830,20 @@ fn merkle_store_rejects_inconsistent_node() {
     let wat_src = fixture_with(&items, "(call $merkle_store_extend (i32.const 0) (i32.const 1))");
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("digest"), "unexpected error: {err}");
+}
+
+#[test]
+fn merkle_store_rejects_poseidon2_node() {
+    let left = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let right = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
+    let value = Poseidon2::merge(&[left, right]);
+    assert_ne!(value, Eidos::merge(&[left, right]));
+
+    let items = format!("(data (i32.const 0) \"{}\")", word_bytes(&[value, left, right]));
+    let wat_src = fixture_with(&items, "(call $merkle_store_extend (i32.const 0) (i32.const 1))");
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("Merkle nodes must use Eidos");
     assert!(err.contains("digest"), "unexpected error: {err}");
 }
 

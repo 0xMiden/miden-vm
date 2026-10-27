@@ -135,7 +135,7 @@ The **`package_deserialize`** target tests `Package::read_from_bytes`.
 cargo +nightly fuzz run package_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`event_handler_section_deserialize`** — Tests `EventHandlerSection::from_payload` (the
+The `event_handler_section_deserialize` target tests `EventHandlerSection::from_payload` (the
 untrusted `event_handlers` package section with its decode-time size caps), the same function
 `Package::event_handlers` uses.
 
@@ -143,15 +143,15 @@ untrusted `event_handlers` package section with its decode-time size caps), the 
 cargo +nightly fuzz run event_handler_section_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`wasm_handler_manifest`** — Tests `manifest_from_module`: the wasmparser pass over an
-untrusted binary and the `miden:event-manifest` custom-section record parser.
+The `wasm_handler_manifest` target tests `manifest_from_module`, which parses an untrusted
+binary with wasmparser and reads its `miden:event-manifest` custom-section records.
 
 ```bash
 cargo +nightly fuzz run wasm_handler_manifest --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`wasm_section_walk_differential`** — Differential test: any module wasmi validates must also
-parse with the wasmparser version the handler loader pins, and pass the static analysis built on
+The `wasm_section_walk_differential` target checks that any module wasmi validates also passes the loader.
+It must parse with the wasmparser version the handler loader pins and pass the static analysis built on
 it (the instantiation-cost estimate and the start-section check), since the loader conservatively
 rejects modules that either one refuses. A disagreement means the loader's wasmparser pin and
 wasmi's own wasmparser dependency drifted apart.

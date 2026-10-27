@@ -1,6 +1,6 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 
 use miden_assembly_syntax::ast::DebugVarLocation;

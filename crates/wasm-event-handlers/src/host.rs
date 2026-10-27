@@ -17,6 +17,7 @@ use miden_crypto::{
     hash::{
         blake::Blake3_256,
         keccak::Keccak256,
+        poseidon2::Poseidon2,
         sha2::{Sha256, Sha512},
     },
 };
@@ -24,7 +25,7 @@ use miden_event_handler_abi::{IMPORT_MODULE, MAX_FAIL_MSG_BYTES, MEMORY_EXPORT, 
 use miden_processor::{
     ContextId, Felt, ProcessorState, Word,
     advice::{AdviceError, AdviceMap, AdviceMutation},
-    crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
+    crypto::{hash::Eidos, merkle::InnerNodeInfo},
 };
 use wasmi::{Caller, Engine, Linker, Memory, StoreLimits, StoreLimitsBuilder};
 
@@ -80,7 +81,7 @@ const FUEL_PER_POSEIDON2_PERM: u64 = 2000;
 
 /// Extra fuel charged per Merkle node for the host-side digest verification hash.
 ///
-/// One node costs one Poseidon2 merge.
+/// One node costs one Eidos merge.
 const FUEL_PER_MERKLE_NODE: u64 = FUEL_PER_POSEIDON2_PERM;
 
 /// Flat fuel charged per byte-hash call on top of [`HOST_CALL_BASE_FUEL`], for the digest
@@ -834,7 +835,7 @@ fn merkle_store_extend(
     // The Merkle store does not verify digests on extension, so reject inconsistent
     // nodes from the untrusted guest here.
     for node in &nodes {
-        if Poseidon2::merge(&[node.left, node.right]) != node.value {
+        if Eidos::merge(&[node.left, node.right]) != node.value {
             return Err(trap("merkle node digest does not match hash(left, right)"));
         }
     }

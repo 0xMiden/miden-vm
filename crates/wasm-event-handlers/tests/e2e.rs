@@ -220,7 +220,8 @@ fn rust_guest_fixture_end_to_end() {
 /// two operand-stack words and answers with the Poseidon2 merge of the pair.
 #[test]
 fn rust_guest_merges_words() {
-    use miden_processor::{Felt, Word, crypto::hash::Poseidon2};
+    use miden_crypto::hash::poseidon2::Poseidon2;
+    use miden_processor::{Felt, Word};
     use miden_wasm_event_handlers::section_from_module;
 
     let wasm = build_rust_guest_fixture();

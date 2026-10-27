@@ -365,33 +365,26 @@ pub mod guest {
         // HASHING
         // ----------------------------------------------------------------------------------------
         //
-        // The host computes VM-native hashes on the guest's behalf, so guests do not carry
-        // their own crypto implementations and always agree bit-for-bit with the VM. Poseidon2
-        // is the hash behind every advice-map key convention (`adv.insert_hdword` keys are
-        // `merge`, `adv.insert_hqword` keys are `hash`, `adv.insert_hperm` keys come from the
-        // raw permutation) and behind Merkle nodes and SMT leaves. All `domain` parameters are
-        // field elements in canonical form; a non-canonical domain traps.
+        // The host computes hashes on the guest's behalf. Poseidon2 is available for
+        // standalone application commitments. The VM uses Eidos for advice keys and Merkle
+        // nodes. All `domain` parameters are canonical field elements; other values trap.
 
         /// Writes the Poseidon2 merge of the two words at `pair` to `out`, using `domain`.
         ///
-        /// Domain `0` is the plain merge, the digest behind `adv.insert_hdword` advice keys and
-        /// Merkle inner nodes. Other domains match `adv.insert_hdword_d` and the SMT leaf
-        /// domains.
+        /// Domain `0` is the plain Poseidon2 merge. This does not compute VM Merkle nodes.
         pub fn poseidon2_merge(pair: *const Word, domain: u64, out: *mut Word);
 
         /// Writes the Poseidon2 sequential hash of `count` field elements at `elems` to `out`,
         /// using `domain`.
         ///
-        /// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys and
-        /// commitment values. The elements are validated canonical; a non-canonical element
-        /// traps.
+        /// Domain `0` is the plain Poseidon2 hash. The elements are validated canonical;
+        /// a non-canonical element traps.
         pub fn poseidon2_hash(elems: *const Felt, count: u32, domain: u64, out: *mut Word);
 
         /// Applies the Poseidon2 permutation to the 12-element state at `state`, in place.
         ///
-        /// This matches `adv.insert_hperm` advice keys: the digest is `state[4..8]` after the
-        /// permutation. The state elements are validated canonical; a non-canonical element
-        /// traps.
+        /// The digest is `state[4..8]` after the permutation. The state elements are
+        /// validated canonical; a non-canonical element traps.
         pub fn poseidon2_permute(state: *mut Felt);
 
         /// Writes the Keccak-256 digest (32 bytes) of the `len` bytes at `data` to `out`.
@@ -454,7 +447,7 @@ pub mod guest {
         /// host applies the buffered mutations. A size-limit violation traps.
         pub fn adv_map_insert(key: *const Word, vals: *const Felt, len: u32);
 
-        /// Buffers `len` inner nodes to extend the Merkle store.
+        /// Buffers `len` Eidos inner nodes to extend the Merkle store.
         ///
         /// A size-limit violation traps.
         pub fn merkle_store_extend(nodes: *const MerkleNode, len: u32);

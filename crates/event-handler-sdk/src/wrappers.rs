@@ -374,7 +374,7 @@ pub fn adv_map_insert(key: &Word, vals: &mut [Felt]) {
 /// Buffers inner nodes to extend the Merkle store.
 ///
 /// Each node holds the node digest and its two child digests. Every node must satisfy
-/// `value == poseidon2_merge([left, right], 0)`.
+/// `value == Eidos::merge([left, right])`, using the VM's native hash.
 ///
 /// This canonicalizes the elements of `nodes` in place; the field values do not change.
 pub fn merkle_store_extend(nodes: &mut [MerkleNode]) {

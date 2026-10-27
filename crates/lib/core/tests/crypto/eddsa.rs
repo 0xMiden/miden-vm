@@ -354,7 +354,7 @@ fn run_program_with_handler(
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
     if let Some(handler) = handler {
-        assert!(host.replace_handler(ED25519_DECOMPRESS_EVENT_NAME, handler));
+        assert!(host.replace_handler(ED25519_DECOMPRESS_EVENT_NAME, handler).unwrap());
     }
     let mut advice = AdviceStack::new();
     advice.append_elements(bytes_to_packed_u32_elements(pk));
