@@ -27,8 +27,8 @@ pub(crate) mod transcript;
 pub(crate) mod uint;
 pub(crate) mod utils;
 
-/// Default maximum memory, in bytes, [`prove_precompiles`] assumes when no budget is given
-/// explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
+/// Default maximum modelled peak memory, in bytes, used by [`prove_precompiles`] when no budget is
+/// given explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
 /// expected to set their own via [`prove_precompiles_with_budget`].
 pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 

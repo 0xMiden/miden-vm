@@ -126,7 +126,8 @@ impl PrecompileWitness {
     /// canonical child-first order, and rejects duplicate commitments and unreachable entries.
     /// Each node's declared work is charged before computing its commitment, which is hashed once.
     /// The final entry establishes the non-TRUE root exposed by [`PreparedWitness::root`]; callers
-    /// must bind that root to the authenticated execution root before evaluation or proving.
+    /// must bind that root to the authenticated execution root before accepting the result as
+    /// evidence for that execution.
     /// Preparation does not evaluate precompile semantics or establish assertion truth.
     ///
     /// Callers retaining the portable witness must clone it explicitly.

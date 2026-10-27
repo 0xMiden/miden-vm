@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn row_cap_never_rejects_a_shape_that_fits() {
-        let multi_air = multi_air();
+        let mut multi_air = multi_air();
         let params = params(3);
         for heights in [[0, 0], [1, 3], [16, 65_536], [1 << 20, 8]] {
             let budget = estimate(&multi_air, heights, &params).unwrap();
@@ -335,6 +335,12 @@ mod tests {
             if let Some(next) = cap.checked_add(1) {
                 assert!(!fits(next));
             }
+            multi_air.airs.reverse();
+            assert_eq!(
+                max_any_height_for_budget::<Felt, QuadFelt, _>(&multi_air, budget, &params),
+                cap
+            );
+            multi_air.airs.reverse();
         }
     }
 }

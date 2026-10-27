@@ -40,8 +40,7 @@ impl Prover {
     /// by [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
-    /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// precompile witness.
+    /// Default maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
         miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
@@ -95,8 +94,7 @@ impl Prover {
         self.max_prover_memory_bytes
     }
 
-    /// Sets the maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// precompile witness.
+    /// Sets the maximum modelled peak memory, in bytes, for proving a precompile witness.
     #[must_use]
     pub const fn with_max_precompile_prover_memory_bytes(
         mut self,
@@ -106,8 +104,7 @@ impl Prover {
         self
     }
 
-    /// Returns the maximum memory, in bytes, this prover is permitted to allocate for a proof
-    /// over a precompile witness.
+    /// Returns the maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const fn max_precompile_prover_memory_bytes(&self) -> u64 {
         self.max_precompile_prover_memory_bytes
     }
