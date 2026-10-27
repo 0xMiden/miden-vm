@@ -161,7 +161,9 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         max_prover_memory_bytes: u64,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use miden_air::{config, memory};
+        use miden_air::{MidenMultiAir, config};
+        use miden_core::field::QuadFelt;
+        use miden_lifted_stark::memory;
 
         use crate::trace::{
             MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,
@@ -176,10 +178,12 @@ impl FastProcessor {
         }
 
         let stack_inputs = self.initial_stack_inputs();
-        let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
-            max_prover_memory_bytes,
-            &config::pcs_params(),
-        ));
+        let max_trace_len =
+            MAX_TRACE_LEN.min(memory::max_any_height_for_budget::<crate::Felt, QuadFelt, _>(
+                &MidenMultiAir::new(),
+                max_prover_memory_bytes,
+                &config::pcs_params(),
+            ));
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),

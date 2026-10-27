@@ -1836,6 +1836,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-debug-types",
+ "miden-lifted-stark",
  "miden-mast-package",
  "miden-precompiles",
  "miden-utils-diagnostics",

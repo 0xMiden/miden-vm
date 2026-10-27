@@ -29,7 +29,6 @@ mod degrees {
 }
 pub mod ace;
 pub mod config;
-pub mod memory;
 pub mod precompiles;
 mod proof_order;
 pub mod security;

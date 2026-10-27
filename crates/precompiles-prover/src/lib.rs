@@ -27,8 +27,8 @@ pub(crate) mod transcript;
 pub(crate) mod uint;
 pub(crate) mod utils;
 
-/// Default maximum memory, in bytes, [`prove_precompiles`] assumes when no budget is given
-/// explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
+/// Default maximum modelled peak memory, in bytes, used by [`prove_precompiles`] when no budget is
+/// given explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
 /// expected to set their own via [`prove_precompiles_with_budget`].
 pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
@@ -95,17 +95,6 @@ pub fn prove_precompile_for_root_with_limits_and_budget(
         Some(core::slice::from_ref(&expected_root)),
         max_prover_memory_bytes,
     )
-}
-
-fn check_memory_budget(
-    estimated_bytes: Option<u64>,
-    budget_bytes: u64,
-) -> Result<(), PrecompileProvingError> {
-    let estimated_bytes = estimated_bytes.ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
-    if estimated_bytes > budget_bytes {
-        return Err(PrecompileProvingError::MemoryBudgetExceeded { estimated_bytes, budget_bytes });
-    }
-    Ok(())
 }
 
 /// Errors produced while importing and proving portable precompile claims.
