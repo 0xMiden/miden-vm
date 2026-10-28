@@ -179,3 +179,37 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
     assert_eq!(trace.to_public_values(), expected_public_inputs.to_elements());
 }
+
+#[test]
+fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
+    use miden_core::{deferred::Node, serde::Serializable};
+
+    use crate::ExecutionWitness;
+
+    let mut operations = vec![Operation::LogDeferred, Operation::ClearDeferred];
+    operations.extend(core::iter::repeat_n(Operation::Noop, TEST_TRACE_FRAGMENT_SIZE));
+    operations.push(Operation::LogDeferred);
+    let mut mast_forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
+    mast_forest.make_root(block);
+    let program = Program::new(mast_forest.into(), block);
+    let witness = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .unwrap()
+    .execute_for_proving_sync(&program, &mut DefaultHost::default())
+    .unwrap();
+    let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
+    let (vm_witness, precompile_witness) = restored.into_parts();
+    let first_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
+    let expected_root = Node::and(TRUE_DIGEST, first_root).digest();
+    assert_eq!(vm_witness.precompile_root, expected_root);
+    assert!(precompile_witness.is_some());
+    let trace = build_trace(vm_witness).unwrap();
+    assert_eq!(trace.precompile_root(), expected_root);
+    trace.check_constraints();
+}

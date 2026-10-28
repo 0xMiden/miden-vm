@@ -445,6 +445,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::LogDeferred,
     },
     PrimitiveSpec {
+        spelling: "clear_deferred",
+        build: || Instruction::ClearDeferred,
+    },
+    PrimitiveSpec {
         spelling: "nop",
         build: || Instruction::Nop,
     },

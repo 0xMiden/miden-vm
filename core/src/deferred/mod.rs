@@ -112,6 +112,10 @@ pub enum DeferredError {
     Unsupported,
     #[error("invalid deferred root transition: expected {expected:?}, got {actual:?}")]
     InvalidDeferredRootTransition { expected: Digest, actual: Digest },
+    #[error(
+        "invalid deferred root reset: expected previous root {expected:?}, current root is {actual:?}"
+    )]
+    InvalidDeferredRootReset { expected: Digest, actual: Digest },
 }
 
 /// Errors produced while evaluating deferred nodes through precompiles.

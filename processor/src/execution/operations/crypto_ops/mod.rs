@@ -2,12 +2,8 @@ use alloc::boxed::Box;
 
 use miden_air_definitions::vm::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
 use miden_core::{
-    chiplets::{
-        eidos_compression,
-        hasher::{BLOCK_HI_RANGE, BLOCK_LO_RANGE, CV_RANGE},
-    },
+    chiplets::{eidos_compression, hasher::CV_RANGE},
     crypto::merkle::MerklePath,
-    deferred::DEFERRED_AND_INIT_CV,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
@@ -474,45 +470,6 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 
     // Return the user operation helpers
     Ok(OperationHelperRegisters::HornerEvalExt { alpha, acc_tmp })
-}
-
-// LOG DEFERRED OPERATION
-// ================================================================================================
-
-/// Folds a precomputed statement digest into the rolling deferred root.
-///
-/// Stack transition:
-/// `[STMNT, ...] -> [STATE_NEW, ...]`
-///
-/// - Hasher computes `Eidos::compress(DEFERRED_AND_INIT_CV, STATE_PREV || STMNT)`; `STATE_NEW` is
-///   the output chaining value.
-/// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
-///   helper registers.
-#[inline(always)]
-pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, OperationError> {
-    let statement_digest: Word = processor.stack().get_word(0);
-    let state_prev = processor.system().deferred_root();
-
-    // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].
-    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[BLOCK_LO_RANGE].copy_from_slice(state_prev.as_slice());
-    hasher_state[BLOCK_HI_RANGE].copy_from_slice(statement_digest.as_slice());
-    hasher_state[CV_RANGE].copy_from_slice(DEFERRED_AND_INIT_CV.as_slice());
-
-    let (addr, output_state) = processor.hasher().compress(hasher_state)?;
-
-    let state_new: Word = output_state[CV_RANGE].try_into().unwrap();
-
-    processor.system_mut().log_deferred_statement(statement_digest, state_new)?;
-
-    processor.stack_mut().set_word(0, &state_new);
-
-    tracer.record_hasher_compress(hasher_state, output_state);
-
-    Ok(OperationHelperRegisters::LogDeferred { addr, state_prev })
 }
 
 // STREAM CIPHER OPERATION

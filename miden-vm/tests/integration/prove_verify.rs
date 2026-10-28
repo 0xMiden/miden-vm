@@ -116,6 +116,19 @@ fn assert_recursive_verify(
 }
 
 #[test]
+fn test_clear_deferred_prove_verify() {
+    // Exercise proof plumbing for the unsafe opcode. A production kernel epilogue must
+    // recursively verify the top stack root before executing clear_deferred.
+    assert_prove_verify(
+        "begin padw log_deferred clear_deferred dropw end",
+        HashFunction::Eidos,
+        "Eidos",
+        false,
+        false,
+    );
+}
+
+#[test]
 fn test_all_hash_functions_prove_verify() {
     let source = "
         begin

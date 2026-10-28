@@ -4,6 +4,7 @@
 
 #### Changes
 
+- [BREAKING] Added VM opcode 6, `clear_deferred`, to reset the accumulator identified by the top stack word in root context, preserving the stack. This unsafe operation requires a trusted kernel epilogue that recursively verifies that exact root before clearing. The VM proof relation and recursive verifier root change.
 - [BREAKING] Reduced the PVM's aligned width from 912 to 768 columns. Verification uses precomputed table commitments to avoid rebuilding preprocessed tables. PVM proofs and recursive verifier roots change ([#4068](https://github.com/0xMiden/miden-vm/pull/4068)).
 - [BREAKING] Reorganized AIR, STARK, and ACE crates: use `miden-air-definitions` for authored AIRs, `miden_air::{vm,precompiles}` for production adapters, `miden-stark` for shared proof infrastructure, and `miden-ace` for ACE formats and optional compilation. Stateful hash adapters moved to `miden_crypto::hash::stateful` ([#4078](https://github.com/0xMiden/miden-vm/pull/4078)).
 - [BREAKING] Unified VM and precompile prover memory estimation in `miden_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).

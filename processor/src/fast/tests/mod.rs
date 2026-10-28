@@ -54,6 +54,7 @@ mod all_ops;
 mod arbitrary_forest;
 mod masm_consistency;
 mod memory;
+mod precompiles;
 
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
