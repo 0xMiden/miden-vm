@@ -10,6 +10,6 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-pub mod precompile;
+pub mod precompiles;
 pub mod shared;
 pub mod vm;

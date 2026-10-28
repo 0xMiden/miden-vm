@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 
-use miden_air_source::vm::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
+use miden_air_definitions::vm::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
 use miden_core::{
     chiplets::{
         eidos_compression,

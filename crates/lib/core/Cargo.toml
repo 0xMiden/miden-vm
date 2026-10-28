@@ -38,11 +38,11 @@ testing = ["arbitrary"]
 constraints-tools = [
     "std",
     "dep:miden-air",
-    "dep:miden-air-source",
+    "dep:miden-air-definitions",
     "dep:miden-ace",
     "dep:miden-stark",
     "miden-ace/compiler",
-    "miden-air-source/compiler",
+    "miden-air-definitions/compiler",
 ]
 
 [dependencies]
@@ -54,7 +54,7 @@ miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
-miden-air-source = { workspace = true, optional = true }
+miden-air-definitions = { workspace = true, optional = true }
 miden-ace = { workspace = true, optional = true }
 miden-stark = { workspace = true, optional = true }
 
@@ -68,7 +68,7 @@ curve25519-dalek.workspace = true
 p3-challenger.workspace = true
 miden-ace = { workspace = true, features = ["compiler"] }
 miden-air = { workspace = true, features = ["compiler"] }
-miden-air-source = { workspace = true, features = ["compiler"] }
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-debug-types.workspace = true

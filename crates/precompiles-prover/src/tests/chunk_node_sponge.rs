@@ -9,9 +9,9 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    air::{BaseAir, ConstraintDegrees},
     lookup::{
-        LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+        LookupAir, ProverLookupBuilder,
         debug::{ValidateLayout, ValidateLookupAir},
     },
 };
@@ -135,7 +135,7 @@ fn serialized_records_fit_the_sponge_height_at_allocation_boundaries() {
 
 #[test]
 fn packed_lookup_columns_match_the_standalone_components() {
-    let input: Vec<u8> = (0..200).map(|i| i as u8).collect();
+    let input: Vec<u8> = (0u8..200).collect();
     let mut node = KeccakNodeRequires::new();
     let mut sponge = SpongeRequires::new();
     let mut chunk = ChunkRequires::new();

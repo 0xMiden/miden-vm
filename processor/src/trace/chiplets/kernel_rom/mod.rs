@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec};
 
-use miden_air_source::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
+use miden_air_definitions::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
 use miden_core::field::PrimeCharacteristicRing;
 
 use super::{ChipletTraceFragment, Felt, KernelDescriptor, Word as Digest, ZERO};

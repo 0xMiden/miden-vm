@@ -5,7 +5,7 @@ Miden VM execution proofs.
 
 The public entry point is `prove_precompiles(Vec<PrecompileWitness>, HashFunction)`. It consumes
 singleton execution witnesses and returns one `PrecompileProof`, preserving input root order and
-repetitions. The AIR definitions live in `miden_air_source::precompile`; this crate owns witness
+repetitions. The AIR definitions live in `miden_air_definitions::precompiles`; this crate owns witness
 generation and proof orchestration. The chiplet and session modules remain private.
 
 ## What's here

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use miden_air::precompile::NUM_CHIPLETS;
+use miden_air::precompiles::NUM_CHIPLETS;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
@@ -421,7 +421,7 @@ fn run_pvm_verifier_with_advice(
 
 #[track_caller]
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
-    use miden_air::precompile::security;
+    use miden_air::precompiles::security;
 
     let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
         .expect("PVM MASM verifier rejected a valid proof");

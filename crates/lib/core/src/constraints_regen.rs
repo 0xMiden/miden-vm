@@ -14,7 +14,7 @@ use miden_air::vm::{
     MIDEN_AIR_COUNT,
     config::{self, PROTOCOL_ID, relation_digest},
 };
-use miden_air_source::vm::AIRS;
+use miden_air_definitions::vm::AIRS;
 use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
 use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
@@ -488,7 +488,8 @@ fn render_vm_parameters(
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
 
-    let and8_log_height = miden_air_source::vm::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT;
+    let and8_log_height =
+        miden_air_definitions::vm::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT;
     let tree_depth = u32::from(and8_log_height) + u32::from(config::pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(tree_depth)

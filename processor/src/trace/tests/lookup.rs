@@ -17,7 +17,7 @@ use alloc::{boxed::Box, vec::Vec};
 use std::collections::HashMap;
 
 use miden_air::vm::{MidenMultiAir, config};
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     MidenAir,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{

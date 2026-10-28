@@ -12,7 +12,7 @@ use miden_core::{
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},
     lookup::{
-        Challenges, LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+        Challenges, LookupAir, LookupMessage, ProverLookupBuilder,
         debug::{ValidateLayout, ValidateLookupAir},
     },
 };

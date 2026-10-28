@@ -1,3 +1,3 @@
-pub use miden_air_source::precompile::transcript::eval::*;
+pub use miden_air_definitions::precompiles::transcript::eval::*;
 
 pub mod trace;

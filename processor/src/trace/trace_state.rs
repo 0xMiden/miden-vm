@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
-use miden_air_source::vm::trace::{
+use miden_air_definitions::vm::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
 };
@@ -1686,7 +1686,7 @@ mod tests {
 mod arbitrary {
     extern crate alloc;
 
-    use miden_air_source::vm::trace::RowIndex;
+    use miden_air_definitions::vm::trace::RowIndex;
     use proptest::prelude::*;
 
     use super::{

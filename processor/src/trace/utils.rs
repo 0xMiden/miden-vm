@@ -1,7 +1,7 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     MIDEN_AIR_COUNT,
     trace::{MIN_TRACE_LEN, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
@@ -180,8 +180,8 @@ pub struct TraceLenSummary {
     chiplets: ChipletsLengths,
     eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
-    /// Set by the trace builder when known, in [`miden_air_source::vm::AIRS`] order. `None` falls
-    /// back to deriving the four padded heights from the unpadded component row counts.
+    /// Set by the trace builder when known, in [`miden_air_definitions::vm::AIRS`] order. `None`
+    /// falls back to deriving the four padded heights from the unpadded component row counts.
     padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
 }
 
@@ -202,7 +202,8 @@ impl TraceLenSummary {
     }
 
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
-    /// [`miden_air_source::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
+    /// [`miden_air_definitions::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8
+    /// lookup.
     pub fn new_with_padded(
         core_rows: usize,
         chiplets: ChipletsLengths,
@@ -288,7 +289,7 @@ impl TraceLenSummary {
             })
     }
 
-    /// Returns the padded per-AIR heights, in [`miden_air_source::vm::AIRS`] order, if known.
+    /// Returns the padded per-AIR heights, in [`miden_air_definitions::vm::AIRS`] order, if known.
     pub fn padded_heights(&self) -> Option<&[usize; MIDEN_AIR_COUNT]> {
         self.padded_heights.as_ref()
     }

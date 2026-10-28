@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air_source::vm::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     chiplets::{eidos_compression, hasher::compress_state},

@@ -19,24 +19,24 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std", "miden-air/concurrent", "miden-air-source/concurrent"]
+concurrent = ["std", "miden-air/concurrent", "miden-air-definitions/concurrent"]
 default = ["std"]
 std = [
-    "miden-air-source/std",
+    "miden-air-definitions/std",
     "miden-core/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-testing = ["arbitrary", "miden-air-source/testing"]
-arbitrary = ["dep:proptest", "miden-air-source/arbitrary", "miden-core/arbitrary"]
+testing = ["arbitrary", "miden-air-definitions/testing"]
+arbitrary = ["dep:proptest", "miden-air-definitions/arbitrary", "miden-core/arbitrary"]
 
 [dependencies]
 proptest = { workspace = true, optional = true }
 # Miden dependencies
 miden-ace.workspace = true
 miden-air.workspace = true
-miden-air-source.workspace = true
+miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-stark.workspace = true

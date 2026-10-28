@@ -1,4 +1,4 @@
-use miden_air_source::vm::trace::{
+use miden_air_definitions::vm::trace::{
     RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS,
 };
 use miden_core::{

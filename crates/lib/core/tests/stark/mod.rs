@@ -1620,7 +1620,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     //    root, and the aux randomness used by `compute_outer_logup_correction`.
     let digest_felts: Vec<Felt> =
         kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air_source::vm::hash_kernel_digests(&digest_felts);
+    let expected_kernel_h = miden_air_definitions::vm::hash_kernel_digests(&digest_felts);
     let mut claim_elements = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
     claim_elements[..WORD_SIZE].copy_from_slice(&program_digest.map(Felt::new_unchecked));
     claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&expected_kernel_h);

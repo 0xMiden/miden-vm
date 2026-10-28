@@ -5,7 +5,7 @@ use core::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 
 use miden_air::vm::MidenAir;
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     ChipletCols,
     logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{
@@ -61,7 +61,10 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     trace
 }
 
-fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air_source::vm::CoreCols<Felt> {
+fn core_row(
+    matrix: &RowMajorMatrix<Felt>,
+    row: usize,
+) -> &miden_air_definitions::vm::CoreCols<Felt> {
     let width = matrix.width();
     matrix.values[row * width..(row + 1) * width].borrow()
 }

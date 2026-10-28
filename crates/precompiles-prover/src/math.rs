@@ -1,1 +1,1 @@
-pub use miden_air_source::precompile::math::*;
+pub use miden_air_definitions::precompiles::math::*;

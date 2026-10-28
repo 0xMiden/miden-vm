@@ -1,8 +1,8 @@
-# Miden AIR source
+# Miden AIR definitions
 
 This crate contains the handwritten constraints and trace schemas used to author Miden AIRs.
 The `vm` module describes the VM's four AIRs, public inputs, typed LogUp messages, and
-auxiliary-trace construction. The `precompile` module describes the precompile VM's AIRs,
+auxiliary-trace construction. The `precompiles` module describes the precompile VM's AIRs,
 trace schemas, lookup messages, and fixed boundary contributions. `shared::eidos` owns the
 common compression equations, physical layout, lookup encoding, and trace coordinates. VM and
 precompile adapters supply their bus mappings and controller, AEAD, or transcript interfaces.
@@ -12,7 +12,7 @@ Common geometry helpers also live in `shared`.
 these definitions to generate the evaluators consumed by `miden-air`; independent checks
 compare the generated evaluators and degree metadata against this source. Production AIR
 owns PCS presets, protocol IDs, and identity pins. Authored statement binding, input validation,
-and external LogUp closure live in `vm::statement` and `precompile::statement`. Production
+and external LogUp closure live in `vm::statement` and `precompiles::statement`. Production
 `MultiAir` implementations select generated evaluators and call these source functions; the
 source crate does not define ordinary runtime `MultiAir` types.
 

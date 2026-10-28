@@ -3,11 +3,11 @@ use crate::vm::MidenAir;
 /// Supported AIRs in instance order.
 ///
 /// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
-pub const AIRS: [MidenAir; miden_air_source::vm::MIDEN_AIR_COUNT] = {
-    let mut airs = [MidenAir::CORE; miden_air_source::vm::MIDEN_AIR_COUNT];
+pub const AIRS: [MidenAir; miden_air_definitions::vm::MIDEN_AIR_COUNT] = {
+    let mut airs = [MidenAir::CORE; miden_air_definitions::vm::MIDEN_AIR_COUNT];
     let mut i = 0;
     while i < airs.len() {
-        airs[i] = MidenAir(miden_air_source::vm::AIRS[i]);
+        airs[i] = MidenAir(miden_air_definitions::vm::AIRS[i]);
         i += 1;
     }
     airs

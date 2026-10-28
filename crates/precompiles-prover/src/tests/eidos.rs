@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, vec, vec::Vec};
 
-use miden_air_source::precompile::primitives::byte_pair_lut::eidos;
+use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos;
 use miden_core::{
     Felt,
     deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},

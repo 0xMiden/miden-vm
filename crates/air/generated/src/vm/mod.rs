@@ -1,12 +1,12 @@
 //! Production AIR evaluators and proof protocol for the Miden VM.
 //!
-//! Authored constraints and trace layouts live in [`miden_air_source::vm`]. This module
+//! Authored constraints and trace layouts live in [`miden_air_definitions::vm`]. This module
 //! combines their metadata and lookup construction with build-generated native evaluators.
 
 use alloc::{borrow::Cow, vec::Vec};
 
-use miden_air_source::vm as source;
-pub use miden_air_source::vm::{NUM_PUBLIC_VALUES, PublicInputs};
+use miden_air_definitions::vm as source;
+pub use miden_air_definitions::vm::{NUM_PUBLIC_VALUES, PublicInputs};
 pub use miden_core::{Felt, serde::DeserializationError};
 use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
 pub use miden_stark::{

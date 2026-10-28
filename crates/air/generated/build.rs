@@ -1,16 +1,16 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     AIRS,
     ace::{CapturedAir, CompiledRelation, LayoutKind},
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
 #[path = "build/precompiles.rs"]
-mod precompile;
+mod precompiles;
 
 fn main() {
-    precompile::generate();
+    precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     let write = |name: &str, contents: String| {
@@ -54,10 +54,10 @@ fn main() {
         .expect("compile VM relation");
     write(
         "air_shape.rs",
-        format!("{:?}", miden_air_source::vm::geometry::air_shape(&relation)),
+        format!("{:?}", miden_air_definitions::vm::geometry::air_shape(&relation)),
     );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
-    let circuit: miden_air_source::vm::ace::RecursiveAceCircuit = relation
+    let circuit: miden_air_definitions::vm::ace::RecursiveAceCircuit = relation
         .build_circuit(LayoutKind::Masm)
         .expect("canonical VM ACE circuit")
         .to_ace()
@@ -75,7 +75,7 @@ fn main() {
             circuit
                 .instructions
                 .iter()
-                .map(miden_air_source::vm::Felt::as_canonical_u64)
+                .map(miden_air_definitions::vm::Felt::as_canonical_u64)
                 .collect::<Vec<_>>()
         ),
     );

@@ -2,7 +2,7 @@ use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use miden_air::vm::PublicInputs;
-use miden_air_source::vm::{CoreCols, trace::RowIndex};
+use miden_air_definitions::vm::{CoreCols, trace::RowIndex};
 use miden_core::{
     Felt,
     deferred::TRUE_DIGEST,

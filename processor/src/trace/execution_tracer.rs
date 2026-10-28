@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_air_source::vm::trace::chiplets::hasher::{
+use miden_air_definitions::vm::trace::chiplets::hasher::{
     CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
 };
 use miden_core::{

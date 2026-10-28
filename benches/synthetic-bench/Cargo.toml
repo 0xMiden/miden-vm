@@ -12,7 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-miden-air-source.workspace = true
+miden-air-definitions.workspace = true
 miden-processor = { workspace = true, features = ["concurrent"] }
 miden-vm        = { path = "../../miden-vm", features = ["concurrent", "internal"] }
 serde           = { workspace = true, features = ["std"] }

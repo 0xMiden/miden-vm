@@ -165,8 +165,8 @@ fn store_cached_tx_proof(
 
 fn pvm_proof_cache_key(root: Word) -> String {
     let parameters =
-        pcs_params_bytes(&miden_air::precompile::stark_config::precompile_pcs_params());
-    let relation = miden_air::precompile::stark_config::PRECOMPILE_RELATION_DIGEST;
+        pcs_params_bytes(&miden_air::precompiles::stark_config::precompile_pcs_params());
+    let relation = miden_air::precompiles::stark_config::PRECOMPILE_RELATION_DIGEST;
     let relation_bytes: Vec<_> = relation
         .iter()
         .flat_map(|value| value.as_canonical_u64().to_le_bytes())

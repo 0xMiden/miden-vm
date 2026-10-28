@@ -2,7 +2,7 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air_source::precompile::hash::{
+use miden_air_definitions::precompiles::hash::{
     chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
     chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
 };
@@ -14,7 +14,7 @@ use miden_core::{
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},
     lookup::{
-        LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+        LookupAir, LookupMessage, ProverLookupBuilder,
         debug::{ValidateLayout, ValidateLookupAir},
     },
 };

@@ -7,7 +7,7 @@ use alloc::{
 use core::{assert_matches, cell::Cell, str::FromStr};
 
 use miden_air::vm::MidenMultiAir;
-use miden_air_source::vm::trace::MIN_TRACE_LEN;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},

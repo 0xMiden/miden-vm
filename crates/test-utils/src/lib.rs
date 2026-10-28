@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air_source::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
+use miden_air_definitions::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,

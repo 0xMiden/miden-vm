@@ -15,7 +15,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::borrow::BorrowMut;
 
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     CoreCols,
     logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg},
     trace::decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},

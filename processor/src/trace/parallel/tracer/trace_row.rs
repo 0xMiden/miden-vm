@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     CoreCols, DecoderCols, StackCols, SystemCols,
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
@@ -566,7 +566,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 fn get_op_batch_encoding(
     num_groups_left: Felt,
 ) -> Result<[Felt; NUM_OP_BATCH_ENCODING_COLS], ExecutionError> {
-    use miden_air_source::vm::trace::decoder::{
+    use miden_air_definitions::vm::trace::decoder::{
         OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     };
     use miden_core::mast::OP_BATCH_SIZE;

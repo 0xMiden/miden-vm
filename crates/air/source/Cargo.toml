@@ -1,8 +1,8 @@
 [package]
-name = "miden-air-source"
+name = "miden-air-definitions"
 version.workspace = true
 description = "Handwritten VM and precompile AIR definitions and shared equations"
-documentation = "https://docs.rs/miden-air-source"
+documentation = "https://docs.rs/miden-air-definitions"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["air", "arithmetization", "crypto", "miden"]

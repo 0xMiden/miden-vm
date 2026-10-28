@@ -1,4 +1,4 @@
-use miden_air_source::vm::trace::decoder::NUM_OP_BITS;
+use miden_air_definitions::vm::trace::decoder::NUM_OP_BITS;
 use miden_core::{Felt, mast::BasicBlockNode, operations::opcodes};
 
 use crate::errors::OperationError;

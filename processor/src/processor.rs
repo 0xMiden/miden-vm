@@ -1,4 +1,4 @@
-use miden_air_source::vm::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::deferred::Digest;
 
 use crate::{

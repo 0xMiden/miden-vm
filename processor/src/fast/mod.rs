@@ -7,7 +7,7 @@ use alloc::{
 };
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air_source::vm::trace::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO,
     deferred::{DeferredState, Digest, PrecompileWitness},

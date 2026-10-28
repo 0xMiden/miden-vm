@@ -48,7 +48,7 @@ use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompi
 use miden_stark::{
     air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement},
     check_constraints,
-    lookup::{LookupAir, ProverLookupBuilder},
+    lookup::{Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions},
 };
 
 use crate::{

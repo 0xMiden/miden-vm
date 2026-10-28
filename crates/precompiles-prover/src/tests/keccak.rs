@@ -363,7 +363,7 @@ fn corruption_rotation_mask_unbalances_the_full_chiplet_stack() {
     let challenges = lookup_challenges();
     let round_idx = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::KeccakRound)
+        .position(|air| air == ChipletAir::KECCAK_ROUND)
         .unwrap();
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     for lane in 0..NUM_LANES {
@@ -393,7 +393,7 @@ fn packed_passthrough_aliases_preserve_memory_but_fail_canonical_byte_checks() {
     let challenges = lookup_challenges();
     let index = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::KeccakRound)
+        .position(|air| air == ChipletAir::KECCAK_ROUND)
         .unwrap();
     let honest = mains[index];
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());

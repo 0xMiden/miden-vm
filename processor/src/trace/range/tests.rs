@@ -1,6 +1,8 @@
 use alloc::vec;
 
-use miden_air_source::vm::trace::and8_lookup::{BYTE_LOOKUP_COUNT_LEN, RANGE_CHECK_COUNT_OFFSET};
+use miden_air_definitions::vm::trace::and8_lookup::{
+    BYTE_LOOKUP_COUNT_LEN, RANGE_CHECK_COUNT_OFFSET,
+};
 
 use super::RangeChecker;
 

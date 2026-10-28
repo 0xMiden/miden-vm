@@ -858,7 +858,7 @@ fn test_op_mrupdate_merge_subtree() {
 // --------------------------------------------------------------------------------------------
 
 mod merkle_validation {
-    use miden_air_source::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+    use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
     use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;

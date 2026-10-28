@@ -19,7 +19,7 @@ use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
     render_proof_order_maps,
 };
-use miden_air::precompile::NUM_CHIPLETS;
+use miden_air::precompiles::NUM_CHIPLETS;
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
@@ -277,7 +277,7 @@ mod tests {
     use alloc::vec;
 
     use miden_ace::LayoutKind;
-    use miden_air_source::precompile::{
+    use miden_air_definitions::precompiles::{
         ace::build_canonical_precompile_ace_circuit, relation::CapturedPvmRelation,
     };
 

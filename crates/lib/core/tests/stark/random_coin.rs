@@ -1,7 +1,7 @@
 //! Rust oracles for the MASM random coin and verifier parameters.
 
 use miden_air::vm::config;
-use miden_air_source::vm::trace::MIN_TRACE_LEN;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_core::{
     Felt, Word,
     field::{

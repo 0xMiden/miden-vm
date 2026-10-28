@@ -17,7 +17,7 @@
 //! Quick start:
 //! ```ignore
 //! use miden_ace::{AceConfig, LayoutKind, build_ace_circuit_for_air};
-//! use miden_air_source::vm::MidenAir;
+//! use miden_air_definitions::vm::MidenAir;
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
 //! let circuit = build_ace_circuit_for_air(&MidenAir::CORE, config)?;

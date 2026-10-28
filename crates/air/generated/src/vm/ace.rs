@@ -1,5 +1,5 @@
 //! Circuit adapters and embedded recursive-verifier instructions.
-pub use miden_air_source::vm::ace::*;
+pub use miden_air_definitions::vm::ace::*;
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
 const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =

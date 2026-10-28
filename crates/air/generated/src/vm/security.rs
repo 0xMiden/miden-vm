@@ -4,7 +4,7 @@
 //! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
-use miden_air_source::shared::geometry::NUM_OOD_POINTS;
+use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
 use miden_stark::pcs::PcsParams;
 #[cfg(test)]
@@ -48,7 +48,7 @@ const RAW_WIDTHS: &[(usize, usize, usize)] = &include!(concat!(env!("OUT_DIR"), 
 /// AIR, so verifiers use the checked constant instead of calling this function.
 #[cfg(any(test, feature = "compiler"))]
 pub fn derive_air_shape() -> AirShape {
-    miden_air_source::vm::geometry::derive_air_shape()
+    miden_air_definitions::vm::geometry::derive_air_shape()
 }
 
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
@@ -60,7 +60,7 @@ pub fn derive_air_shape() -> AirShape {
 /// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
 /// for the Eidos-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    miden_air_source::shared::geometry::num_deep_terms_for_widths(
+    miden_air_definitions::shared::geometry::num_deep_terms_for_widths(
         RAW_WIDTHS,
         AIR_SHAPE.num_quotient_chunks as usize,
         alignment,

@@ -1,4 +1,4 @@
-pub use miden_air_source::precompile::ec::*;
+pub use miden_air_definitions::precompiles::ec::*;
 
 pub mod add;
 pub mod groups;

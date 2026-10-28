@@ -117,7 +117,7 @@ mod tests {
     /// Every authored AIR must fit within the degree admitted by the production PCS policy.
     #[test]
     fn handwritten_degrees_fit_the_pcs_policy() {
-        for air in miden_air_source::vm::AIRS {
+        for air in miden_air_definitions::vm::AIRS {
             assert!(
                 miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air) <= super::LOG_BLOWUP
             );

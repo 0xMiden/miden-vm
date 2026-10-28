@@ -21,9 +21,9 @@ concurrent = [
 ]
 constants-tools = [
     "std",
-    "dep:miden-air-source",
+    "dep:miden-air-definitions",
     "miden-ace/compiler",
-    "miden-air-source/compiler",
+    "miden-air-definitions/compiler",
 ]
 std = [
     "dep:miden-ace",
@@ -35,7 +35,7 @@ std = [
 
 [dependencies]
 miden-ace = { workspace = true, optional = true }
-miden-air-source = { workspace = true, optional = true }
+miden-air-definitions = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
@@ -49,7 +49,7 @@ wincode.workspace = true
 [dev-dependencies]
 insta.workspace = true
 miden-air = { workspace = true, features = ["std", "compiler"] }
-miden-air-source = { workspace = true, features = ["compiler"] }
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-ace = { workspace = true, features = ["testing"] }
 
 [[bin]]

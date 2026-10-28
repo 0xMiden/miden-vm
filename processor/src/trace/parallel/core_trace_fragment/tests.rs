@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air_source::vm::trace::{
+use miden_air_definitions::vm::trace::{
     chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
     decoder::{
         NUM_HASHER_COLUMNS, NUM_OP_BATCH_ENCODING_COLS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
@@ -1681,7 +1681,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 
 /// Extracts the decoder trace columns from the execution trace.
 fn extract_decoder_trace(trace: &VmTrace) -> DecoderTrace {
-    use miden_air_source::vm::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
+    use miden_air_definitions::vm::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     let main_segment = trace.main_trace();
     let start = SYS_TRACE_WIDTH;
@@ -1692,7 +1692,7 @@ fn extract_decoder_trace(trace: &VmTrace) -> DecoderTrace {
 
 /// Extracts the system trace columns from the execution trace.
 fn extract_system_trace(trace: &VmTrace) -> SystemTrace {
-    use miden_air_source::vm::trace::SYS_TRACE_WIDTH;
+    use miden_air_definitions::vm::trace::SYS_TRACE_WIDTH;
 
     let main_segment = trace.main_trace();
     (0..SYS_TRACE_WIDTH).map(|i| main_segment.get_column(i).to_vec()).collect()

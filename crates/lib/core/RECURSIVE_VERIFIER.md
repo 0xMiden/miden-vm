@@ -19,7 +19,7 @@ integers and elliptic-curve parameters.
 | VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/precompiles-verifier/src/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
-| Fixed-environment bus message catalogue | `crates/air/source/src/precompile/fixed.rs` | `pvm/fixed_boundary.masm` |
+| Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
 | Fixed-boundary instructions | Templates in `crates/precompiles-verifier/src/masm/` | `pvm/fixed_boundary.masm` |
 | OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
 | Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
@@ -34,7 +34,7 @@ against them. The PVM layout is generated as a complete module.
 
 The relation digest, ACE circuit digest, and setup commitments are pinned in
 `crates/air/generated/src/vm/config.rs` for the VM and
-`crates/air/generated/src/precompile/protocol.rs` for the PVM. Native proving and verification bind
+`crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
 to these values, and the generated MASM embeds them. Two checks guard the pins, for different reasons:
 
 - The `miden-air` tests detect drift. They recompute every pin from the authored AIRs, so an edit

@@ -374,7 +374,7 @@ mod tests {
     // These pin the resolved column-index maps of each `Cols<T>` view to `.snap` files,
     // so layout changes surface as snapshot diffs.
     // Regenerate with `cargo insta review` (or `INSTA_UPDATE=auto cargo test -p
-    // miden-air-source`).
+    // miden-air-definitions`).
 
     /// Builds a `$cols<usize>` index map by reinterpreting `[0, 1, …, N-1]` through the
     /// struct's `#[repr(C)]` layout, where `N = size_of::<$cols<u8>>()`.

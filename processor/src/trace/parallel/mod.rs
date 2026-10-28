@@ -3,7 +3,7 @@ use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::vm::{MidenMultiAir, config};
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,

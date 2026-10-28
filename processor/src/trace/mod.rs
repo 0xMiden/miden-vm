@@ -3,7 +3,7 @@ use alloc::{format, vec::Vec};
 use core::ops::Range;
 
 use miden_air::vm::{MidenMultiAir, config};
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     PublicInputs,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
@@ -45,7 +45,7 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air_source::vm::trace::RowIndex;
+pub use miden_air_definitions::vm::trace::RowIndex;
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{
     CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,

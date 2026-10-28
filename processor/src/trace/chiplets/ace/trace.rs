@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
 use miden_ace::instruction::{Op, decode_instruction};
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };

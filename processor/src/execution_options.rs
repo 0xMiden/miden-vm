@@ -1,4 +1,4 @@
-use miden_air_source::vm::trace::MIN_TRACE_LEN;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_core::{deferred::PrecompileLimits, program::MIN_STACK_DEPTH};
 
 // EXECUTION OPTIONS

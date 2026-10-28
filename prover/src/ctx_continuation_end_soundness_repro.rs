@@ -29,7 +29,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air_source::vm::trace::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, MastForest},

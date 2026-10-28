@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompile::{
+use miden_air::precompiles::{
     ChipletAir, ChipletMultiAir,
     protocol::{
         PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
@@ -21,8 +21,8 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
-    air::Statement, lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
+    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance, air::Statement,
+    lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;

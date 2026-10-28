@@ -1,3 +1,3 @@
-pub use miden_air_source::precompile::transcript::eidos::*;
+pub use miden_air_definitions::precompiles::transcript::eidos::*;
 
 pub mod trace;

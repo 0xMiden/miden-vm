@@ -2,7 +2,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use miden_air_source::precompile::hash::sha256::io::{self, program::IV};
+use miden_air_definitions::precompiles::hash::sha256::io::{self, program::IV};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{

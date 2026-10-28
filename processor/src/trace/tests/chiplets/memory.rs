@@ -23,7 +23,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air_source::vm::{
+use miden_air_definitions::vm::{
     logup::{MemoryMsg, MemoryResponseMsg},
     trace::MainTrace,
 };
