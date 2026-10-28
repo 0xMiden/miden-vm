@@ -233,6 +233,18 @@ mod tests {
 
     use super::*;
 
+    fn core_package_versions_match(
+        crate_version: &miden_mast_package::Version,
+        package_version: &miden_mast_package::Version,
+    ) -> bool {
+        if !crate_version.pre.is_empty() || !package_version.pre.is_empty() {
+            crate_version == package_version
+        } else {
+            (crate_version.major, crate_version.minor)
+                == (package_version.major, package_version.minor)
+        }
+    }
+
     #[test]
     fn core_package_version_matches_crate_release_line() {
         let core_lib = CoreLibrary::default();
@@ -241,17 +253,38 @@ mod tests {
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
-        assert_eq!(
-            (package_version.major, package_version.minor),
-            (crate_version.major, crate_version.minor),
-            "embedded package {} should match the miden-core-lib crate major and minor versions",
+        assert!(
+            core_package_versions_match(&crate_version, package_version),
+            "embedded package {} version {} does not match the miden-core-lib crate version {}",
             core_lib.package.name,
+            package_version,
+            crate_version,
         );
-        assert_eq!(
-            package_version.pre, crate_version.pre,
-            "embedded package {} should match the miden-core-lib crate prerelease identifier",
-            core_lib.package.name,
-        );
+    }
+
+    #[test]
+    fn core_package_version_policy() {
+        for (crate_version, package_version, expected) in [
+            ("0.36.4", "0.36.3", true),
+            ("1.0.1", "1.0.0", true),
+            ("1.0.0", "1.0.1", true),
+            ("1.0.0-rc.0", "1.0.0-rc.0", true),
+            ("1.0.0-rc.0", "1.0.0-rc.1", false),
+            ("1.0.0-rc.0", "1.0.1-rc.0", false),
+            ("1.0.1-rc.0", "1.0.0-rc.0", false),
+            ("1.0.0-rc.0", "1.0.0", false),
+            ("1.0.0", "1.0.0-rc.0", false),
+            ("1.0.0", "1.1.0", false),
+            ("1.0.0", "2.0.0", false),
+        ] {
+            let crate_version = crate_version.parse().unwrap();
+            let package_version = package_version.parse().unwrap();
+            assert_eq!(
+                core_package_versions_match(&crate_version, &package_version),
+                expected,
+                "crate {crate_version}, package {package_version}",
+            );
+        }
     }
 
     #[test]
