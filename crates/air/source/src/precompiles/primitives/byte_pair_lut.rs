@@ -35,15 +35,18 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, build_logup_aux_trace,
+        build_logup_aux_trace_with_preprocessed,
+    },
+};
 
 use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
 use crate::precompiles::{
-    logup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-        build_logup_aux_trace, build_logup_aux_trace_with_preprocessed, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
 };

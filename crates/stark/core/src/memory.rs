@@ -11,7 +11,7 @@
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    air::{BaseAir, LiftedAir, MultiAir},
+    air::{LiftedAir, MultiAir},
     log_quotient_degree,
     pcs::PcsParams,
 };
@@ -27,6 +27,103 @@ const PROOF_LMCS_TREES_AT_PEAK: u64 = 3;
 const SAFETY_NUMERATOR: u64 = 5;
 const SAFETY_DENOMINATOR: u64 = 4;
 
+/// Costs of one AIR before applying heights or the safety factor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AirMemoryCost {
+    trace_bytes_per_row: u64,
+    has_preprocessed: bool,
+}
+
+fn air_memory_cost<F, EF, A>(air: &A, params: &PcsParams) -> Option<AirMemoryCost>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+{
+    let field_bytes = u64::try_from(size_of::<F>()).ok()?;
+    let extension_dimension = u64::try_from(EF::DIMENSION).ok()?;
+    let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
+    let width = u64::try_from(air.width()).ok()?;
+    let aux_width = u64::try_from(air.aux_width()).ok()?;
+    let preprocessed_width = u64::try_from(air.preprocessed_width()).ok()?;
+    let columns = width
+        .checked_add(aux_width.checked_mul(extension_dimension)?)?
+        .checked_add(preprocessed_width)?;
+    let trace_bytes_per_row =
+        field_bytes.checked_mul(blowup.checked_add(1)?)?.checked_mul(columns)?;
+    Some(AirMemoryCost {
+        trace_bytes_per_row,
+        has_preprocessed: preprocessed_width > 0,
+    })
+}
+
+/// Shared proof and preprocessing costs, independent of the supplied heights.
+fn shared_memory_costs<F, EF, MA>(multi_air: &MA, params: &PcsParams) -> Option<(u64, u64)>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
+    let airs = multi_air.airs();
+    if airs.is_empty() {
+        return Some((0, 0));
+    }
+    let mut log_degree = 0u8;
+    let mut has_preprocessed = false;
+    for air in airs {
+        // Reject unrepresentable trace geometry before degree inference can allocate.
+        let cost = air_memory_cost::<F, EF, _>(air, params)?;
+        has_preprocessed |= cost.has_preprocessed;
+        log_degree = log_degree.max(log_quotient_degree::<F, EF, _>(air));
+    }
+    let extension_bytes = u64::try_from(size_of::<F>())
+        .ok()?
+        .checked_mul(u64::try_from(EF::DIMENSION).ok()?)?;
+    let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
+    let quotient_degree = 1u64.checked_shl(u32::from(log_degree))?;
+    // Three proof trees coexist. Each is built separately, so charge one leaf scratch buffer.
+    let proof_bytes_per_max_row = extension_bytes
+        .checked_mul(quotient_degree)?
+        .checked_add(PROOF_LMCS_TREES_AT_PEAK * TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES)?
+        .checked_mul(blowup)?;
+    let setup_bytes_per_preprocessed_row = if has_preprocessed {
+        (TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES).checked_mul(blowup)?
+    } else {
+        0
+    };
+    Some((proof_bytes_per_max_row, setup_bytes_per_preprocessed_row))
+}
+
+fn peak_bytes(
+    rows: impl Iterator<Item = (Option<AirMemoryCost>, usize)>,
+    proof_bytes_per_max_row: u64,
+    setup_bytes_per_preprocessed_row: u64,
+) -> Option<u64> {
+    let mut trace_bytes = 0u64;
+    let mut max_height = 0u64;
+    let mut max_preprocessed_height = 0u64;
+    for (cost, height) in rows {
+        let cost = cost?;
+        let height = u64::try_from(height).ok()?;
+        trace_bytes = trace_bytes.checked_add(cost.trace_bytes_per_row.checked_mul(height)?)?;
+        max_height = max_height.max(height);
+        // Only AIRs with preprocessed columns contribute to the setup bundle's height.
+        if cost.has_preprocessed {
+            max_preprocessed_height = max_preprocessed_height.max(height);
+        }
+    }
+    trace_bytes
+        .checked_add(proof_bytes_per_max_row.checked_mul(max_height)?)?
+        .checked_add(setup_bytes_per_preprocessed_row.checked_mul(max_preprocessed_height)?)
+        .and_then(apply_safety_factor)
+}
+
+fn apply_safety_factor(bytes: u64) -> Option<u64> {
+    bytes
+        .checked_mul(SAFETY_NUMERATOR)
+        .map(|bytes| bytes.div_ceil(SAFETY_DENOMINATOR))
+}
+
 /// Estimates peak proving memory from padded heights in [`MultiAir::airs`] order.
 ///
 /// Zero heights are allowed for capacity calculations. Returns `None` on arithmetic overflow
@@ -41,66 +138,19 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    prover_peak_bytes_from_heights::<F, EF, _>(multi_air, heights.iter().copied(), params)
-}
-
-// An iterator lets capacity searches supply one nonzero height without allocating a height buffer.
-fn prover_peak_bytes_from_heights<F, EF, MA>(
-    multi_air: &MA,
-    heights: impl ExactSizeIterator<Item = usize>,
-    params: &PcsParams,
-) -> Option<u64>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
-{
     let airs = multi_air.airs();
     if heights.len() != airs.len() {
         return None;
     }
-    let field_bytes = u64::try_from(size_of::<F>()).ok()?;
-    let extension_dimension = u64::try_from(EF::DIMENSION).ok()?;
-    let extension_bytes = field_bytes.checked_mul(extension_dimension)?;
-    let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
-    let one_plus_blowup = blowup.checked_add(1)?;
-    let mut trace_bytes = 0u64;
-    let mut max_height = 0u64;
-    let mut max_preprocessed_height = 0u64;
-    let mut max_quotient_degree = 0u64;
-
-    for (air, height) in airs.iter().zip(heights) {
-        let height = u64::try_from(height).ok()?;
-        let width = u64::try_from(air.width()).ok()?;
-        let aux_width = u64::try_from(air.aux_width()).ok()?;
-        let preprocessed_width = u64::try_from(air.preprocessed_width()).ok()?;
-        let columns = width
-            .checked_add(aux_width.checked_mul(extension_dimension)?)?
-            .checked_add(preprocessed_width)?;
-        let bytes_per_row = field_bytes.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
-        trace_bytes = trace_bytes.checked_add(height.checked_mul(bytes_per_row)?)?;
-        max_height = max_height.max(height);
-        if preprocessed_width > 0 {
-            max_preprocessed_height = max_preprocessed_height.max(height);
-        }
-        let log_degree = log_quotient_degree::<F, EF, _>(air);
-        max_quotient_degree = max_quotient_degree.max(1u64.checked_shl(u32::from(log_degree))?);
-    }
-
-    // Main, auxiliary, and quotient trees coexist; each is built separately, so charge one
-    // leaf-hashing scratch buffer. The preprocessed bundle adds its own tree and setup scratch.
-    let proof_bytes_per_lde_row = extension_bytes
-        .checked_mul(max_quotient_degree)?
-        .checked_add(PROOF_LMCS_TREES_AT_PEAK * TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES)?;
-    let setup_bytes_per_lde_row = TREE_BYTES_PER_LEAF + EXTRA_LEAF_SCRATCH_BYTES;
-    let shared_bytes = max_height
-        .checked_mul(proof_bytes_per_lde_row)?
-        .checked_add(max_preprocessed_height.checked_mul(setup_bytes_per_lde_row)?)?
-        .checked_mul(blowup)?;
-    trace_bytes
-        .checked_add(shared_bytes)?
-        .checked_mul(SAFETY_NUMERATOR)
-        .map(|bytes| bytes.div_ceil(SAFETY_DENOMINATOR))
+    let (proof_bytes_per_max_row, setup_bytes_per_preprocessed_row) =
+        shared_memory_costs::<F, EF, _>(multi_air, params)?;
+    peak_bytes(
+        airs.iter()
+            .map(|air| air_memory_cost::<F, EF, _>(air, params))
+            .zip(heights.iter().copied()),
+        proof_bytes_per_max_row,
+        setup_bytes_per_preprocessed_row,
+    )
 }
 
 /// Largest single-AIR height that can fit the budget, choosing the cheapest AIR while holding
@@ -115,30 +165,158 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    let air_count = multi_air.airs().len();
-    let mut best = 0;
-    for i in 0..air_count {
-        let fits = |height| {
-            let heights = (0..air_count).map(|index| if index == i { height } else { 0 });
-            prover_peak_bytes_from_heights::<F, EF, _>(multi_air, heights, params)
-                .is_some_and(|bytes| bytes <= budget_bytes)
+    let Some((proof_bytes_per_max_row, setup_bytes_per_preprocessed_row)) =
+        shared_memory_costs::<F, EF, _>(multi_air, params)
+    else {
+        return 0;
+    };
+    height_cap(
+        multi_air.airs().iter().map(|air| air_memory_cost::<F, EF, _>(air, params)),
+        proof_bytes_per_max_row,
+        setup_bytes_per_preprocessed_row,
+        budget_bytes,
+    )
+}
+
+fn height_cap(
+    costs: impl Iterator<Item = Option<AirMemoryCost>>,
+    proof_bytes_per_max_row: u64,
+    setup_bytes_per_preprocessed_row: u64,
+    limit_bytes: u64,
+) -> usize {
+    let mut cheapest: Option<u64> = None;
+    for cost in costs {
+        let Some(cost) = cost else {
+            return 0;
         };
-        let mut lo = 0;
-        let mut hi = usize::MAX;
-        if fits(hi) {
-            return hi;
+        let setup_cost = if cost.has_preprocessed {
+            setup_bytes_per_preprocessed_row
+        } else {
+            0
+        };
+        // Overflowing coefficients cannot support a positive height, but other AIRs may fit.
+        if let Some(coefficient) = cost
+            .trace_bytes_per_row
+            .checked_add(proof_bytes_per_max_row)
+            .and_then(|bytes| bytes.checked_add(setup_cost))
+        {
+            cheapest = Some(cheapest.map_or(coefficient, |best| best.min(coefficient)));
         }
-        while hi - lo > 1 {
-            let mid = lo + (hi - lo) / 2;
-            if fits(mid) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        best = best.max(lo);
     }
-    best
+    let Some(coefficient) = cheapest else {
+        return 0;
+    };
+    let fits = |height| {
+        u64::try_from(height)
+            .ok()
+            .and_then(|height| coefficient.checked_mul(height))
+            .and_then(apply_safety_factor)
+            .is_some_and(|bytes| bytes <= limit_bytes)
+    };
+    if fits(usize::MAX) {
+        return usize::MAX;
+    }
+    let mut lo = 0;
+    let mut hi = usize::MAX;
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+/// Precomputed costs for a relation's padded AIR heights, in [`MultiAir::airs`] order.
+///
+/// [`Self::from_multi_air`] derives the shared STARK model described in this module. Trace builders
+/// can query it without retaining the AIRs or their proving configuration. The safety factor is
+/// applied once to the checked total, with ceiling division.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProverMemoryModel<const N: usize> {
+    costs: [AirMemoryCost; N],
+    proof_bytes_per_max_row: u64,
+    setup_bytes_per_preprocessed_row: u64,
+}
+
+impl<const N: usize> ProverMemoryModel<N> {
+    /// Derives costs from AIR metadata and PCS parameters without constructing traces.
+    ///
+    /// Returns `None` on arithmetic overflow or if the relation does not contain exactly `N` AIRs.
+    pub fn from_multi_air<F, EF, MA>(multi_air: &MA, params: &PcsParams) -> Option<Self>
+    where
+        F: Field,
+        EF: ExtensionField<F>,
+        MA: MultiAir<F, EF>,
+    {
+        let airs = multi_air.airs();
+        if airs.len() != N {
+            return None;
+        }
+        let (proof_bytes_per_max_row, setup_bytes_per_preprocessed_row) =
+            shared_memory_costs::<F, EF, _>(multi_air, params)?;
+        let mut costs = [AirMemoryCost::default(); N];
+        for (cost, air) in costs.iter_mut().zip(airs) {
+            *cost = air_memory_cost::<F, EF, _>(air, params)?;
+        }
+        Some(Self {
+            costs,
+            proof_bytes_per_max_row,
+            setup_bytes_per_preprocessed_row,
+        })
+    }
+
+    /// Returns estimated peak bytes for padded AIR heights, or `None` on arithmetic overflow.
+    pub fn prover_peak_bytes(&self, heights: &[usize; N]) -> Option<u64> {
+        peak_bytes(
+            self.costs.iter().copied().map(Some).zip(heights.iter().copied()),
+            self.proof_bytes_per_max_row,
+            self.setup_bytes_per_preprocessed_row,
+        )
+    }
+
+    /// Largest single-AIR height that fits the budget, using the cheapest single-AIR row cost.
+    ///
+    /// This permissive cap never rejects a shape accepted by the model.
+    pub fn max_any_height_for_budget(&self, limit_bytes: u64) -> usize {
+        height_cap(
+            self.costs.iter().copied().map(Some),
+            self.proof_bytes_per_max_row,
+            self.setup_bytes_per_preprocessed_row,
+            limit_bytes,
+        )
+    }
+}
+
+/// A caller-selected byte limit and the relation model used to enforce it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProvingBudget<const N: usize> {
+    model: ProverMemoryModel<N>,
+    limit_bytes: u64,
+}
+
+impl<const N: usize> ProvingBudget<N> {
+    pub const fn new(model: ProverMemoryModel<N>, limit_bytes: u64) -> Self {
+        Self { model, limit_bytes }
+    }
+
+    pub const fn model(&self) -> &ProverMemoryModel<N> {
+        &self.model
+    }
+
+    pub const fn limit_bytes(&self) -> u64 {
+        self.limit_bytes
+    }
+
+    pub fn prover_peak_bytes(&self, heights: &[usize; N]) -> Option<u64> {
+        self.model.prover_peak_bytes(heights)
+    }
+
+    pub fn max_any_height(&self) -> usize {
+        self.model.max_any_height_for_budget(self.limit_bytes)
+    }
 }
 
 #[cfg(test)]
@@ -204,11 +382,11 @@ mod tests {
         }
     }
 
-    struct TestMultiAir {
-        airs: [TestAir; 2],
+    struct TestMultiAir<const N: usize = 2> {
+        airs: [TestAir; N],
     }
 
-    impl MultiAir<Felt, QuadFelt> for TestMultiAir {
+    impl<const N: usize> MultiAir<Felt, QuadFelt> for TestMultiAir<N> {
         type Air = TestAir;
 
         fn airs(&self) -> &[TestAir] {
@@ -239,8 +417,24 @@ mod tests {
         PcsParams::new(log_blowup, 1, 3, 0, 0, 1, 0).expect("valid PCS params")
     }
 
+    fn model<const N: usize>(trace_costs: [u64; N], proof_cost: u64) -> ProverMemoryModel<N> {
+        ProverMemoryModel {
+            costs: trace_costs.map(|trace_bytes_per_row| AirMemoryCost {
+                trace_bytes_per_row,
+                has_preprocessed: false,
+            }),
+            proof_bytes_per_max_row: proof_cost,
+            setup_bytes_per_preprocessed_row: 0,
+        }
+    }
+
     fn estimate(multi_air: &TestMultiAir, heights: [usize; 2], params: &PcsParams) -> Option<u64> {
-        prover_peak_bytes::<Felt, QuadFelt, _>(multi_air, &heights, params)
+        let direct = prover_peak_bytes::<Felt, QuadFelt, _>(multi_air, &heights, params);
+        let supplied =
+            ProverMemoryModel::<2>::from_multi_air::<Felt, QuadFelt, _>(multi_air, params)
+                .and_then(|model| model.prover_peak_bytes(&heights));
+        assert_eq!(supplied, direct);
+        direct
     }
 
     #[test]
@@ -251,7 +445,23 @@ mod tests {
         assert_eq!(prover_peak_bytes::<Felt, QuadFelt, _>(&multi_air, &[1], &params(3)), None);
         // Overflow the byte calculation on both 32-bit and 64-bit hosts.
         multi_air.airs[0].width = usize::MAX;
-        assert_eq!(estimate(&multi_air, [usize::MAX; 2], &params(3)), None);
+        let overflowing_params = params(32);
+        assert_eq!(estimate(&multi_air, [usize::MAX; 2], &overflowing_params), None);
+        assert_eq!(
+            max_any_height_for_budget::<Felt, QuadFelt, _>(
+                &multi_air,
+                u64::MAX,
+                &overflowing_params
+            ),
+            0
+        );
+        assert!(
+            ProverMemoryModel::<2>::from_multi_air::<Felt, QuadFelt, _>(
+                &multi_air,
+                &overflowing_params,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -283,6 +493,9 @@ mod tests {
 
         multi_air.airs[0].constraint_degree = 2;
         multi_air.airs[1].constraint_degree = 5;
+        // The inactive higher-degree AIR still determines the shared proof coefficient:
+        // (360 trace bytes + 3_392 proof bytes) * 5/4 = 4_690, with no setup-height charge.
+        assert_eq!(estimate(&multi_air, [1, 0], &params(3)), Some(4_690));
         // Swap heights: traces cost 12_096; proof trees/scratch still cost 46_080;
         // setup tree/scratch now cost 29_696; quotient costs 8_192. Total * 5/4 = 120_080.
         assert_eq!(estimate(&multi_air, [8, 16], &params(3)), Some(120_080));
@@ -331,6 +544,10 @@ mod tests {
         }
         for budget in [0, 1, 1 << 20, u64::MAX] {
             let cap = max_any_height_for_budget::<Felt, QuadFelt, _>(&multi_air, budget, &params);
+            let model =
+                ProverMemoryModel::<2>::from_multi_air::<Felt, QuadFelt, _>(&multi_air, &params)
+                    .unwrap();
+            assert_eq!(model.max_any_height_for_budget(budget), cap);
             let fits = |height| {
                 [[height, 0], [0, height]].into_iter().any(|heights| {
                     estimate(&multi_air, heights, &params).is_some_and(|bytes| bytes <= budget)
@@ -345,7 +562,70 @@ mod tests {
                 max_any_height_for_budget::<Felt, QuadFelt, _>(&multi_air, budget, &params),
                 cap
             );
+            assert_eq!(
+                ProverMemoryModel::<2>::from_multi_air::<Felt, QuadFelt, _>(&multi_air, &params)
+                    .unwrap()
+                    .max_any_height_for_budget(budget),
+                cap
+            );
             multi_air.airs.reverse();
         }
+    }
+    #[test]
+    fn safety_rounds_once_after_adding_shared_and_per_air_costs() {
+        let model = model([1, 2], 2);
+        assert_eq!(model.prover_peak_bytes(&[1, 2]), Some(12));
+        assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(0));
+    }
+
+    #[test]
+    fn permissive_cap_accepts_every_height_in_a_fitting_shape() {
+        let model = model([7, 2], 3);
+        let heights = [8, 16];
+        let bytes = model.prover_peak_bytes(&heights).unwrap();
+        let budget = ProvingBudget::new(model, bytes);
+        let cap = budget.max_any_height();
+        assert!(heights.into_iter().all(|height| height <= cap));
+        assert!(model.prover_peak_bytes(&[0, cap]).unwrap() <= bytes);
+        assert!(model.prover_peak_bytes(&[0, cap + 1]).unwrap() > bytes);
+    }
+
+    #[test]
+    fn overflow_is_rejected_before_safety_rounding() {
+        for (trace_cost, proof_cost, height) in
+            [(u64::MAX, 0, 2), (u64::MAX, 1, 1), (u64::MAX / 5 + 1, 0, 1)]
+        {
+            assert_eq!(model([trace_cost], proof_cost).prover_peak_bytes(&[height]), None);
+        }
+    }
+
+    #[test]
+    fn cap_skips_overflowing_coefficients_without_rejecting_zero_heights() {
+        let mut preprocessed = model([1, 1], 1);
+        preprocessed.costs[1].has_preprocessed = true;
+        preprocessed.setup_bytes_per_preprocessed_row = u64::MAX;
+        for model in [model([1, u64::MAX], 1), preprocessed] {
+            assert_eq!(model.prover_peak_bytes(&[4, 0]), Some(10));
+            assert_eq!(model.max_any_height_for_budget(10), 4);
+            assert_eq!(model.prover_peak_bytes(&[5, 0]), Some(13));
+        }
+        let model = model([u64::MAX], 1);
+        assert_eq!(model.prover_peak_bytes(&[0]), Some(0));
+        assert_eq!(model.max_any_height_for_budget(u64::MAX), 0);
+    }
+
+    #[test]
+    fn empty_relations_and_zero_cost_airs_have_distinct_caps() {
+        let empty = TestMultiAir { airs: [] };
+        let params = params(64);
+        assert_eq!(prover_peak_bytes::<Felt, QuadFelt, _>(&empty, &[], &params), Some(0));
+        assert_eq!(max_any_height_for_budget::<Felt, QuadFelt, _>(&empty, 0, &params), 0);
+        let empty =
+            ProverMemoryModel::<0>::from_multi_air::<Felt, QuadFelt, _>(&empty, &params).unwrap();
+        assert_eq!(empty.prover_peak_bytes(&[]), Some(0));
+        assert_eq!(empty.max_any_height_for_budget(0), 0);
+        let zero = model([0], 0);
+        assert_eq!(zero.prover_peak_bytes(&[usize::MAX]), Some(0));
+        assert_eq!(zero.max_any_height_for_budget(0), usize::MAX);
     }
 }

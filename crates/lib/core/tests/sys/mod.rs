@@ -311,8 +311,7 @@ fn masm_build_proof_request_key_matches_native() {
 /// host helper and the MASM `build_proof_request_key` address the same advice-map entry.
 #[test]
 fn proof_request_round_trip_retrieves_registered_package() {
-    use miden_core::{Felt, Word};
-    use miden_utils_testing::recursive_verifier::proof_request_key;
+    use miden_core::{Felt, Word, program::proof_request_key};
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [

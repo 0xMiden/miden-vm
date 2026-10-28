@@ -12,7 +12,6 @@ version.workspace      = true
 
 [dependencies]
 # Internal
-miden-air.workspace = true
 miden-core.workspace = true
 miden-stark = { features = ["testing"], workspace = true }
 

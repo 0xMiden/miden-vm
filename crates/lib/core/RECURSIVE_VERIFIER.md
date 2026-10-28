@@ -3,7 +3,9 @@
 Ordinary library builds assemble the tracked `.masm` files. Regeneration is explicit.
 
 The generators capture the authored AIRs in `crates/air/source` once and derive widths,
-quotient geometry, security metadata, and the canonical ACE circuit from that capture. Cargo builds
+quotient geometry, security metadata, and the canonical ACE circuit from that capture. Optional
+authored relation compiler entry points live in `miden_air_definitions::compiler::{vm, precompiles}`.
+Cargo builds
 the native evaluators and embedded ACE streams from the same capture into `OUT_DIR`, so they have
 no regeneration step.
 
@@ -18,9 +20,9 @@ integers and elliptic-curve parameters.
 |---|---|---|
 | VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
-| PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/precompiles-verifier/src/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
+| PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/stark/precompiles/src/recursive/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
 | Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
-| Fixed-boundary instructions | Templates in `crates/precompiles-verifier/src/masm/` | `pvm/fixed_boundary.masm` |
+| Fixed-boundary instructions | Templates in `crates/stark/precompiles/src/recursive/masm/` | `pvm/fixed_boundary.masm` |
 | OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
 | Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
 
@@ -37,9 +39,8 @@ The relation digest, ACE circuit digest, and setup commitments are pinned in
 `crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
 to these values, and the generated MASM embeds them. Two checks guard the pins, for different reasons:
 
-- The `miden-air` tests detect drift. They recompute every pin from the authored AIRs, so an edit
-  that changes the relation fails `cargo test` even when nobody regenerates the MASM. They answer
-  whether the pins still name the relation the authored AIRs define.
+- The AIR and STARK backend tests compare the pins with digests and commitments recomputed from
+  the authored AIRs and setup tables. A stale pin fails these tests independently of MASM regeneration.
 - The generators enforce change control. They compare the compiled circuit and relation digests
   with the pins and fail when they differ, and they take the setup commitments from the pins as
   trusted inputs. They read the pins but never write them, so regeneration cannot introduce a new
@@ -89,7 +90,8 @@ verifier-root consistency check:
 
 ```sh
 cargo test -p miden-air
-cargo test -p miden-precompiles-verifier --features constants-tools --lib
+cargo test -p miden-vm-stark --lib
+cargo test -p miden-precompiles-stark --features constants-tools --lib
 cargo test -p miden-core-lib --features constraints-tools --test core-lib
 cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library
 ```

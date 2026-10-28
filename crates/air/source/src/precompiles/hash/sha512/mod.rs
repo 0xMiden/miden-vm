@@ -5,6 +5,9 @@
 //! The same row ownership selects between compression and IO lookup batches. IO state crosses
 //! the intervening compression rows through [`Sha512IoContinuation`] rather than next-row copies.
 
+pub mod compression;
+pub mod io;
+
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{
@@ -12,20 +15,17 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage},
+};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage,
-        NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
 };
-
-pub mod compression;
-pub mod io;
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
 pub const IO_ROW_START: usize = compression::COMPRESSION_PERIOD - io::IO_PERIOD;
@@ -73,7 +73,7 @@ where
     E: Algebra<E>,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &miden_stark::lookup::Challenges<EF>) -> EF {
         challenges.encode(
             BusId::Sha512IoContinuation as usize,
             [
@@ -133,7 +133,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha512Air {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(self, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(self, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

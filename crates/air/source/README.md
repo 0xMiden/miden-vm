@@ -17,7 +17,7 @@ and external LogUp closure live in `vm::statement` and `precompiles::statement`.
 source crate does not define ordinary runtime `MultiAir` types.
 
 The normal runtime does not include the ACE compiler. Enable `compiler` for symbolic capture,
-relation compilation, and generation tooling. Production builds use these tools as host build
+relation compilation, and generation tooling in `compiler::vm` and `compiler::precompiles`. Production builds use these tools as host build
 dependencies and embed compiled ACE instructions. Without default features, the authored AIRs
 support `no_std` with `alloc`.
 

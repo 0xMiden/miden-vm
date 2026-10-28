@@ -26,14 +26,17 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{

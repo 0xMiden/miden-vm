@@ -1,14 +1,10 @@
 //! Protocol configuration and the pinned identity of the VM relation.
 //!
-//! The shared configuration factories live in [`miden_stark::config`]. This module selects the
-//! VM parameters and transcript domain and keeps the accepted relation and setup identities.
+//! This module owns the immutable VM PCS preset, protocol ID, and accepted relation and setup
+//! identities. Concrete runtime configuration construction belongs to the VM STARK backend.
 
-use miden_core::{Felt, program::domain::STARK_TRANSCRIPT};
-pub use miden_stark::config::{
-    Blake3Config, EidosConfig, EidosLmcs, KeccakConfig, MidenStarkConfig, RelationDigest,
-    blake3_256_config, keccak_config, observe_protocol_params, relation_digest,
-};
-use miden_stark::pcs::PcsParams;
+use miden_core::Felt;
+pub use miden_stark::{config::RelationDigest, pcs::PcsParams};
 
 // PCS PARAMETERS
 // ================================================================================================
@@ -54,11 +50,6 @@ pub const SPONGE_RATE: usize = miden_crypto::hash::eidos::BLOCK_LEN;
 /// Number of base-field elements in a digest.
 pub const DIGEST_WIDTH: usize = 4;
 
-/// Creates an Eidos-based STARK configuration bound to the existing VM transcript domain.
-pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
-    miden_stark::config::eidos_config(params, relation_digest, STARK_TRANSCRIPT)
-}
-
 /// RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR. The generated
@@ -103,12 +94,10 @@ pub const KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = [
 #[cfg(test)]
 mod tests {
     extern crate alloc;
-    use alloc::{format, vec, vec::Vec};
+    use alloc::{format, vec::Vec};
 
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
     use miden_core::{Felt, field::QuadFelt};
-    use miden_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
-
-    use crate::vm::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement, ace};
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
                                in crates/air/generated/src/vm/config.rs and update \
@@ -132,10 +121,10 @@ mod tests {
     #[test]
     fn relation_digest_matches_current_air() {
         let circuit =
-            ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
+            build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
-        let digest = super::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
+        let digest = miden_stark::config::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
         let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
@@ -154,7 +143,7 @@ mod tests {
     /// would let a proof be verified against a circuit the protocol constant never committed to.
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
-        let expected: Vec<u64> = ace::build_recursive_verifier_ace_circuit()
+        let expected: Vec<u64> = build_recursive_verifier_ace_circuit()
             .expect("recursive-verifier ACE circuit")
             .commitment
             .iter()
@@ -164,53 +153,4 @@ mod tests {
             super::ACE_CIRCUIT_DIGEST.iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(actual, expected, "ACE_CIRCUIT_DIGEST is stale; {UPDATE_HINT}");
     }
-
-    /// The And8 setup commitment the given configuration builds from the canonical VM setup.
-    fn canonical_setup_commitment<SC: StarkConfig<Felt, QuadFelt>>(
-        config: &SC,
-    ) -> <SC::Lmcs as Lmcs>::Commitment {
-        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
-            MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; NUM_PUBLIC_VALUES])],
-            vec![],
-        )
-        .expect("canonical VM statement");
-        Preprocessed::build(&statement, config).expect("fixed And8 setup").commitment()
-    }
-
-    /// Each pinned And8 setup commitment must be the one its configuration builds from the
-    /// canonical VM setup.
-    macro_rules! setup_commitment_matches_canonical_setup {
-        ($test:ident, $config:ident, $pinned:ident, $repr:ty) => {
-            #[test]
-            fn $test() {
-                let config = super::$config(super::pcs_params(), super::RELATION_DIGEST);
-                assert_eq!(
-                    <$repr>::from(canonical_setup_commitment(&config)),
-                    super::$pinned,
-                    "{} is stale; {UPDATE_HINT}",
-                    stringify!($pinned)
-                );
-            }
-        };
-    }
-
-    setup_commitment_matches_canonical_setup!(
-        blake3_setup_commitment_is_current,
-        blake3_256_config,
-        BLAKE3_PREPROCESSED_COMMITMENT,
-        [u8; 32]
-    );
-    setup_commitment_matches_canonical_setup!(
-        eidos_setup_commitment_is_current,
-        eidos_config,
-        EIDOS_PREPROCESSED_COMMITMENT,
-        [u64; 4]
-    );
-    setup_commitment_matches_canonical_setup!(
-        keccak_setup_commitment_is_current,
-        keccak_config,
-        KECCAK_PREPROCESSED_COMMITMENT,
-        [u64; 4]
-    );
 }

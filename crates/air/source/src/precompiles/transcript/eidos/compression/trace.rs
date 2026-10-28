@@ -8,40 +8,15 @@ pub use crate::shared::eidos::trace::{
     ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
     retag_felt_trace_block_cycle_id,
 };
-#[cfg(any(test, feature = "testing"))]
-use crate::shared::eidos::{layout::FOOTER_START, trace::write_core_felt_footer_rows};
 use crate::shared::eidos::{
     layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
     trace::write_core_felt_trace_block_into_zeroed_with_lookups,
 };
 
-struct NoopByteLookupRecorder;
+pub(super) struct NoopByteLookupRecorder;
 
 impl ByteLookupRecorder for NoopByteLookupRecorder {
     fn record(&mut self, _lookup: EidosCompressionByteLookup, _lhs: u8, _rhs: u8, _result: u32) {}
-}
-
-#[cfg(any(test, feature = "testing"))]
-pub(super) fn rewrite_felt_footer_for_test(
-    rows: &mut [EidosCompressionFeltRow; BLOCK_PERIOD],
-    block: [u32; 16],
-    h: [u32; 8],
-    final_v: [u32; 16],
-    compression_cycle_id: u64,
-) {
-    for row in rows.iter_mut().skip(FOOTER_START) {
-        row.fill(Felt::ZERO);
-    }
-    let mut write_footer_interface = write_pvm_footer_output;
-    write_core_felt_footer_rows(
-        rows,
-        block,
-        h,
-        final_v,
-        compression_cycle_id,
-        &mut NoopByteLookupRecorder,
-        &mut write_footer_interface,
-    );
 }
 
 /// Writes one Eidos compression cycle after clearing its 32-row destination.
@@ -109,7 +84,7 @@ where
     )
 }
 
-fn write_pvm_footer_output(row: &mut EidosCompressionFeltRow, output: &[u64; 4]) {
+pub(super) fn write_pvm_footer_output(row: &mut EidosCompressionFeltRow, output: &[u64; 4]) {
     for (idx, &value) in output.iter().enumerate() {
         row[footer_digest_col(idx)] = Felt::new_unchecked(value);
     }
@@ -131,7 +106,10 @@ pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
 mod tests {
     use super::*;
     use crate::{
-        shared::eidos::{layout::F_CV_STORAGE_COLS, universal_cv_word},
+        shared::eidos::{
+            layout::{F_CV_STORAGE_COLS, FOOTER_START},
+            universal_cv_word,
+        },
         vm::trace::eidos_compression::{
             F_COMPRESSION_MULTIPLICITY_COL, TraceMode,
             write_felt_trace_block as write_mvm_trace_block,

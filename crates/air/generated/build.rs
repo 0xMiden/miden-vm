@@ -1,8 +1,8 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_definitions::vm::{
-    AIRS,
-    ace::{CapturedAir, CompiledRelation, LayoutKind},
+use miden_air_definitions::{
+    compiler::vm::{CapturedAir, CompiledRelation, LayoutKind},
+    vm::AIRS,
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
@@ -54,7 +54,7 @@ fn main() {
         .expect("compile VM relation");
     write(
         "air_shape.rs",
-        format!("{:?}", miden_air_definitions::vm::geometry::air_shape(&relation)),
+        format!("{:?}", miden_air_definitions::compiler::vm::air_shape(&relation)),
     );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
     let circuit: miden_air_definitions::vm::ace::RecursiveAceCircuit = relation

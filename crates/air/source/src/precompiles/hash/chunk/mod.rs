@@ -20,14 +20,17 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::EidosBlockMsg,
     utils::{current_main, next_main},
@@ -128,7 +131,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&ChunkAir, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(&ChunkAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

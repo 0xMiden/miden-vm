@@ -7,10 +7,11 @@ use miden_core::Felt;
 use super::{
     layout::{BLOCK_PERIOD, NUM_COLS},
     trace::{
-        EidosCompressionFeltRow, rewrite_felt_footer_for_test as rewrite_footer,
-        write_felt_trace_block,
+        EidosCompressionFeltRow, NoopByteLookupRecorder, write_felt_trace_block,
+        write_pvm_footer_output,
     },
 };
+use crate::shared::eidos::{layout::FOOTER_START, testing::write_core_felt_footer_rows};
 
 /// Materialized 32-row compression trace block and its final working state.
 pub struct EidosCompressionFeltTraceBlock {
@@ -50,5 +51,17 @@ pub fn rewrite_felt_footer_for_test(
     final_v: [u32; 16],
     compression_cycle_id: u64,
 ) {
-    rewrite_footer(rows, block, h, final_v, compression_cycle_id);
+    for row in rows.iter_mut().skip(FOOTER_START) {
+        row.fill(Felt::ZERO);
+    }
+    let mut write_footer_interface = write_pvm_footer_output;
+    write_core_felt_footer_rows(
+        rows,
+        block,
+        h,
+        final_v,
+        compression_cycle_id,
+        &mut NoopByteLookupRecorder,
+        &mut write_footer_interface,
+    );
 }

@@ -16,6 +16,7 @@ use miden_stark::{
         Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
 };
+use miden_vm_stark::setup::config::eidos_config;
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -405,8 +406,8 @@ fn init_seed_matches_the_rust_transcript_seeding() {
     let (output, _) =
         build_test!(&source, &[]).execute_for_output().expect("init_seed must execute");
 
-    let mut challenger = config::eidos_config(config::pcs_params(), relation_digest).challenger();
-    config::observe_protocol_params(&config::pcs_params(), &mut challenger);
+    let mut challenger = eidos_config(config::pcs_params(), relation_digest).challenger();
+    miden_stark::config::observe_protocol_params(&config::pcs_params(), &mut challenger);
     for _ in 0..4 {
         challenger.observe(Felt::ZERO);
     }

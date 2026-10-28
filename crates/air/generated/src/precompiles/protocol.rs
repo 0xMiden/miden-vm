@@ -2,12 +2,10 @@
 //!
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
+/// Encoded circuit returned by the production relation's embedded artifact.
+pub use miden_air_definitions::precompiles::ace::PvmRecursiveAceCircuit;
 use miden_core::{Felt, Word};
-
-use crate::{
-    precompiles::ace::PvmRecursiveAceCircuit,
-    shared::security::{AirShape, LookupShape},
-};
+pub use miden_stark::security::{AirShape, LookupShape};
 
 /// Pinned relation identity and setup commitments for the supported proof configurations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,15 +132,16 @@ static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_i
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::compiler::precompiles::build_pvm_recursive_verifier_ace_circuit;
+
     use super::*;
-    use crate::precompiles::{policy, stark_config};
+    use crate::precompiles::policy;
 
     const UPDATE_HINT: &str = "an intentional relation change must update PINS in crates/air/generated/src/precompiles/protocol.rs and CURRENT_PVM_VERIFIER_ROOT in core/src/proof.rs";
 
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
-        let independent =
-            crate::precompiles::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let independent = build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 
@@ -182,14 +181,16 @@ mod tests {
             AuthoredAirs(source::ChipletAir::all()),
             vec![(
                 source::ChipletAir::TRANSCRIPT_EVAL_INDEX,
-                vec![Felt::ZERO; crate::precompiles::logup::NUM_PUBLIC_VALUES],
+                vec![Felt::ZERO; source::logup::NUM_PUBLIC_VALUES],
             )],
             vec![],
         )
         .unwrap();
         let relation_digest = PINS.relation_digest.map(Felt::new_unchecked);
-        let blake3_config =
-            stark_config::blake3_256_config(policy::precompile_pcs_params(), relation_digest);
+        let blake3_config = miden_stark::config::blake3_256_config(
+            policy::precompile_pcs_params(),
+            relation_digest,
+        );
         assert_eq!(
             <[u8; 32]>::from(
                 miden_stark::Preprocessed::build(&statement, &blake3_config)
@@ -200,7 +201,7 @@ mod tests {
             "{UPDATE_HINT}"
         );
         let keccak_config =
-            stark_config::keccak_config(policy::precompile_pcs_params(), relation_digest);
+            miden_stark::config::keccak_config(policy::precompile_pcs_params(), relation_digest);
         assert_eq!(
             <[u64; 4]>::from(
                 miden_stark::Preprocessed::build(&statement, &keccak_config)
@@ -210,15 +211,14 @@ mod tests {
             PVM_KECCAK_PREPROCESSED_COMMITMENT,
             "{UPDATE_HINT}"
         );
-        let config = stark_config::eidos_config(policy::precompile_pcs_params(), relation_digest);
+        let config = miden_stark::config::eidos_config(
+            policy::precompile_pcs_params(),
+            relation_digest,
+            miden_core::program::domain::STARK_TRANSCRIPT,
+        );
         let commitment = <[u64; 4]>::from(
             miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
         );
         assert_eq!(commitment, PVM_PREPROCESSED_COMMITMENT, "{UPDATE_HINT}");
-        assert_eq!(
-            <[u64; 4]>::from(crate::precompiles::preprocessed::eidos().commitment()),
-            commitment,
-            "{UPDATE_HINT}"
-        );
     }
 }

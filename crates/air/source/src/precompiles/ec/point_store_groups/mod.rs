@@ -11,11 +11,14 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
+};
 
 use crate::precompiles::{
     ec::{self, groups},
-    logup::{ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
 };
@@ -56,7 +59,7 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreGroupsAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&EcPointStoreGroupsAir, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(&EcPointStoreGroupsAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

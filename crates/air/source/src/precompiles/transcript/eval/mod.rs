@@ -70,7 +70,13 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{CurvePrecompile, UintPrecompile};
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 
 use crate::precompiles::{
     ec::{
@@ -78,10 +84,7 @@ use crate::precompiles::{
         add::EcGroupAddMsg,
         msm::{MsmClaimTermMsg, MsmExprMsg},
     },
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
@@ -396,7 +399,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&TranscriptEvalAir, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(&TranscriptEvalAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

@@ -13,11 +13,9 @@
 //! value lives under (both unused — zero — for `True`).
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
+use miden_stark::lookup::{Challenges, LookupMessage};
 
-use crate::precompiles::{
-    logup::{Challenges, LookupMessage},
-    relations::BusId,
-};
+use crate::precompiles::relations::BusId;
 
 /// Typed value a node binds to on the [`Binding`](BusId::Binding) bus.
 ///

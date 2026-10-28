@@ -1,48 +1,37 @@
-//! Circuit adapters and embedded recursive-verifier instructions.
-pub use miden_air_definitions::vm::ace::*;
+//! Build-compiled recursive-verifier circuit data.
+//!
+//! Authored circuit construction lives in `miden_air_definitions::compiler::vm`.
+pub use miden_air_definitions::vm::ace::RecursiveAceCircuit;
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
-const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =
+pub const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =
     include!(concat!(env!("OUT_DIR"), "/ace_circuit_shape.rs"));
 
 /// Encoded instruction stream of the build-compiled VM circuit, as canonical felt values.
-static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/ace_instructions.rs"));
-
-/// Materialize the build-compiled VM circuit without symbolic AIR capture at runtime.
-///
-/// The commitment is the pinned [`crate::vm::config::ACE_CIRCUIT_DIGEST`]; the recursive verifier
-/// rejects a stream that does not hash to it.
-pub fn compiled_recursive_circuit() -> RecursiveAceCircuit {
-    let (num_inputs, num_eval_gates, stream_len) = ACE_CIRCUIT_SHAPE;
-    RecursiveAceCircuit {
-        num_inputs,
-        num_eval_gates,
-        stream_len,
-        commitment: miden_core::Word::new(crate::vm::config::ACE_CIRCUIT_DIGEST),
-        instructions: ACE_INSTRUCTIONS
-            .iter()
-            .copied()
-            .map(miden_core::Felt::new_unchecked)
-            .collect(),
-    }
-}
-
-/// Returns the process-wide build-compiled VM circuit.
-#[cfg(feature = "std")]
-pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
-    static CIRCUIT: std::sync::OnceLock<RecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(compiled_recursive_circuit)
-}
+pub static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/ace_instructions.rs"));
 
 #[cfg(test)]
 mod tests {
+    use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
+
     use super::*;
 
     #[test]
     fn embedded_circuit_matches_independent_capture() {
         let independent = build_recursive_verifier_ace_circuit().unwrap();
-        assert_eq!(compiled_recursive_circuit(), independent);
-        #[cfg(feature = "std")]
-        assert_eq!(shared_recursive_circuit(), &independent);
+        assert_eq!(
+            ACE_CIRCUIT_SHAPE,
+            (independent.num_inputs, independent.num_eval_gates, independent.stream_len)
+        );
+        assert_eq!(
+            miden_core::Word::new(crate::vm::config::ACE_CIRCUIT_DIGEST),
+            independent.commitment
+        );
+        let instructions: alloc::vec::Vec<u64> = independent
+            .instructions
+            .iter()
+            .map(miden_core::Felt::as_canonical_u64)
+            .collect();
+        assert_eq!(ACE_INSTRUCTIONS, instructions);
     }
 }
