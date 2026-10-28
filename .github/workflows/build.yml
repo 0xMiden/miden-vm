@@ -34,7 +34,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # These WASM targets provide std. The bare-metal job checks dependency leaks.
-      - name: Build for WASM
+      - name: Build for no-std
         run: |
           rustup update --no-self-update stable
           rustup +stable target add ${{ matrix.target }}
