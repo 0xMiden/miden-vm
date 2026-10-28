@@ -1,17 +1,17 @@
 use std::{collections::HashMap, string::String, vec};
 
-use miden_air::{
-    lookup::Challenges,
-    precompiles::hash::sha512::{
-        COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
-    },
+use miden_air_definitions::precompiles::hash::sha512::{
+    COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
 };
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::Challenges,
+};
 
 use crate::{
     hash::sha512::{
@@ -49,7 +49,7 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 #[test]
 fn sha512_opcode_lookup_packing_preserves_degree() {
     assert_eq!(Sha512Air.width(), 54);
-    assert_eq!(Sha512Air.aux_width(), 14);
+    assert_eq!(Sha512Air.aux_width(), 7);
     assert_eq!(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&Sha512Air).max(), 5);
     assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }

@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "air",
+    "crates/air/generated",
     "benches/blake3-bench",
     "benches/miden-bench",
     "benches/precompiles-bench",
     "benches/smt-codspeed",
     "benches/synthetic-bench",
     "core",
-    "crates/ace-codegen",
-    "crates/air-definitions",
+    "crates/ace",
+    "crates/air/source",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
@@ -18,8 +18,7 @@ members = [
     "crates/field",
     "crates/lib/core",
     "crates/lib/core/codegen",
-    "crates/lifted-air",
-    "crates/lifted-stark",
+    "crates/stark/core",
     "crates/mast-package",
     "crates/miden-constraint-compiler",
     "crates/midenc-hir-type",
@@ -28,8 +27,6 @@ members = [
     "crates/miden-format",
     "crates/project",
     "crates/serde-utils",
-    "crates/stark-transcript",
-    "crates/stateful-hasher",
     "crates/test-serialization-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
@@ -83,9 +80,9 @@ opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
-miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0.0-rc.1", default-features = false }
-miden-air               = { path = "./air", version = "1.0.0-rc.1", default-features = false }
-miden-air-definitions   = { path = "./crates/air-definitions", version = "1.0.0-rc.1", default-features = false }
+miden-ace               = { path = "./crates/ace", version = "1.0.0-rc.1", default-features = false }
+miden-air               = { path = "./crates/air/generated", version = "1.0.0-rc.1", default-features = false }
+miden-air-definitions   = { path = "./crates/air/source", version = "1.0.0-rc.1", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "1.0.0-rc.1", default-features = false }
@@ -97,8 +94,7 @@ miden-crypto            = { path = "./crates/crypto", version = "1.0.0-rc.1", de
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "1.0.0-rc.1", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "1.0.0-rc.1", default-features = false }
 miden-field             = { path = "./crates/field", version = "1.0.0-rc.1", default-features = false }
-miden-lifted-air        = { path = "./crates/lifted-air", version = "1.0.0-rc.1", default-features = false }
-miden-lifted-stark      = { path = "./crates/lifted-stark", version = "1.0.0-rc.1", default-features = false }
+miden-stark            = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0.0-rc.1", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1", default-features = false }
@@ -109,8 +105,6 @@ miden-test-serialization-macros = { path = "./crates/test-serialization-macros",
 miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", default-features = false }
 miden-prover            = { path = "./prover", version = "1.0.0-rc.1", default-features = false }
 miden-serde-utils       = { path = "./crates/serde-utils", version = "1.0.0-rc.1", default-features = false }
-miden-stark-transcript  = { path = "./crates/stark-transcript", version = "1.0.0-rc.1", default-features = false }
-miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "1.0.0-rc.1", default-features = false }
 midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "1.0.0-rc.1", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0.0-rc.1", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0.0-rc.1", default-features = false }

@@ -28,11 +28,9 @@ mod eidos;
 use std::{borrow::Cow, time::Instant};
 
 use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
-use miden_lifted_air::{
-    AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
-};
-use miden_lifted_stark::{
+use miden_stark::{
     GenericStarkConfig, ProverInstance,
+    air::{AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess},
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
 use p3_field::PrimeCharacteristicRing;

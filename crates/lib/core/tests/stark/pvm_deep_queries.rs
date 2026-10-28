@@ -1,6 +1,6 @@
 //! Behavioral oracle for the PVM DEEP-query hook.
 
-use miden_ace_codegen::EXT_DEGREE;
+use miden_ace::EXT_DEGREE;
 use miden_core::{
     Felt, Word,
     crypto::{

@@ -2,13 +2,16 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
+use miden_air_definitions::precompiles::ChipletAir as AuthoredChipletAir;
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -40,9 +43,9 @@ fn sha512_reuses_compression_padding_for_io() {
     // IO needs only sixty-four rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
     assert_eq!(Sha512Air.width(), 54);
-    assert_eq!(miden_air::precompiles::hash::sha512::io::NUM_MAIN_COLS, 37);
-    assert_eq!(miden_air::precompiles::hash::sha512::io::IO_PERIOD, 64);
-    assert_eq!(Sha512Air.aux_width(), 14);
+    assert_eq!(miden_air_definitions::precompiles::hash::sha512::io::NUM_MAIN_COLS, 37);
+    assert_eq!(miden_air_definitions::precompiles::hash::sha512::io::IO_PERIOD, 64);
+    assert_eq!(Sha512Air.aux_width(), 7);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }
@@ -52,7 +55,7 @@ fn sha256_reuses_compression_padding_for_io() {
     // IO needs only thirty-two rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
     assert_eq!(Sha256Air.width(), 40);
-    assert_eq!(Sha256Air.aux_width(), 11);
+    assert_eq!(Sha256Air.aux_width(), 4);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::tests::log_quotient_degree(&Sha256Air), 2);
 }
@@ -233,27 +236,35 @@ pub(crate) fn session_stack_net(
             .iter()
             .find_map(|(replacement_idx, main)| (*replacement_idx == idx).then_some(*main))
             .unwrap_or(mains[idx]);
-        match air {
-            ChipletAir::ChunkNodeSponge => {
+        match air.0 {
+            AuthoredChipletAir::ChunkNodeSponge => {
                 fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
             },
-            ChipletAir::EidosCompression => {
+            AuthoredChipletAir::EidosCompression => {
                 fold_balance(&EidosCompressionAir, main, challenges, &mut net)
             },
-            ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
-            ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
-            ChipletAir::TranscriptEval => {
+            AuthoredChipletAir::KeccakRound => {
+                fold_balance(&KeccakRoundAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::BytePairLut => {
+                fold_balance(&BytePairLutAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },
-            ChipletAir::UintStoreMul => fold_balance(&UintStoreMulAir, main, challenges, &mut net),
-            ChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
-            ChipletAir::EcPointStoreGroups => {
+            AuthoredChipletAir::UintStoreMul => {
+                fold_balance(&UintStoreMulAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
+            AuthoredChipletAir::EcPointStoreGroups => {
                 fold_balance(&EcPointStoreGroupsAir, main, challenges, &mut net)
             },
-            ChipletAir::EcGroupAdd => fold_balance(&EcGroupAddAir, main, challenges, &mut net),
-            ChipletAir::EcMsm => fold_balance(&EcMsmAir, main, challenges, &mut net),
-            ChipletAir::Sha512 => fold_balance(&Sha512Air, main, challenges, &mut net),
-            ChipletAir::Sha256 => fold_balance(&Sha256Air, main, challenges, &mut net),
+            AuthoredChipletAir::EcGroupAdd => {
+                fold_balance(&EcGroupAddAir, main, challenges, &mut net)
+            },
+            AuthoredChipletAir::EcMsm => fold_balance(&EcMsmAir, main, challenges, &mut net),
+            AuthoredChipletAir::Sha512 => fold_balance(&Sha512Air, main, challenges, &mut net),
+            AuthoredChipletAir::Sha256 => fold_balance(&Sha256Air, main, challenges, &mut net),
         }
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);

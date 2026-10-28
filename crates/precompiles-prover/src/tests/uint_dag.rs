@@ -9,13 +9,13 @@
 //! relations must catch (a forged result ptr; a re-encoded op id that
 //! passes every local constraint and dies on the Eidos frame relation).
 
-use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_precompiles::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, UintDomain};
+use miden_stark::lookup::Challenges;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use super::uint::random_uint_below;
@@ -26,8 +26,9 @@ use crate::{
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::{
         eval::{
-            COL_FRAME_PARAM0, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR,
-            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir, add_flag,
+            COL_FRAME_PARAM0, COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_SUB,
+            COL_OUT_MULT, COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
+            add_flag,
         },
         nodes::UintOpId,
     },
@@ -304,6 +305,17 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
         .iter()
         .position(|row| add_flag::<Felt, _>(row) == Felt::ONE)
         .expect("add row");
+    // The selector witnesses must change with the operation; changing either alone is rejected.
+    for column in [COL_IS_UINT_ADD, COL_IS_UINT_SUB] {
+        let mut forged = tampered.clone();
+        forged.values[row * EVAL_NUM_MAIN_COLS + column] =
+            Felt::ONE - forged.values[row * EVAL_NUM_MAIN_COLS + column];
+        crate::tests::assert_constraint_failure(|| {
+            crate::tests::check_local_inputs(TranscriptEvalAir, &forged, traces.air_inputs());
+        });
+    }
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_ADD] = Felt::ZERO;
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_SUB] = Felt::ONE;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_FRAME_PARAM0] = Felt::from(UintOpId::Sub as u8);
 

@@ -12,10 +12,11 @@ use alloc::{string::ToString, vec, vec::Vec};
 use core::any::{Any, TypeId};
 
 use ::serde::Serialize;
-use miden_air::{MidenMultiAir, ProverStatement, Statement};
+use miden_air::vm::MidenMultiAir;
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_lifted_stark::{
+use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
+    air::{ProverStatement, Statement},
     lmcs::Lmcs,
     proof::{StarkOutput, StarkProofData},
 };
@@ -59,9 +60,10 @@ mod span_entry_soundness_repro;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, MidenAir, PublicInputs, config};
-pub use miden_core::proof::{
-    ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+pub use miden_air::vm::{MidenAir, PublicInputs, config};
+pub use miden_core::{
+    proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof},
+    serde::DeserializationError,
 };
 pub use miden_processor::{
     ExecutionClaim, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,

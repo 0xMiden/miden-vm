@@ -11,7 +11,8 @@ use alloc::{
 };
 
 use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
+    protocol::PVM_PREPROCESSED_COMMITMENT,
     stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
 };
 use miden_core::{
@@ -26,14 +27,14 @@ use miden_core::{
     },
 };
 use miden_crypto::merkle::{MerklePath, PartialMerkleTree};
-use miden_lifted_air::{LiftedAir, Statement};
-use miden_lifted_stark::{
+use miden_serde_utils::deserialize_schema_exact;
+use miden_stark::{
     StarkConfig, VerifierInstance,
+    air::{LiftedAir, Statement},
     lmcs::{Lmcs, proof::BatchProofView},
     pcs::PcsProof,
     proof::{StarkProof, StarkProofData},
 };
-use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
 use crate::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
@@ -122,10 +123,10 @@ pub enum PvmRecursiveVerifierInputsError {
     ProofDeserialization(String),
     /// The proof transcript could not be parsed against the PVM statement and setup.
     #[error(transparent)]
-    Transcript(#[from] miden_lifted_stark::VerifierError),
+    Transcript(#[from] miden_stark::VerifierError),
     /// The trusted setup commitment did not match the PVM AIR declaration.
     #[error(transparent)]
-    Preprocessed(#[from] miden_lifted_stark::PreprocessedValidationError),
+    Preprocessed(#[from] miden_stark::PreprocessedValidationError),
     /// The parsed proof does not have the fixed twelve-chiplet shape expected by the wrapper.
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),
@@ -152,7 +153,6 @@ fn build_verifier_advice(
         precompile_pcs_params(),
         crate::ace_constants::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed::eidos();
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
@@ -170,7 +170,7 @@ fn build_verifier_advice(
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(preprocessed.commitment()))?;
+        VerifierInstance::new(&config, &statement, Some(PVM_PREPROCESSED_COMMITMENT.into()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;

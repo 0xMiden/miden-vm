@@ -14,7 +14,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
-use miden_lifted_stark::air::{
+use miden_stark::air::{
     BaseAir, LiftedAir,
     symbolic::{
         AirLayout, BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpression,

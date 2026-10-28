@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::hash::sha256::compression::{
+use miden_air_definitions::precompiles::hash::sha256::compression::{
     self,
     program::{self, Op},
 };
@@ -116,40 +116,18 @@ fn populate_block(
         let r = match s.op {
             Op::Input => {
                 let index = s.src_a as usize;
-                let value = if index < 16 {
+                if index < 16 {
                     rec.block[index]
                 } else {
                     rec.state[index - 16]
-                };
-                for byte in value.to_le_bytes() {
-                    bpl.require(BytePairOp::Xor, 0, byte);
                 }
-                value
             },
             Op::Const(v) => v,
-            Op::Xor => {
-                for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
-                    bpl.require(BytePairOp::Xor, x, y);
-                }
-                a ^ b
-            },
-            Op::And => {
-                for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
-                    bpl.require(BytePairOp::AndNot, 255 - x, y);
-                }
-                a & b
-            },
-            Op::AndNot => {
-                for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
-                    bpl.require(BytePairOp::AndNot, x, y);
-                }
-                (!a) & b
-            },
+            Op::Xor => a ^ b,
+            Op::And => a & b,
+            Op::AndNot => (!a) & b,
             Op::Add => {
                 let (sum, overflow) = a.overflowing_add(b);
-                for byte in sum.to_le_bytes() {
-                    bpl.require(BytePairOp::Xor, 0, byte);
-                }
                 carry = overflow as u32;
                 sum
             },
@@ -182,12 +160,22 @@ fn populate_block(
             rows[base + compression::COL_B_BEGIN..base + compression::COL_B_BEGIN + 4]
                 .copy_from_slice(&witness_b.to_le_bytes().map(Felt::from));
         }
-        let raw = match s.op {
-            Op::Rol(_) => a,
-            _ => r,
-        };
-        rows[base + compression::COL_R_BEGIN..base + compression::COL_R_BEGIN + 4]
-            .copy_from_slice(&raw.to_le_bytes().map(Felt::from));
+        let result_cells =
+            &mut rows[base + compression::COL_R_BEGIN..base + compression::COL_R_BEGIN + 4];
+        if matches!(s.op, Op::Xor | Op::And | Op::AndNot) {
+            result_cells.copy_from_slice(&(a ^ b).to_le_bytes().map(Felt::from));
+            for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
+                bpl.require(BytePairOp::Xor, x, y);
+            }
+        } else if !matches!(s.op, Op::Rol(_)) {
+            for (j, cell) in result_cells[..2].iter_mut().enumerate() {
+                let limb = (r >> (16 * j)) as u16;
+                *cell = Felt::from(limb);
+                if matches!(s.op, Op::Input | Op::Add) {
+                    bpl.require_range16(limb);
+                }
+            }
+        }
         if matches!(s.op, Op::Add) {
             rows[base + compression::COL_CARRY] = Felt::from(carry);
         }

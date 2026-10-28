@@ -1,16 +1,14 @@
 use std::{collections::HashMap, string::String, vec};
 
-use miden_air::{
-    lookup::Challenges,
-    precompiles::hash::sha256::{
-        COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
-    },
+use miden_air_definitions::precompiles::hash::sha256::{
+    COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
 };
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_stark::lookup::Challenges;
 
 use crate::{
     hash::sha256::{
@@ -47,7 +45,7 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 
 #[test]
 fn sha256_trace_meets_per_block_memory_budget() {
-    use miden_lifted_air::LiftedAir;
+    use miden_stark::air::LiftedAir;
 
     let (compression, io) = requirements(&[55]);
     let main = generate_trace(compression, io, &mut BytePairLutRequires::new());
@@ -58,10 +56,10 @@ fn sha256_trace_meets_per_block_memory_budget() {
         &[QuadFelt::from_u64(17), QuadFelt::from_u64(31)],
     );
     // Each commitment row is padded independently to eight base-field elements.
-    // IO must fit within a 40-main + 24-aux aligned footprint per compression row.
+    // IO must fit within a 40-main + 8-aux aligned footprint per compression row.
     let committed_cells = main.height() * main.width.next_multiple_of(8)
         + aux.height() * (2 * aux.width).next_multiple_of(8);
-    assert!(committed_cells <= 64 * 4096, "SHA-256 cells per block: {committed_cells}");
+    assert!(committed_cells <= 48 * 4096, "SHA-256 cells per block: {committed_cells}");
     check_local(Sha256Air, &main);
 }
 

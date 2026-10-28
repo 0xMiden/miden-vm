@@ -49,9 +49,8 @@ jobs:
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
                 .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
-                crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
-                crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
-                crates/stateful-hasher/*)
+                crates/crypto/*|crates/crypto-derive/*|crates/field/*|\
+                crates/stark/core/*|crates/serde-utils/*)
                   run=true
                   break
                   ;;
@@ -217,6 +216,9 @@ jobs:
             RUSTFLAGS="-C target-feature=${target_features}" \
               cargo nextest run --profile ci -p miden-crypto --lib --no-default-features \
                 --no-tests=fail 'hash::eidos::' || return 1
+            RUSTFLAGS="-C target-feature=${target_features}" \
+              cargo nextest run --profile ci -p miden-stark --lib --no-default-features \
+                --no-tests=fail 'config::tests::' || return 1
           }
 
           failed=0
@@ -275,7 +277,7 @@ jobs:
               echo "Compiler tooling leaked into $package runtime dependencies" >&2
               exit 1
             fi
-            if [ "$package" = miden-crypto ] && grep -E '^miden-lifted-stark ' runtime-dependencies.txt; then
+            if [ "$package" = miden-crypto ] && grep -E '^miden-stark ' runtime-dependencies.txt; then
               echo "The STARK engine leaked into crypto dependencies" >&2
               exit 1
             fi

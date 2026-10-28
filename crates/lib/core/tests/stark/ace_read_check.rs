@@ -3,8 +3,8 @@
 //! The check extracts the flat ACE input vector from memory, verifies its structural and selector
 //! invariants, and evaluates the same ACE circuit in Rust.
 
-use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit};
+use miden_ace::{AceConfig, InputKey, InputLayout, LayoutKind};
+use miden_air::vm::{MIDEN_AIR_COUNT, ace::build_canonical_multi_air_ace_circuit};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},
@@ -188,15 +188,12 @@ fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<
 /// `stage_proof_order_maps` derives `pos_by_id` and `id_by_pos` from the transcript-bound per-AIR
 /// heights. Scatter staging, boundary placement, and fold-coefficient staging read those maps.
 /// This helper checks both maps against the Rust ordering before extracting the ACE inputs.
-fn extract_order(read: &impl Fn(u32) -> Felt) -> ProofOrder {
-    let log_heights: Vec<u8> =
-        staged_log_heights(read).into_iter().map(|height| height as u8).collect();
-    let order = ProofOrder::from_instance_log_heights(&log_heights);
+fn extract_order(read: &impl Fn(u32) -> Felt) -> Vec<usize> {
+    let order = proof_order(&staged_log_heights(read));
 
     let positions_ptr = vm_layout_const("PROOF_ORDER_POSITIONS_PTR");
     let ids_ptr = vm_layout_const("PROOF_ORDER_IDS_PTR");
-    for (position, air) in order.airs().iter().enumerate() {
-        let id = air.instance_index();
+    for (position, &id) in order.iter().enumerate() {
         assert_eq!(
             read(positions_ptr + id as u32).as_canonical_u64(),
             position as u64,
@@ -331,7 +328,7 @@ fn assert_air_selectors_match_trace_metadata(
 /// fixtures are not.
 fn assert_fold_coefficients_match_the_proof_order(
     read: &impl Fn(u32) -> Felt,
-    order: &ProofOrder,
+    order: &[usize],
     inputs: &[QuadFelt],
     layout: &InputLayout,
 ) {
@@ -341,13 +338,12 @@ fn assert_fold_coefficients_match_the_proof_order(
         read(CONSTRAINT_COMPOSITION_COEFS_PTR + 3),
     ]);
 
-    for (position, air) in order.airs().iter().enumerate() {
+    for (position, &air) in order.iter().enumerate() {
         let exponent = (MIDEN_AIR_COUNT - 1 - position) as u64;
         assert_eq!(
-            get(InputKey::MultiAirFoldCoeff(air.instance_index())),
+            get(InputKey::MultiAirFoldCoeff(air)),
             beta.exp_u64(exponent),
-            "AIR {} at proof position {position} has the wrong fold coefficient",
-            air.instance_index(),
+            "AIR {air} at proof position {position} has the wrong fold coefficient",
         );
     }
 }
@@ -361,7 +357,7 @@ fn assert_fold_coefficients_match_the_proof_order(
 ///
 /// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
 /// at return.
-pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]) -> ProofOrder {
+pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]) -> Vec<usize> {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
     for (event, handler) in &test.trace_handlers {

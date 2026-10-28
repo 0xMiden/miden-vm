@@ -2,7 +2,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use miden_air::precompiles::hash::sha256::io::{self, program::IV};
+use miden_air_definitions::precompiles::hash::sha256::io::{self, program::IV};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
@@ -252,7 +252,12 @@ pub(crate) fn populate_rows(
                     for j in 0..8 {
                         let byte = inv.digest[lane * 8 + j];
                         row[io::COL_DIGEST_BEGIN + j] = Felt::from_u8(byte);
-                        bpl.require(BytePairOp::Xor, 0, byte);
+                    }
+                    for j in 0..4 {
+                        let a = inv.digest[lane * 8 + 2 * j];
+                        let b = inv.digest[lane * 8 + 2 * j + 1];
+                        bpl.require(BytePairOp::Xor, a, b);
+                        row[io::COL_DIGEST_XOR[j]] = Felt::from_u8(a ^ b);
                     }
                     if lane > 0 {
                         row[io::COL_PREVIOUS_DIGEST..io::COL_PREVIOUS_DIGEST + 2].copy_from_slice(

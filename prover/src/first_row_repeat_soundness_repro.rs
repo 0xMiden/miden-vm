@@ -3,7 +3,7 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
-use miden_air::CoreCols;
+use miden_air_definitions::vm::CoreCols;
 use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},

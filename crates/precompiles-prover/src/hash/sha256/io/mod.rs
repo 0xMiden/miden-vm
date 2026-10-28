@@ -1,6 +1,6 @@
 //! Trace construction for SHA-256 padding, chaining, and assertion binding.
 
-pub use miden_air::precompiles::hash::sha256::io::*;
+pub use miden_air_definitions::precompiles::hash::sha256::io::*;
 
 mod trace;
 pub use trace::Sha256IoRequires;

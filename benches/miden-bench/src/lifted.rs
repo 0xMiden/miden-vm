@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use miden_lifted_stark::{
+use miden_stark::{
     ProverInstance, StarkConfig, VerifierInstance,
     air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
     testing::airs::{blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir},
@@ -109,7 +109,7 @@ pub(crate) fn run_lifted<F: PrimeField64 + TwoAdicField, EF: ExtensionField<F>, 
 ) -> RunResult
 where
     SC: StarkConfig<F, EF>,
-    miden_lifted_stark::proof::StarkDigest<F, EF, SC>: PartialEq + fmt::Debug,
+    miden_stark::proof::StarkDigest<F, EF, SC>: PartialEq + fmt::Debug,
 {
     let airs: Vec<LiftedBenchAir> = specs
         .iter()

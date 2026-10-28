@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_core::{WORD_SIZE, Word};
-use miden_lifted_stark::testing::fri_vectors::{EXTENSION_DEGREE, FOLD_ARITY, LOG_FOLD_ARITY};
+use miden_stark::testing::fri_vectors::{EXTENSION_DEGREE, FOLD_ARITY, LOG_FOLD_ARITY};
 use miden_utils_testing::{Felt, crypto::MerkleStore};
 
 mod verifier_fri_e2f4;

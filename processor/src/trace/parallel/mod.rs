@@ -2,8 +2,9 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
-use miden_air::{
-    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, StackCols, SystemCols, config,
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_definitions::vm::{
+    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
         SYS_TRACE_WIDTH,
@@ -19,7 +20,7 @@ use miden_core::{
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
-use miden_lifted_stark::memory;
+use miden_stark::memory;
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -224,10 +225,10 @@ fn build_trace_inner(
     debug_assert_eq!(
         AIRS,
         [
-            MidenAir::Core,
-            MidenAir::Chiplets,
-            MidenAir::EidosCompression,
-            MidenAir::And8Lookup,
+            MidenAir::CORE,
+            MidenAir::CHIPLETS,
+            MidenAir::EIDOS_COMPRESSION,
+            MidenAir::AND8_LOOKUP,
         ],
         "heights below must be listed in AIRS order",
     );
