@@ -1,7 +1,9 @@
 //! VM lookup integration checks for the shared LogUp framework.
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_stark::lookup::{Challenges, accumulate_slow, build_logup_aux_trace};
+use miden_stark::lookup::{
+    Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
+};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::vm::{Felt, LiftedAir};
@@ -47,11 +49,38 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
     assert_eq!(aux_values, [sigma_prime]);
     assert_eq!(actual.height(), num_rows);
     assert_eq!(actual.width(), expected.len());
+    let output_width = actual.width() + 2;
+    let (padded, padded_sums) = build_logup_aux_trace_with_width(
+        &air,
+        &main,
+        Some(&preprocessed),
+        &challenges,
+        output_width,
+    );
+    assert_eq!(padded.height(), num_rows);
+    assert_eq!(padded.width(), output_width);
+    assert_eq!(padded_sums, aux_values);
     for (row_idx, row) in actual.values.chunks_exact(actual.width()).enumerate() {
+        let padded_row = &padded.values[row_idx * output_width..(row_idx + 1) * output_width];
+        assert_eq!(&padded_row[..actual.width()], row);
+        assert_eq!(&padded_row[actual.width()..], &[QuadFelt::ZERO; 2]);
         for (column, &value) in row.iter().enumerate() {
             assert_eq!(value, expected[column][row_idx], "row {row_idx}, column {column}");
         }
     }
+}
+
+#[test]
+#[should_panic(expected = "auxiliary trace width must accommodate all LogUp columns")]
+fn logup_rejects_width_smaller_than_lookup_columns() {
+    use crate::vm::BaseAir;
+
+    let air = crate::vm::MidenAir::EIDOS_COMPRESSION;
+    let main = RowMajorMatrix::new(Felt::zero_vec(32 * air.width()), air.width());
+    let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(13)];
+    let lookup_width = air.column_shape().len();
+    assert!(lookup_width > 1);
+    let _ = build_logup_aux_trace_with_width(&air, &main, None, &challenges, lookup_width - 1);
 }
 
 #[test]

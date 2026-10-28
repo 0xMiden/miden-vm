@@ -65,16 +65,16 @@ where
 /// On return, `accumulator.len() == contribution.len()`. `contribution.len()` and
 /// (when non-empty) `accumulator.len()` must be powers of two, with
 /// `contribution.len() >= accumulator.len()`.
+/// For a contribution on `g * H_m`, a nonempty prior accumulator must be evaluated on
+/// `g^r * H_n`, where `n` and `m` are their lengths and `r = m / n`.
 ///
 /// # Why
 ///
-/// - **Scale before extend.** Horner-multiplying the smaller buffer is strictly less work than the
-///   lifted one, and the lifted values are determined entirely by the smaller buffer via cyclic
-///   repetition.
-/// - **Cyclic repetition = polynomial lift on two-adic cosets.** In natural-order coset
-///   evaluations, `extended[i] = original[i mod n_old]` realises the composition `P(X) -> P(X^r)`:
-///   iterating `gJ` in natural order and raising to the `r`-th power cycles through `(gJ)^r` with
-///   period `|(gJ)^r|`.
+/// - **Scale before repetition.** Multiply the smaller accumulator once, then add its cyclic
+///   repetitions into the owned contribution buffer. This avoids allocating a lifted copy.
+/// - **Cyclic repetition = polynomial lift on two-adic cosets.** Compatible subgroup generators
+///   satisfy `(g * omega_m^i)^r = g^r * omega_n^i`. Repeating the old values in natural order
+///   therefore evaluates `P(X^r)` on the larger coset.
 pub(super) fn cyclic_extend_and_accumulate<EF: Field>(
     accumulator: &mut Vec<EF>,
     contribution: Vec<EF>,
@@ -85,7 +85,7 @@ pub(super) fn cyclic_extend_and_accumulate<EF: Field>(
     debug_assert!(contribution.len() >= accumulator.len());
 
     if accumulator.is_empty() {
-        accumulator.extend(contribution);
+        *accumulator = contribution;
         return;
     }
 
@@ -100,14 +100,13 @@ pub(super) fn cyclic_extend_and_accumulate<EF: Field>(
     }
 
     par_scale_slice_in_place(accumulator, beta);
-    while accumulator.len() < contribution.len() {
-        accumulator.extend_from_within(..);
-    }
-    // TODO: use parallel packed addition
-    accumulator
+    let mask = accumulator.len() - 1;
+    let mut contribution = contribution;
+    contribution
         .par_iter_mut()
-        .zip(contribution.into_par_iter())
-        .for_each(|(a, c)| *a += c);
+        .enumerate()
+        .for_each(|(i, value)| *value += accumulator[i & mask]);
+    *accumulator = contribution;
 }
 
 // ============================================================================
@@ -252,6 +251,35 @@ mod tests {
 
         let upsampled = upsample_evals::<Felt, QuadFelt, _>(dft, small_evals, added_bits);
         assert_eq!(upsampled, direct_large);
+    }
+
+    #[test]
+    fn accumulation_matches_lifted_polynomial() {
+        let old_height = 8;
+        let new_height = 32;
+        let ratio = new_height / old_height;
+        let shift = Felt::GENERATOR;
+        let beta = QuadFelt::new([Felt::from_u64(7), Felt::from_u64(13)]);
+        let old_coeffs = coeffs(old_height);
+        let mut expected_coeffs = coeffs(new_height);
+        let contribution = NaiveDft
+            .coset_dft_algebra_batch(RowMajorMatrix::new(coeffs(new_height), 1), shift)
+            .values;
+        // Evaluating f(X^ratio) on shift * H_new reads f on shift^ratio * H_old.
+        let mut accumulator = NaiveDft
+            .coset_dft_algebra_batch(
+                RowMajorMatrix::new(old_coeffs.clone(), 1),
+                shift.exp_u64(ratio as u64),
+            )
+            .values;
+        for (i, coefficient) in old_coeffs.into_iter().enumerate() {
+            expected_coeffs[i * ratio] += beta * coefficient;
+        }
+        let expected = NaiveDft
+            .coset_dft_algebra_batch(RowMajorMatrix::new(expected_coeffs, 1), shift)
+            .values;
+        super::cyclic_extend_and_accumulate(&mut accumulator, contribution, beta);
+        assert_eq!(accumulator, expected);
     }
 
     #[test]

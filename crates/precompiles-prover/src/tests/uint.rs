@@ -369,6 +369,55 @@ fn uint_store_mul_shape_and_degree_match_design() {
 }
 
 #[test]
+fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
+    let mut rng = StdRng::seed_from_u64(0xa1_39_72);
+    let height = 2048;
+    // Exercise chunk carries with both registers nonzero and with either register alone.
+    for nonzero_columns in [
+        0..STORE_MUL_NUM_MAIN_COLS,
+        0..NUM_MAIN_COLS,
+        NUM_MAIN_COLS..STORE_MUL_NUM_MAIN_COLS,
+    ] {
+        let main = RowMajorMatrix::new(
+            (0..height * STORE_MUL_NUM_MAIN_COLS)
+                .map(|i| {
+                    if nonzero_columns.contains(&(i % STORE_MUL_NUM_MAIN_COLS)) {
+                        Felt::from(rng.random::<u16>())
+                    } else {
+                        Felt::ZERO
+                    }
+                })
+                .collect(),
+            STORE_MUL_NUM_MAIN_COLS,
+        );
+        let challenges = [rand_qf(&mut rng), rand_qf(&mut rng)];
+        let (merged, _) = UintStoreMulAir.build_aux_trace(&main, &[], &[], &challenges);
+        let store_main = extract_band(&main, 0..NUM_MAIN_COLS);
+        let mul_main = extract_band(&main, NUM_MAIN_COLS..STORE_MUL_NUM_MAIN_COLS);
+        let (store, _) = UintStoreAir.build_aux_trace(&store_main, &[], &[], &challenges);
+        let (mul, _) = UintMulAir.build_aux_trace(&mul_main, &[], &[], &challenges);
+        assert_eq!(
+            store.values[512 * store.width() + store.width() - 1] != QuadFelt::ZERO,
+            nonzero_columns.contains(&0),
+        );
+        assert_eq!(
+            mul.values[512 * mul.width() + mul.width() - 2] != QuadFelt::ZERO,
+            nonzero_columns.contains(&NUM_MAIN_COLS),
+        );
+        for row in 0..height {
+            let merged_end = (row + 1) * merged.width();
+            let store_end = (row + 1) * store.width();
+            let mul_end = (row + 1) * mul.width();
+            assert_eq!(
+                &merged.values[merged_end - 3..merged_end],
+                &[store.values[store_end - 1], mul.values[mul_end - 2], mul.values[mul_end - 1]],
+                "register mismatch at row {row}, nonzero columns {nonzero_columns:?}",
+            );
+        }
+    }
+}
+
+#[test]
 fn uint_store_mul_lookup_matches_its_standalone_components() {
     let mut rng = StdRng::seed_from_u64(0x51_0a_27);
     let bound = random_modulus(&mut rng);
