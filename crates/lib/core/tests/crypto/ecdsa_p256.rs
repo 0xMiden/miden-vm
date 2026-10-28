@@ -864,7 +864,7 @@ fn run_core_program(
         .expect("failed to load CoreLibrary into the host");
     if let Some((event, handler)) = handler {
         let message = format!("the default {event} handler must already be registered");
-        assert!(host.replace_handler(event, handler), "{message}");
+        assert!(host.replace_handler(event, handler).unwrap(), "{message}");
     }
 
     let mut advice_stack = AdviceStack::new();

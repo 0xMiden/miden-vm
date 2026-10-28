@@ -14,7 +14,10 @@ use tracing::instrument;
 use super::{
     data::{Libraries, OutputFile},
     precompile_limits::PrecompileArgs,
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{
+        get_masm_program, get_masp_package, load_package_with_handlers,
+        load_program_package_with_handlers, parse_byte_size,
+    },
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -166,7 +169,14 @@ fn run_masp_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,
 ) -> Result<(VmTrace, [u8; 32]), Report> {
-    let program = get_masp_program(&params.program_file)?;
+    if params.kernel_file.is_some() {
+        return Err(Report::msg(
+            "The `--kernel` option does not apply to a `.masp` package: the package fixes its own kernel.",
+        ));
+    }
+
+    let package = get_masp_package(&params.program_file)?;
+    let program = package.try_into_program()?;
 
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
@@ -176,6 +186,7 @@ fn run_masp_program(
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
 
     let program_hash: [u8; 32] = program.hash().into();
 
@@ -218,7 +229,7 @@ fn run_masm_program(
     }
 
     // load program from file and compile
-    let (program, package_debug_info, entrypoint_source_node, source_manager) =
+    let (program, package_debug_info, entrypoint_source_node, source_manager, kernel_package) =
         get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
@@ -231,8 +242,12 @@ fn run_masm_program(
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
-    for lib in libraries.libraries {
-        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
+    let mut loaded_handler_sections = Vec::new();
+    for lib in &libraries.libraries {
+        load_package_with_handlers(&mut host, lib, &mut loaded_handler_sections)?;
+    }
+    if let Some(kernel_package) = &kernel_package {
+        load_package_with_handlers(&mut host, kernel_package, &mut loaded_handler_sections)?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();
