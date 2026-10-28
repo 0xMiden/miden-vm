@@ -192,7 +192,8 @@ impl<const N: usize> ProverMemoryModel<N> {
     ///
     /// # Panics
     /// Panics if the safety denominator is zero.
-    pub const fn new(
+    #[cfg(test)]
+    const fn new(
         per_air_bytes_per_row: [u64; N],
         shared_bytes_per_max_row: u64,
         safety_numerator: u64,
