@@ -441,6 +441,8 @@ where
     //   2. If D_j < D_max, upsample Q_j to the per-trace target domain.
     //   3. Cyclically extend the accumulator and Horner-fold: acc <- acc * beta + Q_j.
     //
+    // Contributions supply the accumulator's storage, so reserving here would be discarded
+    // on the first fold.
     let mut accumulator: Vec<EF> = Vec::new();
 
     // Pre-compute per-AIR constraint layouts.
