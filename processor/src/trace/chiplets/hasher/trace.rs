@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::{borrow::BorrowMut, ops::Range};
 
-use miden_air::{
+use miden_air_definitions::vm::{
     ControllerCols,
     trace::{
         CHIPLETS_MODE_COL,

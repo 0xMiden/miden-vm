@@ -34,5 +34,5 @@ pub use miden_air::precompiles::protocol::{
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]
 pub(crate) fn relation_digest_for_circuit(circuit_digest: &Word) -> [Felt; 4] {
-    miden_air::config::relation_digest(PVM_PROTOCOL_ID, circuit_digest)
+    miden_air::vm::config::relation_digest(PVM_PROTOCOL_ID, circuit_digest)
 }

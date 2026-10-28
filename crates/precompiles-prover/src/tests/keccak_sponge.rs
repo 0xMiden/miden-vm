@@ -8,13 +8,15 @@
 
 use std::{borrow::Cow, vec, vec::Vec};
 
-use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::debug::{ValidateLayout, ValidateLookupAir},
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -458,9 +460,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
     // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
     // wrapper overrides that method to inject the corruption.
-    use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
+    use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
     use crate::hash::keccak::sponge::NUM_AUX_COLS;
 
@@ -646,7 +647,7 @@ fn noncanonical_prefix_digits_preserving_packed_words_fail_global_byte_checks() 
     );
     let index = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     let start = SPONGE_COL_OFFSET + CHUNK_BYTES_RANGE.start;
@@ -682,7 +683,7 @@ fn dead_padding_state_remains_bus_inert() {
     let mains = traces.mains();
     let index = ChipletAir::all()
         .into_iter()
-        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .position(|air| air == ChipletAir::CHUNK_NODE_SPONGE)
         .unwrap();
     let mut decorated = mains[index].clone();
     let width = decorated.width;

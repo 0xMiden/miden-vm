@@ -1,8 +1,7 @@
 use std::vec;
 
-use miden_air::Felt;
 use miden_core::{
-    ZERO,
+    Felt, ZERO,
     crypto::{dsa::falcon512_eidos::Nonce, hash::Eidos},
     events::EventName,
     field::PrimeField64,

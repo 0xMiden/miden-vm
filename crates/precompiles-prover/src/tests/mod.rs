@@ -37,9 +37,6 @@ mod vm_uint;
 
 use std::{string::String, vec, vec::Vec};
 
-use miden_air::lookup::{
-    Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
-};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -47,9 +44,12 @@ use miden_core::{
     proof::StarkProof,
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
-use miden_lifted_stark::check_constraints;
 use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
+use miden_stark::{
+    air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement},
+    check_constraints,
+    lookup::{Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions},
+};
 
 use crate::{
     session::SessionTraces,
@@ -177,7 +177,7 @@ pub(crate) fn log_quotient_degree<A>(air: &A) -> u8
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
+    miden_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
 }
 
 /// Return an AIR's LogUp column shape without exposing its private backing constant.

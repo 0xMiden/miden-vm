@@ -2,17 +2,19 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupAir, ProverLookupBuilder,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix, bytes_to_packed_u32_elements},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_lifted_air::{BaseAir, ConstraintDegrees};
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees},
+    lookup::{
+        LookupAir, ProverLookupBuilder,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -133,7 +135,7 @@ fn serialized_records_fit_the_sponge_height_at_allocation_boundaries() {
 
 #[test]
 fn packed_lookup_columns_match_the_standalone_components() {
-    let input: Vec<u8> = (0..200).map(|i| i as u8).collect();
+    let input: Vec<u8> = (0u8..200).collect();
     let mut node = KeccakNodeRequires::new();
     let mut sponge = SpongeRequires::new();
     let mut chunk = ChunkRequires::new();

@@ -2,23 +2,22 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::{
-    lookup::{
-        LookupAir, LookupMessage, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
-    precompiles::hash::{
-        chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
-        chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
-    },
+use miden_air_definitions::precompiles::hash::{
+    chunk_node::{COL_OUT_MULT as KECCAK_OUT_MULT, NODE_ROW_START},
+    chunk_node_sponge::NUM_MAIN_COLS as CNS_COLS,
 };
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_lifted_stark::air::ConstraintDegrees;
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::{
+        LookupAir, LookupMessage, ProverLookupBuilder,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

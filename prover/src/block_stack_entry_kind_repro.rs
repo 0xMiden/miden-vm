@@ -13,7 +13,7 @@
 //! regenerating the evaluator made this forged witness verify at 96-bit security. The honest trace
 //! and both single-half controls were unaffected.
 
-use miden_air::trace::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{Felt, field::Field, operations::opcodes, utils::RowMajorMatrix};
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
-use miden_lifted_stark::air::{
+use miden_stark::air::{
     AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr},
 };

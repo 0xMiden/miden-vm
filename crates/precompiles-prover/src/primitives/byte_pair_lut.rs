@@ -2,10 +2,10 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::primitives::byte_pair_lut::eidos::{
+use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos::{
     self, Relation as EidosRelation, Rotation as EidosRotation,
 };
-pub use miden_air::precompiles::primitives::byte_pair_lut::*;
+pub use miden_air_definitions::precompiles::primitives::byte_pair_lut::*;
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 use crate::relations::ProvideMult;

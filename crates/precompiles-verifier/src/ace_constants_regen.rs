@@ -15,7 +15,7 @@ use std::{
     vec::Vec,
 };
 
-use miden_ace_codegen::{
+use miden_ace::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
     MasmConstraintsEvalConfig, render_masm_constraints_eval,
 };
@@ -23,7 +23,7 @@ use miden_air::precompiles::{NUM_CHIPLETS, security as pvm_security};
 use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation, HeightRule};
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 use crate::{
     ace::PvmRecursiveAceCircuit,
@@ -643,7 +643,7 @@ fn render_pvm_parameters(
 
 /// Compares the compiled circuit with the relation identity pinned in `miden-air`.
 fn pinned_identity_matches(artifacts: &GeneratedArtifacts) -> Result<(), String> {
-    const PINS_PATH: &str = "air/src/precompiles/protocol.rs";
+    const PINS_PATH: &str = "crates/air/generated/src/precompiles/protocol.rs";
     for (name, actual, expected) in [
         ("relation_digest", PVM_RELATION_DIGEST, artifacts.relation_digest),
         ("ace_circuit_digest", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
@@ -725,7 +725,7 @@ fn masm_word_literal(word: Word) -> String {
 
 #[cfg(test)]
 mod tests {
-    use miden_ace_codegen::LayoutKind;
+    use miden_ace::LayoutKind;
     use miden_air_definitions::precompiles::relation::CapturedPvmRelation;
 
     use super::{

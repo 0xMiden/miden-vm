@@ -3,7 +3,7 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
-use miden_air::precompiles::primitives::byte_pair_lut::eidos::Rotation;
+use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos::Rotation;
 use miden_core::{Felt, Word, deferred::EidosFrame, utils::RowMajorMatrix};
 use miden_crypto::hash::eidos::Eidos;
 

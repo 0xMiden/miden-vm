@@ -1,7 +1,8 @@
 use alloc::{format, string::String, vec::Vec};
 use core::borrow::BorrowMut;
 
-use miden_air::{CoreCols, PublicInputs};
+use miden_air::vm::PublicInputs;
+use miden_air_definitions::vm::CoreCols;
 use miden_core::{
     Felt,
     program::{ExecutionClaim, StackOutputs},
