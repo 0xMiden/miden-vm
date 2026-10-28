@@ -10,7 +10,7 @@ To regenerate into a separate directory:
 
 ```sh
 MIDEN_VM_FIXTURE_OUTPUT_DIR=/tmp/miden-vm-advice-fixture cargo nextest run --locked \
-  --cargo-profile test-dev -p miden-vm-stark --features concurrent,prover \
+  --cargo-profile test-dev -p miden-prover --test vm_advice_fixture --features concurrent \
   --run-ignored only -E 'test(regenerate_vm_advice_fixture)'
 ```
 

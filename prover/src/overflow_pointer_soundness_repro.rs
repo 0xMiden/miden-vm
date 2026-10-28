@@ -1,22 +1,23 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_air::vm::config;
-use miden_air_definitions::vm::{CoreCols, PublicInputs, trace::RowIndex};
+use miden_air_definitions::vm::{
+    CoreCols, VmTrace,
+    trace::{MainTrace, RowIndex},
+};
 use miden_core::{
     Felt,
     deferred::TRUE_DIGEST,
     mast::{BasicBlockNodeBuilder, MastForest},
     operations::{Operation, opcodes},
     program::{ExecutionClaim, Program, StackOutputs},
-    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    proof::{ExecutionProof, HashFunction},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
-
-use crate::{prover::prove_stark, setup::config::eidos_config};
+use miden_vm_stark::prover::prove;
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
@@ -50,7 +51,11 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host, &crate::memory::default_budget())
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
@@ -132,31 +137,23 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let forged_outputs = StackOutputs::from(output_elements);
     assert_ne!(forged_outputs, *trace.stack_outputs());
 
-    let public_inputs = PublicInputs::new(
+    let forged_trace = VmTrace::new_from_parts(
         trace.program_info().clone(),
         trace.init_stack_state(),
         forged_outputs,
         trace.precompile_root(),
+        MainTrace::from_parts(
+            core_matrix.values,
+            chiplets_matrix.values,
+            eidos_compression_matrix.values,
+            and8_matrix.values,
+            main.last_program_row(),
+        ),
+        *trace.trace_len_summary(),
     );
-    let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-    let stark_config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-    let proof_bytes = prove_stark(
-        &stark_config,
-        core_matrix,
-        chiplets_matrix,
-        eidos_compression_matrix,
-        and8_matrix,
-        &public_values,
-        &aux_inputs,
-    )
-    .expect("the low-level prover should encode the forged trace for the verifier regression");
-    let proof = ExecutionProof::new(
-        VmProof {
-            proof: StarkProof::new(proof_bytes, HashFunction::Eidos),
-            precompile_root: TRUE_DIGEST,
-        },
-        miden_core::proof::PrecompileStatus::Empty,
-    );
+    let proof = prove(forged_trace, HashFunction::Eidos, false)
+        .expect("the prover should encode the forged trace for the verifier regression");
+    let proof = ExecutionProof::new(proof, miden_core::proof::PrecompileStatus::Empty);
     let claim = ExecutionClaim::from_program_info(
         trace.program_info().clone(),
         trace.init_stack_state(),

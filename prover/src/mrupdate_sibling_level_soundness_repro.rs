@@ -97,7 +97,11 @@ fn build_fixture() -> Fixture {
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_merkle_store(store))
         .unwrap()
-        .execute_and_build_trace_sync(&program, &mut host, &crate::memory::default_budget())
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 
