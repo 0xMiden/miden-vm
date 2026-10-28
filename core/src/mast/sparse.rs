@@ -10,7 +10,10 @@ use miden_utils_indexing::newtype_id;
 use crate::{
     Word,
     advice::AdviceMap,
-    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeExt, MastNodeId},
+    mast::{
+        ExecutableMastForest, MastForest, MastForestError, MastForestMergeSource,
+        MastForestRootMap, MastNode, MastNodeExt, MastNodeId, MixedMastForestMerger,
+    },
     serde::DeserializationError,
     utils::Idx,
 };
@@ -94,6 +97,35 @@ pub struct SparseMastForest {
 }
 
 impl SparseMastForest {
+    /// Merges dense and sparse forests into a sparse forest.
+    ///
+    /// Full nodes are deduplicated after remapping their children. Digest-only entries remain
+    /// opaque and are retained when no full node is available. Sparse replay forests cannot carry
+    /// advice data, so this returns an error if any input has a non-empty advice map.
+    pub fn merge<'forest, F>(
+        forests: impl IntoIterator<Item = F>,
+    ) -> Result<(Self, MastForestRootMap), MastForestError>
+    where
+        F: Into<MastForestMergeSource<'forest>>,
+    {
+        MixedMastForestMerger::merge_sparse(forests.into_iter().map(Into::into).collect())
+    }
+
+    pub(in crate::mast) fn from_merged_parts(
+        nodes: BTreeMap<MastNodeId, MastNode>,
+        digests: BTreeMap<MastNodeId, Word>,
+        roots: Vec<MastNodeId>,
+    ) -> Result<Self, MastForestError> {
+        let forest = Self {
+            nodes,
+            digests,
+            roots,
+            advice_map: AdviceMap::default(),
+        };
+        forest.validate()?;
+        Ok(forest)
+    }
+
     /// Checks block invariants, child ordering, and full-node hashes.
     ///
     /// Digest-only entries and external nodes are opaque inputs to these checks. Their membership
