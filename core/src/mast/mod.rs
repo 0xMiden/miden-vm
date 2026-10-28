@@ -1046,6 +1046,8 @@ pub enum MastForestError {
     AdviceMapNotSupportedInSparseMerge,
     #[error("dense MAST merge requires full node data for {0:?}")]
     MissingNodeOnDenseMerge(MastNodeId),
+    #[error("MAST merge requires node data or a digest for procedure root {0:?}")]
+    MissingRootOnMerge(MastNodeId),
     #[error("external node digest {0} resolves to conflicting full nodes")]
     ConflictingNodeDigestOnMerge(Word),
     #[error("cyclic dependency encountered while merging node {0:?}")]

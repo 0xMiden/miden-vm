@@ -702,3 +702,103 @@ fn sparse_merge_rejects_ambiguous_external_resolution() {
     let error = SparseMastForest::merge(sources).unwrap_err();
     assert_eq!(error, MastForestError::ConflictingNodeDigestOnMerge(shared_digest));
 }
+
+#[test]
+fn sparse_merge_rejects_a_root_without_node_data_or_digest() {
+    let mut source = MastForest::new();
+    let root = block_foo().add_to_forest(&mut source).unwrap();
+    source.make_root(root);
+    let sparse = SparseMastForestBuilder::new(Arc::new(source)).finalize();
+
+    let error = SparseMastForest::merge([MastForestMergeSource::from(&sparse)]).unwrap_err();
+    assert_eq!(error, MastForestError::MissingRootOnMerge(root));
+}
+
+#[test]
+fn sparse_merge_retains_distinct_blocks_with_the_same_fingerprint() {
+    let mut add_forest = MastForest::new();
+    let add = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut add_forest)
+        .unwrap();
+    add_forest.make_root(add);
+
+    let mut add_noop_forest = MastForest::new();
+    let add_noop = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Noop])
+        .add_to_forest(&mut add_noop_forest)
+        .unwrap();
+    add_noop_forest.make_root(add_noop);
+    assert_eq!(add_forest[add].digest(), add_noop_forest[add_noop].digest());
+
+    let empty_sparse = SparseMastForestBuilder::new(Arc::new(MastForest::new())).finalize();
+    let sources = [
+        MastForestMergeSource::from(&add_forest),
+        MastForestMergeSource::from(&add_noop_forest),
+        MastForestMergeSource::from(&empty_sparse),
+    ];
+    let (merged, mappings) = SparseMastForest::merge(sources).unwrap();
+    let mapped_add = mappings.map_root(0, &add).unwrap();
+    let mapped_add_noop = mappings.map_root(1, &add_noop).unwrap();
+
+    assert_ne!(mapped_add, mapped_add_noop);
+    assert_eq!(merged.get_node_by_id(mapped_add), add_forest.get_node_by_id(add));
+    assert_eq!(merged.get_node_by_id(mapped_add_noop), add_noop_forest.get_node_by_id(add_noop));
+}
+
+#[test]
+fn mixed_merge_uses_an_explicit_stack_for_deep_external_replacements() {
+    const DEPTH: usize = 16_384;
+
+    let mut replacement = MastForest::new();
+    let mut replacement_root = block_foo().add_to_forest(&mut replacement).unwrap();
+    for _ in 0..DEPTH {
+        replacement_root =
+            CallNodeBuilder::new(replacement_root).add_to_forest(&mut replacement).unwrap();
+    }
+    replacement.make_root(replacement_root);
+
+    let mut external_source = MastForest::new();
+    let external = ExternalNodeBuilder::new(replacement[replacement_root].digest())
+        .add_to_forest(&mut external_source)
+        .unwrap();
+    external_source.make_root(external);
+    let mut external_builder = SparseMastForestBuilder::new(Arc::new(external_source));
+    external_builder.record_visit(external, VisitKind::FullVisit);
+    let external_sparse = external_builder.finalize();
+
+    let sources = [
+        MastForestMergeSource::from(&external_sparse),
+        MastForestMergeSource::from(&replacement),
+    ];
+    let (merged, mappings) = SparseMastForest::merge(sources).unwrap();
+
+    assert_eq!(mappings.map_root(0, &external), mappings.map_root(1, &replacement_root));
+    assert_eq!(merged.nodes().len(), DEPTH + 1);
+}
+
+#[test]
+fn mixed_merge_upgrades_digest_only_entries_when_full_data_is_available() {
+    let mut source = MastForest::new();
+    let root = block_foo().add_to_forest(&mut source).unwrap();
+    source.make_root(root);
+    let source = Arc::new(source);
+    let mut sparse_builder = SparseMastForestBuilder::new(source.clone());
+    sparse_builder.record_visit(root, VisitKind::DigestOnly);
+    let sparse = sparse_builder.finalize();
+
+    let sparse_sources = [
+        MastForestMergeSource::from(&sparse),
+        MastForestMergeSource::from(source.as_ref()),
+    ];
+    let (sparse_merged, sparse_mappings) = SparseMastForest::merge(sparse_sources).unwrap();
+    assert_eq!(sparse_mappings.map_root(0, &root), sparse_mappings.map_root(1, &root));
+    assert_eq!(sparse_merged.nodes().len(), 1);
+    assert!(sparse_merged.digest_entries().is_empty());
+
+    let dense_sources = [
+        MastForestMergeSource::from(&sparse),
+        MastForestMergeSource::from(source.as_ref()),
+    ];
+    let (dense_merged, dense_mappings) = MastForest::merge(dense_sources).unwrap();
+    assert_eq!(dense_mappings.map_root(0, &root), dense_mappings.map_root(1, &root));
+    assert_eq!(dense_merged.num_nodes(), 1);
+}
