@@ -54,19 +54,19 @@ pub const ROUND_PERIOD: usize = 128;
 pub const NUM_PERIODIC_COLS: usize = 24;
 
 /// Selectors for the split byte within either 32-bit half; all zero on byte-aligned rotations.
-pub const COL_ROT_BYTE_BEGIN: usize = 8;
+pub(super) const COL_ROT_BYTE_BEGIN: usize = 8;
 /// High-bit mask for the split byte; zero on byte-aligned rotations.
-pub const COL_ROT_MASK: usize = 12;
+pub(super) const COL_ROT_MASK: usize = 12;
 /// Coefficients of the same half's four XOR bytes in the rotation correction.
-pub const COL_OUTPUT_SAME: usize = 13;
+pub(super) const COL_OUTPUT_SAME: usize = 13;
 /// Coefficients of the opposite half's four XOR bytes in the rotation correction.
-pub const COL_OUTPUT_OTHER: usize = 17;
+pub(super) const COL_OUTPUT_OTHER: usize = 17;
 /// Coefficient of the same half's masked-byte XOR in the rotation correction.
-pub const COL_OUTPUT_MASK_SAME: usize = 21;
+pub(super) const COL_OUTPUT_MASK_SAME: usize = 21;
 /// Coefficient of the opposite half's masked-byte XOR in the rotation correction.
-pub const COL_OUTPUT_MASK_OTHER: usize = 22;
+pub(super) const COL_OUTPUT_MASK_OTHER: usize = 22;
 /// Constant term of the rotation correction, shared by both halves.
-pub const COL_OUTPUT_BIAS: usize = 23;
+pub(super) const COL_OUTPUT_BIAS: usize = 23;
 
 /// Column indices in the periodic table.
 pub const COL_IS_XOR: usize = 0;
