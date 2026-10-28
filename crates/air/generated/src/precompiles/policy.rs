@@ -1,6 +1,6 @@
 //! Canonical STARK parameters and protocol version of the precompile relation.
 
-use miden_stark::pcs::PcsParams;
+pub use miden_stark::pcs::PcsParams;
 pub const LOG_BLOWUP: u8 = 3;
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Protocol version included in the PVM relation digest.
@@ -9,7 +9,6 @@ pub const LOG_FOLDING_ARITY: u8 = 2;
 /// `ChipletMultiAir::eval_external`. Changes to those semantics require a protocol-version bump.
 /// The Miden VM and PVM use distinct protocol versions.
 pub const PROTOCOL_ID: u64 = 4;
-pub use miden_stark::config::RelationDigest;
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
         LOG_BLOWUP, // must be >= log_quotient_degree

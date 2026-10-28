@@ -9,11 +9,14 @@ use miden_core::{
     Felt,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::{BaseAir, LiftedAir, ReductionError};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, ReductionError},
+    lookup::{Challenges, LookupMessage},
+};
 
 use super::{
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
-    logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
+    logup::lookup_challenges_from_slice,
     relation::AIRS,
 };
 

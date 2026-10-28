@@ -16,7 +16,13 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, LookupMessage, build_logup_aux_trace,
+    },
+};
 use miden_utils_sync::LazyLock;
 pub use program::{
     COMPRESSION_PERIOD, INPUT_ADDR_BASE, MAX_PERIODIC_LENGTH, NUM_PERIODIC_COLS, OUTPUT_SLOTS, Op,
@@ -24,10 +30,7 @@ pub use program::{
 };
 
 use crate::precompiles::{
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, halves_le, next_main, pack_le},
@@ -79,7 +82,7 @@ where
     E: Algebra<E>,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &miden_stark::lookup::Challenges<EF>) -> EF {
         challenges.encode(
             BusId::Sha512Word as usize,
             [self.block_id.clone(), self.addr.clone(), self.lo.clone(), self.hi.clone()],
@@ -106,7 +109,7 @@ where
     E: Algebra<E>,
     EF: Algebra<E>,
 {
-    fn encode(&self, challenges: &crate::precompiles::logup::Challenges<EF>) -> EF {
+    fn encode(&self, challenges: &miden_stark::lookup::Challenges<EF>) -> EF {
         challenges.encode(
             BusId::Sha512RoundMetadata as usize,
             [

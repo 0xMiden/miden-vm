@@ -91,14 +91,17 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage,
+    },
+};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
-    logup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::UintValMsg,
     utils::{current_main, next_main},
@@ -316,7 +319,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&UintAddAir, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(&UintAddAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

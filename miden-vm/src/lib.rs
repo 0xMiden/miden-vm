@@ -12,8 +12,16 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
-    deferred::{IntegrityError, PrecompileLimits, PrecompileWitnessEntry, WorkClass, WorkLimit},
-    program::ExecutionClaim,
+    Word, ZERO,
+    deferred::{
+        DeferredRoot, IntegrityError, PrecompileError, PrecompileLimits, PrecompileWitness,
+        PrecompileWitnessEntry, PreparationError, WorkClass, WorkLimit,
+    },
+    operations::Operation,
+    program::{
+        ExecutionClaim, InputError, KernelDescriptor, Program, ProgramInfo, StackInputs,
+        StackOutputs,
+    },
     proof::{
         ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
         ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
@@ -26,14 +34,13 @@ pub use miden_precompiles::{
 };
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
-    FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,
-    ProgramExecutor, ProgramInfo, StackInputs, SyncHost, VmWitness, ZERO, advice, crypto, field,
-    operation::Operation, serde, trace, trace::VmTrace, utils,
+    FastProcessor, FutureMaybeSend, Host, ProgramExecutor, SyncHost, VmWitness, advice, crypto,
+    field, serde, trace, trace::VmTrace, utils,
 };
-pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
+pub use miden_prover::{PrecompileProvingError, Prover, ProverError, prove_sync};
 pub use miden_verifier::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm, VerificationError, VerificationOutcome, Verifier,
+    PrecompileVerificationError, ProofSecurityParameters, SecurityReport, StarkVerificationError,
+    VerificationError, VerificationOutcome, Verifier,
 };
 
 // (private) exports

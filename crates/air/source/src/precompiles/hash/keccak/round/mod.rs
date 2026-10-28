@@ -22,16 +22,19 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, build_logup_aux_trace,
+    },
+};
 use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slots};
 
 use crate::precompiles::{
     hash::memory64::Memory64Msg,
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::{BytePairLutMsg, andnot_result_from_xor},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, halves_le, next_main, pack_le},

@@ -182,7 +182,8 @@ fn prove_trace_outputs(witness: ExecutionWitness) -> (StackOutputs, ExecutionPro
 
 pub fn build_trace(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
-    trace::build_trace(vm_witness).expect("failed to build Blake3 execution trace")
+    trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+        .expect("failed to build Blake3 execution trace")
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

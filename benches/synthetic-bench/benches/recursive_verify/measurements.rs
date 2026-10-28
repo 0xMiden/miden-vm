@@ -90,7 +90,8 @@ pub(super) fn execute_recursive_case(
 
 pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
-    build_trace(vm_witness).expect("build recursive verifier trace")
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+        .expect("build recursive verifier trace")
 }
 
 pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) -> VmTrace {

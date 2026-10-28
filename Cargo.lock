@@ -2156,7 +2156,6 @@ version = "1.0.0-rc.1"
 dependencies = [
  "clap",
  "criterion",
- "miden-air",
  "miden-core",
  "miden-stark",
  "p3-air",
@@ -2237,14 +2236,14 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
- "miden-precompiles-prover",
- "miden-precompiles-verifier",
+ "miden-precompiles-stark",
  "miden-processor",
  "miden-prover",
  "miden-stark",
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
+ "miden-vm-stark",
  "num",
  "p256",
  "p3-challenger",
@@ -2518,18 +2517,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-prover"
+name = "miden-precompiles-stark"
 version = "1.0.0-rc.1"
 dependencies = [
+ "insta",
  "k256",
+ "miden-ace",
  "miden-air",
  "miden-air-definitions",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",
- "miden-precompiles-verifier",
+ "miden-serde-utils",
  "miden-stark",
  "miden-utils-sync",
+ "p3-security",
  "proptest",
  "rand 0.10.2",
  "rayon",
@@ -2537,24 +2539,6 @@ dependencies = [
  "serde-wincode",
  "thiserror",
  "tracing",
- "wincode",
-]
-
-[[package]]
-name = "miden-precompiles-verifier"
-version = "1.0.0-rc.1"
-dependencies = [
- "insta",
- "miden-ace",
- "miden-air",
- "miden-air-definitions",
- "miden-core",
- "miden-crypto",
- "miden-serde-utils",
- "miden-stark",
- "serde",
- "serde-wincode",
- "thiserror",
  "wincode",
 ]
 
@@ -2577,6 +2561,7 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "miden-vm-stark",
  "paste",
  "pretty_assertions",
  "proptest",
@@ -2618,12 +2603,13 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
- "miden-precompiles-prover",
+ "miden-precompiles",
+ "miden-precompiles-stark",
  "miden-processor",
  "miden-stark",
  "miden-verifier",
- "serde",
- "serde-wincode",
+ "miden-vm-stark",
+ "rayon",
  "thiserror",
  "tokio",
  "tracing",
@@ -2666,6 +2652,7 @@ name = "miden-stark"
 version = "1.0.0-rc.1"
 dependencies = [
  "criterion",
+ "miden-core",
  "miden-crypto",
  "miden-utils-sync",
  "p3-air",
@@ -2682,6 +2669,7 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-poseidon2-air",
+ "p3-security",
  "p3-symmetric",
  "p3-util",
  "proptest",
@@ -2715,6 +2703,7 @@ dependencies = [
  "miden-processor",
  "miden-prover",
  "miden-verifier",
+ "miden-vm-stark",
  "pretty_assertions",
  "proptest",
  "test-case",
@@ -2764,13 +2753,10 @@ version = "1.0.0-rc.1"
 dependencies = [
  "miden-air",
  "miden-core",
- "miden-crypto",
  "miden-precompiles",
- "miden-precompiles-verifier",
- "miden-serde-utils",
+ "miden-precompiles-stark",
  "miden-stark",
- "serde",
- "serde-wincode",
+ "miden-vm-stark",
  "thiserror",
 ]
 
@@ -2791,6 +2777,7 @@ dependencies = [
  "miden-prover",
  "miden-test-utils",
  "miden-verifier",
+ "miden-vm-stark",
  "predicates",
  "rand 0.10.2",
  "serde",
@@ -2812,6 +2799,7 @@ dependencies = [
  "insta",
  "miden-core-lib",
  "miden-vm",
+ "miden-vm-stark",
  "rayon",
  "serde",
  "serde_json",
@@ -2828,11 +2816,28 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-crypto",
- "miden-precompiles-prover",
+ "miden-precompiles-stark",
  "miden-stark",
  "miden-vm",
  "p256",
  "rand_chacha 0.10.0",
+]
+
+[[package]]
+name = "miden-vm-stark"
+version = "1.0.0-rc.1"
+dependencies = [
+ "miden-air",
+ "miden-air-definitions",
+ "miden-core",
+ "miden-crypto",
+ "miden-serde-utils",
+ "miden-stark",
+ "p3-security",
+ "serde",
+ "serde-wincode",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -2845,12 +2850,13 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-precompiles-verifier",
+ "miden-precompiles-stark",
  "miden-processor",
  "miden-stark",
  "miden-verifier",
  "miden-vm",
  "miden-vm-precompiles-bench",
+ "miden-vm-stark",
  "serde",
  "serde_json",
  "thiserror",

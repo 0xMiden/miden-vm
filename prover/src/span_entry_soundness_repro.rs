@@ -11,10 +11,7 @@ use miden_core::{
 };
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 /// Width of the trailing `RangeCols { multiplicity, value }` segment of `CoreCols`.
 ///
@@ -71,7 +68,11 @@ fn build_fixture() -> Fixture {
 
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 

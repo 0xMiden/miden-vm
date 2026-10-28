@@ -16,16 +16,19 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    lookup::{
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup,
+    },
+};
 use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
-    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::BytePairLutMsg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, halves_le, next_main},
@@ -205,7 +208,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        crate::precompiles::logup::build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
+        miden_stark::lookup::build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

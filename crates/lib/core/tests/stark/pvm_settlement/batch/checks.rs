@@ -13,7 +13,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorState, Program,
     StackInputs,

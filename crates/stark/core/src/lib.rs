@@ -78,6 +78,8 @@ pub mod pcs;
 mod preprocessed;
 pub mod proof;
 pub mod prover;
+pub mod recursive;
+pub mod security;
 mod selectors;
 pub mod transcript;
 pub(crate) mod util;

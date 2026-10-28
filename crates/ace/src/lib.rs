@@ -16,7 +16,7 @@
 //!
 //! Quick start:
 //! ```ignore
-//! use miden_ace::{AceConfig, LayoutKind, build_ace_circuit_for_air};
+//! use miden_ace::compiler::{AceConfig, LayoutKind, build_ace_circuit_for_air};
 //! use miden_air_definitions::vm::MidenAir;
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
@@ -24,19 +24,11 @@
 //! ```
 //!
 //! Module map (data flow):
-//! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
-//! - `dag`: verifier-style DAG IR and lowering helpers.
-//! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
-//! - `layout`: READ-section layout and index mapping.
-//! - `encode`: ACE stream encoding + padding rules.
+//! - `compiler`: AIR capture, verifier DAG lowering, circuit emission, and MASM rendering.
+//! - [`InputLayout`]: runtime READ-section layout and index mapping.
+//! - [`EncodedCircuit`]: runtime ACE instruction stream and padding metadata.
+//! - [`order_tag`] and [`order_from_tag`]: committed-trace proof-order encodings.
 //! - `instruction`: packed arithmetic operations shared with the processor.
-//! - `masm`: shared renderer for relation-local MASM constraint evaluators.
-//! - `randomness`: challenge input planning for layouts + DAG lowering.
-//! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
-//! - `proof_order`: Lehmer ranking and the sorting network of a relation's committed-trace
-//!   orderings.
-//! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
-//! - `ood_scatter`: shared OOD scatter planning and MASM procedure generation.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -46,37 +38,15 @@ extern crate std;
 
 use alloc::string::String;
 
-// Core IR and lowering.
+/// AIR capture, circuit compilation, and MASM generation.
 #[cfg(feature = "compiler")]
-mod circuit;
-#[cfg(feature = "compiler")]
-mod dag;
+pub mod compiler;
 
-// Input layout and encoding.
 mod encode;
 pub mod instruction;
 mod layout;
-#[cfg(feature = "compiler")]
-mod masm;
-#[cfg(feature = "compiler")]
-mod ood_scatter;
-#[cfg(feature = "compiler")]
-mod order_maps;
 mod proof_order;
-#[cfg(feature = "compiler")]
-mod quotient;
 mod randomness;
-
-// High-level orchestration.
-#[cfg(feature = "compiler")]
-mod pipeline;
-#[cfg(feature = "compiler")]
-mod protocol;
-
-#[cfg(all(test, feature = "compiler"))]
-mod tests;
-#[cfg(all(test, feature = "compiler"))]
-mod unit_tests;
 
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;
@@ -90,26 +60,6 @@ pub enum AceError {
     InvalidInputLayout { message: String },
 }
 
-#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
-pub mod testing;
-
-/// Exposed for the lowering differential tests (`crates/air/generated/tests/ace_codegen.rs`);
-/// production consumes the IR lowering through the pipeline.
-#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
-pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
-#[cfg(feature = "compiler")]
-pub use crate::{
-    circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
-    ood_scatter::OodScatterPlan,
-    order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
-    pipeline::{
-        AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
-        build_canonical_multi_air_ace_circuit,
-    },
-    protocol::{AirGeometry, CapturedAir, CompiledRelation, RelationGeometry, RowSegment},
-};
 pub use crate::{
     encode::{EncodedCircuit, RecursiveAceCircuit},
     layout::{InputCounts, InputKey, InputLayout},

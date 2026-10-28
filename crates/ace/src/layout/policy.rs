@@ -130,22 +130,12 @@ impl InputLayout {
 
     /// Build a native layout for a multi-AIR relation.
     pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(
-            counts,
-            LayoutPolicy::native(),
-            AirComposition::multi_air(num_airs),
-            None,
-        )
+        Self::build_multi_air(counts, num_airs, None, false)
     }
 
     /// Build the MASM-compatible layout for a multi-AIR relation.
     pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(
-            counts,
-            LayoutPolicy::masm(),
-            AirComposition::multi_air(num_airs),
-            None,
-        )
+        Self::build_multi_air(counts, num_airs, None, true)
     }
 
     #[cfg(feature = "compiler")]
@@ -155,17 +145,21 @@ impl InputLayout {
         quotient_width: usize,
         masm: bool,
     ) -> Self {
+        Self::build_multi_air(counts, num_airs, Some(quotient_width), masm)
+    }
+
+    fn build_multi_air(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width: Option<usize>,
+        masm: bool,
+    ) -> Self {
         let policy = if masm {
             LayoutPolicy::masm()
         } else {
             LayoutPolicy::native()
         };
-        Self::build_with_policy(
-            counts,
-            policy,
-            AirComposition::multi_air(num_airs),
-            Some(quotient_width),
-        )
+        Self::build_with_policy(counts, policy, AirComposition::multi_air(num_airs), quotient_width)
     }
 
     fn build_with_policy(

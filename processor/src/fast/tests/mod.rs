@@ -6,7 +6,6 @@ use alloc::{
 };
 use core::{assert_matches, cell::Cell, str::FromStr};
 
-use miden_air::vm::MidenMultiAir;
 use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
@@ -15,7 +14,6 @@ use miden_assembly::{
 use miden_core::{
     ONE, Word,
     events::SystemEvent,
-    field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
         MastNodeId, SplitNodeBuilder,
@@ -35,7 +33,6 @@ use miden_mast_package::{
         PackageDebugInfoBuilder,
     },
 };
-use miden_stark::memory::prover_peak_bytes;
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 
@@ -2432,17 +2429,18 @@ fn test_prover_memory_budget_exceeded() {
         witness.into_parts().0
     };
 
-    let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
-    let params = miden_air::vm::config::pcs_params();
-    let heights = measured
-        .trace_len_summary()
-        .padded_heights()
-        .expect("build_trace records padded heights");
-    let exact_peak =
-        prover_peak_bytes::<Felt, QuadFelt, _>(&MidenMultiAir::new(), heights, &params)
-            .expect("modelled peak fits in u64");
+    let measured =
+        crate::trace::build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+            .expect("default budget must succeed");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(measured.trace_len_summary().padded_heights())
+        .expect("modelled peak fits in u64");
 
-    let err = crate::trace::build_trace_with_budget(build_witness(), exact_peak - 1).unwrap_err();
+    let err = crate::trace::build_trace(
+        build_witness(),
+        &miden_vm_stark::memory::canonical_budget(exact_peak - 1),
+    )
+    .unwrap_err();
 
     assert_matches!(
         err,
@@ -2469,7 +2467,7 @@ fn test_prover_memory_default_budget_accepts_normal_trace() {
         .expect("execution should succeed");
     let (vm_witness, _) = witness.into_parts();
 
-    crate::trace::build_trace(vm_witness)
+    crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
         .expect("the default prover memory budget must accept a normal-sized trace");
 }
 
@@ -2795,7 +2793,7 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
             .expect("traced execution should grow the stack buffer past the initial buffer");
     let (vm_witness, _) = execution_witness.into_parts();
 
-    crate::trace::build_trace(vm_witness)
+    crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
         .expect("trace replay should accept the same operand stack depth limit");
 }
 

@@ -15,6 +15,7 @@ doctest = true
 [dependencies]
 # Internal
 miden-crypto.workspace           = true
+miden-core.workspace             = true
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)
@@ -26,6 +27,7 @@ p3-goldilocks.workspace  = true
 p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
 p3-symmetric.workspace   = true
+p3-security.workspace    = true
 p3-util.workspace        = true
 
 # Optional (for testing/examples features)
@@ -50,6 +52,7 @@ p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace   = true
+p3-security.workspace    = true
 
 # Third-party
 criterion.workspace = true
@@ -57,7 +60,7 @@ proptest.workspace  = true
 
 [features]
 concurrent = ["std", "miden-crypto/concurrent", "p3-maybe-rayon/parallel"]
-std = ["miden-crypto/std"]
+std = ["miden-crypto/std", "miden-core/std"]
 default    = ["concurrent"]
 testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
 

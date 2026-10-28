@@ -6,18 +6,23 @@ use alloc::{
 use std::{fmt::Write as _, fs, io, println};
 
 use miden_ace::{
-    CapturedAir, CompiledRelation, EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout,
-    LayoutKind, MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig,
-    RecursiveAceCircuit, RelationGeometry, render_masm_constraints_eval, render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit,
+    compiler::{
+        CapturedAir, CompiledRelation, FoldCoefficientStaging, LayoutKind,
+        MasmConstraintsEvalConfig, OodScatterPlan, ProofOrderMapsConfig, RelationGeometry,
+        render_masm_constraints_eval, render_proof_order_maps,
+    },
 };
 use miden_air::vm::{
     MIDEN_AIR_COUNT,
-    config::{self, PROTOCOL_ID, relation_digest},
+    config::{self, PROTOCOL_ID},
 };
 use miden_air_definitions::vm::AIRS;
 use miden_core::{Felt, WORD_SIZE, Word, crypto::hash::Eidos, program::KernelDescriptor};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
+use miden_stark::{
+    QuotientRecompositionInputs, config::relation_digest, quotient_recomposition_inputs,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -901,7 +906,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // relation and the generic verifier.
     let fractional_bits = miden_air::vm::security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = miden_air::vm::security::FIXED_POINT_ONE;
-    let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let sample_bits = miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS;
     let shared_literals: [(&str, u64); 9] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),

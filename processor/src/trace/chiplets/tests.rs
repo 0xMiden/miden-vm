@@ -157,7 +157,8 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
     let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
 
-    let _trace = crate::trace::build_trace(vm_witness).unwrap();
+    let _trace =
+        crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
 }
 
 // HELPER FUNCTIONS
@@ -193,7 +194,8 @@ fn build_trace(
 
     let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = crate::trace::build_trace(vm_witness).unwrap();
+    let trace =
+        crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
 
     let trace_len = trace.get_trace_len();
     (

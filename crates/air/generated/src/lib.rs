@@ -5,5 +5,4 @@ extern crate alloc;
 extern crate std;
 
 pub mod precompiles;
-pub mod shared;
 pub mod vm;

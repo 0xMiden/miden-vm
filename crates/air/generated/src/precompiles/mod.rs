@@ -1,13 +1,8 @@
-#[cfg(any(test, feature = "compiler"))]
-pub use miden_air_definitions::precompiles::geometry;
-pub use miden_air_definitions::precompiles::{
-    ace, ec, fixed, hash, logup, math, primitives, relation, relations, transcript, uint, utils,
-};
+//! Production precompile AIRs and relation artifacts.
+
 pub mod air;
 pub mod policy;
-pub mod preprocessed;
 pub mod protocol;
-pub mod security;
-pub mod stark_config;
+
 pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 pub use protocol::PVM_RELATION_DIGEST;
