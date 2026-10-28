@@ -158,8 +158,8 @@ fn append_ood_evaluations(
             }
         }
     }
-    advice_stack.extend_from_slice(&challenge_felts(&local_values));
-    advice_stack.extend_from_slice(&challenge_felts(&next_values));
+    advice_stack.extend_from_slice(&QuadFelt::flatten_to_base(local_values));
+    advice_stack.extend_from_slice(&QuadFelt::flatten_to_base(next_values));
     Ok(())
 }
 

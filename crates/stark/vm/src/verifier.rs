@@ -35,7 +35,11 @@ pub fn preflight(proof: &VmProof) -> Result<(), VerificationError> {
     Ok(())
 }
 
-/// Verifies the VM STARK and derives authenticated security parameters.
+/// Verifies the VM STARK against `claim` and returns authenticated security parameters.
+///
+/// The proof binds the execution to `proof.precompile_root`, which commits to the deferred
+/// computations requested during that execution. Those computations require separate verification.
+/// Application verification coordinates those deferred checks and applies acceptance policy.
 pub fn verify(
     claim: &ExecutionClaim,
     proof: &VmProof,

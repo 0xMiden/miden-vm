@@ -148,6 +148,8 @@ impl FastProcessor {
     /// `budget` applies the same modelled peak-memory bound as
     /// [`crate::trace::build_trace`] does; the streamed hasher builds ahead of that
     /// call, so it needs its own copy of the derived row cap.
+    /// The supplied model must satisfy the compatibility requirements documented on
+    /// [`crate::trace::build_trace`].
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
     /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional
