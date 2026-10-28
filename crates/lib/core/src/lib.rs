@@ -234,15 +234,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn core_package_version_matches_crate_version() {
+    fn core_package_version_matches_crate_release_line() {
         let core_lib = CoreLibrary::default();
+        let package_version = &core_lib.package.version;
         let crate_version = env!("CARGO_PKG_VERSION")
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
         assert_eq!(
-            &core_lib.package.version, &crate_version,
-            "embedded package {} should track the miden-core-lib crate version",
+            (package_version.major, package_version.minor),
+            (crate_version.major, crate_version.minor),
+            "embedded package {} should match the miden-core-lib crate major and minor versions",
+            core_lib.package.name,
+        );
+        assert_eq!(
+            package_version.pre, crate_version.pre,
+            "embedded package {} should match the miden-core-lib crate prerelease identifier",
             core_lib.package.name,
         );
     }

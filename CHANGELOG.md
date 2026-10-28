@@ -4,6 +4,7 @@
 
 #### Changes
 
+- Allow core MASM package patch versions to differ from the `miden-core-lib` crate. Require matching major/minor versions and prerelease identifiers. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Unified VM and precompile prover memory estimation in `miden_lifted_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
 - [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, security metadata, and canonical ACE circuits from one capture without adding compiler tooling to runtime dependencies. The recursive-verifier parameter generators consume the same capture and check the pinned relation identities instead of rewriting them. Removed the `regenerate-evaluator` tool. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
@@ -14,7 +15,6 @@
 
 #### Fixes
 
-- Updated `zstd-sys` to 2.1.2 to address [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
 ## v1.0.0-rc.0 (2026-10-21)
