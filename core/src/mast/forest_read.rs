@@ -7,8 +7,9 @@ use core::{cmp::Reverse, iter, slice};
 
 use super::{
     ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest,
+    serialization::basic_block_content_key,
 };
-use crate::{Felt, Word, chiplets::hasher};
+use crate::Word;
 
 type DenseNodeIter<'a> = iter::Map<
     iter::Enumerate<slice::Iter<'a, MastNode>>,
@@ -146,57 +147,43 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
 
     fn exports_are_subset(&mut self) -> bool {
         let mut source_capacity_by_digest = BTreeMap::<Word, usize>::new();
-        let mut source_full_roots =
-            BTreeMap::<Word, BTreeMap<Word, Vec<(MastNodeId, usize)>>>::new();
-        let mut source_fingerprints = BTreeMap::new();
-        let mut source_equal_pairs = BTreeSet::new();
+        let mut source_full_roots = FullRootGroups::new();
+        let mut source_content_ids = StoredContentIds::new(self.source);
         for &source_root in self.source.procedure_roots() {
             let Some(digest) = self.source.get_digest_by_id(source_root) else {
                 continue;
             };
             *source_capacity_by_digest.entry(digest).or_default() += 1;
             if self.source.get_node_by_id(source_root).is_some() {
-                let Some(fingerprint) =
-                    entry_content_fingerprint(self.source, source_root, &mut source_fingerprints)
-                else {
+                let Some(content_id) = source_content_ids.get(source_root) else {
                     continue;
                 };
-                add_full_root_to_groups(
-                    self.source,
-                    source_root,
-                    digest,
-                    fingerprint,
-                    &mut source_full_roots,
-                    &mut source_equal_pairs,
-                );
+                source_full_roots
+                    .entry(digest)
+                    .or_default()
+                    .entry(content_id)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((source_root, 1));
             }
         }
 
-        let mut candidate_full_roots =
-            BTreeMap::<Word, BTreeMap<Word, Vec<(MastNodeId, usize)>>>::new();
+        let mut candidate_full_roots = FullRootGroups::new();
         let mut candidate_opaque_roots = BTreeMap::<Word, usize>::new();
-        let mut candidate_fingerprints = BTreeMap::new();
-        let mut candidate_equal_pairs = BTreeSet::new();
+        let mut candidate_content_ids = StoredContentIds::new(self.candidate);
         for &candidate_root in self.candidate.procedure_roots() {
             if self.candidate.get_node_by_id(candidate_root).is_some() {
                 let Some(digest) = self.candidate.get_digest_by_id(candidate_root) else {
                     return false;
                 };
-                let Some(fingerprint) = entry_content_fingerprint(
-                    self.candidate,
-                    candidate_root,
-                    &mut candidate_fingerprints,
-                ) else {
+                let Some(content_id) = candidate_content_ids.get(candidate_root) else {
                     return false;
                 };
-                add_full_root_to_groups(
-                    self.candidate,
-                    candidate_root,
-                    digest,
-                    fingerprint,
-                    &mut candidate_full_roots,
-                    &mut candidate_equal_pairs,
-                );
+                candidate_full_roots
+                    .entry(digest)
+                    .or_default()
+                    .entry(content_id)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((candidate_root, 1));
             } else if let Some(digest) = self.candidate.get_digest_by_id(candidate_root) {
                 *candidate_opaque_roots.entry(digest).or_default() += 1;
             } else {
@@ -208,8 +195,8 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
             let Some(source_groups) = source_full_roots.get(&digest) else {
                 return false;
             };
-            let candidate_groups: Vec<_> = candidate_groups.values().flatten().copied().collect();
-            let source_groups: Vec<_> = source_groups.values().flatten().copied().collect();
+            let candidate_groups: Vec<_> = candidate_groups.values().copied().collect();
+            let source_groups: Vec<_> = source_groups.values().copied().collect();
             let mut matched_candidate_groups = Vec::with_capacity(candidate_groups.len());
             for &(candidate_root, count) in &candidate_groups {
                 let mut matches = Vec::new();
@@ -307,137 +294,103 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
     }
 }
 
-const FULL_ENTRY_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
-const OPAQUE_ENTRY_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0004);
+type FullRootGroups = BTreeMap<Word, BTreeMap<usize, (MastNodeId, usize)>>;
 
-type FullRootGroups = BTreeMap<Word, BTreeMap<Word, Vec<(MastNodeId, usize)>>>;
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+enum StoredContentKey {
+    Opaque(Word),
+    Block(Word, Vec<u8>),
+    Join(Word, usize, usize),
+    Split(Word, usize, usize),
+    Loop(Word, usize),
+    Call(Word, bool, usize),
+    Dyn(Word, bool),
+    External(Word),
+}
 
-fn add_full_root_to_groups<F: MastForestRead + ?Sized>(
-    forest: &F,
-    root: MastNodeId,
-    digest: Word,
-    fingerprint: Word,
-    groups: &mut FullRootGroups,
-    equal_pairs: &mut BTreeSet<(MastNodeId, MastNodeId)>,
-) {
-    let bucket = groups.entry(digest).or_default().entry(fingerprint).or_default();
-    if let Some((_, count)) = bucket.iter_mut().find(|(representative, _)| {
-        entries_have_equal_content(forest, root, *representative, equal_pairs)
-    }) {
-        *count += 1;
-    } else {
-        bucket.push((root, 1));
+struct StoredContentIds<'a, F: MastForestRead + ?Sized> {
+    forest: &'a F,
+    by_node_id: BTreeMap<MastNodeId, usize>,
+    by_content: BTreeMap<StoredContentKey, usize>,
+    visiting: BTreeSet<MastNodeId>,
+}
+
+impl<'a, F: MastForestRead + ?Sized> StoredContentIds<'a, F> {
+    fn new(forest: &'a F) -> Self {
+        Self {
+            forest,
+            by_node_id: BTreeMap::new(),
+            by_content: BTreeMap::new(),
+            visiting: BTreeSet::new(),
+        }
+    }
+
+    fn get(&mut self, node_id: MastNodeId) -> Option<usize> {
+        stored_content_id(
+            self.forest,
+            node_id,
+            &mut self.by_node_id,
+            &mut self.by_content,
+            &mut self.visiting,
+        )
     }
 }
 
-fn entries_have_equal_content<F: MastForestRead + ?Sized>(
-    forest: &F,
-    left_id: MastNodeId,
-    right_id: MastNodeId,
-    equal_pairs: &mut BTreeSet<(MastNodeId, MastNodeId)>,
-) -> bool {
-    if left_id == right_id {
-        return true;
-    }
-    let pair = if left_id < right_id {
-        (left_id, right_id)
-    } else {
-        (right_id, left_id)
-    };
-    if equal_pairs.contains(&pair) {
-        return true;
-    }
-
-    let equal = match (forest.get_node_by_id(left_id), forest.get_node_by_id(right_id)) {
-        (Some(left), Some(right)) if left.digest() == right.digest() => match (left, right) {
-            (MastNode::Block(left), MastNode::Block(right)) => left == right,
-            (MastNode::Dyn(left), MastNode::Dyn(right)) => left == right,
-            (MastNode::External(left), MastNode::External(right)) => left == right,
-            (MastNode::Join(left), MastNode::Join(right)) => {
-                entries_have_equal_content(forest, left.first(), right.first(), equal_pairs)
-                    && entries_have_equal_content(
-                        forest,
-                        left.second(),
-                        right.second(),
-                        equal_pairs,
-                    )
-            },
-            (MastNode::Split(left), MastNode::Split(right)) => {
-                entries_have_equal_content(forest, left.on_true(), right.on_true(), equal_pairs)
-                    && entries_have_equal_content(
-                        forest,
-                        left.on_false(),
-                        right.on_false(),
-                        equal_pairs,
-                    )
-            },
-            (MastNode::Loop(left), MastNode::Loop(right)) => {
-                entries_have_equal_content(forest, left.body(), right.body(), equal_pairs)
-            },
-            (MastNode::Call(left), MastNode::Call(right)) => {
-                left.is_syscall() == right.is_syscall()
-                    && entries_have_equal_content(
-                        forest,
-                        left.callee(),
-                        right.callee(),
-                        equal_pairs,
-                    )
-            },
-            _ => false,
-        },
-        (None, None) => match (forest.get_digest_by_id(left_id), forest.get_digest_by_id(right_id))
-        {
-            (Some(left), Some(right)) => left == right,
-            _ => false,
-        },
-        _ => false,
-    };
-    if equal {
-        equal_pairs.insert(pair);
-    }
-    equal
-}
-
-fn entry_content_fingerprint<F: MastForestRead + ?Sized>(
+fn stored_content_id<F: MastForestRead + ?Sized>(
     forest: &F,
     node_id: MastNodeId,
-    fingerprints: &mut BTreeMap<MastNodeId, Word>,
-) -> Option<Word> {
-    if let Some(&fingerprint) = fingerprints.get(&node_id) {
-        return Some(fingerprint);
+    by_node_id: &mut BTreeMap<MastNodeId, usize>,
+    by_content: &mut BTreeMap<StoredContentKey, usize>,
+    visiting: &mut BTreeSet<MastNodeId>,
+) -> Option<usize> {
+    if let Some(&content_id) = by_node_id.get(&node_id) {
+        return Some(content_id);
+    }
+    if !visiting.insert(node_id) {
+        return None;
     }
 
-    let fingerprint = if let Some(node) = forest.get_node_by_id(node_id) {
-        let (tag, payload) = match node {
-            MastNode::Block(block) => (0, block.content_fingerprint()),
-            MastNode::Join(_) => (1, node.digest()),
-            MastNode::Split(_) => (2, node.digest()),
-            MastNode::Loop(_) => (3, node.digest()),
-            MastNode::Call(_) => (4, node.digest()),
-            MastNode::Dyn(_) => (5, node.digest()),
-            MastNode::External(_) => (6, node.digest()),
+    let key = (|| {
+        let node = match forest.get_node_by_id(node_id) {
+            Some(node) => node,
+            None => return Some(StoredContentKey::Opaque(forest.get_digest_by_id(node_id)?)),
         };
-        let mut elements = Vec::new();
-        elements.push(FULL_ENTRY_FINGERPRINT_DOMAIN);
-        elements.push(Felt::new_unchecked(tag));
-        elements.extend_from_slice(payload.as_elements());
+        let digest = node.digest();
+        let key = match node {
+            MastNode::Block(block) => {
+                StoredContentKey::Block(digest, basic_block_content_key(block))
+            },
+            MastNode::Join(join) => StoredContentKey::Join(
+                digest,
+                stored_content_id(forest, join.first(), by_node_id, by_content, visiting)?,
+                stored_content_id(forest, join.second(), by_node_id, by_content, visiting)?,
+            ),
+            MastNode::Split(split) => StoredContentKey::Split(
+                digest,
+                stored_content_id(forest, split.on_true(), by_node_id, by_content, visiting)?,
+                stored_content_id(forest, split.on_false(), by_node_id, by_content, visiting)?,
+            ),
+            MastNode::Loop(loop_node) => StoredContentKey::Loop(
+                digest,
+                stored_content_id(forest, loop_node.body(), by_node_id, by_content, visiting)?,
+            ),
+            MastNode::Call(call) => StoredContentKey::Call(
+                digest,
+                call.is_syscall(),
+                stored_content_id(forest, call.callee(), by_node_id, by_content, visiting)?,
+            ),
+            MastNode::Dyn(dyn_node) => StoredContentKey::Dyn(digest, dyn_node.is_dyncall()),
+            MastNode::External(_) => StoredContentKey::External(digest),
+        };
+        Some(key)
+    })();
+    visiting.remove(&node_id);
+    let key = key?;
 
-        let mut children = Vec::new();
-        node.append_children_to(&mut children);
-        for child_id in children {
-            let child_fingerprint = entry_content_fingerprint(forest, child_id, fingerprints)?;
-            elements.extend_from_slice(child_fingerprint.as_elements());
-        }
-        hasher::hash_elements(&elements)
-    } else {
-        let digest = forest.get_digest_by_id(node_id)?;
-        let mut elements = Vec::with_capacity(5);
-        elements.push(OPAQUE_ENTRY_FINGERPRINT_DOMAIN);
-        elements.extend_from_slice(digest.as_elements());
-        hasher::hash_elements(&elements)
-    };
-    fingerprints.insert(node_id, fingerprint);
-    Some(fingerprint)
+    let next_content_id = by_content.len();
+    let content_id = *by_content.entry(key).or_insert(next_content_id);
+    by_node_id.insert(node_id, content_id);
+    Some(content_id)
 }
 
 fn assign_export_multiplicities(
@@ -605,7 +558,8 @@ mod tests {
         Felt,
         advice::AdviceMap,
         mast::{
-            BasicBlockNode, BasicBlockNodeBuilder, MastNodeExt, SparseMastForestBuilder, VisitKind,
+            BasicBlockNode, BasicBlockNodeBuilder, JoinNodeBuilder, MastNodeExt,
+            SparseMastForestBuilder, VisitKind,
         },
         operations::Operation,
     };
@@ -716,7 +670,7 @@ mod tests {
         let candidate_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut candidate)
             .unwrap();
-        let candidate_root = crate::mast::JoinNodeBuilder::new([candidate_left, candidate_right])
+        let candidate_root = JoinNodeBuilder::new([candidate_left, candidate_right])
             .add_to_forest(&mut candidate)
             .unwrap();
         candidate.make_root(candidate_root);
@@ -731,7 +685,7 @@ mod tests {
         let source_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut source)
             .unwrap();
-        let source_root = crate::mast::JoinNodeBuilder::new([source_left, source_right])
+        let source_root = JoinNodeBuilder::new([source_left, source_right])
             .add_to_forest(&mut source)
             .unwrap();
         source.make_root(source_root);
@@ -746,7 +700,7 @@ mod tests {
         let reversed_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut reversed)
             .unwrap();
-        let reversed_root = crate::mast::JoinNodeBuilder::new([reversed_right, reversed_left])
+        let reversed_root = JoinNodeBuilder::new([reversed_right, reversed_left])
             .add_to_forest(&mut reversed)
             .unwrap();
         reversed.make_root(reversed_root);
@@ -818,7 +772,7 @@ mod tests {
         let low_child = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut low_template)
             .unwrap();
-        let low_join = crate::mast::JoinNodeBuilder::new([low_child, low_child])
+        let low_join = JoinNodeBuilder::new([low_child, low_child])
             .add_to_forest(&mut low_template)
             .unwrap();
         assert_eq!((low_child, low_join), (opaque_child, broad_root));
@@ -833,7 +787,7 @@ mod tests {
         let high_child = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut high_template)
             .unwrap();
-        let high_join = crate::mast::JoinNodeBuilder::new([high_child, high_child])
+        let high_join = JoinNodeBuilder::new([high_child, high_child])
             .add_to_forest(&mut high_template)
             .unwrap();
         assert_eq!((high_child, high_join), (full_child, strict_root));
@@ -933,7 +887,7 @@ mod tests {
     }
 
     #[test]
-    fn content_subset_does_not_group_distinct_blocks_with_colliding_fingerprints() {
+    fn content_subset_does_not_group_distinct_blocks_with_colliding_digests() {
         let add = MastNode::Block(BasicBlockNode::new(vec![Operation::Add]).unwrap());
         let add_noop =
             MastNode::Block(BasicBlockNode::new(vec![Operation::Add, Operation::Noop]).unwrap());
@@ -958,5 +912,44 @@ mod tests {
         .unwrap();
 
         assert!(!candidate.is_content_subset_of(&source));
+    }
+
+    #[test]
+    fn content_subset_interns_many_colliding_export_roots_once() {
+        let mut source = MastForest::new();
+        let add = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let add_noop = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Noop])
+            .add_to_forest(&mut source)
+            .unwrap();
+        assert_eq!(source[add].digest(), source[add_noop].digest());
+
+        let mut level = vec![add, add_noop];
+        while level.len() < 10_000 {
+            let mut next = Vec::with_capacity(level.len() * 2);
+            for node_id in level {
+                next.push(JoinNodeBuilder::new([node_id, add]).add_to_forest(&mut source).unwrap());
+                next.push(
+                    JoinNodeBuilder::new([node_id, add_noop]).add_to_forest(&mut source).unwrap(),
+                );
+            }
+            level = next;
+        }
+        for root in level.into_iter().take(10_000) {
+            source.make_root(root);
+        }
+
+        let opaque_root = MastNodeId::new_unchecked(0);
+        let root_digest = source[source.procedure_roots()[0]].digest();
+        let candidate = SparseMastForest::from_serialized_parts(
+            Vec::new(),
+            vec![(opaque_root, root_digest)],
+            vec![opaque_root],
+            AdviceMap::default(),
+        )
+        .unwrap();
+
+        assert!(candidate.is_content_subset_of(&source));
     }
 }
