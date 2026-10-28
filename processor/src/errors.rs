@@ -305,6 +305,8 @@ pub enum CryptoError {
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
+    #[error("clear_deferred requires root context, but was executed in context {ctx}")]
+    ClearDeferredOutsideRootContext { ctx: ContextId },
     #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
     #[error(transparent)]

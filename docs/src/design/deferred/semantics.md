@@ -126,6 +126,16 @@ implicit TRUE; data entries carry literal chunks, joins carry two backward child
 lists carry ordered pairs of backward child indices. A nonempty witness opens the digest of its
 last entry.
 
+`DeferredState::clear_deferred(expected_previous_root)` resets the accumulator to `TRUE_DIGEST`
+only if it matches the supplied root; a mismatch returns an error without mutation. Registered
+nodes, evaluation caches, the registry, and consumed execution work are preserved. Export includes
+only the new root's reachable closure, or returns `None` if the root remains `TRUE_DIGEST`.
+
+The VM instruction additionally requires root context and reads the expected root from the stack:
+`[ROOT, ...] -> [ROOT, ...]`. **Clearing is unsafe:** neither the native method nor the instruction
+verifies the removed obligation. See the
+[kernel-epilogue safety contract](../stack/precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
+
 In-memory construction and standalone decoding enforce canonical transport syntax and allocation
 bounds only; standalone decoding also rejects trailing bytes. They do not hash commitments or
 validate graph topology. This changes the decoding contract: callers that previously treated

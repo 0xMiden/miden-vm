@@ -198,6 +198,32 @@ impl DeferredState {
         self.accept_statement(statement)
     }
 
+    /// Clears the rolling precompile accumulator to [`TRUE_DIGEST`] only if its current value
+    /// matches `expected_previous_root`.
+    ///
+    /// A mismatch returns [`DeferredError::InvalidDeferredRootReset`] without changing state.
+    /// Registered nodes, evaluation memos, and execution work accounting are preserved.
+    ///
+    /// # Security
+    ///
+    /// Unsafe: this discards outstanding proof obligations. Only use in a trusted kernel epilogue
+    /// after a recursive verifier has proved the exact `expected_previous_root`. This native
+    /// method checks neither the proof nor execution context.
+    pub fn clear_deferred(
+        &mut self,
+        expected_previous_root: Digest,
+    ) -> Result<(), PrecompileError> {
+        if expected_previous_root != self.root {
+            return Err(DeferredError::InvalidDeferredRootReset {
+                expected: expected_previous_root,
+                actual: self.root,
+            }
+            .into());
+        }
+        self.root = TRUE_DIGEST;
+        Ok(())
+    }
+
     /// Evaluates a registered node addressed by digest and returns the canonical node digest.
     ///
     /// Evaluation memoization is an implementation detail: callers receive the canonical digest
@@ -647,5 +673,38 @@ mod tests {
 
         let error = state.log_verified_statement(statement, actual_root).unwrap_err();
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
+    }
+
+    #[test]
+    fn clear_deferred_checks_expected_root_and_preserves_state() {
+        let mut state = DeferredState::default();
+        let stale_root = state.log_statement(TRUE_DIGEST).unwrap();
+        let root = state.log_statement(stale_root).unwrap();
+        let before = state.clone();
+
+        assert!(matches!(
+            state.clear_deferred(stale_root),
+            Err(PrecompileError::Other(DeferredError::InvalidDeferredRootReset { expected, actual }))
+                if expected == stale_root && actual == root
+        ));
+        assert_eq!(state.root(), root);
+        assert_eq!(state.execution_work, before.execution_work);
+
+        state.clear_deferred(root).unwrap();
+        assert_eq!(state.root(), TRUE_DIGEST);
+        assert_eq!(state.evaluator.nodes, before.evaluator.nodes);
+        assert_eq!(state.evaluator.evals, before.evaluator.evals);
+        assert_eq!(state.execution_work, before.execution_work);
+        assert!(matches!(
+            state.clear_deferred(root),
+            Err(PrecompileError::Other(DeferredError::InvalidDeferredRootReset { expected, actual }))
+                if expected == root && actual == TRUE_DIGEST
+        ));
+        assert_eq!(state.root(), TRUE_DIGEST);
+        assert_eq!(state.execution_work, before.execution_work);
+        assert_eq!(
+            state.log_statement(stale_root).unwrap(),
+            Node::and(TRUE_DIGEST, stale_root).digest()
+        );
     }
 }

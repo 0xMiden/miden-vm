@@ -419,6 +419,26 @@ pub enum SystemEvent {
     ///   Advice map: {NODE_DIGEST: [byte_len, packed_u32_le(witness_bytes)...]}
     DeferredExportWitness,
 
+    /// Pushes the current rolling deferred root onto the advice stack as one word.
+    ///
+    /// The root is the accumulator commitment, not its evaluated canonical digest. An empty
+    /// accumulator pushes [`crate::deferred::TRUE_DIGEST`] (four zeros). The accumulator is global
+    /// and can be queried from any execution context. Reading it does not evaluate or change
+    /// deferred state.
+    ///
+    /// The returned word is an unbound host hint. Proof-relevant callers must authenticate it
+    /// with VM instructions before relying on it.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, ...]
+    ///   Advice stack: [...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack: [ROOT, ...], in word order for `adv_pushw`
+    ///   Deferred state: unchanged
+    DeferredRootToStack,
+
     // NON-MUTATING SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Signals an optional, read-only trace event to the host.
@@ -517,6 +537,7 @@ impl SystemEvent {
             Self::DeferredEvaluatePayload,
             Self::DeferredRegisterData,
             Self::DeferredExportWitness,
+            Self::DeferredRootToStack,
             Self::TraceEvent,
         ]
     }
@@ -559,7 +580,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 26;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -690,6 +711,11 @@ impl SystemEvent {
             name: "sys::adv::export_deferred_witness",
         },
         SystemEventEntry {
+            id: EventId::from_u64(14897368383692235127),
+            event: SystemEvent::DeferredRootToStack,
+            name: "sys::adv::push_deferred_root",
+        },
+        SystemEventEntry {
             id: EventId::from_u64(1768618069850226410),
             event: SystemEvent::TraceEvent,
             name: "sys::trace_event",
@@ -813,6 +839,7 @@ mod test {
                 | SystemEvent::DeferredEvaluatePayload
                 | SystemEvent::DeferredRegisterData
                 | SystemEvent::DeferredExportWitness
+                | SystemEvent::DeferredRootToStack
                 | SystemEvent::TraceEvent => {},
             }
         }

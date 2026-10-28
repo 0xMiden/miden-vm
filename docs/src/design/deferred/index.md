@@ -216,6 +216,10 @@ directly, without reconstructing append history. The digest is structural: even 
 hashed with the distinct `DEFERRED_AND_DOMAIN` Eidos framing and is not equal to `TRUE_DIGEST`,
 though it evaluates semantically to `TRUE`.
 
+The root-context-only `clear_deferred` opcode resets the accumulator to `TRUE_DIGEST` while
+preserving its supplied stack root. Clearing is unsafe; see the
+[kernel-epilogue safety contract](../stack/precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
+
 Portable decoding checks canonical encoding and allocation bounds without hashing the graph.
 Preparation validates its structure, charges declared work, and computes commitments. Session
 import then validates the operations and assertions needed to prove its root without rebuilding the

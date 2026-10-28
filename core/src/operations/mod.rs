@@ -29,7 +29,7 @@ pub mod opcodes {
     pub const INV: u8            = 0b0000_0011;
     pub const INCR: u8           = 0b0000_0100;
     pub const NOT: u8            = 0b0000_0101;
-    /* unused                      0b0000_0110 */
+    pub const CLEARDEFERRED: u8  = 0b0000_0110;
     pub const MLOAD: u8          = 0b0000_0111;
     pub const SWAP: u8           = 0b0000_1000;
     pub const CALLER: u8         = 0b0000_1001;
@@ -589,6 +589,22 @@ pub enum Operation {
     /// Logs a precompile event. This instruction is used to signal that a precompile computation
     /// was requested.
     LogDeferred = opcodes::LOGDEFERRED,
+
+    /// Clears the precompile accumulator to the empty/TRUE root without changing the stack.
+    ///
+    /// Stack effect: `[ROOT, ...] -> [ROOT, ...]`, where `ROOT` is the four-element word at the
+    /// top of the stack and must equal the active precompile accumulator.
+    ///
+    /// Execution fails outside the root context (`ctx = 0`). Root context also includes the
+    /// program entrypoint; this check does not restrict the operation to kernel code.
+    ///
+    /// # Security
+    ///
+    /// This operation is unsafe: it discards all outstanding precompile proof obligations. It
+    /// should only be used inside a kernel epilogue after a recursive verifier has proved the
+    /// exact final accumulator supplied as `ROOT`. Matching `ROOT` to the active accumulator
+    /// binds the reset to that verified value; the operation itself does not verify its proof.
+    ClearDeferred = opcodes::CLEARDEFERRED,
 }
 
 impl Operation {
@@ -794,6 +810,7 @@ impl fmt::Display for Operation {
             Self::HornerExt => write!(f, "horner_eval_ext"),
             Self::EvalCircuit => write!(f, "eval_circuit"),
             Self::LogDeferred => write!(f, "log_deferred"),
+            Self::ClearDeferred => write!(f, "clear_deferred"),
         }
     }
 }
@@ -898,6 +915,7 @@ mod operation_arbitrary {
                 Just(Self::HornerExt),
                 Just(Self::EvalCircuit),
                 Just(Self::LogDeferred),
+                Just(Self::ClearDeferred),
             ]
             .boxed()
         }
@@ -996,7 +1014,8 @@ impl Serializable for Operation {
             | Operation::HornerBase
             | Operation::HornerExt
             | Operation::EvalCircuit
-            | Operation::LogDeferred => (),
+            | Operation::LogDeferred
+            | Operation::ClearDeferred => (),
         }
     }
 }
@@ -1090,7 +1109,8 @@ impl Operation {
             | Operation::HornerBase
             | Operation::HornerExt
             | Operation::EvalCircuit
-            | Operation::LogDeferred => (),
+            | Operation::LogDeferred
+            | Operation::ClearDeferred => (),
         }
         size
     }
@@ -1184,6 +1204,7 @@ impl Deserializable for Operation {
             opcodes::HORNERBASE => Self::HornerBase,
             opcodes::HORNEREXT => Self::HornerExt,
             opcodes::LOGDEFERRED => Self::LogDeferred,
+            opcodes::CLEARDEFERRED => Self::ClearDeferred,
             opcodes::EVALCIRCUIT => Self::EvalCircuit,
 
             opcodes::MRUPDATE => Self::MrUpdate,

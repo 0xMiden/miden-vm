@@ -76,7 +76,7 @@ proptest! {
 /// Drives the `Operation` decoder across the full byte space so every
 /// variant's wire form is exercised deterministically. The macro-generated
 /// roundtrip test runs 100 hardcoded cases, which by coupon collection
-/// exercises only ~57 of the 81 variants in a typical run — this sweep
+/// exercises only a subset of the variants in a typical run — this sweep
 /// makes per-variant coverage total without depending on sampling luck
 /// (no `arbitrary` feature needed; runs in the default suite).
 ///
@@ -91,6 +91,7 @@ proptest! {
 /// Adding a variant must extend the pinned counts below.
 #[test]
 fn operation_wire_roundtrip_covers_every_opcode() {
+    assert_eq!(Operation::ClearDeferred.op_code(), 0x06);
     let mut units: Vec<(u8, Operation)> = Vec::new();
     let mut data_opcodes: Vec<u8> = Vec::new();
     let mut unassigned: u32 = 0;
@@ -111,9 +112,9 @@ fn operation_wire_roundtrip_covers_every_opcode() {
         }
     }
 
-    assert_eq!(units.len(), 77, "unit-variant count changed — extend this sweep");
+    assert_eq!(units.len(), 78, "unit-variant count changed — extend this sweep");
     assert_eq!(data_opcodes.len(), 4, "data-variant count changed — extend this sweep");
-    assert_eq!(unassigned, 175, "unassigned-opcode count changed");
+    assert_eq!(unassigned, 174, "unassigned-opcode count changed");
 
     // Data-carrying variants with a nonzero payload (all four write one
     // Felt): byte-exact roundtrip both ways.
