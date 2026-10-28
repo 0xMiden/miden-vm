@@ -3,8 +3,14 @@
 
 use alloc::vec::Vec;
 
+use proptest::prelude::*;
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+
 use super::{
-    super::test_utils::UNUSED_ENTRY_COUNT, ChangedKeys, History, NodeChanges, error::Result,
+    super::test_utils::UNUSED_ENTRY_COUNT,
+    ChangedKeys, History, NodeChanges,
+    error::{HistoryError, Result},
 };
 use crate::{
     EMPTY_WORD, Felt, Word,
@@ -13,7 +19,6 @@ use crate::{
         NodeIndex,
         smt::{LeafIndex, Smt, VersionId},
     },
-    rand::test_utils::ContinuousRng,
 };
 
 // TESTS
@@ -28,14 +33,14 @@ fn empty() {
 
 #[test]
 fn roots() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x12; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x12; 32]);
 
     // Set up our test state
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
     let mut history = History::empty(2);
-    let root_1: Word = rng.value();
-    let root_2: Word = rng.value();
+    let root_1: Word = rng.random();
+    let root_2: Word = rng.random();
     history.add_version(root_1, 0, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     history.add_version(root_2, 1, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
@@ -50,7 +55,7 @@ fn roots() -> Result<()> {
 
 #[test]
 fn find_latest_corresponding_version() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x14; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x14; 32]);
 
     // Start by setting up our test data.
     let nodes = NodeChanges::default();
@@ -64,34 +69,34 @@ fn find_latest_corresponding_version() -> Result<()> {
     let v5 = 45;
 
     history.add_version(
-        rng.value(),
+        rng.random(),
         v1,
         nodes.clone(),
         changed_keys.clone(),
         UNUSED_ENTRY_COUNT,
     )?;
     history.add_version(
-        rng.value(),
+        rng.random(),
         v2,
         nodes.clone(),
         changed_keys.clone(),
         UNUSED_ENTRY_COUNT,
     )?;
     history.add_version(
-        rng.value(),
+        rng.random(),
         v3,
         nodes.clone(),
         changed_keys.clone(),
         UNUSED_ENTRY_COUNT,
     )?;
     history.add_version(
-        rng.value(),
+        rng.random(),
         v4,
         nodes.clone(),
         changed_keys.clone(),
         UNUSED_ENTRY_COUNT,
     )?;
-    history.add_version(rng.value(), v5, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
+    history.add_version(rng.random(), v5, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     // When we query for a version that is older than the oldest in the history we should get an
     // error.
@@ -123,7 +128,7 @@ fn find_latest_corresponding_version() -> Result<()> {
 fn add_version() -> Result<()> {
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
-    let mut rng = ContinuousRng::new([0x15; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x15; 32]);
 
     // We start with an empty state, and we should be able to add deltas up until the limit we
     // set.
@@ -131,18 +136,18 @@ fn add_version() -> Result<()> {
     assert_eq!(history.num_versions(), 0);
     assert_eq!(history.max_versions(), 2);
 
-    let root_1: Word = rng.value();
+    let root_1: Word = rng.random();
     let id_1 = 0;
     history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 1);
 
-    let root_2: Word = rng.value();
+    let root_2: Word = rng.random();
     let id_2 = 1;
     history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 2);
 
     // At this point, adding any version should remove the oldest.
-    let root_3: Word = rng.value();
+    let root_3: Word = rng.random();
     let id_3 = 2;
     history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 2);
@@ -165,22 +170,22 @@ fn add_version() -> Result<()> {
 
 #[test]
 fn add_version_from_mutation_set() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x16; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x16; 32]);
 
     // We start by producing values.
-    let l1_k1: Word = rng.value();
+    let l1_k1: Word = rng.random();
     let leaf_1_ix = LeafIndex::from(l1_k1);
-    let l1_v1: Word = rng.value();
-    let mut l1_k2: Word = rng.value();
+    let l1_v1: Word = rng.random();
+    let mut l1_k2: Word = rng.random();
     l1_k2[3] = Felt::from_u64(leaf_1_ix.position());
-    let l1_v2: Word = rng.value();
+    let l1_v2: Word = rng.random();
 
-    let l2_k1: Word = rng.value();
+    let l2_k1: Word = rng.random();
     let leaf_2_ix = LeafIndex::from(l2_k1);
-    let l2_v1: Word = rng.value();
-    let mut l2_k2: Word = rng.value();
+    let l2_v1: Word = rng.random();
+    let mut l2_k2: Word = rng.random();
     l2_k2[3] = Felt::from_u64(leaf_2_ix.position());
-    let l2_v2: Word = rng.value();
+    let l2_v2: Word = rng.random();
 
     // We produce a changeset by applying these changes to a merkle tree to put things back in the
     // right state.
@@ -191,7 +196,7 @@ fn add_version_from_mutation_set() -> Result<()> {
 
     // We then set up our history and apply it.
     let mut history = History::empty(2);
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
 
     history.add_version_from_mutation_set(version, mutations, UNUSED_ENTRY_COUNT)?;
 
@@ -207,7 +212,7 @@ fn add_version_from_mutation_set() -> Result<()> {
 
 #[test]
 fn truncate() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x17; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x17; 32]);
 
     // Start by setting up the test data
     let mut history = History::empty(4);
@@ -215,19 +220,19 @@ fn truncate() -> Result<()> {
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
 
-    let root_1: Word = rng.value();
+    let root_1: Word = rng.random();
     let id_1 = 5;
     history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
-    let root_2: Word = rng.value();
+    let root_2: Word = rng.random();
     let id_2 = 10;
     history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
-    let root_3: Word = rng.value();
+    let root_3: Word = rng.random();
     let id_3 = 15;
     history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
-    let root_4: Word = rng.value();
+    let root_4: Word = rng.random();
     let id_4 = 20;
     history.add_version(root_4, id_4, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
@@ -259,7 +264,7 @@ fn truncate() -> Result<()> {
 
 #[test]
 fn clear() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x18; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x18; 32]);
 
     // Start by setting up the test data
     let mut history = History::empty(4);
@@ -267,11 +272,11 @@ fn clear() -> Result<()> {
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
 
-    let root_1: Word = rng.value();
+    let root_1: Word = rng.random();
     let id_1 = 0;
     history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
-    let root_2: Word = rng.value();
+    let root_2: Word = rng.random();
     let id_2 = 1;
     history.add_version(root_2, id_2, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
@@ -288,31 +293,31 @@ fn clear() -> Result<()> {
 fn view_at() -> Result<()> {
     // Starting in an empty state we should be able to add deltas up until the limit we set.
     let mut history = History::empty(3);
-    let mut rng = ContinuousRng::new([0x19; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x19; 32]);
     assert_eq!(history.num_versions(), 0);
     assert_eq!(history.max_versions(), 3);
 
     // We can add an initial version with some changes in both nodes and leaves.
-    let root_1: Word = rng.value();
+    let root_1: Word = rng.random();
     let id_1 = 3;
     let mut nodes_1 = NodeChanges::default();
-    let n1_value: Word = rng.value();
-    let n2_value: Word = rng.value();
+    let n1_value: Word = rng.random();
+    let n2_value: Word = rng.random();
     nodes_1.insert(NodeIndex::new(2, 1).unwrap(), n1_value);
     nodes_1.insert(NodeIndex::new(8, 128).unwrap(), n2_value);
 
     let mut changed_1 = ChangedKeys::default();
 
-    let l1_e1_key: Word = rng.value();
-    let l1_e1_value: Word = rng.value();
+    let l1_e1_key: Word = rng.random();
+    let l1_e1_value: Word = rng.random();
     changed_1.insert(l1_e1_key, l1_e1_value);
 
-    let l2_e1_key: Word = rng.value();
-    let l2_e1_value: Word = rng.value();
+    let l2_e1_key: Word = rng.random();
+    let l2_e1_value: Word = rng.random();
     let leaf_2_ix = LeafIndex::from(l2_e1_key);
-    let mut l2_e2_key: Word = rng.value();
+    let mut l2_e2_key: Word = rng.random();
     l2_e2_key[3] = Felt::from_u64(leaf_2_ix.position());
-    let l2_e2_value: Word = rng.value();
+    let l2_e2_value: Word = rng.random();
     changed_1.insert(l2_e1_key, l2_e1_value);
     changed_1.insert(l2_e2_key, l2_e2_value);
 
@@ -320,41 +325,41 @@ fn view_at() -> Result<()> {
     assert_eq!(history.num_versions(), 1);
 
     // We then add another version that overlaps with the older version.
-    let root_2: Word = rng.value();
+    let root_2: Word = rng.random();
     let id_2 = 5;
 
     let mut nodes_2 = NodeChanges::default();
-    let n3_value: Word = rng.value();
-    let n4_value: Word = rng.value();
+    let n3_value: Word = rng.random();
+    let n4_value: Word = rng.random();
     nodes_2.insert(NodeIndex::new(2, 1).unwrap(), n3_value);
     nodes_2.insert(NodeIndex::new(10, 256).unwrap(), n4_value);
 
     let mut changed_2 = ChangedKeys::default();
 
     let leaf_3_ix = leaf_2_ix;
-    let mut l3_e1_key: Word = rng.value();
+    let mut l3_e1_key: Word = rng.random();
     l3_e1_key[3] = Felt::from_u64(leaf_3_ix.position());
-    let l3_e1_value: Word = rng.value();
+    let l3_e1_value: Word = rng.random();
     changed_2.insert(l3_e1_key, l3_e1_value);
     history.add_version(root_2, id_2, nodes_2.clone(), changed_2.clone(), 7)?;
     assert_eq!(history.num_versions(), 2);
 
     // And another version for the sake of the test.
-    let root_3: Word = rng.value();
+    let root_3: Word = rng.random();
     let id_3 = 6;
 
     let mut nodes_3 = NodeChanges::default();
-    let n5_value: Word = rng.value();
+    let n5_value: Word = rng.random();
     nodes_3.insert(NodeIndex::new(30, 1).unwrap(), n5_value);
 
     let mut changed_3 = ChangedKeys::default();
 
-    let l4_e1_key: Word = rng.value();
-    let l4_e1_value: Word = rng.value();
+    let l4_e1_key: Word = rng.random();
+    let l4_e1_value: Word = rng.random();
     changed_3.insert(l4_e1_key, l4_e1_value);
 
     let l1n_e1_key = l1_e1_key;
-    let l1n_e1_value: Word = rng.value();
+    let l1n_e1_value: Word = rng.random();
     changed_3.insert(l1n_e1_key, l1n_e1_value);
 
     history.add_version(root_3, id_3, nodes_3.clone(), changed_3.clone(), 15)?;
@@ -397,7 +402,7 @@ fn view_at() -> Result<()> {
     assert_eq!(view.value(&l4_e1_key), Some(l4_e1_value));
 
     // And getting a value that does not exist in any of the versions should return an empty delta.
-    assert!(view.value(&rng.value()).is_none());
+    assert!(view.value(&rng.random()).is_none());
 
     // Finally, getting a full value from a compact leaf should yield the value directly from
     // the target version if the target version overlays it AND contains it.
@@ -410,7 +415,7 @@ fn view_at() -> Result<()> {
     assert_eq!(view.value(&l4_e1_key), Some(l4_e1_value));
 
     // But if nothing is found, it should just return None;
-    let ne_key: Word = rng.value();
+    let ne_key: Word = rng.random();
     assert!(view.value(&ne_key).is_none());
 
     // We can also get views for versions that are not directly contained, such as a version newer
@@ -432,17 +437,17 @@ fn view_at() -> Result<()> {
 /// and verifies that History correctly tracks the resulting node and leaf changes.
 #[test]
 fn history_from_smt_non_overlapping() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1a; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1a; 32]);
 
     // Create an empty SMT
     let mut smt = Smt::new();
     let initial_root = smt.root();
 
     // Generate test key-value pairs
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     // Create history to track versions
     let mut history = History::empty(3);
@@ -483,7 +488,7 @@ fn history_from_smt_non_overlapping() -> Result<()> {
     assert_eq!(view_v1.entry_count(), 1);
 
     // Verify querying a non-existent key returns None
-    let nonexistent_key: Word = rng.value();
+    let nonexistent_key: Word = rng.random();
     assert!(view_v1.value(&nonexistent_key).is_none());
 
     Ok(())
@@ -492,12 +497,12 @@ fn history_from_smt_non_overlapping() -> Result<()> {
 /// Tests History with SMT value updates (replacing existing values).
 #[test]
 fn history_from_smt_overlapping() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1b; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1b; 32]);
     let mut smt = Smt::new();
 
-    let key: Word = rng.value();
-    let value_v0: Word = rng.value();
-    let value_v1: Word = rng.value();
+    let key: Word = rng.random();
+    let value_v0: Word = rng.random();
+    let value_v1: Word = rng.random();
 
     let mut history = History::empty(2);
 
@@ -528,10 +533,10 @@ fn history_from_smt_overlapping() -> Result<()> {
 
 #[test]
 fn entry_count_single_version() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1c; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1c; 32]);
     let mut history = History::empty(3);
 
-    let root: Word = rng.value();
+    let root: Word = rng.random();
     history.add_version(root, 0, NodeChanges::default(), ChangedKeys::default(), 42)?;
 
     let view = history.get_view_at(0)?;
@@ -542,14 +547,14 @@ fn entry_count_single_version() -> Result<()> {
 
 #[test]
 fn entry_count_multiple_versions() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1d; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1d; 32]);
     let mut history = History::empty(5);
 
     // Add versions with different entry counts.
-    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
-    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
-    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 3)?;
-    history.add_version(rng.value(), 3, NodeChanges::default(), ChangedKeys::default(), 10)?;
+    history.add_version(rng.random(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
+    history.add_version(rng.random(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
+    history.add_version(rng.random(), 2, NodeChanges::default(), ChangedKeys::default(), 3)?;
+    history.add_version(rng.random(), 3, NodeChanges::default(), ChangedKeys::default(), 10)?;
 
     assert_eq!(history.get_view_at(0)?.entry_count(), 0);
     assert_eq!(history.get_view_at(1)?.entry_count(), 5);
@@ -561,13 +566,13 @@ fn entry_count_multiple_versions() -> Result<()> {
 
 #[test]
 fn entry_count_after_eviction() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1e; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1e; 32]);
     let mut history = History::empty(2);
 
     // Add 3 versions to a history that can hold only 2, causing eviction of the oldest.
-    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 1)?;
-    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
-    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 10)?;
+    history.add_version(rng.random(), 0, NodeChanges::default(), ChangedKeys::default(), 1)?;
+    history.add_version(rng.random(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
+    history.add_version(rng.random(), 2, NodeChanges::default(), ChangedKeys::default(), 10)?;
 
     // Version 0 should have been evicted.
     assert!(history.get_view_at(0).is_err());
@@ -581,12 +586,12 @@ fn entry_count_after_eviction() -> Result<()> {
 
 #[test]
 fn entry_count_after_truncation() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x1f; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x1f; 32]);
     let mut history = History::empty(4);
 
-    history.add_version(rng.value(), 5, NodeChanges::default(), ChangedKeys::default(), 2)?;
-    history.add_version(rng.value(), 10, NodeChanges::default(), ChangedKeys::default(), 7)?;
-    history.add_version(rng.value(), 15, NodeChanges::default(), ChangedKeys::default(), 12)?;
+    history.add_version(rng.random(), 5, NodeChanges::default(), ChangedKeys::default(), 2)?;
+    history.add_version(rng.random(), 10, NodeChanges::default(), ChangedKeys::default(), 7)?;
+    history.add_version(rng.random(), 15, NodeChanges::default(), ChangedKeys::default(), 12)?;
 
     // Truncate to version 10, removing version 5.
     history.truncate(10);
@@ -601,14 +606,14 @@ fn entry_count_after_truncation() -> Result<()> {
 
 #[test]
 fn entry_count_reaches_zero_through_removals() -> Result<()> {
-    let mut rng = ContinuousRng::new([0x20; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x20; 32]);
     let mut history = History::empty(4);
 
     // Simulate a tree that gains entries and then has them all removed.
-    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
-    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 3)?;
-    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 1)?;
-    history.add_version(rng.value(), 3, NodeChanges::default(), ChangedKeys::default(), 0)?;
+    history.add_version(rng.random(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
+    history.add_version(rng.random(), 1, NodeChanges::default(), ChangedKeys::default(), 3)?;
+    history.add_version(rng.random(), 2, NodeChanges::default(), ChangedKeys::default(), 1)?;
+    history.add_version(rng.random(), 3, NodeChanges::default(), ChangedKeys::default(), 0)?;
 
     assert_eq!(history.get_view_at(0)?.entry_count(), 0);
     assert_eq!(history.get_view_at(1)?.entry_count(), 3);
@@ -616,4 +621,85 @@ fn entry_count_reaches_zero_through_removals() -> Result<()> {
     assert_eq!(history.get_view_at(3)?.entry_count(), 0);
 
     Ok(())
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn find_latest_is_the_floor_of_the_query(
+        versions in proptest::collection::vec(any::<u64>(), 1..=6)
+            .prop_map(|mut vs| {
+                vs.sort_unstable();
+                vs.dedup();
+                vs
+            }),
+        probes in proptest::collection::vec(any::<u64>(), 1..=4),
+    ) {
+        // find_latest_corresponding_version is the floor over the
+        // recorded versions: the index of the largest recorded version
+        // <= the query, an error strictly below the oldest.
+        let n = versions.len();
+        let capacity = n;
+        let mut history = History::empty(capacity);
+        let nodes = NodeChanges::default();
+        let changed_keys = ChangedKeys::default();
+        for (i, v) in versions.iter().enumerate() {
+            history.add_version(
+                Word::new([Felt::new_unchecked(i as u64); 4]),
+                *v,
+                nodes.clone(),
+                changed_keys.clone(),
+                UNUSED_ENTRY_COUNT,
+            )?;
+        }
+
+        // Strictly below the oldest: exactly VersionTooOld (the history
+        // is nonempty, so the empty-history error would be a regression).
+        if versions[0] > 0 {
+            prop_assert_eq!(
+                history.find_latest_corresponding_version(versions[0] - 1),
+                Err(HistoryError::VersionTooOld),
+            );
+        }
+
+        // At each recorded version: its own index.
+        for (i, v) in versions.iter().enumerate() {
+            prop_assert_eq!(history.find_latest_corresponding_version(*v), Ok(i));
+        }
+
+        // Between consecutive versions: the lower index.
+        for w in versions.windows(2) {
+            let mid = w[0] + (w[1] - w[0]) / 2;
+            if mid > w[0] {
+                let idx = versions.iter().take_while(|v| **v <= mid).count() - 1;
+                prop_assert_eq!(history.find_latest_corresponding_version(mid), Ok(idx));
+            }
+        }
+
+        // Above the newest: the last index.
+        let last = versions[n - 1];
+        if last < u64::MAX {
+            prop_assert_eq!(history.find_latest_corresponding_version(last + 1), Ok(n - 1));
+        }
+
+        // Generated probes must resolve to the floor of the newest
+        // version <= probe, or error below the oldest.
+        for probe in probes {
+            match versions.iter().rposition(|v| *v <= probe) {
+                Some(idx) => {
+                    prop_assert_eq!(history.find_latest_corresponding_version(probe), Ok(idx));
+                },
+                None => {
+                    prop_assert_eq!(
+                        history.find_latest_corresponding_version(probe),
+                        Err(HistoryError::VersionTooOld),
+                    );
+                },
+            }
+        }
+    }
 }

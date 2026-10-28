@@ -1,7 +1,9 @@
 /// Test case for issue #2456: statically linked library calls should preserve valid MAST
 /// structure when copying nodes between forests.
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+};
 
 #[test]
 fn test_issue_2456_statically_linked_library_call() {
@@ -47,7 +49,8 @@ fn test_issue_2456_statically_linked_library_call() {
     let mut host = DefaultHost::default();
     let options = ExecutionOptions::default();
 
-    let result =
-        miden_processor::execute_sync(&program, stack_inputs, advice_inputs, &mut host, options);
+    let result = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .expect("failed to construct FastProcessor")
+        .execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution should succeed but got error: {:?}", result.err());
 }

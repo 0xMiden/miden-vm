@@ -19,7 +19,7 @@ use crate::ast::Ident;
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct PathBuf {
     pub(super) inner: String,
@@ -406,31 +406,28 @@ impl<'de> serde::Deserialize<'de> for PathBuf {
 
         struct PathVisitor;
 
-        impl<'de> Visitor<'de> for PathVisitor {
+        impl Visitor<'_> for PathVisitor {
             type Value = PathBuf;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a valid Path/PathBuf")
             }
 
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Path::validate(v)
+                Path::validate(value)
                     .map_err(serde::de::Error::custom)?
                     .canonicalize()
                     .map_err(serde::de::Error::custom)
             }
 
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Path::validate(&v)
-                    .map_err(serde::de::Error::custom)?
-                    .canonicalize()
-                    .map_err(serde::de::Error::custom)
+                self.visit_str(&value)
             }
         }
 

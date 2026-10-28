@@ -5,11 +5,17 @@ use crate::{
     ContextId, Felt,
     errors::{AceError, AceEvalError},
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
-    trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    trace::chiplets::{
+        CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,
+        PTR_OFFSET_WORD,
+    },
     tracer::Tracer,
 };
 
 /// Checks that the evaluation of an arithmetic circuit is equal to zero.
+///
+/// The encoded circuit defines the relation being checked. Callers relying on a specific circuit
+/// must authenticate its encoding.
 ///
 /// The inputs are composed of:
 ///
@@ -41,16 +47,18 @@ where
 
     let circuit_evaluation =
         eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
-    tracer.record_circuit_evaluation(circuit_evaluation);
+    tracer.record_circuit_evaluation(circuit_evaluation)?;
 
     Ok(())
 }
 
-/// Evaluates an arithmetic circuit encoded in memory starting at `ptr`.
+/// Constructs a witness for an arithmetic circuit encoded in memory starting at `ptr`.
 ///
 /// This reads `num_vars` quadratic extension field elements from memory (the READ section), then
 /// reads `num_eval` base field element gate encodings (the EVAL section), evaluating each gate
-/// in sequence. Returns the resulting [`CircuitEvaluation`] if the circuit evaluates to zero.
+/// in sequence. Each operand must therefore have been resolved when its gate is encountered. This
+/// is a limitation of this witness-construction strategy, not a causality check enforced by the
+/// ACE AIR. Returns the resulting [`CircuitEvaluation`] if the circuit evaluates to zero.
 pub(crate) fn eval_circuit_impl(
     ctx: ContextId,
     ptr: Felt,
@@ -63,14 +71,13 @@ pub(crate) fn eval_circuit_impl(
     let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars.saturating_add(num_eval);
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        const {
-            // If this fails, update the error message below
-            assert!(MAX_NUM_ACE_WIRES == (1_u32 << 30) - 1);
-        }
-        return Err(
-            AceError(format!("num of wires must be less than 2^30 but was {num_wires}")).into()
-        );
+    // Reject oversized circuits before allocating their witness or accessing memory.
+    const { assert!(MAX_EVAL_CIRCUIT_WIRES <= MAX_NUM_ACE_WIRES) };
+    if num_wires > MAX_EVAL_CIRCUIT_WIRES as u64 {
+        return Err(AceError(format!(
+            "num of wires cannot exceed {MAX_EVAL_CIRCUIT_WIRES} but was {num_wires}"
+        ))
+        .into());
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are

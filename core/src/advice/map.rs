@@ -7,12 +7,9 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::{
     Felt, WORD_SIZE, Word,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -29,11 +26,9 @@ use crate::{
 /// are enforced by the processor's `AdviceProvider`, which owns the active execution options and
 /// live resource accounting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 
@@ -91,9 +86,8 @@ impl AdviceMap {
     /// Returns a commitment to this advice map.
     ///
     /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
-    /// value elements. [`Poseidon2::hash_elements`] binds the entry length, and
-    /// [`Poseidon2::merge_many`] folds the ordered entry commitments into the final map
-    /// commitment.
+    /// value elements. [`hasher::hash_elements`] binds the entry length, and
+    /// [`hasher::hash_words`] folds the ordered entry commitments into the final map commitment.
     pub fn commitment(&self) -> Word {
         let entry_commitments = self
             .iter()
@@ -101,11 +95,11 @@ impl AdviceMap {
                 let mut elements = Vec::with_capacity(WORD_SIZE + values.len());
                 elements.extend_from_slice(key.as_elements());
                 elements.extend_from_slice(values);
-                Poseidon2::hash_elements(&elements)
+                hasher::hash_elements(&elements)
             })
             .collect::<Vec<_>>();
 
-        Poseidon2::merge_many(&entry_commitments)
+        hasher::hash_words(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -216,7 +210,11 @@ impl Deserializable for AdviceMap {
         let count = source.read_usize()?;
         for _ in 0..count {
             let (key, values): (Word, Vec<Felt>) = source.read()?;
-            map.insert(key, Arc::from(values));
+            if map.insert(key, Arc::from(values)).is_some() {
+                return Err(DeserializationError::InvalidValue(
+                    "duplicate advice map key in serialized payload".into(),
+                ));
+            }
         }
         Ok(Self(map))
     }
@@ -224,6 +222,8 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::hash::eidos::Eidos;
+
     use super::*;
 
     #[test]
@@ -236,5 +236,82 @@ mod tests {
         let map2 = AdviceMap::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(map1, map2);
+    }
+
+    #[cfg(feature = "arbitrary")]
+    ::proptest::proptest! {
+        /// The duplicate-key rejection covers the FULL repetition class: a repeated key
+        /// is rejected even when the two values are EQUAL (the map is a set of bindings,
+        /// not a multiset), and for arbitrary keys and values — `write_into` never
+        /// produces a repeated key (the BTreeMap source cannot), but a hand-written
+        /// payload can.
+        #[test]
+        fn prop_rejects_generated_duplicate_key_payloads(
+            (key, first, second) in (
+                proptest::prelude::any::<Word>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+            ),
+        ) {
+            use crate::serde::ByteWriter;
+
+            for (repeated, label) in [(second, "different value"), (first.clone(), "equal value")]
+            {
+                let mut bytes = Vec::new();
+                bytes.write_usize(2);
+                (key, first.clone()).write_into(&mut bytes);
+                (key, repeated).write_into(&mut bytes);
+
+                let err = AdviceMap::read_from_bytes(&bytes).unwrap_err();
+                let DeserializationError::InvalidValue(message) = err else {
+                    panic!("expected InvalidValue for a duplicate key with {label}, got {err:?}");
+                };
+                assert_eq!(
+                    message, "duplicate advice map key in serialized payload",
+                    "expected the duplicate-key rejection for {label}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn advice_map_commitment_matches_eidos_primitive() {
+        let low_key =
+            Word::new([Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+        let high_key =
+            Word::new([Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6)]);
+        let low_values = [Felt::from_u32(11), Felt::from_u32(12)];
+        let high_values = [Felt::from_u32(21), Felt::from_u32(22), Felt::from_u32(23)];
+
+        // Insert in reverse key order to pin that the BTreeMap's canonical key order is what gets
+        // committed.
+        let map = AdviceMap::from_iter([
+            (high_key, high_values.to_vec()),
+            (low_key, low_values.to_vec()),
+        ]);
+        let low_entry = [low_key.as_elements(), low_values.as_slice()].concat();
+        let high_entry = [high_key.as_elements(), high_values.as_slice()].concat();
+        let expected = Eidos::hash_words(&[
+            Eidos::hash_elements(&low_entry),
+            Eidos::hash_elements(&high_entry),
+        ]);
+
+        assert_eq!(map.commitment(), expected);
+    }
+
+    #[test]
+    fn read_from_rejects_duplicate_keys() {
+        use crate::serde::ByteWriter;
+
+        // Same key twice with different values. `write_into` never produces this, but a
+        // hand-written payload can.
+        let key = Word::default();
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.write_usize(2);
+        (key, vec![Felt::from_u32(1)]).write_into(&mut bytes);
+        (key, vec![Felt::from_u32(2)]).write_into(&mut bytes);
+
+        let err = AdviceMap::read_from_bytes(&bytes).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
     }
 }

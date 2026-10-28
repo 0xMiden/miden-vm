@@ -1,9 +1,6 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::*;
 use crate::ast::Ident;
 
@@ -15,10 +12,9 @@ use crate::ast::Ident;
 /// automatically, and a syntax error is only generated when keys conflict. All other attribute
 /// types produce an error if they are declared multiple times on the same item.
 #[derive(Default, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct AttributeSet {
     /// The attributes in this set.

@@ -1,4 +1,7 @@
-use alloc::string::{String, ToString};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+};
 use core::{fmt, str::FromStr};
 
 /// Represents the calling convention of a function.
@@ -16,11 +19,7 @@ use core::{fmt, str::FromStr};
 /// perfectly acceptable to mix conventions in a program. The only requirement is that the
 /// convention used at a given call site, matches the convention of the callee, i.e. it must
 /// be the case that caller and callee agree on the convention used for that call.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde_repr::Serialize_repr, serde_repr::Deserialize_repr)
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 #[repr(u8)]
 pub enum CallConv {
     /// This convention passes all arguments and results by value, and thus requires that the types
@@ -139,6 +138,13 @@ pub enum CallConv {
     ///   will be written into memory in reverse order (the closer to the front of the argument
     ///   list, the smaller the offset).
     ComponentModel,
+    /// This is a placeholder for an externally-defined calling convention, whose semantics are
+    /// not defined by this crate.
+    ///
+    /// This is intended to allow language frontends to represent their own calling conventions
+    /// separately from the others listed above, and to allow any frontend that recognizes that
+    /// convention to link against functions of that type.
+    Extern(Arc<str>),
 }
 
 impl CallConv {
@@ -147,14 +153,25 @@ impl CallConv {
         matches!(self, Self::ComponentModel)
     }
 
-    /// Get the string representation of this calling convention
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Fast => "fast",
             Self::C => "C",
             Self::Wasm => "wasm",
             Self::ComponentModel => "component-model",
+            Self::Extern(cc) => cc.as_ref(),
         }
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) const fn tag(&self) -> u8 {
+        // SAFETY: This is safe because we have given this enum a
+        // primitive representation with #[repr(u8)], with the first
+        // field of the underlying union-of-structs the discriminant
+        //
+        // See the section on "accessing the numeric value of the discriminant"
+        // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
+        unsafe { *(self as *const Self).cast::<u8>() }
     }
 }
 
@@ -171,7 +188,7 @@ impl FromStr for CallConv {
             "C" => Ok(Self::C),
             "wasm" | "Wasm" => Ok(Self::Wasm),
             "canon-lift" | "component-model" => Ok(Self::ComponentModel),
-            other => Err(UnknownCallingConventionError(other.to_string())),
+            other => Ok(Self::Extern(other.to_string().into_boxed_str().into())),
         }
     }
 }
@@ -184,8 +201,8 @@ impl fmt::Display for CallConv {
 
 impl miden_formatting::prettier::PrettyPrint for CallConv {
     fn render(&self) -> miden_formatting::prettier::Document {
-        use miden_formatting::prettier::const_text;
+        use miden_formatting::prettier::display;
 
-        const_text(self.as_str())
+        display(self)
     }
 }

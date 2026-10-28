@@ -1,6 +1,22 @@
+use miden::core::stark::types
+use miden::core::crypto::hashes::eidos
+
+pub mod pvm
 pub mod vm
 
-# ===== SYSTEM PROCEDURES ==========================================================================
+# CONSTANTS
+# =================================================================================================
+
+# Eidos chaining word for one proof-request key block under the registered domain tag 0x01000201.
+const PROOF_REQUEST_INIT_CV = [
+    13503953893964382721,
+    11912009168875159560,
+    11170449401267093504,
+    6620516959492505600
+]
+
+# SYSTEM PROCEDURES
+# =================================================================================================
 
 #! Removes elements deep in the stack until the depth of the stack is exactly 16. The elements
 #! are removed in such a way that the top 16 elements of the stack remain unchanged. If the stack
@@ -32,7 +48,29 @@ pub proc truncate_stack()
     # => [A, B, C, D, ...]
 end
 
-#! Drop 16 values from the stack.
-pub proc drop_stack_top()
+#! Drops four words from the top of the stack.
+pub proc drop_stack_top(top: word, upper_mid: word, lower_mid: word, bottom: word)
     dropw dropw dropw dropw
+end
+
+#! Computes the advice-map key addressing a proof package under a verifier.
+#!
+#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one Eidos
+#! block, so a single compression with no memory). It is a lookup address, not a trust anchor: the
+#! verifier re-checks the retrieved package, so a wrong package fails verification. Both inputs are
+#! program-owned: the verifier's MAST root comes from `procref`, while the claim commitment
+#! comes from an authenticated verifier output or the program's own inputs. Mirrors
+#! `miden_core::program::proof_request_key`.
+#!
+#! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
+#! Outputs: [PROOF_REQUEST_KEY, ...]
+pub proc build_proof_request_key(
+    verifier_root: types::Digest,
+    claim_commitment: types::Digest,
+) -> types::Digest
+    swapw
+    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, ...]
+    push.PROOF_REQUEST_INIT_CV
+    exec.eidos::compress_double_word
+    # => [PROOF_REQUEST_KEY, ...]
 end

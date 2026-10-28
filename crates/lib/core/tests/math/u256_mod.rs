@@ -565,8 +565,7 @@ fn bit_count_edge_cases() {
 // SHIFTS / ROTATIONS
 // ================================================================================================
 
-#[test]
-fn shift_edge_cases() {
+fn assert_shift_edge_cases(op: &str, expected: impl Fn(U256, u32) -> U256) {
     // Shift amounts target each k = n / 32 dispatch arm and the m = 0 / m > 0 split inside shr.
     let amounts: &[u32] = &[
         0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97, 127, 128, 129, 159, 160, 161, 191, 192, 193, 223,
@@ -596,12 +595,29 @@ fn shift_edge_cases() {
 
     for &n in amounts {
         for &a in &values {
-            assert_shift_op("shl", n, a, &a.shl(n).to_le_limbs());
-            assert_shift_op("shr", n, a, &a.shr(n).to_le_limbs());
-            assert_shift_op("rotl", n, a, &a.rotl(n).to_le_limbs());
-            assert_shift_op("rotr", n, a, &a.rotr(n).to_le_limbs());
+            assert_shift_op(op, n, a, &expected(a, n).to_le_limbs());
         }
     }
+}
+
+#[test]
+fn shl_edge_cases() {
+    assert_shift_edge_cases("shl", U256::shl);
+}
+
+#[test]
+fn shr_edge_cases() {
+    assert_shift_edge_cases("shr", U256::shr);
+}
+
+#[test]
+fn rotl_edge_cases() {
+    assert_shift_edge_cases("rotl", U256::rotl);
+}
+
+#[test]
+fn rotr_edge_cases() {
+    assert_shift_edge_cases("rotr", U256::rotr);
 }
 
 #[test]

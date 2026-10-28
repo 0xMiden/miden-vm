@@ -2,17 +2,18 @@ use core::assert_matches;
 use std::{
     string::{String, ToString},
     sync::{Arc, Mutex, Once},
+    thread::{self, ThreadId},
 };
 
 use super::*;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExecutableMastForest,
         ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView,
         MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SparseMastForest, SparseMastForestBuilder,
         SplitNodeBuilder, UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
+        node::hash_op_batches,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -20,7 +21,7 @@ use crate::{
 };
 
 struct TestLogger {
-    messages: Mutex<Vec<String>>,
+    messages: Mutex<Vec<(ThreadId, log::Level, String)>>,
 }
 
 impl log::Log for TestLogger {
@@ -30,7 +31,11 @@ impl log::Log for TestLogger {
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            self.messages.lock().unwrap().push(record.args().to_string());
+            self.messages.lock().unwrap().push((
+                thread::current().id(),
+                record.level(),
+                record.args().to_string(),
+            ));
         }
     }
 
@@ -41,20 +46,31 @@ static TEST_LOGGER: TestLogger = TestLogger { messages: Mutex::new(Vec::new()) }
 static TEST_LOGGER_INIT: Once = Once::new();
 static TEST_LOGGER_GUARD: Mutex<()> = Mutex::new(());
 
-fn with_captured_error_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
-    with_captured_logs(log::LevelFilter::Error, f)
+fn with_captured_warn_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<(log::Level, String)>) {
+    with_captured_logs(log::LevelFilter::Warn, f)
 }
 
-fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, Vec<String>) {
+fn with_captured_logs<T>(
+    level: log::LevelFilter,
+    f: impl FnOnce() -> T,
+) -> (T, Vec<(log::Level, String)>) {
     TEST_LOGGER_INIT.call_once(|| {
         log::set_logger(&TEST_LOGGER).expect("test logger should be installed once");
     });
 
     let _guard = TEST_LOGGER_GUARD.lock().unwrap();
     log::set_max_level(level);
+    let current_thread = thread::current().id();
     TEST_LOGGER.messages.lock().unwrap().clear();
     let result = f();
-    let messages = TEST_LOGGER.messages.lock().unwrap().clone();
+    let messages = TEST_LOGGER
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(thread_id, ..)| *thread_id == current_thread)
+        .map(|(_, level, message)| (*level, message.clone()))
+        .collect();
     (result, messages)
 }
 
@@ -137,7 +153,7 @@ fn confirm_operation_structure() {
         Operation::MStream => (),
         Operation::Pipe => (),
         Operation::CryptoStream => (),
-        Operation::HPerm => (),
+        Operation::Compress => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),
         Operation::FriE2F4 => (),
@@ -227,7 +243,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::MStream,
         Operation::Pipe,
         Operation::CryptoStream,
-        Operation::HPerm,
+        Operation::Compress,
         Operation::MpVerify(Felt::from_u32(1022)),
         Operation::MrUpdate,
         Operation::FriE2F4,
@@ -313,7 +329,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::MStream
         | Operation::Pipe
         | Operation::CryptoStream
-        | Operation::HPerm
+        | Operation::Compress
         | Operation::MpVerify(_)
         | Operation::MrUpdate
         | Operation::FriE2F4
@@ -675,6 +691,7 @@ fn test_mast_forest_wire_view_rejects_external_after_basic_block() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 2 * entry_size].rotate_left(entry_size);
 
     let result = MastForestWireView::new(&bytes);
@@ -700,6 +717,7 @@ fn test_mast_forest_wire_view_rejects_duplicate_external_digests() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let duplicate_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
     let duplicate_digest = first.to_bytes();
+    drop(view);
     bytes[duplicate_digest_offset..duplicate_digest_offset + duplicate_digest.len()]
         .copy_from_slice(&duplicate_digest);
 
@@ -1250,13 +1268,15 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
 
     let view = MastForestWireView::new(&serialized).unwrap();
     let node_entry_offset = view.node_entry_offset();
+    drop(view);
 
     // Corrupt the ops_offset field with an out-of-bounds value
     let block_discriminant: u64 = 3;
     let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
 
     let mut corrupted = serialized;
-    corrupted_value.write_into(&mut &mut corrupted[node_entry_offset..node_entry_offset + 8]);
+    corrupted[node_entry_offset..node_entry_offset + 8]
+        .copy_from_slice(&corrupted_value.to_le_bytes());
 
     let result = MastForest::read_from_bytes(&corrupted);
     assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
@@ -1528,7 +1548,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
+    assert_eq!(&bytes[5..8], &[0, 0, 5], "Version should be [0, 0, 5]");
 }
 
 fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
@@ -1575,9 +1595,12 @@ fn test_header_counts_match_node_kinds() {
     assert_eq!(external_node_count, 1);
 }
 
-/// Test that legacy version headers are rejected.
+/// Version 4 encoded opcode 0x50 as HPERM, while version 5 interprets it as COMPRESS. Every load
+/// path must reject version-4 bytes before it can attach the new semantics to an old stored digest.
 #[test]
-fn test_legacy_version_is_rejected() {
+fn test_pre_eidos_wire_version_is_rejected_by_every_load_path() {
+    assert_eq!(VERSION, [0, 0, 5]);
+
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
@@ -1585,12 +1608,25 @@ fn test_legacy_version_is_rejected() {
     forest.make_root(block_id);
 
     let mut bytes = forest.to_bytes();
-    bytes[5..8].copy_from_slice(&[0, 0, 3]);
+    bytes[5..8].copy_from_slice(&[0, 0, 4]);
 
-    let result = MastForest::read_from_bytes(&bytes);
+    assert_unsupported_version(MastForest::read_from_bytes(&bytes));
+    assert_unsupported_version(MastForest::read_view_from_bytes(
+        &bytes,
+        MastForestReadMode::Materialized,
+    ));
+    assert_unsupported_version(MastForest::read_view_from_bytes(
+        &bytes,
+        MastForestReadMode::WireBacked,
+    ));
+    assert_unsupported_version(UntrustedMastForest::read_from_bytes(&bytes));
+}
+
+fn assert_unsupported_version<T: core::fmt::Debug>(result: Result<T, DeserializationError>) {
     assert_matches!(
         result,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Unsupported version")
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("Unsupported version")
     );
 }
 
@@ -1742,12 +1778,14 @@ fn assert_untrusted_overspec_logging(
     expected_nodes: u32,
     expected_log_fragments: &[&str],
 ) {
-    let (result, logs) = with_captured_error_logs(|| UntrustedMastForest::read_from_bytes(bytes));
+    let (result, logs) = with_captured_warn_logs(|| UntrustedMastForest::read_from_bytes(bytes));
 
     let untrusted = result.unwrap();
     assert_eq!(logs.len(), expected_log_fragments.len());
     for expected in expected_log_fragments {
-        assert!(logs.iter().any(|msg| msg.contains(expected)));
+        assert!(logs.iter().any(|(level, msg)| {
+            *level == log::Level::Warn && msg.contains(expected) && msg.contains("input at ")
+        }));
     }
     assert_eq!(untrusted.validate().unwrap().num_nodes(), expected_nodes);
 
@@ -1777,6 +1815,52 @@ fn test_untrusted_overspecification_logging_matches_wire_mode() {
 
     let bytes = forest.to_bytes();
     assert_untrusted_overspec_logging(&bytes, forest.num_nodes(), &["wire node hashes"]);
+}
+
+#[test]
+fn test_untrusted_overspecification_logging_tracks_trait_call_site() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let mut reader = SliceReader::new(&bytes);
+    let expected_line = line!() + 2;
+    let (result, logs) =
+        with_captured_warn_logs(|| <UntrustedMastForest as Deserializable>::read_from(&mut reader));
+
+    result.unwrap();
+    let expected_location = format!("{}:{expected_line}:", file!());
+    assert!(logs.iter().any(|(level, msg)| {
+        *level == log::Level::Warn
+            && msg.contains("wire node hashes")
+            && msg.contains(&expected_location)
+    }));
+}
+
+#[test]
+fn test_untrusted_overspecification_logging_tracks_trait_bytes_call_site() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let expected_line = line!() + 2;
+    let (result, logs) = with_captured_warn_logs(|| {
+        <UntrustedMastForest as Deserializable>::read_from_bytes(&bytes)
+    });
+
+    result.unwrap();
+    let expected_location = format!("{}:{expected_line}:", file!());
+    assert!(logs.iter().any(|(level, msg)| {
+        *level == log::Level::Warn
+            && msg.contains("wire node hashes")
+            && msg.contains(&expected_location)
+    }));
 }
 
 /// Test that untrusted validation in hashless mode recomputes non-external digests without any
@@ -1842,6 +1926,7 @@ fn test_untrusted_forest_detects_forward_reference() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 4 * entry_size].rotate_right(entry_size);
 
     // Deserialize as untrusted and try to validate
@@ -1876,9 +1961,8 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     .into();
 
     let mut corrupted = bytes.clone();
-    bogus_digest.write_into(
-        &mut &mut corrupted[digest_offset..digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[digest_offset..digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&bogus_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();
@@ -1913,9 +1997,8 @@ fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let left_digest_offset = node_hash_digest_offset(&view, left_root.to_usize());
 
     let mut corrupted = bytes.clone();
-    right_digest.write_into(
-        &mut &mut corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&right_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();
@@ -2096,7 +2179,7 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     assert_eq!(discriminant, 3, "expected a Block node");
 
     let payload = node_type_u64 & 0x0f_ff_ff_ff_ff_ff_ff_ff;
-    assert!(payload <= u32::MAX as u64, "Block ops_offset payload must fit in u32");
+    assert!(u32::try_from(payload).is_ok(), "Block ops_offset payload must fit in u32");
     let ops_offset = payload as usize;
 
     let digest_offset = view.node_hash_offset().unwrap();
@@ -2116,15 +2199,10 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
 }
 
 fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word> {
-    use crate::chiplets::hasher;
-
     let forest = MastForest::read_from_bytes(bytes).ok()?;
     let block = forest[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
 
-    let op_groups: Vec<Felt> =
-        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-
-    Some(hasher::hash_elements(&op_groups))
+    Some(hash_op_batches(block.op_batches()))
 }
 
 /// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
@@ -2132,8 +2210,7 @@ fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word>
 fn test_untrusted_forest_rejects_non_full_prefix_batch() {
     let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
@@ -2153,8 +2230,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
 fn test_untrusted_forest_accepts_full_prefix_batch() {
     let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
@@ -2425,4 +2501,87 @@ fn test_untrusted_payload_does_not_allocate_debug_info_scaffolding() {
     untrusted
         .validate()
         .expect("validation should fit the budget previously consumed by debug scaffolding");
+}
+
+/// A repeated advice map key must be rejected by the wire view and by both deserializing readers.
+#[test]
+fn duplicate_advice_map_key_rejected_by_every_reader_path() {
+    use crate::advice::AdviceMap;
+
+    let mut forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+
+    // Same forest without an advice map.
+    let mut empty_bytes = Vec::new();
+    forest.clone().write_into(&mut empty_bytes);
+
+    // One-entry advice map, used to find where the advice map section starts.
+    let key = Word::default();
+    let mut one_entry_map = AdviceMap::default();
+    one_entry_map.insert(key, vec![Felt::new_unchecked(1)]);
+    let forest_with_map = forest.clone().with_advice_map(one_entry_map.clone());
+    let mut one_entry_bytes = Vec::new();
+    forest_with_map.write_into(&mut one_entry_bytes);
+
+    let one_entry_map_bytes = one_entry_map.to_bytes();
+    let advice_map_start = one_entry_bytes.len() - one_entry_map_bytes.len();
+
+    // The advice map is the last section, so everything before it must match.
+    assert_eq!(&one_entry_bytes[..advice_map_start], &empty_bytes[..advice_map_start]);
+
+    // Advice map with the same key twice.
+    let mut dup_map_bytes = Vec::new();
+    dup_map_bytes.write_usize(2);
+    (key, vec![Felt::new_unchecked(1)]).write_into(&mut dup_map_bytes);
+    (key, vec![Felt::new_unchecked(2)]).write_into(&mut dup_map_bytes);
+
+    let mut dup_bytes = one_entry_bytes[..advice_map_start].to_vec();
+    dup_bytes.extend_from_slice(&dup_map_bytes);
+
+    assert!(MastForestWireView::new(&dup_bytes).is_err());
+    assert!(MastForest::read_from_bytes(&dup_bytes).is_err());
+    assert!(UntrustedMastForest::read_from_bytes(&dup_bytes).is_err());
+}
+
+/// Internal digest limbs are validated lazily. An in-range entry remains readable even when
+/// both digest-bearing accessors reject its digest with the same decoding error.
+#[test]
+fn wire_view_defers_internal_digest_validation_until_access() {
+    use crate::serde::DeserializationError;
+
+    // Minimized fuzz counterexample (crash-08fc67b9, 173 bytes): 'MAST' magic, version 4,
+    // 3 nodes; the node-hash section at the tail carries 0xf8ffffffffffffff (>= ORDER).
+    const BYTES: [u8; 173] = [
+        0x4d, 0x41, 0x53, 0x54, 0x00, 0x00, 0x00, 0x04, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a,
+        0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x5c, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a,
+        0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x8b, 0x85, 0x85, 0x85, 0x85,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x00, 0xff, 0xff,
+        0xfe, 0xf7, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let mut bytes = BYTES;
+    bytes[5..8].copy_from_slice(&VERSION);
+    let view = MastForestWireView::new(&bytes).expect("structure should materialize");
+    assert_eq!(view.node_count(), 3);
+    for i in 0..2 {
+        view.node_info_at(i)
+            .unwrap_or_else(|e| panic!("node {i} should materialize but failed: {e:?}"));
+    }
+    let expected = DeserializationError::InvalidValue("value not in the appropriate range".into());
+    assert!(view.has_node(2));
+    assert!(view.node_entry_at(2).is_ok());
+    assert_eq!(view.node_info_at(2), Err(expected.clone()));
+    assert_eq!(view.node_digest_at(2), Err(expected.clone()));
+    let trait_view: &dyn MastForestView = &view;
+    assert_eq!(trait_view.node_info_at(2), Err(expected.clone()));
+    assert_eq!(trait_view.node_digest_at(2), Err(expected));
 }

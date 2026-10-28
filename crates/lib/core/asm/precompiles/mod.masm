@@ -1,0 +1,279 @@
+#! Top-level module for internal MASM precompile support.
+#!
+#! Concrete precompile support modules live here and in submodules. The helper procedures in this
+#! module are shared by generated and hand-written wrappers.
+
+pub mod hashes
+pub mod fields
+pub mod curves
+pub mod u256
+
+#! Deferred-node digest.
+pub type Digest = word
+#! Eidos initial chaining value that commits to a deferred frame.
+pub type InitialChainingValue = word
+#! Deferred frame in domain-tag and parameter order.
+pub type Frame = struct { domain_tag: u32, params: [u32; 3] }
+#! One deferred payload chunk in stack order.
+pub type Payload = struct { lo: word, hi: word }
+
+# registered Eidos CHUNKS domain tag, matching `miden_core::deferred`.
+# DEFERRED_CHUNKS_DOMAIN = 0x01000401
+
+# Eidos initial-CV bases. Kept local so this package remains independent of `miden-core`; they
+# match `miden::core::crypto::eidos`.
+const EIDOS_INIT_CV_0_BASE = 13503953893947604992
+const EIDOS_INIT_CV_1_BASE = 11912009168875159552
+const EIDOS_INIT_CV_2_BASE = 11170449401267093504
+const EIDOS_INIT_CV_3_BASE = 6620516959492505600
+
+# Domain-injected first lane for framework CHUNKS. The remaining lanes start from the generic
+# Eidos bases; the dynamic encoded length is added to lane 1.
+const DEFERRED_CHUNKS_INIT_CV_0 = 13503953893964383233
+
+# Framework AND frame, pinned to miden_core::deferred::DEFERRED_AND_INIT_CV.
+const DEFERRED_AND_INIT_CV = [13503953893964382977, 11912009168875159552, 11170449401267093504, 6620516959492505600]
+
+# Initial chaining words for one, two, and three framework CHUNKS payload blocks. Each word binds
+# the encoded Felt length: `init(DEFERRED_CHUNKS_DOMAIN, [8 * n_chunks, 0, 0])`.
+const DEFERRED_CHUNKS_INIT_CV_1 = [13503953893964383233, 11912009168875159560, 11170449401267093504, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_2 = [13503953893964383233, 11912009168875159568, 11170449401267093504, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_3 = [13503953893964383233, 11912009168875159576, 11170449401267093504, 6620516959492505600]
+
+#! Constructs an Eidos chaining word from a domain tag and three domain-defined
+#! parameters.
+#! Input: [domain_tag, param0, param1, param2, ...]
+#! Output: [CV, ...]
+proc init_deferred_cv(frame: Frame) -> InitialChainingValue
+    u32assert2.err="Eidos init values must fit in u32"
+    movup.3 movup.3 u32assert2.err="Eidos init values must fit in u32"
+
+    push.EIDOS_INIT_CV_2_BASE add
+    swap push.EIDOS_INIT_CV_3_BASE add
+    movup.3 push.EIDOS_INIT_CV_1_BASE add
+    movup.3 push.EIDOS_INIT_CV_0_BASE add
+    movup.3 movdn.2
+end
+
+#! Returns whether two words are equal, consuming both words.
+#!
+#! This helper keeps generated precompile modules independent of `miden-core`. Importing
+#! `miden::core::word::eq` here would create a dependency cycle because `miden-core` dynamically
+#! depends on `miden-precompiles`.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_equal]
+#!
+#! Where:
+#! - RHS is the first word to compare.
+#! - LHS is the second word to compare.
+#! - is_equal is one if the words are equal, and zero otherwise.
+#!
+#! Invocation: exec
+pub proc word_eq(rhs: word, lhs: word) -> i1
+    movup.4 eq swap
+    movup.4 eq and swap
+    movup.3 eq and
+    movdn.2 eq and
+end
+
+# ===== DEFERRED-DAG HELPERS =======================================================================
+#
+# The internal `miden::precompiles` support namespace cannot import `miden-core` because
+# `miden-core` depends on the precompile package. These procedures implement the same registration
+# contracts as the core system helpers and must remain semantically aligned with them.
+#
+# `register_expr` / `register_mem` bind their registration inputs by deriving the node digest with
+# VM instructions from the same initial CV and payload. There is no shared `evaluate` procedure:
+# deferred evaluation returns an unbound host hint, and each precompile must bind that hint to its
+# own predicate with VM instructions.
+
+#! Registers a fixed one-block expression using a caller-supplied initial chaining word.
+#!
+#! The host recovers the unique frame encoded by `CV`; the VM uses the same `CV` to hash the
+#! payload. This keeps registration metadata and digest framing identical by construction.
+#!
+#! Input:  [CV, PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_fixed_expr(
+    chaining_value: InitialChainingValue,
+    payload: Payload,
+) -> Digest
+    adv.register_deferred
+
+    movdnw.2
+    # => [PAYLOAD_LO, PAYLOAD_HI, CV, ...]
+    compress
+    dropw dropw
+end
+
+#! Registers an expression-bodied node `(frame, payload)` in the deferred-computation DAG and returns
+#! its content-addressed digest on top of the operand stack.
+#!
+#! Input:  [FRAME=[domain_tag, param0, param1, param2], PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_expr(frame: Frame, payload: Payload) -> Digest
+    exec.init_deferred_cv
+    exec.register_fixed_expr
+end
+
+#! Registers a data-bodied node (`n` eight-Felt blocks of bulk data at `ptr`) in the
+#! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
+#!
+#! `adv.register_deferred_data` interns the node host-side by reading `8n` felts from memory at
+#! `ptr`, where `n` is the stack-supplied `n_chunks`; it produces no stack or advice output. The
+#! event leaves those stack arguments unchanged, but its direct host read adds no AIR memory access.
+#! `CV` must be a framed Eidos initial chaining word, `n_chunks` must be a nonzero `u32`, and the
+#! frame's payload grammar must admit exactly `n_chunks` blocks. The event validates those recovered
+#! values before the hashing loop begins. The caller remains responsible for checking every dynamic
+#! input as a `u32` before injecting it into `CV`.
+#! This wrapper binds the registration input with the same Eidos construction as `Node::digest`:
+#! the supplied initial chaining word is followed by the `n` payload chunks. Empty data bodies are
+#! forbidden, so `n >= 1`.
+#!
+#! Input:  [CV, ptr, n_chunks, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_mem(
+    chaining_value: InitialChainingValue,
+    ptr: ptr<Payload>,
+    n_chunks: u32,
+) -> Digest
+    movup.5
+    # => [n_chunks, CV, ptr, ...]
+    adv.register_deferred_data
+
+    # A successful event has validated that n_chunks is a nonzero u32 and that ptr + 8*n_chunks
+    # fits in the u32 memory address space. Reuse that contract for the hashing loop.
+    # end_addr = ptr + 8 * n_chunks.
+    mul.8 dup.5 add movdn.5
+    # => [CV, ptr, end_addr, ...]
+
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_addr, ...]
+
+    push.1
+    while.true
+        mem_stream compress
+        dup.13 dup.13 neq
+    end
+    dropw dropw
+    movup.4 drop movup.4 drop
+end
+
+#! Registers memory as framework CHUNKS data and returns its content-addressed digest.
+#!
+#! Input:  [ptr, n_chunks, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem(ptr: ptr<Payload>, n_chunks: u32) -> Digest
+    # Only the encoded length is dynamic. Validate that lane directly and build the partially
+    # precomputed CV instead of routing fixed values through the generic initializer.
+    dup.1 mul.8 u32assert.err="Deferred CHUNKS length must fit in u32"
+    push.EIDOS_INIT_CV_1_BASE add
+    push.EIDOS_INIT_CV_3_BASE push.EIDOS_INIT_CV_2_BASE movup.2
+    push.DEFERRED_CHUNKS_INIT_CV_0
+    # => [CV, ptr, n_chunks, ...]
+    exec.register_mem
+end
+
+#! Registers exactly one 8-felt memory chunk as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_1(ptr: ptr<Payload>) -> Digest
+    push.DEFERRED_CHUNKS_INIT_CV_1 push.1
+    # => [n_chunks=1, CV, ptr, ...]
+    adv.register_deferred_data
+
+    drop
+    # => [CV, ptr, ...]
+
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    mem_stream compress
+    dropw dropw
+    movup.4 drop
+end
+
+#! Registers exactly two contiguous 8-felt memory chunks as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_2(ptr: ptr<Payload>) -> Digest
+    push.DEFERRED_CHUNKS_INIT_CV_2 push.2
+    # => [n_chunks=2, CV, ptr, ...]
+    adv.register_deferred_data
+
+    drop
+    # => [CV, ptr, ...]
+
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    repeat.2
+        mem_stream compress
+    end
+    dropw dropw
+    movup.4 drop
+end
+
+#! Registers exactly three contiguous 8-felt memory chunks as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_3(ptr: ptr<Payload>) -> Digest
+    push.DEFERRED_CHUNKS_INIT_CV_3 push.3
+    # => [n_chunks=3, CV, ptr, ...]
+    adv.register_deferred_data
+
+    drop
+    # => [CV, ptr, ...]
+
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    repeat.3
+        mem_stream compress
+    end
+    dropw dropw
+    movup.4 drop
+end
+
+#! Folds a deferred node digest into the rolling deferred root using `log_deferred`.
+#! The digest must reference a node that will reduce to TRUE under the installed precompiles.
+#!
+#! The opcode replaces NODE_DIGEST with the updated deferred root, which this helper drops.
+#!
+#! Input:  [NODE_DIGEST, ...]
+#! Output: `[...]` (the deferred commitment root advances; node is folded in)
+pub proc log_deferred(node: Digest)
+    log_deferred
+    dropw
+end
+
+#! Combines two registered true obligation roots without logging.
+#! Input:  [LHS_ROOT, RHS_ROOT, ...]
+#! Output: [ROOT, ...]
+#! Both children must be registered and evaluate to TRUE, or be implicit TRUE. The result is
+#! exactly AND(LHS_ROOT, RHS_ROOT), including when either child is TRUE; no identity is simplified.
+#! Registration and VM hashing use the same framework AND chaining word and ordered payload.
+#! The obligation is commutative; swapping the children changes the digest, not its truth value.
+pub proc append_root(lhs: Digest, rhs: Digest) -> Digest
+    push.DEFERRED_AND_INIT_CV
+    exec.register_fixed_expr
+    # => [ROOT, ...]
+end
+
+#! Appends a registered true assertion to the root stored at a word-aligned pointer, without logging.
+#! Input:  [ROOT_PTR, ASSERTION, ...]
+#! Output: [...]
+#! ROOT_PTR must be word-aligned and reference four readable, writable felts.
+#! Updates this word to exactly AND(ROOT, ASSERTION). Both children must
+#! be registered and evaluate to TRUE, or be implicit TRUE; no identity is simplified.
+pub proc append_root_ptr(root_ptr: ptr<Digest>, assertion: Digest)
+    dup movdn.5
+    # => [ROOT_PTR, ASSERTION, ROOT_PTR, ...]
+    padw movup.4 mem_loadw_le
+    # => [ROOT, ASSERTION, ROOT_PTR, ...]
+    exec.append_root
+    # => [NEXT_ROOT, ROOT_PTR, ...]
+    movup.4 mem_storew_le dropw
+    # => [...]
+end

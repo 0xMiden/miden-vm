@@ -20,6 +20,16 @@ pub(crate) enum AssemblerError {
     #[error("duplicate definition found for export path '{path}'")]
     #[diagnostic()]
     DuplicateExportPath { path: Arc<Path> },
+    #[error("invalid `@source_name` procedure attribute")]
+    #[diagnostic(help(
+        "expected exactly one quoted string, e.g. `@source_name(\"original name\")`"
+    ))]
+    InvalidSourceNameAttribute {
+        #[label("this attribute does not have the form `@source_name(\"...\")`")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("number of procedure locals {num_locals} exceeds the maximum {max_locals}")]
     #[diagnostic(help(
         "number of procedure locals {num_locals} exceeds the maximum of {max_locals}"

@@ -1,25 +1,37 @@
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::DeferredState,
+    deferred::{DeferredState, Digest, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use miden_mast_package::Package;
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
+    ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
+    operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod basic_block;
+mod debug;
 mod execution_api;
 mod external;
 mod memory;
@@ -27,6 +39,7 @@ mod operation;
 mod step;
 
 pub use basic_block::SystemEventError;
+pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
 pub use step::{BreakReason, ResumeContext};
 
@@ -120,6 +133,12 @@ pub struct FastProcessor {
     /// The advice provider to be used during execution.
     advice: AdviceProvider,
 
+    /// MAST forests loaded during this execution, indexed by their local procedure digests.
+    loaded_mast_forests: BTreeMap<Word, LoadedMastForest>,
+
+    /// Commitments of MAST forests whose advice maps have been merged into the advice provider.
+    merged_mast_forests: BTreeSet<Word>,
+
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
@@ -144,20 +163,33 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
-    /// Deferred witness accumulated during execution and returned for verifier rehydration.
+    /// Eager deferred evaluation state retained only while execution is running.
     deferred_state: DeferredState,
+
+    /// Package debug information configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) package_debug_info: Option<PackageDebugInfo>,
+
+    /// Entrypoint source node configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) entrypoint_source_node: Option<DebugSourceNodeId>,
 }
 
 impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
-    fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
-        ExecutionOutput {
+    fn into_execution_output(self, stack: StackOutputs) -> Result<ExecutionOutput, ExecutionError> {
+        let precompile_root = self.deferred_state.root();
+        let precompile_witness = self
+            .deferred_state
+            .into_witness(self.options.verification_precompile_limits())
+            .map_err(OperationError::from)
+            .map_exec_err_no_ctx()?;
+        Ok(ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
-            deferred_state: self.deferred_state,
-        }
+            precompile_root,
+            precompile_witness,
+        })
     }
 
     /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
@@ -167,9 +199,7 @@ impl FastProcessor {
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
-            ControlFlow::Continue(stack_outputs) => {
-                Ok(processor.into_execution_output(stack_outputs))
-            },
+            ControlFlow::Continue(stack_outputs) => processor.into_execution_output(stack_outputs),
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(_) => {
@@ -235,12 +265,14 @@ impl FastProcessor {
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
-    /// and any accumulated deferred state are preserved; only the remaining deferred-state
-    /// budget is updated to match the new options.
+    /// and any accumulated deferred state are preserved. Execution precompile limits cannot be
+    /// lowered below work already consumed by that state.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
-        self.deferred_state.set_max_elements(options.max_deferred_elements());
         self.memory.set_max_elements(options.max_memory_elements());
+        self.deferred_state
+            .set_execution_limits(options.execution_precompile_limits().clone())
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?;
         self.options = options;
         Ok(self)
     }
@@ -269,6 +301,8 @@ impl FastProcessor {
 
         Ok(Self {
             advice: AdviceProvider::new(advice_inputs, &options)?,
+            loaded_mast_forests: BTreeMap::new(),
+            merged_mast_forests: BTreeSet::new(),
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
@@ -281,9 +315,11 @@ impl FastProcessor {
             saved_overflow_len: 0,
             deferred_state: DeferredState::new(
                 Arc::new(miden_precompiles::registry()),
-                options.max_deferred_elements(),
+                options.execution_precompile_limits().clone(),
             )
-            .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?,
+            package_debug_info: None,
+            entrypoint_source_node: None,
             options,
         })
     }
@@ -313,6 +349,7 @@ impl FastProcessor {
             continuation_stack,
             kernel: program.kernel().clone(),
             package_debug_info,
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -330,6 +367,7 @@ impl FastProcessor {
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
             package_debug_info: None,
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -665,13 +703,23 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider, memory,
-/// and final deferred state at the end of execution.
+/// and optional portable precompile witness at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub deferred_state: DeferredState,
+    pub precompile_root: Digest,
+    pub precompile_witness: Option<PrecompileWitness>,
+}
+
+impl ExecutionOutput {
+    /// Returns the deferred root accumulated during execution.
+    ///
+    /// This does not validate the witness's precompile computations.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
+    }
 }
 
 // SYSTEM CALL STATE

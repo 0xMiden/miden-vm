@@ -1,16 +1,38 @@
-use alloc::{vec, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec, vec::Vec};
 use core::{array, mem};
 
 use miden_stark_transcript::ProverChannel;
-use miden_stateful_hasher::StatefulHasher;
+use miden_stateful_hasher::{Alignable, StatefulHasher};
+use miden_utils_sync::RwLock;
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+use p3_matrix::{
+    Dimensions, Matrix,
+    bitrev::BitReversibleMatrix,
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+};
 use p3_maybe_rayon::{iter, prelude::*};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
+use crate::{
+    lmcs::{
+        BlockConsumerFactory, Lmcs, LmcsError, LmcsTree,
+        merkle_witness::MerkleWitness,
+        node_id::NodeId,
+        proof::{BatchProof, LeafOpening},
+        row_list::RowList,
+        tree_indices::TreeIndices,
+    },
+    util::align::aligned_len_sum,
+};
+
+/// Number of lowest digest layers, leaf hashes included, that a tree does not store.
+///
+/// Stored digests shrink by a factor of `2^PRUNED_LAYERS`. In exchange, opening rebuilds the
+/// subtree containing each queried leaf, rooted at its deepest stored ancestor. That costs up to
+/// `2^PRUNED_LAYERS` leaf hashes per distinct subtree (fewer for shorter trees).
+const PRUNED_LAYERS: usize = 4;
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -82,16 +104,16 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     /// powers of two. Each matrix's rows are absorbed into sponge states that are
     /// maintained and upsampled across matrices of increasing height.
     ///
-    /// This vector is retained for inspection or re-opening of the tree; it is not used
-    /// after construction time.
+    /// Openings read their rows from these matrices and rehash them to rebuild the digest
+    /// layers the tree does not store.
     pub(crate) leaves: Vec<M>,
 
-    /// All hash layers (digest arrays) in top-down order: index 0 is the root
-    /// (one hash) and the last layer contains the leaf hashes.
+    /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
     ///
     /// This matches the top-down depth convention of [`NodeId`](crate::lmcs::node_id::NodeId):
     /// `digest_layers[d]` has `2^d` entries, so `digest_layers[node.depth()][node.position()]`
-    /// gives direct access.
+    /// gives direct access. The lowest `min(PRUNED_LAYERS, depth)` layers, leaf hashes included,
+    /// are not stored; openings rebuild the parts they need from `leaves` and `salt`.
     pub(crate) digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
 
     /// Salt matrix for hiding commitment. Each row contains `SALT_ELEMS` random field elements.
@@ -152,8 +174,12 @@ where
     /// that require zero padding must check the opened rows explicitly.
     ///
     /// Leaf openings are written in **sorted tree index order** (ascending, deduplicated).
-    fn prove_batch<Ch>(&self, indices: &TreeIndices, channel: &mut Ch)
+    ///
+    /// Sibling hashes below the stored layers are rebuilt with `lmcs`, which must be the
+    /// configuration that built this tree; panics otherwise.
+    fn prove_batch<L, Ch>(&self, lmcs: &L, indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
         Ch: ProverChannel<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
     {
         let tree_log_height = log2_strict_usize(self.height()) as u8;
@@ -165,17 +191,12 @@ where
 
         // Stream leaf openings in sorted tree index order.
         for &index in indices.iter() {
-            let opening = LeafOpening {
-                rows: self.aligned_rows(index),
-                salt: self.salt(index),
-            };
-            opening.write_to_channel(channel);
+            self.leaf_opening(index).write_to_channel(channel);
         }
 
         // Emit missing sibling hashes left-to-right, bottom-to-top.
-        for sibling in indices.missing_siblings() {
-            let hash = self.digest_layers[sibling.depth()][sibling.position()];
-            channel.hint_commitment(Hash::from(hash));
+        for (_, hash) in self.missing_sibling_hashes(lmcs, indices) {
+            channel.hint_commitment(hash);
         }
     }
 }
@@ -187,6 +208,78 @@ where
     D: Copy + Default + PartialEq + Send + Sync,
     M: Matrix<F>,
 {
+    pub(crate) fn batch_proof<L>(
+        &self,
+        lmcs: &L,
+        indices: &TreeIndices,
+    ) -> Result<BatchProof<F, Hash<F, D, DIGEST_ELEMS>, SALT_ELEMS>, LmcsError>
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let tree_depth = log2_strict_usize(self.height());
+        if indices.depth() as usize != tree_depth {
+            return Err(LmcsError::InvalidProof);
+        }
+
+        let openings: BTreeMap<_, _> =
+            indices.iter().map(|&index| (index, self.leaf_opening(index))).collect();
+        let leaf_hashes = openings.iter().map(|(&index, opening)| (index, opening.leaf_hash(lmcs)));
+
+        let mut siblings = self.missing_sibling_hashes(lmcs, indices);
+        let witness = MerkleWitness::build(
+            leaf_hashes,
+            tree_depth,
+            |expected| {
+                let (actual, hash) = siblings.next().ok_or(LmcsError::InvalidProof)?;
+                if actual != expected {
+                    return Err(LmcsError::InvalidProof);
+                }
+                Ok(hash)
+            },
+            |left, right| lmcs.compress(left, right),
+        )?;
+        let remaining_sibling = siblings.next();
+        debug_assert!(remaining_sibling.is_none());
+
+        Ok(BatchProof { openings, witness })
+    }
+
+    fn leaf_opening(&self, index: usize) -> LeafOpening<F, SALT_ELEMS> {
+        LeafOpening {
+            rows: self.aligned_rows(index),
+            salt: self.salt(index),
+        }
+    }
+
+    /// Rebuild only queried pruned subtrees, then yield missing siblings in transcript order.
+    fn missing_sibling_hashes<'a, L>(
+        &'a self,
+        lmcs: &L,
+        indices: &'a TreeIndices,
+    ) -> impl Iterator<Item = (NodeId, Hash<F, D, DIGEST_ELEMS>)> + 'a
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let tree_depth = log2_strict_usize(self.height());
+        let stored_depth = self.digest_layers.len() - 1;
+        let pruned_subtrees = self.rebuild_pruned_subtrees(lmcs, indices);
+
+        indices.missing_siblings().map(move |sibling| {
+            let (depth, position) = (sibling.depth(), sibling.position());
+            let hash = if depth <= stored_depth {
+                Hash::from(self.digest_layers[depth][position])
+            } else {
+                let shift = depth - stored_depth;
+                let subtree = pruned_subtrees
+                    .binary_search_by_key(&(position >> shift), |(ancestor, _)| *ancestor)
+                    .map(|i| &pruned_subtrees[i].1)
+                    .expect("a missing sibling lies under a queried leaf's stored ancestor");
+                subtree[tree_depth - depth][position & ((1 << shift) - 1)]
+            };
+            (sibling, hash)
+        })
+    }
+
     /// Build a tree from domain-ordered matrices with optional salt and explicit alignment.
     ///
     /// Matrices are bit-reversed internally before storage and hashing.
@@ -196,7 +289,8 @@ where
     /// - Matrices are sorted by height (shortest to tallest).
     ///
     /// `alignment` controls transcript padding only; it does not affect the commitment.
-    /// LMCS does not enforce that padded columns are zero.
+    /// The hasher's own alignment determines the encoded leaf length and commitment padding. LMCS
+    /// does not enforce that transcript-padding columns are zero.
     ///
     /// Panics if `leaves` is empty.
     pub fn build_with_alignment<DomainM, PF, PD, H, C, const WIDTH: usize>(
@@ -212,6 +306,8 @@ where
         PD: PackedValue<Value = D>,
         H: StatefulHasher<F, [D; DIGEST_ELEMS], State = [D; WIDTH]>
             + StatefulHasher<PF, [PD; DIGEST_ELEMS], State = [PD; WIDTH]>
+            + Alignable<F, D>
+            + Alignable<PF, PD>
             + Sync,
         C: PseudoCompressionFunction<[D; DIGEST_ELEMS], 2>
             + PseudoCompressionFunction<[PD; DIGEST_ELEMS], 2>
@@ -219,51 +315,66 @@ where
     {
         const { assert!(PF::WIDTH == PD::WIDTH) }
         assert!(!leaves.is_empty(), "cannot commit empty batch");
-        debug_assert!(alignment > 0, "alignment must be non-zero");
+        assert_ne!(alignment, 0, "alignment must be non-zero");
+
+        let scalar_alignment = <H as Alignable<F, D>>::ALIGNMENT;
+        let packed_alignment = <H as Alignable<PF, PD>>::ALIGNMENT;
+        assert_eq!(
+            scalar_alignment, packed_alignment,
+            "scalar and packed hasher alignments must match"
+        );
+
+        // Matrix widths and salt width are shared by every leaf, so derive the initial state once.
+        let encoded_len = aligned_len_sum(
+            leaves.iter().map(Matrix::width).chain(salt.as_ref().map(Matrix::width)),
+            scalar_alignment,
+        );
+        let mut initial_state = [D::default(); WIDTH];
+        <H as StatefulHasher<F, [D; DIGEST_ELEMS]>>::initialize_state(
+            h,
+            &mut initial_state,
+            encoded_len,
+        );
 
         let leaves: Vec<M> =
             leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
 
-        // Build leaf hashes: absorb all matrix rows into sponge states, then squeeze.
-        let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =
-            info_span!("hash leaves").in_scope(|| {
-                let mut leaf_states: Vec<[PD::Value; WIDTH]> =
-                    build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(&leaves, h);
+        let leaf_digests = info_span!("hash leaves").in_scope(|| {
+            let states = build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(
+                &leaves,
+                h,
+                leaves.last().unwrap().height(),
+                initial_state,
+            );
+            Self::finish_leaf_states::<PF, PD, H, WIDTH>(h, states, salt.as_ref())
+        });
+        Self::from_leaf_digests::<PD, C>(c, leaves, salt, alignment, leaf_digests)
+    }
 
-                // Absorb salt into states using SIMD-parallelized path (no-op when salt is None)
-                if let Some(ref salt_matrix) = salt {
-                    debug_assert_eq!(salt_matrix.height(), leaf_states.len());
-                    debug_assert_eq!(salt_matrix.width(), SALT_ELEMS);
-                    info_span!("absorb salt", height = salt_matrix.height(), width = SALT_ELEMS)
-                        .in_scope(|| {
-                            absorb_matrix::<PF, PD, _, _, WIDTH, DIGEST_ELEMS>(
-                                &mut leaf_states,
-                                salt_matrix,
-                                h,
-                            );
-                        });
-                }
-
-                // Squeeze leaf hashes and bit-reverse in one pass: digest[i] =
-                // squeeze(state[bitrev(i)]). This places digests in domain order so
-                // the Merkle tree is indexed naturally.
-                let n = leaf_states.len();
-                let log_n = log2_strict_usize(n);
-                info_span!("squeeze leaves", n).in_scope(|| {
-                    (0..n)
-                        .into_par_iter()
-                        .map(|i| {
-                            let src = reverse_bits_len(i, log_n);
-                            h.squeeze(&leaf_states[src])
-                        })
-                        .collect()
-                })
-            });
-
+    fn from_leaf_digests<PD, C>(
+        c: &C,
+        leaves: Vec<M>,
+        salt: Option<RowMajorMatrix<F>>,
+        alignment: usize,
+        leaf_digests: Vec<[D; DIGEST_ELEMS]>,
+    ) -> Self
+    where
+        PD: PackedValue<Value = D>,
+        C: PseudoCompressionFunction<[D; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PD; DIGEST_ELEMS], 2>
+            + Sync,
+    {
         // Build digest layers by repeatedly compressing until we reach the root,
         // then reverse so index 0 = root, matching the top-down NodeId convention.
+        // The lowest `PRUNED_LAYERS` layers are dropped as soon as their parents exist.
         let digest_layers = info_span!("compress tree layers").in_scope(|| {
-            let mut digest_layers = vec![leaf_digests];
+            let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
+            let mut lowest_stored = leaf_digests;
+            for _ in 0..pruned_layers {
+                lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
+            }
+
+            let mut digest_layers = vec![lowest_stored];
             loop {
                 let prev_layer = digest_layers.last().unwrap();
                 if prev_layer.len() == 1 {
@@ -283,6 +394,36 @@ where
             salt,
             alignment: alignment.max(1),
         }
+    }
+
+    fn finish_leaf_states<PF, PD, H, const WIDTH: usize>(
+        h: &H,
+        mut states: Vec<[D; WIDTH]>,
+        salt: Option<&RowMajorMatrix<F>>,
+    ) -> Vec<[D; DIGEST_ELEMS]>
+    where
+        PF: PackedValue<Value = F>,
+        PD: PackedValue<Value = D>,
+        H: StatefulHasher<F, [D; DIGEST_ELEMS], State = [D; WIDTH]>
+            + StatefulHasher<PF, [PD; DIGEST_ELEMS], State = [PD; WIDTH]>
+            + Sync,
+    {
+        if let Some(salt) = salt {
+            debug_assert_eq!(salt.height(), states.len());
+            debug_assert_eq!(salt.width(), SALT_ELEMS);
+            info_span!("absorb salt", height = salt.height(), width = SALT_ELEMS).in_scope(|| {
+                absorb_matrix::<PF, PD, _, _, WIDTH, DIGEST_ELEMS>(&mut states, salt, h);
+            });
+        }
+        let n = states.len();
+        let log_n = log2_strict_usize(n);
+        // Digest i uses state bitrev(i), placing tree leaves in domain order.
+        info_span!("squeeze leaves", n).in_scope(|| {
+            (0..n)
+                .into_par_iter()
+                .map(|i| h.squeeze(&states[reverse_bits_len(i, log_n)]))
+                .collect()
+        })
     }
 
     /// Column alignment used when streaming openings.
@@ -341,30 +482,174 @@ where
         }
         RowList::new(elems, widths)
     }
+
+    /// Hash the leaf at `domain_index` the way tree construction does: every matrix row (unpadded),
+    /// then the salt when present.
+    fn hash_leaf<L>(&self, lmcs: &L, domain_index: usize) -> L::Commitment
+    where
+        L: Lmcs<F = F>,
+    {
+        let rows = self.rows(domain_index);
+        let salt = self.salt.is_some().then(|| self.salt(domain_index));
+        lmcs.hash(rows.iter_rows().chain(salt.as_ref().map(<[F; SALT_ELEMS]>::as_slice)))
+    }
+
+    /// Rebuild the unstored subtree under the deepest stored ancestor of every leaf in `indices`.
+    ///
+    /// Returns `(position, layers)` pairs sorted by the ancestor's position in the deepest stored
+    /// layer. `layers[l]` holds the subtree's nodes `l` levels above the leaves, so `layers[0]` is
+    /// its leaf hashes; the stored ancestor itself is not included. Empty when no layer is pruned.
+    ///
+    /// Panics if a rebuilt subtree does not hash to its stored ancestor, which happens when `lmcs`
+    /// is not the configuration that built this tree.
+    fn rebuild_pruned_subtrees<L>(
+        &self,
+        lmcs: &L,
+        indices: &TreeIndices,
+    ) -> Vec<(usize, Vec<Vec<L::Commitment>>)>
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let stored_depth = self.digest_layers.len() - 1;
+        let pruned_layers = log2_strict_usize(self.height()) - stored_depth;
+        if pruned_layers == 0 {
+            return Vec::new();
+        }
+
+        // `indices` is sorted, so equal ancestors are adjacent.
+        let mut ancestors: Vec<usize> = indices.iter().map(|&leaf| leaf >> pruned_layers).collect();
+        ancestors.dedup();
+
+        ancestors
+            .into_iter()
+            .map(|ancestor| {
+                let first_leaf = ancestor << pruned_layers;
+                let mut layer: Vec<L::Commitment> = (first_leaf..first_leaf + (1 << pruned_layers))
+                    .map(|leaf| self.hash_leaf(lmcs, leaf))
+                    .collect();
+                let mut layers = Vec::with_capacity(pruned_layers);
+                while layer.len() > 1 {
+                    let parents = layer
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|&[left, right]| lmcs.compress(left, right))
+                        .collect();
+                    layers.push(mem::replace(&mut layer, parents));
+                }
+                assert!(
+                    layer[0] == Hash::from(self.digest_layers[stored_depth][ancestor]),
+                    "rebuilt subtree does not hash to the stored tree; \
+                     open with the LMCS configuration that built it",
+                );
+                (ancestor, layers)
+            })
+            .collect()
+    }
 }
 
-/// Build leaf states using the upsampled view (nearest-neighbor upsampling).
+impl<F, D, const DIGEST_ELEMS: usize, const SALT_ELEMS: usize>
+    LiftedMerkleTree<F, D, RowMajorMatrix<F>, DIGEST_ELEMS, SALT_ELEMS>
+where
+    F: Copy + Default + PartialEq + Send + Sync,
+    D: Copy + Default + PartialEq + Send + Sync,
+{
+    pub(super) fn build_aligned_with_blocks<PF, PD, H, C, P, const WIDTH: usize>(
+        h: &H,
+        c: &C,
+        mut leaves: Vec<RowMajorMatrix<F>>,
+        dimensions: Dimensions,
+        produce: P,
+        salt: Option<RowMajorMatrix<F>>,
+    ) -> Self
+    where
+        PF: PackedValue<Value = F>,
+        PD: PackedValue<Value = D>,
+        H: StatefulHasher<F, [D; DIGEST_ELEMS], State = [D; WIDTH]>
+            + StatefulHasher<PF, [PD; DIGEST_ELEMS], State = [PD; WIDTH]>
+            + Alignable<F, D>
+            + Alignable<PF, PD>
+            + Sync,
+        C: PseudoCompressionFunction<[D; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PD; DIGEST_ELEMS], 2>
+            + Sync,
+        P: FnOnce(Option<BlockConsumerFactory<'_, F>>) -> RowMajorMatrix<F>,
+    {
+        const { assert!(PF::WIDTH == PD::WIDTH) }
+        let alignment = <H as Alignable<F, D>>::ALIGNMENT;
+        assert_ne!(alignment, 0, "alignment must be non-zero");
+        assert_eq!(
+            alignment,
+            <H as Alignable<PF, PD>>::ALIGNMENT,
+            "scalar and packed hasher alignments must match"
+        );
+        let encoded_len = aligned_len_sum(
+            leaves
+                .iter()
+                .map(Matrix::width)
+                .chain([dimensions.width])
+                .chain(salt.as_ref().map(Matrix::width)),
+            alignment,
+        );
+        let mut initial_state = [D::default(); WIDTH];
+        <H as StatefulHasher<F, [D; DIGEST_ELEMS]>>::initialize_state(
+            h,
+            &mut initial_state,
+            encoded_len,
+        );
+
+        let leaf_digests = info_span!("produce and hash leaves").in_scope(|| {
+            let mut states = build_leaf_states_upsampled::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(
+                &leaves,
+                h,
+                dimensions.height,
+                initial_state,
+            );
+            let mut slots = Vec::new();
+            let make_consumer: BlockConsumerFactory<'_, F> = Box::new(|block_rows| {
+                assert!(block_rows.is_power_of_two(), "block height must be a power of two");
+                assert!(block_rows <= dimensions.height, "block exceeds final matrix height");
+                slots = states
+                    .chunks_exact_mut(block_rows)
+                    .map(|block| RwLock::new(Some(block)))
+                    .collect();
+                let slots = &slots;
+                Box::new(move |row: usize, block: RowMajorMatrixView<'_, F>| {
+                    assert_eq!(row % block_rows, 0, "misaligned block offset");
+                    assert_eq!(block.height(), block_rows, "wrong block height");
+                    assert_eq!(block.width(), dimensions.width, "wrong block width");
+                    // Release the lock before hashing the disjoint state slice.
+                    let states = slots
+                        .get(row / block_rows)
+                        .expect("block offset out of range")
+                        .write()
+                        .take()
+                        .expect("duplicate block");
+                    absorb_matrix::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(states, &block, h);
+                })
+            });
+            let matrix = produce(Some(make_consumer));
+            assert!(
+                !slots.is_empty() && slots.into_iter().all(|slot| slot.into_inner().is_none()),
+                "missing block"
+            );
+            assert_eq!(matrix.dimensions(), dimensions, "producer returned wrong dimensions");
+            leaves.push(matrix);
+            Self::finish_leaf_states::<PF, PD, H, WIDTH>(h, states, salt.as_ref())
+        });
+        Self::from_leaf_digests::<PD, C>(c, leaves, salt, alignment, leaf_digests)
+    }
+}
+
+/// Absorb bit-reversed matrices in order and lift their states to `final_height`.
 ///
-/// Returns the sponge states after absorbing all matrix rows but **before squeezing**.
-/// Callers must squeeze the states to obtain final leaf hashes.
-///
-/// Conceptually, each matrix is virtually extended to height `H` by repeating each row
-/// `L = H / h` times (width unchanged), and the leaf `r` absorbs the `r`-th row from each
-/// extended matrix in order. Each absorbed row is virtually padded with zeros to a multiple of the
-/// hasher's padding width for absorption; see [`LiftedMerkleTree`](crate::lmcs::LiftedMerkleTree)
-/// docs for the equivalent single-matrix view.
-///
-/// Padding is implicit and not checked; callers that require zero padding must enforce
-/// it elsewhere.
-///
-/// # Preconditions
-/// - `matrices` is non-empty and sorted by non-decreasing power-of-two heights.
-/// - `P::WIDTH` is a power of two.
-///
-/// Panics in debug builds if preconditions are violated.
+/// Returns states before squeezing. An empty prefix repeats `initial_state` for each final row.
+/// Panics unless all heights, including `final_height`, are non-decreasing powers of two.
 fn build_leaf_states_upsampled<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     matrices: &[M],
     sponge: &H,
+    final_height: usize,
+    initial_state: [PD::Value; WIDTH],
 ) -> Vec<[PD::Value; WIDTH]>
 where
     PF: PackedValue,
@@ -376,67 +661,52 @@ where
 {
     const { assert!(PF::WIDTH.is_power_of_two()) };
     const { assert!(PD::WIDTH.is_power_of_two()) };
-    let final_height = validate_heights(matrices.iter().map(|d| d.dimensions().height));
-
-    // Memory buffers:
-    // - states: Per-leaf scalar states (one per final row), maintained across matrices.
-    // - scratch_states: Temporary buffer used when duplicating states during upsampling.
-    // `repeat_n` initializes these large buffers in parallel when concurrency is enabled.
-    let default_state = [PD::Value::default(); WIDTH];
+    let final_height = validate_heights(matrices.iter().map(Matrix::height).chain([final_height]));
     let mut states = info_span!("alloc states", final_height, width = WIDTH)
-        .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
-    // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
-    // rounds) never need the scratch buffer.
-    let mut scratch_states: Vec<[PD::Value; WIDTH]> = Vec::new();
-
-    let mut active_height = matrices.first().unwrap().height();
-
+        .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
+    let mut scratch = Vec::new();
+    let mut active_height = matrices.first().map_or(final_height, Matrix::height);
     for matrix in matrices {
         let height = matrix.height();
-
-        // Upsample states when height increases (applies to both scalar and packed paths).
-        // Duplicate each existing state to fill the expanded height.
-        // E.g., [s0, s1] with scaling_factor=2 → [s0, s0, s1, s1]
-        if height > active_height {
-            let scaling_factor = height / active_height;
-
-            if scratch_states.is_empty() {
-                scratch_states = info_span!("alloc scratch", final_height)
-                    .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
-            }
-
-            // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
-            // so we keep the accumulated sponge states aligned with the taller matrix.
-            info_span!("upsample states", from = active_height, to = height).in_scope(|| {
-                scratch_states[..height]
-                    .par_chunks_mut(scaling_factor)
-                    .zip(states[..active_height].par_iter())
-                    .for_each(|(chunk, state)| chunk.fill(*state));
-            });
-
-            // Copy upsampled states back to canonical buffer
-            mem::swap(&mut scratch_states, &mut states);
-        }
-
-        // Absorb the rows of the matrix into the extended state vector
+        upsample_states(&mut states, &mut scratch, active_height, height);
         info_span!("absorb matrix", height, width = matrix.width()).in_scope(|| {
             absorb_matrix::<PF, PD, _, _, _, _>(&mut states[..height], matrix, sponge)
         });
-
         active_height = height;
     }
-
+    upsample_states(&mut states, &mut scratch, active_height, final_height);
     states
+}
+
+fn upsample_states<D: Copy + Default + Send + Sync, const WIDTH: usize>(
+    states: &mut Vec<[D; WIDTH]>,
+    scratch: &mut Vec<[D; WIDTH]>,
+    from: usize,
+    to: usize,
+) {
+    if from == to {
+        return;
+    }
+    if scratch.is_empty() {
+        let final_height = states.len();
+        *scratch = info_span!("alloc scratch", final_height)
+            .in_scope(|| iter::repeat_n([D::default(); WIDTH], final_height).collect());
+    }
+    info_span!("upsample states", from, to).in_scope(|| {
+        scratch[..to]
+            .par_chunks_mut(to / from)
+            .zip(states[..from].par_iter())
+            .for_each(|(chunk, state)| chunk.fill(*state));
+    });
+    mem::swap(scratch, states);
 }
 
 /// Incorporate one matrix's row-wise contribution into the running per-leaf states.
 ///
 /// Semantics: given `states` of length `h = matrix.height()`, for each row index `r ∈ [0, h)`
-/// update `states[r]` by absorbing the matrix row `r` into that state. In the overall tree
-/// construction, callers ensure that `states` is the correct lifted view for the current matrix
-/// (either the "nearest-neighbor" duplication or the "modulo" duplication across the final
-/// height). This helper performs exactly one absorption round for that matrix and returns with the
-/// states mutated; it does not change the lifting shape or squeeze hashes.
+/// update `states[r]` by absorbing the matrix row `r` into that state. Callers ensure that
+/// `states` already has the lifted shape required by the current matrix. This helper does not
+/// upsample states or squeeze hashes.
 fn absorb_matrix<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     states: &mut [[PD::Value; WIDTH]],
     matrix: &M,
@@ -453,12 +723,12 @@ fn absorb_matrix<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     assert_eq!(height, states.len());
 
     if height < PF::WIDTH || PF::WIDTH == 1 {
-        // Scalar path: walk every final leaf state and absorb the wrapped row for this matrix.
+        // Scalar path: absorb one matrix row into each leaf state.
         states.par_iter_mut().zip(matrix.par_rows()).for_each(|(state, row)| {
             sponge.absorb_into(state, row);
         });
     } else {
-        // SIMD path: gather → absorb wrapped packed row → scatter per chunk.
+        // SIMD path: gather states, absorb a vertically packed row, then scatter.
         states
             .par_chunks_mut(PF::WIDTH)
             .enumerate()
@@ -498,7 +768,7 @@ fn compress_uniform<
     let default_digest = [P::Value::default(); DIGEST_ELEMS];
     let mut next_digests = vec![default_digest; next_len];
 
-    // Use scalar path when output is too small for packing
+    // Use scalar path when output is too small for packing.
     if next_len < P::WIDTH || P::WIDTH == 1 {
         next_digests.par_iter_mut().zip(prev_layer.par_chunks_exact(2)).for_each(
             |(next_digest, prev_layer_pair)| {
@@ -556,9 +826,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        lmcs::tests::build_leaves_single,
+        lmcs::{
+            hiding_config::HidingLmcsConfig,
+            tests::{build_leaves_single, roundtrip_open_batch},
+        },
         testing::configs::goldilocks_poseidon2::{
-            self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge,
+            self as gl, Compress, DIGEST, Felt, PackedFelt, RATE, Sponge, WIDTH,
         },
         util::align::aligned_len,
     };
@@ -637,8 +910,12 @@ mod tests {
         matrices: &[RowMajorMatrix<Felt>],
         sponge: &Sponge,
     ) -> Vec<[Felt; DIGEST]> {
-        let mut states =
-            build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(matrices, sponge);
+        let mut states = build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(
+            matrices,
+            sponge,
+            matrices.last().unwrap().height(),
+            [Felt::ZERO; WIDTH],
+        );
         states.iter_mut().map(|s| sponge.squeeze(s)).collect()
     }
 
@@ -672,5 +949,52 @@ mod tests {
             let leaves_single = build_leaves_single(&matrix_single, &sponge);
             assert_eq!(leaves, leaves_single);
         }
+    }
+
+    /// Trees keep only the layers above their lowest `PRUNED_LAYERS` (the memory saving), and
+    /// openings rebuild the missing siblings from the committed rows. Every opening must still
+    /// verify against the root: a rebuilt leaf that hashes differently from construction (row
+    /// lifting, alignment, salt) would produce an invalid proof.
+    #[test]
+    fn pruned_trees_open_against_their_roots() {
+        let (_, sponge, compress) = gl::test_components();
+        let lmcs = gl::test_lmcs();
+        let hiding = HidingLmcsConfig::<
+            PackedFelt,
+            PackedFelt,
+            Sponge,
+            Compress,
+            SmallRng,
+            WIDTH,
+            DIGEST,
+            4,
+        >::new(sponge, compress, SmallRng::seed_from_u64(1));
+        let mut rng = SmallRng::seed_from_u64(2);
+
+        // Lifted matrices, 2^8 leaves. The queries share a pruned subtree (16, 17, 30), sit alone
+        // in one (100), and cover both ends of the tree.
+        let matrices: Vec<RowMajorMatrix<Felt>> = [(32, 3), (128, RATE + 1), (256, 2 * RATE)]
+            .into_iter()
+            .map(|(h, w)| RowMajorMatrix::rand(&mut rng, h, w))
+            .collect();
+        let indices = [0, 16, 17, 30, 100, 255];
+        let stored_layers = 8 - PRUNED_LAYERS + 1;
+
+        let tree = lmcs.build_tree(matrices.clone());
+        assert_eq!(tree.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&lmcs, &tree, &indices).expect("pruned opening should verify");
+
+        let aligned = lmcs.build_aligned_tree(matrices.clone());
+        assert_eq!(aligned.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&lmcs, &aligned, &indices).expect("aligned opening should verify");
+
+        let salted = hiding.build_tree(matrices);
+        assert_eq!(salted.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&hiding, &salted, &indices).expect("salted opening should verify");
+
+        // A tree no taller than 2^PRUNED_LAYERS keeps only its root.
+        let short = lmcs.build_tree(vec![RowMajorMatrix::<Felt>::rand(&mut rng, 8, 3)]);
+        assert_eq!(short.digest_layers.len(), 1);
+        roundtrip_open_batch(&lmcs, &short, &[2, 5]).expect("short opening should verify");
     }
 }

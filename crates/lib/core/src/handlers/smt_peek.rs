@@ -47,9 +47,6 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 ///
 /// # Errors
 /// Returns an error if the provided Merkle root doesn't exist on the advice provider.
-///
-/// # Panics
-/// Will panic as unimplemented if the target depth is `64`.
 pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
@@ -107,8 +104,11 @@ fn get_smt_leaf_preimage(
         return Err(SmtPeekError::InvalidSmtNodePreimage { node, preimage_len: kv_pairs.len() });
     }
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     Ok(kv_pairs
-        .chunks_exact(WORD_SIZE * 2)
+        .as_chunks::<{ WORD_SIZE * 2 }>()
+        .0
+        .iter()
         .map(|kv_chunk| {
             let key = [kv_chunk[0], kv_chunk[1], kv_chunk[2], kv_chunk[3]];
             let value = [kv_chunk[4], kv_chunk[5], kv_chunk[6], kv_chunk[7]];

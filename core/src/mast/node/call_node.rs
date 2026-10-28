@@ -5,8 +5,6 @@ use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, text},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
@@ -29,8 +27,6 @@ use crate::{
 /// - A simple call: the callee is executed in the new user context.
 /// - A syscall: the callee is executed in the root context.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,
@@ -123,16 +119,16 @@ impl MastNodeExt for CallNode {
     /// whether the node represents a simple call or a syscall - i.e.,:
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
+    /// hasher::merge_in_mast_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
     /// ```
     /// or
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
+    /// hasher::merge_in_mast_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -177,37 +173,6 @@ impl MastNodeExt for CallNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for CallNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate callee, digest, and whether it's a syscall
-        (any::<MastNodeId>(), any::<[u64; 4]>(), any::<bool>())
-            .prop_map(|(callee, digest_array, is_syscall)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                CallNode {
-                    callee,
-                    is_syscall,
-                    digest,
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`CallNode`] instances.
 #[derive(Debug)]
@@ -245,7 +210,7 @@ impl CallNodeBuilder {
                 CallNode::CALL_DOMAIN
             };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
         };
 
         Ok(CallNode {
@@ -292,7 +257,7 @@ impl MastForestContributor for CallNodeBuilder {
                 CallNode::CALL_DOMAIN
             };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &[self.callee], context, hash_by_node_id)

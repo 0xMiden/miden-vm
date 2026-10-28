@@ -10,7 +10,6 @@ source "$DIR/lib/release-plan-common.sh"
 check_command "cargo"
 check_command "curl"
 check_command "jq"
-check_command "awk"
 
 export CRATES_IO_USER_AGENT="miden-vm-package-release-plan"
 RELEASE_PLAN_TMPDIR="$(mktemp -d)"
@@ -20,6 +19,27 @@ trap 'rm -rf "$RELEASE_PLAN_TMPDIR"' EXIT
 metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
 workspace_root="$(printf '%s' "$metadata_json" | jq -r '.workspace_root')"
 selected_packages=()
+allow_existing=true
+check_semver=true
+skip_checks=false
+package_arguments=()
+
+for argument in "$@"; do
+    case "$argument" in
+        --allow-existing=*) allow_existing="${argument#*=}" ;;
+        --skip-semver) check_semver=false ;;
+        --skip-checks) skip_checks=true ;;
+        *) package_arguments+=("$argument") ;;
+    esac
+done
+
+case "$allow_existing" in
+    true | false) ;;
+    *)
+        echo "ERROR: --allow-existing must be true or false" >&2
+        exit 2
+        ;;
+esac
 
 add_packages() {
     local item word
@@ -33,8 +53,21 @@ add_packages() {
     done
 }
 
-add_packages "$@"
+if [[ "${#package_arguments[@]}" -gt 0 ]]; then
+    add_packages "${package_arguments[@]}"
+fi
+if [[ ${#selected_packages[@]} -gt 0 ]]; then
+    duplicates="$(printf '%s\n' "${selected_packages[@]}" | sort | uniq -d)"
+    if [[ -n "$duplicates" ]]; then
+        echo "ERROR: duplicate selected packages: $duplicates" >&2
+        exit 1
+    fi
+fi
 selected_package_count="${#selected_packages[@]}"
+if [[ "$skip_checks" == true && "$selected_package_count" -eq 0 ]]; then
+    echo 'ERROR: --skip-checks requires an explicit non-empty package selection.' >&2
+    exit 2
+fi
 
 publishable_package_names="$(
     publishable_packages | cut -f1
@@ -78,21 +111,43 @@ semver_latest_versions=()
 
 echo "Package release plan"
 echo
+if [[ "$skip_checks" == true ]]; then
+    echo 'WARNING: version, archive and semver validation skipped for manual recovery.'
+fi
 
-while IFS=$'\t' read -r package local_version manifest_path; do
+while IFS=$'\t' read -r package local_version _manifest_path; do
     if ! is_selected_package "$package"; then
         continue
     fi
 
-    latest_version="$(latest_published_version "$package")"
+    if [[ "$skip_checks" == true ]]; then
+        if crate_version_exists "$package" "$local_version"; then
+            if [[ "$allow_existing" == true ]]; then
+                already_published+=("$package v$local_version (manually verified)")
+            else
+                version_errors+=("$package v$local_version already exists on crates.io")
+            fi
+        else
+            would_publish+=("$package v$local_version (manually verified)")
+        fi
+        continue
+    fi
+
+    latest_version="$(latest_published_version "$package" "$local_version")"
 
     if [[ -z "$latest_version" ]]; then
-        would_publish+=("$package v$local_version (latest published: none)")
+        would_publish+=("$package v$local_version (baseline: ${latest_version:-none})")
         continue
     fi
 
     if crate_version_exists "$package" "$local_version"; then
-        if package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
+        has_binary_target="$(jq -r --arg package "$package" '
+            .packages[] | select(.name == $package)
+            | any(.targets[]; .kind | index("bin") != null)
+        ' <<< "$metadata_json")"
+        if [[ "$allow_existing" == "false" ]]; then
+            version_errors+=("$package v$local_version already exists on crates.io")
+        elif package_archive_matches_published "$package" "$local_version" "$workspace_root" "$has_binary_target"; then
             already_published+=("$package v$local_version (latest published: $latest_version)")
         else
             archive_status=$?
@@ -111,9 +166,19 @@ while IFS=$'\t' read -r package local_version manifest_path; do
         continue
     fi
 
+    if [[ "$check_semver" == "false" ]]; then
+        would_publish+=("$package v$local_version (latest published: $latest_version)")
+        continue
+    fi
+
+    baseline_version="$(release_policy baseline "$local_version" "$RELEASE_PLAN_TMPDIR/$package.latest.json")"
+    if [[ -z "$baseline_version" ]]; then
+        would_publish+=("$package v$local_version (latest published: $latest_version)")
+        continue
+    fi
     semver_packages+=("$package")
     semver_local_versions+=("$local_version")
-    semver_latest_versions+=("$latest_version")
+    semver_latest_versions+=("$baseline_version")
 done < <(publishable_packages)
 
 if [[ ${#version_errors[@]} -gt 0 && ${#semver_packages[@]} -gt 0 ]]; then
@@ -131,10 +196,17 @@ else
         local_version="${semver_local_versions[$i]}"
         latest_version="${semver_latest_versions[$i]}"
 
-        echo "Checking semver for $package v$local_version against published v$latest_version"
         baseline_commit="$(baseline_commit_for "$package" "$latest_version" || true)"
+        if [[ -z "$baseline_commit" ]] &&
+            ! published_package_has_library_target "$package" "$latest_version"; then
+            echo "Skipping semver for $package because published v$latest_version has no library target."
+            would_publish+=("$package v$local_version (baseline: ${latest_version:-none})")
+            continue
+        fi
+
+        echo "Checking semver for $package v$local_version against published v$latest_version"
         if run_semver_check "$package" "$latest_version" "$workspace_root" "$baseline_commit"; then
-            would_publish+=("$package v$local_version (latest published: $latest_version)")
+            would_publish+=("$package v$local_version (baseline: ${latest_version:-none})")
         else
             semver_failures+=("$package v$local_version against published v$latest_version")
         fi
@@ -183,3 +255,10 @@ fi
 
 echo
 echo "Release plan check passed."
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    if [[ ${#would_publish[@]} -eq 0 ]]; then
+        echo 'packages=[]' >> "$GITHUB_OUTPUT"
+    else
+        printf 'packages=%s\n' "$(jq -cn --args '$ARGS.positional | map(split(" " )[0])' "${would_publish[@]}")" >> "$GITHUB_OUTPUT"
+    fi
+fi

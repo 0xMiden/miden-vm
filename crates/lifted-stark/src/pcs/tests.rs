@@ -162,12 +162,16 @@ fn test_pcs_cases() {
     let tree_b = lmcs.build_aligned_tree(vec![mat_b.bit_reverse_rows()]);
     run_pcs_case(&params, &[tree_a, tree_b], 200).expect("multi-tree roundtrip");
 
-    // Case 3: mixed heights in one commitment group (LMCS upsampling).
+    // Case 3: mixed heights within and across commitment groups.
     let rng = &mut SmallRng::seed_from_u64(99);
     let short = random_lde_matrix(rng, 4, log_blowup, 2, lde_shift);
     let tall = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![short.bit_reverse_rows(), tall.bit_reverse_rows()]);
-    run_pcs_case(&params, &[tree], 300).expect("mixed-height roundtrip");
+    run_pcs_case(&params, core::slice::from_ref(&tree), 300).expect("mixed-height roundtrip");
+
+    let medium = random_lde_matrix(rng, 5, log_blowup, 5, lde_shift);
+    let other = lmcs.build_aligned_tree(vec![medium.bit_reverse_rows()]);
+    run_pcs_case(&params, &[tree, other], 301).expect("mixed-height multi-tree roundtrip");
 
     // Case 4: random (non-low-degree) data — FRI should reject.
     let rng = &mut SmallRng::seed_from_u64(77);

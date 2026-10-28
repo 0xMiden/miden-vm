@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
@@ -27,8 +24,6 @@ use crate::{
 /// If the top of the stack is neither `0` nor `1` when the condition is checked, the execution
 /// fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
@@ -95,9 +90,9 @@ impl MastNodeExt for LoopNode {
     /// the domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let body_digest = Word::default();
-    /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -137,36 +132,6 @@ impl MastNodeExt for LoopNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for LoopNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate one MastNodeId value and digest for the body
-        (any::<MastNodeId>(), any::<[u64; 4]>())
-            .prop_map(|(body, digest_array)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                LoopNode {
-                    body,
-                    digest,
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`LoopNode`] instances.
 #[derive(Debug)]
@@ -193,7 +158,7 @@ impl LoopNodeBuilder {
         } else {
             let body_hash = body.digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
         Ok(LoopNode { body: self.body, digest })
@@ -230,7 +195,7 @@ impl MastForestContributor for LoopNodeBuilder {
                 .ok_or_else(|| MastForestError::NodeIdOverflow(self.body, context.node_count()))?
                 .digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &[self.body], context, hash_by_node_id)

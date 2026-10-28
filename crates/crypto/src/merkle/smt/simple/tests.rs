@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     EMPTY_WORD,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::{
         EmptySubtreeRoots, InnerNodeInfo, MerklePath, MerkleTree, int_to_leaf, int_to_node,
         smt::{LeafIndex, SparseMerkleTreeReader},
@@ -219,20 +219,20 @@ fn small_tree_opening_is_consistent() {
 
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
-    let e = Poseidon2::merge(&[a, b]);
-    let f = Poseidon2::merge(&[z, z]);
-    let g = Poseidon2::merge(&[c, z]);
-    let h = Poseidon2::merge(&[z, d]);
+    let e = Eidos::merge(&[a, b]);
+    let f = Eidos::merge(&[z, z]);
+    let g = Eidos::merge(&[c, z]);
+    let h = Eidos::merge(&[z, d]);
 
-    let i = Poseidon2::merge(&[e, f]);
-    let j = Poseidon2::merge(&[g, h]);
+    let i = Eidos::merge(&[e, f]);
+    let j = Eidos::merge(&[g, h]);
 
-    let k = Poseidon2::merge(&[i, j]);
+    let k = Eidos::merge(&[i, j]);
 
     let entries = vec![(0, a), (1, b), (4, c), (7, d)];
     let tree = SimpleSmt::<3>::with_leaves(entries).unwrap();
@@ -338,20 +338,20 @@ fn test_simplesmt_set_subtree() {
 
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
-    let e = Poseidon2::merge(&[a, b]);
-    let f = Poseidon2::merge(&[z, z]);
-    let g = Poseidon2::merge(&[c, z]);
-    let h = Poseidon2::merge(&[z, d]);
+    let e = Eidos::merge(&[a, b]);
+    let f = Eidos::merge(&[z, z]);
+    let g = Eidos::merge(&[c, z]);
+    let h = Eidos::merge(&[z, d]);
 
-    let i = Poseidon2::merge(&[e, f]);
-    let j = Poseidon2::merge(&[g, h]);
+    let i = Eidos::merge(&[e, f]);
+    let j = Eidos::merge(&[g, h]);
 
-    let k = Poseidon2::merge(&[i, j]);
+    let k = Eidos::merge(&[i, j]);
 
     // subtree:
     //   g
@@ -393,10 +393,10 @@ fn test_simplesmt_set_subtree_unchanged_for_wrong_index() {
 
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
     // subtree:
     //   g
@@ -434,10 +434,10 @@ fn test_simplesmt_set_subtree_entire_tree() {
 
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
     // subtree: E3
     const DEPTH: u8 = 3;
@@ -463,10 +463,10 @@ fn test_simplesmt_set_subtree_entire_tree() {
 fn test_simplesmt_set_subtree_clears_region() {
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
     let mut tree = {
         let entries = vec![(0, a), (1, b), (4, c), (5, d), (7, d)];
@@ -489,10 +489,10 @@ fn test_simplesmt_set_subtree_clears_region() {
 fn test_simplesmt_set_subtree_replaces_populated_region() {
     let z = EMPTY_WORD;
 
-    let a = Poseidon2::merge(&[z; 2]);
-    let b = Poseidon2::merge(&[a; 2]);
-    let c = Poseidon2::merge(&[b; 2]);
-    let d = Poseidon2::merge(&[c; 2]);
+    let a = Eidos::merge(&[z; 2]);
+    let b = Eidos::merge(&[a; 2]);
+    let c = Eidos::merge(&[b; 2]);
+    let d = Eidos::merge(&[c; 2]);
 
     let subtree = SimpleSmt::<1>::with_leaves(vec![(1, c)]).unwrap();
     let mut tree = {
@@ -628,9 +628,9 @@ fn test_simplesmt_check_empty_root_constant() {
 // --------------------------------------------------------------------------------------------
 
 fn compute_internal_nodes() -> (Word, Word, Word) {
-    let node2 = Poseidon2::merge(&[VALUES4[0], VALUES4[1]]);
-    let node3 = Poseidon2::merge(&[VALUES4[2], VALUES4[3]]);
-    let root = Poseidon2::merge(&[node2, node3]);
+    let node2 = Eidos::merge(&[VALUES4[0], VALUES4[1]]);
+    let node3 = Eidos::merge(&[VALUES4[2], VALUES4[3]]);
+    let root = Eidos::merge(&[node2, node3]);
 
     (root, node2, node3)
 }

@@ -16,7 +16,10 @@ use super::{
 /// A [Location] represents file and span information for portability across source managers
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Location {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,
@@ -65,7 +68,7 @@ impl Deserializable for Location {
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct FileLineCol {
     /// The path to the source file in which the relevant source code can be found

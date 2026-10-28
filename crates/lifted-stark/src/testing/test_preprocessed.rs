@@ -7,7 +7,8 @@
 //! [`Preprocessed::build`] + [`ProverInstance::new`], and the verifier receives
 //! only the commitment via [`VerifierInstance::new`].
 
-use alloc::{vec, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -318,29 +319,28 @@ type TestPreprocessed = Preprocessed<Felt, Lmcs>;
 
 fn prove_with_preprocessed<MA>(
     config: &TestConfig,
-    ps: &ProverStatement<Felt, QuadFelt, MA>,
-) -> (TestOutput, TestPreprocessed)
+    ps: ProverStatement<Felt, QuadFelt, MA>,
+) -> (TestOutput, TestPreprocessed, Statement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config).expect("has preprocessed");
-    let output = ProverInstance::new(config, ps, Some(&preprocessed))
-        .expect("valid preprocessed setup")
-        .prove(test_challenger())
-        .expect("prove succeeds");
-    (output, preprocessed)
+    let prover_instance =
+        ProverInstance::new(config, ps, Some(&preprocessed)).expect("valid preprocessed setup");
+    let (output, statement) = prover_instance.prove(test_challenger()).expect("prove succeeds");
+    (output, preprocessed, statement)
 }
 
 fn verify_and_reparse<MA>(
     config: &TestConfig,
-    ps: &ProverStatement<Felt, QuadFelt, MA>,
+    statement: &Statement<Felt, QuadFelt, MA>,
     output: &TestOutput,
     preprocessed: &TestPreprocessed,
 ) where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let verifier_instance =
-        VerifierInstance::new(config, ps.statement(), Some(preprocessed.commitment()))
+        VerifierInstance::new(config, statement, Some(preprocessed.commitment()))
             .expect("valid preprocessed setup");
     let digest = verifier_instance
         .verify(&output.proof, test_challenger())
@@ -353,13 +353,13 @@ fn verify_and_reparse<MA>(
     assert_eq!(output.digest, reparse_digest);
 }
 
-fn prove_verify_reparse<MA>(ps: &ProverStatement<Felt, QuadFelt, MA>)
+fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let config = test_config();
-    let (output, preprocessed) = prove_with_preprocessed(&config, ps);
-    verify_and_reparse(&config, ps, &output, &preprocessed);
+    let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
+    verify_and_reparse(&config, &statement, &output, &preprocessed);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +374,10 @@ fn single_air_with_preprocessed() {
         vec![row_index_trace(height)],
     );
     let config = test_config();
-    let (output, preprocessed) = prove_with_preprocessed(&config, &ps);
-    verify_and_reparse(&config, &ps, &output, &preprocessed);
+    let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
+    verify_and_reparse(&config, &statement, &output, &preprocessed);
 
-    let missing_commitment = VerifierInstance::new(&config, ps.statement(), None);
+    let missing_commitment = VerifierInstance::new(&config, &statement, None);
     assert!(
         matches!(
             missing_commitment,
@@ -398,7 +398,7 @@ fn mixed_airs_preprocessed_at_index_1() {
         vec![squaring_trace(height), row_index_trace(height)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn rejects_width_mismatch() {
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
-    let result = ProverInstance::new(&config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -431,7 +431,7 @@ fn rejects_height_mismatch() {
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
-    let result = ProverInstance::new(&config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -454,7 +454,7 @@ fn rejects_log_blowup_mismatch() {
 
     let mut proving_config = test_config();
     proving_config.pcs = PcsParams::new(2, 2, 2, 0, 0, 2, 0).expect("valid PCS params");
-    let result = ProverInstance::new(&proving_config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&proving_config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -477,7 +477,7 @@ fn rejects_wrong_trusted_preprocessed_commitment() {
         vec![row_index_trace(height)],
     );
     let config = test_config();
-    let (output, _preprocessed) = prove_with_preprocessed(&config, &ps);
+    let (output, _preprocessed, statement) = prove_with_preprocessed(&config, ps);
 
     let wrong_ps = prover_statement(
         vec![RowCounterAir {
@@ -488,13 +488,28 @@ fn rejects_wrong_trusted_preprocessed_commitment() {
     let wrong_preprocessed =
         Preprocessed::build(wrong_ps.statement(), &config).expect("has preprocessed");
     let verifier_instance =
-        VerifierInstance::new(&config, ps.statement(), Some(wrong_preprocessed.commitment()))
+        VerifierInstance::new(&config, &statement, Some(wrong_preprocessed.commitment()))
             .expect("presence is valid");
 
     assert!(
         verifier_instance.verify(&output.proof, test_challenger()).is_err(),
         "verification must reject a proof checked against the wrong trusted setup commitment",
     );
+}
+
+#[test]
+fn preprocessed_with_short_nonlinear_air() {
+    // The two-row squaring trace has a nonzero quotient. On wide SIMD targets this
+    // checks that a partial pack writes its output, including without preprocessed columns.
+    let ps = prover_statement(
+        vec![
+            MixedAir::Constant(ConstantAir),
+            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(8) }),
+        ],
+        vec![squaring_trace(2), row_index_trace(8)],
+    );
+
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -510,7 +525,7 @@ fn preprocessed_shorter_than_max_trace() {
         vec![squaring_trace(8), row_index_trace(4)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -525,7 +540,7 @@ fn preprocessed_much_shorter_than_max_trace() {
         vec![squaring_trace(8), row_index_trace(2)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -542,5 +557,119 @@ fn preprocessed_multiple_heights_below_max() {
         vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
+}
+
+/// Instrument the real prover dispatch without changing the existing fallback AIR fixtures.
+#[derive(Clone, Debug)]
+struct CountedAir {
+    inner: MixedAir,
+    materializations: Arc<AtomicUsize>,
+    aux_calls: Arc<AtomicUsize>,
+    borrowed_address: Arc<AtomicUsize>,
+}
+
+impl BaseAir<Felt> for CountedAir {
+    fn width(&self) -> usize {
+        self.inner.width()
+    }
+    fn preprocessed_width(&self) -> usize {
+        self.inner.preprocessed_width()
+    }
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        self.materializations.fetch_add(1, Ordering::Relaxed);
+        self.inner.preprocessed_trace()
+    }
+}
+
+impl LiftedAir<Felt, QuadFelt> for CountedAir {
+    fn aux_width(&self) -> usize {
+        self.inner.aux_width()
+    }
+    fn num_randomness(&self) -> usize {
+        self.inner.num_randomness()
+    }
+    fn num_aux_values(&self) -> usize {
+        self.inner.num_aux_values()
+    }
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        _challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        panic!("the prover must dispatch the borrowed setup hook")
+    }
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        assert_eq!(preprocessed.is_some(), self.preprocessed_width() > 0);
+        if let Some(trace) = preprocessed {
+            assert_eq!(trace.height(), main.height());
+            assert_eq!(trace.width(), self.preprocessed_width());
+        }
+        self.borrowed_address.store(
+            preprocessed.map_or(0, |trace| trace.values.as_ptr() as usize),
+            Ordering::Relaxed,
+        );
+        self.aux_calls.fetch_add(1, Ordering::Relaxed);
+        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        self.inner.eval(builder)
+    }
+}
+
+#[test]
+fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
+    // Include a missing table and different heights in an instance order unlike proof order.
+    let airs: Vec<_> = [
+        MixedAir::Constant(ConstantAir),
+        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(4) }),
+        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(2) }),
+    ]
+    .into_iter()
+    .map(|inner| CountedAir {
+        inner,
+        materializations: Arc::new(AtomicUsize::new(0)),
+        aux_calls: Arc::new(AtomicUsize::new(0)),
+        borrowed_address: Arc::new(AtomicUsize::new(0)),
+    })
+    .collect();
+    let make_statement = || {
+        prover_statement(
+            airs.clone(),
+            vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
+        )
+    };
+    let config = test_config();
+    let first = make_statement();
+    let preprocessed = Preprocessed::build(first.statement(), &config).expect("has preprocessed");
+    let original_addresses: Vec<_> = preprocessed
+        .raw_traces()
+        .iter()
+        .map(|trace| trace.as_ref().map_or(0, |trace| trace.values.as_ptr() as usize))
+        .collect();
+    for ps in [first, make_statement()] {
+        let prover = ProverInstance::new(&config, ps, Some(&preprocessed)).expect("valid setup");
+        let (output, statement) = prover.prove(test_challenger()).expect("prove");
+        verify_and_reparse(&config, &statement, &output, &preprocessed);
+        for (air, &address) in airs.iter().zip(&original_addresses) {
+            assert_eq!(
+                air.borrowed_address.load(Ordering::Relaxed),
+                address,
+                "reuse the original allocation in instance order, including absent slots"
+            );
+        }
+    }
+    for air in airs {
+        assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "generate only during setup");
+        assert_eq!(air.aux_calls.load(Ordering::Relaxed), 2, "both proofs build auxiliary traces");
+    }
 }

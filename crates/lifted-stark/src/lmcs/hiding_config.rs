@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use miden_stark_transcript::VerifierChannel;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use rand::{
     Rng,
@@ -14,8 +14,8 @@ use rand::{
 };
 
 use crate::lmcs::{
-    Lmcs, LmcsError, OpenedRows, config::LmcsConfig, lifted_tree::LiftedMerkleTree,
-    proof::BatchProof, tree_indices::TreeIndices,
+    BlockConsumerFactory, Lmcs, LmcsError, OpenedRows, config::LmcsConfig,
+    lifted_tree::LiftedMerkleTree, proof::BatchProof, tree_indices::TreeIndices,
 };
 
 /// Configuration for hiding LMCS with random salt.
@@ -103,6 +103,7 @@ where
     H: StatefulHasher<PF::Value, [PD::Value; DIGEST], State = [PD::Value; WIDTH]>
         + StatefulHasher<PF, [PD; DIGEST], State = [PD; WIDTH]>
         + Alignable<PF::Value, PD::Value>
+        + Alignable<PF, PD>
         + Sync,
     C: PseudoCompressionFunction<[PD::Value; DIGEST], 2>
         + PseudoCompressionFunction<[PD; DIGEST], 2>
@@ -146,6 +147,27 @@ where
         )
     }
 
+    fn build_aligned_tree_with_blocks<P>(
+        &self,
+        leaves: Vec<RowMajorMatrix<Self::F>>,
+        dimensions: Dimensions,
+        produce: P,
+    ) -> Self::Tree<RowMajorMatrix<Self::F>>
+    where
+        P: FnOnce(Option<BlockConsumerFactory<'_, Self::F>>) -> RowMajorMatrix<Self::F>,
+    {
+        let tree_height = dimensions.height;
+        let salt = RowMajorMatrix::rand(&mut *self.rng.borrow_mut(), tree_height, SALT);
+        LiftedMerkleTree::build_aligned_with_blocks::<PF, PD, H, C, P, WIDTH>(
+            &self.inner.sponge,
+            &self.inner.compress,
+            leaves,
+            dimensions,
+            produce,
+            Some(salt),
+        )
+    }
+
     fn hash<'a, I>(&self, rows: I) -> Self::Commitment
     where
         I: IntoIterator<Item = &'a [Self::F]>,
@@ -181,6 +203,14 @@ where
         Ch: VerifierChannel<F = Self::F, Commitment = Self::Commitment>,
     {
         self.inner.read_batch_proof(widths, indices, channel)
+    }
+
+    fn batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError> {
+        self.inner.batch_proof(tree, indices)
     }
 
     fn alignment(&self) -> usize {

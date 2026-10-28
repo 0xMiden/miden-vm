@@ -133,23 +133,68 @@ impl CallGraph {
 
         // If not all nodes were visited, the remaining nodes participate in cycles
         if output.len() != num_nodes {
-            let visited: BTreeSet<GlobalItemIndex> = output.iter().copied().collect();
-            let mut in_cycle = BTreeSet::default();
-            for (&n, out_edges) in self.nodes.iter() {
-                if visited.contains(&n) {
-                    continue;
-                }
-                in_cycle.insert(n);
-                for &succ in out_edges {
-                    if !visited.contains(&succ) {
-                        in_cycle.insert(succ);
-                    }
-                }
-            }
-            Err(CycleError(in_cycle))
+            Err(CycleError(self.cycle_nodes()))
         } else {
             Ok(output)
         }
+    }
+
+    /// Returns the nodes that belong to a strongly connected component containing a cycle.
+    fn cycle_nodes(&self) -> BTreeSet<GlobalItemIndex> {
+        let mut visited = BTreeSet::new();
+        let mut finish_order = Vec::with_capacity(self.nodes.len());
+
+        for &root in self.nodes.keys() {
+            if !visited.insert(root) {
+                continue;
+            }
+
+            let mut stack = vec![(root, 0)];
+            while let Some((node, next_edge)) = stack.last_mut() {
+                if let Some(&successor) = self.out_edges(*node).get(*next_edge) {
+                    *next_edge += 1;
+                    if visited.insert(successor) {
+                        stack.push((successor, 0));
+                    }
+                } else {
+                    finish_order.push(*node);
+                    stack.pop();
+                }
+            }
+        }
+
+        let mut predecessors: BTreeMap<GlobalItemIndex, Vec<GlobalItemIndex>> =
+            self.nodes.keys().map(|&node| (node, Vec::new())).collect();
+        for (&node, successors) in &self.nodes {
+            for &successor in successors {
+                predecessors.entry(successor).or_default().push(node);
+            }
+        }
+
+        visited.clear();
+        let mut cycle_nodes = BTreeSet::new();
+        for root in finish_order.into_iter().rev() {
+            if !visited.insert(root) {
+                continue;
+            }
+
+            let mut component = Vec::new();
+            let mut stack = vec![root];
+            while let Some(node) = stack.pop() {
+                component.push(node);
+                for &predecessor in &predecessors[&node] {
+                    if visited.insert(predecessor) {
+                        stack.push(predecessor);
+                    }
+                }
+            }
+
+            if component.len() > 1 || self.out_edges(root).contains(&root) {
+                cycle_nodes.extend(component);
+            }
+        }
+
+        cycle_nodes
     }
 
     /// Gets a new graph which is a subgraph of `self` containing all of the nodes reachable from
@@ -171,34 +216,6 @@ impl CallGraph {
         }
 
         graph
-    }
-
-    /// Computes the set of nodes in this graph which can reach `root`.
-    fn reverse_reachable(&self, root: GlobalItemIndex) -> BTreeSet<GlobalItemIndex> {
-        // Build reverse adjacency map: O(V + E)
-        let mut predecessors: BTreeMap<GlobalItemIndex, Vec<GlobalItemIndex>> =
-            self.nodes.keys().map(|&k| (k, Vec::new())).collect();
-        for (&node, out_edges) in self.nodes.iter() {
-            for &succ in out_edges {
-                predecessors.entry(succ).or_default().push(node);
-            }
-        }
-
-        // BFS on reverse graph: O(V + E)
-        let mut worklist = VecDeque::from_iter([root]);
-        let mut visited = BTreeSet::default();
-
-        while let Some(gid) = worklist.pop_front() {
-            if !visited.insert(gid) {
-                continue;
-            }
-
-            if let Some(preds) = predecessors.get(&gid) {
-                worklist.extend(preds.iter().copied());
-            }
-        }
-
-        visited
     }
 
     /// Constructs the topological ordering of nodes in the call graph, for which `caller` is an
@@ -257,28 +274,7 @@ impl CallGraph {
         // back to it), or not all nodes were reachable (an internal cycle)
         let has_cycle = caller_has_predecessors || output.len() != num_nodes;
         if has_cycle {
-            let visited: BTreeSet<GlobalItemIndex> = output.iter().copied().collect();
-            let mut in_cycle = BTreeSet::default();
-
-            // Collect nodes not processed by the sort (they're in internal cycles)
-            for (&n, out_edges) in subgraph.nodes.iter() {
-                if !visited.contains(&n) {
-                    in_cycle.insert(n);
-                    for &succ in out_edges {
-                        if !visited.contains(&succ) {
-                            in_cycle.insert(succ);
-                        }
-                    }
-                }
-            }
-
-            // If caller has back-edges, include all nodes participating in the cycle
-            // through caller
-            if caller_has_predecessors {
-                in_cycle.extend(subgraph.reverse_reachable(caller));
-            }
-
-            Err(CycleError(in_cycle))
+            Err(CycleError(subgraph.cycle_nodes()))
         } else {
             Ok(output)
         }

@@ -20,8 +20,8 @@ use crate::{Felt, Word, field::QuotientMap};
 // CONSTANTS
 // ================================================================================================
 
-/// The number of byte chunks that can be safely embedded in a field element
-const BINARY_CHUNK_SIZE: usize = 7;
+/// Number of data bytes packed into each Felt by the padded byte encoding.
+pub(crate) const BINARY_CHUNK_SIZE: usize = 7;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -93,7 +93,9 @@ pub(crate) fn read_sensitive_array<const N: usize, R: ByteReader>(
 /// * `bytes` - Byte slice to encode
 ///
 /// # Returns
-/// Vector of `Felt` elements with the last element containing padding
+///
+/// Returns `bytes.len().div_ceil(BINARY_CHUNK_SIZE)` Felts. Empty input yields an empty vector.
+/// The padding marker fits in the final Felt, even when the final data chunk has seven bytes.
 pub fn bytes_to_elements_with_padding(bytes: &[u8]) -> Vec<Felt> {
     if bytes.is_empty() {
         return vec![];
@@ -208,11 +210,8 @@ pub fn bytes_to_elements_exact(bytes: &[u8]) -> Option<Vec<Felt>> {
 
     let mut result = Vec::with_capacity(bytes.len() / Felt::NUM_BYTES);
 
-    for chunk in bytes.chunks_exact(Felt::NUM_BYTES) {
-        let chunk_array: [u8; Felt::NUM_BYTES] =
-            chunk.try_into().expect("should succeed given the length check above");
-
-        let value = u64::from_le_bytes(chunk_array);
+    for chunk in bytes.as_chunks::<{ Felt::NUM_BYTES }>().0 {
+        let value = u64::from_le_bytes(*chunk);
 
         // Validate that the value represents a valid field element
         let felt = Felt::from_canonical_checked(value)?;

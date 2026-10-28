@@ -3,7 +3,8 @@
 #! These stack-returning core wrappers use bundled precompile-backed support internally for event
 #! handling and deferred verification.
 
-use miden::precompiles::hashes::keccak256
+use miden::core::precompiles
+use miden::core::precompiles::hashes::keccak256
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -18,6 +19,9 @@ use miden::precompiles::hashes::keccak256
 # PROCEDURES
 # ================================================================================================
 
+#! Keccak256 digest, packed as eight little-endian u32 limbs.
+pub type Digest = struct { limbs: [u32; 8] }
+
 #! Computes Keccak256 hash of data stored in memory.
 #!
 #! Input: [ptr, len_bytes, ...]
@@ -29,7 +33,7 @@ use miden::precompiles::hashes::keccak256
 #! - INPUT_U32[len_u32] ~ INPUT_U8[len_bytes] with u32 packing (unused bytes in final u32 must be 0)
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 @locals(8)
-pub proc hash_bytes
+pub proc hash_bytes(ptr: ptr<u32>, len_bytes: u32) -> Digest
     locaddr.0 movdn.2
     # => [ptr, len_bytes, out_ptr=loc[0], ...]
     dup.2 movdn.3
@@ -54,7 +58,7 @@ end
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
 #! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
 @locals(8)
-pub proc hash
+pub proc hash(input: Digest) -> Digest
     # Stage INPUT_U32[8] at loc[0..8], using the pointer as a short cursor and recovering the base.
     locaddr.0
     # => [out_ptr, INPUT_U32[8], ...]
@@ -89,7 +93,7 @@ end
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
 @locals(16)
-pub proc merge
+pub proc merge(left: Digest, right: Digest) -> Digest
     # Stage INPUT_L || INPUT_R at loc[0..16], using locaddr.0 as a cursor and recovering the base.
     locaddr.0
     # => [out_ptr, INPUT_L_U32[8], INPUT_R_U32[8], ...]
@@ -113,4 +117,80 @@ pub proc merge
     # => [DIGEST_LO_U32[4], out_ptr, ...]
     padw movup.8 add.4 mem_loadw_le swapw
     # => [DIGEST_U32[8], ...]
+end
+
+#! Returns the obligation root for `hash_bytes` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [ptr, len_bytes, ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
+@locals(8)
+pub proc hash_bytes_with_root(
+    ptr: ptr<u32>,
+    len_bytes: u32,
+) -> (precompiles::Digest, Digest)
+    locaddr.0 movdn.2
+    dup.2 movdn.3
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
+    exec.keccak256::hash_bytes_mem_with_root
+    # => [ROOT, saved_out_ptr, ...]
+    movup.4
+    # => [saved_out_ptr, ROOT, ...]
+    padw dup.4 mem_loadw_le
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
+end
+
+#! Returns the obligation root for `hash` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [INPUT_U32[8], ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
+@locals(8)
+pub proc hash_with_root(input: Digest) -> (precompiles::Digest, Digest)
+    locaddr.0
+    dup movdn.5
+    mem_storew_le dropw add.4
+    dup movdn.5
+    mem_storew_le dropw sub.4
+    dup dup push.32 swap
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
+    exec.keccak256::hash_1_chunk_mem_with_root
+    # => [ROOT, saved_out_ptr, ...]
+    movup.4
+    # => [saved_out_ptr, ROOT, ...]
+    padw dup.4 mem_loadw_le
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
+end
+
+#! Returns the obligation root for `merge` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [LEFT_U32[8], RIGHT_U32[8], ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
+@locals(16)
+pub proc merge_with_root(
+    left: Digest,
+    right: Digest,
+) -> (precompiles::Digest, Digest)
+    locaddr.0
+    repeat.3
+        dup movdn.5
+        mem_storew_le dropw add.4
+    end
+    dup movdn.5
+    mem_storew_le dropw sub.12
+    dup dup push.64 swap
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
+    exec.keccak256::hash_2_chunks_mem_with_root
+    # => [ROOT, saved_out_ptr, ...]
+    movup.4
+    # => [saved_out_ptr, ROOT, ...]
+    padw dup.4 mem_loadw_le
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end

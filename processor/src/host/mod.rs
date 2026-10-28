@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    Word,
+    Felt, Word,
     advice::{AdviceMap, AdviceStack},
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
@@ -30,8 +30,8 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { stack: AdviceStack },
-    ExtendMap { other: AdviceMap },
-    ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
+    ExtendMap { map: AdviceMap },
+    ExtendMerkleStore { inner_nodes: Vec<InnerNodeInfo> },
 }
 
 impl AdviceMutation {
@@ -39,12 +39,22 @@ impl AdviceMutation {
         Self::ExtendStack { stack }
     }
 
-    pub fn extend_map(other: AdviceMap) -> Self {
-        Self::ExtendMap { other }
+    /// Extends the advice stack with `elements`, ordered from the top of the stack down.
+    ///
+    /// The typed [`AdviceMutation::extend_advice_stack`] is the one to reach for when the caller
+    /// already holds an [`AdviceStack`], or needs its element/word/dword layout helpers. This one
+    /// covers the common case of a host reply that is just a handful of field elements, which
+    /// would otherwise have to build an [`AdviceStack`] only to hand it straight over.
+    pub fn extend_advice_stack_with(elements: impl IntoIterator<Item = Felt>) -> Self {
+        Self::ExtendStack { stack: elements.into_iter().collect() }
     }
 
-    pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
-        Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    pub fn extend_map(map: AdviceMap) -> Self {
+        Self::ExtendMap { map }
+    }
+
+    pub fn extend_merkle_store(inner_nodes: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
+        Self::ExtendMerkleStore { inner_nodes: Vec::from_iter(inner_nodes) }
     }
 }
 // HOST TRAIT
@@ -129,7 +139,7 @@ pub trait SyncHost: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
@@ -176,7 +186,7 @@ pub trait Host: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
@@ -239,3 +249,24 @@ pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
 
 #[cfg(not(target_family = "wasm"))]
 impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdviceMutation, AdviceStack, Felt};
+
+    /// The iterator helper must be indistinguishable from building the stack by hand, so that a
+    /// handler can switch to it without changing what the VM sees.
+    ///
+    /// Driven from a lazy `Map` rather than a collection, since taking any `IntoIterator` is the
+    /// point of the helper.
+    #[test]
+    fn extend_advice_stack_with_matches_the_typed_helper() {
+        let mut stack = AdviceStack::new();
+        stack.append_elements((1..=3u32).map(Felt::from_u32));
+
+        assert_eq!(
+            AdviceMutation::extend_advice_stack_with((1..=3u32).map(Felt::from_u32)),
+            AdviceMutation::extend_advice_stack(stack)
+        );
+    }
+}

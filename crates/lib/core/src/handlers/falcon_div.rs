@@ -6,11 +6,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{ZERO, events::EventName};
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -19,15 +15,15 @@ const M: u64 = 12289;
 
 /// Event name for the falcon_div operation.
 pub const FALCON_DIV_EVENT_NAME: EventName =
-    EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+    EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
 /// FALCON_DIV system event handler.
 ///
-/// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
+/// Pushes the result of division (both the quotient and the remainder) of a [u64] by the Falcon
 /// prime (M = 12289) onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [event_id, a1, a0, ...]
+///   Operand stack: [event_id, a0, a1, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
@@ -38,11 +34,11 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// Similarly, (q0, q1) represent the quotient and r the remainder.
 ///
 /// # Errors
-/// - Returns an error if the divisor is ZERO.
+///
 /// - Returns an error if either a0 or a1 is not a u32.
 pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let dividend_hi = process.get_stack_item(1).as_canonical_u64();
-    let dividend_lo = process.get_stack_item(2).as_canonical_u64();
+    let dividend_lo = process.get_stack_item(1).as_canonical_u64();
+    let dividend_hi = process.get_stack_item(2).as_canonical_u64();
 
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {
@@ -63,21 +59,17 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
 
     let (quotient, remainder) = (dividend / M, dividend % M);
 
-    let (q_hi, q_lo) = u64_to_u32_elements(quotient);
-    let (r_hi, r_lo) = u64_to_u32_elements(remainder);
+    let (q_lo, q_hi) = u64_to_u32_elements(quotient);
+    let (r_lo, r_hi) = u64_to_u32_elements(remainder);
 
-    // Assertion from the original code: r_hi should always be zero for Falcon modulus
+    // The remainder is below M < 2^32, so its high limb is zero.
     assert_eq!(r_hi, ZERO);
 
-    let mut remainder_stack = AdviceStack::new();
     // MASM consumes the remainder after the quotient, with one `adv_push`.
-    remainder_stack.append_element(r_lo);
-    let remainder = AdviceMutation::extend_advice_stack(remainder_stack);
+    let remainder = AdviceMutation::extend_advice_stack_with([r_lo]);
 
-    let mut quotient_stack = AdviceStack::new();
     // MASM reads q_hi then q_lo with `adv_push adv_push`, so q_lo lands on top.
-    quotient_stack.append_elements([q_hi, q_lo]);
-    let quotient = AdviceMutation::extend_advice_stack(quotient_stack);
+    let quotient = AdviceMutation::extend_advice_stack_with([q_hi, q_lo]);
     Ok(vec![remainder, quotient])
 }
 

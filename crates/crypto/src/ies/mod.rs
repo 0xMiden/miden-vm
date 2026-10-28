@@ -5,6 +5,10 @@
 //! It exposes a simple API via [`SealingKey`], [`UnsealingKey`], [`SealedMessage`], and
 //! [`IesError`].
 //!
+//! [`IesScheme::Ecgfp5Eidos`] uses EcGFp5 agreement and Eidos extract/expand. Its
+//! [`ecgfp5_eidos`] module also provides the Felt envelope used by the core library's MASM
+//! procedures. Convert that envelope into [`SealedMessage`] to open it with [`UnsealingKey`].
+//!
 //! # Examples
 //!
 //! ```
@@ -28,6 +32,7 @@
 //! ```
 
 mod crypto_box;
+pub mod ecgfp5_eidos;
 mod keys;
 mod message;
 
@@ -41,14 +46,18 @@ use thiserror::Error;
 // IES SCHEME
 // ================================================================================================
 
-/// Supported schemes for IES
+/// Supported IES wire schemes.
+///
+/// The discriminant is serialized in keys and sealed messages. Assigned values must not be reused.
+/// IDs 2 and 3 are reserved for the unsupported Poseidon2 schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IesScheme {
     K256XChaCha20Poly1305 = 0,
     X25519XChaCha20Poly1305 = 1,
-    K256AeadPoseidon2 = 2,
-    X25519AeadPoseidon2 = 3,
+    K256AeadEidos = 4,
+    X25519AeadEidos = 5,
+    Ecgfp5Eidos = 6,
 }
 
 impl TryFrom<u8> for IesScheme {
@@ -57,8 +66,9 @@ impl TryFrom<u8> for IesScheme {
         match value {
             0 => Ok(IesScheme::K256XChaCha20Poly1305),
             1 => Ok(IesScheme::X25519XChaCha20Poly1305),
-            2 => Ok(IesScheme::K256AeadPoseidon2),
-            3 => Ok(IesScheme::X25519AeadPoseidon2),
+            4 => Ok(IesScheme::K256AeadEidos),
+            5 => Ok(IesScheme::X25519AeadEidos),
+            6 => Ok(IesScheme::Ecgfp5Eidos),
             _ => Err(IesError::UnsupportedScheme),
         }
     }
@@ -81,8 +91,9 @@ impl IesScheme {
         match self {
             IesScheme::K256XChaCha20Poly1305 => "K256+XChaCha20-Poly1305",
             IesScheme::X25519XChaCha20Poly1305 => "X25519+XChaCha20-Poly1305",
-            IesScheme::K256AeadPoseidon2 => "K256+AeadPoseidon2",
-            IesScheme::X25519AeadPoseidon2 => "X25519+AeadPoseidon2",
+            IesScheme::K256AeadEidos => "K256+AeadEidos",
+            IesScheme::X25519AeadEidos => "X25519+AeadEidos",
+            IesScheme::Ecgfp5Eidos => "EcGFp5+Eidos",
         }
     }
 }

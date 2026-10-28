@@ -18,11 +18,11 @@ use miden_assembly_syntax_cst::{
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
-use super::context::LoweringContext;
+use super::{super::MAX_CONSTANT_EXPR_NESTING, context::LoweringContext};
 use crate::{
     Path,
     ast::{
-        self, PathBuf,
+        self, MAX_TYPE_EXPR_NESTING, PathBuf,
         types::{AddressSpace, Type, TypeRepr},
     },
     parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
@@ -104,12 +104,30 @@ pub(super) fn lower_advice_map_decl(
     FragmentParser::parse(context, advice_map, |parser| parser.parse_advice_map_decl(span))
 }
 
+/// Whether a type expression is the variadic marker `...`.
+fn is_variadic_type_expr(ty: &ast::TypeExpr) -> bool {
+    matches!(ty, ast::TypeExpr::Primitive(t) if matches!(t.inner(), Type::Variadic))
+}
+
+struct ConstantExprWithDepth {
+    expr: ast::ConstantExpr,
+    depth: usize,
+}
+
+impl ConstantExprWithDepth {
+    fn leaf(expr: ast::ConstantExpr) -> Self {
+        Self { expr, depth: 0 }
+    }
+}
+
 /// Small recursive-descent/Pratt parser used to re-parse fragment-local CST token streams.
 struct FragmentParser<'a, 'b> {
     context: &'a mut LoweringContext<'b>,
     tokens: Vec<SyntaxToken>,
     pos: usize,
     span: SourceSpan,
+    constant_expr_nesting: usize,
+    type_expr_nesting: usize,
 }
 
 impl<'a, 'b> FragmentParser<'a, 'b> {
@@ -129,6 +147,8 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             tokens: node.significant_tokens().collect(),
             pos: 0,
             span,
+            constant_expr_nesting: 0,
+            type_expr_nesting: 0,
         };
         let parsed = action(&mut parser)?;
         parser.expect_eof(format!("unexpected trailing tokens in {}", node.describe()))?;
@@ -137,6 +157,10 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
     /// Parses a complete constant expression from the current fragment.
     fn parse_constant_expr(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+        self.parse_constant_expr_with_depth().map(|parsed| parsed.expr)
+    }
+
+    fn parse_constant_expr_with_depth(&mut self) -> Result<ConstantExprWithDepth, ParsingError> {
         if self.is_eof() {
             return Err(self.invalid_syntax("expected a constant expression"));
         }
@@ -146,28 +170,28 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_constant_expr_bp(
         &mut self,
         min_precedence: u8,
-    ) -> Result<ast::ConstantExpr, ParsingError> {
+    ) -> Result<ConstantExprWithDepth, ParsingError> {
         let mut lhs = self.parse_constant_term()?;
         while let Some((precedence, op)) = self.current_constant_operator() {
             if precedence < min_precedence {
                 break;
             }
 
-            self.bump();
+            let operator = self.bump().expect("constant operator should be present");
             let rhs = self.parse_constant_expr_bp(precedence + 1)?;
-            let span = join_spans(lhs.span(), rhs.span());
-            lhs = ast::ConstantExpr::BinaryOp {
-                span,
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            lhs = self.build_binary_constant_expr(lhs, op, rhs, self.token_span(&operator))?;
         }
 
         Ok(lhs)
     }
 
     fn parse_constant_arithmetic_expr(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+        self.parse_constant_arithmetic_expr_with_depth().map(|parsed| parsed.expr)
+    }
+
+    fn parse_constant_arithmetic_expr_with_depth(
+        &mut self,
+    ) -> Result<ConstantExprWithDepth, ParsingError> {
         if self.is_eof() {
             return Err(self.invalid_syntax("expected a constant expression"));
         }
@@ -177,31 +201,28 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_constant_arithmetic_expr_bp(
         &mut self,
         min_precedence: u8,
-    ) -> Result<ast::ConstantExpr, ParsingError> {
+    ) -> Result<ConstantExprWithDepth, ParsingError> {
         let mut lhs = self.parse_numeric_constant_term()?;
         while let Some((precedence, op)) = self.current_constant_operator() {
             if precedence < min_precedence {
                 break;
             }
 
-            self.bump();
+            let operator = self.bump().expect("constant operator should be present");
             let rhs = self.parse_constant_arithmetic_expr_bp(precedence + 1)?;
-            let span = join_spans(lhs.span(), rhs.span());
-            lhs = ast::ConstantExpr::BinaryOp {
-                span,
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            lhs = self.build_binary_constant_expr(lhs, op, rhs, self.token_span(&operator))?;
         }
 
         Ok(lhs)
     }
 
-    fn parse_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+    fn parse_constant_term(&mut self) -> Result<ConstantExprWithDepth, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
-            self.bump();
-            let expr = self.parse_constant_expr()?;
+            let lparen = self.bump().expect("opening parenthesis should be present");
+            self.enter_constant_expr_nesting(self.token_span(&lparen))?;
+            let expr = self.parse_constant_expr_with_depth();
+            self.constant_expr_nesting -= 1;
+            let expr = expr?;
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close constant expression")?;
             return Ok(expr);
         }
@@ -209,11 +230,11 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         if (self.at_keyword("word") || self.at_keyword("event"))
             && self.peek_kind(1) == Some(SyntaxKind::LParen)
         {
-            return self.parse_hash_constant();
+            return self.parse_hash_constant().map(ConstantExprWithDepth::leaf);
         }
 
         if self.at_kind(SyntaxKind::LBracket) {
-            return self.parse_word_literal();
+            return self.parse_word_literal().map(ConstantExprWithDepth::leaf);
         }
 
         let Some(token) = self.current() else {
@@ -225,21 +246,27 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             {
                 ParsedNumeric::Int(value) => {
                     self.bump();
-                    Ok(ast::ConstantExpr::Int(Span::new(self.token_span(&token), value)))
+                    Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::Int(Span::new(
+                        self.token_span(&token),
+                        value,
+                    ))))
                 },
                 ParsedNumeric::Word(value) => {
                     self.bump();
-                    Ok(ast::ConstantExpr::Word(Span::new(self.token_span(&token), value)))
+                    Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::Word(Span::new(
+                        self.token_span(&token),
+                        value,
+                    ))))
                 },
             },
             SyntaxKind::QuotedString | SyntaxKind::QuotedIdent => {
                 let token = self.bump().expect("quoted string token should exist");
                 let value = self.lower_string_token(&token)?;
-                Ok(ast::ConstantExpr::String(value))
+                Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::String(value)))
             },
             _ => {
                 let path = self.parse_path(PathMode::Constant)?;
-                Ok(ast::ConstantExpr::Var(path))
+                Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::Var(path)))
             },
         }
     }
@@ -248,10 +275,13 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     ///
     /// This rejects strings, words, and hash constructors so arithmetic-only contexts can reuse
     /// the constant-expression precedence parser without permitting non-numeric operands.
-    fn parse_numeric_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+    fn parse_numeric_constant_term(&mut self) -> Result<ConstantExprWithDepth, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
-            self.bump();
-            let expr = self.parse_constant_arithmetic_expr()?;
+            let lparen = self.bump().expect("opening parenthesis should be present");
+            self.enter_constant_expr_nesting(self.token_span(&lparen))?;
+            let expr = self.parse_constant_arithmetic_expr_with_depth();
+            self.constant_expr_nesting -= 1;
+            let expr = expr?;
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close constant expression")?;
             return Ok(expr);
         }
@@ -276,7 +306,10 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             {
                 ParsedNumeric::Int(value) => {
                     self.bump();
-                    Ok(ast::ConstantExpr::Int(Span::new(self.token_span(&token), value)))
+                    Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::Int(Span::new(
+                        self.token_span(&token),
+                        value,
+                    ))))
                 },
                 ParsedNumeric::Word(_) => Err(ParsingError::InvalidSyntax {
                     span: self.token_span(&token),
@@ -285,9 +318,36 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             },
             _ => {
                 let path = self.parse_path(PathMode::Constant)?;
-                Ok(ast::ConstantExpr::Var(path))
+                Ok(ConstantExprWithDepth::leaf(ast::ConstantExpr::Var(path)))
             },
         }
+    }
+
+    fn build_binary_constant_expr(
+        &self,
+        lhs: ConstantExprWithDepth,
+        op: ast::ConstantOp,
+        rhs: ConstantExprWithDepth,
+        operator_span: SourceSpan,
+    ) -> Result<ConstantExprWithDepth, ParsingError> {
+        let depth = lhs.depth.max(rhs.depth) + 1;
+        if depth > MAX_CONSTANT_EXPR_NESTING {
+            return Err(ParsingError::ConstantExpressionNestingDepthExceeded {
+                span: operator_span,
+                max_depth: MAX_CONSTANT_EXPR_NESTING,
+            });
+        }
+
+        let span = join_spans(lhs.expr.span(), rhs.expr.span());
+        Ok(ConstantExprWithDepth {
+            expr: ast::ConstantExpr::BinaryOp {
+                span,
+                op,
+                lhs: Box::new(lhs.expr),
+                rhs: Box::new(rhs.expr),
+            },
+            depth,
+        })
     }
 
     /// Parses `word("...")` / `event("...")` hash-like constant constructors.
@@ -373,14 +433,30 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(ast::TypeExpr::Ref(path))
     }
 
+    fn parse_nested_type_expr(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        let span = self.current_span();
+        let next_depth = self.type_expr_nesting + 1;
+        if next_depth > MAX_TYPE_EXPR_NESTING {
+            return Err(ParsingError::TypeExpressionNestingDepthExceeded {
+                span,
+                max_depth: MAX_TYPE_EXPR_NESTING,
+            });
+        }
+
+        self.type_expr_nesting = next_depth;
+        let ty = self.parse_type_expr();
+        self.type_expr_nesting -= 1;
+        ty
+    }
+
     /// Parses a full procedure signature fragment.
     fn parse_function_type(&mut self) -> Result<ast::FunctionType, ParsingError> {
         let lparen =
             self.expect_kind(SyntaxKind::LParen, "expected `(` to start procedure signature")?;
-        let args = self.parse_comma_delimited_allow_trailing(
-            SyntaxKind::RParen,
-            Self::parse_function_param_type,
-        )?;
+        let (arg_names, args): (Vec<_>, Vec<_>) = self
+            .parse_comma_delimited_allow_trailing(SyntaxKind::RParen, Self::parse_function_param)?
+            .into_iter()
+            .unzip();
         let rparen =
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close procedure parameters")?;
         let mut end_span = self.token_span(&rparen);
@@ -395,23 +471,78 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             Vec::new()
         };
 
+        Self::check_variadic_position(&args, "parameter")?;
+        Self::check_variadic_position(&results, "result")?;
+
         Ok(ast::FunctionType::new(ast::types::CallConv::Fast, args, results)
+            .with_arg_names(arg_names)
             .with_span(join_spans(self.token_span(&lparen), end_span)))
     }
 
-    fn parse_function_param_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
-        if !matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
-            || self.peek_kind(1) != Some(SyntaxKind::Colon)
+    /// A variadic type parameter stands for zero or more values of arbitrary type, so it only
+    /// has a meaning in trailing position, and only once per list: anything after it could never
+    /// be reached, and a second one would have no boundary with the first.
+    fn check_variadic_position(types: &[ast::TypeExpr], list: &str) -> Result<(), ParsingError> {
+        let mut variadics = types.iter().enumerate().filter(|(_, ty)| is_variadic_type_expr(ty));
+        let Some((first, _)) = variadics.next() else {
+            return Ok(());
+        };
+
+        // Report the second `...` itself, rather than whatever happens to follow the first.
+        if let Some((_, extra)) = variadics.next() {
+            return Err(ParsingError::InvalidSyntax {
+                span: extra.span(),
+                message: alloc::format!("only one variadic {list} is allowed"),
+            });
+        }
+
+        match types.get(first + 1) {
+            None => Ok(()),
+            Some(next) => Err(ParsingError::InvalidSyntax {
+                span: next.span(),
+                message: alloc::format!("a variadic {list} must come last"),
+            }),
+        }
+    }
+
+    /// Parses a single procedure parameter.
+    fn parse_function_param(
+        &mut self,
+    ) -> Result<(Option<ast::Ident>, ast::TypeExpr), ParsingError> {
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok((None, self.parse_variadic_type()));
+        }
+
+        if !matches!(
+            self.current().as_ref().map(SyntaxToken::kind),
+            Some(SyntaxKind::Ident | SyntaxKind::QuotedIdent | SyntaxKind::QuotedString)
+        ) || self.peek_kind(1) != Some(SyntaxKind::Colon)
         {
             return Err(self.invalid_syntax("expected a named procedure parameter"));
         }
 
+        let name = self.bump().expect("parameter name token should be present");
+        let name = match name.kind() {
+            SyntaxKind::QuotedString => self.context.lower_escaped_ident_token(&name)?,
+            _ => self.context.lower_ident_token(&name)?,
+        };
         self.bump();
+        Ok((Some(name), self.parse_type_expr()?))
+    }
+
+    /// Consumes a `...` token, which is only reachable from parameter or result position.
+    fn parse_variadic_type(&mut self) -> ast::TypeExpr {
+        let token = self.current().expect("caller checked for `...`");
+        let span = self.token_span(&token);
         self.bump();
-        self.parse_type_expr()
+        ast::TypeExpr::Primitive(Span::new(span, Type::Variadic))
     }
 
     fn parse_function_result_types(&mut self) -> Result<Vec<ast::TypeExpr>, ParsingError> {
+        // An unparenthesised result list may itself be just `...`, i.e. `-> ...`.
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok(vec![self.parse_variadic_type()]);
+        }
         if self.at_kind(SyntaxKind::LParen) {
             self.bump();
             let results = self.parse_comma_delimited_allow_trailing(
@@ -426,6 +557,9 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     fn parse_maybe_named_result_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok(self.parse_variadic_type());
+        }
         if matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
             && self.peek_kind(1) == Some(SyntaxKind::Colon)
         {
@@ -675,7 +809,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_pointer_type(&mut self) -> Result<ast::PointerType, ParsingError> {
         let ptr = self.expect_keyword("ptr", "expected `ptr`")?;
         self.expect_kind(SyntaxKind::LAngle, "expected `<` after `ptr`")?;
-        let pointee = self.parse_type_expr()?;
+        let pointee = self.parse_nested_type_expr()?;
 
         let mut ty = ast::PointerType::new(pointee);
         if self.at_kind(SyntaxKind::Comma) {
@@ -694,7 +828,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_array_type(&mut self) -> Result<ast::ArrayType, ParsingError> {
         let lbracket =
             self.expect_kind(SyntaxKind::LBracket, "expected `[` to start array type")?;
-        let elem = self.parse_type_expr()?;
+        let elem = self.parse_nested_type_expr()?;
         self.expect_kind(SyntaxKind::Semicolon, "expected `;` in array type")?;
         let arity = self.parse_decimal_usize("expected an array length")?;
         let rbracket =
@@ -738,7 +872,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         let name_token = self.expect_ident("expected a struct field name")?;
         let name = self.context.lower_ident_token(&name_token)?;
         self.expect_kind(SyntaxKind::Colon, "expected `:` after struct field name")?;
-        let ty = self.parse_type_expr()?;
+        let ty = self.parse_nested_type_expr()?;
         let span = join_spans(self.context.parse().span_for_token(&name_token), ty.span());
         Ok(ast::StructField { span, name, ty })
     }
@@ -753,7 +887,6 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             return match name_text {
                 "packed" => Ok(Span::new(name_span, TypeRepr::packed(1))),
                 "transparent" => Ok(Span::new(name_span, TypeRepr::Transparent)),
-                "bigendian" => Ok(Span::new(name_span, TypeRepr::BigEndian)),
                 "align" => Err(ParsingError::InvalidStructRepr {
                     span: join_spans(self.token_span(&at), name_span),
                     message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),
@@ -941,14 +1074,15 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     /// with its binding power.
     fn current_constant_operator(&self) -> Option<(u8, ast::ConstantOp)> {
         let token = self.current()?;
-        match token.kind() {
-            SyntaxKind::Plus => Some((1, ast::ConstantOp::Add)),
-            SyntaxKind::Minus => Some((1, ast::ConstantOp::Sub)),
-            SyntaxKind::Star => Some((2, ast::ConstantOp::Mul)),
-            SyntaxKind::Slash => Some((2, ast::ConstantOp::Div)),
-            SyntaxKind::SlashSlash => Some((2, ast::ConstantOp::IntDiv)),
-            _ => None,
-        }
+        let op = match token.kind() {
+            SyntaxKind::Plus => ast::ConstantOp::Add,
+            SyntaxKind::Minus => ast::ConstantOp::Sub,
+            SyntaxKind::Star => ast::ConstantOp::Mul,
+            SyntaxKind::Slash => ast::ConstantOp::Div,
+            SyntaxKind::SlashSlash => ast::ConstantOp::IntDiv,
+            _ => return None,
+        };
+        Some((op.precedence(), op))
     }
 
     fn expect_keyword(
@@ -1140,6 +1274,18 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             .unwrap_or_else(|| SourceSpan::at(self.span.source_id(), self.span.end()))
     }
 
+    fn enter_constant_expr_nesting(&mut self, span: SourceSpan) -> Result<(), ParsingError> {
+        let next_depth = self.constant_expr_nesting + 1;
+        if next_depth > MAX_CONSTANT_EXPR_NESTING {
+            return Err(ParsingError::ConstantExpressionNestingDepthExceeded {
+                span,
+                max_depth: MAX_CONSTANT_EXPR_NESTING,
+            });
+        }
+        self.constant_expr_nesting = next_depth;
+        Ok(())
+    }
+
     /// Constructs a generic syntax error anchored at the current cursor position.
     fn invalid_syntax(&self, message: impl ToString) -> ParsingError {
         ParsingError::InvalidSyntax {
@@ -1189,6 +1335,7 @@ fn builtin_type_for_name(name: &str) -> Option<Type> {
         "u32" => Type::U32,
         "u64" => Type::U64,
         "u128" => Type::U128,
+        "u256" => Type::U256,
         "felt" => Type::Felt,
         _ => return None,
     })
@@ -1389,10 +1536,13 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body,
+        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body, parse_numeric_token,
     };
-    use crate::{ast, parser::cst::context::LoweringContext};
+    use crate::{
+        Word, ast,
+        parser::{ParsingError, cst::context::LoweringContext},
+    };
 
     #[test]
     fn lowers_procedure_signatures_from_cst_tokens() {
@@ -1449,6 +1599,108 @@ end
                 ],
             )
         );
+    }
+
+    /// Lower the signature of the single procedure in `source`.
+    fn lower_signature(source: &str) -> Result<ast::FunctionType, ParsingError> {
+        let source = test_source_file(source);
+        let parse = parse_source_file(source);
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let procedure = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::Procedure(procedure) => Some(procedure),
+                _ => None,
+            })
+            .expect("procedure");
+        let signature = procedure.signature().expect("signature");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(parse, &mut interned);
+        lower_function_type_from_signature(&mut context, &signature)
+    }
+
+    fn variadic() -> ast::TypeExpr {
+        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Variadic))
+    }
+
+    fn felt() -> ast::TypeExpr {
+        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Felt))
+    }
+
+    #[test]
+    fn lowers_variadic_type_parameters_in_trailing_position() {
+        // The forms documented as valid on `Type::Variadic`.
+        let cases: &[(&str, &[ast::TypeExpr], &[ast::TypeExpr])] = &[
+            ("pub proc f(...)\n    nop\nend\n", &[variadic()], &[]),
+            ("pub proc f() -> ...\n    nop\nend\n", &[], &[variadic()]),
+            ("pub proc f(...) -> ...\n    nop\nend\n", &[variadic()], &[variadic()]),
+            ("pub proc f(a: felt, ...)\n    nop\nend\n", &[felt(), variadic()], &[]),
+            ("pub proc f() -> (a: felt, ...)\n    nop\nend\n", &[], &[felt(), variadic()]),
+            (
+                "pub proc f(a: felt, ...) -> (b: felt, ...)\n    nop\nend\n",
+                &[felt(), variadic()],
+                &[felt(), variadic()],
+            ),
+        ];
+
+        for (source, params, results) in cases {
+            let signature =
+                lower_signature(source).unwrap_or_else(|err| panic!("{source:?}: {err}"));
+            assert_eq!(
+                signature,
+                ast::FunctionType::new(
+                    ast::types::CallConv::Fast,
+                    params.to_vec(),
+                    results.to_vec(),
+                ),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_variadic_type_parameters_out_of_trailing_position() {
+        // The forms documented as invalid on `Type::Variadic`.
+        let cases = [
+            "pub proc f(..., ...)\n    nop\nend\n",
+            "pub proc f() -> (..., ...)\n    nop\nend\n",
+            "pub proc f(..., a: felt)\n    nop\nend\n",
+            "pub proc f(a: felt, ..., b: felt)\n    nop\nend\n",
+            "pub proc f() -> (..., a: felt)\n    nop\nend\n",
+            // Both rules are violated at once; the "only one" rule takes precedence.
+            "pub proc f(a: felt, ..., b: felt, ...)\n    nop\nend\n",
+        ];
+
+        for source in cases {
+            let err = lower_signature(source)
+                .expect_err(&alloc::format!("{source:?} should be rejected"));
+            let rendered = alloc::format!("{err:?}");
+            assert!(rendered.contains("variadic"), "{source:?}: unexpected error: {rendered}");
+        }
+    }
+
+    #[test]
+    fn rejects_variadic_outside_a_function_signature() {
+        // `...` denotes a variadic parameter list, and has no meaning as an ordinary type.
+        let source = test_source_file("type Bad = struct { field: ... }\n");
+        let parse = parse_source_file(source);
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let alias = source_file.items().find_map(|item| match item {
+            CstItem::TypeDecl(decl) => decl.body(),
+            _ => None,
+        });
+
+        if let Some(body) = alias {
+            let mut interned = BTreeSet::default();
+            let mut context = LoweringContext::new(parse, &mut interned);
+            assert!(
+                lower_type_expr_from_alias_body(&mut context, &body).is_err(),
+                "`...` should not be accepted as an ordinary type"
+            );
+        }
     }
 
     #[test]
@@ -1597,6 +1849,70 @@ end
                 miden_core::Felt::from_u32(7),
             ]
         );
+    }
+
+    #[test]
+    fn mast_root_literal_matches_word_to_hex_byte_order() {
+        use miden_core::Felt;
+        use miden_debug_types::SourceSpan;
+
+        use crate::parser::WordValue;
+
+        // Non-symmetric field elements (issue #3885): every byte position is distinct, so any
+        // byte-order/transposition bug in the hex <-> Word conversion flips the resulting root.
+        let elements: [u64; 4] =
+            [0x1f92867d5acabdfd, 0xece9a4eb6d0c2ae1, 0x9359c1a7ae1fa54e, 0x1fc16cc6ab2d94c0];
+        let word = Word::new([
+            Felt::new(elements[0]).unwrap(),
+            Felt::new(elements[1]).unwrap(),
+            Felt::new(elements[2]).unwrap(),
+            Felt::new(elements[3]).unwrap(),
+        ]);
+
+        // `Word::to_hex()` must round-trip through the MAST root literal parser.
+        let to_hex = word.to_hex();
+        let parsed = parse_numeric_token(SourceSpan::default(), &to_hex)
+            .expect("Word::to_hex() output must be a valid MAST root literal");
+        match parsed {
+            ParsedNumeric::Word(WordValue(parsed_word)) => {
+                assert_eq!(
+                    Word::from(parsed_word),
+                    word,
+                    "MAST root literal parsing must round-trip Word::to_hex() exactly"
+                );
+            },
+            ParsedNumeric::Int(_) => {
+                panic!("64 hex-digit literal must parse as a Word, not an Int")
+            },
+        }
+
+        // The "naive" encoding (each field element formatted as a canonical big-endian integer
+        // and concatenated) is syntactically a valid 64-digit hex literal, but silently decodes
+        // to a different MAST root.
+        let mut canonical_literal = alloc::string::String::from("0x");
+        for e in elements {
+            canonical_literal.push_str(&alloc::format!("{e:016x}"));
+        }
+        assert_ne!(
+            canonical_literal, to_hex,
+            "sanity check: canonical-integer and Word::to_hex() encodings must differ for this fixture"
+        );
+
+        let parsed_canonical = parse_numeric_token(SourceSpan::default(), &canonical_literal)
+            .expect("canonical-integer literal is still syntactically valid hex");
+        match parsed_canonical {
+            ParsedNumeric::Word(WordValue(parsed_word)) => {
+                assert_ne!(
+                    Word::from(parsed_word),
+                    word,
+                    "canonical-integer concatenation must NOT decode back to the original word \
+                     (this is the trap #3885 documents: it parses, but to the wrong root)"
+                );
+            },
+            ParsedNumeric::Int(_) => {
+                panic!("64 hex-digit literal must parse as a Word, not an Int")
+            },
+        }
     }
 
     fn test_source_file(source: &str) -> Arc<SourceFile> {

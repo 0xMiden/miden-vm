@@ -1,12 +1,17 @@
 #![no_main]
 
+use std::collections::BTreeMap;
+
 use core::mem::size_of;
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{
-    merkle::smt::{LeafIndex, NodeValue, PartialSmt, SmtLeaf, UniqueNodes, SMT_DEPTH},
+    Felt, Word,
+    merkle::{
+        NodeIndex,
+        smt::{LeafIndex, PartialSmt, SMT_DEPTH, SmtLeaf, UniqueNodes},
+    },
     utils::{Deserializable, Serializable},
-    Felt, Map, Word,
 };
 
 const MAX_LEVELS: usize = 16;
@@ -29,25 +34,29 @@ fuzz_target!(|data: &[u8]| {
     // Generate parse-valid compact PartialSmt encodings from the input bytes. This gives the fuzzer
     // enough structure to regularly reach reconstruction and validation, not just byte parsing.
     let unique_nodes = StructuredInput::new(data).unique_nodes();
-    let _ = PartialSmt::read_from_bytes(&unique_nodes.to_bytes());
+    let bytes = unique_nodes.to_bytes();
+    assert_eq!(UniqueNodes::read_from_bytes(&bytes).unwrap(), unique_nodes);
+    let _ = PartialSmt::read_from_bytes(&bytes);
 
     // Also try the same leaves without reconstruction nodes. This preserves direct coverage for
-    // missing-node cases like the panic path reported in roborev review 3329.
+    // missing-node cases like the decode failure mode.
     if !unique_nodes.leaves.is_empty() {
         let mut missing_nodes = unique_nodes;
         missing_nodes.nodes.clear();
         let _ = PartialSmt::read_from_bytes(&missing_nodes.to_bytes());
     }
 
-    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the reviewed
-    // failure mode without first discovering the broader structured encoding.
+    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the
+    // decode failure mode without first discovering the broader structured encoding.
     let _ = PartialSmt::read_from_bytes(&focused_missing_node_payload(data));
 });
 
 fn focused_missing_node_payload(data: &[u8]) -> Vec<u8> {
     let leaf_index = leaf_index_from_prefix(data);
     UniqueNodes {
-        leaves: vec![(leaf_index, SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))],
+        leaves: [(leaf_index, SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))]
+            .into_iter()
+            .collect(),
         ..UniqueNodes::empty()
     }
     .to_bytes()
@@ -77,25 +86,29 @@ impl<'a> StructuredInput<'a> {
             UniqueNodes::empty().root
         };
 
-        let mut nodes = Map::new();
+        let mut nodes = BTreeMap::new();
         for _ in 0..self.next_count(MAX_LEVELS) {
             let depth = self.next_node_depth();
             let node_count = self.next_count(MAX_NODES_PER_LEVEL);
-            let level_nodes = nodes.entry(depth).or_insert_with(Vec::new);
-
             for _ in 0..node_count {
-                level_nodes.push((self.next_node_position(depth), self.next_node_value()));
+                let position = bounded_position(depth, self.next_node_position(depth));
+                nodes.insert(NodeIndex::new(depth, position).unwrap(), self.next_word());
             }
         }
 
-        let mut leaves = Vec::new();
+        let mut leaves = BTreeMap::new();
         for _ in 0..self.next_count(MAX_LEAVES) {
-            leaves.push(self.next_leaf_entry());
+            let (position, leaf) = self.next_leaf_entry();
+            leaves.insert(position, leaf);
         }
 
-        let mut value_only_leaves = Vec::new();
+        let mut value_only_leaves = BTreeMap::new();
         for _ in 0..self.next_count(MAX_VALUE_ONLY_LEAVES) {
-            value_only_leaves.push((self.next_node_position(SMT_DEPTH), self.next_word()));
+            let position = self.next_node_position(SMT_DEPTH);
+            let value = self.next_word();
+            if !leaves.contains_key(&position) {
+                value_only_leaves.insert(position, value);
+            }
         }
 
         UniqueNodes { root, nodes, leaves, value_only_leaves }
@@ -111,17 +124,26 @@ impl<'a> StructuredInput<'a> {
             _ => self.next_multiple_leaf(leaf_index),
         };
 
-        (outer_index, leaf)
+        (leaf.index().position(), leaf)
     }
 
     fn next_multiple_leaf(&mut self, leaf_index: u64) -> SmtLeaf {
         let count = 2 + self.next_count(MAX_MULTI_LEAF_ENTRIES.saturating_sub(2));
-        let entries = (0..count)
-            .map(|_| (self.next_key_for_leaf(leaf_index), self.next_word()))
-            .collect();
+        // A multiple leaf holds its entries sorted by key with no repeats. Short inputs wrap around
+        // and can yield the same key twice, so a repeated key is bumped until it is new, keeping
+        // `count` entries.
+        let mut entries = BTreeMap::new();
+        for _ in 0..count {
+            let mut key = self.next_key_for_leaf(leaf_index);
+            while entries.contains_key(&key) {
+                key.a += Felt::ONE;
+            }
+            let value = self.next_word();
+            entries.insert(key, value);
+        }
 
-        SmtLeaf::new_multiple(entries)
-            .unwrap_or_else(|_| SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))
+        SmtLeaf::new_multiple(entries.into_iter().collect())
+            .expect("keys are distinct, sorted and share the same leaf index")
     }
 
     fn next_key_for_leaf(&mut self, leaf_index: u64) -> Word {
@@ -131,14 +153,6 @@ impl<'a> StructuredInput<'a> {
             self.next_felt(),
             Felt::new_unchecked(leaf_index % Felt::ORDER),
         ])
-    }
-
-    fn next_node_value(&mut self) -> NodeValue {
-        if self.next_bool() {
-            NodeValue::Present(self.next_word())
-        } else {
-            NodeValue::EmptySubtreeRoot
-        }
     }
 
     fn next_node_depth(&mut self) -> u8 {

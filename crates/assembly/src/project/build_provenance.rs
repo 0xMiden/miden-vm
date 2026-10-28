@@ -41,7 +41,7 @@ use super::PackageBuildSettings;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub(super) enum PackageBuildProvenance {
     /// Provenance for a package assembled from sources addressed by a local filesystem path.

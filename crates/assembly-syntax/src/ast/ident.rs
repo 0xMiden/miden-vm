@@ -56,7 +56,7 @@ pub enum CaseKindError {
 #[derive(Clone)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct Ident {
     /// The source span associated with this identifier.
@@ -140,7 +140,10 @@ impl Ident {
             crate::Path::KERNEL_PATH
             | crate::Path::EXEC_PATH
             | crate::ast::ProcedureName::MAIN_PROC_NAME => false,
-            ident => !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            ident => {
+                ident.starts_with(|c: char| c.is_ascii_digit())
+                    || !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            },
         }
     }
 
@@ -246,27 +249,6 @@ impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
     }
 }
 
-#[cfg(feature = "serde")]
-impl serde::Serialize for Ident {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Ident {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(name).map_err(serde::de::Error::custom)
-    }
-}
-
 impl Serializable for Ident {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_usize(self.len());
@@ -343,17 +325,20 @@ pub mod arbitrary {
     const PREFERRED_RANGES: &[core::ops::RangeInclusive<char>] = &['a'..='z', 'A'..='Z'];
     const EXTRA_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9', 'à'..='ö', 'ø'..='ÿ'];
 
-    const PREFERRED_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['A'..='Z'];
-    const EXTRA_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9'];
+    const PREFERRED_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] =
+        core::slice::from_ref(&('A'..='Z'));
+    const EXTRA_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] =
+        core::slice::from_ref(&('0'..='9'));
 
     prop_compose! {
         /// A strategy to produce a random character from a more restricted dictionary for bare
         /// identifiers
+        #[allow(clippy::single_range_in_vec_init)]
         fn bare_ident_chars()
                       (c in CharStrategy::new_borrowed(
                           &['_'],
                           PREFERRED_RANGES,
-                          &['0'..='9']
+                          core::slice::from_ref(&('0'..='9'))
                       )) -> char {
             c
         }

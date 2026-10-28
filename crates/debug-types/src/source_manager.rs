@@ -15,8 +15,23 @@ use super::*;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SourceId(u32);
+
+impl Serializable for SourceId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for SourceId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        u32::read_from(source).map(Self)
+    }
+}
 
 impl From<u32> for SourceId {
     fn from(value: u32) -> Self {
@@ -409,7 +424,7 @@ impl DefaultSourceManagerImpl {
         let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
 
         let max_len = ByteIndex::from(file.as_str().len() as u32);
-        if loc.start >= max_len || loc.end > max_len {
+        if loc.start > loc.end || loc.end > max_len {
             return None;
         }
 

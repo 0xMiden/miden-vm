@@ -1,8 +1,10 @@
-use miden::core::stark::constants
+use {
+    PUBLIC_INPUTS_ADDRESS_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
-use miden::core::crypto::hashes::poseidon2
-use miden::core::sys::vm::claim
+use miden::core::sys::vm::layout
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -14,10 +16,8 @@ use miden::core::sys::vm::claim
 #
 # Memory layout populated (low -> high addresses):
 #
-#   boundary_inputs_ptr --> [ kernel_H       (4 felts) ]
-#                           [ program_digest (4 felts) ]
+#   boundary_inputs_ptr --> [ program_digest (4 felts) ]
 #                           [ deferred_root  (4 felts) ]
-#                           [ reserved       (4 felts) ]
 #
 #   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
 #
@@ -43,18 +43,18 @@ use miden::core::sys::vm::claim
 #
 # Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
 #   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
-# where CLAIM_HASH is the canonical execution-claim commitment over
-# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` (computed over the caller's claim
-# region by `claim::claim_commitment`). With RELATION_DIGEST pre-loaded in the transcript
-# capacity by `init_seed`, the state after this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+# where CLAIM_HASH is the caller-provided execution-claim commitment, authenticated against
+# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs.
+# `init_seed` folds RELATION_DIGEST into the initial transcript chaining word, so the state after
+# this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
 # The raw stack i/o and kernel digests remain public values for the constraint checks and the
 # LogUp boundary without being separately absorbed.
 #
 # Data sources:
-#   - claim region: caller memory at `claim_ptr` (operand), 40 base felts `P | K | I | O`,
-#     fully populated by the caller from its own trusted data.
-#   - kernel digests: verifier memory at `kernel_ptr` (operand), N word-aligned digests.
-#     `verify_vm_proof` fetches them from the advice map and asserts they hash to
+#   - claim region: verifier memory at `claim_ptr`, populated from advice and authenticated against
+#     the caller-provided claim commitment before any fields are used.
+#   - kernel digests: verifier memory at `KERNEL_WITNESS_PTR`, N word-aligned digests.
+#     `vm::verify_proof` fetches them from the advice map and asserts they hash to
 #     the claim's K before calling into this module; the step-II boundary fold reads them
 #     from the same region.
 #   - deferred_root: advice (4 canonical felts), loaded by `stage_boundary_inputs`.
@@ -67,23 +67,23 @@ use miden::core::sys::vm::claim
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
 # Number of AIR instances in the Miden VM statement.
-const NUM_MIDEN_AIRS = 3
+const NUM_MIDEN_AIRS = 4
 
 # Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 
-# Word offsets into the 16-felt boundary-inputs block at `boundary_inputs_ptr`:
-#   [ kernel_H (+0) | program_digest (+4) | deferred_root (+8) | reserved (+12) ].
-const BOUNDARY_INPUTS_PROGRAM_OFFSET    = 4
-const BOUNDARY_INPUTS_DEFERRED_OFFSET   = 8
+# Word offsets into the boundary-inputs block at `boundary_inputs_ptr`:
+#   [ program_digest (+0) | deferred_root (+4) ].
+const BOUNDARY_INPUTS_PROGRAM_OFFSET    = 0
+const BOUNDARY_INPUTS_DEFERRED_OFFSET   = 4
 
 
 # CONSTANTS GETTERS
 # =================================================================================================
 
-pub proc get_num_fixed_len_public_inputs
+pub proc get_num_fixed_len_public_inputs() -> u8
     push.NUM_FIXED_LEN_PUBLIC_INPUTS
 end
 
@@ -92,30 +92,24 @@ end
 
 #! Processes the public inputs (step I of the verifier).
 #!
-#! See module banner for the memory layout, the canonical FS schedule and the advice tape
-#! order.
+#! See the module banner for the memory layout and canonical Fiat-Shamir schedule.
 #!
-#! Precondition:  random coin input_len=0 (guaranteed by `init_seed`, which absorbs the
-#!                protocol parameters as one full rate block).
+#! Precondition:  the transcript buffer contains the trusted preprocessed-trace commitment
+#!                observed by `init_seed`.
 #! Postcondition: the transcript input buffer holds the AIR-shape values. The generic verifier
 #!                observes the main-trace commitment next and flushes before sampling.
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc process_public_inputs
-    # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="process_public_inputs: input buffer must be empty"
-
-    # 1) Store the ACE and boundary-data pointers.
+pub proc process_public_inputs()
+    # 1) Store the ACE public-input pointer.
     exec.get_num_fixed_len_public_inputs
+    exec.layout::aux_rand_elem_ptr
     exec.public_inputs::compute_and_store_public_inputs_address
-    exec.store_boundary_inputs_address
     # => [...]
 
     # 2) Absorb [CLAIM_HASH | D].
-    exec.constants::claim_address_ptr mem_load
-    exec.claim::claim_commitment
+    padw exec.layout::claim_commitment_ptr mem_loadw_le
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
@@ -129,69 +123,27 @@ pub proc process_public_inputs
     # => [...]
 end
 
-#! Publishes the fixed boundary-inputs block address for caller-facing output readers.
-#!
-#! Input:  [...]
-#! Output: [...]
-proc store_boundary_inputs_address
-    exec.constants::boundary_inputs_ptr
-    exec.constants::boundary_inputs_address_ptr mem_store
-end
-
 #! Stages VM boundary data before the transcript starts.
 #!
-#! Precondition: the claim region is fully populated, and the digest witness at `kernel_ptr`
-#! hashes to its K field (`verify_vm_proof` asserts this before calling).
+#! Precondition: the claim region is populated and authenticated.
 #!
 #! Writes:
-#! - +0: K from the claim
-#! - +4: program_digest from the claim
-#! - +8: deferred_root from advice
-#! - +12: reserved and unchanged
-#!
-#! Also stores `claim_ptr`, `kernel_ptr`, and N for later steps.
-#!
-#! Input:  [claim_ptr, kernel_ptr, N, ...]
-#! Output: [...]
-pub proc stage_boundary_inputs
-    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and the region pointers.
-    dup.2
-    u32assert.err="number of kernel procedure digests must fit in a u32"
-    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
-    exec.constants::num_kernel_digests_ptr mem_store
-    # => [claim_ptr, kernel_ptr, N, ...]
-    dup.1 exec.constants::kernel_digests_address_ptr mem_store
-    dup exec.constants::claim_address_ptr mem_store
-    # => [claim_ptr, kernel_ptr, N, ...]
-    movdn.2 drop drop
-    # => [claim_ptr, ...]
-
-    # K: claim region (+4) -> the window (+0).
-    padw dup.4 add.4 mem_loadw_le
-    # => [K, claim_ptr, ...]
-    exec.constants::boundary_inputs_ptr mem_storew_le
-    # => [K, claim_ptr, ...]
-
-    # program_digest: claim region (+0) -> boundary_inputs + BOUNDARY_INPUTS_PROGRAM_OFFSET.
-    # The dead K word is the load target (mem_loadw_le overwrites the top word).
-    movup.4 mem_loadw_le
-    # => [P, ...]
-    exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_PROGRAM_OFFSET mem_storew_le
-    # => [P, ...]
-
-    # deferred_root from advice -> boundary_inputs + BOUNDARY_INPUTS_DEFERRED_OFFSET, loaded
-    # over the dead P word.
-    adv_loadw
-    exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
-    # => [...]
-end
-
-#! Loads the final deferred root from the boundary-inputs window.
+#! - +0: program_digest from the claim
+#! - +4: deferred_root from advice
 #!
 #! Input:  [...]
-#! Output: [D, ...]
-pub proc load_deferred_root
-    padw exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
+#! Output: [...]
+pub proc stage_boundary_inputs()
+    # program_digest: claim region (+0) -> boundary_inputs (+0).
+    padw exec.layout::claim_ptr mem_loadw_le
+    # => [P, ...]
+    exec.layout::boundary_inputs_ptr mem_storew_le
+    # => [P, ...]
+
+    # deferred_root from advice -> boundary_inputs (+4), loaded over the dead P word.
+    adv_loadw
+    exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
+    # => [...]
 end
 
 # HELPER PROCEDURES
@@ -205,7 +157,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc compute_bus_gamma
+proc compute_bus_gamma()
     exec.push_beta
     # => [β0, β1, ...]
     dup.1 dup.1 ext2mul   # β^2
@@ -213,7 +165,7 @@ proc compute_bus_gamma
     dup.1 dup.1 ext2mul   # β^8
     dup.1 dup.1 ext2mul   # β^16 = γ
     push.0.0 movup.3 movup.3
-    exec.constants::bus_gamma_ptr mem_storew_le
+    exec.layout::bus_gamma_ptr mem_storew_le
     dropw
 end
 
@@ -221,24 +173,24 @@ end
 #!
 #! Input:  [...]
 #! Output: [β0, β1, ...]
-proc push_beta
-    exec.constants::aux_rand_elem_ptr add.1 mem_load
-    exec.constants::aux_rand_elem_ptr mem_load
+proc push_beta() -> types::QuadFelt
+    exec.layout::aux_rand_elem_ptr add.1 mem_load
+    exec.layout::aux_rand_elem_ptr mem_load
 end
 
 #! Computes the bus prefix `α + i·γ` for bus scale factor `i = bus_id + 1`.
 #!
 #! Input:  [i, ...]
 #! Output: [p0, p1, ...]
-proc push_alpha_plus_i_gamma
+proc push_alpha_plus_i_gamma(bus_id_plus_one: u8) -> types::QuadFelt
     dup
-    exec.constants::bus_gamma_ptr add.1 mem_load mul
+    exec.layout::bus_gamma_ptr add.1 mem_load mul
     # => [i·γ1, i, ...]
     swap
-    exec.constants::bus_gamma_ptr mem_load mul
+    exec.layout::bus_gamma_ptr mem_load mul
     # => [i·γ0, i·γ1, ...]
-    exec.constants::aux_rand_elem_ptr add.3 mem_load
-    exec.constants::aux_rand_elem_ptr add.2 mem_load
+    exec.layout::aux_rand_elem_ptr add.3 mem_load
+    exec.layout::aux_rand_elem_ptr add.2 mem_load
     # => [α0, α1, i·γ0, i·γ1, ...]
     ext2add
     # => [p0, p1, ...]
@@ -249,7 +201,7 @@ end
 #!
 #! Input:  [m0, m1, m2, m3, ...]
 #! Output: [msg0, msg1, ...]
-proc fold_digest_word
+proc fold_digest_word(digest: types::Digest) -> types::QuadFelt
     movup.3 push.0 swap
     # => [m3, 0, m0, m1, m2, ...]
     exec.push_beta ext2mul
@@ -271,7 +223,11 @@ end
 #!
 #! Input:  [acc0, acc1, base, N, ...]
 #! Output: [acc0, acc1, ...]   (acc += Σ_i 1 / ((α + γ) + msg(digest_i)))
-proc fold_kernel_digests_into_acc
+proc fold_kernel_digests_into_acc(
+    accumulator: types::QuadFelt,
+    base: types::Address,
+    count: u8,
+) -> types::QuadFelt
     dup.3 push.0 neq
     while.true
         # Loop entry: [acc0, acc1, base, N, ...]
@@ -305,10 +261,10 @@ end
 #!
 #! Input:  [bus_id_plus_one, offset, ...]
 #! Output: [inv_term0, inv_term1, ...]
-proc fold_boundary_word_inv_term
+proc fold_boundary_word_inv_term(bus_id_plus_one: u8, offset: u8) -> types::QuadFelt
     padw
     # => [0, 0, 0, 0, bus_id, offset, ...]
-    exec.constants::boundary_inputs_address_ptr mem_load
+    exec.layout::boundary_inputs_ptr
     dup.6 add
     # => [target, 0, 0, 0, 0, bus_id, offset, ...]
     mem_loadw_le
@@ -333,28 +289,28 @@ end
 #! `generate_aux_randomness` first.
 #!
 #! Derives `γ = β^16`, then folds the request/response terms over the verifier-owned kernel digests
-#! at `KERNEL_DIGESTS_ADDRESS_PTR` (count at `NUM_KERNEL_DIGESTS_PTR`) and the program digest /
-#! deferred root in the boundary-inputs block, all staged in `stage_boundary_inputs`. Mirrors the module
-#! banner's `c_total` definition and `MidenMultiAir::eval_external`.
+#! at `KERNEL_WITNESS_PTR` (count at `NUM_KERNEL_PROCEDURES_PTR`), plus the program digest and
+#! deferred root in the boundary-inputs block. Mirrors the module banner's `c_total` definition
+#! and `MidenMultiAir::eval_external`.
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc compute_outer_logup_correction
+pub proc compute_outer_logup_correction()
     # γ = β^16 into BUS_GAMMA_PTR.
     exec.compute_bus_gamma
     # => [...]
 
     # acc = 0; build [acc0, acc1, base, N] for the kernel fold.
     push.0.0
-    exec.constants::kernel_digests_address_ptr mem_load movdn.2
-    exec.constants::num_kernel_digests_ptr mem_load movdn.3
+    exec.layout::kernel_witness_ptr movdn.2
+    exec.layout::num_kernel_procedures_ptr mem_load movdn.3
     # => [acc0, acc1, base, N, ...]   (acc = 0)
 
     #    Request a) kernel digests: Σ_i 1 / ((α + γ) + msg(digest_i)).
     exec.fold_kernel_digests_into_acc
     # => [acc0, acc1, ...]
 
-    #    Request b) program digest: + 1 / ((α + 2γ) + msg(program)) from boundary_inputs+4.
+    #    Request b) program digest: + 1 / ((α + 2γ) + msg(program)) from boundary_inputs+0.
     push.BOUNDARY_INPUTS_PROGRAM_OFFSET push.BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE
     exec.fold_boundary_word_inv_term
     ext2add
@@ -367,7 +323,7 @@ pub proc compute_outer_logup_correction
     ext2add
     # => [acc0, acc1, ...]
 
-    #    Response) deferred root: − 1 / ((α + 3γ) + msg(deferred_root)) from boundary_inputs+8.
+    #    Response) deferred root: − 1 / ((α + 3γ) + msg(deferred_root)) from boundary_inputs+4.
     push.BOUNDARY_INPUTS_DEFERRED_OFFSET push.BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE
     exec.fold_boundary_word_inv_term
     neg swap neg swap
@@ -375,44 +331,26 @@ pub proc compute_outer_logup_correction
     # => [acc0, acc1, ...]   (acc = requests − response)
 
     #    Store c_total once.
-    exec.constants::c_total_ptr mem_store
-    exec.constants::c_total_ptr add.1 mem_store
+    exec.layout::c_total_ptr mem_store
+    exec.layout::c_total_ptr add.1 mem_store
     # => [...]
 end
 
-#! Absorbs the single statement block `[CLAIM_HASH | D]` into the FS transcript, mirroring
-#! `MidenMultiAir::observe`. With RELATION_DIGEST pre-loaded in the transcript capacity
-#! (`init_seed`), the resulting state realizes the factored statement binding
-#! `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`. `D` is read from the boundary-inputs window.
-#!
-#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
+#! Observes `[CLAIM_HASH | D]` through the FS stream, mirroring `MidenMultiAir::observe` after the
+#! framework-bound preprocessed commitment. `D` is read from the boundary-inputs window.
 #!
 #! Input:  [CLAIM_HASH, ...]
 #! Output: [...]
-proc absorb_claim_and_deferred_into_fs
-    # D from the boundary-inputs window
-    padw exec.constants::boundary_inputs_address_ptr mem_load add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
-    # => [D, CLAIM_HASH, ...]
+proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
+    exec.random_coin::eidos_observe_word
 
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    # Duplex overwrite mode: the stale rate words are never read, so load only the capacity
-    # and build the rate from [CLAIM_HASH | D] already on the stack.
-    exec.random_coin::get_capacity
-    # => [C, D, CLAIM_HASH, ...]
-    swapw.2
-    # => [CLAIM_HASH, D, C, ...]
-
-    # Bind the absorbed length (8) into the capacity before the absorb permutation.
-    movup.8 add.8 movdn.8
-    exec.poseidon2::permute
-    # => [R1', R2', C', ...]
-
-    exec.random_coin::store_random_coin_state
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    # D from the boundary-inputs window.
+    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
+    exec.random_coin::eidos_observe_word
     # => [...]
 end
 
-#! Loads the claim region's stack i/o (at `claim_address_ptr + 8`) and stores it at `pi_ptr` as
+#! Loads the claim region's stack i/o (at `claim_ptr + 8`) and stores it at `pi_ptr` as
 #! extension field elements (each base felt at offset `2*i`, zero in the high coordinate).
 #!
 #! The values are public inputs for the constraint checks only; they are NOT absorbed into the
@@ -420,12 +358,12 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc load_public_inputs
+proc load_public_inputs()
     padw padw padw
     # => [SCRATCH(12), ...]
-    exec.constants::claim_address_ptr mem_load add.8
+    exec.layout::claim_ptr add.8
     movdn.12
-    exec.constants::public_inputs_address_ptr mem_load
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
     movdn.12
     # => [SCRATCH(12), pi_ptr, claim_io_ptr, ...]
 
@@ -446,11 +384,10 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc observe_miden_air_shape
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    exec.constants::get_core_trace_length_log
-    push.NUM_MIDEN_AIRS
-    # => [NUM_MIDEN_AIRS, core_log, chiplets_log, poseidon2_log, ...]
-    exec.random_coin::observe_word
+proc observe_miden_air_shape()
+    push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
+    exec.layout::get_core_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_chiplets_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_eidos_compression_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
 end

@@ -225,6 +225,13 @@ $$
 s_3 - (s_3' * 2 + s_0')  = 0 \text{ | degree} = 1
 $$
 
+Because `EXPACC` checks the exponent decomposition in $\mathbb{F}_Q$, dynamic exponentiation uses
+at most 63 steps. Every 63-bit value is below $2^{63} < Q$, so its integer decomposition is unique.
+Bare `exp` accepts exponents in $[0, 2^{63})$; larger inputs fail the terminal-zero assertion.
+When immediate exponentiation uses `EXPACC`, it uses the exact bit length of its program-bound
+exponent. Immediate exponentiation accepts every canonical field value. `EXPACC` is internal and
+is not available as assembly syntax.
+
 The effect on the rest of the stack is:
 * **No change** starting from position $4$.
 

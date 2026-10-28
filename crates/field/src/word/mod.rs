@@ -17,6 +17,11 @@ use miden_serde_utils::{
 };
 #[cfg(not(all(target_family = "wasm", miden)))]
 use p3_field::integers::QuotientMap;
+#[cfg(not(all(target_family = "wasm", miden)))]
+use rand::{
+    Rng,
+    distr::{Distribution, StandardUniform},
+};
 use thiserror::Error;
 
 use super::Felt;
@@ -33,14 +38,6 @@ mod tests;
 /// For ordering a word with `Ord` the word's elements are treated as limbs of an integer
 /// in little-endian limb order and thus comparison starts from the most significant element.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(
-    not(all(target_family = "wasm", miden)),
-    derive(serde::Deserialize, serde::Serialize)
-)]
-#[cfg_attr(
-    not(all(target_family = "wasm", miden)),
-    serde(into = "String", try_from = "&str")
-)]
 #[repr(C)]
 #[cfg_attr(all(target_family = "wasm", miden), repr(align(16)))]
 pub struct Word {
@@ -58,6 +55,14 @@ pub struct Word {
     //
     // see sdk/base-macros/wit/miden.wit in the compiler repo, so we have to define it like that
     // here.
+}
+
+#[cfg(not(all(target_family = "wasm", miden)))]
+impl Distribution<Word> for StandardUniform {
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Word {
+        Word::new(core::array::from_fn(|_| self.sample(rng)))
+    }
 }
 
 // Compile-time assertions to ensure `Word` has the same layout as `[Felt; 4]`. This is relied upon
@@ -785,7 +790,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            prop::array::uniform4(any::<Felt>()).prop_map(Word::new).no_shrink().boxed()
+            prop::array::uniform4(any::<Felt>()).prop_map(Word::new).boxed()
         }
     }
 }

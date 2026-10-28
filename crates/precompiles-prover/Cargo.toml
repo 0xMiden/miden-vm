@@ -1,0 +1,69 @@
+[package]
+name = "miden-precompiles-prover"
+version.workspace = true
+description = "Prover-side precompile implementations for the Miden VM deferred framework"
+documentation = "https://docs.rs/miden-precompiles-prover"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "deferred", "zkp"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+concurrent = [
+    "std",
+    "miden-crypto/concurrent",
+    "miden-lifted-stark/concurrent",
+    "miden-air/concurrent",
+]
+fixture-tools = ["std", "dep:miden-precompiles-verifier"]
+testing = ["std"]
+std = [
+    "miden-core/std",
+    "miden-crypto/std",
+    "miden-air/std",
+    "miden-precompiles/std",
+    "miden-utils-sync/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-lifted-air.workspace = true
+miden-lifted-stark.workspace = true
+miden-air.workspace = true
+miden-precompiles.workspace = true
+miden-precompiles-verifier = { workspace = true, optional = true }
+miden-utils-sync.workspace = true
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wincode.workspace = true
+
+[[bin]]
+name = "pvm-proof-fixture"
+path = "src/bin/pvm_proof_fixture.rs"
+required-features = ["fixture-tools"]
+
+[dev-dependencies]
+# Known-good secp256k1 ("k1") reference — the oracle for EC circuit
+# cross-validation tests (RustCrypto, pure Rust, no C deps).
+k256 = { workspace = true, features = ["arithmetic"] }
+miden-air = { workspace = true, features = ["std", "testing"] }
+miden-vm = { path = "../../miden-vm" }
+miden-vm-precompiles-bench = { path = "../../benches/precompiles-bench" }
+miden-precompiles-verifier = { workspace = true, features = ["std"] }
+proptest = { workspace = true, features = ["std"] }
+# Kept for upstream test files (e.g. the #3943 AIR-constraint tests) that still sample
+# with a seeded StdRng; the property-testing migration only replaced this crate's own
+# manual randomness.
+rand = { workspace = true, features = ["std_rng"] }
+rayon.workspace = true
+tracing = { workspace = true, features = ["std"] }

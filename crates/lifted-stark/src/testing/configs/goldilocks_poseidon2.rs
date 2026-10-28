@@ -140,7 +140,7 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
 }
 
 /// Run the full prove → verify → transcript-reparse cycle.
-pub fn prove_and_verify_statement<MA>(prover_statement: &ProverStatement<Felt, QuadFelt, MA>)
+pub fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
 {
@@ -148,11 +148,11 @@ where
 
     let prover_instance = crate::ProverInstance::new(&config, prover_statement, None)
         .expect("no preprocessed columns");
-    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     let verifier_instance =
-        crate::VerifierInstance::new(&config, prover_statement.statement(), None)
-            .expect("no preprocessed columns");
+        crate::VerifierInstance::new(&config, &statement, None).expect("no preprocessed columns");
     let verifier_digest = verifier_instance
         .verify(&output.proof, test_challenger())
         .expect("verification should succeed");
@@ -195,9 +195,10 @@ where
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement = Statement::new(TestMultiAir::new(airs), air_inputs.to_vec(), Vec::new())
+    let air_inputs = (0..airs.len()).map(|i| (i, air_inputs.to_vec())).collect();
+    let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())
         .expect("statement inputs valid");
     let prover_statement =
         ProverStatement::new(statement, traces_owned).expect("trace shape valid");
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }

@@ -1,0 +1,451 @@
+//! Cached transaction and PVM proof fixtures consumed by recursive benchmark cases.
+
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+
+use miden_assembly::Linkage;
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    crypto::hash::Blake3_256,
+    field::QuotientMap,
+    program::ExecutionClaim,
+    proof::{PrecompileProof, PrecompileStatus},
+    serde::{Deserializable, Serializable},
+    utils::to_hex,
+};
+use miden_core_lib::CoreLibrary;
+use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_processor::{ExecutionOptions, FastProcessor};
+use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_vm::{
+    Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
+    prove_sync, trace::build_trace,
+};
+use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload};
+
+use super::{
+    cache_key::{INNER_PROOF_HASH, pcs_params_bytes, tx_proof_cache_key},
+    config::BenchConfig,
+    measurements::{print_bench_shape, trace_shape_summary_for},
+    recursive_host,
+};
+
+const PVM_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-pvm-proof-cache-v6-eidos";
+pub(super) struct TxProofFixture {
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+}
+
+pub(super) struct RecursiveProofAdvice {
+    pub(super) claim_commitment: Word,
+    pub(super) advice_inputs: AdviceInputs,
+}
+
+fn stack_inputs(values: &[u64]) -> StackInputs {
+    let values: Vec<_> = values
+        .iter()
+        .copied()
+        .map(|value| {
+            Felt::from_canonical_checked(value)
+                .unwrap_or_else(|| panic!("invalid RECURSION_BENCH_STACK value {value}"))
+        })
+        .collect();
+    StackInputs::new(&values).expect("invalid RECURSION_BENCH_STACK")
+}
+
+fn tx_proof_cache_paths(
+    cache_dir: &Path,
+    proof_index: usize,
+    cache_key: &str,
+) -> (PathBuf, PathBuf) {
+    (
+        cache_dir.join(format!("proof-{proof_index}-{cache_key}.bin")),
+        cache_dir.join(format!("outputs-{proof_index}-{cache_key}.bin")),
+    )
+}
+
+fn load_cached_tx_proof(
+    cache_dir: &Path,
+    proof_index: usize,
+    cache_key: &str,
+    program_info: &ProgramInfo,
+    stack_inputs: StackInputs,
+) -> Option<(StackOutputs, ExecutionProof)> {
+    let (proof_path, outputs_path) = tx_proof_cache_paths(cache_dir, proof_index, cache_key);
+    if !proof_path.is_file() || !outputs_path.is_file() {
+        return None;
+    }
+
+    let proof_bytes = match std::fs::read(&proof_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("ignoring unreadable cached proof {}: {err}", proof_path.display());
+            return None;
+        },
+    };
+    let proof = match ExecutionProof::read_from_bytes(&proof_bytes) {
+        Ok(proof) => proof,
+        Err(err) => {
+            eprintln!("ignoring undecodable cached proof {}: {err}", proof_path.display());
+            return None;
+        },
+    };
+    let vm_proof = match proof.precompile() {
+        PrecompileStatus::Empty => proof.vm(),
+        PrecompileStatus::Proven(_) | PrecompileStatus::Deferred(_) => {
+            eprintln!(
+                "ignoring cached transaction proof with precompile data {}",
+                proof_path.display()
+            );
+            return None;
+        },
+    };
+    if vm_proof.proof.hash_fn() != INNER_PROOF_HASH {
+        eprintln!(
+            "ignoring cached transaction proof with the wrong hash function {}",
+            proof_path.display()
+        );
+        return None;
+    }
+
+    let output_bytes = match std::fs::read(&outputs_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("ignoring unreadable cached outputs {}: {err}", outputs_path.display());
+            return None;
+        },
+    };
+    let stack_outputs = match StackOutputs::read_from_bytes(&output_bytes) {
+        Ok(stack_outputs) => stack_outputs,
+        Err(err) => {
+            eprintln!("ignoring undecodable cached outputs {}: {err}", outputs_path.display());
+            return None;
+        },
+    };
+
+    let claim =
+        ExecutionClaim::from_program_info(program_info.clone(), stack_inputs, stack_outputs);
+    match Verifier::new().verify(&claim, &proof) {
+        Ok(outcome) if outcome.is_complete() => Some((stack_outputs, proof)),
+        Ok(_) => {
+            eprintln!("ignoring incomplete cached transaction proof {}", proof_path.display());
+            None
+        },
+        Err(err) => {
+            eprintln!("ignoring invalid cached transaction proof {}: {err}", proof_path.display());
+            None
+        },
+    }
+}
+
+fn store_cached_tx_proof(
+    cache_dir: &Path,
+    proof_index: usize,
+    cache_key: &str,
+    stack_outputs: &StackOutputs,
+    proof: &ExecutionProof,
+) {
+    std::fs::create_dir_all(cache_dir)
+        .unwrap_or_else(|err| panic!("create proof cache {}: {err}", cache_dir.display()));
+    let (proof_path, outputs_path) = tx_proof_cache_paths(cache_dir, proof_index, cache_key);
+
+    std::fs::write(&proof_path, proof.to_bytes())
+        .unwrap_or_else(|err| panic!("write cached proof {}: {err}", proof_path.display()));
+
+    let mut output_bytes = Vec::new();
+    stack_outputs.write_into(&mut output_bytes);
+    std::fs::write(&outputs_path, output_bytes)
+        .unwrap_or_else(|err| panic!("write cached outputs {}: {err}", outputs_path.display()));
+}
+
+fn pvm_proof_cache_key(root: Word) -> String {
+    let parameters =
+        pcs_params_bytes(&miden_air::precompiles::stark_config::precompile_pcs_params());
+    let relation = miden_air::precompiles::stark_config::PRECOMPILE_RELATION_DIGEST;
+    let relation_bytes: Vec<_> = relation
+        .iter()
+        .flat_map(|value| value.as_canonical_u64().to_le_bytes())
+        .collect();
+    let digest: [u8; 32] = Blake3_256::hash_iter(
+        [
+            PVM_PROOF_CACHE_KEY_VERSION,
+            env!("CARGO_PKG_VERSION").as_bytes(),
+            root.as_bytes().as_slice(),
+            parameters.as_slice(),
+            relation_bytes.as_slice(),
+        ]
+        .into_iter(),
+    )
+    .into();
+    to_hex(digest)
+}
+
+fn pvm_proof_cache_path(cache_dir: &Path, cache_key: &str) -> PathBuf {
+    cache_dir.join(format!("pvm-{cache_key}.bin"))
+}
+
+fn load_cached_pvm_proof(
+    cache_dir: &Path,
+    cache_key: &str,
+    expected_root: Word,
+) -> Option<PrecompileProof> {
+    let path = pvm_proof_cache_path(cache_dir, cache_key);
+    if !path.is_file() {
+        return None;
+    }
+
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("ignoring unreadable cached PVM proof {}: {err}", path.display());
+            return None;
+        },
+    };
+    let proof = match PrecompileProof::read_from_bytes(&bytes) {
+        Ok(proof) if proof.to_bytes() == bytes => proof,
+        Ok(_) => {
+            eprintln!("ignoring non-canonical cached PVM proof {}", path.display());
+            return None;
+        },
+        Err(err) => {
+            eprintln!("ignoring undecodable cached PVM proof {}: {err}", path.display());
+            return None;
+        },
+    };
+    if proof.proof.hash_fn() != INNER_PROOF_HASH {
+        eprintln!("ignoring cached PVM proof with the wrong hash function {}", path.display());
+        return None;
+    }
+    if proof.roots.as_slice() != [expected_root] {
+        eprintln!("ignoring cached PVM proof for a stale deferred root {}", path.display());
+        return None;
+    }
+    if let Err(err) = Verifier::new().verify_precompile(&proof, expected_root) {
+        eprintln!("ignoring stale or invalid cached PVM proof {}: {err}", path.display());
+        return None;
+    }
+
+    Some(proof)
+}
+
+fn store_cached_pvm_proof(cache_dir: &Path, cache_key: &str, proof: &PrecompileProof) {
+    std::fs::create_dir_all(cache_dir)
+        .unwrap_or_else(|err| panic!("create proof cache {}: {err}", cache_dir.display()));
+    let path = pvm_proof_cache_path(cache_dir, cache_key);
+    std::fs::write(&path, proof.to_bytes())
+        .unwrap_or_else(|err| panic!("write cached PVM proof {}: {err}", path.display()));
+}
+
+fn generate_pvm_proof(witness: PrecompileWitness, root: Word) -> PrecompileProof {
+    eprintln!("proving precompile witness with Eidos...");
+    let proof = Prover::new()
+        .with_hash_fn(INNER_PROOF_HASH)
+        .prove_precompiles(vec![witness])
+        .expect("prove precompile witness");
+    Verifier::new()
+        .verify_precompile(&proof, root)
+        .expect("verify generated PVM proof natively");
+    proof
+}
+
+fn load_pvm_proof(config: &BenchConfig, ecdsa_count: usize) -> PrecompileProof {
+    let (witness, root) = PrecompileFixture::generate(PrecompileWorkload {
+        ecdsas: ecdsa_count,
+        keccaks: 0,
+        eddsas: 0,
+        ecdsa_p256s: 0,
+        sha256_64b: 0,
+        sha256_1kib: 0,
+    })
+    .precompile_witness();
+    let cache_key = pvm_proof_cache_key(root);
+    let cache_dir = config.pvm_proof_cache_dir();
+    let cached = load_cached_pvm_proof(cache_dir, cache_key.as_str(), root);
+    let (proof, cache_status) = if let Some(proof) = cached {
+        (proof, "hit")
+    } else {
+        let proof = generate_pvm_proof(witness, root);
+        store_cached_pvm_proof(cache_dir, cache_key.as_str(), &proof);
+        (proof, "miss")
+    };
+
+    let proof_bytes = proof.proof.bytes();
+    let proof_digest: [u8; 32] = Blake3_256::hash(proof_bytes).into();
+    println!(
+        "\n=== PVM proof fixture\n    ecdsas={ecdsa_count} keccaks={ecdsa_count} proof_bytes={} proof_cache={}",
+        proof_bytes.len(),
+        cache_status,
+    );
+    println!(
+        "BENCH_PVM_PROOF workload=ecdsa_k256_{ecdsa_count} ecdsas={ecdsa_count} \
+         keccaks={ecdsa_count} proof_bytes={} proof_cache={} \
+         proof_digest={} proof_prefix={}",
+        proof_bytes.len(),
+        cache_status,
+        to_hex(proof_digest),
+        hex_prefix(proof_bytes),
+    );
+    proof
+}
+
+fn hex_prefix(bytes: &[u8]) -> String {
+    to_hex(&bytes[..bytes.len().min(16)])
+}
+
+fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs, scenario: &str) {
+    let processor = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("transaction fixture advice should fit provider limits");
+    let mut host = recursive_host();
+    let witness = processor
+        .execute_for_proving_sync(program, &mut host)
+        .expect("execute transaction fixture");
+    let (vm_witness, _) = witness.into_parts();
+    let trace = build_trace(vm_witness).expect("build transaction fixture trace");
+    let summary = trace.trace_len_summary();
+    let record = format!("BENCH_TX_SHAPE scenario={scenario}");
+    let shape = trace_shape_summary_for(summary);
+    print_bench_shape(&record, &shape);
+}
+
+pub(super) fn load_tx_fixtures(
+    config: &BenchConfig,
+    proof_count: usize,
+    source: &str,
+    scenario: &str,
+) -> Vec<TxProofFixture> {
+    let core_lib = CoreLibrary::default();
+    let program = Assembler::default()
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .expect("link core library")
+        .assemble_program("tx_fixture", source)
+        .expect("assemble transaction fixture")
+        .unwrap_program();
+    let program_info = ProgramInfo::from(program.clone());
+
+    println!(
+        "\n=== transaction proof fixtures\n    scenario={scenario} hash={:?} proof_cache={}",
+        INNER_PROOF_HASH,
+        config.tx_proof_cache_dir().display(),
+    );
+    // Synthetic snippets have fixed control flow and memory access patterns for all proof inputs.
+    print_tx_fixture_shape(&program, stack_inputs(&config.stack_values_for_proof(0)), scenario);
+
+    let compatibility = Verifier::proof_compatibility();
+    let mut seen_proofs = HashSet::with_capacity(proof_count);
+    (0..proof_count)
+        .map(|proof_index| {
+            let stack_values = config.stack_values_for_proof(proof_index);
+            let stack_inputs = stack_inputs(&stack_values);
+            let advice_inputs = AdviceInputs::default();
+            let proof_cache_key = tx_proof_cache_key(&program_info, &stack_values, &compatibility);
+            let (stack_outputs, proof, proof_cache_status) = if let Some((stack_outputs, proof)) =
+                load_cached_tx_proof(
+                    config.tx_proof_cache_dir(),
+                    proof_index,
+                    proof_cache_key.as_str(),
+                    &program_info,
+                    stack_inputs,
+                ) {
+                (stack_outputs, proof, "hit")
+            } else {
+                let mut host = recursive_host();
+                let (stack_outputs, proof) = prove_sync(
+                    &Prover::new().with_hash_fn(INNER_PROOF_HASH),
+                    &program,
+                    stack_inputs,
+                    advice_inputs,
+                    &mut host,
+                    ExecutionOptions::default(),
+                )
+                .expect("prove transaction fixture");
+                assert!(
+                    matches!(proof.precompile(), PrecompileStatus::Empty),
+                    "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
+                     this benchmark expects precompile-free fixtures"
+                );
+                let claim = ExecutionClaim::from_program_info(
+                    program_info.clone(),
+                    stack_inputs,
+                    stack_outputs,
+                );
+                assert!(
+                    Verifier::new()
+                        .verify(&claim, &proof)
+                        .expect("verify generated transaction fixture")
+                        .is_complete()
+                );
+                store_cached_tx_proof(
+                    config.tx_proof_cache_dir(),
+                    proof_index,
+                    proof_cache_key.as_str(),
+                    &stack_outputs,
+                    &proof,
+                );
+                (stack_outputs, proof, "miss")
+            };
+            let proof_bytes = proof.to_bytes();
+            let proof_bytes_len = proof_bytes.len();
+            let proof_digest: [u8; 32] = Blake3_256::hash(&proof_bytes).into();
+            let proof_prefix = hex_prefix(&proof_bytes);
+            assert!(
+                seen_proofs.insert(proof_bytes),
+                "recursive benchmark generated duplicate transaction proof at index {proof_index}"
+            );
+
+            let proof_digest_hex = to_hex(proof_digest);
+            println!(
+                "    proof={proof_index} stack={stack_values:?} proof_bytes={proof_bytes_len} \
+                 deferred_entries=0",
+            );
+            println!(
+                "BENCH_TX_PROOF scenario={scenario} index={proof_index} stack={stack_values:?} \
+                 proof_bytes={proof_bytes_len} deferred_entries=0 \
+                 proof_cache={proof_cache_status} proof_digest={proof_digest_hex} \
+                 proof_prefix={proof_prefix}",
+            );
+
+            TxProofFixture {
+                program_info: program_info.clone(),
+                stack_inputs,
+                stack_outputs,
+                proof,
+            }
+        })
+        .collect()
+}
+
+pub(super) fn recursive_proof_advice(
+    fixture: &TxProofFixture,
+    verifier_root: Word,
+) -> RecursiveProofAdvice {
+    let claim = ExecutionClaim::from_program_info(
+        fixture.program_info.clone(),
+        fixture.stack_inputs,
+        fixture.stack_outputs,
+    );
+    let (advice_inputs, claim_commitment) =
+        RecursiveVerifierInputs::for_request(verifier_root, &fixture.proof, &claim)
+            .expect("build MVM recursive request package")
+            .into_parts();
+
+    RecursiveProofAdvice { claim_commitment, advice_inputs }
+}
+
+pub(super) fn load_pvm_advice(config: &BenchConfig, ecdsa_count: usize) -> RecursiveProofAdvice {
+    let proof = load_pvm_proof(config, ecdsa_count);
+    let verifier_root = CoreLibrary::default().pvm_recursive_verifier_root();
+    let inputs = PvmRecursiveVerifierInputs::for_request(verifier_root, &proof)
+        .expect("build PVM recursive advice");
+    let (advice_inputs, claim_commitment) = inputs.into_parts();
+
+    RecursiveProofAdvice { claim_commitment, advice_inputs }
+}

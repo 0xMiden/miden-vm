@@ -5,13 +5,12 @@ use seq_macro::seq;
 use {
     super::{Deserializable, DeserializationError, Serializable},
     alloc::boxed::Box,
-    alloc::vec::Vec,
     std::error::Error,
 };
 
 use super::{
-    EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
-    Poseidon2, Word,
+    Eidos, EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
+    Word,
 };
 use crate::{
     Felt, ONE, ZERO,
@@ -185,7 +184,7 @@ fn test_empty_roots() {
     let mut root = Word::default();
 
     for depth in 0..255 {
-        root = Poseidon2::merge(&[root; 2]);
+        root = Eidos::merge(&[root; 2]);
         assert!(
             store.get_node(root, NodeIndex::make(0, 0)).is_ok(),
             "The root of the empty tree of depth {depth} must be registered"
@@ -540,9 +539,9 @@ fn wont_open_to_different_depth_root() {
     // Compute the root for a different depth. We cherry-pick this specific depth to prevent a
     // regression to a bug in the past that allowed the user to fetch a node at a depth lower than
     // the inserted path of a Merkle tree.
-    let mut root = Poseidon2::merge(&[a, b]);
+    let mut root = Eidos::merge(&[a, b]);
     for depth in (1..=63).rev() {
-        root = Poseidon2::merge(&[root, empty[depth]]);
+        root = Eidos::merge(&[root, empty[depth]]);
     }
 
     // For this example, the depth of the Merkle tree is 1, as we have only two leaves. Here we
@@ -566,15 +565,15 @@ fn store_path_opens_from_leaf() {
     let g = Word::new([Felt::new_unchecked(7); 4]);
     let h = Word::new([Felt::new_unchecked(8); 4]);
 
-    let i = Poseidon2::merge(&[a, b]);
-    let j = Poseidon2::merge(&[c, d]);
-    let k = Poseidon2::merge(&[e, f]);
-    let l = Poseidon2::merge(&[g, h]);
+    let i = Eidos::merge(&[a, b]);
+    let j = Eidos::merge(&[c, d]);
+    let k = Eidos::merge(&[e, f]);
+    let l = Eidos::merge(&[g, h]);
 
-    let m = Poseidon2::merge(&[i, j]);
-    let n = Poseidon2::merge(&[k, l]);
+    let m = Eidos::merge(&[i, j]);
+    let n = Eidos::merge(&[k, l]);
 
-    let root = Poseidon2::merge(&[m, n]);
+    let root = Eidos::merge(&[m, n]);
 
     let mtree = MerkleTree::new(vec![a, b, c, d, e, f, g, h]).unwrap();
     let store = MerkleStore::from(&mtree);
@@ -710,6 +709,29 @@ fn node_path_should_be_truncated_by_midtier_insert() {
 
 // LEAF TRAVERSAL
 // ================================================================================================
+
+#[test]
+fn get_leaf_depth_depth_0_reports_bare_leaf_roots_as_not_in_store() {
+    // The store tracks only internal nodes, so the depth-zero empty root (a bare leaf) is
+    // reported as not in the store; this early return happens before any path computation.
+    let store = MerkleStore::new();
+    let root = EmptySubtreeRoots::empty_hashes(0)[0];
+    assert!(matches!(
+        store.get_leaf_depth(root, 0, 0),
+        Err(MerkleError::RootNotInStore(r)) if r == root
+    ));
+}
+
+#[test]
+fn get_leaf_depth_depth_0_does_not_overflow_the_path_shift() {
+    // Regression: computing the path used to shift by the full 64-bit width for a depth-zero
+    // tree, which panics in debug builds and relies on target-dependent shift masking in
+    // release builds. Querying an internal root (present in the pre-populated store) at depth
+    // zero reaches the path computation and must report that no leaf fits within depth zero.
+    let store = MerkleStore::new();
+    let root = EmptySubtreeRoots::empty_hashes(1)[0];
+    assert!(matches!(store.get_leaf_depth(root, 0, 0), Err(MerkleError::DepthTooBig(1))));
+}
 
 #[test]
 fn get_leaf_depth_works_depth_64() {
@@ -882,6 +904,44 @@ fn find_lone_leaf() {
     assert_eq!(res, None);
 }
 
+#[test]
+fn find_lone_leaf_in_trees_shallower_than_64() {
+    for tree_depth in [1u8, 2, 8, 16, 63] {
+        let mut store = MerkleStore::new();
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
+        let mut root: Word = empty[0];
+
+        // a single leaf at the bottom of the tree is a lone leaf for every one of its ancestors
+        let key = (0b0101_0110_u64 << 8 | 0b1010_0101) & ((1u64 << tree_depth) - 1);
+        let idx = NodeIndex::make(tree_depth, key);
+        let val = Word::from([ONE, ONE, ONE, ONE]);
+        root = store.set_node(root, idx, val).unwrap().root;
+
+        for depth in 0..tree_depth {
+            let parent_index = NodeIndex::make(depth, key >> (tree_depth - depth));
+            let parent = store.get_node(root, parent_index).unwrap();
+            let res = store.find_lone_leaf(parent, parent_index, tree_depth).unwrap();
+            assert_eq!(res, Some((idx, val)), "tree_depth {tree_depth}, depth {depth}");
+        }
+    }
+
+    // a second leaf below the root makes the root's lone-leaf lookup return None
+    let mut store = MerkleStore::new();
+    let empty = EmptySubtreeRoots::empty_hashes(8);
+    let mut root: Word = empty[0];
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b0000_0001), Word::from([ONE, ONE, ONE, ONE]))
+        .unwrap()
+        .root;
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b1000_0001), Word::from([ONE, ONE, ONE, ZERO]))
+        .unwrap()
+        .root;
+    let root_index = NodeIndex::make(0, 0);
+    let node = store.get_node(root, root_index).unwrap();
+    assert_eq!(store.find_lone_leaf(node, root_index, 8).unwrap(), None);
+}
+
 // SUBSET EXTRACTION
 // ================================================================================================
 
@@ -940,28 +1000,150 @@ fn check_mstore_subtree(store: &MerkleStore, subtree: &MerkleTree) {
 // SERIALIZATION
 // ================================================================================================
 
+const STORE_HEADER: &[u8] = b"MRKSTORE\x01";
+
 #[cfg(feature = "std")]
 #[test]
 fn test_serialization() -> Result<(), Box<dyn Error>> {
-    let mtree = MerkleTree::new(VALUES4)?;
-    let store = MerkleStore::from(&mtree);
-    let decoded = MerkleStore::read_from_bytes(&store.to_bytes()).expect("deserialization failed");
-    assert_eq!(store, decoded);
+    // Equal, non-empty children must not be mistaken for canonical empty nodes.
+    for leaves in [VALUES4, [VALUES4[0]; 4]] {
+        let mtree = MerkleTree::new(leaves)?;
+        let store = MerkleStore::from(&mtree);
+        let bytes = store.to_bytes();
+        let unique_nodes = mtree.inner_nodes().map(|node| node.value).collect::<crate::Set<_>>();
+        assert!(bytes.starts_with(STORE_HEADER));
+        assert_eq!(bytes.len(), STORE_HEADER.len() + 8 + unique_nodes.len() * 96);
+
+        // The optimization must preserve every byte emitted by the original canonical filter.
+        let empty_nodes: crate::Map<_, _> = super::empty_hashes().collect();
+        let nodes = store.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+        let mut expected_bytes = STORE_HEADER.to_vec();
+        (nodes.clone().count() as u64).write_into(&mut expected_bytes);
+        for (key, node) in nodes {
+            key.write_into(&mut expected_bytes);
+            node.write_into(&mut expected_bytes);
+        }
+        assert_eq!(bytes, expected_bytes);
+
+        // The reader also accepts older payloads that explicitly include empty nodes.
+        let mut full_bytes = STORE_HEADER.to_vec();
+        (store.num_internal_nodes() as u64).write_into(&mut full_bytes);
+        for node in store.inner_nodes() {
+            node.value.write_into(&mut full_bytes);
+            node.left.write_into(&mut full_bytes);
+            node.right.write_into(&mut full_bytes);
+        }
+        for payload in [&bytes, &full_bytes] {
+            let mut decoded = MerkleStore::read_from_bytes(payload)?;
+            assert_eq!(store, decoded);
+            for (position, leaf) in leaves.into_iter().enumerate() {
+                let index = NodeIndex::new(2, position as u64)?;
+                let proof = decoded.get_path(mtree.root(), index)?;
+                assert_eq!(proof.value, leaf);
+                assert_eq!(proof.path, mtree.get_path(index)?);
+            }
+
+            let new_root = decoded.set_node(mtree.root(), NodeIndex::new(2, 1)?, VALUES8[7])?.root;
+            let mut updated = mtree.clone();
+            updated.update_leaf(1, VALUES8[7])?;
+            assert_eq!(new_root, updated.root());
+        }
+    }
     Ok(())
 }
 
 #[test]
+fn deserialize_rejects_unversioned_store() {
+    // Unversioned encoding: a u64 node count followed by parent/left/right words.
+    let parent = Eidos::merge(&[VALUES4[0], VALUES4[1]]);
+    let mut bytes = 1u64.to_bytes();
+    parent.write_into(&mut bytes);
+    VALUES4[0].write_into(&mut bytes);
+    VALUES4[1].write_into(&mut bytes);
+
+    assert!(matches!(
+        MerkleStore::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(message))
+            if message == "unsupported MerkleStore format: expected a versioned encoding"
+    ));
+}
+
+#[test]
+fn deserialize_checks_version_before_node_count() {
+    for version in [0, 2, u8::MAX] {
+        let mut bytes = STORE_HEADER.to_vec();
+        bytes[8] = version;
+        // No node count follows: the version error must take precedence over UnexpectedEOF.
+        assert!(matches!(
+            MerkleStore::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == format!("unsupported MerkleStore version {version} (expected 1)")
+        ));
+    }
+}
+
+#[test]
+fn deserialize_accepts_empty_versioned_store() {
+    let mut bytes = STORE_HEADER.to_vec();
+    0u64.write_into(&mut bytes);
+    assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
+    assert_eq!(MerkleStore::read_from_bytes(&bytes).unwrap(), MerkleStore::default());
+}
+
+#[test]
+fn serialization_preserves_noncanonical_children_at_empty_node_keys() {
+    use crate::utils::{ByteReader, SliceReader};
+
+    let key = *EmptySubtreeRoots::entry(64, 0);
+    for right in [VALUES4[0], VALUES4[1]] {
+        let node = super::StoreNode { left: VALUES4[0], right };
+        let mut store = MerkleStore::default();
+        store.nodes.insert(key, node);
+        let bytes = store.to_bytes();
+        let mut expected_bytes = STORE_HEADER.to_vec();
+        (1u64, key, node).write_into(&mut expected_bytes);
+        assert_eq!(bytes, expected_bytes);
+        let mut reader = SliceReader::new(&bytes[STORE_HEADER.len()..]);
+        assert_eq!(reader.read_u64().unwrap(), 1);
+        assert_eq!(Word::read_from(&mut reader).unwrap(), key);
+        assert_eq!(super::StoreNode::read_from(&mut reader).unwrap(), node);
+        assert!(!reader.has_more_bytes());
+    }
+}
+
+#[test]
+fn serialize_omits_canonical_empty_nodes() {
+    let mut bytes = STORE_HEADER.to_vec();
+    0u64.write_into(&mut bytes);
+    assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
+    assert_eq!(MerkleStore::default().to_bytes(), bytes);
+    let decoded = MerkleStore::read_from_bytes(&bytes).unwrap();
+    assert_eq!(decoded, MerkleStore::default());
+    for depth in [1, 64, 255] {
+        let root = *EmptySubtreeRoots::entry(depth, 0);
+        let path_depth = depth.min(SMT_MAX_DEPTH);
+        let proof = decoded.get_path(root, NodeIndex::new(path_depth, 1).unwrap()).unwrap();
+        assert_eq!(proof.value, *EmptySubtreeRoots::entry(depth, path_depth));
+        assert_eq!(proof.path.compute_root(1, proof.value).unwrap(), root);
+    }
+}
+
+#[test]
 fn deserialize_rejects_oversized_length() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     u64::MAX.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes_with_budget(&bytes, bytes.len());
-    assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    assert!(matches!(
+        result,
+        Err(DeserializationError::InvalidValue(message))
+            if message == "MerkleStore node count too large"
+    ));
 }
 
 #[test]
 fn deserialize_rejects_truncated_payload() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     1u64.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes(&bytes);

@@ -5,61 +5,89 @@
 //! of [`Node`]s and a deferred root commitment that verifies by evaluating every logged statement
 //! to TRUE.
 //!
-//! `miden-core` owns the data model, registry, state, and wire validation; the processor only
-//! provides system-event plumbing.
+//! `miden-core` owns the data model, registry, runtime state, and portable witness validation; the
+//! processor only provides system-event plumbing.
 
+mod claim;
 mod node;
 mod precompile;
 mod precompile_registry;
 mod state;
 mod wire;
+mod work;
 
 use alloc::boxed::Box;
 
-pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
-pub use precompile::{Precompile, precompile_id};
+pub use claim::DeferredClaim;
+use miden_crypto::hash::eidos::EidosDomain;
+pub use miden_crypto::hash::eidos::EidosFrame;
+pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST};
+pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
+pub use wire::{
+    IntegrityError, PrecompileWitness, PreparationError, PreparedNode, PreparedWitness,
+    WireEntry as PrecompileWitnessEntry,
+};
+pub use work::{
+    PrecompileLimitError, PrecompileLimits, PrecompileWork, WorkClass, WorkItem, WorkLimit,
+    WorkSummary,
+};
 
-use crate::Word;
+use crate::{
+    Felt, Word,
+    program::domain::{DeferredAndDomain, DeferredChunksDomain},
+};
 
 /// The deferred root committed in public inputs.
 pub type DeferredRoot = Digest;
 
-/// Fixed capacity word used to domain-separate deferred root folds.
-pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
+/// Eidos domain tag for semantic AND nodes and rolling deferred-root folds.
+pub const DEFERRED_AND_DOMAIN: Felt = DeferredAndDomain::TAG.as_felt();
 
-/// Default maximum approximate number of field elements allowed in deferred state.
-pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+/// Eidos domain tag for framework-owned CHUNKS nodes.
+pub const DEFERRED_CHUNKS_DOMAIN: Felt = DeferredChunksDomain::TAG.as_felt();
+
+/// Frame for a fixed deferred AND node or rolling-root fold.
+pub const DEFERRED_AND_FRAME: EidosFrame = EidosFrame::for_domain(DeferredAndDomain, [0; 3]);
+
+/// Constructs the frame for a non-empty deferred CHUNKS node.
+///
+/// # Panics
+///
+/// Panics if `n_chunks` is zero or greater than `u32::MAX / 8`.
+pub const fn deferred_chunks_frame(n_chunks: u32) -> EidosFrame {
+    assert!(n_chunks != 0, "deferred CHUNKS must contain at least one chunk");
+    assert!(n_chunks <= u32::MAX / 8, "deferred CHUNKS length must fit in u32");
+    EidosFrame::for_domain(DeferredChunksDomain, [8 * n_chunks, 0, 0])
+}
+
+/// Fixed initial Eidos chaining value for deferred AND nodes and rolling-root folds.
+///
+/// This is
+/// `DEFERRED_AND_FRAME.initial_chaining_word()`. It is spelled out
+/// so the consensus-critical value remains a `const` usable by AIR definitions.
+pub const DEFERRED_AND_INIT_CV: Word = Word::new([
+    Felt::new_unchecked(13503953893964382977),
+    Felt::new_unchecked(11912009168875159552),
+    Felt::new_unchecked(11170449401267093504),
+    Felt::new_unchecked(6620516959492505600),
+]);
+
+/// Hard allocation ceiling for hostile deferred wire input.
+///
+/// Execution and verification admission use independently configurable [`PrecompileLimits`]
+/// instead.
+pub const MAX_DEFERRED_WIRE_ELEMENTS: usize = 1 << 20;
+
+/// Hard library safety ceiling for ordered precompile roots.
+///
+/// This bounds proving batch size, root-vector allocation, and aggregate-root folding.
+pub const MAX_PRECOMPILE_ROOTS: usize = 128;
 
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
     Node::and(root, statement).digest()
-}
-
-/// Small helper for tests and trace plumbing that need to advance a deferred root incrementally.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct DeferredRootTracker {
-    root: DeferredRoot,
-}
-
-impl DeferredRootTracker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn from_root(root: DeferredRoot) -> Self {
-        Self { root }
-    }
-
-    pub fn root(&self) -> DeferredRoot {
-        self.root
-    }
-
-    pub fn record_statement(&mut self, statement: Digest) {
-        self.root = fold_deferred_root(self.root, statement);
-    }
 }
 
 // ERROR
@@ -68,13 +96,13 @@ impl DeferredRootTracker {
 /// Coarse deferred-framework failures shared by deferred state and precompile evaluation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeferredError {
-    #[error("invalid or unknown deferred tag")]
-    InvalidTag,
+    #[error("invalid or unknown deferred frame")]
+    InvalidFrame,
     #[error("referenced digest is not present in deferred state")]
     MissingNode,
     #[error("conflicting node definition for digest")]
     ConflictingNode,
-    #[error("payload is not valid for the given tag")]
+    #[error("payload is not valid for the given frame")]
     InvalidPayload,
     #[error("equality assertion failed")]
     AssertionFailed,
@@ -93,7 +121,7 @@ pub enum PrecompileError {
     #[error("deferred DAG is missing a node referenced during evaluation")]
     MissingNode,
 
-    /// A tag is unknown or its payload shape is invalid for the decoded node type.
+    /// A frame is unknown or its payload shape is invalid for the decoded node type.
     #[error("node failed precompile validation")]
     InvalidNode,
 
@@ -101,11 +129,15 @@ pub enum PrecompileError {
     #[error("deferred assertion failed: values disagree")]
     AssertionFailed,
 
+    /// Work exceeded the configured execution or verification admission policy.
+    #[error(transparent)]
+    Limit(#[from] PrecompileLimitError),
+
     /// A framework-level error surfaced by a precompile evaluation.
     #[error(transparent)]
     Other(#[from] DeferredError),
 
-    /// Adds the owning precompile's name to a tag or evaluation failure.
+    /// Adds the owning precompile's name to a frame or evaluation failure.
     ///
     /// Registry construction errors are setup-time panics and are not represented here.
     #[error("precompile `{name}`: {source}")]
@@ -126,5 +158,15 @@ impl PrecompileError {
 
     pub(crate) fn with_precompile(name: &'static str, source: PrecompileError) -> Self {
         Self::Precompile { name, source: Box::new(source) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deferred_and_init_cv_matches_its_eidos_derivation() {
+        assert_eq!(DEFERRED_AND_INIT_CV, DEFERRED_AND_FRAME.initial_chaining_word(),);
     }
 }

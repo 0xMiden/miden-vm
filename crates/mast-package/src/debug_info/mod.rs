@@ -24,15 +24,61 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 2;
+pub const DEBUG_INFO_VERSION: u8 = 4;
+
+/// Maximum encoded payload size accepted for package-owned debug information.
+///
+/// Decoding temporarily retains the encoded section, an aligned copy, and decoded table storage,
+/// so this cap bounds peak memory before any package-level validation can run. Assembly currently
+/// imports complete shared dependency tables even for dynamic `exec`, so the allowance accommodates
+/// several large libraries until selective debug-table imports are available.
+pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 256 * 1024 * 1024;
+
+/// Maximum number of rows accepted in the variable-width debug string table.
+///
+/// Dependency imports currently merge complete shared tables, including for dynamic `exec`.
+/// Allow their distinct strings to accumulate while retaining the encoded payload size cap.
+pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 1_000_000;
+
+/// Maximum encoded byte length accepted for one debug string.
+pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
+
+/// Maximum number of rows accepted in the variable-width debug type table.
+pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
+
+/// Errors returned when encoding debug information for the bounded package reader.
+#[derive(Debug, thiserror::Error)]
+pub enum DebugInfoEncodingError {
+    /// A debug-information resource exceeds the reader's limit.
+    #[error("{resource} {size} exceeds limit {limit}")]
+    LimitExceeded {
+        resource: &'static str,
+        size: usize,
+        limit: usize,
+    },
+    /// The serialized debug-information envelope could not be read.
+    #[error("invalid encoded debug-information envelope: {0}")]
+    InvalidEnvelope(#[from] miden_core::serde::DeserializationError),
+}
 
 // PACKAGE DEBUG INFO
 // ================================================================================================
 
-/// Trusted package-owned debug information decoded from well-known debug sections.
+/// Package-owned debug information decoded from the well-known debug section.
+///
+/// The [`miden_core::serde::Deserializable::read_from`] and
+/// [`miden_core::serde::Deserializable::read_from_bytes`] implementations apply fixed resource
+/// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
+/// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
+/// [`PackageDebugInfo::read_from_bytes_unmetered`].
+///
+/// Strings are stored and serialized verbatim, including control characters, and consumers decide
+/// their validity for each use case (see [PR #3460]).
+///
+/// [PR #3460]: https://github.com/0xMiden/miden-vm/pull/3460#discussion_r3759590646
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub type PackageDebugInfo = DebugInfo<MastNodeId, DebugSourceNodeId>;
 
@@ -307,7 +353,9 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
             let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
                 *new_path_idx
             } else {
-                let path = self.strings[old_path_idx].clone();
+                let Some(path) = self.strings.get(old_path_idx).cloned() else {
+                    continue;
+                };
                 let new_path_idx = match trimmer(path.as_ref()) {
                     None => old_path_idx,
                     Some(new_path) => match string_indices.entry(new_path.clone()) {
@@ -345,8 +393,8 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
     /// Returns the deduplicated source locations referenced by assembly operation rows.
     pub fn get_location(&self, idx: DebugLocIdx) -> Option<Location> {
         let DebugLoc { file_idx, start, end } = self.locations.get(idx)?;
-        let file = &self.files[*file_idx];
-        let uri = self.strings[file.path_idx].clone();
+        let file = self.files.get(*file_idx)?;
+        let uri = self.strings.get(file.path_idx).cloned()?;
         Some(Location {
             uri: Uri::from(uri),
             start: *start,
@@ -364,7 +412,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         self.error_messages
             .iter()
             .find(|row| row.err_code == err_code)
-            .map(|row| self.strings[row.message].clone())
+            .and_then(|row| self.strings.get(row.message).cloned())
     }
 
     /// Returns source/debug occurrence nodes.
@@ -398,7 +446,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         exec_node: Exec,
     ) -> impl Iterator<Item = (Src, &SourceNode<Exec, Src>)> {
         self.roots.iter().copied().filter_map(move |source_node_id| {
-            let source_node = &self.nodes[source_node_id];
+            let source_node = self.nodes.get(source_node_id)?;
             if source_node.exec_node == exec_node {
                 Some((source_node_id, source_node))
             } else {
@@ -451,14 +499,12 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
 
     /// Returns the first assembly operation row for `source_node`, if present.
     pub fn first_asm_op_for_source_node(&self, source_node: Src) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_ops.first())
     }
 
     /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(&self, source_node: Src, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node)
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_op_for_operation(op_idx))
     }
 
     /// Returns debug variable rows for a source/debug occurrence.
@@ -498,7 +544,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceInlineCall> {
         self.inline_calls_for_source_node(source_node)
-            .filter(move |row| row.op_idx == op_idx)
+            .filter(move |row| row.contains_operation(op_idx))
     }
 }
 
@@ -912,6 +958,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     )?;
                     target_node.inline_calls.push(DebugSourceInlineCall {
                         op_idx: row.op_idx,
+                        op_end: row.op_end,
                         callee_idx,
                         loc_idx,
                     });
@@ -929,7 +976,7 @@ fn validate_debug_type_info(
     types: &IndexVec<DebugTypeIdx, DebugTypeInfo>,
 ) -> Result<(), DebugInfoTableRemapError> {
     match ty {
-        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => {},
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown | DebugTypeInfo::Variadic => {},
         DebugTypeInfo::Pointer { pointee_type_idx } => {
             validate_type_idx(*pointee_type_idx, types)?;
         },
@@ -1056,6 +1103,7 @@ fn remap_debug_type_info(
                 .collect::<Result<_, DebugInfoTableRemapError>>()?,
         },
         DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
+        DebugTypeInfo::Variadic => DebugTypeInfo::Variadic,
     })
 }
 
@@ -1099,5 +1147,31 @@ fn table_remap_error<Exec: Idx, Src: Idx>(
         DebugInfoTableRemapError::MissingSourceFile { file_idx } => {
             DebugInfoMergeError::MissingSourceFileMapping { forest_index, file_idx }
         },
+    }
+}
+
+#[cfg(test)]
+mod control_char_tests {
+    /// Control characters are preserved by the package format. Consumers decide whether a
+    /// decoded string is appropriate for their use case.
+    #[test]
+    fn control_chars_round_trip_through_debug_info() {
+        use miden_core::serde::{Deserializable, Serializable, SliceReader};
+
+        use crate::debug_info::{PackageDebugInfo, PackageDebugInfoBuilder};
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let idx = builder.add_string("has\u{0001}control");
+        let debug_info: PackageDebugInfo = *builder.build();
+        let bytes = debug_info.to_bytes();
+        let mut reader = SliceReader::new(&bytes);
+        let decoded = PackageDebugInfo::read_from(&mut reader).expect("decode should succeed");
+        // Check the exact string at its captured index and the whole decoded value.
+        assert_eq!(
+            decoded.get_string(idx).as_deref(),
+            Some("has\u{0001}control"),
+            "the exact control-char string must round-trip at its index"
+        );
+        assert_eq!(decoded, debug_info, "the whole value must round-trip");
     }
 }

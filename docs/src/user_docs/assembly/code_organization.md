@@ -13,8 +13,8 @@ Miden assembly programs are organized into procedures. Procedures, in turn, can 
 ### Procedures
 A *procedure* can be used to encapsulate a frequently-used sequence of instructions which can later be invoked via a label. A procedure is introduced using the `proc` keyword. Procedure definitions consist of the following parts, in the order they appear:
 
-* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes that modify the procedure itself. Currently, the only built-in attribute is `@locals(N)`, which specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
-* An optional visibility modifier, i.e. `pub` if the procedure is to be exported from the containing module.
+* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes interpreted by the assembler. For example, `@locals(N)` specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
+* An optional visibility modifier: `pub` or `pub(package)` to make the procedure visible outside its defining module.
 * The `proc` keyword
 * The procedure name/label
 * An optional type signature. See the [Types](#types) section for more details.
@@ -61,7 +61,7 @@ end
 ```
 
 #### Dynamic procedure invocation
-It is also possible to invoke procedures dynamically - i.e., without specifying target procedure labels at compile time. A procedure can only call itself using dynamic invocation. There are two instructions, `dynexec` and `dyncall`, which can be used to execute dynamically-specified code targets. Both instructions expect the [MAST root](../../design/programs.md) of the target to be stored in memory, and the memory address of the MAST root to be on the top of the stack. The difference between `dynexec` and `dyncall` corresponds to the difference between `exec` and `call`, see the documentation on [procedure invocation semantics](./execution_contexts.md#procedure-invocation-semantics) for more details.
+You can invoke procedures dynamically without specifying target procedure labels at compile time. A procedure can only call itself using dynamic invocation. There are two instructions, `dynexec` and `dyncall`, which can be used to execute dynamically-specified code targets. Both instructions expect the [MAST root](../../design/programs.md) of the target to be stored in memory, and the memory address of the MAST root to be on the top of the stack. The difference between `dynexec` and `dyncall` corresponds to the difference between `exec` and `call`, see the documentation on [procedure invocation semantics](./execution_contexts.md#procedure-invocation-semantics) for more details.
 
 
 Dynamic code execution in the same context is achieved by setting the top element of the stack to the memory address where the  hash of the dynamic code block is stored, and then executing the `dynexec` or `dyncall` instruction. You can obtain the hash of a procedure in the current program, by name, using the `procref` instruction. See the following example of pairing the two:
@@ -92,6 +92,8 @@ Procedure attributes (also called annotations) provide a mechanism to attach arb
 The set of built-in attributes is listed below:
 
 - `@locals(N)`, specifies that the assembler should allocate `N` elements of procedure local storage, which can then be accessed using procedure-local memory operations, e.g. `loc_load`
+- `@source_name(..)`, reserved for internal use by the Miden compiler.
+
 
 #### Attribute syntax
 
@@ -145,6 +147,18 @@ end
 A program cannot contain any exported procedures.
 
 When a program is executed, the execution starts at the first instruction following the `begin` instruction.
+
+#### Package visibility
+
+`pub(package)` makes a declaration visible under the same module-access rules as `pub`, but does not export it from the package being built. It is supported on procedures, constants, types, enums, submodules, and item re-exports. For example, a helper in a public module can be called by another module in the package without becoming part of the package interface:
+
+```masm
+pub(package) proc helper
+    nop
+end
+```
+
+A `pub(package) mod` declaration makes the child module accessible like `pub mod`, while excluding its module tree from automatic package exports. A visible item can still be explicitly re-exported with `pub use` elsewhere.
 
 #### Declaring submodules
 Modules may declare submodules, and so on, to better organize functionality for re-use and maintainability. Modules must explicitly declare each submodule that
@@ -218,7 +232,7 @@ begin
 end
 ```
 
-Imports are resolved independently. An import may not refer to another import declared in the same module:
+Import paths start at the global module tree unless qualified with `self::`. A bare import alias cannot be used as the root of another import path:
 
 ```
 use foo::bar
@@ -239,9 +253,16 @@ pub proc foo
 end
 ```
 
-In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `miden::core::math::u64` module.
+The module exports the locally defined procedure `foo` and re-exports `add` and `mul64` from `miden::core::math::u64`.
 
-`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`, and it does not resolve through other imports in the current module. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
+`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`. Any item visible at the declaration site may be re-exported, including a private item or import alias in the same module. The re-export's visibility controls access through the alias independently of the original declaration's visibility. Names must remain unique, so re-exporting a local declaration requires an alias:
+
+```masm
+proc helper nop end
+pub use {helper as exposed} from self
+```
+
+Use `pub(package) use` to expose an alias to other modules without exporting it from the package. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
 
 A leading `::` may be used to make the global root explicit:
 
@@ -349,6 +370,25 @@ begin
 
 end
 ```
+
+#### String-derived constants
+
+The `word("...")` constructor hashes a string with Blake3 to derive a deterministic word. The
+result behaves like any other word constant, including support for slice notation:
+
+```
+const STORAGE_SLOT = word("miden::account::storage_slot")
+
+begin
+    push.STORAGE_SLOT       # pushes the full word
+    push.STORAGE_SLOT[0]    # pushes the first element
+    push.STORAGE_SLOT[1..3] # pushes a two-element slice
+end
+```
+
+Use `event("...")` when a string should identify an event. It derives a single field element that
+can be used with event instructions, for example `const TRANSFER = event("miden::transfer")` and
+`emit.TRANSFER`.
 
 ### Types
 

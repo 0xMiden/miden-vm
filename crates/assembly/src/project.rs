@@ -6,6 +6,7 @@ use std::{
 };
 
 use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
+use miden_core::serde::Deserializable;
 use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
@@ -580,7 +581,7 @@ where
                             RegisteredSourcePackage::IndexedButUnreadable(expected) => {
                                 let actual = PackageVersion::new(
                                     package.package.version.clone(),
-                                    package.package.digest(),
+                                    package.package.dependency_commitment(),
                                 );
                                 if actual != expected {
                                     return Err(Report::msg(format!(
@@ -784,7 +785,7 @@ where
     }
 
     fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> bool {
-        let version = PackageVersion::new(package.version.clone(), package.digest());
+        let version = PackageVersion::new(package.version.clone(), package.dependency_commitment());
         let Some(record) = self.store.get_by_semver(&package.name, &package.version) else {
             return true;
         };
@@ -961,7 +962,7 @@ fn load_selected_preassembled_package(
         )));
     }
 
-    let actual = PackageVersion::new(package.version.clone(), package.digest());
+    let actual = PackageVersion::new(package.version.clone(), package.dependency_commitment());
     if &actual != selected {
         return Err(Report::msg(format!(
             "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph selection '{}'",
@@ -998,7 +999,7 @@ fn load_selected_preassembled_package(
 fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
     let bytes = fs::read(path)
         .map_err(|error| Report::msg(format!("failed to read '{}': {error}", path.display())))?;
-    let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
+    let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))

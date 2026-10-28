@@ -4,163 +4,203 @@
 [![LICENSE](https://img.shields.io/badge/license-APACHE-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-APACHE)
 [![Test](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml)
 [![Build](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml)
-[![RUST_VERSION](https://img.shields.io/badge/rustc-1.96+-lightgray.svg)](https://www.rust-lang.org/tools/install)
+[![RUST_VERSION](https://img.shields.io/badge/rustc-1.96.1+-lightgray.svg)](https://www.rust-lang.org/tools/install)
 [![Crates.io](https://img.shields.io/crates/v/miden-vm)](https://crates.io/crates/miden-vm)
 
-A STARK-based virtual machine.
-
-**WARNING:** This project is in an alpha stage. It has not been audited and may contain bugs and security flaws. This implementation is NOT ready for production use.
-
-**WARNING:** For `no_std`, only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
+Miden VM is a zero-knowledge virtual machine written in Rust.
 
 ## Overview
 
-Miden VM is a zero-knowledge virtual machine written in Rust. For any program executed on Miden VM, a STARK-based proof of execution can be automatically generated. This proof can then be used by anyone to verify that the program was executed correctly without the need for re-executing the program or even knowing the contents of the program.
+You can execute a program on Miden VM and generate a STARK proof of its execution.
+Anyone can verify the proof without executing the program again or knowing its source code.
 
-The Miden VM uses [Plonky3](https://github.com/0xMiden/Plonky3) as the proving system, although with some modifications. See the [`p3-miden`](https://github.com/0xMiden/p3-miden) repository for more information.
+The prover uses the [lifted STARK protocol](crates/lifted-stark) with components from
+[Plonky3](https://github.com/Plonky3/Plonky3).
 
-In the latest stable release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. We are still making changes to the VM internals and external interfaces, so you should expect some breaking changes with each new release.
+For usage examples and the Rust API, see the [miden-vm crate](miden-vm).
+The [documentation](https://docs.miden.xyz/miden-vm/) covers the VM design and programming model.
 
-- If you'd like to learn more about how Miden VM works, check out the [documentation](https://docs.miden.xyz/miden-vm/).
-- If you'd like to start using Miden VM, check out the [miden-vm](./miden-vm) crate.
-- If you'd like to learn more about STARKs, check out the [references](#references) section.
+### Branches and releases
 
-### Status and features
+Until the 1.0 release, development takes place on the following branches:
 
-The next version of the VM is being developed in the [next](https://github.com/0xMiden/miden-vm/tree/next) branch; see the [changelog](https://github.com/0xMiden/miden-vm/blob/next/CHANGELOG.md) for changes made in the currently unreleased version, and every past release.
+| Branch | Release in development |
+| --- | --- |
+| [`main`](https://github.com/0xMiden/miden-vm/tree/main) | Minor release 0.36. |
+| [`release/v0.35.1`](https://github.com/0xMiden/miden-vm/tree/release/v0.35.1) | Patch release 0.35.1. |
+| [`next`](https://github.com/0xMiden/miden-vm/tree/next) | Major release 1.0. |
 
-#### Feature highlights
+After the 1.0 release, `main` will be the release branch and `next` will be the development branch.
+Use a [release tag](https://github.com/0xMiden/miden-vm/releases) when you need a specific published version.
 
-Miden VM is a fully-featured virtual machine. Despite being optimized for zero-knowledge proof generation, it provides all the features one would expect from a regular VM. To highlight a few:
+Changes to VM internals and public interfaces can require changes in programs that use Miden VM.
+Each branch has a `CHANGELOG.md` with its release history and unreleased changes.
+See [Contributing](CONTRIBUTING.md) for the contribution workflow.
 
-- **Flow control.** Miden VM is Turing-complete and supports familiar flow control structures such as conditional statements and counter/condition-controlled loops. There are no restrictions on the maximum number of loop iterations or the depth of control flow logic.
-- **Procedures and execution contexts.** Miden assembly programs can be broken into subroutines called _procedures_, and program execution can span multiple isolated contexts, each with its own dedicated memory space. The contexts are separated into the _root context_ and _user contexts_. The root context can be accessed from user contexts via customizable kernel calls.
-- **Memory.** Miden VM supports read-write random-access memory. Procedures can reserve portions of global memory for easier management of local variables.
-- **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers (arithmetic, comparison, and bitwise operations) as well as built-in instructions for computing hashes and verifying Merkle paths using the Poseidon2 hash function (the native hash function of the VM).
-- **External libraries.** Miden VM supports compiling programs against pre-defined libraries. The VM ships with one such library: Miden `miden-core-lib` which adds support for such things as 64-bit unsigned integers. Developers can build other similar libraries to extend the VM's functionality in ways which fit their use cases.
-- **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
-- **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
-- **Fast processor execution mode.** In addition to the trace-generating processor used for proof generation, Miden VM includes a fast processor that can execute programs at up to 320 MHz, enabling among other things rapid program testing and debugging.
-- **Precompiles.** Miden VM supports [precompiles](./docs/src/design/stack/precompiles.md), allowing programs to defer expensive computations to the host while still producing auditable evidence inside the STARK proof. This enables efficient verification of operations like signature schemes and hash functions that would otherwise be prohibitively expensive to execute natively in the VM.
+### Features
 
-#### Planned features
+Miden VM supports general computation and proof generation with the following capabilities.
 
-In the coming months we plan to finalize the design of the VM and implement support for the following features:
+#### Programming model
 
-- **Recursive proofs.** Miden VM will soon be able to verify a proof of its own execution. This will enable infinitely recursive proofs, an extremely useful tool for real-world applications.
-- **Better debugging.** Miden VM will provide a better debugging experience including the ability to place breakpoints, better source mapping, and more complete program analysis info.
+- Programs can use conditional branches and loops.
+- Programs can call procedures and execute them in isolated contexts with separate memory.
+  Kernel procedures provide controlled access to the root context.
+- Programs can read and write memory, including local memory reserved for individual procedures.
+- Programs can use native 32-bit integer operations and Eidos hashing, including Merkle path verification.
+- Programs can use Eidos AEAD streaming.
+- Programs can use code from external libraries. The [core library](crates/lib/core) includes operations on 64-bit integers and cryptographic routines.
 
-#### Compilation to WebAssembly.
+[Miden Assembly](docs/src/user_docs/assembly/index.md) is the language for Miden VM programs.
+The [assembly reference](docs/src/user_docs/assembly/instruction_reference.md) describes the instructions.
+See the [assembler documentation](crates/assembly/README.md) for parsing APIs and compilation into executable packages.
 
-Miden VM is written in pure Rust and can be compiled to WebAssembly. Rust's `std` standard library is linked by default for most crates. To compile to one of the two `wasm32` supported targets, use `cargo`'s `--no-default-features` flag to ensure Rust's standard library isn't linked (*i.e. compiling in `no_std`).
+#### Hosts and private inputs
 
-This workspace's [`.cargo/config.toml`](.cargo/config.toml) sets `-C target-feature=+simd128` for the `wasm32-unknown-unknown` target, enabling Plonky3's SIMD128 backend for faster hashing (Blake3, Poseidon2) in WASM. Cargo only applies `.cargo/config.toml` to builds run from this workspace (or a directory nested under it); downstream consumers building Miden as a dependency (e.g. via `web-sdk`) must set this flag themselves, for example with `RUSTFLAGS="-C target-feature=+simd128"` or their own `.cargo/config.toml`, to get the same speedup.
+Hosts can supply private inputs and computation hints through the advice provider.
+Programs must verify advice values to establish their correctness.
 
-#### Concurrent proof generation
+#### Precompiles
 
-When compiled with the `concurrent` feature enabled, the prover will generate STARK proofs using multiple threads. For the benefits of concurrent proof generation, check out benchmarks below.
+Programs can [defer computations to the host](docs/src/design/stack/precompiles.md).
+The VM proof commits to the deferred claims.
+To complete verification, you must also verify a precompile proof for those claims.
+See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
 
-Internally, we use [rayon](https://github.com/rayon-rs/rayon) for parallel computations. Hence, to control the number of threads used to generate a STARK proof, you can use `RAYON_NUM_THREADS` environment variable.
+The [precompile VM](air/src/precompiles) proves deferred claims with specialized circuits.
+The [precompiles](crates/precompiles) support Keccak-256, SHA-256 and SHA-512 hashing. They also support 256-bit integer arithmetic and elliptic curve operations.
+The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
+
+#### Recursive verification
+
+Programs can verify VM proofs and precompile VM proofs with the core library's recursive verifiers.
+See [`sys::vm`](crates/lib/core/docs/sys/vm.md) and [`sys::pvm`](crates/lib/core/docs/sys/pvm.md) for their requirements.
+
+#### Execution and platforms
+
+You can use the fast processor to execute programs without generating a proof.
+Developers can use processor APIs to step through execution and retain source locations, including inlined calls.
+Programs can also [print VM state](docs/src/user_docs/assembly/debugging.md) through the core library's debug procedures.
+
+Miden VM supports WebAssembly builds without Rust's standard library (`no_std`).
+The supported `no_std` targets are `wasm32-unknown-unknown` and `wasm32-wasip1`.
+Use Cargo's `--no-default-features` flag for these builds.
+
+The workspace [Cargo configuration](.cargo/config.toml) enables SIMD128 instructions for
+`wasm32-unknown-unknown` with `-C target-feature=+simd128`.
+These instructions accelerate hashing in the Plonky3 backend.
+Cargo applies this configuration only when you build from this workspace or a directory inside it.
+When you use Miden VM as a dependency, set the same flag in your own Cargo configuration or `RUSTFLAGS`.
+
+Enable the `concurrent` feature to generate STARK proofs with multiple threads.
+The prover uses [Rayon](https://github.com/rayon-rs/rayon) for parallel computation.
+Set `RAYON_NUM_THREADS` to control the number of worker threads.
+See the [benchmarks](#performance) for measured performance.
 
 ### Project structure
 
-The project is organized into several crates like so:
+The workspace contains the main crates below. Internal support and benchmark crates are omitted.
 
-| Crate                       | Description                                                                                                                                                                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [core](core)                | Contains components defining the Miden VM instruction set, program structure, and a set of utility functions used by other crates.                                                                                         |
-| [assembly](crates/assembly) | Contains the Miden assembler. The assembler is used to compile Miden assembly source code into Miden VM programs.                                                                                                          |
-| [processor](processor)      | Contains the Miden VM processor. The processor is used to execute Miden programs and to generate program execution traces. These traces are then used by the Miden prover to generate proofs of correct program execution. |
-| [air](air)                  | Contains _algebraic intermediate representation_ (AIR) of Miden VM processor logic. This AIR is used by the VM during proof generation and verification.                                                     |
-| [prover](prover)            | Contains the Miden VM prover. The prover is used to generate STARK proofs attesting to correct execution of Miden VM programs. Internally, the prover uses Miden processor to execute programs and generate the execution traces.                            |
-| [verifier](verifier)        | Contains a light-weight verifier which can be used to verify proofs of program execution generated by the Miden VM.                                                                                                        |
-| [miden-vm](miden-vm)        | Aggregates functionality exposed by Miden VM processor, prover, and verifier in a single place, and also provides a CLI interface for the Miden VM.                                                                         |
-| [core-lib](crates/lib/core)  | Contains the Miden core assembly library. The goal of Miden core library is to provide highly-optimized and battle-tested implementations of commonly-used primitives.                                                      |
-| [test-utils](crates/test-utils)    | Contains utilities for testing execution of Miden VM programs.                                                                                                                                                         |
+| Area | Crate | Purpose |
+| --- | --- | --- |
+| VM | [core](core) | Defines the instruction set and shared VM types. |
+| VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
+| VM | [processor](processor) | Executes programs and builds execution traces. |
+| VM | [air](air) | Defines the production VM and precompile AIRs and their generated artifacts. |
+| VM | [air-definitions](crates/air-definitions) | Defines the authored VM and precompile constraints that generation captures. |
+| VM | [prover](prover) | Produces STARK proofs from execution traces. |
+| VM | [verifier](verifier) | Verifies VM execution proofs. |
+| VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
+| Shared code | [field](crates/field) | Provides a common field element type for Miden Rust code. |
+| Shared code | [crypto](crates/crypto) | Provides the cryptographic primitives used across the workspace. |
+| Proof system | [lifted-air](crates/lifted-air) | Defines AIR traits and symbolic constraints for the lifted STARK protocol. |
+| Proof system | [lifted-stark](crates/lifted-stark) | Implements lifted STARK proving and verification. |
+| Proof system | [stark-transcript](crates/stark-transcript) | Provides transcript channels used by proof protocols. |
+| Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
+| Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
+| Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
+| Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs. |
+| Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |
+| Packages and tools | [mast-package](crates/mast-package) | Stores compiled MAST artifacts with their dependencies and exports. |
+| Packages and tools | [project](crates/project) | Loads and builds Miden projects. |
+| Packages and tools | [package-registry](crates/package-registry) | Defines package registry and dependency resolution interfaces. |
+| Packages and tools | [package-registry-local](crates/package-registry-local) | Provides a local package registry and its command line interface. |
+| Packages and tools | [miden-format](crates/miden-format) | Formats Miden Assembly source files. |
 
 ## Documentation
 
-The documentation in the `docs/` folder is built using Docusaurus and is automatically absorbed into the main [miden-docs](https://github.com/0xMiden/miden-docs) repository for the main documentation website. Changes to the `next` branch trigger an automated deployment workflow. The docs folder requires npm packages to be installed before building.
-
+The [miden-docs](https://github.com/0xMiden/miden-docs) repository imports the Markdown from
+[`docs/src`](docs/src) for the published documentation website.
+You can build a local preview with Docusaurus. See the [docs setup instructions](docs/README.md).
 
 ## Performance
 
-The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons that many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
+These benchmarks use Eidos, Miden VM's native hash function, for STARK proof generation. The resulting proofs are therefore recursion-friendly: they can be efficiently verified inside Miden VM.
 
-A few general notes on performance:
+Execution measures the fast interpreter; proving includes trace generation after witness construction. RAM consumed is peak process memory. See the [performance guide](docs/src/performance.md).
 
-- Execution time is dominated by proof generation time. In fact, the time needed to run the program is usually under 0.01% of the time needed to generate the proof.
-- Proof verification time is really fast. In most cases it is under 1 ms, but sometimes gets as high as 2 ms or 3 ms.
-- Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
-- Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
-
-To refresh the Blake3 results below, run the same Criterion benchmark used by CI:
+To reproduce the multi-core results:
 
 ```bash
-RAYON_NUM_THREADS=16 cargo run --profile optimized -p miden-vm-blake3-bench --bin blake3-nonregression -- run \
-  --repo-root . \
-  --output-dir target/blake3-nonregression \
-  --rayon-num-threads 16 \
-  --sample-size 10 \
-  --light-sample-size 100 \
-  --measurement-time-secs 1 \
-  --warm-up-time-secs 1 \
-  --bench-axes all \
-  --git-ref "$(git rev-parse HEAD)"
+cargo build --locked --profile optimized -p miden-vm-blake3-bench --bin vm-performance
+target/optimized/vm-performance --hash eidos --threads 14 --iterations 128 --samples 5
 ```
-
-The result is written to `target/blake3-nonregression/result.json`; the harness does not parse the `miden-vm run` or `miden-vm prove` text output. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `e2e_prove`. The `e2e_prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
 
 ### Single-core prover performance
 
-When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.
+The VM executes the [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on an Apple M4 Pro with one Rayon worker. The rows measure chains of 2, 8, 32, and 128 Blake3 calls, with VM cycles padded to a power of two. The default proof parameters target 96-bit conjectured security. See the [Eidos security and usage guide](docs/src/design/eidos-security.md).
 
-|   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
-| :------------: | :------------: | :----------: | :----------: | :--------: |
-| 2<sup>14</sup> |    0.3 ms      |    885 ms    |    200 MB    |   80 KB    |
-| 2<sup>16</sup> |    0.7 ms      |   3.6 sec    |    750 MB    |  100 KB    |
-| 2<sup>18</sup> |    1.2 ms      |  14.7 sec    |    2.9 GB    |  116 KB    |
-| 2<sup>20</sup> |    6 ms        |   59 sec     |    11 GB     |  136 KB    |
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 3.00 ms        | 1.04 sec     | 0.60 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 2.95 ms        | 2.42 sec     | 0.79 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 3.97 ms        | 9.02 sec     | 1.91 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 7.68 ms        | 38.92 sec    | 6.46 GiB     | 192.0 KiB  |
 
-As can be seen from the above, proving time roughly doubles with every doubling in the number of cycles, but proof size grows much slower.
+The Apple M5 Max results use one Rayon worker. Timings and proof sizes are medians of five samples after one warmup proof.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 2.63 ms        | 0.92 sec     | 0.65 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 2.75 ms        | 2.13 sec     | 1.35 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 3.18 ms        | 7.48 sec     | 2.25 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 5.21 ms        | 30.01 sec    | 6.93 GiB     | 192.0 KiB  |
+
+The AMD Ryzen 9 9950X results use one Rayon worker. Ryzen timings and proof sizes are medians of five samples.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 5.99 ms        | 0.95 sec     | 0.37 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 6.29 ms        | 2.30 sec     | 0.54 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 6.87 ms        | 8.46 sec     | 1.59 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 9.04 ms        | 33.78 sec    | 5.66 GiB     | 192.0 KiB  |
 
 ### Multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
-
-In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
+The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</sup>).
 
 | Machine                        | Execution time | Proving time | Execution % | Implied Frequency |
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
-| Apple M1 Pro (16 threads)      |     9 ms       |   14.2 sec   |    0.1%     |      70 KHz       |
-| Apple M4 Max (16 threads)      |     6 ms       |   5.9 sec    |    0.2%     |      170 KHz      |
-| Amazon Graviton 4 (64 threads) |     11 ms      |   4.9 sec    |    0.2%     |      205 KHz      |
-| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   3.7 sec    |    0.2%     |      270 KHz      |
-| AMD Ryzen 9 9950X (16 threads) |     7.2 ms     |   7.2 sec    |    0.1%     |      145 KHz      |
-| AMD Ryzen 9 9950X (32 threads) |     6.5 ms     |   6.5 sec    |    0.1%     |      161 KHz      |
+| Apple M1 Pro (12 threads)      | 9.4 ms         | 7.75 sec     | 0.12%       | 135 KHz           |
+| Apple M4 Pro (14 threads)      | 6.3 ms         | 4.36 sec     | 0.14%       | 240 KHz           |
+| Apple M4 Max (16 threads)      | 5.9 ms         | 2.97 sec     | 0.20%       | 353 KHz           |
+| Apple M5 Max (18 threads)      | 5.8 ms         | 2.69 sec     | 0.22%       | 390 KHz           |
+| Amazon Graviton 4 (64 threads) |                |              |             |                   |
+| AMD EPYC 9R45 (64 threads)     |                |              |             |                   |
+| AMD Ryzen 9 9950X (16 threads) | 9.7 ms         | 3.78 sec     | 0.26%       | 277 KHz           |
+| AMD Ryzen 9 9950X (32 threads) | 9.5 ms         | 3.83 sec     | 0.25%       | 274 KHz           |
 
-### Recursion-friendly proofs
-
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
-
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
-
-| Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
-| ------------------------------ | :------------: | :----------: | :----------------: |
-| Apple M1 Pro (16 threads)      |     9 ms       |   25.5 sec   |     1.8x           |
-| Apple M4 Max (16 threads)      |     6 ms       |   10.1 sec   |     1.7x           |
-| Amazon Graviton 4 (64 threads) |     11 ms      |   7.7 sec    |     1.6x           |
-| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   6.9 sec    |     1.9x           |
-| AMD Ryzen 9 9950X (16 threads) |     7.2 ms     |   16.0 sec   |     2.2x           |
-| AMD Ryzen 9 9950X (32 threads) |     6.5 ms     |   12.9 sec   |     2.0x           |
+Execution % is execution time divided by proving time. Implied frequency is the padded VM cycle count (2<sup>20</sup> for these runs) divided by proving time, reported in KHz.
 
 ## References
 
-Proofs of execution generated by Miden VM are based on STARKs. A STARK is a novel proof-of-computation scheme that allows you to create an efficiently verifiable proof that a computation was executed correctly. The scheme was developed by Eli Ben-Sasson, Michael Riabzev et al. at Technion - Israel Institute of Technology. STARKs do not require an initial trusted setup, and rely on very few cryptographic assumptions.
+Miden VM uses STARK proofs to establish that a computation was executed correctly.
+Eli Ben-Sasson and Michael Riabzev developed STARKs with their coauthors at Technion (Israel Institute of Technology).
+STARKs require no trusted setup and rely on few cryptographic assumptions.
 
 Here are some resources to learn more about STARKs:
 
-- STARKs whitepaper: [Scalable, transparent, and post-quantum secure computational integrity](https://eprint.iacr.org/2018/046)
+- [Scalable, transparent, and post-quantum secure computational integrity](https://eprint.iacr.org/2018/046)
 - STARKs vs. SNARKs: [A Cambrian Explosion of Crypto Proofs](https://medium.com/starkware/the-cambrian-explosion-of-crypto-proofs-7ac080ac9aed)
 
 Vitalik Buterin's blog series on zk-STARKs:

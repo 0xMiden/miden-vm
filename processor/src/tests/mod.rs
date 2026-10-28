@@ -17,7 +17,7 @@ use crate::{
     BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
     Program, StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName, SystemEvent, TraceError, TraceHandler},
+    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
 };
 
@@ -284,18 +284,15 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
 }
 
 #[test]
-fn test_diagnostic_host_trace_error_uses_emit_location() {
+fn test_diagnostic_host_trace_error_uses_trace_location() {
     let trace = EventName::new("test::host_trace_error");
     let trace_id = trace.to_event_id();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let source = format!(
         "
         begin
-            push.{trace_id}
-            push.{trace_sys_event_id}
-            emit
+            trace.event(\"{trace}\")
         end"
     );
     let package = Assembler::new(source_manager.clone())
@@ -319,11 +316,10 @@ fn test_diagnostic_host_trace_error_uses_emit_location() {
         // Name and id of the user defined trace event are shown
         format!("  x error during processing of event '{trace}' (ID: {trace_id})"),
         "  `-> dummy host trace failure",
-        regex!(r#",-\[.*:5:13\]"#),
-        format!(" 4 |             push.{trace_sys_event_id}"),
-        " 5 |             emit",
-        regex!(r#":\s+\^\^\^"#),
-        " 6 |         end",
+        regex!(r#",-\[.*:3:13\]"#),
+      r#" 3 |             trace.event("test::host_trace_error")"#,
+        regex!(r#":\s+\^+"#),
+        " 4 |         end",
         "   `----"
     );
 }
@@ -585,8 +581,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
 
     let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
     let err = build_test.execute().expect_err("expected error");
-    // With LE sponge, the root hash changes and lookup fails at root level instead of path
-    // verification
+    // The deliberately wrong index changes the derived root key, so the Merkle-store lookup fails.
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
@@ -988,6 +983,11 @@ fn test_diagnostic_procedure_not_found_call() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("lib", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1007,7 +1007,7 @@ fn test_diagnostic_procedure_not_found_call() {
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        format!("procedure with root digest {missing_root} could not be found"),
         regex!(r#",-\[.*:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
@@ -1043,6 +1043,11 @@ fn test_diagnostic_procedure_not_found_join() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1062,7 +1067,7 @@ fn test_diagnostic_procedure_not_found_join() {
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        format!("procedure with root digest {missing_root} could not be found"),
         regex!(r#",-\[.*:4:9\]"#),
         " 3 |",
         " 4 | ,->         begin",
@@ -1102,6 +1107,11 @@ fn test_diagnostic_procedure_not_found_loop() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1121,7 +1131,7 @@ fn test_diagnostic_procedure_not_found_loop() {
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        format!("procedure with root digest {missing_root} could not be found"),
         regex!(r#",-\[.*:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             while.true",
@@ -1162,6 +1172,11 @@ fn test_diagnostic_procedure_not_found_split() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1181,7 +1196,7 @@ fn test_diagnostic_procedure_not_found_split() {
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        format!("procedure with root digest {missing_root} could not be found"),
         regex!(r#",-\[.*:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             if.true",
@@ -1438,6 +1453,11 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let kernel_library = Assembler::new(source_manager.clone())
         .assemble_kernel("kernel", kernel, None)
         .unwrap();
+    let missing_root = kernel_library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("kernel must contain dummy_proc");
 
     let program = {
         let package = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
@@ -1468,7 +1488,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
+        format!("syscall failed: procedure with root {missing_root} was not found in the kernel"),
         regex!(r#",-\[.*:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",

@@ -1,304 +1,320 @@
+use {
+    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    RELATION_DIGEST_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
+use {
+    AND8_LOOKUP_LOG_HEIGHT,
+    AND8_PREPROCESSED_TRACE_COM_0,
+    AND8_PREPROCESSED_TRACE_COM_1,
+    AND8_PREPROCESSED_TRACE_COM_2,
+    AND8_PREPROCESSED_TRACE_COM_3,
+    LOOKUP_FRACTIONS_PER_ROW,
+    MAX_CONSTRAINT_DEGREE,
+    MAX_MESSAGE_WIDTH,
+    NUM_COMPOSED_CONSTRAINTS,
+    NUM_DEEP_TERMS,
+    RELATION_DIGEST_0,
+    RELATION_DIGEST_1,
+    RELATION_DIGEST_2,
+    RELATION_DIGEST_3,
+} from miden::core::sys::vm::parameters
+use miden::core::mem
+use miden::core::stark::utils
+use miden::core::stark::verifier
+
 pub mod aux_trace
 pub mod claim
 pub mod constraints_eval
-pub mod constraints_eval_inputs
 pub mod deep_queries
+pub mod layout
 pub mod ood_frames
+pub mod parameters
 pub mod public_inputs
 
-use miden::core::mem
-use miden::core::stark::verifier
-use miden::core::stark::constants
+# Lifted STARK does not grind lookup challenges.
+const LOOKUP_POW_BITS = 0
 
-# Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
-# configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
-# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
-# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
-const CONJECTURED_BITS_PER_QUERY_FP = 193382
+# One block-hash seed and two deferred-root terms, consumed in public_inputs.masm.
+const CORE_BOUNDARY_LOOKUP_TERMS = 3
 
-# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
-const MAX_SECURITY_LEVEL = 128
+# Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
+# shapes before a security descriptor is constructed and keep its fixed-point arithmetic in the
+# common estimator's supported u32 domain.
+const LOG_HEIGHT_MIN = 6
+const LOG_HEIGHT_MAX = 29
 
-# RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 6228634522968454696
-const RELATION_DIGEST_1 = 9493741029039437490
-const RELATION_DIGEST_2 = 16565065039104926463
-const RELATION_DIGEST_3 = 1338979827357058143
+# Offset of K in the P | K | I | O claim encoding.
+const KERNEL_COMMITMENT_OFFSET = 4
 
-# Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 6703562205535399821
-const ACE_REGISTRY_ROOT_1 = 4902180974408534340
-const ACE_REGISTRY_ROOT_2 = 2376205887554034497
-const ACE_REGISTRY_ROOT_3 = 2131879092839069624
+# Offset of D in the P | D boundary-input block.
+const DEFERRED_ROOT_OFFSET = 4
 
-#! Loads security parameters from the advice stack and stores them in memory.
-#!
-#! The advice stack must contain, in order:
-#!   [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-#!
-#! After this procedure, all four values are available in memory via the corresponding
-#! accessors in constants.masm (get_number_queries, get_query_pow_bits, etc.).
-#!
-#! Input:  [...]
-#! Output: [...]
-proc load_security_params
-    adv_push exec.constants::set_number_queries
-    adv_push exec.constants::set_query_pow_bits
-    adv_push exec.constants::set_deep_pow_bits
-    adv_push exec.constants::set_folding_pow_bits
-end
+# Domain tag for the kernel commitment:
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
+# Must match miden_core::program::KERNEL_DOMAIN_TAG.
+const KERNEL_DOMAIN_TAG = 0x01000001
 
-#! Checks that the 40-felt claim region is word-aligned and below verifier-owned memory.
-#! Must run before the verifier writes to memory.
-#!
-#! Input:  [claim_ptr, ...]
-#! Output: [claim_ptr, ...]
-proc assert_valid_claim_region
-    # u32mod also validates that claim_ptr is a u32.
-    dup u32mod.4 assertz.err="claim_ptr must be word-aligned"
+const FELTS_PER_KERNEL_DIGEST = 4
 
-    # Require [claim_ptr, claim_ptr + 40) to end before verifier memory.
-    dup add.40 exec.constants::verifier_memory_start
-    u32lte assert.err="claim memory region overlaps verifier-owned memory"
-end
-
-#! Computes the conjectured security level (in bits) attained by the given proof parameters.
-#!
-#! Evaluates the integer fixed-point formula `min((num_queries * C) >> 16 + query_pow_bits, 128)`.
-#! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
-#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
-#!
-#! PRECONDITION: `num_queries <= 150`, so `num_queries * C` fits in a u32 (the `u32shr` below
-#! requires that). Parameters returned by `verify_vm_proof` satisfy this bound: the generic
-#! verifier enforces it.
-#!
-#! Inputs:  [num_queries, query_pow_bits, ...]
-#! Outputs: [level, ...]
-pub proc conjectured_security_level
-    push.CONJECTURED_BITS_PER_QUERY_FP mul
-    u32shr.16
-    add
-    push.MAX_SECURITY_LEVEL u32min
-    # => [level, ...]
-end
+# Must match KernelDescriptor::MAX_NUM_PROCEDURES.
+const MAX_NUM_KERNEL_PROCEDURES = 255
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
-#!   [log_core, log_chiplets, log_poseidon2_permutation]
+#!   [log_core, log_chiplets, log_eidos_compression]
 #!
-#! Writes per-AIR log heights, the maximum log height, ORDER_TAG, RELATION_DIGEST, and
-#! ACE_REGISTRY_ROOT to memory.
-pub proc load_air_context
+#! The And8 lookup height is fixed verifier setup.
+#!
+#! Writes the trace shape, proof-order routing, relation commitments, and fixed OOD/query-row
+#! addresses to verifier memory.
+pub proc load_air_context()
     adv_push
     exec.assert_shape_log
-    exec.constants::set_core_trace_length_log
+    exec.layout::set_core_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_chiplets_trace_length_log
+    exec.layout::set_chiplets_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_poseidon2_permutation_trace_length_log
+    exec.layout::set_eidos_compression_trace_length_log
 
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
+    push.AND8_LOOKUP_LOG_HEIGHT
+    exec.layout::set_and8_lookup_trace_length_log
+
+    exec.layout::get_core_trace_length_log
+    exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_eidos_compression_trace_length_log
     u32max
-    exec.constants::set_trace_length_log
+    exec.layout::get_and8_lookup_trace_length_log
+    u32max
+    mem_store.LOG_TRACE_LENGTH_PTR
 
-    exec.derive_order_tag
-    exec.constants::set_order_tag
+    # Derive the height-sorted proof order once from the heights stored above, then route each
+    # AIR's canonical out-of-domain destination to its proof-order stream position. The heights are
+    # unchanged from here on, so both run once per proof; the auxiliary-boundary placement and the
+    # fold-coefficient staging reuse the same maps.
+    exec.ood_frames::stage_proof_order_maps
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
+    exec.store_and8_preprocessed_trace_commitment
+    exec.layout::ood_evaluations_ptr
+    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
+    exec.layout::current_trace_row_ptr
+    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
+    exec.layout::auxiliary_ace_inputs_ptr
+    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
+    exec.layout::aux_rand_elem_ptr
+    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
-proc assert_shape_log
+proc assert_shape_log(height: felt) -> u8
     dup u32assert.err="AIR log height must be u32"
-    dup u32gt.5 assert.err="AIR log height below minimum"
-    dup u32lt.30 assert.err="AIR log height above maximum"
+    dup u32gte.LOG_HEIGHT_MIN assert.err="AIR log height below minimum"
+    dup u32lte.LOG_HEIGHT_MAX assert.err="AIR log height above maximum"
     drop
 end
 
-#! Derives the Lehmer proof-order tag for [Core, Chiplets, Poseidon2Permutation].
-proc derive_order_tag
-    exec.core_le_chiplets
-    if.true
-        exec.chiplets_le_poseidon2_permutation
-        if.true
-            # Core, Chiplets, Poseidon2Permutation
-            push.0
-        else
-            exec.core_le_poseidon2_permutation
-            if.true
-                # Core, Poseidon2Permutation, Chiplets
-                push.1
-            else
-                # Poseidon2Permutation, Core, Chiplets
-                push.4
-            end
-        end
-    else
-        exec.core_le_poseidon2_permutation
-        if.true
-            # Chiplets, Core, Poseidon2Permutation
-            push.2
-        else
-            exec.chiplets_le_poseidon2_permutation
-            if.true
-                # Chiplets, Poseidon2Permutation, Core
-                push.3
-            else
-                # Poseidon2Permutation, Chiplets, Core
-                push.5
-            end
-        end
-    end
-end
-
-proc core_le_chiplets
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    u32lte
-end
-
-proc core_le_poseidon2_permutation
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    u32lte
-end
-
-proc chiplets_le_poseidon2_permutation
-    exec.constants::get_chiplets_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    u32lte
-end
-
-proc store_relation_digest
+proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    exec.constants::relation_digest_ptr mem_storew_le
+    mem_storew_le.RELATION_DIGEST_PTR
     # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+    dropw
 end
 
-proc store_ace_registry_root
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
-    # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+proc store_and8_preprocessed_trace_commitment
+    push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
+    mem_storew_le.PREPROCESSED_TRACE_COM_PTR
+    dropw
 end
 
-#! Verifies a STARK proof of the caller-staged execution claim and returns the deferred
-#! obligation the proof binds and the proof's transcript-bound security parameters.
+#! Materializes and authenticates the kernel witness named by the staged claim.
 #!
-#! The proof is consumed from the advice stack; request keys name this procedure's MAST root
-#! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
+#! The digest list and its validated procedure count are stored for the kernel-ROM boundary check.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc materialize_kernel_witness()
+    padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+    # => [K, ...]
+    adv.push_mapvaln
+    adv_push
+    # => [num_kernel_felts, K, ...]   advice: [digest_0, .., digest_{n-1}]
+
+    u32assert.err="kernel witness length must fit in a u32"
+    dup u32mod.FELTS_PER_KERNEL_DIGEST
+    assertz.err="kernel witness length must be word-aligned"
+    div.FELTS_PER_KERNEL_DIGEST
+    dup u32lte.MAX_NUM_KERNEL_PROCEDURES
+    assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+    # => [num_kernel_procedures, K, ...]
+
+    dup exec.layout::num_kernel_procedures_ptr mem_store
+    # => [num_kernel_procedures, K, ...]
+
+    exec.layout::kernel_witness_ptr swap
+    push.KERNEL_DOMAIN_TAG
+    exec.mem::pipe_words_to_memory_in_domain
+    # => [K', end_ptr, K, ...]
+
+    # Discard the end pointer, then authenticate the copied witness.
+    movup.4 drop
+    # => [K', K, ...]
+    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    # => [...]
+end
+
+#! Builds the common security descriptor from the four transcript-bound proof parameters returned
+#! by the generic STARK verifier and the MVM relation data.
+#!
+#! The AIR shape and per-row lookup count are fixed by this relation. The one-time lookup boundary
+#! count is `CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures`; the latter was derived from the
+#! kernel witness and authenticated against the claim's kernel commitment before proof
+#! verification.
+#!
+#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
+    mem_load.LOG_TRACE_LENGTH_PTR
+    push.LOOKUP_FRACTIONS_PER_ROW
+    exec.layout::num_kernel_procedures_ptr mem_load
+    add.CORE_BOUNDARY_LOOKUP_TERMS
+    push.MAX_MESSAGE_WIDTH
+    push.NUM_DEEP_TERMS
+    push.MAX_CONSTRAINT_DEGREE
+    push.NUM_COMPOSED_CONSTRAINTS
+    push.LOOKUP_POW_BITS
+end
+
+#! Verifies a lifted-STARK proof of the Miden VM execution claim named by the caller-provided
+#! commitment and returns the common security descriptor followed by the deferred obligation.
+#!
+#! The claim preimage is fetched from the advice map under the caller-provided claim commitment,
+#! authenticated, and stored in verifier-owned memory. The proof is consumed from the advice
+#! stack; request keys name this procedure's MAST root
+#! (`CoreLibrary::vm_recursive_verifier_root` on the operator side). A consumer that fetches the
 #! proof by content derives the identical root in-VM via `procref` of this procedure, computes
-#! `request_key(verifier_root, claim_commitment)` with `claim::request_key`, and moves the
-#! registered proof package onto the advice stack before calling it.
+#! `proof_request_key(verifier_root, claim_commitment)` with `sys::build_proof_request_key`, and
+#! moves the registered proof package onto the advice stack before calling it.
 #!
-#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
-#! from the advice stack and stored in memory for the generic verifier, which enforces their
-#! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
-#! parameters it was not produced with. This procedure holds no security-estimate formula and
-#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
-#! (e.g. with `conjectured_security_level`) under its own policy. An estimate or policy change
-#! therefore never moves this procedure's root - request keys and registered proof packages
-#! stay valid across such changes.
+#! The four proof parameters are loaded from advice, structurally validated, and bound into the
+#! Fiat-Shamir transcript. The maximum trace height is likewise transcript-bound. The remaining
+#! descriptor fields are fixed by this verifier's relation, except for the boundary count derived
+#! from the kernel witness authenticated against the claim. The caller passes the returned twelve
+#! elements unchanged to `stark::security::compute_conjectured_security_level`, then applies its
+#! own acceptance policy. The estimation formula and policy remain outside this procedure.
+#! Changing only the formula therefore changes the estimator root without changing this verifier's
+#! root. A change to the proof format or to any value supplied by the verifier still changes this
+#! procedure.
 #!
-#! The caller stores the claim as `P (+0) | K (+4) | I (+8) | O (+24)`. The complete 40-felt
-#! region must be below `constants::verifier_memory_start`.
+#! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
+#! lookup grinding, 6..=29 for every AIR log trace height, and 0..=255 kernel procedures.
+#!
+#! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
+#! commitment before using these values as AIR public inputs.
 #!
 #! The verifier fetches the kernel digest list from the advice map under K, copies it to
-#! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
+#! `layout::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
 #! claim commitment and checks the kernel-ROM boundary against this list.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
-#! include it in its own statement.
+#! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
 #!
-#! Inputs:  [claim_ptr, ...]
-#! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Verification runs in an isolated execution context, preserving caller memory and stack elements
+#! below the claim commitment.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, ...]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
 #!
 #! Where:
-#! - claim_ptr is word-aligned; its 40-felt region ends at or before
-#!   `constants::verifier_memory_start`.
+#! - CLAIM_COMMITMENT is supplied by the caller and binds the advice-supplied claim preimage.
+#! - The first twelve elements are the common security descriptor documented by
+#!   `stark::security::compute_conjectured_security_level`.
 #! - D is the deferred root bound by the verified statement.
-#! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
-#!   transcript-bound security parameters.
-pub proc verify_vm_proof
-    # Validate before load_security_params writes verifier memory.
-    exec.assert_valid_claim_region
+#!
+#! Invocation: exec
+pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
+    # Reserve the callee's 16-element argument/result window above the caller's live stack.
+    padw padw padw
+    # => [pad(12), CLAIM_COMMITMENT, ...]
+    swapw.3
+    # => [CLAIM_COMMITMENT, pad(12), ...]
 
-    # --- Load security parameters from advice stack ---
+    call.verify_proof_inner
+    # => [security_descriptor(12), D, ...]
+end
 
-    exec.load_security_params
-    # => [claim_ptr, ...]
+#! Verifies a Miden VM execution proof against the supplied claim commitment.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, pad(12)]
+#! Outputs: [security_descriptor(12), D]
+#!
+#! Invocation: call
+proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
+    # --- Authenticate execution claim -----------------------------------------------------------
 
-    # --- Materialize the kernel digest witness from the advice map, keyed by the claim's K ---
+    # Preserve the commitment until public inputs are absorbed after transcript initialization.
+    exec.layout::claim_commitment_ptr mem_storew_le
+    # => [CLAIM_COMMITMENT, pad(12)]
 
-    padw dup.4 add.4 mem_loadw_le
-    # => [K, claim_ptr, ...]
-    adv.push_mapval
-    adv_push
-    # => [num_kernel_digests, K, claim_ptr, ...]   advice: [digest_0, .., digest_{n-1}]
+    exec.layout::claim_ptr exec.claim::materialize_claim
+    # => [scratch(16)]
 
-    # The count must be bounded before the copy: it comes from advice and is only bound to K
-    # by the hash check, which runs after the writes.
-    u32assert.err="number of kernel procedure digests must fit in a u32"
-    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+    # --- Prepare MVM verifier state --------------------------------------------------------------
 
-    dup exec.constants::kernel_witness_ptr swap
-    # => [num_words = num_kernel_digests, write_ptr, num_kernel_digests, K, claim_ptr, ...]
-    exec.mem::pipe_words_to_memory
-    # The pipe's untagged hash state is unused: the binding check is the domain-tagged kernel
-    # commitment below.
-    # => [R0, R1, C, write_ptr', num_kernel_digests, K, claim_ptr, ...]
-    dropw dropw dropw drop
-    # => [num_kernel_digests, K, claim_ptr, ...]
+    exec.utils::load_security_params
+    # => [scratch(16)]
 
-    dup exec.constants::kernel_witness_ptr
-    # => [kernel_ptr, num_kernel_digests, num_kernel_digests, K, claim_ptr, ...]
-    exec.claim::kernel_commitment
-    # => [K', num_kernel_digests, K, claim_ptr, ...]
-    movup.4 movdn.8
-    # => [K', K, num_kernel_digests, claim_ptr, ...]
-    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
-    # => [num_kernel_digests, claim_ptr, ...]
+    exec.materialize_kernel_witness
+    # => [scratch(16)]
 
-    # --- Stage the boundary-inputs block from the claim region and advice ---
-
-    exec.constants::kernel_witness_ptr movup.2
-    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
     exec.public_inputs::stage_boundary_inputs
-    # => [...]
+    # => [scratch(16)]
 
     exec.load_air_context
-    # => [...]
+    # => [scratch(16)]
 
-    # --- Load the digests of all dynamically invoked procedures --------------
+    # --- Verify ----------------------------------------------------------------------------------
 
+    # Dynamic hook digests in the generic verifier's ABI order.
     procref.deep_queries::compute_deep_composition_polynomial_queries
     procref.constraints_eval::execute_constraint_evaluation_check
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4]
-
-    # --- Call the core verification procedure from `core-lib` ------------------
+    # => [D0, D1, D2, D3, D4, scratch(16)]
 
     exec.verifier::verify
-    # => [...]
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]
 
-    # --- Return the deferred obligation and the transcript-bound security parameters ---
+    # --- Return result ---------------------------------------------------------------------------
 
-    exec.constants::get_folding_pow_bits
-    exec.constants::get_deep_pow_bits
-    exec.constants::get_query_pow_bits
-    exec.constants::get_number_queries
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-    exec.public_inputs::load_deferred_root
-    # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    exec.build_security_descriptor
+    # => [security_descriptor(12), scratch(16)]
+
+    # Leave one scratch word for the deferred root.
+    repeat.3
+        movupw.3
+        dropw
+    end
+    # => [security_descriptor(12), scratch(4)]
+
+    swapw.3
+    exec.layout::boundary_inputs_ptr add.DEFERRED_ROOT_OFFSET mem_loadw_le
+    swapw.3
+    # => [security_descriptor(12), D]
 end

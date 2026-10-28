@@ -16,12 +16,19 @@ miden-core = { workspace = true }
 miden-core-lib = { workspace = true }
 miden-crypto = { workspace = true }
 miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }
+p256 = { features = ["ecdsa"], workspace = true }
 rand_chacha = { workspace = true }
-
-[dev-dependencies]
-codspeed-criterion-compat = { workspace = true }
 
 [[bench]]
 name = "precompiles_bench"
-path = "../../precompiles/benches/precompiles_bench.rs"
+path = "../../crates/precompiles/benches/precompiles_bench.rs"
+harness = false
+
+[dev-dependencies]
+codspeed-criterion-compat = { workspace = true }
+miden-precompiles-prover = { workspace = true, features = ["testing", "concurrent"] }
+miden-air = { workspace = true }
+
+[[bench]]
+name = "pvm_bench"
 harness = false

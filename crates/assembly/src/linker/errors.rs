@@ -5,7 +5,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Felt, Path, Word,
-    ast::{SymbolResolutionError, constants::ConstEvalError},
+    ast::{ModuleIndex, SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
@@ -44,6 +44,9 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("too many modules in the graph (maximum: {})", ModuleIndex::MAX_MODULES)]
+    #[diagnostic()]
+    TooManyModules,
     #[error("invalid module surface metadata for package '{package}': {reason}")]
     #[diagnostic()]
     InvalidPackageModuleSurface { package: String, reason: String },
@@ -249,6 +252,19 @@ pub enum LinkerError {
     UndefinedType {
         #[label]
         span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
+    #[error("recursive type definition")]
+    #[diagnostic(help(
+        "this type refers to itself without an intervening pointer, so it would have infinite \
+         size; introduce a pointer somewhere in the cycle"
+    ))]
+    RecursiveType {
+        #[label("this type is defined in terms of itself")]
+        span: SourceSpan,
+        #[label("the cycle returns here")]
+        cycle_span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },

@@ -130,6 +130,7 @@ fn rocksdb_reader_is_detached_snapshot() {
 #[test]
 fn rocksdb_persistence_reopen() {
     let entries = generate_entries(1000);
+    let (key, value) = entries[0];
 
     let (initial_storage, temp_dir_guard) = setup_storage();
     let db_path = temp_dir_guard.path().to_path_buf();
@@ -152,6 +153,7 @@ fn rocksdb_persistence_reopen() {
     assert_eq!(inner_nodes.len(), inner_nodes_2.len());
     assert_eq!(inner_nodes, inner_nodes_2);
     assert_eq!(smt.root(), root);
+    smt.open(&key).verify_presence(&key, &value, &root).unwrap();
 }
 
 #[test]

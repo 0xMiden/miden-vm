@@ -1,3 +1,12 @@
+use {
+    COMPOSITION_POLY_COM_PTR,
+    DEEP_POW_BITS_PTR,
+    FOLDING_POW_BITS_PTR,
+    MAIN_TRACE_COM_PTR,
+    NUM_QUERIES_PTR,
+    QUERY_POW_BITS_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
 use miden::core::pcs::fri::frie2f4
 use miden::core::pcs::fri::helper
 
@@ -5,7 +14,6 @@ use miden::core::stark::deep_queries
 use miden::core::stark::random_coin
 use miden::core::stark::ood_frames
 use miden::core::stark::public_inputs
-use miden::core::stark::constants
 use miden::core::stark::utils
 
 #! Verifies a STARK proof.
@@ -20,8 +28,15 @@ use miden::core::stark::utils
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
 #!
-#! Precondition: security parameters, relation metadata, and relation-specific state must already
-#! be stored in memory. The relation wrapper owns validation and setup of that state.
+#! Before calling this procedure, a relation wrapper must:
+#!
+#! - store the transcript-bound security parameters, which this procedure validates;
+#! - store its relation digest and canonical AIR heights;
+#! - stage its fixed OOD and query-row addresses in the generic context cells; and
+#! - supply the five hooks listed above in the documented ABI order.
+#!
+#! Relation-dependent constants live under `sys/<relation>`. The circuit digest and circuit shape
+#! must be derived by regeneration, while any hand-written copy must be pinned to that source.
 #!
 #! Hardcoded protocol parameters:
 #!
@@ -29,9 +44,13 @@ use miden::core::stark::utils
 #! - Maximum remainder polynomial degree: 127.
 #! - Constraint folding, OOD evaluations, and aux-trace values use the quadratic extension field.
 #!
+#! Rust counterpart: `miden_lifted_stark::VerifierInstance::verify`. Rust checks PCS openings
+#! before evaluating constraints; this procedure evaluates constraints first. Constraint evaluation
+#! does not change the Fiat-Shamir transcript, so the order of challenges is the same.
+#!
 #! Inputs:  [D0, D1, D2, D3, D4]
-#! Outputs: []
-pub proc verify
+#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
 
     #==============================================================================================
     #       I)  Observe proof context and load public inputs
@@ -45,7 +64,7 @@ pub proc verify
     exec.utils::validate_inputs
     # => [...]
 
-    # Initialize sponge with DSFS seeding and derive trace domain parameters.
+    # Initialize the Eidos challenger with DSFS seeding and derive trace domain parameters.
     # Security params, relation digest, and trace-height metadata are read from memory.
     exec.random_coin::init_seed
     # => [...]
@@ -58,7 +77,7 @@ pub proc verify
     # Load the main-trace commitment, observe it onto the buffered stream, and flush before
     # sampling auxiliary randomness.
     padw adv_loadw
-    exec.constants::main_trace_com_ptr mem_storew_le
+    mem_storew_le.MAIN_TRACE_COM_PTR
     # => [main_trace_commitment, ...]
     exec.random_coin::observe_word_and_flush_buffer
     # => [...]
@@ -92,7 +111,7 @@ pub proc verify
     # Guaranteed here because generate_constraint_composition_coefficients only samples
     # (decrements output_len) and never observes (input_len stays 0).
     padw adv_loadw
-    exec.constants::composition_poly_com_ptr mem_storew_le
+    mem_storew_le.COMPOSITION_POLY_COM_PTR
     exec.random_coin::reseed_direct
     exec.random_coin::generate_z_zN
     # => [...]
@@ -124,12 +143,8 @@ pub proc verify
     exec.random_coin::check_deep_pow_and_generate_deep_composition_random_coefficients
 
     #============================================
-    #   2) Compute constants needed for computing
-    #       FRI queries. These are:
-    #       -   LDE domain generator.
-    #       -   Trace domain generator `g`.
-    #       -   `gz`.
-    #       -   Number of FRI layers.
+    #   2) Compute and store the number of FRI
+    #      layers and the remainder polynomial size.
     #============================================
 
     exec.helper::generate_fri_parameters
@@ -145,8 +160,8 @@ pub proc verify
     # => [...]
 
     #============================================
-    #   4) Load and check commitment to remainder
-    #      polynomial.
+    #   4) Load the remainder polynomial and absorb
+    #      it into the transcript.
     #============================================
 
     exec.helper::load_and_verify_remainder
@@ -176,4 +191,10 @@ pub proc verify
     #============================================
 
     exec.frie2f4::verify
+
+    # Return the transcript-bound parameters for the relation wrapper's caller to grade.
+    mem_load.FOLDING_POW_BITS_PTR
+    mem_load.DEEP_POW_BITS_PTR
+    mem_load.QUERY_POW_BITS_PTR
+    mem_load.NUM_QUERIES_PTR
 end

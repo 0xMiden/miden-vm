@@ -78,7 +78,7 @@ pub trait StartsWith<Prefix: ?Sized> {
     fn starts_with_exactly(&self, prefix: &Prefix) -> bool;
 }
 
-/// Serialize a [Path]-like value
+/// Serialize a [Path]-like value.
 #[cfg(feature = "serde")]
 pub fn serialize<P, S>(path: P, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -89,7 +89,7 @@ where
     path.as_ref().serialize(serializer)
 }
 
-/// Deserialize a [Path]-like value
+/// Deserialize a [Path]-like value.
 #[cfg(feature = "serde")]
 pub fn deserialize<'de, P, D>(deserializer: D) -> Result<P, D::Error>
 where
@@ -100,7 +100,7 @@ where
     Ok(P::from(path))
 }
 
-/// Deserialize a [Path]-like value wrapped in a [Span]
+/// Deserialize a [Path]-like value wrapped in a [Span].
 #[cfg(feature = "serde")]
 pub fn deserialize_spanned<'de, P, D>(deserializer: D) -> Result<Span<P>, D::Error>
 where

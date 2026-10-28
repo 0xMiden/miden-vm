@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 // ================================================================================================
 pub use miden_core::crypto::{
     dsa::*,
-    hash::Poseidon2,
+    hash::Eidos,
     merkle::{
         EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
         MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,

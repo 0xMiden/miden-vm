@@ -1,16 +1,17 @@
-//! Unified testing infrastructure for the lifted STARK crate.
+//! Test fixtures and FRI vector generation.
 //!
-//! Provides three complete configuration variants, each containing everything
-//! needed to test at any level (LMCS, PCS, or full STARK):
+//! The `testing` feature also exposes example AIRs and four hash configurations:
 //!
 //! - `configs::goldilocks_poseidon2`
 //! - `configs::goldilocks_keccak`
+//! - `configs::goldilocks_blake3`
 //! - `configs::goldilocks_blake3_192`
-//!
-//! Also provides shared fixtures, matrix generation utilities, and test helpers.
 
+#[cfg(feature = "testing")]
 pub mod airs;
+#[cfg(any(test, feature = "testing"))]
 pub mod configs;
+pub mod fri_vectors;
 pub mod params;
 
 #[cfg(test)]
@@ -27,11 +28,9 @@ mod test_tiny_air;
 // Re-export commonly used params at the module level for convenience.
 use alloc::vec::Vec;
 
-// Re-exports for integration benches (which consume `miden_lifted_stark` as an
-// external crate via the `testing` feature). Gated so production callers don't
-// see this surface.
+// Re-exports used by external integration tests and benches.
 pub use miden_lifted_air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
-use p3_field::{Field, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 pub use params::{
     BENCH_PCS_PARAMS, FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, LOG_HEIGHTS,
@@ -67,6 +66,36 @@ pub use crate::{
 pub fn canonical_domain<F: TwoAdicField>(log_trace_height: u8, log_blowup: u8) -> LiftedDomain<F> {
     LiftedDomain::try_canonical(log_trace_height, log_blowup)
         .expect("canonical domain parameters out of range")
+}
+
+/// Number of FRI folding rounds the verifier expects for a codeword on `domain` under `params`.
+pub fn fri_num_rounds<F: TwoAdicField>(params: &PcsParams, domain: &LiftedDomain<F>) -> usize {
+    params.fri.num_rounds(domain)
+}
+
+/// Number of coefficients of the final FRI polynomial the verifier expects for a codeword on
+/// `domain` under `params`.
+pub fn fri_final_poly_degree<F: TwoAdicField>(
+    params: &PcsParams,
+    domain: &LiftedDomain<F>,
+) -> usize {
+    params.fri.final_poly_degree(domain)
+}
+
+/// Samples an OOD point and the next field element through the verifier's channel.
+pub fn sample_ood_point_and_next<F, EF, C, Ch>(domain: &LiftedDomain<F>, challenger: Ch) -> (EF, F)
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    C: Clone,
+    Ch: miden_stark_transcript::TranscriptChallenger<F, C>,
+{
+    use miden_stark_transcript::Channel;
+
+    let mut channel =
+        miden_stark_transcript::VerifierTranscript::<F, C, Ch>::new(challenger, &[], &[]);
+    let z = domain.sample_ood_point(&mut channel);
+    (z, channel.sample())
 }
 
 // =============================================================================
@@ -130,6 +159,7 @@ pub fn total_elements<F: Field>(matrix_groups: &[Vec<RowMajorMatrix<F>>]) -> u64
 /// `Felt`, `Sponge`, `Compress`, `Challenger`, `test_challenger`
 ///
 /// Also requires `Lmcs` to be defined as a type alias in the invoking module.
+#[cfg(any(test, feature = "testing"))]
 macro_rules! define_lmcs_test_helpers {
     () => {
         use $crate::lmcs::Lmcs as LmcsTrait;
@@ -168,4 +198,5 @@ macro_rules! define_lmcs_test_helpers {
     };
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use define_lmcs_test_helpers;

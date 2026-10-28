@@ -1,177 +1,136 @@
 ---
-title: "Range Checker"
-sidebar_position: 4
+title: "16-bit Range Checks"
+sidebar_position: 5
 ---
 
-# Range Checker
+# 16-bit range checks
 
-Miden VM relies very heavily on 16-bit range-checks (checking if a value of a field element is between $0$ and $2^{16}$). For example, most of the [u32 operations](./stack/u32_ops.md) need to perform between two and four 16-bit range-checks per operation. Similarly, operations involving memory (e.g. load and store) require two 16-bit range-checks per operation.
+Miden VM proves that selected field elements are 16-bit integers through a typed LogUp relation.
+There is no separate range-checker execution-trace component. The table side is part of the fixed
+byte-pair lookup AIR that also supports byte AND and the byte rotations used by Eidos compression.
 
-Thus, it is very important for the VM to be able to perform a large number of 16-bit range checks very efficiently. In this note we describe how this can be achieved using the [LogUp](./lookups/logup.md) lookup argument.
+## Fixed byte-pair table
 
-## 8-bit range checks
-
-First, let's define a construction for the simplest possible 8-bit range-check. This can be done with a single column as illustrated below.
-
-![rc_8_bit_range_check](../img/design/range/rc_8_bit_range_check.png)
-
-For this to work as a range-check we need to enforce a few constraints on this column:
-
-- The value in the first row must be $0$.
-- The value in the last row must be $255$.
-- As we move from one row to the next, we can either keep the value the same or increment it by $1$.
-
-Denoting $v$ as the value of column $v$ in the current row, and $v'$ as the value of column $v$ in the next row, we can enforce the last condition as follows:
+`And8LookupAir` has exactly $2^{16}$ rows. Its preprocessed columns enumerate every pair
+$(a,b) \in [0,255]^2$ in row order
 
 $$
-(v' - v) \cdot (v' - v - 1) = 0
+r = 256a + b.
 $$
 
-Together, these constraints guarantee that all values in column $v$ are between $0$ and $255$ (inclusive).
+The same row stores $x = a \mathbin{\mathsf{xor}} b$ and the two wrapping Eidos contributions
+$W_{12}(x)$ and $W_7(x)$. Ordinary AND requests are encoded on the canonical XOR relation with
+$x = a + b - 2(a \mathbin{\&} b)$; the remaining rotation values are derived affinely from the
+fixed columns. For range checking, the row represents the 16-bit value $v = 256a + b$.
 
-We can then make use of the LogUp lookup argument by adding another column $b$ which will keep a running sum that is the logarithmic derivative of the product of values in the $v$ column. The transition constraint for $b$ would look as follows:
-
-$$
-b' = b + \frac{1}{(\alpha - v)}
-$$
-
-Since constraints cannot include divisions, the constraint would actually be expressed as the following degree 2 constraint:
+The wrapping columns are
 
 $$
-b' \cdot (\alpha - v) = b \cdot (\alpha - v) + 1
+W_{12}(x) = \left\lfloor \frac{x}{16} \right\rfloor + 2^{28}(x \bmod 16),
+\qquad
+W_7(x) = \left\lfloor \frac{x}{128} \right\rfloor + 2^{25}(x \bmod 128).
 $$
 
-Using these two columns we can check if some other column in the execution trace is a permutation of values in $v$. Let's call this other column $x$. We can compute the logarithmic derivative for $x$ as a running sum in the same way as we compute it for $v$. Then, we can check that the last value in $b$ is the same as the final value for the running sum of $x$.
+For physical byte positions zero through three, lookup messages divide the stored rotation
+contribution by the static scales $(2^{20}, 2, 2^4, 1)$. Because the scale depends only on the
+position, every normalized message remains affine in the trace.
 
-While this approach works, it has a couple of limitations:
-
-- First, column $v$ must contain all values between $0$ and $255$. Thus, if column $x$ does not contain one of these values, we need to artificially add this value to $x$ somehow (i.e., we need to pad $x$ with extra values).
-- Second, assuming $n$ is the length of execution trace, we can range-check at most $n$ values. Thus, if we wanted to range-check more than $n$ values, we'd need to introduce another column similar to $v$.
-
-We can get rid of both requirements by including the _multiplicity_ of the value $v$ into the calculation of the logarithmic derivative for LogUp, which will allow us to specify exactly how many times each value needs to be range-checked.
-
-### A better construction
-
-Let's add one more column $m$ to our table to keep track of how many times each value should be range-checked.
-
-![rc_8_bit_logup](../img/design/range/rc_8_bit_logup.png)
-
-The transition constraint for $b$ is now as follows:
+The main trace contains one dynamic range multiplicity $m_v$ for every fixed row. A request to
+range-check a field element $x$ removes a `RangeCheck(x)` message from the relation. The fixed
+table inserts `RangeCheck(v)` with multiplicity $m_v$. With challenge reduction $R(x)$, the
+relation closes only when
 
 $$
-b' = b + \frac{m}{(\alpha - v)}
+\sum_{v=0}^{65535} \frac{m_v}{R(v)}
+- \sum_{x \in requests} \frac{1}{R(x)} = 0.
 $$
 
-This addresses the limitations we had as follows:
-1. We no longer need to pad the column we want to range-check with extra values because we can skip the values we don't care about by setting the multiplicity to $0$.
-2. We can range check as many unique values as there are rows in the trace, and there is essentially no limit to how many times each of these values can be range-checked. (The only restriction on the multiplicity value is that it must be less than the size of the set of lookup values. Therefore, for long traces where $n > 2^{16}$, $m < 2^{16}$ must hold, and for short traces $m < n$ must be true.)
+Because the fixed table contains no value outside $[0,65535]$, a request for any other field
+element cannot be matched. Multiplicities allow any table value to be requested repeatedly
+without adding bridge rows or extending a VM trace.
 
-Additionally, the constraint degree has not increased versus the naive approach, and the only additional cost is a single trace column.
+## Request sources
 
-## 16-bit range checks
+Range-check requests come from:
 
-To support 16-bit range checks, let's try to extend the idea of the 8-bit table. Our 16-bit table would look like so (the only difference is that column $v$ now has to end with value $65535$):
+- selected operand-stack [`u32` operations](./stack/u32_ops.md#range-checks), which request four
+  checks for decoder helper values; `U32DIV` requests two additional checks for its remainder
+  bound;
+- `MPVERIFY` and `MRUPDATE`, which request checks for the depth $d$ and
+  $2^{10}(d - 1)$, accepting exactly $1 \le d \le 64$;
+- each `MPVERIFY` or `MRUPDATE`, which requests checks for the four limbs
+  $y_0, y_1, y_2, y_3$ of its canonical-index helper and for $2y_3$;
+- the memory chiplet, which requests five checks for sorted-access deltas and address limbs on each
+  active row; and
+- the Eidos compression AIR, which range-checks fused message/output limbs.
 
-![rc_16_bit_logup](../img/design/range/rc_16_bit_logup.png)
-
-While this works, it is rather wasteful. In the worst case, we'd need to enumerate over 65K values, most of which we may not actually need. It would be nice if we could "skip over" the values that we don't want. One way to do this could be to add bridge rows between two values to be range checked and add constraints to enforce the consistency of the gap between these bridge rows.
-
-If we allow gaps between two consecutive rows to only be 0 or powers of 2, we could enforce a constraint:
-
-$$
-\Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 2)  \cdot (\Delta v - 4)  \cdot (\Delta v - 8)  \cdot (\Delta v - 16)  \cdot (\Delta v - 32)  \cdot (\Delta v - 64)  \cdot (\Delta v - 128) = 0
-$$
-
-This constraint has a degree 9. This construction allows the minimum trace length to be 1024.
-
-We could go even further and allow the gaps between two consecutive rows to only be 0 or powers of 3. In this case we would enforce the constraint:
+On an `MPVERIFY` or `MRUPDATE` row, the six Core helpers are `[addr, b, y0, y1, y2, y3]`.
+`CoreAir` enforces booleanity of $b$ and
 
 $$
-\Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81)  \cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0
+n + b + 2y = Q - 1,
 $$
 
-This allows us to reduce the minimum trace length to 64.
+where $n$ is the stack's node index, $Q$ is the base-field modulus, and
+$y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3$. The Merkle-init bus binds $b$ to the first
+direction bit derived by the hash controller. Range-checking the four limbs and $2y_3$ proves
+$y < 2^{63}$ and rules out a wrapped 64-bit path index. These requests are replayed through
+existing Core lookup columns: the low three limbs use the stack-overflow column, while the top-limb,
+doubled-top-limb, depth, and scaled-depth requests are split between the chiplet-request and
+block-stack/range/log-deferred columns. No hasher-controller chaining-value cells are used. See
+[Merkle range checks](./stack/crypto_ops.md#merkle-range-checks) for the exact packing.
 
-To find out the number of bridge rows to be added in between two values to be range checked, we represent the gap between them as a linear combination of powers of 3, ie,
+The trace builder collects these counts deterministically and writes them into the range
+multiplicity column of `And8LookupAir`. The relation uses its own bus identifier, so range-check
+messages cannot cancel byte-AND or Eidos compression rotation messages even though they share the
+same fixed rows.
+
+## Communication bus
+
+The domain-separated `RangeCheck`
+[communication bus](./lookups/index.md#communication-buses-in-miden-vm) encodes a value as
+$d_{\mathrm{range}}(x) = \operatorname{prefix}_{\mathrm{RangeCheck}} + \beta^0 x$. A request made
+under flag $f$ contributes
 
 $$
-(r' - r) = \sum_{i=0}^{7} x_i \cdot 3^i
+-\frac{f}{d_{\mathrm{range}}(x)},
 $$
 
-Then for each $x_i$ except the first, we add a bridge row at a gap of $3^i$.
+while an And8 table row contributes
 
-## Miden approach
+$$
+\frac{m}{d_{\mathrm{range}}(v)}.
+$$
 
-This construction is implemented in Miden with the following requirements, capabilities and constraints.
+These interactions do not use a dedicated $b_{\mathrm{range}}$ accumulator. They are packed with
+other lookup interactions in the Core and Chiplets AIRs. For AIR $i$, let $\sigma_i$ be the sum of
+all its lookup contributions and $n_i$ its trace length. The AIR commits the normalized sum
 
-### Requirements
+$$
+\sigma'_i = \frac{\sigma_i}{n_i}.
+$$
 
-- 2 columns of the main trace: $m, v$, where $v$ contains the value being range-checked and $m$ is the number of times the value is checked (its multiplicity).
-- 1 [bus](./lookups/index.md#communication-buses-in-miden-vm) $b_{range}$ to ensure that the range checks performed in the range checker match those requested by other VM components (the [stack](./stack/u32_ops.md#range-checks) and the [memory chiplet](./chiplets/memory.md)).
+The verifier enforces the cross-AIR identity
 
-### Capabilities
+$$
+\sum_i n_i \sigma'_i + c_{\mathrm{boundary}} = 0,
+$$
 
-The construction gives us the following capabilities:
-- For long traces (when $n > 2^{16}$), we can do an essentially unlimited number of arbitrary 16-bit range-checks.
-- For short traces ($2^5 < n \le 2^{16}$), we can range-check slightly fewer than $n$ unique values, but there is essentially no practical limit to the total number of range checks.
+where $c_{\mathrm{boundary}}$ contains the explicit boundary messages required by other buses. The
+`RangeCheck` bus has no boundary messages, so its table responses must cancel its requests.
+Internally, the first lookup accumulator is anchored at zero and follows a normalized cyclic
+recurrence, including the last-to-first edge; there is no separate requirement that a terminal
+$b_{\mathrm{range}}$ value be zero.
 
+## Cost and topology
 
-### Execution trace
+The table height is always $2^{16}$ and is independent of VM program length. Its five
+preprocessed columns $[a,b,x,W_{12}(x),W_7(x)]$ are commitment-cached, while its seven main
+columns contain only dynamic multiplicities: canonical XOR, five dedicated normalized rotation
+relations, and range check. The seven table-side fractions use four auxiliary LogUp columns with
+shape `[1, 2, 2, 2]`: canonical XOR is a singleton, two columns pair rotation relations, and the
+last pairs one rotation relation with range check. Every interaction retains its typed
+denominator, so the closing constraints have degree three without merging bus domains.
 
-The range checker's execution trace looks as follows:
-
-![rc_with_bridge_rows.png](../img/design/range/rc_with_bridge_rows.png)
-
-The columns have the following meanings:
-- $m$ is the multiplicity column that indicates the number of times the value in that row should be range checked (included into the computation of the logarithmic derivative).
-- $v$ contains the values to be range checked.
-  - These values go from $0$ to $65535$. Values must either stay the same or increase by powers of 3 less than or equal to $3^7$.
-  - The final 2 rows of the 16-bit section of the trace must both equal $65535$. The extra value of $65535$ is required in order to [pad the trace](./lookups/index.md#length-of-auxiliary-columns-for-lookup-arguments) so the [$b_{range}$](#communication-bus) bus column can be computed correctly.
-
-### Execution trace constraints
-
-First, we need to constrain that the consecutive values in the range checker are either the same or differ by powers of 3 that are less than or equal to $3^7$.
-
-> $$
-> \Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81) 
-> \cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0 \text{ | degree} = 9
-> $$
-
-In addition to the transition constraints described above, we also need to enforce the following boundary constraints:
-
-- The value of $v$ in the first row is $0$.
-- The value of $v$ in the last row is $65535$.
-
-### Communication bus
-
-$b_{range}$ is the [bus](./lookups/index.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
-
-Requests are sent to the range checker bus by the following components:
-- The Stack sends requests for 16-bit range checks during some [`u32` operations](./stack/u32_ops.md#range-checks).
-- The [Memory chiplet](./chiplets/memory.md) sends requests for 16-bit range checks against the values in the $d_0$ and $d_1$ trace columns to enforce internal consistency.
-
-Responses are provided by the range checker using the transition constraint for the LogUp construction described above.
-
-> $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
-> $$
-
-To describe the complete transition constraint for the bus, we'll define the following variables:
-
-- $f_{stack}$: the boolean flag that indicates whether or not a stack operation requiring range checks is occurring. This flag has degree 3.
-- $f_{mem}$: the boolean flag that indicates whether or not a memory operation requiring range checks is occurring. This flag has degree 3.
-- $s_0, s_1, s_2, s_3$: the values for which range checks are requested from the stack when $f_{stack}$ is set.
-- $m_0, m_1$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
-
-> $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)}  - \frac{f_{mem}}{(\alpha - m_0)} - \frac{f_{mem}}{(\alpha - m_1)} \text{ | degree} = 9
-> $$
-
-As previously mentioned, constraints cannot include divisions, so the actual constraint which is applied will be the equivalent expression in which all denominators have been multiplied through, which is degree 9.
-
-If $b_{range}$ is initialized to $0$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 0$.
-
-Therefore, in addition to the transition constraint described above, we also need to enforce the following boundary constraints:
-
-- The value of $b_{range}$ in the first row $0$.
-- The value of $b_{range}$ in the last row $0$.
+The table supplies both 16-bit range checks and the byte operations required by the native Eidos
+compression AIR.

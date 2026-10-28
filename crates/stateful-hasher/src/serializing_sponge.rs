@@ -190,14 +190,38 @@ const fn compute_field_alignment(
     inner_bytes / a
 }
 
-impl<F, Inner, T> Alignable<F, T> for SerializingStatefulSponge<Inner>
-where
-    F: Field,
-    Inner: Alignable<T, T>,
-{
-    const ALIGNMENT: usize =
-        compute_field_alignment(F::NUM_BYTES, size_of::<T>(), Inner::ALIGNMENT);
+macro_rules! impl_alignable {
+    ($word:ty) => {
+        impl<F, Inner> Alignable<F, $word> for SerializingStatefulSponge<Inner>
+        where
+            F: Field,
+            Inner: Alignable<$word, $word>,
+        {
+            const ALIGNMENT: usize = compute_field_alignment(
+                F::NUM_BYTES,
+                size_of::<$word>(),
+                <Inner as Alignable<$word, $word>>::ALIGNMENT,
+            );
+        }
+
+        impl<F, Inner, const M: usize> Alignable<[F; M], [$word; M]>
+            for SerializingStatefulSponge<Inner>
+        where
+            F: Field,
+            Inner: Alignable<[$word; M], [$word; M]>,
+        {
+            const ALIGNMENT: usize = compute_field_alignment(
+                F::NUM_BYTES,
+                size_of::<$word>(),
+                <Inner as Alignable<[$word; M], [$word; M]>>::ALIGNMENT,
+            );
+        }
+    };
 }
+
+impl_alignable!(u8);
+impl_alignable!(u32);
+impl_alignable!(u64);
 
 #[cfg(test)]
 mod tests {

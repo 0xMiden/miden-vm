@@ -1,12 +1,21 @@
 use alloc::{string::String, vec::Vec};
 
+use miden_ace_codegen::{factorial, order_from_tag, order_tag};
+
 use crate::MidenAir;
 
 /// Supported AIRs in instance order.
 ///
 /// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
-pub const AIRS: [MidenAir; 3] =
-    [MidenAir::Core, MidenAir::Chiplets, MidenAir::Poseidon2Permutation];
+pub const AIRS: [MidenAir; miden_air_definitions::MIDEN_AIR_COUNT] = {
+    let mut airs = [MidenAir::Core; miden_air_definitions::MIDEN_AIR_COUNT];
+    let mut i = 0;
+    while i < airs.len() {
+        airs[i] = MidenAir::from_definition(miden_air_definitions::AIRS[i]);
+        i += 1;
+    }
+    airs
+};
 
 pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 
@@ -14,15 +23,19 @@ pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 pub const PROOF_ORDER_COUNT: usize = factorial(MIDEN_AIR_COUNT);
 const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags must fit in u32");
 
-/// Smallest Merkle tree depth covering every proof-order tag.
-pub const PROOF_ORDER_REGISTRY_DEPTH: usize = ceil_log2(PROOF_ORDER_COUNT);
-
 /// Proof-order AIR permutation.
 ///
 /// The proof stores AIR commitments in ascending `(log_trace_height, instance_index)` order. That
-/// order can vary by statement, so the recursive verifier selects one ACE circuit from a small
-/// registry. The registry key is `tag`, the Lehmer rank of the AIR permutation relative to
-/// [`AIRS`].
+/// order can vary by statement, so the recursive verifier resolves each AIR's position in it when
+/// placing that AIR's data and weighting its contribution. `tag` is the Lehmer rank of the
+/// permutation relative to [`AIRS`].
+///
+/// The recursive verifier derives the complete order once from the committed heights with the
+/// fixed sorting network emitted as `stage_proof_order_maps` in each relation's out-of-domain
+/// hook. The resulting position maps drive scatter, boundary placement, and fold-coefficient
+/// staging. The Lehmer tag API provides a stable encoding for exhaustive proof-order enumeration.
+/// The shared [`miden_ace_codegen::MAX_ORDER_AIRS`] bound ensures that every supported rank fits in
+/// `u32`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {
     airs: [MidenAir; MIDEN_AIR_COUNT],
@@ -57,7 +70,7 @@ impl ProofOrder {
         (0..PROOF_ORDER_COUNT).map(Self::from_rank).collect()
     }
 
-    /// Decode a registry tag into a proof order.
+    /// Decode a Lehmer tag into a proof order.
     pub fn from_tag(tag: u32) -> Option<Self> {
         let rank = tag as usize;
         (rank < PROOF_ORDER_COUNT).then(|| Self::from_rank(rank))
@@ -85,12 +98,12 @@ impl ProofOrder {
         &self.airs
     }
 
-    /// Registry tag for this proof order.
+    /// Lehmer tag for this proof order.
     pub fn tag(&self) -> u32 {
         self.tag
     }
 
-    /// File stem for the generated ACE circuit for this order.
+    /// Returns a stable diagnostic label for this proof order.
     pub fn file_stem(&self) -> String {
         let mut stem = String::from("constraints_eval_");
         for (i, air) in self.airs.iter().copied().enumerate() {
@@ -105,47 +118,14 @@ impl ProofOrder {
     /// Decode a Lehmer rank into its AIR permutation.
     fn from_rank(rank: usize) -> Self {
         debug_assert!(rank < PROOF_ORDER_COUNT);
-        debug_assert!(rank <= u32::MAX as usize);
-
-        let tag = rank as u32;
-        let mut rank = rank;
-        let mut remaining = AIRS.to_vec();
+        let tag = u32::try_from(rank).expect("proof-order tags fit in u32");
+        let instance_order = order_from_tag(tag, MIDEN_AIR_COUNT).expect("rank is in range");
         let mut airs = [AIRS[0]; MIDEN_AIR_COUNT];
-
-        for (i, slot) in airs.iter_mut().enumerate() {
-            let factor = factorial(MIDEN_AIR_COUNT - 1 - i);
-            // The next Lehmer digit selects an AIR from the remaining ordered list.
-            let index = rank / factor;
-            rank %= factor;
-            *slot = remaining.remove(index);
+        for (slot, index) in airs.iter_mut().zip(instance_order) {
+            *slot = AIRS[index];
         }
-
         Self { airs, tag }
     }
-}
-
-/// Compute `n!`.
-const fn factorial(n: usize) -> usize {
-    let mut result = 1;
-    let mut factor = 2;
-    while factor <= n {
-        result *= factor;
-        factor += 1;
-    }
-    result
-}
-
-/// Return the smallest `d` such that `2^d >= value`.
-const fn ceil_log2(value: usize) -> usize {
-    assert!(value > 0, "ceil_log2 is undefined for zero");
-
-    let mut value = value - 1;
-    let mut result = 0;
-    while value > 0 {
-        value >>= 1;
-        result += 1;
-    }
-    result
 }
 
 /// Assert that `airs` contains every supported AIR exactly once.
@@ -158,26 +138,49 @@ fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     }
 }
 
-/// Return the Lehmer rank of an AIR permutation relative to [`AIRS`].
+/// Return the Lehmer tag of an AIR permutation relative to [`AIRS`].
+///
+/// Uses the shared Lehmer ranking for exhaustive proof-order enumeration.
 fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
-    let mut rank = 0;
-    for i in 0..airs.len() {
-        // Lehmer digit: number of smaller instance indices to the right of position `i`.
-        let smaller_after = airs[i + 1..]
-            .iter()
-            .filter(|air| air.instance_index() < airs[i].instance_index())
-            .count();
-        rank += smaller_after as u32 * factorial(airs.len() - 1 - i) as u32;
-    }
-    rank
+    let instance_order: Vec<usize> = airs.iter().map(|air| air.instance_index()).collect();
+    order_tag(&instance_order)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// `variants()` gets its tags from the decoder, so round-trip through `ProofOrder::new`
+    /// to exercise the encoder independently.
     #[test]
-    fn air_registry_order_matches_instance_indices() {
+    fn lehmer_encoder_inverts_the_decoder_for_every_tag() {
+        for tag in 0..PROOF_ORDER_COUNT as u32 {
+            let order = ProofOrder::from_tag(tag).expect("tag in range");
+            let airs: [MidenAir; MIDEN_AIR_COUNT] =
+                order.airs().try_into().expect("order holds one AIR per slot");
+            assert_eq!(
+                ProofOrder::new(airs).tag(),
+                tag,
+                "encoder does not invert the decoder at tag {tag}"
+            );
+        }
+    }
+
+    /// `AIRS` fixes proof-order tie-breaks and the relation digest. Pin it independently of
+    /// `instance_index`; intentional changes require regenerated protocol constants and a
+    /// breaking changelog entry.
+    #[test]
+    fn air_instance_order_is_protocol_pinned() {
+        const PINNED: [MidenAir; MIDEN_AIR_COUNT] = [
+            MidenAir::Core,
+            MidenAir::Chiplets,
+            MidenAir::EidosCompression,
+            MidenAir::And8Lookup,
+        ];
+        assert_eq!(
+            AIRS, PINNED,
+            "AIRS instance order moved; regenerate protocol constants for an intentional change"
+        );
         for (index, air) in AIRS.iter().copied().enumerate() {
             assert_eq!(air.instance_index(), index);
         }
@@ -186,7 +189,6 @@ mod tests {
     #[test]
     fn proof_order_constants_derive_from_air_count() {
         assert_eq!(PROOF_ORDER_COUNT, ProofOrder::variants().len());
-        assert_eq!(PROOF_ORDER_REGISTRY_DEPTH, ceil_log2(PROOF_ORDER_COUNT));
     }
 
     #[test]
@@ -196,15 +198,6 @@ mod tests {
         assert_eq!(factorial(2), 2);
         assert_eq!(factorial(3), 6);
         assert_eq!(factorial(4), 24);
-    }
-
-    #[test]
-    fn registry_depth_is_ceil_log2() {
-        assert_eq!(ceil_log2(1), 0);
-        assert_eq!(ceil_log2(2), 1);
-        assert_eq!(ceil_log2(3), 2);
-        assert_eq!(ceil_log2(6), 3);
-        assert_eq!(ceil_log2(24), 5);
     }
 
     #[test]
@@ -223,27 +216,30 @@ mod tests {
     #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 9, 10]),
+            ProofOrder::from_instance_log_heights(&[8, 9, 10, 11]),
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[9, 8, 10]),
+            ProofOrder::from_instance_log_heights(&[9, 8, 10, 11]),
             ProofOrder::from_airs(&[
                 MidenAir::Chiplets,
                 MidenAir::Core,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 8, 8]),
+            ProofOrder::from_instance_log_heights(&[8, 8, 8, 8]),
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
     }

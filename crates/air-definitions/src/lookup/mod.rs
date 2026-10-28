@@ -1,0 +1,105 @@
+//! Generic traits and adapters for LogUp lookup arguments.
+//!
+//! This module contains the generic lookup contract ([`LookupAir`]), the builder API,
+//! message encoding, challenge precomputation, constraint and prover adapters, and
+//! aux-trace accumulation helpers.
+
+pub mod aux_builder;
+pub mod builder;
+pub mod challenges;
+pub mod constraint;
+#[cfg(feature = "std")]
+pub mod debug;
+pub mod message;
+pub mod prover;
+
+pub use aux_builder::{
+    LookupFractions, accumulate, accumulate_slow, build_logup_aux_trace,
+    build_logup_aux_trace_with_preprocessed,
+};
+pub use builder::{BoundaryBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
+pub use challenges::Challenges;
+pub use constraint::ConstraintLookupBuilder;
+pub use message::LookupMessage;
+pub use prover::{ProverLookupBuilder, build_lookup_fractions};
+
+// LOOKUP AIR
+// ================================================================================================
+
+/// A declarative LogUp lookup argument.
+///
+/// Shaped the same way as `p3_air::Air<AB>`: generic over the builder
+/// the caller picks, and evaluated once per logical "row pair" (the
+/// constraint path visits every row symbolically, the prover path visits
+/// every concrete row).
+///
+/// The trait carries both the static *shape* (per-column fraction bounds, payload width bound,
+/// bus-id upper bound) and the `eval` method that actually emits the interactions. Adapter
+/// constructors take a `&impl LookupAir<Self>` and read the shape via the trait — the `LB` type
+/// parameter is pinned to the adapter itself, so there is no
+/// ambiguity when the blanket `impl<LB: LookupBuilder> LookupAir<LB>
+/// for MyAir` implementations apply.
+///
+/// ## Contract
+///
+/// - [`column_shape()`](Self::column_shape) has one entry per LogUp permutation column and its
+///   length must match the number of [`LookupBuilder::next_column`] calls issued from
+///   [`eval`](Self::eval). The shared adapters validate this invariant.
+/// - LogUp columns occupy the prefix `0..column_shape().len()` of the auxiliary trace. A
+///   [`LiftedAir`](miden_lifted_stark::air::LiftedAir) may append independently constrained
+///   extension-field registers after that prefix; they are excluded from the LogUp recurrence.
+/// - [`max_message_width()`](Self::max_message_width) must be ≥ the widest payload any message in
+///   the AIR emits. It counts **only** contiguous payload slots — the bus identifier is handled
+///   separately through the precomputed bus-prefix table.
+/// - [`num_bus_ids()`](Self::num_bus_ids) must be ≥ the largest bus ID any message in the AIR
+///   emits, plus one; the adapter precomputes exactly that many bus prefixes and indexes into the
+///   table with `bus_id as usize`.
+/// - The auxiliary trace must have a positive row count. Its single committed value is the
+///   normalized sum `sigma_prime = sigma / n`, bound by the all-row cyclic recurrence.
+pub trait LookupAir<LB: LookupBuilder> {
+    /// Number of LogUp permutation columns declared by this AIR.
+    ///
+    /// The column shape defines this count, so the two values cannot drift apart.
+    fn num_columns(&self) -> usize {
+        self.column_shape().len()
+    }
+
+    /// Per-column upper bound on the number of fractions a single row can push.
+    ///
+    /// The slice length is the number of LogUp permutation columns. Each entry is the
+    /// mutual-exclusion-aware maximum: the largest active branch count across mutually exclusive
+    /// groups inside the column, not the sum of every structural `add`, `remove`, `insert`, or
+    /// `batch` site.
+    ///
+    /// The prover-path adapter uses this to size the dense per-column fraction buffer.
+    fn column_shape(&self) -> &[usize];
+
+    /// Upper bound on the **payload** width of any message emitted by
+    /// [`eval`](Self::eval), exclusive of the bus identifier slot.
+    fn max_message_width(&self) -> usize;
+
+    /// Upper bound on any bus ID this AIR emits through
+    /// [`LookupMessage::encode`],
+    /// plus one. The adapter pre-computes that many bus prefixes at
+    /// construction time and indexes into the table with
+    /// `bus_id as usize`.
+    fn num_bus_ids(&self) -> usize;
+
+    /// Evaluate the lookup argument, describing its interactions through
+    /// the builder's closure API.
+    fn eval(&self, builder: &mut LB);
+
+    /// Emit once-per-proof boundary interactions that don't come from any main-trace row.
+    ///
+    /// Typical sources are statement-supplied terminals and public-input-driven seed emissions
+    /// (kernel ROM init, block hash seed, log-deferred terminals).
+    /// These close out buses whose per-row [`eval`](Self::eval) contributions alone
+    /// don't cancel.
+    ///
+    /// Default is a no-op so AIRs with no boundary contributions don't need to override it.
+    fn eval_boundary<B>(&self, _boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+    }
+}

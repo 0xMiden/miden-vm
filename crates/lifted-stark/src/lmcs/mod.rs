@@ -81,10 +81,14 @@ pub(crate) mod tree_indices;
 #[cfg(test)]
 mod tests;
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use miden_stark_transcript::{ProverChannel, TranscriptError, VerifierChannel};
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
+use p3_matrix::{
+    Dimensions, Matrix,
+    bitrev::BitReversibleMatrix,
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+};
 use proof::BatchProofView;
 use row_list::RowList;
 use thiserror::Error;
@@ -98,6 +102,12 @@ use crate::util::align::aligned_len;
 
 /// Opened rows keyed by tree or query index, returned by LMCS opening APIs.
 pub type OpenedRows<F> = BTreeMap<usize, RowList<F>>;
+
+/// Consumes completed rows in physical bit-reversed order, starting at the given row index.
+pub type BlockConsumer<'a, F> = dyn Fn(usize, RowMajorMatrixView<'_, F>) + Sync + 'a;
+
+/// Creates a consumer for the producer's chosen block height.
+pub type BlockConsumerFactory<'a, F> = Box<dyn FnOnce(usize) -> Box<BlockConsumer<'a, F>> + 'a>;
 
 // ============================================================================
 // Traits
@@ -113,8 +123,7 @@ pub trait Lmcs: Clone {
     type Commitment: Clone + Eq;
     /// Tree type (prover data), parameterized by stored matrix type.
     type Tree<Stored: Matrix<Self::F>>: LmcsTree<Self::F, Self::Commitment, Stored>;
-    /// Batch witness type returned by [`read_batch_proof`](Self::read_batch_proof) and
-    /// [`read_lifted_batch_proof`](Self::read_lifted_batch_proof).
+    /// Batch witness type returned by the typed and transcript batch proof APIs.
     type BatchProof: BatchProofView<Self::F, Self::Commitment>;
 
     /// Build a tree from domain-ordered matrices with no transcript padding (alignment = 1).
@@ -136,10 +145,40 @@ pub trait Lmcs: Clone {
         leaves: Vec<M>,
     ) -> Self::Tree<M::BitRev>;
 
+    /// Append a final matrix while consuming its completed blocks, then build an aligned tree.
+    ///
+    /// `leaves` and the produced matrix use physical bit-reversed order, with non-decreasing
+    /// power-of-two heights. `dimensions` describes the final matrix. `produce` is called once.
+    /// When given a factory, it must call it once with a positive power-of-two block height
+    /// dividing the final height. It must then publish every final row exactly once to the
+    /// returned consumer, in aligned blocks of that height, and finish all callbacks before
+    /// returning. Consumer calls may run concurrently and in any order. Published values must
+    /// match the returned matrix and cannot be modified afterward. Callback panics must propagate
+    /// out of `produce`.
+    ///
+    /// The default implementation calls `produce` without a factory and delegates to
+    /// [`Self::build_aligned_tree`].
+    fn build_aligned_tree_with_blocks<P>(
+        &self,
+        mut leaves: Vec<RowMajorMatrix<Self::F>>,
+        dimensions: Dimensions,
+        produce: P,
+    ) -> Self::Tree<RowMajorMatrix<Self::F>>
+    where
+        P: FnOnce(Option<BlockConsumerFactory<'_, Self::F>>) -> RowMajorMatrix<Self::F>,
+    {
+        let matrix = produce(None);
+        assert_eq!(matrix.dimensions(), dimensions, "producer returned wrong dimensions");
+        leaves.push(matrix);
+        self.build_aligned_tree(
+            leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect(),
+        )
+    }
+
     /// Hash a sequence of field slices into a leaf hash.
     ///
-    /// Inputs are absorbed in order. For salted leaves, append the salt slice to the
-    /// iterator (or call this with a chained iterator).
+    /// Inputs are absorbed in order. Each slice is padded independently to the hasher's
+    /// alignment. For salted leaves, append the salt as its own slice.
     fn hash<'a, I>(&self, rows: I) -> Self::Commitment
     where
         I: IntoIterator<Item = &'a [Self::F]>,
@@ -238,6 +277,32 @@ pub trait Lmcs: Clone {
         self.read_batch_proof(widths, &leaf_indices, channel)
     }
 
+    /// Construct an exact batch proof directly from a committed tree.
+    ///
+    /// `tree` must have been built with this configuration, and `indices` must be
+    /// in the tree's index space. Empty indices produce an empty proof; a depth
+    /// mismatch returns [`LmcsError::InvalidProof`].
+    fn batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError>;
+
+    /// Construct a batch proof for query indices in a larger domain.
+    ///
+    /// The proof is keyed by distinct projected tree indices, as with
+    /// [`Self::read_lifted_batch_proof`]. Returns [`LmcsError::InvalidProof`]
+    /// if the query domain is smaller than the tree.
+    fn lifted_batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        query_indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError> {
+        let tree_depth = miden_lifted_air::log2_strict_u8(tree.height());
+        let leaf_indices = query_indices.fold_to_depth(tree_depth)?;
+        self.batch_proof(tree, &leaf_indices)
+    }
+
     /// Get the alignment used by `build_aligned_tree`.
     ///
     /// This is the hasher's rate, used to pad rows when streaming hints.
@@ -284,26 +349,29 @@ pub trait LmcsTree<F, Commitment, M> {
     /// The hint format is implementation-defined and must be consumed by the
     /// corresponding exact `Lmcs::open_batch` implementation. Rows are padded to
     /// the tree's alignment before being written to the channel. `indices` must
-    /// already be in this tree's own index space.
+    /// already be in this tree's own index space. `lmcs` must be the configuration
+    /// that built this tree; it recomputes hashes the tree does not store.
     ///
     /// Leaf openings are written in **sorted tree index order** (ascending, deduplicated).
-    fn prove_batch<Ch>(&self, indices: &TreeIndices, channel: &mut Ch)
+    fn prove_batch<L, Ch>(&self, lmcs: &L, indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Commitment>,
         Ch: ProverChannel<F = F, Commitment = Commitment>;
 
     /// Prove a virtually lifted batch opening.
     ///
     /// Projects `query_indices` to this tree's depth and then delegates to exact
     /// [`Self::prove_batch`].
-    fn prove_lifted_batch<Ch>(&self, query_indices: &TreeIndices, channel: &mut Ch)
+    fn prove_lifted_batch<L, Ch>(&self, lmcs: &L, query_indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Commitment>,
         Ch: ProverChannel<F = F, Commitment = Commitment>,
     {
         let tree_log_height = miden_lifted_air::log2_strict_u8(self.height());
         let leaf_indices = query_indices
             .fold_to_depth(tree_log_height)
             .expect("query index depth must be at least the committed tree depth");
-        self.prove_batch(&leaf_indices, channel);
+        self.prove_batch(lmcs, &leaf_indices, channel);
     }
 }
 

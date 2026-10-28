@@ -96,7 +96,7 @@ pub fn parse_inline_masm(
         let mut context = LoweringContext::new(parse, interned);
         let cst_block = miden_assembly_syntax_cst::ast::Block::cast(context.parse().syntax())
             .expect("inline masm root kind should always be Block");
-        blocks::lower_block(&mut context, &cst_block)
+        blocks::lower_block(&mut context, &cst_block, 0)
             .map_err(move |err| Report::from(err).with_source_code(source))
     } else {
         Err(Report::from(SyntaxError::from(diagnostics)).with_source_code(source))

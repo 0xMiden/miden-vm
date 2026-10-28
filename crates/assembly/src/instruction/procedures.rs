@@ -1,15 +1,19 @@
+use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
+    debuginfo::SourceSpan,
     diagnostics::Report,
 };
 use miden_core::operations::{AssemblyOp, Operation};
+use miden_mast_package::debug_info::DebugSourceInlineCall;
 use smallvec::SmallVec;
 
 use crate::{
     Assembler, GlobalItemIndex,
     basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeUse},
 };
 
 /// Procedure Invocation
@@ -24,17 +28,41 @@ impl Assembler {
         kind: InvokeKind,
         callee: &InvocationTarget,
         caller: GlobalItemIndex,
+        call_site: SourceSpan,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
-    ) -> Result<MastNodeRef, Report> {
+        mut inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<MastNodeUse, Report> {
         let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
-            InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_ref(
+            InvokeKind::ProcRef => Ok(resolved.node),
+            InvokeKind::Exec => {
+                // Ordinary exec is the innermost caller context; explicit source inline
+                // annotations enclose it. Existing callee rows remain still further inside.
+                if !matches!(callee, InvocationTarget::MastRoot(_))
+                    && let Some(callee_idx) = resolved.function
+                    && let Ok(location) = self.source_manager().location(call_site)
+                {
+                    let loc_idx = mast_forest_builder.debug_info_mut().add_location(location);
+                    // The exec source-tree copy assigns each occurrence's operation range.
+                    inline_calls.insert(
+                        0,
+                        DebugSourceInlineCall {
+                            op_idx: 0,
+                            op_end: 0,
+                            callee_idx,
+                            loc_idx,
+                        },
+                    );
+                }
+                mast_forest_builder.record_exec_inline_calls(resolved.node, &inline_calls)
+            },
+            InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_use(
                 resolved.node,
                 matches!(kind, InvokeKind::SysCall),
                 asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
+                inline_calls,
             ),
         }
     }
@@ -44,8 +72,9 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_ref(false, asm_op)?;
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<Option<MastNodeUse>, Report> {
+        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_use(false, asm_op, inline_calls)?;
 
         Ok(Some(dyn_node_ref))
     }
@@ -55,8 +84,10 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_call_node_ref = mast_forest_builder.ensure_dyn_node_ref(true, asm_op)?;
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<Option<MastNodeUse>, Report> {
+        let dyn_call_node_ref =
+            mast_forest_builder.ensure_dyn_node_use(true, asm_op, inline_calls)?;
 
         Ok(Some(dyn_call_node_ref))
     }
@@ -76,7 +107,10 @@ impl Assembler {
             )?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
-            block_builder.mast_forest_builder().mast_root_for_ref(resolved.node).unwrap()
+            block_builder
+                .mast_forest_builder()
+                .mast_root_for_ref(resolved.node.node_ref())
+                .unwrap()
         };
 
         self.procref_mast_root(mast_root, block_builder);

@@ -1,9 +1,10 @@
 //! Batch STARK AIR wrappers, lookup implementations, and prove/verify runner.
 
-use miden_lifted_stark::{air::BaseAir, testing::airs::poseidon2::NUM_POSEIDON2_COLS};
+use miden_lifted_stark::air::BaseAir;
 use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_batch_stark::{ProverData, StarkInstance, prove_batch, verify_batch};
 use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
+use p3_challenger::GrindingChallenger;
 use p3_commit::ExtensionMmcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
@@ -14,7 +15,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use tracing::info_span;
 
 use crate::{
-    BatchPoseidon2Air, Felt, GlRoundConstants, QuadFelt, RunResult,
+    Felt, QuadFelt, RunResult,
     cli::{AirType, Cli, TraceSpec},
 };
 
@@ -91,7 +92,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MidenWithLookups {
 #[derive(Clone)]
 enum BatchBenchAir {
     Keccak(KeccakWithLookup),
-    Poseidon2(Box<BatchPoseidon2Air>),
     Blake3,
     Miden(MidenWithLookups),
 }
@@ -100,7 +100,6 @@ impl<F> BaseAir<F> for BatchBenchAir {
     fn width(&self) -> usize {
         match self {
             Self::Keccak(a) => BaseAir::<F>::width(a),
-            Self::Poseidon2(_) => NUM_POSEIDON2_COLS,
             Self::Blake3 => NUM_BLAKE3_COLS,
             Self::Miden(a) => BaseAir::<F>::width(a),
         }
@@ -111,7 +110,6 @@ impl<AB: AirBuilder<F = Felt> + InteractionBuilder> Air<AB> for BatchBenchAir {
     fn eval(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => Air::eval(a, builder),
-            Self::Poseidon2(a) => Air::eval(a.as_ref(), builder),
             Self::Blake3 => Air::eval(&Blake3Air {}, builder),
             Self::Miden(a) => Air::eval(a, builder),
         }
@@ -146,6 +144,7 @@ macro_rules! batch_config {
             log_final_poly_len: $cli.log_final_degree as usize,
             max_log_arity: $cli.log_folding_arity as usize,
             num_queries: $cli.num_queries,
+            batch_proof_of_work_bits: 0,
             commit_proof_of_work_bits: $cli.folding_pow_bits,
             query_proof_of_work_bits: $cli.query_pow_bits,
             mmcs: challenge_mmcs,
@@ -163,12 +162,13 @@ pub(crate) fn run_batch<SC>(
     config: &SC,
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     cli: &Cli,
 ) -> RunResult
 where
     SC: p3_uni_stark::StarkGenericConfig<Challenge = QuadFelt>,
     SC::Pcs: Sync,
+    SC::Challenger: GrindingChallenger<Witness = Felt>,
+    <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::ProverError: Send,
     <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::Domain:
         p3_commit::PolynomialSpace<Val = Felt> + Send + Sync,
     <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::ProverData: Sync,
@@ -178,10 +178,6 @@ where
         .iter()
         .map(|spec| match spec.air_type {
             AirType::Keccak => BatchBenchAir::Keccak(KeccakWithLookup),
-            AirType::Poseidon2 => {
-                let c = constants.as_ref().expect("poseidon2 constants required");
-                BatchBenchAir::Poseidon2(Box::new(BatchPoseidon2Air::new(c.clone())))
-            },
             AirType::Blake3 => BatchBenchAir::Blake3,
             AirType::Miden => BatchBenchAir::Miden(MidenWithLookups {
                 width: spec.width,
@@ -195,10 +191,13 @@ where
 
     let instances = StarkInstance::new_multiple(&airs, &trace_refs, &pvs);
 
-    let prover_data = ProverData::from_instances(config, &instances);
+    let prover_data =
+        ProverData::from_instances(config, &instances).expect("batch-stark setup failed");
     let common = &prover_data.common;
 
-    let proof = info_span!("prove").in_scope(|| prove_batch(config, &instances, &prover_data));
+    let proof = info_span!("prove").in_scope(|| {
+        prove_batch(config, &instances, &prover_data).expect("batch-stark proving failed")
+    });
 
     let result = RunResult {
         proof_size_bytes: postcard::to_allocvec(&proof).expect("serialization failed").len(),
@@ -220,35 +219,9 @@ where
 // Batch config constructors (called from main)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn run_batch_poseidon2(
-    specs: &[TraceSpec],
-    traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
-    log_blowup: u8,
-    cli: &Cli,
-) -> RunResult {
-    use miden_lifted_stark::testing::configs::goldilocks_poseidon2 as gl;
-    use p3_symmetric::PaddingFreeSponge;
-
-    let (perm, _, compress) = gl::test_components();
-    let leaf = PaddingFreeSponge::<_, { gl::WIDTH }, { gl::RATE }, { gl::DIGEST }>::new(perm);
-    let config = batch_config!(
-        gl::PackedFelt,
-        gl::PackedFelt,
-        { gl::DIGEST },
-        leaf,
-        compress,
-        gl::test_challenger(),
-        log_blowup,
-        cli
-    );
-    run_batch(&config, specs, traces, constants, cli)
-}
-
 pub(crate) fn run_batch_keccak(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -270,13 +243,12 @@ pub(crate) fn run_batch_keccak(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }
 
 pub(crate) fn run_batch_blake3(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -297,13 +269,12 @@ pub(crate) fn run_batch_blake3(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }
 
 pub(crate) fn run_batch_blake3_192(
     specs: &[TraceSpec],
     traces: &[RowMajorMatrix<Felt>],
-    constants: &Option<GlRoundConstants>,
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
@@ -324,5 +295,5 @@ pub(crate) fn run_batch_blake3_192(
         log_blowup,
         cli
     );
-    run_batch(&config, specs, traces, constants, cli)
+    run_batch(&config, specs, traces, cli)
 }

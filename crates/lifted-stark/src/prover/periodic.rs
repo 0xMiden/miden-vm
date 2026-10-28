@@ -4,11 +4,9 @@
 //! constraint evaluation on the LDE domain. The key optimization is that a periodic
 //! column with period `p` only needs `p * blowup` LDE values (not `trace_height * blowup`),
 //! which are accessed via modular indexing.
-//!
-//! Uses NaiveDft since periodic column periods are typically small.
 
 use miden_lifted_air::log2_strict_u8;
-use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
+use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
@@ -37,7 +35,6 @@ impl<F: TwoAdicField> PeriodicLde<F> {
     ///
     /// Takes the output of [`miden_lifted_air::BaseAir::periodic_columns_matrix`], where
     /// columns with smaller periods have been repeated cyclically to the maximum period.
-    /// Uses NaiveDft since periodic column periods are typically small.
     ///
     /// # Arguments
     /// - `domain`: The evaluation domain (trace + LDE + constraint degree)
@@ -68,8 +65,8 @@ impl<F: TwoAdicField> PeriodicLde<F> {
         let log_ratio = domain.log_trace_height() - log_max_period;
         let period_shift: F = domain.shift().exp_power_of_2(log_ratio as usize);
 
-        // Compute LDE using NaiveDft (periods are small)
-        let ldes = NaiveDft
+        // Compute LDE
+        let ldes = Radix2DFTSmallBatch::<F>::default()
             .coset_lde_batch(repeated_matrix, log_blowup, period_shift)
             .to_row_major_matrix();
 
@@ -148,7 +145,7 @@ mod tests {
             .map(|col| {
                 let full: Vec<gl::Felt> = (0..trace_height).map(|i| col[i % col.len()]).collect();
                 let matrix = RowMajorMatrix::new(full, 1);
-                NaiveDft
+                Radix2DFTSmallBatch::<gl::Felt>::default()
                     .coset_lde_batch(matrix, log_blowup.into(), expected_shift)
                     .to_row_major_matrix()
                     .values

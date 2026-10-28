@@ -14,8 +14,13 @@ pub enum InputKey {
     AuxRandAlpha,
     /// Aux randomness beta supplied as an input.
     AuxRandBeta,
-    /// Challenge used to fold per-AIR constraint roots in proof order.
-    MultiAirFoldBeta,
+    /// Fold coefficient for the AIR instance at the given index.
+    ///
+    /// Has a real READ-layout slot. Each relation's generated evaluator
+    /// (`sys/<relation>/constraints_eval.masm`) populates it with `beta^(N-1-pos(k))`, where
+    /// `pos(k)` is the AIR's position in the height-sorted proof order, by walking the staged
+    /// proof-order maps.
+    MultiAirFoldCoeff(usize),
     /// Preprocessed trace value at (offset, index).
     Preprocessed { offset: usize, index: usize },
     /// Main trace value at (offset, index).
@@ -51,7 +56,8 @@ pub enum InputKey {
     IsTransitionAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
-    /// `f = h^N`, the chunk shift ratio between cosets.
+    /// Primitive `D`-th root of unity, where `D` is the quotient chunk count; the chunk shift
+    /// ratio between cosets after taking the trace-height power.
     F,
     /// `s0 = offset^N`, the first chunk shift.
     S0,
@@ -78,7 +84,7 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
-            InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
+            InputKey::MultiAirFoldCoeff(i) => layout.stark.multi_air_fold_coeff_index(i),
             InputKey::Preprocessed { offset, index } => match offset {
                 0 => layout.regions.preprocessed_curr.index(index),
                 1 => layout.regions.preprocessed_next.index(index),

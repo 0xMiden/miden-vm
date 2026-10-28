@@ -1,9 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::{
     Felt, WORD_SIZE, Word,
     advice::AdviceMap,
@@ -13,12 +10,12 @@ use crate::{
 };
 
 mod claim;
-pub use claim::{
-    CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS, REQUEST_DOMAIN_TAG, claim_commitment,
-    request_key,
-};
+pub use claim::{CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS, claim_commitment};
 
 pub mod domain;
+
+mod request;
+pub use request::{PROOF_REQUEST_DOMAIN_TAG, proof_request_key};
 
 mod kernel;
 pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError};
@@ -35,10 +32,9 @@ pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutp
 /// execution begins, and a definition of the kernel against which the program must be executed
 /// (the kernel can be an empty kernel).
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct Program {
     mast_forest: Arc<MastForest>,
@@ -224,6 +220,10 @@ impl fmt::Display for Program {
 /// membership of a given kernel procedure for a given proof, without compromising its
 /// zero-knowledge properties.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ProgramInfo {
     program_hash: Word,
     kernel: KernelDescriptor,
@@ -325,4 +325,28 @@ impl ToElements for ProgramInfo {
 fn pad_next_mul_8(input: &mut Vec<Felt>) {
     let output_len = input.len().next_multiple_of(8);
     input.resize(output_len, Felt::ZERO);
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{KernelDescriptor, ProgramInfo};
+    use crate::Word;
+
+    impl Arbitrary for ProgramInfo {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // KernelDescriptor's own strategy already produces normalized, valid kernels
+            // (distinct words below `MAX_NUM_PROCEDURES`), and any word is a valid program hash.
+            (any::<Word>(), any::<KernelDescriptor>())
+                .prop_map(|(program_hash, kernel)| ProgramInfo::new(program_hash, kernel))
+                .boxed()
+        }
+    }
 }

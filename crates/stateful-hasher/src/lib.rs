@@ -46,7 +46,16 @@ pub trait StatefulHasher<Item, Out>: Clone {
     /// The internal state type that evolves during absorption.
     type State;
 
-    /// Absorb elements into the state with overwrite-mode and zero-padding semantics if applicable.
+    /// Initializes a fresh state for an input with the given encoded length.
+    ///
+    /// `encoded_len` counts items after any padding performed between calls to
+    /// [`absorb_into`](Self::absorb_into). Callers must invoke this before the first absorption
+    /// when the hasher does not use its state's default value as the initial state. The default
+    /// implementation leaves the state unchanged.
+    fn initialize_state(&self, _state: &mut Self::State, _encoded_len: usize) {}
+
+    /// Absorb elements into an initialized state, using overwrite-mode and zero-padding semantics
+    /// if applicable.
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Item>);
 
     /// Squeeze an output from the current state.
@@ -54,7 +63,9 @@ pub trait StatefulHasher<Item, Out>: Clone {
 
     /// One-shot hash of multiple row slices.
     ///
-    /// Creates a fresh state, absorbs all rows, and squeezes the result.
+    /// Creates a default state, absorbs all rows, and squeezes the result. A hasher whose initial
+    /// state is not the default, including one which binds the encoded length, must override this
+    /// method because the default implementation cannot derive a padding-aware encoded length.
     fn hash_rows<'a>(&self, rows: impl IntoIterator<Item = &'a [Item]>) -> Out
     where
         Item: Copy + 'a,
@@ -99,28 +110,4 @@ pub trait Alignable<Input, Target> {
     /// This represents the maximum number of virtual zero input elements that
     /// could be added due to padding when absorbing input.
     const ALIGNMENT: usize;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::{MockBinaryHasher, MockBinaryPermutation};
-
-    /// Compile-time verification that all StatefulHasher implementations
-    /// satisfy their generic bounds with mock types.
-    #[test]
-    fn types_instantiate() {
-        // Native sponge: T -> [T; WIDTH] -> [T; OUT]
-        let _sponge = StatefulSponge::<_, 8, 4, 2>::new(MockBinaryPermutation::<u64, 8>::default());
-        let _: [u64; 8] = Default::default();
-
-        // Serializing sponge: F -> [binary; WIDTH] -> [binary; OUT]
-        let inner = StatefulSponge::<_, 8, 4, 2>::new(MockBinaryPermutation::<u64, 8>::default());
-        let _serializing: SerializingStatefulSponge<_> = SerializingStatefulSponge::new(inner);
-        let _: [u64; 8] = Default::default();
-
-        // Chaining hasher: F -> [binary; N] (digest = state)
-        let _chaining: ChainingHasher<MockBinaryHasher> = ChainingHasher::new(MockBinaryHasher);
-        let _: [u64; 4] = Default::default();
-    }
 }

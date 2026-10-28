@@ -3,9 +3,11 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+use once_cell::sync::Lazy;
+
 use super::{
-    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree, NodeIndex,
-    PartialMerkleTree, Poseidon2, RootPath, Word,
+    Eidos, EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree,
+    NodeIndex, PartialMerkleTree, RootPath, Word,
     mmr::Mmr,
     smt::{SimpleSmt, Smt},
 };
@@ -21,7 +23,10 @@ mod tests;
 // ================================================================================================
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StoreNode {
     left: Word,
     right: Word,
@@ -29,16 +34,20 @@ pub struct StoreNode {
 
 /// An in-memory data store for Merkelized data.
 ///
-/// This is a in memory data store for Merkle trees, this store allows all the nodes of multiple
-/// trees to live as long as necessary and without duplication, this allows the implementation of
-/// space efficient persistent data structures.
+/// Nodes from multiple Merkle trees are stored without duplication, allowing persistent trees to
+/// share unchanged subtrees.
+///
+/// Serialization uses format version 1; unversioned encodings and other versions are rejected.
+/// Deserialization does not verify parent hashes against their children.
+///
+/// Canonical empty-subtree nodes are omitted on write and restored on read.
 ///
 /// Example usage:
 ///
 /// ```rust
 /// # use miden_crypto::{ZERO, Felt, Word};
 /// # use miden_crypto::merkle::{NodeIndex, MerkleTree, store::MerkleStore};
-/// # use miden_crypto::hash::poseidon2::Poseidon2;
+/// # use miden_crypto::hash::eidos::Eidos;
 /// # use miden_crypto::field::PrimeCharacteristicRing;
 /// # const fn int_to_node(value: u64) -> Word {
 /// #     Word::new([Felt::new_unchecked(value), ZERO, ZERO, ZERO])
@@ -91,7 +100,10 @@ pub struct StoreNode {
 /// assert_eq!(store.num_internal_nodes() - 255, 10);
 /// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MerkleStore {
     nodes: Map<Word, StoreNode>,
 }
@@ -103,6 +115,10 @@ impl Default for MerkleStore {
 }
 
 impl MerkleStore {
+    /// Identifies the serialized MerkleStore format.
+    const FORMAT_MAGIC: [u8; 8] = *b"MRKSTORE";
+    const FORMAT_VERSION: u8 = 1;
+
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
@@ -246,8 +262,13 @@ impl MerkleStore {
             return Err(MerkleError::RootNotInStore(hash));
         }
 
-        // we traverse from root to leaf, so the path is reversed
-        let mut path = (index << (64 - tree_depth)).reverse_bits();
+        // we traverse from root to leaf, so the path is reversed. A depth-zero tree has the empty
+        // path, and computing it with the shift below would shift by the full 64-bit width.
+        let mut path = if tree_depth == 0 {
+            0
+        } else {
+            (index << (64 - tree_depth)).reverse_bits()
+        };
 
         // iterate every depth and reconstruct the path from root to leaf
         for depth in 0..=tree_depth {
@@ -297,7 +318,7 @@ impl MerkleStore {
         if tree_depth > MAX_DEPTH {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
-        let empty = EmptySubtreeRoots::empty_hashes(MAX_DEPTH);
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
 
         let mut node = root;
         if !self.nodes.contains_key(&node) {
@@ -424,7 +445,7 @@ impl MerkleStore {
             let left: Word = node.left;
             let right: Word = node.right;
 
-            debug_assert_eq!(Poseidon2::merge(&[left, right]), value);
+            debug_assert_eq!(Eidos::merge(&[left, right]), value);
             self.nodes.insert(value, StoreNode { left, right });
 
             node.value
@@ -476,7 +497,7 @@ impl MerkleStore {
     ///
     /// Merges arbitrary values. They may be leaves, nodes, or a mixture of both.
     pub fn merge_roots(&mut self, left_root: Word, right_root: Word) -> Result<Word, MerkleError> {
-        let parent = Poseidon2::merge(&[left_root, right_root]);
+        let parent = Eidos::merge(&[left_root, right_root]);
         self.nodes.insert(parent, StoreNode { left: left_root, right: right_root });
 
         Ok(parent)
@@ -589,17 +610,42 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.nodes.len() as u64);
+        target.write_bytes(&Self::FORMAT_MAGIC);
+        target.write_u8(Self::FORMAT_VERSION);
+        static EMPTY_NODES: Lazy<Map<Word, StoreNode>> = Lazy::new(|| empty_hashes().collect());
+        // Count omissions with a fixed number of lookups, without scanning the entire store.
+        let omitted = EMPTY_NODES
+            .iter()
+            .filter(|(key, node)| self.nodes.get(*key) == Some(*node))
+            .count();
 
-        for (k, v) in self.nodes.iter() {
-            k.write_into(target);
-            v.write_into(target);
+        target.write_u64((self.nodes.len() - omitted) as u64);
+
+        for (key, node) in &self.nodes {
+            // Only nodes with equal children can be canonical empty nodes.
+            if node.left != node.right || EMPTY_NODES.get(key) != Some(node) {
+                key.write_into(target);
+                node.write_into(target);
+            }
         }
     }
 }
 
 impl Deserializable for MerkleStore {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_array::<8>()? != Self::FORMAT_MAGIC {
+            return Err(DeserializationError::InvalidValue(
+                "unsupported MerkleStore format: expected a versioned encoding".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != Self::FORMAT_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported MerkleStore version {version} (expected {})",
+                Self::FORMAT_VERSION,
+            )));
+        }
+
         let len_u64 = source.read_u64()?;
         let len = usize::try_from(len_u64).map_err(|_| {
             DeserializationError::InvalidValue("MerkleStore node count too large".into())
@@ -618,9 +664,9 @@ impl Deserializable for MerkleStore {
         Ok(nodes.into_iter().collect())
     }
 
-    /// Minimum serialized size: u64 length prefix (0 entries).
+    /// Minimum serialized size: magic, version, and u64 node count (0 entries).
     fn min_serialized_size() -> usize {
-        8
+        Self::FORMAT_MAGIC.len() + 1 + u64::min_serialized_size()
     }
 }
 
@@ -647,4 +693,60 @@ fn combine_nodes_with_empty_hashes(
         .into_iter()
         .map(|info| (info.value, StoreNode { left: info.left, right: info.right }))
         .chain(empty_hashes())
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use super::{MerkleStore, StoreNode, Word};
+
+    impl Arbitrary for MerkleStore {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Build structurally valid stores bottom-up: every inserted key is the Eidos
+            // hash of its two children, matching the invariant maintained by `add_merkle_path`
+            // and `merge_roots`.
+            prop::collection::vec(any::<Word>(), 0..=16)
+                .prop_map(|leaves| {
+                    let mut store = MerkleStore::default();
+                    let mut level = leaves;
+                    while level.len() > 1 {
+                        let mut next = Vec::new();
+                        for pair in level.chunks(2) {
+                            if pair.len() == 2 {
+                                let parent = store
+                                    .merge_roots(pair[0], pair[1])
+                                    .expect("merging arbitrary words is valid");
+                                next.push(parent);
+                            } else {
+                                next.push(pair[0]);
+                            }
+                        }
+                        level = next;
+                    }
+                    store
+                })
+                .boxed()
+        }
+    }
+    impl Arbitrary for StoreNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (left, right) pair is structurally valid; key consistency is MerkleStore's
+            // concern, not the node's.
+            (any::<Word>(), any::<Word>())
+                .prop_map(|(left, right)| StoreNode { left, right })
+                .boxed()
+        }
+    }
 }

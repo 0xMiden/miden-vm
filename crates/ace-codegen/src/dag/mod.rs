@@ -13,10 +13,14 @@ mod ir;
 #[cfg(any(test, feature = "testing"))]
 mod lower;
 mod lower_ir;
+mod normalize;
 mod periodic;
 
 pub use builder::DagBuilder;
+#[cfg(test)]
+pub(crate) use ir::PeriodicColumn;
 pub use ir::{AceDag, DagSnapshot, NodeId, NodeKind, PeriodicColumnData};
 #[cfg(any(test, feature = "testing"))]
 pub use lower::build_verifier_dag;
 pub use lower_ir::build_verifier_dag_from_ir;
+pub(crate) use normalize::normalize_dag;

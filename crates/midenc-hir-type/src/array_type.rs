@@ -2,7 +2,6 @@ use super::{Alignable, Type};
 
 /// A fixed-size, homogenous vector type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArrayType {
     pub ty: Type,
     pub len: usize,

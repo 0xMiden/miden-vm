@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
@@ -22,8 +19,6 @@ use crate::{
 /// A Join node describe sequential execution. When the VM encounters a Join node, it executes the
 /// first child first and the second child second.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct JoinNode {
     children: [MastNodeId; 2],
     digest: Word,
@@ -108,10 +103,10 @@ impl MastNodeExt for JoinNode {
     /// defined by [Self::DOMAIN] - i.e.,:
     /// ```
     /// # use miden_core::mast::JoinNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let first_child_digest = Word::default();
     /// # let second_child_digest = Word::default();
-    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -153,36 +148,6 @@ impl MastNodeExt for JoinNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for JoinNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate two MastNodeId values and digest for the children
-        (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
-            .prop_map(|(first_child, second_child, digest_array)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                JoinNode {
-                    children: [first_child, second_child],
-                    digest,
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`JoinNode`] instances.
 #[derive(Debug)]
@@ -213,7 +178,7 @@ impl JoinNodeBuilder {
             let left_child_hash = left_child.digest();
             let right_child_hash = right_child.digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
         Ok(JoinNode { children: self.children, digest })
@@ -258,7 +223,7 @@ impl MastForestContributor for JoinNodeBuilder {
                 })?
                 .digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &self.children, context, hash_by_node_id)

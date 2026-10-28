@@ -26,6 +26,9 @@ Procedures in the Miden Core Library are organized into modules, each targeting 
 
 For an example of how to invoke procedures from imported modules see [this section](../assembly/code_organization.md#importing-modules). Users should load `CoreLibrary` to access modules under the `miden::core` namespace. Core wrappers may use bundled precompile-backed verification internally, but users should rely on the stable `miden::core::*` facades.
 
+To verify execution proofs and settle deferred precompile work, see
+[Verifying proofs in MASM](./recursive_verification.md).
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 
@@ -35,18 +38,23 @@ Currently, Miden core library contains just a few modules, which are listed belo
 | [miden::core::collections::smt](./collections.md#sparse-merkle-tree)        | Contains procedures for manipulating Sparse Merkle Trees with 4-element keys and values.                                                                         |
 | [miden::core::collections::sorted_array](./collections.md#sorted-array)     | Contains procedures for searching in sorted arrays of words.                                                                                                     |
 | [miden::core::pcs::fri::frie2f4](./pcs/fri.md#fri-extension-2-fold-4)       | Contains procedures for verifying FRI proofs (field extension = 2, folding factor = 4).                                                                          |
-| [miden::core::stark::mod](./stark.md)                                        | Contains procedures and helpers used when verifying STARK proofs inside the VM.                                                                                  |
-| [miden::core::crypto::aead](./crypto/aead.md)                               | Contains procedures for authenticated encryption with associated data (AEAD) using Poseidon2 hash.                                                                     |
-| [miden::core::crypto::dsa::ecdsa_k256_keccak](./crypto/dsa.md#ecdsa-secp256k1-keccak256) | Proves the existence of an ECDSA-valid secp256k1/Keccak256 advice witness; it does not bind a canonical Ethereum signature encoding. |
-| [miden::core::crypto::dsa::falcon512_poseidon2](./crypto/dsa.md#poseidon2-falcon512)     | Contains procedures for verifying Poseidon2 Falcon512 post-quantum signatures.                                                                                         |
+| [miden::core::stark](./stark.md)                                        | Contains procedures and helpers used when verifying STARK proofs inside the VM.                                                                                  |
+| [miden::core::crypto::aead_eidos](./crypto/aead_eidos.md)                 | Contains Eidos/u32-XOR AEAD procedures, including exact-length expanded-ciphertext authentication.                                                                      |
+| [miden::core::crypto::dsa::ecdsa_k256_keccak](./crypto/dsa.md#ecdsa-secp256k1-keccak256) | Verifies ECDSA advice witnesses and recovers full secp256k1 public keys from native EVM recovery witnesses. |
+| [miden::core::crypto::dsa::ecdsa_p256_sha256](./crypto/dsa.md#ecdsa-p-256-sha256) | Verifies P-256 ECDSA advice witnesses over SHA-256 message hashes and recovers P-256 public keys from native recovery witnesses. |
+| [miden::core::crypto::dsa::eddsa_25519_sha512](./crypto/dsa.md#ed25519-sha512) | Verifies Ed25519 advice witnesses over Word or arbitrary-byte messages. |
+| [miden::core::crypto::dsa::falcon512_eidos](./crypto/dsa.md#eidos-falcon512)             | Contains procedures for verifying Eidos Falcon512 post-quantum signatures.                                                                                             |
 | [miden::core::crypto::hashes::blake3](./crypto/hashes.md#blake3)            | Contains procedures for computing hashes using BLAKE3 hash function.                                                                                             |
 | [miden::core::crypto::hashes::keccak256](./crypto/hashes.md#keccak256)      | Contains procedures for computing hashes using Keccak256.                              |
-| [miden::core::crypto::hashes::poseidon2](./crypto/hashes.md#poseidon2)      | Contains procedures for computing hashes using the Poseidon2 hash function.                                                                    |
+| [miden::core::crypto::hashes::eidos](./crypto/hashes.md#eidos)              | Contains Eidos hashing and Eidos compression procedures.                                                                                       |
 | [miden::core::crypto::hashes::sha256](./crypto/hashes.md#sha256)            | Contains procedures for computing hashes using SHA256 hash function.                                                                                             |
+| [miden::core::precompiles::hashes::sha256](./crypto/hashes.md#sha256-precompile) | Computes SHA-256 through the deferred precompile relation. |
+| [miden::core::precompiles::hashes::sha512](./crypto/hashes.md#sha512) | Computes SHA-512 through the deferred precompile relation. |
 | [miden::core::math::u64](./math/u64.md)                                     | Contains procedures for working with 64-bit unsigned integers.                                                                                                   |
 | [miden::core::math::u128](./math/u128.md)                                   | Contains procedures for working with 128-bit unsigned integers.                                                                                                  |
 | [miden::core::math::u256](./math/u256.md)                                   | Contains procedures for working with 256-bit unsigned integers.                                                                                                  |
 | [miden::core::mem](./mem.md)                                                | Contains procedures for working with random access memory.                                                                                                       |
 | [miden::core::sys](./sys.md)                                                | Contains system-level utility procedures.                                                                                                                        |
-| [miden::core::sys::vm](./sys_vm.md)                                         | Contains VM-facing utility procedures needed during Miden VM recursive proof verification.                                                                       |
+| [miden::core::sys::vm](./sys_vm.md)                                         | Verifies MVM execution claims and returns their security descriptors and deferred roots. |
+| [miden::core::sys::pvm](./recursive_verification.md)                         | Requests and verifies precompile proofs to settle deferred roots. |
 | [miden::core::word](./word.md)                                               | Contains utilities for working with words.                                                                                                                       |

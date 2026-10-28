@@ -1,101 +1,78 @@
-//! Comprehensive Digital Signature Algorithm (DSA) benchmarks
-//!
-//! This module benchmarks all DSA operations implemented in the library:
-//! - Falcon512-Poseidon2 (Falcon using Poseidon2 for hashing the message)
-//! - ECDSA over secp256k1 (using Keccak for hashing)
-//! - EdDSA (Ed25519 using SHA-512)
-//!
-//! # Organization
-//!
-//! The benchmarks are organized by:
-//! 1. Key generation operations
-//! 2. Signing operations (with and without RNG)
-//! 3. Verification operations
-//!
-//! # Adding New DSA Benchmarks
-//!
-//! To add benchmarks for new DSA algorithms:
-//! 1. Add the algorithm to the imports
-//! 2. Add parameterized benchmark functions following the naming convention
-//! 3. Add to the appropriate benchmark group
-//! 4. Update input size arrays in config.rs if needed
+//! Key generation, signing, and verification for Falcon512-Eidos, ECDSA-secp256k1,
+//! and EdDSA-Ed25519.
 
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-// Import DSA modules
 use miden_crypto::{
     Felt, Word,
     dsa::{
         ecdsa_k256_keccak, eddsa_25519_sha512,
-        falcon512_poseidon2::{
-            self, PublicKey as Falcon512PublicKey, SecretKey as Falcon512SecretKey,
-        },
+        falcon512_eidos::{self, PublicKey as Falcon512PublicKey, SecretKey as Falcon512SecretKey},
     },
 };
 use rand::rng;
 
-// Import common utilities
 mod common;
 use common::*;
 
-// Import configuration constants
 use crate::config::{DEFAULT_MEASUREMENT_TIME, DEFAULT_SAMPLE_SIZE};
 
-/// Configuration for key generation benchmarks
-const KEYGEN_ITERATIONS: usize = 10;
+/// Public-key derivation, signing, and verification time ten operations per iteration.
+/// Secret-key generation times one operation per iteration.
+const OPERATIONS_PER_BATCH: usize = 10;
 
 // ================================================================================================
-// FALCON512-POSEIDON2 BENCHMARKS
+// FALCON512-EIDOS BENCHMARKS
 // ================================================================================================
 
 // === Key Generation Benchmarks ===
 
-// Secret key generation without RNG
+// Secret key generation with the default RNG.
 benchmark_with_setup! {
-    falcon512_poseidon2_keygen_secret_default,
+    falcon512_eidos_keygen_secret_default,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_keygen_secret",
+    "falcon512_eidos_keygen_secret",
     || {},
     |b: &mut criterion::Bencher| {
         b.iter(|| {
-            let _secret_key = Falcon512SecretKey::new();
+            let _secret_key = black_box(Falcon512SecretKey::new());
         })
     },
 }
 
 // Secret key generation with custom RNG
 benchmark_with_setup_data! {
-    falcon512_poseidon2_keygen_secret_with_rng,
+    falcon512_eidos_keygen_secret_with_rng,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_keygen_secret_with_rng",
+    "falcon512_eidos_keygen_secret_with_rng",
     || {
         rng()
     },
     |b: &mut criterion::Bencher, rng: &rand::rngs::ThreadRng| {
         b.iter(|| {
             let mut rng_clone = rng.clone();
-            let _secret_key = Falcon512SecretKey::with_rng(&mut rng_clone);
+            let _secret_key = black_box(Falcon512SecretKey::with_rng(&mut rng_clone));
         })
     },
 }
 
 // Public key generation from secret key
 benchmark_with_setup_data! {
-    falcon512_poseidon2_keygen_public,
+    falcon512_eidos_keygen_public,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_keygen_public",
+    "falcon512_eidos_keygen_public",
     || {
-        let secret_keys: Vec<Falcon512SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::new()).collect();
+        let secret_keys: Vec<Falcon512SecretKey> = (0..OPERATIONS_PER_BATCH).map(|_| Falcon512SecretKey::new()).collect();
         secret_keys
     },
     |b: &mut criterion::Bencher, secret_keys: &Vec<Falcon512SecretKey>| {
         b.iter(|| {
             for secret_key in secret_keys {
-                let _public_key = secret_key.public_key();
+                let _public_key = black_box(secret_key.public_key());
             }
         })
     },
@@ -103,22 +80,22 @@ benchmark_with_setup_data! {
 
 // === Signing Benchmarks ===
 
-// Message signing without RNG
+// Message signing with the default RNG.
 benchmark_with_setup_data! {
-    falcon512_poseidon2_sign_default,
+    falcon512_eidos_sign_default,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_sign",
+    "falcon512_eidos_sign",
     || {
-        let secret_keys: Vec<Falcon512SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::new()).collect();
+        let secret_keys: Vec<Falcon512SecretKey> = (0..OPERATIONS_PER_BATCH).map(|_| Falcon512SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<Falcon512SecretKey>, Vec<Word>)| {
         b.iter(|| {
             for (secret_key, message) in secret_keys.iter().zip(messages.iter()) {
-                let _signature = secret_key.sign(black_box(*message));
+                let _signature = black_box(secret_key.sign(black_box(*message)));
             }
         })
     },
@@ -126,15 +103,15 @@ benchmark_with_setup_data! {
 
 // Message signing with custom RNG
 benchmark_with_setup_data! {
-    falcon512_poseidon2_sign_with_rng,
+    falcon512_eidos_sign_with_rng,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_sign_with_rng",
+    "falcon512_eidos_sign_with_rng",
     || {
-        let secret_keys: Vec<Falcon512SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::new()).collect();
+        let secret_keys: Vec<Falcon512SecretKey> = (0..OPERATIONS_PER_BATCH).map(|_| Falcon512SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
-        let rngs: Vec<_> = (0..KEYGEN_ITERATIONS).map(|_| rng()).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+        let rngs: Vec<_> = (0..OPERATIONS_PER_BATCH).map(|_| rng()).collect();
         (secret_keys, messages, rngs)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages, rngs): &(Vec<Falcon512SecretKey>, Vec<Word>, Vec<_>)| {
@@ -143,7 +120,7 @@ benchmark_with_setup_data! {
             for ((secret_key, message), rng) in
                 secret_keys.iter().zip(messages.iter()).zip(rngs_local.iter_mut())
             {
-                let _signature = secret_key.sign_with_rng(black_box(*message), rng);
+                let _signature = black_box(secret_key.sign_with_rng(black_box(*message), rng));
             }
         })
     },
@@ -153,30 +130,30 @@ benchmark_with_setup_data! {
 
 // Signature verification
 benchmark_with_setup_data! {
-    falcon512_poseidon2_verify,
+    falcon512_eidos_verify,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "falcon512_poseidon2_verify",
+    "falcon512_eidos_verify",
     || {
         let mut rng = rand::rngs::ThreadRng::default();
         let secret_keys: Vec<Falcon512SecretKey> =
-            (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::with_rng(&mut rng)).collect();
-        let public_keys: Vec<Falcon512PublicKey> = secret_keys.iter().map(falcon512_poseidon2::SecretKey::public_key).collect();
+            (0..OPERATIONS_PER_BATCH).map(|_| Falcon512SecretKey::with_rng(&mut rng)).collect();
+        let public_keys: Vec<Falcon512PublicKey> = secret_keys.iter().map(falcon512_eidos::SecretKey::public_key).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
-        let signatures: Vec<falcon512_poseidon2::Signature> = secret_keys
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+        let signatures: Vec<falcon512_eidos::Signature> = secret_keys
             .iter()
             .zip(messages.iter())
             .map(|(sk, msg)| sk.sign_with_rng(black_box(*msg), &mut rng))
             .collect();
         (public_keys, messages, signatures)
     },
-    |b: &mut criterion::Bencher, (public_keys, messages, signatures): &(Vec<Falcon512PublicKey>, Vec<Word>, Vec<falcon512_poseidon2::Signature>)| {
+    |b: &mut criterion::Bencher, (public_keys, messages, signatures): &(Vec<Falcon512PublicKey>, Vec<Word>, Vec<falcon512_eidos::Signature>)| {
         b.iter(|| {
             for ((public_key, message), signature) in
                 public_keys.iter().zip(messages.iter()).zip(signatures.iter())
             {
-                let _result = public_key.verify(black_box(*message), signature);
+                let _result = black_box(public_key.verify(black_box(*message), signature));
             }
         })
     },
@@ -196,7 +173,7 @@ benchmark_with_setup! {
     || {},
     |b: &mut criterion::Bencher| {
         b.iter(|| {
-            let _secret_key = ecdsa_k256_keccak::SigningKey::new();
+            let _secret_key = black_box(ecdsa_k256_keccak::SigningKey::new());
         })
     },
 }
@@ -212,7 +189,7 @@ benchmark_with_setup_data! {
     |b: &mut criterion::Bencher, rng: &rand::rngs::ThreadRng| {
         b.iter(|| {
             let mut rng_clone = rng.clone();
-            let _secret_key = ecdsa_k256_keccak::SigningKey::with_rng(&mut rng_clone);
+            let _secret_key = black_box(ecdsa_k256_keccak::SigningKey::with_rng(&mut rng_clone));
         })
     },
 }
@@ -223,13 +200,13 @@ benchmark_with_setup_data! {
     DEFAULT_SAMPLE_SIZE,
     "ecdsa_k256_keygen_public",
     || {
-        let secret_keys: Vec<ecdsa_k256_keccak::SigningKey> = (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SigningKey::new()).collect();
+        let secret_keys: Vec<ecdsa_k256_keccak::SigningKey> = (0..OPERATIONS_PER_BATCH).map(|_| ecdsa_k256_keccak::SigningKey::new()).collect();
         secret_keys
     },
     |b: &mut criterion::Bencher, secret_keys: &Vec<ecdsa_k256_keccak::SigningKey>| {
         b.iter(|| {
             for secret_key in secret_keys {
-                let _public_key = secret_key.public_key();
+                let _public_key = black_box(secret_key.public_key());
             }
         })
     },
@@ -243,9 +220,9 @@ benchmark_with_setup_data! {
     DEFAULT_SAMPLE_SIZE,
     "ecdsa_k256_sign",
     || {
-        let secret_keys: Vec<ecdsa_k256_keccak::SigningKey> = (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SigningKey::new()).collect();
+        let secret_keys: Vec<ecdsa_k256_keccak::SigningKey> = (0..OPERATIONS_PER_BATCH).map(|_| ecdsa_k256_keccak::SigningKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<ecdsa_k256_keccak::SigningKey>, Vec<Word>)| {
@@ -253,7 +230,7 @@ benchmark_with_setup_data! {
             // Clone secret keys since sign() needs &mut self
             let mut secret_keys_local = secret_keys.clone();
             for (secret_key, message) in secret_keys_local.iter_mut().zip(messages.iter()) {
-                let _signature = secret_key.sign(black_box(*message));
+                let _signature = black_box(secret_key.sign(black_box(*message)));
             }
         })
     },
@@ -269,10 +246,10 @@ benchmark_with_setup_data! {
     || {
         let mut rng = rand::rngs::ThreadRng::default();
         let mut secret_keys: Vec<ecdsa_k256_keccak::SigningKey> =
-            (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SigningKey::with_rng(&mut rng)).collect();
+            (0..OPERATIONS_PER_BATCH).map(|_| ecdsa_k256_keccak::SigningKey::with_rng(&mut rng)).collect();
         let public_keys: Vec<ecdsa_k256_keccak::PublicKey> = secret_keys.iter().map(ecdsa_k256_keccak::SigningKey::public_key).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<ecdsa_k256_keccak::Signature> = secret_keys
             .iter_mut()
             .zip(messages.iter())
@@ -285,7 +262,7 @@ benchmark_with_setup_data! {
             for ((public_key, message), signature) in
                 public_keys.iter().zip(messages.iter()).zip(signatures.iter())
             {
-                let _result = public_key.verify(black_box(*message), signature);
+                let _result = black_box(public_key.verify(black_box(*message), signature));
             }
         })
     },
@@ -305,7 +282,7 @@ benchmark_with_setup! {
     || {},
     |b: &mut criterion::Bencher| {
         b.iter(|| {
-            let _secret_key = eddsa_25519_sha512::SigningKey::new();
+            let _secret_key = black_box(eddsa_25519_sha512::SigningKey::new());
         })
     },
 }
@@ -321,7 +298,7 @@ benchmark_with_setup_data! {
     |b: &mut criterion::Bencher, rng: &rand::rngs::ThreadRng| {
         b.iter(|| {
             let mut rng_clone = rng.clone();
-            let _secret_key = eddsa_25519_sha512::SigningKey::with_rng(&mut rng_clone);
+            let _secret_key = black_box(eddsa_25519_sha512::SigningKey::with_rng(&mut rng_clone));
         })
     },
 }
@@ -332,13 +309,13 @@ benchmark_with_setup_data! {
     DEFAULT_SAMPLE_SIZE,
     "eddsa_25519_sha512_keygen_public",
     || {
-        let secret_keys: Vec<eddsa_25519_sha512::SigningKey> = (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SigningKey::new()).collect();
+        let secret_keys: Vec<eddsa_25519_sha512::SigningKey> = (0..OPERATIONS_PER_BATCH).map(|_| eddsa_25519_sha512::SigningKey::new()).collect();
         secret_keys
     },
     |b: &mut criterion::Bencher, secret_keys: &Vec<eddsa_25519_sha512::SigningKey>| {
         b.iter(|| {
             for secret_key in secret_keys {
-                let _public_key = secret_key.public_key();
+                let _public_key = black_box(secret_key.public_key());
             }
         })
     },
@@ -352,15 +329,15 @@ benchmark_with_setup_data! {
     DEFAULT_SAMPLE_SIZE,
     "eddsa_25519_sha512_sign",
     || {
-        let secret_keys: Vec<eddsa_25519_sha512::SigningKey> = (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SigningKey::new()).collect();
+        let secret_keys: Vec<eddsa_25519_sha512::SigningKey> = (0..OPERATIONS_PER_BATCH).map(|_| eddsa_25519_sha512::SigningKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<eddsa_25519_sha512::SigningKey>, Vec<Word>)| {
         b.iter(|| {
             for (secret_key, message) in secret_keys.iter().zip(messages.iter()) {
-                let _signature = secret_key.sign(black_box(*message));
+                let _signature = black_box(secret_key.sign(black_box(*message)));
             }
         })
     },
@@ -376,10 +353,10 @@ benchmark_with_setup_data! {
     || {
         let mut rng = rand::rngs::ThreadRng::default();
         let secret_keys: Vec<eddsa_25519_sha512::SigningKey> =
-            (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SigningKey::with_rng(&mut rng)).collect();
+            (0..OPERATIONS_PER_BATCH).map(|_| eddsa_25519_sha512::SigningKey::with_rng(&mut rng)).collect();
         let public_keys: Vec<eddsa_25519_sha512::PublicKey> = secret_keys.iter().map(eddsa_25519_sha512::SigningKey::public_key).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+            (0..OPERATIONS_PER_BATCH).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<eddsa_25519_sha512::Signature> = secret_keys
             .iter()
             .zip(messages.iter())
@@ -392,7 +369,7 @@ benchmark_with_setup_data! {
             for ((public_key, message), signature) in
                 public_keys.iter().zip(messages.iter()).zip(signatures.iter())
             {
-                let _result = public_key.verify(black_box(*message), signature);
+                let _result = black_box(public_key.verify(black_box(*message), signature));
             }
         })
     },
@@ -416,13 +393,13 @@ criterion_group!(
     eddsa_25519_sha512_keygen_public,
     eddsa_25519_sha512_sign,
     eddsa_25519_sha512_verify,
-    // Falcon512-Poseidon2 benchmarks
-    falcon512_poseidon2_keygen_secret_default,
-    falcon512_poseidon2_keygen_secret_with_rng,
-    falcon512_poseidon2_keygen_public,
-    falcon512_poseidon2_sign_default,
-    falcon512_poseidon2_sign_with_rng,
-    falcon512_poseidon2_verify,
+    // Falcon512-Eidos benchmarks
+    falcon512_eidos_keygen_secret_default,
+    falcon512_eidos_keygen_secret_with_rng,
+    falcon512_eidos_keygen_public,
+    falcon512_eidos_sign_default,
+    falcon512_eidos_sign_with_rng,
+    falcon512_eidos_verify,
 );
 
 criterion_main!(dsa_benchmark_group);

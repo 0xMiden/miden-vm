@@ -4,7 +4,10 @@ use core::assert_matches;
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
 use super::*;
-use crate::ast::{Form, Immediate, Instruction, Op, Visibility};
+use crate::{
+    MAX_CONTROL_FLOW_NESTING,
+    ast::{Form, Immediate, Instruction, MAX_TYPE_EXPR_NESTING, Op, Visibility},
+};
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -178,6 +181,122 @@ end
 
     let forms = parse_forms(source).expect("parser should succeed");
     assert_eq!(forms.len(), 2);
+}
+
+#[test]
+fn expression_nesting_limits_are_inclusive() {
+    let source = format!(
+        "const PARENS = {}1{}\nconst BINARY = 1{}\ntype T = {}felt{}\n",
+        "(".repeat(MAX_CONSTANT_EXPR_NESTING),
+        ")".repeat(MAX_CONSTANT_EXPR_NESTING),
+        " + 1".repeat(MAX_CONSTANT_EXPR_NESTING),
+        "[".repeat(MAX_TYPE_EXPR_NESTING),
+        "; 1]".repeat(MAX_TYPE_EXPR_NESTING),
+    );
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            parse_forms(test_source_file(&source))
+                .expect("constant and type expressions at the nesting limits should parse");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+#[test]
+fn rejects_deeply_nested_constant_expression() {
+    let depth = 10_000;
+    let source = format!("const VALUE = {}1{}\n", "(".repeat(depth), ")".repeat(depth),);
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep constant expression should return an error");
+            assert_eq!(error.to_string(), "constant expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+#[test]
+fn rejects_deeply_nested_binary_constant_expression() {
+    let depth = 10_000;
+    let source = format!("const VALUE = 1{}\n", " + 1".repeat(depth));
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep binary constant expression should return an error");
+            assert_eq!(error.to_string(), "constant expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+/// The nesting limits reject the FIRST depth past the boundary (limit + 1), not just
+/// far-past depths: an off-by-N check (e.g. `> limit + 5`) would pass both the
+/// inclusive-at-limit test and the deep-rejection tests while accepting depths the
+/// contract forbids. All three expression kinds are pinned at their own limit + 1.
+#[test]
+fn rejects_first_depth_past_the_nesting_limits() {
+    let cases = [
+        (
+            format!(
+                "const VALUE = {}1{}\n",
+                "(".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+                ")".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+            ),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!("const VALUE = 1{}\n", " + 1".repeat(MAX_CONSTANT_EXPR_NESTING + 1)),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!(
+                "type T = {}felt{}\n",
+                "[".repeat(MAX_TYPE_EXPR_NESTING + 1),
+                "; 1]".repeat(MAX_TYPE_EXPR_NESTING + 1),
+            ),
+            "type expression nesting depth exceeded",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let error = parse_forms(test_source_file(&source))
+                    .expect_err("the first depth past the limit should return an error");
+                assert_eq!(error.to_string(), expected);
+            })
+            .expect("failed to start parser thread")
+            .join()
+            .expect("parser thread panicked");
+    }
+}
+
+#[test]
+fn rejects_deeply_nested_type_expression() {
+    let depth = 10_000;
+    let source = format!("type T = {}felt{}\n", "[".repeat(depth), "; 1]".repeat(depth),);
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep type expression should return an error");
+            assert_eq!(error.to_string(), "type expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
 }
 
 #[test]
@@ -493,6 +612,27 @@ end
 }
 
 #[test]
+fn parse_variadic_procedure_signatures() {
+    let source = test_source_file(
+        "\
+pub proc log(...)
+    nop
+end
+
+pub proc collect(prefix: felt, ...) -> (count: u32, ...)
+    nop
+end
+
+pub proc passthrough() -> ...
+    nop
+end
+",
+    );
+
+    assert_parses(source);
+}
+
+#[test]
 fn parse_advice_map_and_begin_forms() {
     let source = test_source_file(
         "\
@@ -557,6 +697,23 @@ end
     );
 
     assert_parses(source);
+}
+
+#[test]
+fn control_flow_nesting_depth_exceeded_during_lowering() {
+    let mut source = String::from("begin\n");
+    for _ in 0..=MAX_CONTROL_FLOW_NESTING {
+        source.push_str("push.1\nif.true\n");
+    }
+    source.push_str("push.1\n");
+    for _ in 0..=MAX_CONTROL_FLOW_NESTING {
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+
+    let error = parse_forms(test_source_file(&source))
+        .expect_err("lowering should reject control-flow nesting beyond the configured limit");
+    crate::assert_diagnostic!(error, "control-flow nesting depth exceeded");
 }
 
 #[test]
@@ -638,8 +795,11 @@ begin
     swap
     assert
     adv.insert_hdword
+    adv.insert_compress
     adv.push_mapvaln
+    compress
     emit
+    trace
     mem_load
     u32div
     add.1
@@ -751,6 +911,8 @@ begin
     procref.foo::bar
     emit.EVENT_ID
     emit.event(\"abc\")
+    trace.EVENT_ID
+    trace.event(\"abc\")
     assert.err=\"oops\"
     u32assert.err=ERR_CODE
 end
@@ -775,6 +937,39 @@ fn parser_accepts_checked_in_masm_corpus() {
             panic!("parser failed for {}:\n{diagnostic}", path.display())
         });
     }
+}
+
+#[test]
+#[cfg(feature = "std")]
+fn printed_core_library_modules_parse_again() {
+    use crate::debuginfo::DefaultSourceManager;
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (root, submodules) = read_modules_from_root(
+        repo_root().join("crates/lib/core/asm/mod.masm"),
+        Some(Arc::<Path>::from(Path::new("::miden::core"))),
+        Some(ast::ModuleKind::Library),
+        source_manager.clone(),
+        true,
+    )
+    .unwrap_or_else(|error| panic!("failed to read the core library: {error:?}"));
+
+    let mut failures = Vec::new();
+    for module in core::iter::once(root).chain(submodules) {
+        let printed = module.to_string();
+        if let Err(error) = ModuleParser::new(Some(ast::ModuleKind::Library)).parse_str(
+            None,
+            &printed,
+            source_manager.clone(),
+        ) {
+            failures.push(format!("{:?}: {error:?}", module.path()));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "printed modules failed to parse again:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -1084,6 +1279,15 @@ end
 }
 
 #[test]
+fn parser_rejects_unsupported_compression_spellings() {
+    for spelling in ["bcompress", "adv.insert_bcompress"] {
+        let source = test_source_file(&format!("begin\n    {spelling}\nend\n"));
+        let err = parse_forms(source).expect_err("unsupported spelling must be rejected");
+        assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid instruction"));
+    }
+}
+
+#[test]
 fn parser_rejects_empty_while_blocks() {
     let source = test_source_file(
         "\
@@ -1133,5 +1337,58 @@ fn parser_rejects_debug_instructions() {
             render_diagnostic(err),
             diag if diag.contains("invalid syntax") || diag.contains("invalid instruction")
         );
+    }
+}
+
+#[test]
+fn parse_package_visibility_on_all_declarations() {
+    let forms = parse_forms(test_source_file(
+        "pub(package) mod api\n\
+         pub(package) use {helper} from api\n\
+         pub(package) const VALUE = 1\n\
+         pub(package) type Word = felt\n\
+         pub(package) enum Tag : u8 { A }\n\
+         pub(package) proc helper nop end\n",
+    ))
+    .expect("package visibility should parse");
+    assert_eq!(forms.len(), 6);
+    for form in &forms {
+        let visibility = match form {
+            Form::Submodule(decl) => decl.visibility,
+            Form::Import(import) => import.visibility(),
+            Form::Constant(constant) => constant.visibility,
+            Form::Type(ty) => ty.visibility,
+            Form::Enum(ty) => ty.visibility(),
+            Form::Procedure(proc) => proc.visibility(),
+            other => panic!("unexpected form: {other:?}"),
+        };
+        assert_eq!(visibility.to_string(), "pub(package)");
+        assert!(visibility.is_public());
+    }
+}
+
+#[test]
+fn package_visibility_survives_ast_roundtrip() {
+    let source = "namespace root\npub(package) mod api\npub(package) use {helper} from self::api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) proc entry nop end\n";
+    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let module = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, source, source_manager.clone())
+        .expect("package visibility should parse");
+    let rendered = module.to_string();
+    assert_eq!(rendered.matches("pub(package)").count(), 5, "{rendered}");
+    let reparsed = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, &rendered, source_manager)
+        .expect("printed package visibility should parse");
+    assert_eq!(reparsed.to_string(), rendered);
+}
+
+#[test]
+fn invalid_package_visibility_qualifiers_are_rejected() {
+    for source in [
+        "pub(module) proc helper nop end",
+        "pub() proc helper nop end",
+        "pub(package proc helper nop end",
+    ] {
+        assert!(parse_forms(test_source_file(source)).is_err(), "accepted {source}");
     }
 }

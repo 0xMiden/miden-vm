@@ -13,15 +13,13 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
+use miden_air::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
     diagnostics::Report,
 };
-#[cfg(not(target_family = "wasm"))]
-use miden_core::program::ProgramInfo;
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
@@ -30,7 +28,7 @@ pub use miden_core::{
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
-    chiplets::hasher::apply_permutation,
+    chiplets::hasher::compress_state,
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
@@ -39,16 +37,14 @@ use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    trace::ExecutionTrace,
+    trace::VmTrace,
 };
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
+    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
     event::{EventHandler, TraceHandler},
 };
-#[cfg(not(target_family = "wasm"))]
-pub use miden_prover::prove_sync;
-pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::verify;
+pub use miden_prover::Prover;
+pub use miden_verifier::Verifier;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -581,7 +577,7 @@ impl Test {
     /// stack outputs.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
+    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
         self.execute_with_stack_inputs_inner(self.stack_inputs)
     }
 
@@ -594,7 +590,7 @@ impl Test {
     pub fn execute_with_stack_inputs(
         &self,
         stack_inputs: &[u64],
-    ) -> Result<ExecutionTrace, ExecutionError> {
+    ) -> Result<VmTrace, ExecutionError> {
         let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
@@ -604,7 +600,7 @@ impl Test {
     fn execute_with_stack_inputs_inner(
         &self,
         stack_inputs: StackInputs,
-    ) -> Result<ExecutionTrace, ExecutionError> {
+    ) -> Result<VmTrace, ExecutionError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
         // with these tests (which are tested separately), but rather only the per-fragment trace
         // generation logic - though not too big so as to over-allocate memory.
@@ -623,19 +619,20 @@ impl Test {
                     .unwrap(),
             )?;
             if let Some(debug_info) = debug_info.as_ref() {
-                fast_processor.execute_trace_inputs_with_package_debug_info_sync(
+                fast_processor.execute_for_proving_with_package_debug_info_sync(
                     &program, debug_info, &mut host,
                 )
             } else {
-                fast_processor.execute_trace_inputs_sync(&program, &mut host)
+                fast_processor.execute_for_proving_sync(&program, &mut host)
             }
         };
 
         // Compare traced full execution and step/resume execution stack outputs.
         self.assert_result_with_step_execution(stack_inputs, &fast_stack_result);
 
-        fast_stack_result.and_then(|trace_inputs| {
-            let trace = build_trace(trace_inputs)?;
+        fast_stack_result.and_then(|witness| {
+            let (vm_witness, _) = witness.into_parts();
+            let trace = build_trace(vm_witness)?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -675,40 +672,49 @@ impl Test {
     /// verifier logic, or precompile request handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
-        let (program, mut host, _debug_info) = self.get_program_and_host();
+        let (program, mut host, debug_info) = self.get_program_and_host();
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
-        let (stack_outputs, proof) = prove_sync(
-            &program,
+        let processor = new_vm_default_processor(
             stack_inputs,
             self.advice_inputs.clone(),
-            &mut host,
             ExecutionOptions::default(),
-            ProvingOptions::default(),
         )
         .unwrap();
-
-        let program_info = ProgramInfo::from(program);
+        let witness = if let Some(debug_info) = debug_info.as_ref() {
+            processor
+                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+        } else {
+            processor.execute_for_proving_sync(&program, &mut host)
+        }
+        .unwrap();
+        let stack_outputs = *witness.claim().stack_outputs();
+        let proof = Prover::new().prove_full(witness).unwrap();
+        let claim =
+            ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
         if test_fail {
             let mut elements = [ZERO; MIN_STACK_DEPTH];
             elements.copy_from_slice(&*stack_outputs);
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            let claim =
-                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-            assert!(verify(proof, claim).is_err());
+            let invalid_claim = ExecutionClaim::from_program_info(
+                claim.to_program_info(),
+                stack_inputs,
+                stack_outputs,
+            );
+            assert!(Verifier::new().verify(&invalid_claim, &proof).is_err());
         } else {
-            let claim =
-                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-            let result = verify(proof, claim);
-            assert!(result.is_ok(), "error: {result:?}");
+            let outcome =
+                Verifier::new().verify(&claim, &proof).expect("complete proof should verify");
+            assert!(outcome.is_complete(), "prove_full must settle all precompile work");
         }
     }
 
     /// Executes the test program and checks all AIR constraints without generating a STARK proof.
     ///
     /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`ExecutionTrace::check_constraints`], which is much faster than the
+    /// [`VmTrace::check_constraints`], which is much faster than the
     /// full prove/verify pipeline and provides better error diagnostics. Use
     /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
     /// complete STARK proof generation and verification flow.
@@ -775,7 +781,7 @@ impl Test {
     fn assert_result_with_step_execution(
         &self,
         stack_inputs: StackInputs,
-        fast_result: &Result<TraceBuildInputs, ExecutionError>,
+        fast_result: &Result<ExecutionWitness, ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -844,7 +850,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|trace_inputs| *trace_inputs.stack_outputs()),
+            fast_result.as_ref().map(|witness| *witness.claim().stack_outputs()),
             &fast_result_by_step,
             "traced execution",
             "step/resume execution",
@@ -863,7 +869,11 @@ impl Test {
                 .iter()
                 .map(|(path, source)| (path.to_string(), source.clone()))
                 .collect(),
-            library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
+            library_digests: self
+                .libraries
+                .iter()
+                .map(|library| library.dependency_commitment())
+                .collect(),
         }
     }
 }
@@ -1005,25 +1015,24 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Given a hasher state, perform one permutation.
+/// Computes one expected COMPRESS state transition.
 ///
-/// This helper reconstructs that state, applies a permutation, and returns the resulting
-/// `[RATE0',RATE1',CAP']` back in stack order.
-pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
+/// The block lanes are preserved and the chaining-value lanes are replaced with the
+/// Eidos compression output.
+pub fn build_expected_compress(values: &[u64]) -> [Felt; STATE_WIDTH] {
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for compress test");
 
-    // Reconstruct the internal Poseidon2 state from the initial stack:
+    // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
-    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    // => state[0..12] = stack[0..12] in [BLOCK_LO, BLOCK_HI, CV] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
         state[i] = Felt::new_unchecked(values[i]);
     }
 
-    // Apply the permutation
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
-    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    // Map internal state back to stack layout [BLOCK_LO, BLOCK_HI, CV'].
     let mut out = [ZERO; STATE_WIDTH];
     out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
 
@@ -1033,6 +1042,14 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     let digest = hash_elements(&values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>());
     digest.into()
+}
+
+/// Computes the generic eight-Felt hash used by `hdword`.
+pub fn build_expected_hdword(values: &[u64]) -> [Felt; 4] {
+    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hdword test");
+
+    let values = values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
+    hash_elements(&values[..2 * WORD_SIZE]).into()
 }
 
 // Generates the MASM code which pushes the input values during the execution of the program.
@@ -1075,7 +1092,8 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         in_span: "in_span",
         group_count: "group_count",
         op_index: "op_index",
-        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        full_batch: "full_batch",
+        batch_size_code: "batch_size_code",
         extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
     },
     stack: StackCols {
@@ -1100,10 +1118,6 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         b0: "stack_b0",
         b1: "stack_b1",
         h0: "stack_h0",
-    },
-    range: RangeCols {
-        multiplicity: "range_check[0]",
-        value: "range_check[1]",
     },
 };
 

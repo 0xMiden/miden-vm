@@ -199,6 +199,9 @@ where
                         };
                         let row_base = row_bases[k];
                         let mut scale = F::ONE;
+                        // `EF::DIMENSION` cannot be used as an `as_chunks_mut` const argument
+                        // while generic const expressions remain unsupported.
+                        #[allow(clippy::chunks_exact_to_as_chunks)]
                         for chunk in row.chunks_exact_mut(EF::DIMENSION) {
                             for val in chunk {
                                 *val *= scale;

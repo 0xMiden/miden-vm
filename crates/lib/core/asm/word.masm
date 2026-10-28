@@ -24,7 +24,7 @@ end
 #! - Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.
 #!
 #! Cycles: 22
-pub proc store_word_u32s_le
+pub proc store_word_u32s_le(value: word, out_ptr: ptr<u32>)
     swap u32split
     # => [w1_lo, w1_hi, w0, w2, w3, out_ptr, ...]
 
@@ -281,7 +281,10 @@ end
 #! Outputs: [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 #!
 #! Cycles: 13
-proc arrange_words_adjacent_le
+proc arrange_words_adjacent_le(
+    rhs: word,
+    lhs: word,
+) -> (felt, felt, felt, felt, felt, felt, felt, felt)
     # Get l_3 and r_3 to top (MSB pair)
     movup.7 movup.4 swap
     # => [l_3, r_3, r_0, r_1, r_2, l_0, l_1, l_2]

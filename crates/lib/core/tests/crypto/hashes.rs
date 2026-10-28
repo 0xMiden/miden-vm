@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::DeferredState, utils::bytes_to_packed_u32_elements};
+use miden_core::{Felt, chiplets::eidos_compression, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::CoreLibrary;
 use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::{
@@ -9,7 +7,9 @@ use miden_processor::{
     advice::AdviceInputs,
 };
 
-use crate::helpers::{masm_push_felts, masm_store_felts};
+use crate::helpers::{
+    assert_precompile_witness_round_trips, masm_push_felts, masm_push_word, masm_store_felts,
+};
 
 const IN_PTR: u32 = 128;
 
@@ -48,7 +48,7 @@ fn core_keccak256_hash_bytes_returns_expected_digest() {
 
     let output =
         run_core_hash_bytes("keccak256", input).expect("keccak256::hash_bytes must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(input)));
 }
 
@@ -57,7 +57,7 @@ fn core_keccak256_hash_returns_expected_digest() {
     let input: Vec<u8> = (0u8..32).collect();
 
     let output = run_core_fixed_hash("keccak256", &input).expect("keccak256::hash must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(&input)));
 }
 
@@ -69,7 +69,7 @@ fn core_keccak256_merge_returns_expected_digest() {
     preimage.extend_from_slice(&right);
 
     let output = run_core_merge("keccak256", &left, &right).expect("keccak256::merge must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(&preimage)));
 }
 
@@ -81,10 +81,20 @@ fn core_hash_wrapper_cycle_baselines() {
     let short = b"core hash compatibility";
 
     let mut mismatches = Vec::new();
+    // Core invokes the bundled precompile wrappers. Eidos content addressing makes deferred-node
+    // registration compression-based, so pin the resulting wrapper choreography explicitly.
     for (name, source, expected) in [
-        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 212),
-        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 232),
-        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 248),
+        ("eidos_init_8", cycle_eidos_init_source(8), 33),
+        ("eidos_precomputed_init_8", cycle_eidos_precomputed_init_source(8), 25),
+        ("eidos_domain_init_8", cycle_eidos_domain_init_source(42, 8), 34),
+        (
+            "eidos_precomputed_domain_init_8",
+            cycle_eidos_precomputed_domain_init_source(42, 8),
+            25,
+        ),
+        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 195),
+        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 219),
+        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 243),
     ] {
         let output =
             run_core_program(&source).unwrap_or_else(|err| panic!("{name} failed: {err:?}"));
@@ -95,6 +105,72 @@ fn core_hash_wrapper_cycle_baselines() {
     }
 
     assert!(mismatches.is_empty(), "cycle count changed:\n{}", mismatches.join("\n"));
+}
+
+fn cycle_eidos_init_source(num_elements: u32) -> String {
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            push.{num_elements}
+            exec.::miden::core::crypto::hashes::eidos::init
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_precomputed_init_source(num_elements: u32) -> String {
+    let cv = masm_push_word(&eidos_compression::felt_sequence_chaining_word(num_elements));
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            {cv}
+            exec.::miden::core::crypto::hashes::eidos::init_with_chaining_word
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_domain_init_source(domain: u32, num_elements: u32) -> String {
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            push.{num_elements} push.{domain}
+            exec.::miden::core::crypto::hashes::eidos::init_in_domain
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_precomputed_domain_init_source(domain: u32, num_elements: u32) -> String {
+    let cv = masm_push_word(&eidos_compression::init_chaining_word(domain, num_elements));
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            {cv}
+            exec.::miden::core::crypto::hashes::eidos::init_with_chaining_word
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
 }
 
 fn run_core_hash_bytes(module: &str, input: &[u8]) -> Result<ExecutionOutput, ExecutionError> {
@@ -276,16 +352,4 @@ fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {
 
 fn pack_digest(bytes: &[u8]) -> Vec<Felt> {
     bytes_to_packed_u32_elements(bytes)
-}
-
-fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
-    let registry = Arc::new(miden_precompiles::registry());
-    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX)
-        .expect("deferred wire must rehydrate under miden-precompiles registry");
-    assert_eq!(
-        rehydrated.root(),
-        output.deferred_state.root(),
-        "wire round-trip must preserve the deferred root",
-    );
 }

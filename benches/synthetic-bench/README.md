@@ -1,127 +1,234 @@
-# miden-vm-synthetic-bench
+# Synthetic transaction benchmarks
 
-Criterion benchmark that reproduces the **proving-cost brackets** of a real
-workload from a small JSON snapshot, without depending on any
-producer-side runtime code.
+This package generates MASM programs with the same padded AIR heights as measured protocol
+transactions. `synthetic_bench` measures their execution, witness preparation, proving, and native
+verification. `recursive_verify` measures the cost of verifying X MVM proofs and one PVM proof
+inside another MVM program.
 
-## Approach
+The standalone MVM defaults cover consuming one P2ID note, consuming two notes, and creating one
+note, each with Falcon or ECDSA signing. Recursive benchmarks default to the two-note consumption
+workloads. Use `SYNTH_SCENARIO` to select a workload. The standalone MVM benchmark also supports
+the other scenarios in the snapshot.
 
-STARK proving cost is dominated by the padded power-of-two lengths of the
-execution trace's segments. Everything else -- per-chiplet row counts,
-instruction mix, which procedures get called -- is second-order once the
-brackets are known.
+## MVM benchmarks
 
-This crate takes a snapshot of per-segment trace-row counts captured by
-an external producer (e.g. `protocol/bin/bench-transaction/`'s
-`bench-tx.json`), generates a tiny MASM program whose execution
-reproduces those brackets, and runs `execute` + `execute_and_prove`
-Criterion groups against it. The result is a VM-level regression detector
-that isolates *prover* changes from *workload* changes without depending
-on the producer's machinery.
+```sh
+cargo bench -p miden-vm-synthetic-bench --bench synthetic_bench --profile optimized
+```
 
-## Pipeline (per bench run)
+`exec` measures execution. `trace_prep` measures execution and replay-witness preparation.
+`prove` includes execution, trace construction, and proof generation. `verify` measures native
+verification of a proof generated during setup.
 
-Each bench invocation rebuilds every synthetic program from scratch,
-so the numbers always reflect the current commit's VM -- there are no
-stale calibration constants checked into the repo.
+| Environment variable | Meaning |
+| --- | --- |
+| `SYNTH_SNAPSHOT` | Use one JSON file; default: all top-level `snapshots/*.json` files |
+| `SYNTH_SCENARIO` | Match part of a scenario name, ignoring case and separators |
+| `SYNTH_BENCH_AXES` | Comma-separated `exec`, `trace_prep`, `prove`, `verify`, or `all`; default: all |
+| `SYNTH_HASH_LDE_BLOCKS` | Hash completed LDE blocks when proving: `0` or `1`; default: `0` |
+| `SYNTH_SAMPLE_SIZE` | Criterion sample size; default: 30 |
+| `SYNTH_MEASUREMENT_TIME_SECS` | Measurement duration in seconds; default: 30 |
+| `SYNTH_WARM_UP_TIME_SECS` | Warm-up duration in seconds; default: 1 |
+| `SYNTH_MASM_WRITE` | Write generated programs to this package's `target/` |
 
-1. **Calibrate (once)** -- run each MASM snippet as `repeat.K ...` and
-   divide the resulting per-component row counts by `K` to learn how
-   many core/hasher/memory/... rows a single iteration costs *on this
-   VM*. Running this on every bench invocation is what keeps the
-   bench honest across VM changes: if `hperm` gets cheaper tomorrow,
-   tomorrow's iteration count grows to compensate, and the target
-   bracket is still hit.
+## Recursive benchmarks
 
-For each scenario in every producer file under `snapshots/` (or the
-single file in `SYNTH_SNAPSHOT`):
+Each case verifies X distinct MVM proofs and one PVM proof, for X = 3, 4, 5, 6, 7. All X MVM
+proofs use the same P2ID scenario and signing scheme.
 
-2. **Load scenario** -- read the target row counts from the producer's
-   `trace` section. See [Snapshot format](#snapshot-format).
-3. **Solve** -- pick an iteration count for each snippet so that their
-   combined row contributions add up to the scenario's target. We do
-   this by fixed-point refinement: start from zero, and on each pass
-   update every snippet's count from the current guesses of the others,
-   clamping negatives to zero. A handful of passes is enough because
-   each snippet is designed to drive mostly *one* component, so the
-   counts barely depend on each other and the sweep converges quickly.
-   (For the linear-algebra reader: this is Jacobi iteration on a
-   near-diagonal matrix with a non-negativity projection.)
-4. **Emit** -- wrap each snippet's body in a `repeat.N ... end` block,
-   concatenate, and enclose in `begin ... end`. The output is the MASM
-   program that Criterion actually runs.
-5. **Verify** -- execute the emitted program, measure its real row
-   counts, and assert that the available padded brackets match the
-   scenario's. Split-aware snapshots enforce core/range, chiplets,
-   Poseidon2 permutation, and total brackets. Legacy snapshots without a
-   Poseidon2 target enforce only core/range and total brackets, because
-   their `chiplets_rows` still include inlined Poseidon2 permutations.
-   A bracket miss fails the bench; smaller drift inside the same bracket
-   is reported but tolerated, because proving cost is driven by the
-   padded length, not the raw count.
+The single PVM proof covers X secp256k1 ECDSA verifications and their X Keccak prehashes, each
+over a distinct 32-byte message. Both signing schemes use this PVM workload for comparison;
+Falcon transactions verify their signatures inside the MVM.
 
-## Snippets
+The synthetic MVM programs contain no deferred work. The PVM proof is generated separately from
+one witness. This measures verification cost without checking settlement of the transactions'
+deferred work or exercising PVM proofs with multiple public roots.
 
-Five patterns cover every component the solver targets:
+The defaults run two-note consumption separately for Falcon and ECDSA, with five proof counts
+per scheme: ten cases in total.
 
-| Snippet       | Body                                         | Drives                        |
-|---------------|----------------------------------------------|-------------------------------|
-| `hasher`      | `hperm`                                      | Poseidon2 hash work           |
-| `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
-| `u32arith`    | `u32assert2 push.65537 add swap push.65537 add swap` | range chiplet |
-| `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |
-| `decoder_pad` | `swap dup.1 add`                             | core (decoder + stack)        |
+```sh
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
 
-`u32arith` and `memory` use banded counters (strides of 65537 and
-262148) so that their 16-bit limbs form disjoint contiguous bands,
-keeping the range chiplet from deduplicating limb values across
-iterations.
+Set `SYNTH_SCENARIO="consume single P2ID note"` or `SYNTH_SCENARIO="create single P2ID note"`
+to run the other P2ID workloads. `SYNTH_SCENARIO=signing` selects all six scenarios.
 
-The solver has no snippets targeting the ACE or kernel-ROM chiplets.
+Before timing, the benchmark loads or generates all inner proofs and verifies them natively.
+It prepares one PVM proof for each X and reuses it across scenarios with the same X.
 
-- **ACE** is reachable from plain MASM, but exercising it requires
-  building an arithmetic circuit and preparing a memory region for its
-  READ section -- more setup than the other snippets warrant, and not
-  currently done here.
-- **Kernel-ROM** rows are a small, near-constant contribution in
-  practice, so we simplify by folding them into the memory target
-  rather than driving them directly.
+Inner proofs are cached in `target/recursive-bench-cache/{tx,pvm}`. When `CARGO_TARGET_DIR` is set,
+the cache goes under that directory instead of `target`. Use `RECURSION_BENCH_TX_PROOF_CACHE_DIR`
+and `RECURSION_BENCH_PVM_PROOF_CACHE_DIR` to choose other directories. Relative overrides start
+at the VM root. Invalid cached proofs are regenerated; delete an entry to force regeneration.
 
-Since snapshots still carry row counts for both, they're **folded into
-the memory target** -- growing memory ops preserves the overall
-chiplet-trace length and therefore the chiplet bracket.
+Cache keys include the AIR relation and proof parameters, plus the MVM program and inputs or
+the PVM deferred root. MVM keys also include the proof format and MVM/PVM verifier roots. The
+benchmark checks each synthetic program against its snapshot before looking up MVM proofs.
 
-One producer-side caveat: the consumer can measure `ace_chiplet_len()`
-when it runs synthetic programs, but a producer pinned to an older
-`miden-processor` may report `ace_rows: 0` until that dependency
-exposes the accessor. Treat zero ACE rows in a snapshot as a producer
-visibility limitation, not as proof that the VM emitted no ACE rows.
+Each case reports four measurements:
 
-## Snapshot format
+| Measurement | Includes |
+| --- | --- |
+| `execute` | Execution and replay-witness preparation |
+| `build_trace` | Trace construction after execution |
+| `total` | Execution, replay-witness preparation, and trace construction |
+| `prove` | Execution, trace construction, and outer proof generation |
 
-A producer JSON file is a map of scenario keys to entries. Each entry
-must carry a `trace` section; any sibling fields (cycle counts,
-metadata, ...) are silently ignored. Inside `trace`, the AIR-side
-totals (`core_rows`, `chiplets_rows`, `poseidon2_permutation_rows`,
-`range_rows`) are the verifier's contract; nested `chiplets_shape` is an
-advisory per-chiplet breakdown. `poseidon2_permutation_rows` defaults to
-zero for older snapshots that predate the split Poseidon2 AIR. The
-loader checks
-`trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
+Trace summaries report row counts for all four MVM AIRs and individual chiplets in each case.
+
+For repeated outer proving measurements:
+
+```sh
+RECURSION_PROFILE_PROVE=1 \
+RECURSION_PROFILE_PROVE_REPEATS=10 \
+RECURSION_PROFILE_PROVE_WARMUPS=1 \
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
+
+The starting case rotates between rounds. The report includes mean, median, minimum, maximum,
+and proof size. Outer-proof verification happens outside the timer.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `RECURSION_PROOF_COUNTS` | Comma-separated counts from 3 through 7; default: all five |
+| `RECURSION_HASH_LDE_BLOCKS` | Hash completed LDE blocks when proving the outer MVM: `0` or `1`; default: `0` |
+| `RECURSION_PROFILE_ONLY` | Prepare inner proofs and print trace sizes, without collecting timings |
+| `RECURSION_SAMPLE_SIZE` | Criterion sample size; default: 10 |
+| `RECURSION_WARM_UP_TIME_SECS` | Warm-up duration in seconds; default: 1 |
+| `RECURSION_MEASUREMENT_TIME_SECS` | Measurement duration in seconds; default: 10 |
+| `RECURSION_MASM_WRITE` | Write recursive programs to this package's `target/` |
+| `RECURSION_BENCH_STACK` | Initial MVM proof inputs; default: `0,1`, with the first value incremented for each proof |
+
+## Results
+
+Each time is the mean of 20 samples from two separate process runs, excluding warmup.
+Peak RSS is the larger whole-process peak from those runs.
+
+All builds use Rust 1.99.0, `--profile optimized`, and `-C target-cpu=native` on Amazon Linux 2023
+with glibc 2.34. The Workers column gives `RAYON_NUM_THREADS`. All runs set
+`RUST_MIN_STACK=16777216`.
+
+Huge pages improved proving time on all three machines. All runs used
+`GLIBC_TUNABLES=glibc.malloc.hugetlb=1` with the kernel's `madvise` huge-page policy. Separate checks
+confirmed 2 MiB huge-page use.
+
+Runs with 32 workers were restricted to CPUs 0-31; runs with 64 workers used CPUs 0-63.
+On Intel, these CPU sets use one hardware thread per core.
+
+### Two-note ECDSA P2ID: one MVM proof
+
+| Machine | Workers | Mean proving time | Peak process RSS |
+| --- | ---: | ---: | ---: |
+| AMD EPYC 9R45 (m8a.16xlarge)[^epyc-m8a] | 32 | 0.145 s | 1.38 GiB |
+| Intel Xeon 6975P-C (c8i.32xlarge)[^intel-c8i] | 32 | 0.176 s | 1.36 GiB |
+| AWS Graviton4 (c8g.16xlarge)[^graviton-c8g] | 64 | 0.161 s | 1.58 GiB |
+
+This measures the synthetic MVM workload; its PVM authentication proof is separate.
+
+### Two-note Falcon P2ID: one MVM proof
+
+| Machine | Workers | Mean proving time | Peak process RSS |
+| --- | ---: | ---: | ---: |
+| AMD EPYC 9R45 (m8a.16xlarge)[^epyc-m8a] | 64 | 0.232 s | 2.04 GiB |
+| Intel Xeon 6975P-C (c8i.32xlarge)[^intel-c8i] | 64 | 0.269 s | 2.06 GiB |
+| AWS Graviton4 (c8g.16xlarge)[^graviton-c8g] | 64 | 0.267 s | 2.03 GiB |
+
+### 5 MVM + 1 PVM: outer MVM proof
+
+The five MVM proofs use the two-note ECDSA P2ID workload. The PVM proof covers five ECDSA
+verifications and their five Keccak prehashes. Timing includes outer execution, trace construction,
+and proving; cached inner-proof preparation and native verification are outside the timer.
+
+| Machine | Workers | Mean proving time | Peak process RSS |
+| --- | ---: | ---: | ---: |
+| AMD EPYC 9R45 (m8a.16xlarge)[^epyc-m8a] | 64 | 1.154 s | 14.37 GiB |
+| Intel Xeon 6975P-C (c8i.32xlarge)[^intel-c8i] | 64 | 1.384 s | 14.35 GiB |
+| AWS Graviton4 (c8g.16xlarge)[^graviton-c8g] | 64 | 1.839 s | 14.32 GiB |
+
+[^epyc-m8a]: This instance has 64 physical cores, 256 GiB RAM, and one NUMA node. We enabled
+    blockwise LDE hashing for Falcon and 5 MVM + 1 PVM because it improved their proving times.
+    ECDSA and 5 MVM + 1 PVM use PGO, which also reduced their proving times.
+
+[^intel-c8i]: This instance has 64 physical cores, 128 logical CPUs, 256 GiB RAM, and two NUMA
+    nodes. Falcon uses a PGO build; 5 MVM + 1 PVM enables blockwise LDE hashing. Both changes
+    reduced proving time. We used the default NUMA memory policy.
+
+[^graviton-c8g]: This instance has 64 physical cores, 128 GiB RAM, and one NUMA node. PGO made
+    these workloads slower. Blockwise LDE hashing changed proving times by less than 1%, so we
+    left both options off.
+
+## Workload generation
+
+Both suites generate programs in the same way:
+
+1. Measure how many rows each snippet adds to each trace, once per run.
+2. Read the selected scenarios' row counts from the snapshot.
+3. Choose how many times to repeat each snippet. The solver adjusts the counts over several
+   passes, accounting for rows added to other traces and keeping the counts non-negative.
+4. Generate a MASM program using `repeat.N ... end` blocks.
+5. Execute the program and check its trace against the snapshot before measuring performance.
+
+Keeping the snapshot fixed lets us compare VM versions against the same trace sizes. Execution
+timings apply only to the generated programs.
+
+The generated program must match the snapshot's padded height for each AIR:
+
+| AIR | Snapshot field | Padded height |
+| --- | --- | --- |
+| Core | `core_rows` | `max(64, next_pow2(core_rows))` |
+| Chiplets | `chiplets_rows` | `max(64, next_pow2(chiplets_rows))` |
+| Eidos compression | `eidos_compression_rows` | `max(64, next_pow2(eidos_compression_rows))` |
+| And8 lookup | `byte_pair_lookup_rows` | 65,536 |
+
+The benchmark checks each program before timing it or generating its MVM proofs. Any mismatch
+in padded height stops the benchmark. Checking only the largest trace could miss differences
+in smaller AIRs.
+
+Row counts before padding may differ. Differences above 2% are flagged in the report, but do
+not fail the benchmark if the padded heights match.
+
+| Snippet | Body | Main contribution |
+| --- | --- | --- |
+| `eidos_compression` | `compress` | Eidos compression rows |
+| `bitwise` | `u32split u32xor` | Total chiplet rows |
+| `memory` | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | Memory rows |
+| `decoder_pad` | `swap dup.1 add` | Core rows |
+
+Individual chiplet counts can differ from the snapshot. The memory snippet targets the sum of
+the snapshot's memory, ACE, and kernel-ROM rows, using a different word-aligned address each
+iteration. Bitwise operations fill the remaining chiplet rows.
+
+The And8 table always has 65,536 rows; compression activity changes its lookup multiplicities.
+MAST hashing adds compression rows even to programs containing only core operations, so some
+small compression targets cannot be matched. See [`src/snippets.rs`](src/snippets.rs).
+
+## Snapshot schema
+
+A snapshot maps scenario names to objects containing a `trace` section with row counts measured
+by executing the producer workload. All four AIR totals and all five `chiplets_shape` fields
+are required. Other scenario fields, such as transaction-stage cycle counts, are ignored.
+
+The loader rejects missing or unknown trace fields. Eidos compression counts must be multiples
+of 32, and the And8 height must be 65,536. Counts must fit without overflow when added or padded.
+The chiplet counts must satisfy
+`chiplets_rows == hasher_rows + bitwise_rows + memory_rows + kernel_rom_rows + ace_rows + 1`.
+
+For example, the measured Falcon workload for consuming one P2ID note has:
 
 ```json
 {
-  "consume single P2ID note": {
+  "consume single P2ID note with Falcon signing": {
     "trace": {
-      "core_rows": 77699,
-      "chiplets_rows": 123129,
-      "poseidon2_permutation_rows": 17740,
-      "range_rows": 20203,
+      "core_rows": 43619,
+      "chiplets_rows": 5559,
+      "eidos_compression_rows": 84320,
+      "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
-        "hasher_rows": 120352,
-        "bitwise_rows": 416,
-        "memory_rows": 2297,
-        "kernel_rom_rows": 63,
+        "hasher_rows": 3504,
+        "bitwise_rows": 84,
+        "memory_rows": 1969,
+        "kernel_rom_rows": 1,
         "ace_rows": 0
       }
     }
@@ -129,114 +236,28 @@ loader checks
 }
 ```
 
-Snapshots live in `snapshots/`. The bench loads every `*.json` file in
-that directory and runs one Criterion group per `(producer_file,
-scenario_key)` pair, named `<producer-stem>/<scenario-slug>`. See the
-[Running](#running) section below for `SYNTH_SNAPSHOT` /
-`SYNTH_SCENARIO` filters.
+The checked-in snapshot contains the full producer output. The
+[capture metadata](snapshots/provenance/bench-tx.json) records the protocol and VM revisions and
+the snapshot hash.
 
-There is no schema-version field; the on-disk shape is the contract.
-If the producer changes that shape, the loader fails loudly (serde
-error or chiplet-sum mismatch). Update both repos together.
-
-## Verifier contract
-
-Once the emitted program has run, the verifier compares its actual
-row counts against the scenario's targets and decides whether the
-bench passed. The checks come in three tiers -- **hard**, **soft**,
-and **info** -- graded by how directly each number maps to proving
-cost. There's also one free-standing **warning** for snippet-balance
-regressions.
-
-### Hard checks -- fail the bench
-
-Proving cost is dominated by the padded (power-of-two) length of each
-trace segment, not by the raw row count. For split-aware snapshots, the
-assertions that can fail the bench are on padded proxies:
-
-- `padded_core_side = max(64, next_pow2(max(core_rows, range_rows)))`
-  -- the non-chiplets side of the AIR.
-- `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
-- `padded_poseidon2  = max(64, next_pow2(poseidon2_permutation_rows))`
-  when the snapshot carries a non-zero Poseidon2 target.
-- `padded_total      = max(padded_core_side, padded_chiplets, padded_poseidon2)`.
-
-These can land in *different* brackets on the same workload -- `consume
-two P2ID notes`, for example, has `padded_core_side = 131072` but
-`padded_chiplets = 262144`. Checking them independently catches a
-bracket miss that a single global `padded_total` check would hide.
-
-Legacy snapshots do not carry `poseidon2_permutation_rows`. In that
-mode, `chiplets_rows` still includes the old inlined Poseidon2
-permutation segment, so it is not comparable to the split branch's
-controller-only hasher rows. The verifier therefore hard-checks
-`padded_core_side` and `padded_total`; chiplets and Poseidon2 rows are
-reported as informational.
-
-### Soft checks -- report, don't fail
-
-`core_rows`, `chiplets_rows`, and `poseidon2_permutation_rows` are
-compared against the targets within a 2% band. A drift inside that band
-is harmless for proving cost (same bracket either way), so the bench
-only reports it. A drift that *crosses* a bracket is already caught by
-the hard tier above, so this tier exists purely to surface in-bracket
-near-misses worth noticing.
-
-### Info -- no judgement
-
-Per-chiplet deltas (hasher/bitwise/memory/...) from `shape` are
-printed for visibility but never asserted. Some divergence is
-unavoidable: MAST hashing at program init contributes hasher rows
-that the synthetic program can't suppress, so a snapshot with
-`core_rows / hasher_rows > 4` cannot be per-chiplet-matched even
-though it still matches both padded brackets. See `src/snippets.rs`
-for the cases where this structural mismatch shows up.
-
-### Warning -- range dominates
-
-If `range_rows` turns out to be the largest unpadded component in
-either the target or the actual shape, the bench prints a warning.
-The solver treats range as a derived quantity driven mostly by u32
-arithmetic; if it starts setting the bracket, snippet balance has
-drifted and should be revisited.
-
-## Refreshing snapshots from a producer
-
-Snapshots travel by hand so that producer and consumer can evolve
-independently. For the `protocol/bin/bench-transaction/` producer:
-
-1. In `protocol`: `cargo run --release --bin bench-transaction --features concurrent`.
-2. Copy `bin/bench-transaction/bench-tx.json` over
-   `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`.
-3. Run `cargo bench -p miden-vm-synthetic-bench` and verify
-   `=> BRACKET MATCH` for every scenario in the printed verifier
-   tables.
-
-If a kernel change moves a scenario into a different padded bucket,
-the `committed_snapshots_load` test in `src/snapshot.rs` fails with
-the producer/scenario pair and the new bracket -- update
-`COMMITTED_SCENARIO_EXPECTATIONS` accordingly.
-
-## Running
+To reproduce the capture, run the following from the VM checkout root:
 
 ```sh
-cargo bench -p miden-vm-synthetic-bench
+VM_CHECKOUT="$PWD"
+CAPTURE_WORKDIR=$(mktemp -d)
+git clone https://github.com/0xMiden/protocol.git "$CAPTURE_WORKDIR/protocol"
+cd "$CAPTURE_WORKDIR/protocol"
+git fetch origin e9852edb7a77c4b350873ee2453ade850dbb6513
+git checkout --detach FETCH_HEAD
+cargo run --locked --profile test-dev -p bench-transaction --features concurrent
+
+cp bin/bench-transaction/bench-tx.json \
+  "$VM_CHECKOUT/benches/synthetic-bench/snapshots/bench-tx.json"
 ```
 
-Env vars:
-
-- `SYNTH_SNAPSHOT=<path>` -- bench only the specified producer JSON
-  (instead of iterating over every `snapshots/*.json`).
-- `SYNTH_SCENARIO=<substr>` -- restrict to scenarios whose slugified
-  key contains this slugified substring. Both sides are slugified
-  before comparison, so `"P2ID"`, `"p2id"`, `"P2ID note"`, and
-  `"p2id-note"` all match `"consume single P2ID note"`.
-- `SYNTH_MASM_WRITE=1` -- dump each emitted MASM program to
-  `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
-  inspection.
-
-The `prove` and `verify` axes use `HashFunction::Poseidon2` for STARK
-proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`).
+For a new capture, select the protocol revision to measure and use its checked-in lockfile.
+Update the capture metadata and expected default AIR heights in `src/snapshot.rs` from the new
+data. All six P2ID workloads must pass the trace checks before recording timings.
 
 ## License
 

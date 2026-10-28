@@ -5,10 +5,11 @@ use miden_assembly_syntax::{ast::GlobalItemIndex, module::ItemInfo};
 pub use self::module::ModuleRewriter;
 use super::*;
 
-/// Rewrite `symbol` such that all unresolved references to other symbols have been resolved.
+/// Validate references in `symbol` and fold constant expressions before marking it linked.
 ///
 /// This function will use `resolver` to resolve references to other symbols, using `cache` to cache
-/// resolutions.
+/// resolutions. Invocation targets retain their access paths rather than being replaced with
+/// definition paths, preserving visibility granted through re-export aliases.
 pub fn rewrite_symbol(
     gid: GlobalItemIndex,
     symbol: &Symbol,
@@ -51,15 +52,19 @@ pub fn rewrite_symbol(
             resolver.cache.constants.insert(gid, value);
         },
         SymbolItem::Type(item) => {
+            use ast::TypeResolver;
+
             let mut resolver = Resolver {
                 resolver,
                 cache,
                 current_module: gid.module,
             };
-            let ty = item
-                .ty()
-                .resolve_type(&mut resolver)?
-                .expect("type or error to have been raised");
+            // Resolve through the declaration rather than its inner expression, so that a
+            // reference back to this declaration is recognised as recursion rather than
+            // re-expanded.
+            let ty =
+                resolver.get_type(item.span(), gid)?.expect("type or error to have been raised");
+            let ty = resolver.finalize(item.span(), ty)?;
             resolver.cache.types.insert(gid, ty);
         },
     }

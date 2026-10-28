@@ -6,7 +6,7 @@ use alloc::{
 use core::fmt;
 
 use super::{
-    EMPTY_WORD, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Poseidon2, Word,
+    EMPTY_WORD, Eidos, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Word,
 };
 use crate::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, word_to_hex,
@@ -14,6 +14,86 @@ use crate::utils::{
 
 #[cfg(test)]
 mod tests;
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use super::PartialMerkleTree;
+    use crate::{
+        Word,
+        merkle::{MerklePath, MerkleTree, NodeIndex},
+    };
+
+    impl Arbitrary for PartialMerkleTree {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction. Branch A opens a subset of leaves of a real MerkleTree:
+            // all paths share one depth, so no entry can be an ancestor of another (the
+            // ambiguity `with_leaves` rejects), and an all-false mask yields the empty tree.
+            // Branch B contributes a single synthetic deep path (no other path, so still no
+            // ambiguity), exercising large NodeIndex depth/position wire encodings cheaply -
+            // path provenance is irrelevant to the leaves-only wire format. No generation-time
+            // panics: every input is valid for any shrunken prefix.
+            prop_oneof![paths_from_real_tree().boxed(), single_deep_path().boxed()].boxed()
+        }
+    }
+
+    fn paths_from_real_tree() -> impl Strategy<Value = PartialMerkleTree> {
+        (1u8..=6)
+            .prop_flat_map(|depth| {
+                let count = 1usize << depth;
+                (
+                    Just(depth),
+                    proptest::collection::vec(any::<Word>(), count),
+                    proptest::collection::vec(any::<bool>(), count),
+                )
+            })
+            .prop_map(|(depth, leaves, track_mask)| {
+                let tree = MerkleTree::new(&leaves).expect("leaf count is a power of two >= 2");
+                let paths: Vec<(u64, Word, MerklePath)> = track_mask
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tracked)| **tracked)
+                    .map(|(pos, _)| {
+                        let node_index =
+                            NodeIndex::new(depth, pos as u64).expect("position fits the depth");
+                        let path = tree.get_path(node_index).expect("position within the tree");
+                        (pos as u64, leaves[pos], path)
+                    })
+                    .collect();
+                PartialMerkleTree::with_paths(paths)
+                    .expect("paths from one tree share a depth and no ancestor relation")
+            })
+    }
+
+    fn single_deep_path() -> impl Strategy<Value = PartialMerkleTree> {
+        (7u8..=64, any::<u64>(), any::<Word>())
+            .prop_flat_map(|(depth, index, value)| {
+                let mask = if depth == 64 { u64::MAX } else { (1u64 << depth) - 1 };
+                (
+                    Just(depth),
+                    Just(value),
+                    Just(index & mask),
+                    proptest::collection::vec(any::<Word>(), depth as usize),
+                )
+            })
+            .prop_map(|(_depth, value, index, path_nodes)| {
+                let path = MerklePath::new(path_nodes);
+                PartialMerkleTree::with_paths([(index, value, path)])
+                    .expect("a single path is always a valid partial tree")
+            })
+    }
+}
 
 // CONSTANTS
 // ================================================================================================
@@ -32,7 +112,10 @@ const EMPTY_DIGEST: Word = EMPTY_WORD;
 ///
 /// The root of the tree is recomputed on each new leaf update.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PartialMerkleTree {
     max_depth: u8,
     nodes: BTreeMap<NodeIndex, Word>,
@@ -111,20 +194,13 @@ impl PartialMerkleTree {
         // add data to the leaves and nodes maps and also fill layers map, where the key is the
         // depth of the node and value is its index.
         for (node_index, hash) in entries {
+            Self::check_depth(node_index.depth())?;
             leaves.insert(node_index);
             nodes.insert(node_index, hash);
             layers
                 .entry(node_index.depth())
                 .and_modify(|layer_vec| layer_vec.push(node_index.position()))
                 .or_insert(vec![node_index.position()]);
-        }
-
-        // make sure the depth of the last layer is 64 or smaller
-        if let Some(last_layer) = layers.last_entry() {
-            let last_layer_depth = *last_layer.key();
-            if last_layer_depth > 64 {
-                return Err(MerkleError::TooManyEntries(last_layer_depth));
-            }
         }
 
         // Get maximum depth
@@ -144,19 +220,18 @@ impl PartialMerkleTree {
             current_layer = layer_iter.next().unwrap();
             core::mem::swap(&mut current_layer, &mut parent_layer);
 
+            // Siblings have the same parent position. Sort them together and retain one child per
+            // parent so each parent is computed once.
+            current_layer.sort_unstable();
+            current_layer.dedup_by_key(|position| *position / 2);
+
             for index_value in current_layer {
                 // get the parent node index
                 let parent_node = NodeIndex::new(depth - 1, index_value / 2)?;
 
-                // If parent already exists, check if it's user-provided (invalid) or computed
-                // (skip)
-                if parent_layer.contains(&parent_node.position()) {
-                    // If the parent was provided as a leaf, that's invalid - we can't have both
-                    // a node and its descendant in the input set.
-                    if leaves.contains(&parent_node) {
-                        return Err(MerkleError::EntryIsNotLeaf { node: parent_node });
-                    }
-                    continue;
+                // A user-provided parent cannot also have a descendant in the input set.
+                if leaves.contains(&parent_node) {
+                    return Err(MerkleError::EntryIsNotLeaf { node: parent_node });
                 }
 
                 // create current node index
@@ -169,7 +244,7 @@ impl PartialMerkleTree {
                     .get(&index.sibling())
                     .ok_or(MerkleError::NodeIndexNotFoundInTree(index.sibling()))?;
                 // get parent hash
-                let parent = Poseidon2::merge(&index.build_node(*node, *sibling));
+                let parent = Eidos::merge(&index.build_node(*node, *sibling));
 
                 // add index value of the calculated node to the parents layer
                 parent_layer.push(parent_node.position());
@@ -319,7 +394,7 @@ impl PartialMerkleTree {
 
         // traverse to the root, updating the nodes
         let mut index_value = index_value;
-        let node = Poseidon2::merge(&index_value.build_node(value, path[0]));
+        let node = Eidos::merge(&index_value.build_node(value, path[0]));
         let root = path.iter().skip(1).copied().fold(node, |node, hash| {
             index_value.move_up();
             // insert calculated node to the nodes map
@@ -345,7 +420,7 @@ impl PartialMerkleTree {
                 self.leaves.insert(sibling_node);
             }
 
-            Poseidon2::merge(&index_value.build_node(node, hash))
+            Eidos::merge(&index_value.build_node(node, hash))
         });
 
         // if the path set is empty (the root is all ZEROs), set the root to the root of the added
@@ -397,7 +472,7 @@ impl PartialMerkleTree {
         let mut value = value;
         for _ in 0..node_index.depth() {
             let sibling = self.nodes.get(&node_index.sibling()).expect("sibling should exist");
-            value = Poseidon2::merge(&node_index.build_node(value, *sibling));
+            value = Eidos::merge(&node_index.build_node(value, *sibling));
             node_index.move_up();
             self.nodes.insert(node_index, value);
         }

@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt::Debug;
 
 use miden_core::{
@@ -10,13 +14,18 @@ use miden_core::{
 };
 use miden_mast_package::debug_info::{
     DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
 };
 
 use super::{
-    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceNodeRef,
+    MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
+    SourceNodeRef, remap_inline_ranges,
 };
-use crate::diagnostics::Report;
+use crate::{
+    GlobalItemIndex,
+    diagnostics::{IntoDiagnostic, Report},
+    linker::LinkLibrary,
+};
 
 #[derive(Clone, Copy)]
 struct StaticSourceRoot {
@@ -97,27 +106,52 @@ impl MastForestBuilder {
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
     ) -> Result<MastNodeRef, Report> {
+        let source_child_refs = self.source_child_refs_for_node_refs(&child_refs);
+        let child_uses = child_refs
+            .into_iter()
+            .zip(source_child_refs)
+            .map(|(node_ref, source_ref)| MastNodeUse::new(node_ref, source_ref))
+            .collect();
+        Ok(self
+            .ensure_node_from_statically_linked_source_use(
+                source_node,
+                child_uses,
+                source_metadata,
+            )?
+            .node_ref())
+    }
+
+    /// Copies a statically linked source occurrence while preserving the exact source occurrence
+    /// selected for each execution child.
+    fn ensure_node_from_statically_linked_source_use(
+        &mut self,
+        source_node: MastNode,
+        child_uses: Vec<MastNodeUse>,
+        source_metadata: Option<StaticSourceMetadata>,
+    ) -> Result<MastNodeUse, Report> {
+        let child_refs = child_uses.iter().copied().map(MastNodeUse::node_ref).collect();
+        let source_child_refs =
+            child_uses.iter().copied().map(MastNodeUse::source_ref).collect::<Vec<_>>();
         let StaticPendingDraft { draft, source_op_range } = self
             .pending_draft_for_statically_linked_source(source_node, child_refs, source_metadata);
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
-        if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
-            self.record_static_source_occurrence(
-                node_ref,
-                source_child_refs,
-                &draft,
-                source_op_range,
-            )?;
-            return Ok(node_ref);
-        }
-
-        let node_ref = self.insert_or_replace_pending_node_record_ref(
-            dedup_key,
-            draft.clone(),
-            &source_child_refs,
+        let node_ref =
+            if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
+                node_ref
+            } else {
+                self.insert_or_replace_pending_node_record_ref(
+                    dedup_key,
+                    draft.clone(),
+                    &source_child_refs,
+                )?
+            };
+        let source_ref = self.record_static_source_occurrence(
+            node_ref,
+            source_child_refs,
+            &draft,
+            source_op_range,
         )?;
-        self.record_static_source_occurrence(node_ref, source_child_refs, &draft, source_op_range)?;
-        Ok(node_ref)
+        Ok(MastNodeUse::new(node_ref, source_ref))
     }
 
     fn record_static_source_occurrence(
@@ -129,17 +163,7 @@ impl MastForestBuilder {
     ) -> Result<SourceNodeRef, Report> {
         let (op_start, op_end) =
             source_op_range.unwrap_or_else(|| self.source_op_range_for_draft(draft));
-        self.push_source_occurrence(
-            exec_ref,
-            child_refs,
-            op_start,
-            op_end,
-            draft.asm_ops.clone(),
-            draft.debug_vars.clone(),
-            draft.inline_calls.clone(),
-            &draft.functions,
-            true,
-        )
+        self.record_source_occurrence_with_range(exec_ref, child_refs, draft, op_start, op_end)
     }
 
     fn unadjust_source_block_indices<T>(
@@ -346,7 +370,83 @@ impl MastForestBuilder {
             .expect("statically linked subtree root must be copied"))
     }
 
-    fn import_static_debug_tables(
+    /// Import the declared function from the exact dependency, never from a digest alias.
+    /// Dynamic imports retain declaration/type/root data without claiming a local definition.
+    pub(crate) fn import_procedure_function(
+        &mut self,
+        gid: GlobalItemIndex,
+        library_id: Word,
+        library: &LinkLibrary,
+        path: &miden_assembly_syntax::Path,
+        source_node: Option<DebugSourceNodeId>,
+        mast_root: Word,
+    ) -> Result<Option<DebugFunctionIdx>, Report> {
+        if !self.imported_debug_tables.contains_key(&library_id) {
+            let imported = if let Some(debug) = library.package.debug_info().into_diagnostic()? {
+                let static_index = self
+                    .statically_linked_package_debug_info
+                    .iter()
+                    .enumerate()
+                    .find(|(index, info)| {
+                        info.as_ref() == Some(&debug)
+                            && self.statically_linked_source_forests[*index].commitment()
+                                == library.commitment()
+                    })
+                    .map(|(index, _)| index);
+                let tables = if let Some(index) = static_index {
+                    self.import_static_debug_tables(index, &debug)?
+                } else {
+                    Arc::new(debug.merge_tables_into(&mut self.debug_info).map_err(|error| {
+                        Report::msg(format!("failed to import procedure debug tables: {error}"))
+                    })?)
+                };
+                Some((debug, tables))
+            } else {
+                None
+            };
+            self.imported_debug_tables.insert(library_id, imported);
+        }
+        let Some((debug, tables)) = self.imported_debug_tables[&library_id].as_ref() else {
+            return Ok(None);
+        };
+        // An external export occurrence is an invocation boundary, not a local definition.
+        // Such declarations are identified by their exported linkage name below.
+        let source_node =
+            source_node.filter(|source| !library.mast()[debug[*source].exec_node].is_external());
+        let matches_name = |function: &FunctionInfo<DebugSourceNodeId>| {
+            let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+            debug[name].as_ref() == path.as_str()
+        };
+        let candidates = debug.functions().iter().enumerate().filter(|(_, function)| {
+            function.mast_root == mast_root
+                && source_node
+                    .is_none_or(|source| function.source_node.into_option() == Some(source))
+        });
+        // Prefer the declared path. Re-exports may only have a function for the defining path,
+        // so fall back to the export's exact source occurrence, never to its digest alone.
+        let require_name =
+            source_node.is_none() || candidates.clone().any(|(_, function)| matches_name(function));
+        let mut matches =
+            candidates.filter(|(_, function)| !require_name || matches_name(function));
+        let Some((index, _)) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            log::warn!(
+                target: "assembler::import_procedure_function",
+                "ambiguous debug declarations for {path} in library {} ({library_id}); omitting exec inline-call frame",
+                library.package.name,
+            );
+            return Ok(None);
+        }
+        let index = tables
+            .function(DebugFunctionIdx::from(index as u32))
+            .expect("imported function must have a table mapping");
+        self.procedure_function_indices.insert(gid, index);
+        Ok(Some(index))
+    }
+
+    pub(super) fn import_static_debug_tables(
         &mut self,
         forest_idx: usize,
         package_debug_info: &PackageDebugInfo,
@@ -375,91 +475,186 @@ impl MastForestBuilder {
         tables: &DebugInfoTableRemapping,
         source_root_id: DebugSourceNodeId,
     ) -> Result<MastNodeRef, Report> {
-        let mut node_refs_by_source_id = BTreeMap::new();
-        self.copy_package_debug_source_node_ref(
-            source_forest,
-            package_debug_info,
-            tables,
-            source_root_id,
-            &mut node_refs_by_source_id,
-        )
-    }
+        let mut node_uses_by_source_id = BTreeMap::new();
+        let mut pending = vec![(source_root_id, false)];
 
-    fn copy_package_debug_source_node_ref(
-        &mut self,
-        source_forest: &MastForest,
-        package_debug_info: &PackageDebugInfo,
-        tables: &DebugInfoTableRemapping,
-        source_node_id: DebugSourceNodeId,
-        node_refs_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeRef>,
-    ) -> Result<MastNodeRef, Report> {
-        if let Some(node_ref) = node_refs_by_source_id.get(&source_node_id).copied() {
-            return Ok(node_ref);
-        }
+        while let Some((source_node_id, children_copied)) = pending.pop() {
+            if node_uses_by_source_id.contains_key(&source_node_id) {
+                continue;
+            }
 
-        let source_node = package_debug_info.source_node(source_node_id).ok_or_else(|| {
-            Report::msg(format!(
-                "statically linked package debug graph is missing source node {source_node_id:?}"
-            ))
-        })?;
-
-        let source_exec_node_id = source_node.exec_node;
-        let source_exec_node = source_forest
-            .get_node_by_id(source_exec_node_id)
-            .ok_or_else(|| {
+            let source_node = package_debug_info.source_node(source_node_id).ok_or_else(|| {
                 Report::msg(format!(
-                    "statically linked package debug graph references missing execution node {source_exec_node_id:?}"
+                    "statically linked package debug graph is missing source node {source_node_id:?}"
                 ))
-            })?
-            .clone();
-        let mut exec_child_ids = Vec::new();
-        source_exec_node.for_each_child(|child_id| exec_child_ids.push(child_id));
-        if exec_child_ids.len() != source_node.children.len() {
-            return Err(Report::msg(format!(
-                "statically linked package debug source node {source_node_id:?} has {} children, expected {} from execution node {source_exec_node_id:?}",
-                source_node.children.len(),
-                exec_child_ids.len(),
-            )));
-        }
-
-        let mut child_refs = Vec::new();
-        for (child_index, child_source_node_id) in source_node.children.iter().copied().enumerate()
-        {
-            let child_source_node =
-                package_debug_info.source_node(child_source_node_id).ok_or_else(|| {
+            })?;
+            let source_exec_node_id = source_node.exec_node;
+            let source_exec_node = source_forest
+                .get_node_by_id(source_exec_node_id)
+                .ok_or_else(|| {
                     Report::msg(format!(
-                        "statically linked package debug graph source node {source_node_id:?} references missing child source node {child_source_node_id:?}"
+                        "statically linked package debug graph references missing execution node {source_exec_node_id:?}"
                     ))
-                })?;
-            if child_source_node.exec_node != exec_child_ids[child_index] {
+                })?
+                .clone();
+            let mut exec_child_ids = Vec::new();
+            source_exec_node.for_each_child(|child_id| exec_child_ids.push(child_id));
+            if exec_child_ids.len() != source_node.children.len() {
                 return Err(Report::msg(format!(
-                    "statically linked package debug graph source node {source_node_id:?} child {child_index} maps to {:?}, expected {:?}",
-                    child_source_node.exec_node, exec_child_ids[child_index],
+                    "statically linked package debug source node {source_node_id:?} has {} children, expected {} from execution node {source_exec_node_id:?}",
+                    source_node.children.len(),
+                    exec_child_ids.len(),
                 )));
             }
-            child_refs.push(self.copy_package_debug_source_node_ref(
+            for (child_index, child_source_node_id) in
+                source_node.children.iter().copied().enumerate()
+            {
+                let child_source_node = package_debug_info
+                    .source_node(child_source_node_id)
+                    .ok_or_else(|| {
+                        Report::msg(format!(
+                            "statically linked package debug graph source node {source_node_id:?} references missing child source node {child_source_node_id:?}"
+                        ))
+                    })?;
+                if child_source_node.exec_node != exec_child_ids[child_index] {
+                    return Err(Report::msg(format!(
+                        "statically linked package debug graph source node {source_node_id:?} child {child_index} maps to {:?}, expected {:?}",
+                        child_source_node.exec_node, exec_child_ids[child_index],
+                    )));
+                }
+            }
+
+            if !children_copied {
+                pending.push((source_node_id, true));
+                pending.extend(
+                    source_node
+                        .children
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|child_id| !node_uses_by_source_id.contains_key(child_id))
+                        .map(|child_id| (child_id, false)),
+                );
+                continue;
+            }
+
+            let child_uses = source_node
+                .children
+                .iter()
+                .map(|child_id| {
+                    node_uses_by_source_id
+                        .get(child_id)
+                        .copied()
+                        .expect("source child must be copied before its parent")
+                })
+                .collect();
+            let metadata = self.package_source_metadata(
                 source_forest,
                 package_debug_info,
                 tables,
-                child_source_node_id,
-                node_refs_by_source_id,
-            )?);
+                source_node_id,
+                source_exec_node_id,
+            )?;
+            let node_use = self.ensure_node_from_statically_linked_source_use(
+                source_exec_node,
+                child_uses,
+                Some(metadata),
+            )?;
+            node_uses_by_source_id.insert(source_node_id, node_use);
         }
 
-        let metadata = self.package_source_metadata(
+        // Inline invocation copies do not own function definitions. Import canonical source
+        // trees whose execution nodes are already present, without linking any additional code.
+        // If merging later prunes those execution nodes, finalization leaves the declaration's
+        // source_node absent rather than attributing the definition to a caller's aggregate.
+        self.copy_available_function_sources(
             source_forest,
             package_debug_info,
             tables,
-            source_node_id,
-            source_exec_node_id,
+            &node_uses_by_source_id,
         )?;
-        let node_ref = self.ensure_node_from_statically_linked_source_ref(
-            source_exec_node,
-            child_refs,
-            Some(metadata),
-        )?;
-        node_refs_by_source_id.insert(source_node_id, node_ref);
-        Ok(node_ref)
+        Ok(node_uses_by_source_id[&source_root_id].node_ref())
+    }
+
+    fn copy_available_function_sources(
+        &mut self,
+        source_forest: &MastForest,
+        debug: &PackageDebugInfo,
+        tables: &DebugInfoTableRemapping,
+        node_uses: &BTreeMap<DebugSourceNodeId, MastNodeUse>,
+    ) -> Result<(), Report> {
+        let exec_refs = node_uses
+            .iter()
+            .map(|(source, node_use)| (debug[*source].exec_node, node_use.node_ref()))
+            .collect::<BTreeMap<_, _>>();
+        let mut source_refs = node_uses
+            .iter()
+            .map(|(source, node_use)| (*source, node_use.source_ref()))
+            .collect::<BTreeMap<_, _>>();
+        let callees = node_uses
+            .keys()
+            .flat_map(|source| debug[*source].inline_calls.iter().map(|row| row.callee_idx))
+            .collect::<BTreeSet<_>>();
+        for index in callees {
+            let function = debug.get_function(index).expect("inline function must exist");
+            let Some(root) = function.source_node.into_option() else {
+                continue;
+            };
+            let function_index =
+                tables.function(index).expect("imported function must have a mapping");
+            if self.debug_info[function_index].source_node.into_option().is_some() {
+                continue;
+            }
+            let mut pending = vec![(root, false)];
+            let mut ordered = Vec::new();
+            let mut visited = BTreeSet::new();
+            let mut available = true;
+            while let Some((source, expanded)) = pending.pop() {
+                if source_refs.contains_key(&source) {
+                    continue;
+                }
+                let node = &debug[source];
+                if !exec_refs.contains_key(&node.exec_node) {
+                    available = false;
+                    break;
+                }
+                if expanded {
+                    ordered.push(source);
+                } else if visited.insert(source) {
+                    pending.push((source, true));
+                    pending.extend(node.children.iter().rev().map(|child| (*child, false)));
+                }
+            }
+            if !available {
+                continue;
+            }
+            for source in ordered {
+                let node = &debug[source];
+                let metadata = self.package_source_metadata(
+                    source_forest,
+                    debug,
+                    tables,
+                    source,
+                    node.exec_node,
+                )?;
+                let (start, end) =
+                    metadata.op_range.expect("package source has an operation range");
+                let source_ref = self.push_source_occurrence(
+                    exec_refs[&node.exec_node],
+                    node.children.iter().map(|child| source_refs[child]).collect(),
+                    start,
+                    end,
+                    metadata.asm_ops,
+                    metadata.debug_vars,
+                    metadata.inline_calls,
+                    &metadata.functions,
+                    source_forest[node.exec_node].is_external(),
+                    false,
+                )?;
+                source_refs.insert(source, source_ref);
+            }
+        }
+        Ok(())
     }
 
     fn package_source_metadata(
@@ -520,7 +715,7 @@ impl MastForestBuilder {
                 })
             })
             .collect::<Result<Vec<_>, Report>>()?;
-        let inline_calls = package_debug_info
+        let mut inline_calls = package_debug_info
             .inline_calls_for_source_node(source_node_id)
             .map(|row| {
                 let loc_idx =
@@ -530,9 +725,22 @@ impl MastForestBuilder {
                     row.callee_idx,
                     "function",
                 )?;
-                Ok(DebugSourceInlineCall { op_idx: row.op_idx, callee_idx, loc_idx })
+                Ok(DebugSourceInlineCall {
+                    op_idx: row.op_idx,
+                    op_end: row.op_end,
+                    callee_idx,
+                    loc_idx,
+                })
             })
             .collect::<Result<Vec<_>, Report>>()?;
+        remap_inline_ranges(&mut inline_calls, |endpoints| {
+            if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_exec_node_id)
+            {
+                BasicBlockNode::unadjust_asm_op_indices(endpoints, block.op_batches())
+            } else {
+                endpoints
+            }
+        });
         let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
             self.unadjust_source_block_range(
                 source_forest,
@@ -542,16 +750,13 @@ impl MastForestBuilder {
             )
         });
 
-        let mast_root = source_forest.get_digest_by_id(source_exec_node_id).unwrap();
         let functions = package_debug_info
             .functions()
             .iter()
             .enumerate()
             .filter_map(|(index, function)| {
                 let function_source_node = function.source_node.into_option();
-                if function_source_node.is_some_and(|snid| snid == source_node_id)
-                    || function_source_node.is_none() && function.mast_root == mast_root
-                {
+                if function_source_node == Some(source_node_id) {
                     let function_index = DebugFunctionIdx::from(
                         u32::try_from(index).expect("invalid function index"),
                     );
@@ -576,12 +781,7 @@ impl MastForestBuilder {
                 debug_vars,
                 |debug_var| &mut debug_var.op_idx,
             ),
-            inline_calls: self.unadjust_source_block_indices(
-                source_forest,
-                source_exec_node_id,
-                inline_calls,
-                |inline_call| &mut inline_call.op_idx,
-            ),
+            inline_calls,
             functions,
         })
     }

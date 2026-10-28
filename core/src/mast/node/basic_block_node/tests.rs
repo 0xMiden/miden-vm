@@ -16,8 +16,7 @@ fn batch_ops_1() {
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
-    let mut batch_groups = [ZERO; BATCH_SIZE];
-    batch_groups[0] = build_group(&ops);
+    let batch_groups = [build_group(&ops)];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -30,8 +29,7 @@ fn batch_ops_2() {
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
-    let mut batch_groups = [ZERO; BATCH_SIZE];
-    batch_groups[0] = build_group(&ops);
+    let batch_groups = [build_group(&ops)];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -44,9 +42,7 @@ fn batch_ops_3() {
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
-    let mut batch_groups = [ZERO; BATCH_SIZE];
-    batch_groups[0] = build_group(&ops);
-    batch_groups[1] = Felt::new_unchecked(12345678);
+    let batch_groups = [build_group(&ops), Felt::new_unchecked(12345678)];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -111,11 +107,10 @@ fn batch_ops_5() {
         Felt::new_unchecked(6),
         ZERO,
     ];
-    let mut batch1_groups = [ZERO; BATCH_SIZE];
-    batch1_groups[0] = build_group(&[ops[9]]);
-    batch1_groups[1] = Felt::new_unchecked(7);
+    let batch1_groups = [build_group(&[ops[9]]), Felt::new_unchecked(7)];
 
-    let all_groups = [batch0_groups, batch1_groups].concat();
+    let mut all_groups = batch0_groups.to_vec();
+    all_groups.extend_from_slice(&batch1_groups);
     assert_eq!(hasher::hash_elements(&all_groups), hash);
 }
 
@@ -144,10 +139,6 @@ fn batch_ops_6() {
         Felt::new_unchecked(7),
         Felt::new_unchecked(11),
         build_group(&ops[9..]),
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
     ];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
@@ -171,16 +162,8 @@ fn batch_ops_7() {
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
-    let batch_groups = [
-        build_group(&ops[..8]),
-        build_group(&[ops[8]]),
-        Felt::new_unchecked(11),
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-    ];
+    let batch_groups =
+        [build_group(&ops[..8]), build_group(&[ops[8]]), Felt::new_unchecked(11), ZERO];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -203,16 +186,8 @@ fn batch_ops_8() {
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
-    let batch_groups = [
-        build_group(&ops[..8]),
-        ONE,
-        build_group(&[ops[8]]),
-        Felt::new_unchecked(2),
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-    ];
+    let batch_groups =
+        [build_group(&ops[..8]), ONE, build_group(&[ops[8]]), Felt::new_unchecked(2)];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -257,18 +232,10 @@ fn batch_ops_9() {
         ZERO,
     ];
 
-    let batch1_groups = [
-        build_group(&ops[17..]),
-        Felt::new_unchecked(6),
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-        ZERO,
-    ];
+    let batch1_groups = [build_group(&ops[17..]), Felt::new_unchecked(6)];
 
-    let all_groups = [batch0_groups, batch1_groups].concat();
+    let mut all_groups = batch0_groups.to_vec();
+    all_groups.extend_from_slice(&batch1_groups);
     assert_eq!(hasher::hash_elements(&all_groups), hash);
 }
 

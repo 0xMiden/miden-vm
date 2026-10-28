@@ -23,3 +23,6 @@
 
 pub mod backend;
 pub mod ir;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;

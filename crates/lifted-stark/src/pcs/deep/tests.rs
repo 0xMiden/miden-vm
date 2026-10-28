@@ -69,7 +69,7 @@ fn deep_quotient_end_to_end() {
     let tree_indices =
         TreeIndices::new([0, 1, lde_height / 4, lde_height / 2, lde_height - 1], log_lde_height)
             .expect("indices are in range");
-    tree.prove_batch(&tree_indices, &mut prover_channel);
+    tree.prove_batch(&lmcs, &tree_indices, &mut prover_channel);
     let (prover_digest, transcript) = prover_channel.finalize();
 
     // Create commitments slice for multi-commitment API (single commitment in this case)

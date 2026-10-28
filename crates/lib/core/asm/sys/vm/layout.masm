@@ -1,0 +1,205 @@
+use {
+    LOG_AIR_TRACE_LENGTHS_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
+use {
+    ACE_CIRCUIT_STREAM_PTR,
+    AUXILIARY_ACE_INPUTS_PTR,
+    AUX_BUS_BOUNDARY_PTR,
+    OOD_EVALUATIONS_PTR,
+    PROOF_ORDER_IDS_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
+} from miden::core::sys::vm::parameters
+
+### Memory-map constants and accessors specific to the Miden VM relation.
+###
+### The per-AIR log heights live in the generic array (`constants::LOG_AIR_TRACE_LENGTHS_PTR`);
+### this module only fixes which AIR occupies which offset: core 0, chiplets 1,
+### Eidos compression 2, and And8 lookup 3 — the canonical instance order the proof order sorts
+### against.
+###
+### The generic verifier in `stark/` owns the addresses it dereferences; everything
+### named after this relation's AIRs, statement, or bus lives here so the generic layer
+### carries no relation vocabulary and a second relation is a sibling module.
+###
+### The VM control frame occupies the half-open range 3223322776..3223323864, immediately
+### after the generic verifier frame. It contains relation metadata, the authenticated claim,
+### boundary inputs, and the maximum 255-word kernel witness.
+
+### Number of kernel procedures in the authenticated witness.
+const NUM_KERNEL_PROCEDURES_PTR = 3223322776
+
+### CONTROL_ALIGNMENT_PADDING_PTR: 3 felts at 3223322777..3223322780.
+
+### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
+### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
+### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness.
+const BUS_GAMMA_PTR = 3223322780
+### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
+### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
+### statement values staged before the transcript starts, then asserted via
+### `c_total + aux_sum == 0`. The remaining two cells reserve the full word and isolate adjacent
+### state.
+const C_TOTAL_PTR = 3223322784
+
+### Caller-provided claim commitment. The verifier checks the advice-supplied preimage against it.
+const CLAIM_COMMITMENT_PTR = 3223322788
+
+### Verifier-owned claim preimage (40 felts: P | K | I | O).
+const CLAIM_PTR = 3223322792
+
+### BOUNDARY_ANCHOR_PADDING_PTR: 4 felts at 3223322832..3223322836.
+
+### Boundary block [program_digest | deferred_root].
+const BOUNDARY_INPUTS_PTR = 3223322836
+
+### Kernel digest witness (up to 255 word-aligned procedure digests).
+const KERNEL_WITNESS_PTR = 3223322844
+
+### Out-of-domain ingest scatter table and proof-order maps, after the VM control frame.
+### Regeneration checks the reservation; `parameters.masm` describes its size and internal offsets.
+const OOD_SCATTER_TABLE_PTR = 3223323864
+
+## VM ACE READ section
+##
+## Stack I/O public values occupy the region immediately before AUX_RAND_ELEM_PTR. The relation's
+## statement block is stored separately, outside ACE READ. Each ACE input slot stores a quadratic
+## extension element (two base felts); base-field public values occupy (value, 0) slots.
+## The fixed public-value count and its storage size are recorded in `parameters.masm`.
+##
+## Memory order, from low to high addresses:
+##
+##   pi_ptr                   --> [ stack I/O public inputs                  ]
+##   AUX_RAND_ELEM_PTR        --> [ lookup randomness: beta, alpha           ]
+##                                [ alignment padding                        ]
+##   OOD_EVALUATIONS_PTR      --> [ current OOD row                          ]
+##                                [ next OOD row                             ]
+##   AUX_BUS_BOUNDARY_PTR     --> [ normalized LogUp finals, one per AIR     ]
+##   AUXILIARY_ACE_INPUTS_PTR --> [ shared STARK variables                   ]
+##                                [ Core selectors                           ]
+##                                [ Chiplets selectors                       ]
+##                                [ Eidos compression selectors              ]
+##                                [ And8 selectors                           ]
+##                                [ per-AIR fold coefficients                ]
+##                                [ alignment padding                        ]
+##   ACE_CIRCUIT_STREAM_PTR   --> [ ACE instruction stream                   ]
+##                                [ reserved tail to fixed PVM READ base     ]
+##
+## Each OOD row contains aligned preprocessed, main, auxiliary-coordinate, and quotient groups,
+## in that order. LogUp finals, selectors, and fold coefficients use canonical AIR instance order.
+## Each selector group contains first-row, last-row, and transition selectors. `parameters.masm`
+## records the region boundaries, row widths, and auxiliary slot counts derived from InputLayout.
+
+### Two extension-field elements: beta followed by alpha, four base felts total.
+### Fixed READ anchor: 2^31 + 2^30 + 2^22 = 3225419776.
+const AUX_RAND_ELEM_PTR = 3225419776
+
+### Scratch row for DEEP query openings, in preprocessed/main/auxiliary/quotient order.
+### Its AIR-derived width is recorded in `parameters.masm`.
+const CURRENT_TRACE_ROW_PTR = 3238002688
+
+pub proc set_core_trace_length_log(height: u8)
+    mem_store.LOG_AIR_TRACE_LENGTHS_PTR
+end
+
+pub proc get_core_trace_length_log() -> u8
+    mem_load.LOG_AIR_TRACE_LENGTHS_PTR
+end
+
+pub proc set_chiplets_trace_length_log(height: u8)
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_store
+end
+
+pub proc get_chiplets_trace_length_log() -> u8
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_load
+end
+
+pub proc set_eidos_compression_trace_length_log(height: u8)
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_store
+end
+
+pub proc get_eidos_compression_trace_length_log() -> u8
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_load
+end
+
+pub proc set_and8_lookup_trace_length_log(height: u8)
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_store
+end
+
+pub proc get_and8_lookup_trace_length_log() -> u8
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_load
+end
+
+### Relation-facing pointer accessors used by the generated constraint evaluator.
+### Keeping the anchors here gives the shared renderer one contract for VM and PVM while
+### keeping relation-sized regions out of the generic layer.
+pub proc aux_rand_elem_ptr() -> ptr<types::QuadFelt>
+    push.AUX_RAND_ELEM_PTR
+end
+
+### Normalized LogUp finals, one extension element per AIR in canonical instance order.
+pub proc aux_bus_boundary_ptr() -> types::Address
+    push.AUX_BUS_BOUNDARY_PTR
+end
+
+### Fixed STARK variables, per-AIR selectors, and fold coefficients in ACE input order.
+pub proc auxiliary_ace_inputs_ptr() -> types::Address
+    push.AUXILIARY_ACE_INPUTS_PTR
+end
+
+pub proc ace_circuit_stream_ptr() -> types::Address
+    push.ACE_CIRCUIT_STREAM_PTR
+end
+
+### Current and next aligned OOD rows, with one QuadFelt per scalar evaluation.
+pub proc ood_evaluations_ptr() -> ptr<types::QuadFelt>
+    push.OOD_EVALUATIONS_PTR
+end
+
+pub proc ood_scatter_table_ptr() -> types::Address
+    push.OOD_SCATTER_TABLE_PTR
+end
+
+### Maps each AIR instance to its height-sorted proof position.
+### Read by ood_frames::stage_ood_scatter_table and aux_trace::scatter_aux_bus_boundary.
+pub proc proof_order_positions_ptr() -> types::Address
+    push.PROOF_ORDER_POSITIONS_PTR
+end
+
+### Maps each height-sorted proof position to its AIR instance.
+### Read by constraints_eval::stage_air_fold_coefficients.
+pub proc proof_order_ids_ptr() -> types::Address
+    push.PROOF_ORDER_IDS_PTR
+end
+
+pub proc current_trace_row_ptr() -> types::Address
+    push.CURRENT_TRACE_ROW_PTR
+end
+
+pub proc bus_gamma_ptr() -> types::Address
+    push.BUS_GAMMA_PTR
+end
+
+pub proc c_total_ptr() -> types::Address
+    push.C_TOTAL_PTR
+end
+
+pub proc boundary_inputs_ptr() -> types::Address
+    push.BOUNDARY_INPUTS_PTR
+end
+
+pub proc claim_commitment_ptr() -> ptr<types::Digest>
+    push.CLAIM_COMMITMENT_PTR
+end
+
+pub proc claim_ptr() -> types::Address
+    push.CLAIM_PTR
+end
+
+pub proc num_kernel_procedures_ptr() -> types::Address
+    push.NUM_KERNEL_PROCEDURES_PTR
+end
+
+pub proc kernel_witness_ptr() -> types::Address
+    push.KERNEL_WITNESS_PTR
+end

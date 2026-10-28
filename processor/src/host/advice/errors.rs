@@ -24,21 +24,11 @@ pub enum AdviceError {
     #[error("advice stack read failed")]
     StackReadFailed,
     #[error(
-        "advice stack size exceeded: pushing {push_count} elements would exceed the maximum of {max}"
+        "advice provider size budget exceeded: adding {added} bytes to the current {current} bytes would exceed the maximum of {max} bytes"
     )]
-    StackSizeExceeded { push_count: usize, max: usize },
-    #[error("advice map value size of {size} exceeds the maximum of {max}")]
-    AdvMapValueSizeExceeded { size: usize, max: usize },
-    #[error(
-        "advice map element budget exceeded: adding {added} elements to the current {current} would exceed the maximum of {max}"
-    )]
-    AdvMapElementBudgetExceeded { current: usize, added: usize, max: usize },
-    #[error(
-        "Merkle store node budget exceeded: adding {added} nodes to the current {current} would exceed the maximum of {max}"
-    )]
-    MerkleStoreNodeBudgetExceeded { current: usize, added: usize, max: usize },
-    #[error("failed to initialize deferred state with the built-in precompile registry")]
-    DeferredStateInitializationFailed(#[source] PrecompileError),
+    SizeBudgetExceeded { current: usize, added: usize, max: usize },
+    #[error("failed to configure deferred state with the built-in precompile registry or limits")]
+    DeferredStateConfigurationFailed(#[source] PrecompileError),
     #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]

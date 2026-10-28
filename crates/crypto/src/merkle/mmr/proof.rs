@@ -8,7 +8,6 @@ use crate::Word;
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MmrPath {
     /// The state of the MMR when the MMR path was created.
     forest: Forest,
@@ -95,7 +94,6 @@ impl MmrPath {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MmrProof {
     /// The Merkle path data describing how to authenticate the leaf.
     path: MmrPath,

@@ -4,8 +4,6 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     ast::{HashKind, Ident},
@@ -18,10 +16,9 @@ use crate::{
 /// Represents a constant value in Miden Assembly syntax.
 #[derive(Clone)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum ConstantValue {
     /// A literal [`miden_core::Felt`] value.

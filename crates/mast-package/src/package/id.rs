@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(transparent)]
 pub struct PackageId(Arc<str>);
@@ -111,7 +111,7 @@ impl proptest::arbitrary::Arbitrary for PackageId {
         let chars = proptest::char::range('a', 'z');
         proptest::collection::vec(chars, 4..32)
             .prop_map(|chars| Self(String::from_iter(chars).into_boxed_str().into()))
-            .no_shrink()  // Pure random strings, no meaningful shrinking pattern
+            .no_shrink() // Pure random strings, no meaningful shrinking pattern
             .boxed()
     }
 }

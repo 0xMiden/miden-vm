@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     EMPTY_WORD, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::smt::{
         EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
         SparseMerkleTreeReader,
@@ -185,7 +185,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
         }
 
         // Compute the root from children at indices 2 and 3
-        let calculated_root = Poseidon2::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
+        let calculated_root = Eidos::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
 
         // Set the root node
         in_memory_nodes[ROOT_MEMORY_INDEX] = calculated_root;

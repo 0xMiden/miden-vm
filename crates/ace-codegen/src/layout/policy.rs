@@ -22,12 +22,13 @@ struct LayoutPolicy {
     main: Alignment,
     aux: Alignment,
     quotient: Alignment,
+    quotient_padding: usize,
     aux_bus_boundary: Alignment,
     stark_vars: Alignment,
     end_align: Option<Alignment>,
 }
 
-/// Whether the layout includes the slots needed to combine multiple AIR instances.
+/// Selects single-AIR inputs or per-AIR selectors and fold coefficients.
 #[derive(Clone, Copy)]
 enum AirComposition {
     Single,
@@ -44,18 +45,21 @@ impl AirComposition {
     fn extra_stark_slots(self) -> usize {
         match self {
             Self::Single => 0,
-            Self::Multi { air_count } => 1 + air_count.get() * SELECTORS_PER_AIR,
+            Self::Multi { air_count } => air_count.get() * (SELECTORS_PER_AIR + 1),
         }
     }
 
     fn multi_air_indices(self, stark_start: usize, base_slots: usize) -> Option<MultiAirIndices> {
         match self {
             Self::Single => None,
-            Self::Multi { air_count } => Some(MultiAirIndices {
-                air_count,
-                fold_beta: stark_start + base_slots,
-                selector_start: stark_start + base_slots + 1,
-            }),
+            Self::Multi { air_count } => {
+                let selector_start = stark_start + base_slots;
+                Some(MultiAirIndices {
+                    air_count,
+                    selector_start,
+                    fold_coeff_start: selector_start + air_count.get() * SELECTORS_PER_AIR,
+                })
+            },
         }
     }
 }
@@ -69,6 +73,7 @@ impl LayoutPolicy {
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
             quotient: Alignment::Unaligned,
+            quotient_padding: 1,
             aux_bus_boundary: Alignment::Unaligned,
             stark_vars: Alignment::Unaligned,
             end_align: None,
@@ -83,9 +88,10 @@ impl LayoutPolicy {
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
             quotient: Alignment::DoubleWord,
+            quotient_padding: 8,
             aux_bus_boundary: Alignment::Word,
             stark_vars: Alignment::Word,
-            end_align: Some(Alignment::Word),
+            end_align: Some(Alignment::DoubleWord),
         }
     }
 }
@@ -114,28 +120,59 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout with no alignment padding.
     pub fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single, None)
     }
 
     /// Build the MASM-compatible layout.
     pub fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single, None)
     }
 
     /// Build a native layout for a multi-AIR relation.
     pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::multi_air(num_airs))
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::native(),
+            AirComposition::multi_air(num_airs),
+            None,
+        )
     }
 
     /// Build the MASM-compatible layout for a multi-AIR relation.
     pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::multi_air(num_airs))
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::masm(),
+            AirComposition::multi_air(num_airs),
+            None,
+        )
+    }
+
+    #[cfg(feature = "compiler")]
+    pub(crate) fn for_relation(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width: usize,
+        masm: bool,
+    ) -> Self {
+        let policy = if masm {
+            LayoutPolicy::masm()
+        } else {
+            LayoutPolicy::native()
+        };
+        Self::build_with_policy(
+            counts,
+            policy,
+            AirComposition::multi_air(num_airs),
+            Some(quotient_width),
+        )
     }
 
     fn build_with_policy(
         counts: InputCounts,
         policy: LayoutPolicy,
         composition: AirComposition,
+        quotient_width: Option<usize>,
     ) -> Self {
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         assert_eq!(
@@ -157,11 +194,15 @@ impl InputLayout {
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_width = quotient_width.unwrap_or_else(|| {
+            (counts.num_quotient_chunks * EXT_DEGREE).next_multiple_of(policy.quotient_padding)
+        });
+        assert!(quotient_width >= counts.num_quotient_chunks * EXT_DEGREE);
+        let quotient_curr = builder.alloc(quotient_width, policy.quotient);
         let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_next = builder.alloc(quotient_width, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
         let stark_vars = builder.alloc(num_stark_vars, policy.stark_vars);
 
@@ -235,13 +276,25 @@ mod tests {
     }
 
     #[test]
+    fn masm_reads_committed_quotient_padding_without_exposing_extra_chunks() {
+        let mut counts = test_counts();
+        counts.num_quotient_chunks = 2;
+        let layout = InputLayout::new_masm(counts);
+        assert_eq!(layout.regions.quotient_curr.width, 8);
+        assert_eq!(layout.regions.quotient_next.width, 8);
+        assert_eq!(
+            layout.index(InputKey::QuotientChunkCoord { offset: 0, chunk: 2, coord: 0 }),
+            None
+        );
+        layout.validate();
+    }
+
+    #[test]
     fn multi_air_layout_indexes_air_slots() {
         let layout = InputLayout::new_masm_multi_air(test_counts(), 3);
 
-        let beta = layout.index(InputKey::MultiAirFoldBeta).unwrap();
-
         let first0 = layout.index(InputKey::IsFirstAir(0)).unwrap();
-        assert_eq!(first0, beta + 1);
+        assert_eq!(first0, layout.regions.stark_vars.offset + 10);
         assert_eq!(layout.index(InputKey::IsLastAir(0)), Some(first0 + 1));
         assert_eq!(layout.index(InputKey::IsTransitionAir(0)), Some(first0 + 2));
         assert_eq!(layout.index(InputKey::IsFirstAir(1)), Some(first0 + 3));
@@ -253,5 +306,42 @@ mod tests {
     #[should_panic(expected = "multi-AIR layout requires at least one AIR")]
     fn multi_air_layout_rejects_zero_airs() {
         let _ = InputLayout::new_masm_multi_air(test_counts(), 0);
+    }
+
+    #[test]
+    fn canonical_multi_air_layout_adds_fold_coefficient_slots_after_selectors() {
+        let layout = InputLayout::new_masm_multi_air(test_counts(), 3);
+
+        // One `adv_pipe` block carries four extension-field slots (eight base-field felts).
+        assert!(layout.total_inputs.is_multiple_of(4));
+
+        let first_selector = layout.index(InputKey::IsFirstAir(0)).unwrap();
+        assert_eq!(first_selector, layout.regions.stark_vars.offset + 10);
+
+        // Selectors occupy 3 AIRs * 3 selectors = 9 EF slots after the prologue.
+        let last_selector = layout.index(InputKey::IsTransitionAir(2)).unwrap();
+        assert_eq!(last_selector, first_selector + 8);
+
+        // Each fold coefficient occupies one EF slot immediately after the selectors.
+        let coeff0 = layout.index(InputKey::MultiAirFoldCoeff(0)).unwrap();
+        assert_eq!(coeff0, last_selector + 1);
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(1)), Some(coeff0 + 1));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), Some(coeff0 + 2));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(3)), None);
+
+        // MASM uses felt offsets: 20 for the prologue, then 6 per AIR for selectors.
+        let stark_base = layout.regions.stark_vars.offset;
+        assert_eq!((coeff0 - stark_base) * crate::EXT_DEGREE, 20 + 6 * 3);
+
+        layout.validate();
+    }
+
+    #[test]
+    fn canonical_multi_air_native_layout_has_fold_coefficient_slots() {
+        let layout = InputLayout::new_multi_air(test_counts(), 2);
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(0)).is_some());
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(1)).is_some());
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), None);
+        layout.validate();
     }
 }

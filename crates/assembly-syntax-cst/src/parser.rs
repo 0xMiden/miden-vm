@@ -4,7 +4,7 @@ use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
 
 use crate::{
-    MasmLanguage,
+    MAX_CONTROL_FLOW_NESTING, MasmLanguage,
     ast::AstNode,
     diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
     lexer::{Token, tokenize},
@@ -260,7 +260,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_inline_masm(mut self, source: Arc<SourceFile>) -> Parse {
-        match self.parse_block_unterminated() {
+        match self.parse_block_unterminated(0) {
             BlockParseOutcome::ReachedEof => (),
             BlockParseOutcome::FoundTerminator => self.error_here("unexpected 'end'"),
             BlockParseOutcome::RecoveredImplicitEnd => {
@@ -781,7 +781,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::BeginBlock);
         self.expect_keyword("begin", "expected `begin`");
         self.parse_line_tail();
-        if self.parse_block(BlockOwner::Begin, &["end"]) == BlockParseOutcome::FoundTerminator {
+        if self.parse_block(BlockOwner::Begin, &["end"], 0) == BlockParseOutcome::FoundTerminator {
             self.expect_keyword("end", BlockOwner::Begin.missing_end_message());
         }
         self.finish_node();
@@ -822,7 +822,9 @@ impl<'input> Parser<'input> {
         }
 
         self.parse_line_tail();
-        if self.parse_block(BlockOwner::Procedure, &["end"]) == BlockParseOutcome::FoundTerminator {
+        if self.parse_block(BlockOwner::Procedure, &["end"], 0)
+            == BlockParseOutcome::FoundTerminator
+        {
             self.expect_keyword("end", BlockOwner::Procedure.missing_end_message());
         }
         self.finish_node();
@@ -852,6 +854,16 @@ impl<'input> Parser<'input> {
     fn parse_visibility(&mut self) {
         self.start_node(SyntaxKind::Visibility);
         let _ = self.expect_keyword("pub", "expected `pub`");
+        if self
+            .next_relevant_top_level_token(self.pos)
+            .and_then(|index| self.tokens.get(index))
+            .is_some_and(|token| token.kind() == SyntaxKind::LParen)
+        {
+            self.bump_regular_trivia();
+            self.bump();
+            let _ = self.expect_keyword("package", "expected `package` in visibility modifier");
+            let _ = self.expect_kind(SyntaxKind::RParen, "expected `)` after `package`");
+        }
         self.finish_node();
     }
 
@@ -901,7 +913,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_block_unterminated(&mut self) -> BlockParseOutcome {
+    fn parse_block_unterminated(&mut self, nesting_depth: usize) -> BlockParseOutcome {
         self.start_node(SyntaxKind::Block);
         while !self.eof() {
             if self.at_regular_trivia() {
@@ -917,23 +929,30 @@ impl<'input> Parser<'input> {
                 continue;
             }
 
+            if self.at_control_flow_operation()
+                && self.reject_excessive_control_flow_nesting(nesting_depth)
+            {
+                self.finish_node();
+                return BlockParseOutcome::ReachedEof;
+            }
+
             if self.at_keyword("if") {
-                if self.parse_if() {
+                if self.parse_if(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("do") {
-                if self.parse_do_while() {
+                if self.parse_do_while(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("while") {
-                if self.parse_while() {
+                if self.parse_while(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("repeat") {
-                if self.parse_repeat() {
+                if self.parse_repeat(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
@@ -951,7 +970,12 @@ impl<'input> Parser<'input> {
         BlockParseOutcome::ReachedEof
     }
 
-    fn parse_block(&mut self, owner: BlockOwner, terminators: &[&str]) -> BlockParseOutcome {
+    fn parse_block(
+        &mut self,
+        owner: BlockOwner,
+        terminators: &[&str],
+        nesting_depth: usize,
+    ) -> BlockParseOutcome {
         self.start_node(SyntaxKind::Block);
         while !self.eof() {
             if self.at_terminator(terminators) {
@@ -980,23 +1004,30 @@ impl<'input> Parser<'input> {
                 continue;
             }
 
+            if self.at_control_flow_operation()
+                && self.reject_excessive_control_flow_nesting(nesting_depth)
+            {
+                self.finish_node();
+                return BlockParseOutcome::ReachedEof;
+            }
+
             if self.at_keyword("if") {
-                if self.parse_if() {
+                if self.parse_if(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("do") {
-                if self.parse_do_while() {
+                if self.parse_do_while(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("while") {
-                if self.parse_while() {
+                if self.parse_while(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
             } else if self.at_keyword("repeat") {
-                if self.parse_repeat() {
+                if self.parse_repeat(nesting_depth + 1) {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
@@ -1015,12 +1046,12 @@ impl<'input> Parser<'input> {
         BlockParseOutcome::ReachedEof
     }
 
-    fn parse_if(&mut self) -> bool {
+    fn parse_if(&mut self, nesting_depth: usize) -> bool {
         self.start_node(SyntaxKind::IfOp);
         self.expect_keyword("if", "expected `if`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        let then_outcome = self.parse_block(BlockOwner::If, &["else", "end"]);
+        let then_outcome = self.parse_block(BlockOwner::If, &["else", "end"], nesting_depth);
         if then_outcome == BlockParseOutcome::ReachedEof {
             self.finish_node();
             return true;
@@ -1029,7 +1060,7 @@ impl<'input> Parser<'input> {
         if self.at_keyword("else") {
             self.bump();
             self.parse_line_tail();
-            let else_outcome = self.parse_block(BlockOwner::If, &["end"]);
+            let else_outcome = self.parse_block(BlockOwner::If, &["end"], nesting_depth);
             if else_outcome == BlockParseOutcome::ReachedEof {
                 self.finish_node();
                 return true;
@@ -1043,12 +1074,12 @@ impl<'input> Parser<'input> {
         false
     }
 
-    fn parse_while(&mut self) -> bool {
+    fn parse_while(&mut self, nesting_depth: usize) -> bool {
         self.start_node(SyntaxKind::WhileOp);
         self.expect_keyword("while", "expected `while`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        let outcome = self.parse_block(BlockOwner::While, &["end"]);
+        let outcome = self.parse_block(BlockOwner::While, &["end"], nesting_depth);
         if outcome == BlockParseOutcome::ReachedEof {
             self.finish_node();
             return true;
@@ -1060,14 +1091,14 @@ impl<'input> Parser<'input> {
         false
     }
 
-    fn parse_do_while(&mut self) -> bool {
+    fn parse_do_while(&mut self, nesting_depth: usize) -> bool {
         self.start_node(SyntaxKind::DoWhileOp);
         self.expect_keyword("do", "expected `do`");
         self.parse_line_tail();
         // The body is terminated by a *bare* `while` (the loop condition). A nested
         // `while.true` loop inside the body carries a `.` suffix and is therefore not treated
         // as the terminator (see `at_terminator`).
-        let body_outcome = self.parse_block(BlockOwner::DoWhileBody, &["while"]);
+        let body_outcome = self.parse_block(BlockOwner::DoWhileBody, &["while"], nesting_depth);
         if body_outcome == BlockParseOutcome::ReachedEof {
             self.finish_node();
             return true;
@@ -1075,7 +1106,7 @@ impl<'input> Parser<'input> {
         if body_outcome == BlockParseOutcome::FoundTerminator {
             self.expect_keyword("while", "expected `while`");
             self.parse_line_tail();
-            let cond_outcome = self.parse_block(BlockOwner::DoWhile, &["end"]);
+            let cond_outcome = self.parse_block(BlockOwner::DoWhile, &["end"], nesting_depth);
             if cond_outcome == BlockParseOutcome::ReachedEof {
                 self.finish_node();
                 return true;
@@ -1088,12 +1119,12 @@ impl<'input> Parser<'input> {
         false
     }
 
-    fn parse_repeat(&mut self) -> bool {
+    fn parse_repeat(&mut self, nesting_depth: usize) -> bool {
         self.start_node(SyntaxKind::RepeatOp);
         self.expect_keyword("repeat", "expected `repeat`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        let outcome = self.parse_block(BlockOwner::Repeat, &["end"]);
+        let outcome = self.parse_block(BlockOwner::Repeat, &["end"], nesting_depth);
         if outcome == BlockParseOutcome::ReachedEof {
             self.finish_node();
             return true;
@@ -1130,6 +1161,30 @@ impl<'input> Parser<'input> {
                 break;
             }
         }
+    }
+
+    fn at_control_flow_operation(&self) -> bool {
+        self.at_keyword("if")
+            || self.at_keyword("do")
+            || self.at_keyword("while")
+            || self.at_keyword("repeat")
+    }
+
+    /// Consumes the rest of an invalid source without recursing any further.
+    fn reject_excessive_control_flow_nesting(&mut self, nesting_depth: usize) -> bool {
+        if nesting_depth < MAX_CONTROL_FLOW_NESTING {
+            return false;
+        }
+
+        self.start_node(SyntaxKind::Error);
+        self.error_here(format!(
+            "control-flow nesting depth exceeded the maximum depth of {MAX_CONTROL_FLOW_NESTING}"
+        ));
+        while !self.eof() {
+            self.bump();
+        }
+        self.finish_node();
+        true
     }
 
     fn parse_instruction(&mut self) {
@@ -1221,6 +1276,7 @@ impl<'input> Parser<'input> {
                     | SyntaxKind::Equal
                     | SyntaxKind::Comma
                     | SyntaxKind::DotDot
+                    | SyntaxKind::DotDotDot
                     | SyntaxKind::Colon
                     | SyntaxKind::ColonColon
                     | SyntaxKind::RArrow
@@ -1342,7 +1398,7 @@ impl<'input> Parser<'input> {
                         Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
                     ),
                     "pub" => matches!(
-                        self.next_relevant_top_level_token(index + 1)
+                        self.next_token_after_visibility(index)
                             .and_then(|next| self.tokens.get(next)),
                         Some(next)
                             if next.kind() == SyntaxKind::Ident
@@ -1453,10 +1509,29 @@ impl<'input> Parser<'input> {
             return false;
         }
 
+        let next = if prefix == "pub" {
+            self.next_token_after_visibility(self.pos)
+        } else {
+            self.next_relevant_top_level_token(self.pos + 1)
+        };
         matches!(
-            self.next_relevant_top_level_token(self.pos + 1).and_then(|index| self.tokens.get(index)),
+            next.and_then(|index| self.tokens.get(index)),
             Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword
         )
+    }
+
+    /// Looks past an optional visibility qualifier when recognizing declarations.
+    fn next_token_after_visibility(&self, index: usize) -> Option<usize> {
+        let mut next = self.next_relevant_top_level_token(index + 1)?;
+        if self.tokens.get(next)?.kind() == SyntaxKind::LParen {
+            next = self.next_relevant_top_level_token(next + 1)?;
+            next = self.next_relevant_top_level_token(next + 1)?;
+            if self.tokens.get(next)?.kind() != SyntaxKind::RParen {
+                return None;
+            }
+            next = self.next_relevant_top_level_token(next + 1)?;
+        }
+        Some(next)
     }
 
     fn at_regular_trivia(&self) -> bool {
@@ -1631,6 +1706,7 @@ fn expects_continuation_operand(kind: SyntaxKind) -> bool {
             | SyntaxKind::Equal
             | SyntaxKind::Comma
             | SyntaxKind::DotDot
+            | SyntaxKind::DotDotDot
             | SyntaxKind::Colon
             | SyntaxKind::ColonColon
             | SyntaxKind::RArrow
@@ -1652,6 +1728,7 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
             | SyntaxKind::Equal
             | SyntaxKind::Comma
             | SyntaxKind::DotDot
+            | SyntaxKind::DotDotDot
             | SyntaxKind::Colon
             | SyntaxKind::ColonColon
             | SyntaxKind::RArrow
@@ -1810,6 +1887,21 @@ adv_map TABLE = [
             .collect()
     }
 
+    fn nested_if_source(depth: usize, terminated: bool) -> String {
+        let mut source = String::from("begin\n");
+        for _ in 0..depth {
+            source.push_str("push.1\nif.true\n");
+        }
+        source.push_str("push.1\n");
+        if terminated {
+            for _ in 0..depth {
+                source.push_str("end\n");
+            }
+            source.push_str("end\n");
+        }
+        source
+    }
+
     fn assert_import_rejected(source: &str, expected_label: &str) {
         let parse = parse_text(source);
         assert!(parse.has_errors(), "expected {source:?} to be rejected");
@@ -1825,6 +1917,22 @@ adv_map TABLE = [
     fn parse_text_is_lossless_for_representative_sources() {
         for (index, source) in representative_round_trip_sources().iter().enumerate() {
             assert_lossless_parse(source, format_args!("representative source {index}"));
+        }
+    }
+
+    #[test]
+    fn rejects_excessive_control_flow_nesting() {
+        for terminated in [true, false] {
+            let source = nested_if_source(1_500, terminated);
+            let parse = parse_text(&source);
+            let labels = diagnostic_labels(&parse);
+
+            assert!(
+                labels.iter().any(|label| label.contains("control-flow nesting depth exceeded")),
+                "expected a nesting-depth diagnostic, got {:?}",
+                parse.diagnostics()
+            );
+            assert_eq!(parse.syntax().text().to_string(), source);
         }
     }
 
@@ -2884,5 +2992,27 @@ begin end
         let end = start + "foo".len() as u32;
         let expected = SourceSpan::new(parse.source().id(), start..end);
         assert_eq!(parse.span_for_token(&name), expected);
+    }
+}
+
+#[cfg(test)]
+mod visibility_trivia_tests {
+    use alloc::string::ToString;
+
+    use super::*;
+    use crate::ast::AstNode;
+
+    #[test]
+    fn unqualified_visibility_does_not_consume_trailing_trivia() {
+        let input = "pub # keep me\nmod api\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors());
+        let visibility = parse
+            .syntax()
+            .descendants()
+            .find_map(crate::ast::Visibility::cast)
+            .expect("visibility marker");
+        assert_eq!(visibility.syntax().text().to_string(), "pub");
+        assert_eq!(parse.syntax().text().to_string(), input);
     }
 }

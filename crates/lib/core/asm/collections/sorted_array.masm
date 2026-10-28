@@ -1,7 +1,18 @@
 use miden::core::word
 
+# TYPES
+# =================================================================================================
+
+#! A word key and its associated word value in memory.
+pub type Entry = struct { key: word, value: word }
+
+#! The two most significant key elements, in operand stack order.
+pub type HalfKey = struct { suffix: felt, prefix: felt }
+
+
 # CONSTANTS
 # =================================================================================================
+
 const LOWERBOUND_ARRAY_EVENT = event("miden::core::collections::sorted_array::lowerbound_array")
 const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array::lowerbound_key_value")
 
@@ -27,16 +38,22 @@ const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array
 #! # Panics
 #!
 #! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
 #! - start_ptr, end_ptr are not word-aligned
 #! - `start_ptr > end_ptr`
+#! - the array contains more than 65,536 words.
 #!
 #! Cycles:
-#!   Value exists: 46 cycles
+#!   Value exists: 47 cycles
 #!   Value doesn't exist and the array is empty: 25 cycles
-#!   Value doesn't exist and is smaller than all elements: 151 cycles
-#!   Value doesn't exist and is larger than all elements: 149 cycles
-#!   Value doesn't exist: 286 cycles
-pub proc find_word
+#!   Value doesn't exist and is smaller than all elements: 152 cycles
+#!   Value doesn't exist and is larger than all elements: 150 cycles
+#!   Value doesn't exist: 288 cycles
+pub proc find_word(
+    value: word,
+    start_ptr: ptr<word>,
+    end_ptr: ptr<word>,
+) -> (i1, ptr<word>, ptr<word>, ptr<word>)
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_ARRAY_EVENT
     adv_push adv_push
@@ -50,8 +67,8 @@ pub proc find_word
         u32lt assert.err="lowerbound_array invariant: maybe_value_ptr must be < end_ptr"
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
-        # dereference maybe_value_ptr (8 cycles)
-        dup movdn.5 padw movup.4 mem_loadw_le
+        # dereference maybe_value_ptr (9 cycles)
+        dup u32assert.err="maybe_value_ptr is not u32" movdn.5 padw movup.4 mem_loadw_le
         #=> [MAYBE_VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
         # check if it matches the requested VALUE (15 cycles)
@@ -87,8 +104,8 @@ pub proc find_word
                 movdn.4
                 #=> [VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
-                # dereference maybe_value_ptr (7 cycles)
-                dup.4 padw movup.4 mem_loadw_le
+                # dereference maybe_value_ptr (8 cycles)
+                dup.4 u32assert.err="start_ptr is not u32" padw movup.4 mem_loadw_le
                 #=> [FIRST_WORD, VALUE, maybe_value_ptr = start_ptr, start_ptr, end_ptr]
 
                 # there was no match, the first array element must be larger than VALUE
@@ -108,8 +125,8 @@ pub proc find_word
 
                 #=> [maybe_value_ptr = end_ptr, VALUE, start_ptr, end_ptr]
 
-                # fetch the last word in the array (10 cycles)
-                dup movdn.5 sub.4 padw movup.4 mem_loadw_le
+                # fetch the last word in the array (11 cycles)
+                dup movdn.5 sub.4 u32assert.err="end_ptr-4 is not u32" padw movup.4 mem_loadw_le
                 #=> [LAST_WORD, VALUE, maybe_value_ptr = end_ptr, start_ptr, end_ptr]
 
                 # there was no match, the last array element must be smaller than VALUE
@@ -140,16 +157,16 @@ pub proc find_word
                 movdn.4 dupw
                 #=> [VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
-                # dereference maybe_value_ptr (8 cycles)
-                padw dup.12 mem_loadw_le
+                # dereference maybe_value_ptr (9 cycles)
+                padw dup.12 u32assert.err="maybe_value_ptr is not u32" mem_loadw_le
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_array invariant: *maybe_value_ptr must be greater than VALUE"
 
-                # dereference `maybe_value_ptr-4` (11 cycles)
-                padw dup.8 sub.4 mem_loadw_le
+                # dereference `maybe_value_ptr-4` (12 cycles)
+                padw dup.8 sub.4 u32assert.err="maybe_value_ptr-4 is not u32" mem_loadw_le
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
@@ -178,7 +195,7 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent word pair is out of order.
 @locals(1)
-pub proc assert_sorted_words
+pub proc assert_sorted_words(start_ptr: ptr<word>, end_ptr: ptr<word>) -> (ptr<word>, ptr<word>)
     # locals:
     # 0: current_ptr
     dup add.4 loc_store.0
@@ -232,11 +249,17 @@ end
 #! # Panics
 #!
 #! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
 #! - start_ptr is not word-aligned
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
-pub proc find_key_value
+#! - the array contains more than 65,536 key-value entries.
+pub proc find_key_value(
+    key: word,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     push.1
     # => [use_full_key = 1, KEY, start_ptr, end_ptr]
 
@@ -270,11 +293,17 @@ end
 #! # Panics
 #!
 #! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
 #! - start_ptr is not word-aligned
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
-pub proc find_half_key_value
+#! - the array contains more than 65,536 key-value entries.
+pub proc find_half_key_value(
+    key: HalfKey,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     # Build KEY with key_prefix at word[3] (most significant in BE) and key_suffix at word[2]
     # word[0] and word[1] are 0 (will be zeroed in half-key comparison anyway)
     push.0 push.0
@@ -312,19 +341,25 @@ end
 #! # Panics
 #!
 #! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
 #! - start_ptr is not word-aligned
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
 #!
 #! Cycles:
-#!   Key exists: 70 cycles
+#!   Key exists: 72 cycles
 #!   Key doesn't exist and the array is empty: 25 cycles
-#!   Key doesn't exist and is smaller than all stored keys: 166 cycles
-#!   Key doesn't exist and is larger than all stored keys: 162 cycles
-#!   Key doesn't exist: 322 cycles
+#!   Key doesn't exist and is smaller than all stored keys: 167 cycles
+#!   Key doesn't exist and is larger than all stored keys: 163 cycles
+#!   Key doesn't exist: 323 cycles
 @locals(1)
-proc find_partial_key_value
+proc find_partial_key_value(
+    key: word,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+    use_full_key: i1,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
     # => [KEY, start_ptr, end_ptr, use_full_key]
@@ -344,12 +379,13 @@ proc find_partial_key_value
         u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr must be < end_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
-        # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
-        dup dup.6 sub u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
+        # make sure maybe_key_ptr is pointing to a key, not value (11 cycles)
+        dup dup.6 sub u32assert.err="maybe_key_ptr-start_ptr is not u32"
+        u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
-        # dereference maybe_key_ptr (22 cycles)
-        dup movdn.5
+        # dereference maybe_key_ptr (23 cycles)
+        dup u32assert.err="maybe_key_ptr is not u32" movdn.5
         #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
         loc_load.0 exec.load_key
@@ -383,8 +419,8 @@ proc find_partial_key_value
                 # assert `the key at start_ptr > KEY`
                 #=> [maybe_key_ptr = start_ptr, KEY, start_ptr, end_ptr]
 
-                # load key (22 cycles)
-                dup movdn.5
+                # load key (23 cycles)
+                dup u32assert.err="start_ptr is not u32" movdn.5
                 #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 loc_load.0 exec.load_key
@@ -407,8 +443,8 @@ proc find_partial_key_value
 
                 #=> [maybe_key_ptr = end_ptr, KEY, start_ptr, end_ptr]
 
-                # fetch the last key in the array (23 cycles)
-                dup movdn.5 sub.8
+                # fetch the last key in the array (24 cycles)
+                dup movdn.5 sub.8 u32assert.err="end_ptr-8 is not u32"
                 #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 loc_load.0 exec.load_key
@@ -455,8 +491,8 @@ proc find_partial_key_value
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY must be greater than KEY"
                 #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference `maybe_key_ptr-8` (previous key) (22 cycles)
-                dup.4 sub.8
+                # dereference `maybe_key_ptr-8` (previous key) (23 cycles)
+                dup.4 sub.8 u32assert.err="maybe_key_ptr-8 is not u32"
                 #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 loc_load.0 exec.load_key
@@ -490,7 +526,7 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent key pair is out of order.
 @locals(2)
-pub proc assert_sorted_keys
+pub proc assert_sorted_keys(start_ptr: ptr<Entry>, end_ptr: ptr<Entry>) -> (ptr<Entry>, ptr<Entry>)
     # locals:
     # 0: current_ptr
     # 1: use_full_key
@@ -544,7 +580,10 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent half-key pair is out of order.
 @locals(2)
-pub proc assert_sorted_half_keys
+pub proc assert_sorted_half_keys(
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (ptr<Entry>, ptr<Entry>)
     # locals:
     # 0: current_ptr
     # 1: use_full_key
@@ -590,7 +629,7 @@ end
 #! Outputs: [KEY]
 #!
 #! Cycles: 16
-proc load_key
+proc load_key(use_full_key: i1, key_ptr: ptr<Entry>) -> word
     padw movup.5 mem_loadw_le
     # => [w0, w1, w2, w3, use_full_key]
 

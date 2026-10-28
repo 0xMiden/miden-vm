@@ -1,7 +1,8 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 
-use miden_crypto::rand::test_utils::prng_array;
 use proptest::prelude::*;
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use crate::{
     Felt, WORD_SIZE, Word,
@@ -21,7 +22,7 @@ use crate::{
 #[test]
 fn dyn_hash_is_correct() {
     let expected_constant =
-        hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
+        hasher::merge_in_mast_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
 
     let mut forest = MastForest::new();
     let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
@@ -38,7 +39,7 @@ proptest! {
         let program_hash = digest_from_seed(*seed);
         let kernel: Vec<Word> = (0..kernel_count)
             .scan(*seed, |seed, _| {
-                *seed = prng_array(*seed);
+                *seed = ChaCha20Rng::from_seed(*seed).random();
                 Some(digest_from_seed(*seed))
             })
             .collect();

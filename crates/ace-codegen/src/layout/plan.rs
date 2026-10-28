@@ -1,6 +1,7 @@
 use core::num::NonZeroUsize;
 
 use super::{InputKey, SELECTORS_PER_AIR};
+#[cfg(any(test, feature = "compiler"))]
 use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
@@ -97,10 +98,10 @@ pub(crate) struct StarkVarIndices {
 pub(crate) struct MultiAirIndices {
     /// Number of AIR instances represented in the layout.
     pub air_count: NonZeroUsize,
-    /// Multi-AIR fold beta slot.
-    pub fold_beta: usize,
     /// First per-AIR selector slot.
     pub selector_start: usize,
+    /// First per-AIR fold-coefficient slot.
+    pub fold_coeff_start: usize,
 }
 
 /// ACE input layout for circuit evaluation.
@@ -125,12 +126,20 @@ impl InputLayout {
         super::InputKeyMapper { layout: self }
     }
 
+    /// Number of quotient coordinate READ slots, including committed row padding.
+    ///
+    /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
+    pub fn quotient_width(&self) -> usize {
+        self.regions.quotient_curr.width
+    }
+
     /// Map a logical `InputKey` into the flat input index, if present.
     pub fn index(&self, key: InputKey) -> Option<usize> {
         self.mapper().index_of(key)
     }
 
     /// Validate internal layout invariants.
+    #[cfg(any(test, feature = "compiler"))]
     pub(crate) fn validate(&self) {
         let mut max_end = 0usize;
         for region in [
@@ -168,13 +177,13 @@ impl InputLayout {
         assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
 
         let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
-        assert_eq!(
-            self.regions.quotient_curr.width, quotient_width,
-            "quotient_curr width mismatch"
+        assert!(
+            self.regions.quotient_curr.width >= quotient_width,
+            "quotient_curr omits logical chunks"
         );
         assert_eq!(
-            self.regions.quotient_next.width, quotient_width,
-            "quotient_next width mismatch"
+            self.regions.quotient_next.width, self.regions.quotient_curr.width,
+            "quotient row widths differ"
         );
         assert_eq!(
             self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,
@@ -197,9 +206,11 @@ impl InputLayout {
         check("f", self.stark.f);
         check("s0", self.stark.s0);
         if let Some(multi_air) = self.stark.multi_air {
-            check("multi_air_fold_beta", multi_air.fold_beta);
             for i in 0..(multi_air.air_count.get() * SELECTORS_PER_AIR) {
                 check("air_selector", multi_air.selector_start + i);
+            }
+            for i in 0..multi_air.air_count.get() {
+                check("fold_coeff", multi_air.fold_coeff_start + i);
             }
         }
 
@@ -217,8 +228,10 @@ impl InputLayout {
 }
 
 impl StarkVarIndices {
-    pub(crate) fn multi_air_fold_beta_index(&self) -> Option<usize> {
-        self.multi_air.map(|multi_air| multi_air.fold_beta)
+    pub(crate) fn multi_air_fold_coeff_index(&self, air_index: usize) -> Option<usize> {
+        let multi_air = self.multi_air?;
+        let start = multi_air.fold_coeff_start;
+        (air_index < multi_air.air_count.get()).then_some(start + air_index)
     }
 
     pub(crate) fn air_selector_index(

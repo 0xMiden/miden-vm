@@ -9,7 +9,7 @@
 //! fine-grained control.
 //!
 //! ```bash
-//! # Quick run with defaults (blake3:15 keccak:18 poseidon2:19):
+//! # Quick run with defaults (blake3:15 keccak:18):
 //! cargo run -p miden-bench --features concurrent --release
 //!
 //! # Custom traces:
@@ -18,14 +18,12 @@
 //! # Full tracing tree:
 //! cargo run -p miden-bench --features concurrent --release -- -v keccak:15
 //!
-//! # Multi-iteration with warm-up (reports min/median/mean/max):
-//! cargo run -p miden-bench --features concurrent --release -- -n 5 keccak:15
-//!
-//! # Miden-shaped AIR (auto log_blowup=3):
+//! # Dummy degree-9 AIRs with configurable widths (auto log_blowup=3):
 //! cargo run -p miden-bench --features concurrent --release -- miden:18:51 miden:19:20
 //!
 //! # Batch-STARK comparison:
-//! cargo run -p miden-bench --features concurrent --release -- -m batch keccak:15 keccak:18
+//! cargo run -p miden-bench --features concurrent --release -- \
+//!   -m batch -H blake3 keccak:15 keccak:18
 //! ```
 
 mod batch;
@@ -35,45 +33,28 @@ mod lifted;
 use std::{fmt, time::Instant};
 
 use clap::Parser;
+use miden_air::config::eidos_config;
+use miden_core::Felt as MidenFelt;
 use miden_lifted_stark::{
     GenericStarkConfig,
     pcs::PcsParams,
     testing::{
         airs::{
-            blake3::generate_blake3_trace,
-            keccak::generate_keccak_trace,
+            blake3::generate_blake3_trace, keccak::generate_keccak_trace,
             miden::generate_dummy_trace,
-            poseidon2::{HALF_FULL_ROUNDS, PARTIAL_ROUNDS, WIDTH, generate_poseidon2_trace},
         },
         configs::{
             Felt, QuadFelt, goldilocks_blake3 as blake3, goldilocks_blake3_192 as blake3_192,
-            goldilocks_keccak as keccak, goldilocks_poseidon2 as gl,
+            goldilocks_keccak as keccak,
         },
     },
 };
-use p3_goldilocks::GenericPoseidon2LinearLayersGoldilocks;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use p3_poseidon2_air::RoundConstants;
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use tracing::info_span;
 use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::cli::{AirType, Cli, HashFn, Mode, TraceSpec};
-
-// ─── Type aliases ───────────────────────────────────────────────────────────���
-
-type Gl = p3_goldilocks::Goldilocks;
-type GlRoundConstants = RoundConstants<Gl, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>;
-
-type BatchPoseidon2Air = p3_poseidon2_air::Poseidon2Air<
-    Felt,
-    GenericPoseidon2LinearLayersGoldilocks,
-    WIDTH,
-    { miden_lifted_stark::testing::airs::poseidon2::SBOX_DEGREE },
-    { miden_lifted_stark::testing::airs::poseidon2::SBOX_REGISTERS },
-    HALF_FULL_ROUNDS,
-    PARTIAL_ROUNDS,
->;
 
 const KECCAK_ROWS_PER_HASH: usize = 24;
 
@@ -137,11 +118,7 @@ fn print_config(cli: &Cli, specs: &[TraceSpec], traces: &[RowMajorMatrix<Felt>],
 // Trace generation (shared between modes)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn generate_traces(
-    specs: &[TraceSpec],
-    rng: &mut SmallRng,
-    constants: Option<&GlRoundConstants>,
-) -> Vec<RowMajorMatrix<Felt>> {
+fn generate_traces(specs: &[TraceSpec], rng: &mut SmallRng) -> Vec<RowMajorMatrix<Felt>> {
     specs
         .iter()
         .map(|spec| {
@@ -151,14 +128,6 @@ fn generate_traces(
                         let n = keccak_hash_count(spec.log_height);
                         let inputs: Vec<[u64; 25]> = (0..n).map(|_| rng.random()).collect();
                         generate_keccak_trace(inputs)
-                    },
-                    AirType::Poseidon2 => {
-                        let n = 1usize << spec.log_height;
-                        let inputs: Vec<[Felt; 12]> = (0..n).map(|_| rng.random()).collect();
-                        generate_poseidon2_trace(
-                            inputs,
-                            constants.expect("poseidon2 constants required"),
-                        )
                     },
                     AirType::Blake3 => {
                         let n = 1usize << spec.log_height;
@@ -177,6 +146,10 @@ fn generate_traces(
 
 fn main() {
     let cli = Cli::parse();
+    assert!(
+        !matches!(cli.mode, Mode::Batch) || cli.hash != HashFn::Eidos,
+        "batch mode requires --hash keccak, blake3, or blake3-192",
+    );
 
     // Apply defaults.
     let mut specs = if cli.traces.is_empty() {
@@ -190,12 +163,6 @@ fn main() {
             TraceSpec {
                 air_type: AirType::Keccak,
                 log_height: 18,
-                width: 0,
-                num_aux_cols: 0,
-            },
-            TraceSpec {
-                air_type: AirType::Poseidon2,
-                log_height: 19,
                 width: 0,
                 num_aux_cols: 0,
             },
@@ -213,17 +180,8 @@ fn main() {
     // Set up tracing subscriber (quiet by default, -v for full tree).
     init_tracing(cli.verbose);
 
-    // Generate Poseidon2 round constants (from RNG, before trace inputs).
     let mut rng = SmallRng::seed_from_u64(cli.seed);
-    let poseidon2_constants: Option<GlRoundConstants> =
-        if specs.iter().any(|s| s.air_type == AirType::Poseidon2) {
-            Some(RoundConstants::from_rng(&mut rng))
-        } else {
-            None
-        };
-
-    // Generate traces.
-    let traces = generate_traces(&specs, &mut rng, poseidon2_constants.as_ref());
+    let traces = generate_traces(&specs, &mut rng);
 
     // Print configuration summary.
     print_config(&cli, &specs, &traces, log_blowup);
@@ -242,60 +200,68 @@ fn main() {
 
     type Dft = p3_dft::Radix2DitParallel<Felt>;
 
+    // Convert field representations before timing the native Eidos prover.
+    let (traces, native_traces) = if cli.hash == HashFn::Eidos {
+        let native = traces
+            .into_iter()
+            .map(|matrix| {
+                RowMajorMatrix::new(
+                    matrix.values.into_iter().map(MidenFelt::from).collect(),
+                    matrix.width,
+                )
+            })
+            .collect::<Vec<_>>();
+        (Vec::new(), Some(native))
+    } else {
+        (traces, None)
+    };
+
     // Run prove/verify.
     let start = Instant::now();
     let result = match cli.mode {
         Mode::Lifted => match cli.hash {
-            HashFn::Poseidon2 => {
-                let config = GenericStarkConfig::new(
-                    pcs,
-                    gl::test_lmcs(),
-                    Dft::default(),
-                    gl::test_challenger(),
-                );
-                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
+            HashFn::Eidos => {
+                let config = eidos_config(pcs, [MidenFelt::ZERO; 4]);
+                lifted::run_lifted(
+                    &config,
+                    &specs,
+                    native_traces.expect("native Eidos traces"),
+                    &cli,
+                )
             },
             HashFn::Keccak => {
-                let config = GenericStarkConfig::new(
+                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
                     pcs,
                     keccak::test_lmcs(),
                     Dft::default(),
                     keccak::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &cli)
             },
             HashFn::Blake3 => {
-                let config = GenericStarkConfig::new(
+                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
                     pcs,
                     blake3::test_lmcs(),
                     Dft::default(),
                     blake3::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &cli)
             },
             HashFn::Blake3_192 => {
-                let config = GenericStarkConfig::new(
+                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
                     pcs,
                     blake3_192::test_lmcs(),
                     Dft::default(),
                     blake3_192::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &cli)
             },
         },
         Mode::Batch => match cli.hash {
-            HashFn::Poseidon2 => {
-                batch::run_batch_poseidon2(&specs, &traces, &poseidon2_constants, log_blowup, &cli)
-            },
-            HashFn::Keccak => {
-                batch::run_batch_keccak(&specs, &traces, &poseidon2_constants, log_blowup, &cli)
-            },
-            HashFn::Blake3 => {
-                batch::run_batch_blake3(&specs, &traces, &poseidon2_constants, log_blowup, &cli)
-            },
-            HashFn::Blake3_192 => {
-                batch::run_batch_blake3_192(&specs, &traces, &poseidon2_constants, log_blowup, &cli)
-            },
+            HashFn::Eidos => unreachable!("Eidos requires lifted mode"),
+            HashFn::Keccak => batch::run_batch_keccak(&specs, &traces, log_blowup, &cli),
+            HashFn::Blake3 => batch::run_batch_blake3(&specs, &traces, log_blowup, &cli),
+            HashFn::Blake3_192 => batch::run_batch_blake3_192(&specs, &traces, log_blowup, &cli),
         },
     };
     let elapsed = start.elapsed();
@@ -373,7 +339,7 @@ mod tests {
     #[test]
     fn non_keccak_trace_summary_keeps_power_of_two_rows() {
         let spec = TraceSpec {
-            air_type: AirType::Poseidon2,
+            air_type: AirType::Blake3,
             log_height: 19,
             width: 0,
             num_aux_cols: 0,

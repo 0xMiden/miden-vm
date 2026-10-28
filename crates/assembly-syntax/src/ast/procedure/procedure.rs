@@ -288,7 +288,7 @@ impl crate::prettier::PrettyPrint for Procedure {
             doc += const_text("begin");
         } else {
             if self.num_locals > 0 {
-                doc += text(format!("@locals(\"{}\")", self.num_locals)) + nl();
+                doc += text(format!("@locals({})", self.num_locals)) + nl();
             }
             match self.signature() {
                 Some(sig) if sig.cc != crate::ast::types::CallConv::Fast => {

@@ -1,4 +1,11 @@
 use miden::core::stark::constants
+use {
+    HOOK_PROCESS_PUBLIC_INPUTS_PTR,
+    PUBLIC_INPUTS_ADDRESS_PTR,
+    TMP1_PTR,
+    TMP2_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
 
 #! Processes the public inputs.
 #!
@@ -9,8 +16,8 @@ use miden::core::stark::constants
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc process_public_inputs
-    exec.constants::get_procedure_digest_process_public_inputs_ptr dynexec
+pub proc process_public_inputs()
+    push.HOOK_PROCESS_PUBLIC_INPUTS_PTR dynexec
 end
 
 #! Computes and stores the start address of the ACE public-input region.
@@ -22,48 +29,59 @@ end
 #! This helper only computes the ACE READ public-input pointer. Relation-specific code owns any
 #! additional statement inputs that are not read by the ACE circuit.
 #!
-#! Inputs:  [num_fixed_len_pi, ...]
+#! Inputs:  [aux_rand_ptr, num_fixed_len_pi, ...]
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc compute_and_store_public_inputs_address
-    exec.constants::aux_rand_elem_ptr
+pub proc compute_and_store_public_inputs_address(
+    aux_rand_ptr: ptr<types::QuadFelt>,
+    num_fixed_len_pi: u32,
+)
     # => [aux_rand_ptr, num_fixed_len_pi, ...]
     swap mul.2 sub
     # => [public_inputs_ptr, ...]
 
-    exec.constants::public_inputs_address_ptr mem_store
+    mem_store.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
 #! Loads 8 base-field elements from memory, stores them as 8 extension-field elements, and leaves
-#! the base elements in the rate slots for a direct full-rate absorption.
+#! the base elements in the block slots for one complete Eidos compression.
 #!
-#! Input:  [R1, R2, C, dst, src, ...]
-#! Output: [R1', R2', C, dst + 16, src + 8, ...]
+#! Transcript absorption is handled separately (see `sys/vm/public_inputs::absorb_public_inputs`),
+#! so callers may treat the returned `A0`/`A1` words as disposable placeholders.
+#!
+#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, dst, src, ...]
+#! Outputs: [A0, A1, CV, dst + 16, src + 8, ...]
+#!
+#! A0 and A1 are the original base-element words from memory, in increasing address order.
 #!
 #! Invocation: exec
-pub proc load_base_store_extension_double_word_from_mem
+pub proc load_base_store_extension_double_word_from_mem(
+    state: types::EidosState,
+    dst: ptr<types::QuadFelt>,
+    src: types::Address,
+) -> (types::EidosState, ptr<types::QuadFelt>, types::Address)
     dup.13 mem_loadw_le
-    exec.constants::tmp1 mem_storew_le
+    mem_storew_le.TMP1_PTR
     movup.13 add.4 movdn.13
 
     swapw
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a3, a2, a1, a0, C, dst, src, ...]
+    # => [0, 0, 0, 0, a0, a1, a2, a3, CV, dst, src + 4, ...]
     movdn.7
     movdn.5
     movdn.3
     swap
-    # => [a3, 0, a2, 0, a1, 0, a0, 0, C, dst, src, ...]
+    # => [a0, 0, a1, 0, a2, 0, a3, 0, CV, dst, src + 4, ...]
 
     dup.12
     mem_storew_le
 
     dup.13 mem_loadw_le
-    exec.constants::tmp2 mem_storew_le
+    mem_storew_le.TMP2_PTR
     movup.13 add.4 movdn.13
     swapw
-    # => [a3, 0, a2, 0, a7, a6, a5, a4, C, dst, src, ...]
+    # => [a2, 0, a3, 0, a4, a5, a6, a7, CV, dst, src + 8, ...]
 
     dup.12 add.4
     mem_storew_le
@@ -73,18 +91,18 @@ pub proc load_base_store_extension_double_word_from_mem
     movdn.5
     movdn.3
     swap
-    # => [a7, 0, a6, 0, a5, 0, a4, 0, C, dst, src, ...]
+    # => [a4, 0, a5, 0, a6, 0, a7, 0, CV, dst, src + 8, ...]
 
     dup.12
     add.8
     mem_storew_le
-    exec.constants::tmp2 mem_loadw_le
+    mem_loadw_le.TMP2_PTR
     swapw
 
     dup.12
     add.16 swap.13
     add.12
     mem_storew_le
-    exec.constants::tmp1 mem_loadw_le
-    # => [a3, a2, a1, a0, a7, a6, a5, a4, C, dst + 16, src + 8, ...]
+    mem_loadw_le.TMP1_PTR
+    # => [a0, a1, a2, a3, a4, a5, a6, a7, CV, dst + 16, src + 8, ...]
 end

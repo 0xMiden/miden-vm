@@ -1,0 +1,1321 @@
+//! Message structs for LogUp bus interactions.
+//!
+//! Each struct represents a reduced denominator encoding: `α + Σ βⁱ · field_i`.
+//! Fields are named for readability; the [`super::lookup::LookupMessage`] trait
+//! (implemented further down in this file) provides the `encode` method that
+//! produces the extension-field value.
+//!
+//! Chiplet messages are addressed by interaction-specific bus domains (one [`BusId`]
+//! variant per semantic message kind). Constructors pick the interaction domain; payloads
+//! start directly with the semantic fields (addr, ctx, etc.).
+//!
+//! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
+
+use miden_core::{
+    WORD_SIZE,
+    chiplets::eidos_compression,
+    field::{Algebra, PrimeCharacteristicRing},
+};
+
+use crate::{
+    constraints::and8_lookup::eidos::BytePairRelation,
+    lookup::{Challenges, message::LookupMessage},
+    trace::chiplets::hasher::{BLOCK_LEN, STATE_WIDTH},
+};
+
+// MESSAGE PAYLOAD ALIASES
+// ================================================================================================
+
+type CompressionState<E> = [E; STATE_WIDTH];
+type Block<E> = [E; BLOCK_LEN];
+type WordFields<E> = [E; WORD_SIZE];
+
+// BUS IDENTIFIERS
+// ================================================================================================
+
+/// Width of the `beta_powers` table `Challenges` precomputes for Miden's bus
+/// messages, i.e. the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in
+/// `bus_prefix[i] = alpha + (i + 1) * gamma`.
+///
+/// Must match the recursive verifier's hardcoded `gamma = beta^16` computation in
+/// `crates/lib/core/asm/sys/vm/public_inputs.masm` (4 squarings). The const assertion
+/// below is a tripwire: anyone changing `MIDEN_MAX_MESSAGE_WIDTH` must also update the
+/// MASM-side computation in lockstep, or the build fails here.
+pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
+
+const _: () = assert!(
+    MIDEN_MAX_MESSAGE_WIDTH == 16,
+    "MIDEN_MAX_MESSAGE_WIDTH is hardcoded as 16 by the MASM recursive verifier (4 squarings to reach gamma = beta^16). Update `crates/lib/core/asm/sys/vm/public_inputs.masm` before changing this constant.",
+);
+
+/// Domain-separated bus interaction identifier.
+///
+/// Each variant identifies a distinct bus interaction type. When encoding a message,
+/// the bus is cast to `usize` and indexes into
+/// [`Challenges::bus_prefix`](crate::lookup::Challenges) to obtain the additive base
+/// `bus_prefix[bus] = alpha + (bus + 1) * gamma`.
+#[repr(usize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum BusId {
+    // --- Out-of-circuit (boundary correction / reduced_aux_values) ---
+    /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
+    KernelRomInit = 0,
+    /// Block hash table (decoder p2): root program hash boundary correction.
+    BlockHashTable = 1,
+    /// Log-deferred state: initial/final deferred-root boundary correction.
+    LogDeferredRoot = 2,
+
+    // --- In-circuit buses ---
+    KernelRomCall = 3,
+    HasherLinearHashInit = 4,
+    /// Reserved hasher bus id. One-row controller rows use `HasherReturnHash`.
+    ReservedHasherBus5 = 5,
+    HasherAbsorption = 6,
+    HasherReturnHash = 7,
+    HasherMerkleVerifyInit = 8,
+    HasherMerkleOldInit = 9,
+    HasherMerkleNewInit = 10,
+    MemoryReadElement = 11,
+    MemoryWriteElement = 12,
+    MemoryReadWord = 13,
+    MemoryWriteWord = 14,
+    Bitwise = 15,
+    AceInit = 16,
+    /// Block-stack relation: a tagged union of control-flow continuations and saved
+    /// caller frames. See [`BlockStackMsg`].
+    BlockStackTable = 17,
+    /// Op group table (decoder p3): tracks operation batch consumption.
+    OpGroupTable = 18,
+    /// Stack overflow table.
+    StackOverflowTable = 19,
+    /// Sibling table: shares Merkle tree sibling nodes between old/new root computations.
+    SiblingTable = 20,
+    /// Range checker bus (LogUp).
+    RangeCheck = 21,
+    /// ACE wiring bus (LogUp).
+    AceWiring = 22,
+    /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
+    HasherCompressionLink = 23,
+    /// Eidos compression internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
+    EidosCompressionInputCv = 24,
+    /// Byte-pair lookup table: canonical `[a, b, a xor b]` for byte-sized operands.
+    And8Lookup = 25,
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus26 = 26,
+    /// Normalized Eidos rot12 contribution for byte position 1: `[a, b, value]`.
+    EidosCompressionRot12Pos1 = 27,
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus28 = 28,
+    /// Normalized Eidos rot12 contribution for byte position 3: `[a, b, value]`.
+    EidosCompressionRot12Pos3 = 29,
+    /// Normalized Eidos rot7 contribution for byte position 0: `[a, b, value]`.
+    EidosCompressionRot7Pos0 = 30,
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus31 = 31,
+    /// Normalized Eidos rot7 contribution for byte position 2: `[a, b, value]`.
+    EidosCompressionRot7Pos2 = 32,
+    /// Normalized Eidos rot7 contribution for byte position 3: `[a, b, value]`.
+    EidosCompressionRot7Pos3 = 33,
+    /// Eidos compression internal chaining-value pair bus:
+    /// `[4 * compression_cycle_id + pair_index, word_even, word_odd]`.
+    EidosCompressionInputWord = 34,
+    /// Eidos compression internal message-word bus: `[word_index, word, compression_cycle_id]`.
+    EidosCompressionMessageWord = 35,
+    /// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+    AeadStreamRequest = 36,
+    /// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
+    AeadEidosCompressionInput = 37,
+    /// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
+    AeadEidosCompressionOutputPair = 38,
+}
+
+impl BusId {
+    /// Number of bus-prefix slots through the highest assigned discriminant. Reserved slots remain
+    /// part of this prefix layout.
+    pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
+}
+
+// Per-variant discriminant locks. `BusId::COUNT` records only the high watermark; a reorder below
+// it would silently swap which `bus_prefix[i]` each variant resolves to, breaking domain separation
+// across every emitter and consumer. These asserts pin every assigned and reserved ID.
+//
+// If a new bus is added: append it after the current tail and add a matching assert for the new
+// variant. Renumbering existing entries is a protocol change and requires regenerated bindings.
+const _: () = assert!(BusId::KernelRomInit as usize == 0);
+const _: () = assert!(BusId::BlockHashTable as usize == 1);
+const _: () = assert!(BusId::LogDeferredRoot as usize == 2);
+const _: () = assert!(BusId::KernelRomCall as usize == 3);
+const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
+const _: () = assert!(BusId::ReservedHasherBus5 as usize == 5);
+const _: () = assert!(BusId::HasherAbsorption as usize == 6);
+const _: () = assert!(BusId::HasherReturnHash as usize == 7);
+const _: () = assert!(BusId::HasherMerkleVerifyInit as usize == 8);
+const _: () = assert!(BusId::HasherMerkleOldInit as usize == 9);
+const _: () = assert!(BusId::HasherMerkleNewInit as usize == 10);
+const _: () = assert!(BusId::MemoryReadElement as usize == 11);
+const _: () = assert!(BusId::MemoryWriteElement as usize == 12);
+const _: () = assert!(BusId::MemoryReadWord as usize == 13);
+const _: () = assert!(BusId::MemoryWriteWord as usize == 14);
+const _: () = assert!(BusId::Bitwise as usize == 15);
+const _: () = assert!(BusId::AceInit as usize == 16);
+const _: () = assert!(BusId::BlockStackTable as usize == 17);
+const _: () = assert!(BusId::OpGroupTable as usize == 18);
+const _: () = assert!(BusId::StackOverflowTable as usize == 19);
+const _: () = assert!(BusId::SiblingTable as usize == 20);
+const _: () = assert!(BusId::RangeCheck as usize == 21);
+const _: () = assert!(BusId::AceWiring as usize == 22);
+const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
+const _: () = assert!(BusId::EidosCompressionInputCv as usize == 24);
+const _: () = assert!(BusId::And8Lookup as usize == 25);
+const _: () = assert!(BusId::ReservedEidosCompressionBus26 as usize == 26);
+const _: () = assert!(BusId::EidosCompressionRot12Pos1 as usize == 27);
+const _: () = assert!(BusId::ReservedEidosCompressionBus28 as usize == 28);
+const _: () = assert!(BusId::EidosCompressionRot12Pos3 as usize == 29);
+const _: () = assert!(BusId::EidosCompressionRot7Pos0 as usize == 30);
+const _: () = assert!(BusId::ReservedEidosCompressionBus31 as usize == 31);
+const _: () = assert!(BusId::EidosCompressionRot7Pos2 as usize == 32);
+const _: () = assert!(BusId::EidosCompressionRot7Pos3 as usize == 33);
+const _: () = assert!(BusId::EidosCompressionInputWord as usize == 34);
+const _: () = assert!(BusId::EidosCompressionMessageWord as usize == 35);
+const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
+const _: () = assert!(BusId::AeadEidosCompressionInput as usize == 37);
+const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);
+
+// HASHER MESSAGES
+// ================================================================================================
+
+/// Hasher chiplet message: a [`BusId`] tag plus a variable-width payload.
+///
+/// All hasher messages encode as `bus_prefix[kind] + [addr, node_index, ...payload]`; only
+/// the payload width differs between variants.
+#[derive(Clone, Debug)]
+pub struct HasherMsg<E> {
+    pub kind: BusId,
+    pub addr: E,
+    pub node_index: E,
+    pub payload: HasherPayload<E>,
+}
+
+/// Payload for a [`HasherMsg`]; width varies per interaction kind.
+#[derive(Clone, Debug)]
+pub enum HasherPayload<E> {
+    /// 12-lane Eidos compression state.
+    State(CompressionState<E>),
+    /// 8-Felt compression block.
+    Block(Block<E>),
+    /// 4-element word/digest.
+    Word(WordFields<E>),
+    /// Merkle direction bit followed by a 4-element leaf word.
+    MerkleWord { direction_bit: E, word: WordFields<E> },
+}
+
+impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
+    // --- State messages (14 payload elements: [addr, node_index, state[12]]) ---
+
+    /// Linear hash / control block init: full 12-lane Eidos compression state.
+    ///
+    /// Used by: COMPRESS input, LOGDEFERRED input.
+    pub fn linear_hash_init(addr: E, state: CompressionState<E>) -> Self {
+        Self {
+            kind: BusId::HasherLinearHashInit,
+            addr,
+            node_index: E::ZERO,
+            payload: HasherPayload::State(state),
+        }
+    }
+
+    /// Control block init: one 8-Felt block + Eidos chaining word initialized from `opcode`.
+    ///
+    /// Used by: JOIN, SPLIT, LOOP, CALL, SYSCALL, DYN, DYNCALL.
+    pub fn control_block(addr: E, block: &[E; 8], opcode: u8) -> Self {
+        let cv = eidos_compression::two_to_one_chaining_word(opcode as u32);
+        let cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
+        let state = [
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
+            cv[0].clone(),
+            cv[1].clone(),
+            cv[2].clone(),
+            cv[3].clone(),
+        ];
+        Self {
+            kind: BusId::HasherLinearHashInit,
+            addr,
+            node_index: E::ZERO,
+            payload: HasherPayload::State(state),
+        }
+    }
+
+    /// Basic-block hash init: one 8-Felt block + Eidos chaining word initialized from the
+    /// logical number of operation groups in the block.
+    pub fn basic_block_init(addr: E, block: &[E; 8], num_groups: E) -> Self {
+        let cv = eidos_compression::felt_sequence_chaining_word(0);
+        let mut cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
+        cv[1] = cv[1].clone() + num_groups;
+        let state = [
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
+            cv[0].clone(),
+            cv[1].clone(),
+            cv[2].clone(),
+            cv[3].clone(),
+        ];
+        Self {
+            kind: BusId::HasherLinearHashInit,
+            addr,
+            node_index: E::ZERO,
+            payload: HasherPayload::State(state),
+        }
+    }
+
+    // --- Block messages (10 payload elements: [addr, node_index, block[8]]) ---
+
+    /// Absorb the next block into a running hash.
+    ///
+    /// Used by: RESPAN.
+    pub fn absorption(addr: E, block: Block<E>) -> Self {
+        Self {
+            kind: BusId::HasherAbsorption,
+            addr,
+            node_index: E::ZERO,
+            payload: HasherPayload::Block(block),
+        }
+    }
+
+    // --- Word messages (6 payload elements: [addr, node_index, word[4]]) ---
+
+    /// Return one four-Felt hash result or updated chaining value (`node_index = 0`).
+    ///
+    /// `COMPRESS` returns an updated CV; the framed hash operations return completed digests.
+    /// Used by: COMPRESS output, LOGDEFERRED output, END, MPVERIFY output, MRUPDATE output.
+    pub fn return_hash(addr: E, word: WordFields<E>) -> Self {
+        Self {
+            kind: BusId::HasherReturnHash,
+            addr,
+            node_index: E::ZERO,
+            payload: HasherPayload::Word(word),
+        }
+    }
+
+    /// Start Merkle path verification (with explicit node_index).
+    ///
+    /// Used by: MPVERIFY input.
+    pub fn merkle_verify_init(
+        addr: E,
+        node_index: E,
+        direction_bit: E,
+        word: WordFields<E>,
+    ) -> Self {
+        Self {
+            kind: BusId::HasherMerkleVerifyInit,
+            addr,
+            node_index,
+            payload: HasherPayload::MerkleWord { direction_bit, word },
+        }
+    }
+
+    /// Start Merkle update, old path (with explicit node_index).
+    ///
+    /// Used by: MRUPDATE old input.
+    pub fn merkle_old_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
+        Self {
+            kind: BusId::HasherMerkleOldInit,
+            addr,
+            node_index,
+            payload: HasherPayload::MerkleWord { direction_bit, word },
+        }
+    }
+
+    /// Start Merkle update, new path (with explicit node_index).
+    ///
+    /// Used by: MRUPDATE new input.
+    pub fn merkle_new_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
+        Self {
+            kind: BusId::HasherMerkleNewInit,
+            addr,
+            node_index,
+            payload: HasherPayload::MerkleWord { direction_bit, word },
+        }
+    }
+}
+
+// MEMORY MESSAGES
+// ================================================================================================
+
+/// Memory chiplet message. Variants differ by payload size.
+///
+/// Encodes as `bus_prefix[bus] + [ctx, addr, clk, ...payload]`. Use the [`MemoryMsg`]
+/// associated functions (`read_element`, `write_element`, `read_word`, `write_word`) to
+/// build messages with the correct interaction kind.
+#[derive(Clone, Debug)]
+pub enum MemoryMsg<E> {
+    /// 5-element message: `[ctx, addr, clk, element]`.
+    ///
+    /// `#[non_exhaustive]` forces external construction through the typed
+    /// [`MemoryMsg::read_element`] / [`MemoryMsg::write_element`] helpers, which pin
+    /// `bus` to `MemoryReadElement` / `MemoryWriteElement`. Direct external construction
+    /// with an arbitrary `BusId` would silently break bus domain separation.
+    #[non_exhaustive]
+    Element {
+        bus: BusId,
+        ctx: E,
+        addr: E,
+        clk: E,
+        element: E,
+    },
+    /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
+    ///
+    /// `#[non_exhaustive]` forces external construction through the typed
+    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers — see
+    /// [`MemoryMsg::Element`] for rationale.
+    #[non_exhaustive]
+    Word {
+        bus: BusId,
+        ctx: E,
+        addr: E,
+        clk: E,
+        word: WordFields<E>,
+    },
+}
+
+impl<E> MemoryMsg<E> {
+    /// Read a single element from memory.
+    pub fn read_element(ctx: E, addr: E, clk: E, element: E) -> Self {
+        Self::Element {
+            bus: BusId::MemoryReadElement,
+            ctx,
+            addr,
+            clk,
+            element,
+        }
+    }
+
+    /// Write a single element to memory.
+    pub fn write_element(ctx: E, addr: E, clk: E, element: E) -> Self {
+        Self::Element {
+            bus: BusId::MemoryWriteElement,
+            ctx,
+            addr,
+            clk,
+            element,
+        }
+    }
+
+    /// Read a 4-element word from memory.
+    pub fn read_word(ctx: E, addr: E, clk: E, word: WordFields<E>) -> Self {
+        Self::Word {
+            bus: BusId::MemoryReadWord,
+            ctx,
+            addr,
+            clk,
+            word,
+        }
+    }
+
+    /// Write a 4-element word to memory.
+    pub fn write_word(ctx: E, addr: E, clk: E, word: WordFields<E>) -> Self {
+        Self::Word {
+            bus: BusId::MemoryWriteWord,
+            ctx,
+            addr,
+            clk,
+            word,
+        }
+    }
+}
+
+// BITWISE MESSAGE
+// ================================================================================================
+
+/// Bitwise chiplet message (4 elements): `[op, a, b, result]`.
+#[derive(Clone, Debug)]
+pub struct BitwiseMsg<E> {
+    pub op: E,
+    pub a: E,
+    pub b: E,
+    pub result: E,
+}
+
+impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
+    const AND_SELECTOR: u32 = 0;
+    const XOR_SELECTOR: u32 = 1;
+
+    /// Bitwise AND message (op selector = 0).
+    pub fn and(a: E, b: E, result: E) -> Self {
+        Self {
+            op: E::from_u32(Self::AND_SELECTOR),
+            a,
+            b,
+            result,
+        }
+    }
+
+    /// Bitwise XOR message (op selector = 1).
+    pub fn xor(a: E, b: E, result: E) -> Self {
+        Self {
+            op: E::from_u32(Self::XOR_SELECTOR),
+            a,
+            b,
+            result,
+        }
+    }
+}
+
+// DECODER MESSAGES
+// ================================================================================================
+
+const BLOCK_STACK_CALLER_FN_HASH_OFFSET: usize = 6;
+/// The entry-kind tag follows every caller-frame payload slot.
+const BLOCK_STACK_ENTRY_KIND_OFFSET: usize = BLOCK_STACK_CALLER_FN_HASH_OFFSET + WORD_SIZE;
+const _: () = assert!(BLOCK_STACK_ENTRY_KIND_OFFSET == 10);
+const _: () = assert!(BLOCK_STACK_ENTRY_KIND_OFFSET < MIDEN_MAX_MESSAGE_WIDTH);
+
+/// An entry in the single logical block-stack relation.
+///
+/// `Continuation` records only ordinary control-flow nesting. It is used by
+/// JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN and their matching END transitions.
+///
+/// `CallerFrame` additionally records the caller state that CALL/SYSCALL/DYNCALL save and their
+/// matching END restores. Its semantic payload is
+/// `[caller_ctx, caller_stack_depth, caller_overflow_addr, caller_fn_hash[4]]`. It has no loop
+/// marker: caller frames and LOOP continuations are disjoint entry kinds. The encoder writes zero
+/// to the shared layout's `is_loop` slot.
+///
+/// The variants are a tagged union within one bus: a dedicated payload slot authenticates which
+/// END behavior the corresponding insertion authorized. They must not be modeled as an untagged,
+/// zero-padded union, because a zeroed caller-frame payload would then collide with a continuation
+/// entry.
+#[derive(Clone, Debug)]
+pub enum BlockStackMsg<E> {
+    Continuation {
+        block_id: E,
+        parent_id: E,
+        is_loop: E,
+    },
+    CallerFrame {
+        block_id: E,
+        parent_id: E,
+        caller_ctx: E,
+        caller_stack_depth: E,
+        caller_overflow_addr: E,
+        caller_fn_hash: WordFields<E>,
+    },
+}
+
+/// Block hash queue message (7 elements):
+/// `[child_hash[4], parent, is_first_child, is_loop_body]`.
+///
+/// `FirstChild` — first child of a JOIN (is_first_child = 1, is_loop_body = 0).
+/// `Child` — non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
+/// `LoopBody` — loop body entry (is_first_child = 0, is_loop_body = 1).
+/// `End` — removal at END; both flags are computed expressions.
+#[derive(Clone, Debug)]
+pub enum BlockHashMsg<E> {
+    FirstChild {
+        parent: E,
+        child_hash: WordFields<E>,
+    },
+    Child {
+        parent: E,
+        child_hash: WordFields<E>,
+    },
+    LoopBody {
+        parent: E,
+        child_hash: WordFields<E>,
+    },
+    End {
+        parent: E,
+        child_hash: WordFields<E>,
+        is_first_child: E,
+        is_loop_body: E,
+    },
+}
+
+/// Op group table message (3 elements): `[batch_id, group_pos, group_value]`.
+#[derive(Clone, Debug)]
+pub struct OpGroupMsg<E> {
+    pub batch_id: E,
+    pub group_pos: E,
+    pub group_value: E,
+}
+
+impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
+    /// Create an op group message. Computes `group_pos = group_count - offset`.
+    pub fn new<V>(batch_id: &E, group_count: V, offset: u16, group_value: E) -> Self
+    where
+        V: core::ops::Sub<E, Output = E> + Clone,
+    {
+        Self {
+            batch_id: batch_id.clone(),
+            group_pos: group_count - E::from_u16(offset),
+            group_value,
+        }
+    }
+}
+
+// STACK MESSAGE
+// ================================================================================================
+
+/// Stack overflow table message (3 elements): `[clk, val, prev]`.
+///
+/// `clk` is the cycle at which the value spilled past `stack[15]`, `val` is the spilled element,
+/// and `prev` links to the previous overflow entry (the prior `b1`).
+#[derive(Clone, Debug)]
+pub struct StackOverflowMsg<E> {
+    pub clk: E,
+    pub val: E,
+    pub prev: E,
+}
+
+// HASHER COMPRESSION-LINK MESSAGE
+// ================================================================================================
+
+/// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
+///
+/// Binds one hasher controller row to one Eidos compression block.
+#[derive(Clone, Debug)]
+pub struct HasherCompressionLinkMsg<E> {
+    pub block: [E; 8],
+    pub cv_in: [E; 4],
+    pub cv_out: [E; 4],
+}
+
+// BYTE-PAIR LOOKUP MESSAGE
+// ================================================================================================
+
+/// Canonical byte-pair lookup message `[a, b, x]`, where `x = a xor b`.
+#[derive(Clone, Debug)]
+pub struct BytePairLookupMsg<E> {
+    pub a: E,
+    pub b: E,
+    pub x: E,
+}
+
+impl<E: PrimeCharacteristicRing> BytePairLookupMsg<E> {
+    /// Maps an ordinary AND witness onto the canonical XOR relation.
+    pub fn from_and(a: E, b: E, h: E) -> Self {
+        let x = a.clone() + b.clone() - h.double();
+        Self { a, b, x }
+    }
+}
+
+impl<E> BytePairLookupMsg<E> {
+    /// Constructs the canonical relation directly from `x = a xor b`.
+    pub fn from_xor(a: E, b: E, x: E) -> Self {
+        Self { a, b, x }
+    }
+}
+
+/// Dedicated normalized Eidos rotation message `[a, b, value]`.
+#[derive(Clone, Debug)]
+pub(crate) struct EidosRotationMsg<E> {
+    relation: BytePairRelation,
+    a: E,
+    b: E,
+    value: E,
+}
+
+impl<E> EidosRotationMsg<E> {
+    /// Constructs a provider message whose value is already normalized.
+    pub(crate) fn from_normalized(relation: BytePairRelation, a: E, b: E, value: E) -> Self {
+        assert!(relation != BytePairRelation::CanonicalXor);
+        Self { relation, a, b, value }
+    }
+}
+
+pub(crate) const fn byte_pair_relation_bus(relation: BytePairRelation) -> BusId {
+    match relation {
+        BytePairRelation::CanonicalXor => BusId::And8Lookup,
+        BytePairRelation::Rot12Pos1 => BusId::EidosCompressionRot12Pos1,
+        BytePairRelation::Rot7Pos0 => BusId::EidosCompressionRot7Pos0,
+        BytePairRelation::Rot7Pos2 => BusId::EidosCompressionRot7Pos2,
+        BytePairRelation::Rot12Pos3 => BusId::EidosCompressionRot12Pos3,
+        BytePairRelation::Rot7Pos3 => BusId::EidosCompressionRot7Pos3,
+    }
+}
+
+// AEAD STREAM MESSAGES
+// ================================================================================================
+
+/// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+#[derive(Clone, Debug)]
+pub struct AeadStreamRequestMsg<E> {
+    pub ctx: E,
+    pub clk: E,
+    pub src_ptr: E,
+    pub dst_ptr: E,
+    pub lane_base: E,
+}
+
+/// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
+#[derive(Clone, Debug)]
+pub struct AeadEidosCompressionInputMsg<E> {
+    pub clk: E,
+    pub state: CompressionState<E>,
+}
+
+/// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
+#[derive(Clone, Debug)]
+pub struct AeadEidosCompressionOutputPairMsg<E> {
+    pub clk: E,
+    pub first_lane_idx: E,
+    pub value0: E,
+    pub value1: E,
+}
+
+// KERNEL ROM MESSAGE
+// ================================================================================================
+
+/// Kernel ROM message (4 elements): `bus_prefix[bus] + [digest[4]]`.
+///
+/// Two bus domains: INIT (one remove per declared procedure, balanced by the boundary
+/// correction from public inputs) and CALL (one insert per SYSCALL, carrying the
+/// multiplicity from kernel ROM column 0; balanced by decoder-emitted SYSCALL removes).
+#[derive(Clone, Debug)]
+pub struct KernelRomMsg<E> {
+    bus: BusId,
+    pub digest: WordFields<E>,
+}
+
+impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
+    /// Kernel procedure call message (SYSCALL request side + chiplet CALL response).
+    pub fn call(digest: WordFields<E>) -> Self {
+        Self { bus: BusId::KernelRomCall, digest }
+    }
+
+    /// Kernel procedure init message (public-input boundary + chiplet INIT response).
+    pub fn init(digest: WordFields<E>) -> Self {
+        Self { bus: BusId::KernelRomInit, digest }
+    }
+}
+
+// ACE MESSAGE
+// ================================================================================================
+
+/// ACE circuit evaluation init message (5 elements): `[clk, ctx, ptr, num_read, num_eval]`.
+#[derive(Clone, Debug)]
+pub struct AceInitMsg<E> {
+    pub clk: E,
+    pub ctx: E,
+    pub ptr: E,
+    pub num_read: E,
+    pub num_eval: E,
+}
+
+// RANGE CHECK MESSAGE
+// ================================================================================================
+
+/// Range check message (1 element): `[value]`.
+///
+/// The denominator is `α + β⁰ · value`.
+#[derive(Clone, Debug)]
+pub struct RangeMsg<E> {
+    pub value: E,
+}
+
+// LOG-DEFERRED STATE MESSAGE
+// ================================================================================================
+
+/// Log-deferred state message (4 elements): deferred root `state[4]`.
+#[derive(Clone, Debug)]
+pub struct LogDeferredMsg<E> {
+    pub state: WordFields<E>,
+}
+
+// SIBLING TABLE MESSAGE
+// ================================================================================================
+
+// ACE WIRING MESSAGE
+// ================================================================================================
+
+/// ACE wiring bus message (5 elements): `[clk, ctx, id, v0, v1]`.
+///
+/// Encodes a single wire entry for the ACE wiring bus. Each wire carries
+/// an identifier and a two-coefficient extension-field value.
+#[derive(Clone, Debug)]
+pub struct AceWireMsg<E> {
+    pub clk: E,
+    pub ctx: E,
+    pub id: E,
+    pub v0: E,
+    pub v1: E,
+}
+
+// CHIPLET RESPONSE MESSAGES
+// ================================================================================================
+
+/// Memory chiplet response message with conditional element/word encoding.
+///
+/// The chiplet-side memory response must select between element access (4 payload
+/// elements: `[ctx, addr, clk, element]`) and word access (7 payload elements:
+/// `[ctx, addr, clk, word[4]]`) based on `is_word`. The label, address, and element are
+/// all pre-computed from the chiplet columns (including the idx0/idx1 element mux).
+#[derive(Clone, Debug)]
+pub struct MemoryResponseMsg<E> {
+    pub is_read: E,
+    pub ctx: E,
+    pub addr: E,
+    pub clk: E,
+    pub is_word: E,
+    pub element: E,
+    pub word: WordFields<E>,
+}
+
+// LOOKUP MESSAGE IMPLEMENTATIONS
+// ================================================================================================
+
+// --- HasherMsg (interaction-specific bus ids) ----------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for HasherMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let mut acc = challenges.bus_prefix[self.kind as usize].clone();
+        acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
+        match &self.payload {
+            HasherPayload::State(state) => {
+                acc += challenges.inner_product_at(2, state.as_slice());
+            },
+            HasherPayload::Block(block) => {
+                acc += challenges.inner_product_at(2, block.as_slice());
+            },
+            HasherPayload::Word(word) => {
+                acc += challenges.inner_product_at(2, word.as_slice());
+            },
+            HasherPayload::MerkleWord { direction_bit, word } => {
+                acc += challenges.inner_product_at(2, core::slice::from_ref(direction_bit));
+                acc += challenges.inner_product_at(3, word.as_slice());
+            },
+        }
+        acc
+    }
+}
+
+// --- MemoryMsg (interaction-specific bus ids) ----------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for MemoryMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let bus = match self {
+            Self::Element { bus, .. } | Self::Word { bus, .. } => *bus as usize,
+        };
+        let mut acc = challenges.bus_prefix[bus].clone();
+        match self {
+            Self::Element { ctx, addr, clk, element, .. } => {
+                acc += challenges.inner_product_at(
+                    0,
+                    &[ctx.clone(), addr.clone(), clk.clone(), element.clone()],
+                );
+            },
+            Self::Word { ctx, addr, clk, word, .. } => {
+                acc += challenges.inner_product_at(0, &[ctx.clone(), addr.clone(), clk.clone()]);
+                acc += challenges.inner_product_at(3, word.as_slice());
+            },
+        }
+        acc
+    }
+}
+
+// --- BitwiseMsg ----------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for BitwiseMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::Bitwise as usize,
+            [self.op.clone(), self.a.clone(), self.b.clone(), self.result.clone()],
+        )
+    }
+}
+
+// --- AEAD stream messages -----------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for AeadStreamRequestMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadStreamRequest as usize,
+            [
+                self.ctx.clone(),
+                self.clk.clone(),
+                self.src_ptr.clone(),
+                self.dst_ptr.clone(),
+                self.lane_base.clone(),
+            ],
+        )
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionInputMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let fields: [E; 16] = core::array::from_fn(|i| {
+            if i < 12 {
+                self.state[i].clone()
+            } else if i == 12 {
+                self.clk.clone()
+            } else {
+                E::ZERO
+            }
+        });
+        challenges.encode(BusId::AeadEidosCompressionInput as usize, fields)
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionOutputPairMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadEidosCompressionOutputPair as usize,
+            [
+                self.clk.clone(),
+                self.first_lane_idx.clone(),
+                self.value0.clone(),
+                self.value1.clone(),
+            ],
+        )
+    }
+}
+
+// --- BytePairLookupMsg ---------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for BytePairLookupMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges
+            .encode(BusId::And8Lookup as usize, [self.a.clone(), self.b.clone(), self.x.clone()])
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for EidosRotationMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            byte_pair_relation_bus(self.relation) as usize,
+            [self.a.clone(), self.b.clone(), self.value.clone()],
+        )
+    }
+}
+// --- BlockStackMsg -------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for BlockStackMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        // Both variants use one bus. Slot 10 tags Continuation as 0 and CallerFrame as 1; without
+        // it, a caller frame with a zero saved-state payload would collide with a continuation.
+        let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].dup();
+        match self {
+            Self::Continuation { block_id, parent_id, is_loop } => {
+                acc += challenges
+                    .inner_product_at(0, &[block_id.dup(), parent_id.dup(), is_loop.dup()]);
+            },
+            Self::CallerFrame {
+                block_id,
+                parent_id,
+                caller_ctx,
+                caller_stack_depth,
+                caller_overflow_addr,
+                caller_fn_hash,
+            } => {
+                acc += challenges.inner_product_at(
+                    0,
+                    &[
+                        block_id.dup(),
+                        parent_id.dup(),
+                        E::ZERO,
+                        caller_ctx.dup(),
+                        caller_stack_depth.dup(),
+                        caller_overflow_addr.dup(),
+                    ],
+                );
+                acc += challenges
+                    .inner_product_at(BLOCK_STACK_CALLER_FN_HASH_OFFSET, caller_fn_hash.as_slice());
+                acc += challenges.inner_product_at(BLOCK_STACK_ENTRY_KIND_OFFSET, &[E::ONE]);
+            },
+        }
+        acc
+    }
+}
+
+// --- BlockHashMsg --------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for BlockHashMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        // Per-variant fan-in: produce the (parent, child_hash, is_first_child, is_loop_body)
+        // tuple, then emit a flat 7-slot payload laid out as
+        // `[child_hash[4], parent, is_first_child, is_loop_body]`.
+        let (parent, child_hash, is_first_child, is_loop_body) = match self {
+            Self::FirstChild { parent, child_hash } => (parent, child_hash, E::ONE, E::ZERO),
+            Self::Child { parent, child_hash } => (parent, child_hash, E::ZERO, E::ZERO),
+            Self::LoopBody { parent, child_hash } => (parent, child_hash, E::ZERO, E::ONE),
+            Self::End {
+                parent,
+                child_hash,
+                is_first_child,
+                is_loop_body,
+            } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
+        };
+        challenges.encode(
+            BusId::BlockHashTable as usize,
+            [
+                child_hash[0].clone(),
+                child_hash[1].clone(),
+                child_hash[2].clone(),
+                child_hash[3].clone(),
+                parent.clone(),
+                is_first_child,
+                is_loop_body,
+            ],
+        )
+    }
+}
+
+// --- OpGroupMsg ----------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for OpGroupMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::OpGroupTable as usize,
+            [self.batch_id.clone(), self.group_pos.clone(), self.group_value.clone()],
+        )
+    }
+}
+
+// --- StackOverflowMsg ----------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for StackOverflowMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::StackOverflowTable as usize,
+            [self.clk.clone(), self.val.clone(), self.prev.clone()],
+        )
+    }
+}
+
+// --- KernelRomMsg --------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for KernelRomMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(self.bus as usize, self.digest.clone())
+    }
+}
+
+// --- AceInitMsg ----------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for AceInitMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AceInit as usize,
+            [
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.ptr.clone(),
+                self.num_read.clone(),
+                self.num_eval.clone(),
+            ],
+        )
+    }
+}
+
+// --- RangeMsg ------------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for RangeMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(BusId::RangeCheck as usize, [self.value.clone()])
+    }
+}
+
+// --- LogDeferredMsg ----------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for LogDeferredMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(BusId::LogDeferredRoot as usize, self.state.clone())
+    }
+}
+
+// --- HasherCompressionLinkMsg --------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for HasherCompressionLinkMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let payload: [E; 16] = core::array::from_fn(|i| {
+            if i < 8 {
+                self.block[i].clone()
+            } else if i < 12 {
+                self.cv_in[i - 8].clone()
+            } else {
+                self.cv_out[i - 12].clone()
+            }
+        });
+        challenges.encode(BusId::HasherCompressionLink as usize, payload)
+    }
+}
+
+// --- AceWireMsg ----------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for AceWireMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AceWiring as usize,
+            [
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.id.clone(),
+                self.v0.clone(),
+                self.v1.clone(),
+            ],
+        )
+    }
+}
+
+// LookupMessage impls for the response + sibling structs
+// ================================================================================================
+//
+// The `*ResponseMsg` structs below carry `LookupMessage<E, EF>` impls consumed by
+// `lookup/buses/chiplet_responses.rs`. The runtime-muxed encoding (bus prefix muxed
+// by `is_read`/`is_word` flags) keeps the response-column transition at degree 8.
+
+impl<E, EF> LookupMessage<E, EF> for MemoryResponseMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let bp = &challenges.beta_powers;
+        let is_read = self.is_read.clone();
+        let is_write: E = E::ONE - is_read.clone();
+        let is_word = self.is_word.clone();
+        let is_element: E = E::ONE - is_word.clone();
+
+        // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared. Factored
+        // as a read/write select per access width so the four (read/write × element/word)
+        // cases stay audit-visible without blowing the polynomial degree.
+        let prefix_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
+            * is_read.clone()
+            + challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone() * is_write.clone();
+        let prefix_word = challenges.bus_prefix[BusId::MemoryReadWord as usize].clone() * is_read
+            + challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone() * is_write;
+        let prefix = prefix_element * is_element.clone() + prefix_word * is_word.clone();
+
+        let mut acc = prefix;
+        acc += bp[0].clone() * self.ctx.clone();
+        acc += bp[1].clone() * self.addr.clone();
+        acc += bp[2].clone() * self.clk.clone();
+
+        // Element payload (gated by is_element) vs word payload (gated by is_word).
+        acc += bp[3].clone() * self.element.clone() * is_element;
+        acc += challenges.inner_product_at(3, self.word.as_slice()) * is_word;
+        acc
+    }
+}
+
+// SIBLING MESSAGES
+// ================================================================================================
+//
+// [`SiblingMsg<E>`] carries an already selected block half and a [`SiblingBit`] tag. It uses the
+// sparse β layout expected by the hasher chiplet. Lookup-message encoders may touch sparse β
+// positions; contiguity is a convention, not a requirement.
+
+/// Sibling-table message pairing the old and new paths of an MRUPDATE.
+///
+/// The path level, MRUPDATE id, and node index occupy β⁰, β¹, and β². The Merkle direction bit
+/// selects the sibling from the Eidos block and determines its encoding:
+///
+/// - `bit = 0`: the high block word (`block[4..8]`), encoded at β⁷..β¹⁰;
+/// - `bit = 1`: the low block word (`block[0..4]`), encoded at β³..β⁶.
+#[derive(Clone, Debug)]
+pub struct SiblingMsg<E> {
+    pub bit: SiblingBit,
+    pub level: E,
+    pub mrupdate_id: E,
+    pub node_index: E,
+    /// The selected sibling word.
+    pub h: WordFields<E>,
+}
+
+/// Which half of the Eidos block holds the sibling word for this row.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SiblingBit {
+    /// `bit = 0` — sibling lives in the high block word (`block[4..8]`).
+    Zero,
+    /// `bit = 1` — sibling lives in the low block word (`block[0..4]`).
+    One,
+}
+
+impl<E, EF> LookupMessage<E, EF> for SiblingMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
+        acc += challenges.inner_product_at(
+            0,
+            &[self.level.clone(), self.mrupdate_id.clone(), self.node_index.clone()],
+        );
+        let base = match self.bit {
+            SiblingBit::Zero => 7,
+            SiblingBit::One => 3,
+        };
+        acc += challenges.inner_product_at(base, self.h.as_slice());
+        acc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{Felt, chiplets::eidos_compression, field::QuadFelt};
+
+    use super::{
+        BLOCK_STACK_ENTRY_KIND_OFFSET, BlockStackMsg, BusId, BytePairLookupMsg, BytePairRelation,
+        EidosRotationMsg, HasherMsg, HasherPayload, MIDEN_MAX_MESSAGE_WIDTH,
+    };
+    use crate::lookup::{Challenges, message::LookupMessage};
+
+    #[test]
+    fn basic_block_init_uses_eidos_length_slot() {
+        let block = [Felt::from(0_u32); 8];
+        let num_groups = 17_u32;
+        let msg = HasherMsg::basic_block_init(Felt::from(1_u32), &block, Felt::from(num_groups));
+        let HasherPayload::State(state) = msg.payload else {
+            panic!("basic-block initialization must carry a compression state");
+        };
+        let expected = eidos_compression::felt_sequence_chaining_word(num_groups);
+
+        assert_eq!(&state[8..], expected.as_slice());
+    }
+
+    #[test]
+    fn block_stack_entry_kind_is_authenticated_when_caller_frame_payload_is_zero() {
+        let block_id = Felt::from_u32(37);
+        let parent_id = Felt::from_u32(41);
+        let continuation = BlockStackMsg::Continuation { block_id, parent_id, is_loop: Felt::ZERO };
+        let caller_frame = BlockStackMsg::CallerFrame {
+            block_id,
+            parent_id,
+            caller_ctx: Felt::ZERO,
+            caller_stack_depth: Felt::ZERO,
+            caller_overflow_addr: Felt::ZERO,
+            caller_fn_hash: [Felt::ZERO; 4],
+        };
+        let challenges = Challenges::<Felt>::new(
+            Felt::from_u32(29),
+            Felt::from_u32(31),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+        let continuation_encoding = continuation.encode(&challenges);
+        let caller_frame_encoding = caller_frame.encode(&challenges);
+        let expected_tag = challenges.inner_product_at(BLOCK_STACK_ENTRY_KIND_OFFSET, &[Felt::ONE]);
+
+        assert_eq!(caller_frame_encoding - continuation_encoding, expected_tag);
+        assert_ne!(continuation_encoding, caller_frame_encoding);
+    }
+
+    #[test]
+    fn normalized_byte_pair_relations_are_domain_separated() {
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::new([Felt::new_unchecked(3), Felt::new_unchecked(5)]),
+            QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let a = Felt::new_unchecked(19);
+        let b = Felt::new_unchecked(23);
+        let x = Felt::new_unchecked(29);
+
+        let encodings = [
+            BytePairLookupMsg::from_xor(a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot12Pos1, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos0, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos2, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot12Pos3, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos3, a, b, x)
+                .encode(&challenges),
+        ];
+
+        for left in 0..encodings.len() {
+            for right in left + 1..encodings.len() {
+                assert_ne!(encodings[left], encodings[right]);
+            }
+        }
+    }
+}

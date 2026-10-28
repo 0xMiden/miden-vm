@@ -1,8 +1,8 @@
 //! Memory-chiplet bus tests.
 //!
 //! Exercises stack-issued memory opcodes (`MStoreW`, `MLoadW`, `MLoad`, `MStore`, `MStream`)
-//! plus the `CryptoStream` double-word read+write pair, and verifies the chiplet-requests /
-//! chiplet-responses bus pair.
+//! plus the `AeadStream` plaintext read / ciphertext write rows, and verifies the chiplet-requests
+//! / chiplet-responses bus pair.
 //!
 //! For each stack-level memory op the test registers an expected `-1` push of a
 //! [`MemoryMsg`] (the "request" side). For each memory chiplet row the test registers an
@@ -13,7 +13,7 @@
 //!
 //! # Scope
 //!
-//! Coverage is limited to the stack-only memory ops above plus `CryptoStream`. The DYN,
+//! Coverage is limited to the stack-only memory ops above plus `AeadStream`. The DYN,
 //! DYNCALL, CALL-FMP-write, and PIPE memory-request paths in
 //! `air/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to integration tests —
 //! each is heavyweight to set up and small in algebraic surface. A bug in those paths would
@@ -22,12 +22,15 @@
 //! The programs run at ctx = 0 throughout (no CALL/SYSCALL), so a request/response bug that
 //! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.
 
+use alloc::vec::Vec;
+
 use miden_air::{
     logup::{MemoryMsg, MemoryResponseMsg},
     trace::MainTrace,
 };
 use miden_core::{
     Felt, ONE, ZERO,
+    chiplets::eidos_compression,
     operations::{Operation, opcodes},
 };
 
@@ -38,6 +41,7 @@ use super::super::{
 use crate::RowIndex;
 
 const FOUR: Felt = Felt::new_unchecked(4);
+const TWO: Felt = Felt::new_unchecked(2);
 
 /// Covers `MStoreW`, `MLoad`, `MLoadW`, `MStore`, `MStream` — every memory opcode issuable
 /// directly from the stack — asserting the chiplet-bus request/response pair fires at every
@@ -170,67 +174,92 @@ fn memory_chiplet_bus_request_response_pairs() {
     log.assert_contains(&exp);
 }
 
-/// Verifies that `CryptoStream`'s four memory requests land on the chiplet-requests bus
-/// as the exact read+read+write+write pattern, using hand-coded expected values
-/// (ciphertext = plaintext + rate) rather than values read back from the trace — a missing
-/// emission, a wrong opcode label, or a swapped addr/clk would all fail the subset match.
+/// Verifies that `AeadStream` emits its source reads and ciphertext writes.
 #[test]
-fn cryptostream_emits_four_memory_requests() {
-    // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, pad, pad]
+fn aead_stream_emits_memory_requests() {
+    // Stack layout: [K_CTR(4), counter, src_ptr, dst_ptr, remaining, tail(8)].
     let stack = [
-        1, 2, 3, 4, 5, 6, 7, 8, // rate(8)
-        0, 0, 0, 0, // cap(4)
+        1, 2, 3, 4, // K_CTR
+        0, // counter
         0, // src_ptr
         8, // dst_ptr
-        0, 0, // pad
+        1, // remaining
+        0, 0, 0, 0, 0, 0, 0, 0, // tail
     ];
 
     let trace = build_trace_from_ops(vec![Operation::CryptoStream], &stack);
     let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
 
     let mut exp = Expectations::new(&log);
 
-    // CryptoStream runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized source memory
-    // (reads return zeros). Ciphertext = plaintext + rate = rate in this case.
-    const ROW: usize = 1;
-    let zero_word = [ZERO, ZERO, ZERO, ZERO];
-    let cipher1 = [
+    let aead_rows: Vec<_> = (0..main.core_height())
+        .filter(|&row| main.chiplet_aead_stream_active(RowIndex::from(row)) == ONE)
+        .collect();
+    assert_eq!(aead_rows.len(), 16, "expected two 8-row stream entries");
+
+    // AeadStream runs at cycle 1 (cycle 0 is SPAN), ctx = 0. Source memory is uninitialized, so
+    // both plaintext reads return zeros.
+    let input_state = [
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
         Felt::new_unchecked(1),
         Felt::new_unchecked(2),
         Felt::new_unchecked(3),
         Felt::new_unchecked(4),
     ];
-    let cipher2 = [
-        Felt::new_unchecked(5),
-        Felt::new_unchecked(6),
-        Felt::new_unchecked(7),
-        Felt::new_unchecked(8),
-    ];
+    let keystream = eidos_compression::compress_raw_xof_lanes(&input_state);
+    let ciphertext: [Felt; 16] = keystream.map(Felt::from_u32);
+    let zero_word = [ZERO, ZERO, ZERO, ZERO];
+    let cipher_words: [[Felt; 4]; 4] =
+        core::array::from_fn(|i| core::array::from_fn(|j| ciphertext[4 * i + j]));
 
     let mut request_exps_added = 0usize;
-    // read src_ptr, read src_ptr + 4
-    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+    exp.remove(aead_rows[0], &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
     request_exps_added += 1;
-    exp.remove(ROW, &MemoryMsg::read_word(ZERO, FOUR, ONE, zero_word));
+    exp.remove(aead_rows[4], &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
     request_exps_added += 1;
-    // write dst_ptr, write dst_ptr + 4
-    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(8), ONE, cipher1));
+    exp.remove(
+        aead_rows[3],
+        &MemoryMsg::write_word(ZERO, Felt::new_unchecked(8), ONE, cipher_words[0]),
+    );
     request_exps_added += 1;
-    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(12), ONE, cipher2));
+    exp.remove(
+        aead_rows[7],
+        &MemoryMsg::write_word(ZERO, Felt::new_unchecked(12), ONE, cipher_words[1]),
+    );
+    request_exps_added += 1;
+    exp.remove(aead_rows[8], &MemoryMsg::read_word(ZERO, FOUR, ONE, zero_word));
+    request_exps_added += 1;
+    exp.remove(aead_rows[12], &MemoryMsg::read_word(ZERO, FOUR, ONE, zero_word));
+    request_exps_added += 1;
+    exp.remove(
+        aead_rows[11],
+        &MemoryMsg::write_word(ZERO, Felt::new_unchecked(16), ONE, cipher_words[2]),
+    );
+    request_exps_added += 1;
+    exp.remove(
+        aead_rows[15],
+        &MemoryMsg::write_word(ZERO, Felt::new_unchecked(20), ONE, cipher_words[3]),
+    );
     request_exps_added += 1;
 
-    assert_eq!(request_exps_added, 4, "expected 4 CryptoStream request expectations");
+    assert_eq!(request_exps_added, 8, "expected 8 AeadStream memory expectations");
 
     log.assert_contains(&exp);
 }
 
-/// Verifies that `HornerBase`'s two element-reads land on the chiplet-requests bus.
-/// HornerBase reads α = (α₀, α₁) from memory at (`alpha_ptr`, `alpha_ptr + 1`);
-/// uninitialized memory returns zeros, and the trace stores those same zeros into
-/// helpers[0..2], so a missing request or a swapped addr/clk would fail the subset match.
+/// Verifies that `HornerBase` emits one zero-padded word read on the chiplet-requests bus.
 #[test]
-fn hornerbase_emits_two_memory_requests() {
-    // HornerBase stack layout: [c0..c7, _, _, _, _, _, alpha_ptr, acc_low, acc_high]
+fn hornerbase_emits_one_memory_request() {
+    // Use a point for which helpers[2] and helpers[3] are nonzero. This makes either helper
+    // distinguishable from the zero padding in the memory request.
     let stack = [
         1, 2, 3, 4, 5, 6, 7, 8, // coeffs[0..8]
         0, 0, 0, 0, 0, // pad (5 slots)
@@ -238,22 +267,39 @@ fn hornerbase_emits_two_memory_requests() {
         0, 0, // acc_low, acc_high
     ];
 
-    let trace = build_trace_from_ops(vec![Operation::HornerBase], &stack);
+    let operations = vec![
+        Operation::Push(ZERO),
+        Operation::Push(ZERO),
+        Operation::Push(TWO),
+        Operation::Push(ONE),
+        Operation::Push(ZERO),
+        Operation::MStoreW,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::HornerBase,
+    ];
+    let trace = build_trace_from_ops(operations, &stack);
+    const HORNER_CLK: u32 = 11;
+    let helpers = trace.get_user_op_helpers_at(HORNER_CLK);
+    assert_ne!(helpers[2], ZERO);
+    assert_ne!(helpers[3], ZERO);
+
     let log = InteractionLog::new(&trace);
 
     let mut exp = Expectations::new(&log);
 
-    // HornerBase runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized memory returns zeros.
-    const ROW: usize = 1;
-    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ZERO, ONE, ZERO));
-    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ONE, ONE, ZERO));
+    // HornerBase runs at cycle 11 (cycle 0 is SPAN).
+    exp.remove(
+        HORNER_CLK as usize,
+        &MemoryMsg::read_word(ZERO, ZERO, Felt::from_u32(HORNER_CLK), [ONE, TWO, ZERO, ZERO]),
+    );
 
     log.assert_contains(&exp);
 }
 
-/// Verifies that `HornerExt`'s single word-read lands on the chiplet-requests bus.
-/// HornerExt reads `[α₀, α₁, k₀, k₁]` as a single word from `alpha_ptr`;
-/// uninitialized memory returns the zero word, which the trace parks in helpers[0..4].
+/// Verifies that `HornerExt`'s word read lands on the chiplet-requests bus.
 #[test]
 fn hornerext_emits_one_memory_request() {
     // HornerExt stack layout: [s0_lo, s0_hi, ..., s3_lo, s3_hi, _, _, _, _, _, alpha_ptr,
@@ -271,8 +317,7 @@ fn hornerext_emits_one_memory_request() {
     let mut exp = Expectations::new(&log);
 
     const ROW: usize = 1;
-    let zero_word = [ZERO, ZERO, ZERO, ZERO];
-    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, [ZERO; 4]));
 
     log.assert_contains(&exp);
 }

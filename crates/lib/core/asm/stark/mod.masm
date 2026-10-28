@@ -1,8 +1,11 @@
 pub mod constants
+pub mod constraints_eval_inputs
 pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 pub mod random_coin
+pub mod security
+pub mod types
 pub mod utils
 pub mod verifier
 

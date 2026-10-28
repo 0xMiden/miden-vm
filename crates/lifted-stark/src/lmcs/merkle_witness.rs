@@ -93,6 +93,16 @@ impl<T: Clone> MerkleWitness<T> {
         self.get(NodeId::new(0, 0))
     }
 
+    /// Return a stored node at leaf depth.
+    ///
+    /// The node may be an opened leaf or a sibling supplied as part of an authentication path.
+    pub(crate) fn leaf_node(&self, index: usize) -> Option<&T> {
+        if index >= (1usize << self.tree_depth) {
+            return None;
+        }
+        self.get(NodeId::new(self.tree_depth, index))
+    }
+
     /// Authentication path for a leaf index (sibling hashes, bottom-to-top).
     pub fn path(&self, index: usize) -> Option<Vec<T>> {
         if index >= (1usize << self.tree_depth) {
@@ -158,6 +168,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(tree.root(), Some(&10)); // (1+2) + (3+4) = 10
+        assert_eq!(tree.leaf_node(0), Some(&1));
+        assert_eq!(tree.leaf_node(3), Some(&4));
+        assert_eq!(tree.leaf_node(4), None);
 
         // path: sibling hashes from leaf to root
         assert_eq!(tree.path(0).unwrap(), vec![2, 7]);

@@ -9,7 +9,6 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Instruction as CstInstruction},
     rowan,
 };
-use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span};
 
 use super::{
@@ -158,12 +157,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::InsertHdword),
     },
     PrimitiveSpec {
-        spelling: "adv.insert_hdword_d",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
-    },
-    PrimitiveSpec {
-        spelling: "adv.insert_hperm",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHperm),
+        spelling: "adv.insert_compress",
+        build: || Instruction::SysEvent(SystemEventNode::InsertCompress),
     },
     PrimitiveSpec {
         spelling: "adv.insert_hqword",
@@ -206,12 +201,16 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluate),
     },
     PrimitiveSpec {
-        spelling: "adv.evaluate_deferred_tag",
-        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateTag),
+        spelling: "adv.evaluate_deferred_frame",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateFrame),
     },
     PrimitiveSpec {
         spelling: "adv.evaluate_deferred_payload",
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
+    },
+    PrimitiveSpec {
+        spelling: "adv.export_deferred_witness",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredExportWitness),
     },
     PrimitiveSpec {
         spelling: "add",
@@ -378,6 +377,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Emit,
     },
     PrimitiveSpec {
+        spelling: "trace",
+        build: || Instruction::Trace,
+    },
+    PrimitiveSpec {
         spelling: "eval_circuit",
         build: || Instruction::EvalCircuit,
     },
@@ -406,6 +409,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Ext2Sub,
     },
     PrimitiveSpec {
+        spelling: "compress",
+        build: || Instruction::Compress,
+    },
+    PrimitiveSpec {
         spelling: "fri_ext2fold4",
         build: || Instruction::FriExt2Fold4,
     },
@@ -414,12 +421,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Hash,
     },
     PrimitiveSpec {
-        spelling: "hmerge",
-        build: || Instruction::HMerge,
-    },
-    PrimitiveSpec {
-        spelling: "hperm",
-        build: || Instruction::HPerm,
+        spelling: "hdword",
+        build: || Instruction::HDword,
     },
     PrimitiveSpec {
         spelling: "horner_eval_base",
@@ -1207,7 +1210,12 @@ fn lower_extended_instruction(
             lower_invocation_instruction(context, span, &tokens, build)
         },
 
-        ExtendedInstructionKind::Emit => lower_emit_instruction(context, span, &tokens),
+        ExtendedInstructionKind::Emit => {
+            lower_event_imm_instruction(context, span, &tokens, "emit", Instruction::EmitImm)
+        },
+        ExtendedInstructionKind::Trace => {
+            lower_event_imm_instruction(context, span, &tokens, "trace", Instruction::TraceImm)
+        },
         ExtendedInstructionKind::ErrorCode(build) => {
             lower_error_code_instruction(context, span, &tokens, spec.keyword, build)
         },
@@ -1224,6 +1232,7 @@ enum ExtendedInstructionKind {
     Push,
     Invocation(fn(ast::InvocationTarget) -> Instruction),
     Emit,
+    Trace,
     ErrorCode(fn(ast::ErrorMsg) -> Instruction),
 }
 
@@ -1251,6 +1260,10 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
     ExtendedInstructionSpec {
         keyword: "emit",
         kind: ExtendedInstructionKind::Emit,
+    },
+    ExtendedInstructionSpec {
+        keyword: "trace",
+        kind: ExtendedInstructionKind::Trace,
     },
     ExtendedInstructionSpec {
         keyword: "assert",
@@ -1343,15 +1356,17 @@ fn lower_invocation_instruction(
     Ok(Some(vec![inst_op(instruction_span, build(target))]))
 }
 
-/// Lowers `emit.<const>` and `emit.event("name")`.
-fn lower_emit_instruction(
+/// Lowers `emit.<const>` / `emit.event("name")` and `trace.<const>` / `trace.event("name")`.
+fn lower_event_imm_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
     tokens: &[SyntaxToken],
+    keyword: &str,
+    builder: fn(ast::EventImmediate) -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     if tokens.len() < 3
         || tokens[0].kind() != SyntaxKind::Ident
-        || tokens[0].text() != "emit"
+        || tokens[0].text() != keyword
         || tokens[1].kind() != SyntaxKind::Dot
     {
         return Ok(None);
@@ -1362,7 +1377,7 @@ fn lower_emit_instruction(
             let name = context.lower_constant_ident_token(name)?;
             Ok(Some(vec![inst_op(
                 instruction_span,
-                Instruction::EmitImm(Immediate::Constant(name)),
+                builder(ast::EventImmediate::Immediate(Immediate::Constant(name))),
             )]))
         },
         [event, lparen, string, rparen]
@@ -1373,10 +1388,12 @@ fn lower_emit_instruction(
                 && rparen.kind() == SyntaxKind::RParen =>
         {
             let value = unquote_string_token(string, context.parse().span_for_token(string))?;
-            let event_id = EventId::from_name(value.as_ref()).as_felt();
             Ok(Some(vec![inst_op(
                 instruction_span,
-                Instruction::EmitImm(Immediate::Value(Span::new(instruction_span, event_id))),
+                builder(ast::EventImmediate::Name(Span::new(
+                    context.parse().span_for_token(string),
+                    value,
+                ))),
             )]))
         },
         _ => Ok(None),

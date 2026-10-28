@@ -6,16 +6,14 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{AIRS, BaseAir, HandwrittenMidenAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air_definitions::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::{
-    field::{Field, PrimeCharacteristicRing},
-    stark::air::symbolic::{AirLayout, SymbolicAirBuilder},
-};
+use miden_crypto::field::{Field, PrimeCharacteristicRing};
+use miden_lifted_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
 fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
     AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: BaseAir::<Felt>::preprocessed_width(&air),
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
@@ -33,9 +31,8 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -43,7 +40,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&periodic_columns, z_k);
 
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &layout));
-    air.eval_handwritten(&mut builder);
+    <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder);
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -74,12 +71,10 @@ fn core_air_dag_rejects_mismatched_layout() {
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
 
     let dag = build_ace_dag_for_air(&air, dag_config).unwrap().dag;
@@ -98,7 +93,6 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: 1,
     };
 
     let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
@@ -127,7 +121,6 @@ fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: 1,
     };
 
     let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
@@ -165,95 +158,63 @@ fn quotient_next_inputs_do_not_affect_eval() {
 }
 
 #[test]
-fn multi_air_ace_circuit_builds_and_has_multi_air_fold_beta_slots() {
-    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
+fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
+    use miden_air::ace::build_canonical_multi_air_ace_circuit;
 
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
 
-    let circuit = build_multi_air_ace_circuit_for_order(config, &ProofOrder::instance_order())
-        .expect("multi-AIR ACE circuit");
+    let circuit = build_canonical_multi_air_ace_circuit(config).expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined main width is each per-AIR width aligned to the LMCS rate:
-    // aligned(51) + aligned(22) + aligned(16) = 56 + 24 + 16 = 96.
+    const LMCS_ALIGNMENT: usize = 8;
+    let expected_preprocessed_width = AIRS
+        .iter()
+        .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .sum::<usize>();
+    let expected_main_width = AIRS
+        .iter()
+        .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .sum::<usize>();
+    // Aux-trace widths concatenate each per-AIR coordinate region after LMCS
+    // alignment, then convert back to extension-field columns.
+    let expected_aux_width = AIRS
+        .iter()
+        .map(|air| {
+            (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
+                .next_multiple_of(LMCS_ALIGNMENT)
+                / EXT_DEGREE
+        })
+        .sum::<usize>();
+    let expected_aux_boundary =
+        AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).sum::<usize>();
+
+    assert_eq!(layout.counts.preprocessed_width, expected_preprocessed_width);
     assert_eq!(
-        layout.counts.width, 96,
+        layout.counts.width, expected_main_width,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 12,
-        "combined aux_width = aligned(4) + aligned(3) + aligned(1) = 12 EFs"
+        layout.counts.aux_width, expected_aux_width,
+        "combined aux width must be sum of per-AIR LMCS-aligned widths"
     );
-    assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
+    assert_eq!(layout.counts.num_aux_boundary, expected_aux_boundary);
 
-    let beta = layout
-        .index(InputKey::MultiAirFoldBeta)
-        .expect("multi-air layout exposes folding beta");
-    assert!(beta < layout.total_inputs, "beta slot must be within layout bounds");
-
-    for key in [
-        InputKey::IsFirstAir(0),
-        InputKey::IsLastAir(0),
-        InputKey::IsTransitionAir(0),
-        InputKey::IsFirstAir(1),
-        InputKey::IsLastAir(1),
-        InputKey::IsTransitionAir(1),
-        InputKey::IsFirstAir(2),
-        InputKey::IsLastAir(2),
-        InputKey::IsTransitionAir(2),
-    ] {
-        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
-        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    for air_index in 0..MIDEN_AIR_COUNT {
+        for key in [
+            InputKey::MultiAirFoldCoeff(air_index),
+            InputKey::IsFirstAir(air_index),
+            InputKey::IsLastAir(air_index),
+            InputKey::IsTransitionAir(air_index),
+        ] {
+            let idx =
+                layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
+            assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+        }
     }
-    assert!(layout.index(InputKey::IsFirstAir(3)).is_none());
-}
-
-#[test]
-fn multi_air_ace_circuit_emits_consistently() {
-    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
-
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
-    };
-
-    for order in ProofOrder::variants() {
-        // Check that the ACE encoding is well-formed and rate-aligned.
-        let circuit = build_multi_air_ace_circuit_for_order(config, &order).expect("ACE circuit");
-        let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
-        assert!(
-            encoded.size_in_felt().is_multiple_of(8),
-            "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
-        );
-    }
-}
-
-#[test]
-fn multi_air_ace_circuit_evaluates_without_panic() {
-    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
-
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
-    };
-
-    for order in ProofOrder::variants() {
-        let circuit =
-            build_multi_air_ace_circuit_for_order(config, &order).expect("multi-AIR ACE circuit");
-        let layout = circuit.layout();
-
-        // Fill all input slots with deterministic non-zero values. We don't expect the
-        // circuit to evaluate to zero for arbitrary inputs; this only checks that every
-        // DAG input reference is in range.
-        let inputs: Vec<QuadFelt> = fill_inputs(layout);
-        let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
-    }
+    assert!(layout.index(InputKey::IsFirstAir(MIDEN_AIR_COUNT)).is_none());
 }
 
 /// A DAG node relabeled by index: `NodeId` embeds a per-builder dag id, so
@@ -294,16 +255,15 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: 1,
     };
     for air in AIRS {
         // Production path: handwritten capture -> IR -> DAG.
-        let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+        let artifacts = build_ace_dag_for_air(&air, config).unwrap();
 
         // Anchor: the original symbolic-tree lowering over the same constraints.
         let mut builder =
             SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &artifacts.layout));
-        air.eval_handwritten(&mut builder);
+        <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder);
         let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
         let periodic_data = (!periodic_columns.is_empty())
             .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
@@ -323,5 +283,93 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
         }
         assert_eq!(tree_nodes.len(), ir_nodes.len(), "node counts differ");
         assert_eq!(tree_root, ir_root, "roots differ");
+    }
+}
+
+/// The recursive verifier's canonical entry point must be a thin wrapper over the canonical
+/// builder: same encoding, same commitment, and no dependence on the proof order.
+///
+/// The order-invariance itself is established by the cross-order fold sweep below. This test binds
+/// the production entry point to the exact circuit used by that sweep.
+#[test]
+fn recursive_verifier_circuit_matches_the_canonical_builder() {
+    use miden_air::ace::{
+        build_canonical_multi_air_ace_circuit, build_recursive_verifier_ace_circuit,
+    };
+    use miden_core::crypto::hash::Eidos;
+
+    let produced = build_recursive_verifier_ace_circuit().expect("recursive ACE circuit");
+
+    let canonical = build_canonical_multi_air_ace_circuit(AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+    })
+    .expect("canonical circuit");
+    let encoded = canonical.to_ace().expect("encode canonical circuit");
+
+    assert_eq!(produced.num_inputs, encoded.num_vars());
+    assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
+    assert_eq!(produced.stream_len, encoded.size_in_felt());
+    assert_eq!(produced.instructions, encoded.instructions());
+    assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+
+    // The stream is loaded with `adv_pipe`, which consumes eight felts per iteration.
+    assert!(produced.stream_len.is_multiple_of(8));
+
+    // Calling it twice must be deterministic.
+    let produced_again = build_recursive_verifier_ace_circuit().expect("recursive ACE circuit");
+    assert_eq!(produced, produced_again);
+
+    // The cached circuit is what the advice builder serves, and it is reachable across crates.
+    #[cfg(feature = "std")]
+    assert_eq!(*miden_air::ace::shared_recursive_circuit(), produced);
+}
+
+/// Checks the canonical circuit against a direct AIR fold for every VM proof order.
+#[test]
+fn canonical_circuit_matches_every_vm_proof_order() {
+    use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit};
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+    };
+    let canonical = build_canonical_multi_air_ace_circuit(config).expect("canonical circuit");
+    let canonical_layout = canonical.layout();
+
+    // Nonzero quotient openings exercise the shared quotient binding.
+    let base: Vec<QuadFelt> = fill_inputs(canonical_layout);
+
+    let beta = QuadFelt::from_u64(97);
+    let mut canonical_roots: Vec<QuadFelt> = Vec::new();
+    for order in ProofOrder::variants() {
+        // Canonical circuit: trace values stay put, only the fold coefficients move. The AIR at
+        // proof position `k` carries `beta^(N - 1 - k)`, matching the proof-order Horner fold.
+        let mut canonical_inputs = base.clone();
+        for (position, air) in order.airs().iter().copied().enumerate() {
+            let idx = canonical_layout
+                .index(InputKey::MultiAirFoldCoeff(air.instance_index()))
+                .expect("coeff slot");
+            canonical_inputs[idx] = beta.exp_u64((MIDEN_AIR_COUNT - 1 - position) as u64);
+        }
+        let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
+
+        let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+            &AIRS,
+            canonical_layout,
+            &canonical_inputs,
+            &order.airs().iter().map(|air| air.instance_index()).collect::<Vec<_>>(),
+            beta,
+            8,
+        );
+        assert_eq!(canonical_root, direct, "direct symbolic evaluation for {}", order.file_stem());
+        canonical_roots.push(canonical_root);
+    }
+
+    // Distinct roots ensure this fixture distinguishes every proof order.
+    for (i, left) in canonical_roots.iter().enumerate() {
+        for (j, right) in canonical_roots.iter().enumerate().skip(i + 1) {
+            assert_ne!(left, right, "orders {i} and {j} fold identically");
+        }
     }
 }

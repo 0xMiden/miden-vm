@@ -48,8 +48,16 @@ pub type Digest512 = Digest<DIGEST512_BYTES>;
 /// defaulting to 32 bytes (256 bits).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(into = "String", try_from = "&str"))]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 #[repr(transparent)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(
+        types(DIGEST192_BYTES),
+        types(DIGEST256_BYTES),
+        types(DIGEST512_BYTES)
+    )
+)]
 pub struct Digest<const N: usize = DIGEST256_BYTES>([u8; N]);
 
 impl<const N: usize> Digest<N> {
@@ -144,6 +152,14 @@ impl<const N: usize> TryFrom<&str> for Digest<N> {
     }
 }
 
+impl<const N: usize> TryFrom<String> for Digest<N> {
+    type Error = HexParseError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
 impl<const N: usize> Serializable for Digest<N> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_bytes(&self.0);
@@ -193,18 +209,6 @@ mod tests {
     #[test]
     fn test_digest_default_64() {
         let digest = Digest::<64>::default();
-        assert_eq!(digest.as_bytes(), &[0u8; 64]);
-    }
-
-    #[test]
-    fn test_digest256_alias() {
-        let digest = Digest256::default();
-        assert_eq!(digest.as_bytes(), &[0u8; 32]);
-    }
-
-    #[test]
-    fn test_digest512_alias() {
-        let digest = Digest512::default();
         assert_eq!(digest.as_bytes(), &[0u8; 64]);
     }
 
@@ -263,6 +267,17 @@ mod tests {
         assert_eq!(recovered.as_bytes(), &bytes);
     }
 
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_digest_deserializes_owned_json_string() {
+        let bytes = [0xab; 32];
+        let value = serde_json::Value::String(bytes_to_hex_string(bytes));
+
+        let digest: Digest<32> = serde_json::from_value(value).unwrap();
+
+        assert_eq!(digest.as_bytes(), &bytes);
+    }
+
     #[test]
     fn test_digest_digests_as_bytes_32() {
         let d1 = Digest::<32>::from([1u8; 32]);
@@ -283,5 +298,27 @@ mod tests {
         assert_eq!(bytes.len(), 128);
         assert_eq!(&bytes[0..64], &[1u8; 64]);
         assert_eq!(&bytes[64..128], &[2u8; 64]);
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::Digest;
+
+    impl<const N: usize> Arbitrary for Digest<N> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every byte pattern is a valid digest; no invariants to preserve.
+            proptest::collection::vec(any::<u8>(), N)
+                .prop_map(|bytes| Self(bytes.try_into().expect("vec length equals N")))
+                .boxed()
+        }
     }
 }

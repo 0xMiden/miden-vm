@@ -40,17 +40,18 @@
 //! These are AIR implementer responsibilities. Run [`debug::assert_prover_setup`] (or its
 //! components) from your test harness to catch structural mistakes early:
 //!
-//! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, positive
-//!    aux width, power-of-two periodic column lengths, and matching override helpers. Checked by
+//! 1. **AIR structural contract** — non-empty AIR collection, positive aux width, power-of-two
+//!    periodic column lengths, and matching override helpers. Checked by
 //!    [`miden_lifted_air::debug::assert_multi_air_valid`]. These are not typed `Statement::new`
 //!    errors.
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
-//! 4. **[`LiftedAir::build_aux_trace`](air::LiftedAir::build_aux_trace) output** — per AIR, an aux
-//!    trace of width `aux_width()`, height matching the main trace, and exactly `num_aux_values()`
-//!    aux values. A malformed output is caught by the prover (LDE/commit panic) or by verification,
-//!    since the verifier re-derives these shapes from the AIR contract.
+//! 4. **Aux trace output** —
+//!    [`build_aux_trace_with_preprocessed`](air::LiftedAir::build_aux_trace_with_preprocessed)
+//!    returns, per AIR, a trace of width `aux_width()`, height matching the main trace, and exactly
+//!    `num_aux_values()` aux values. A malformed output is caught by the prover (LDE/commit panic)
+//!    or by verification, since the verifier re-derives these shapes from the AIR contract.
 //! 5. **Sound [`Statement::eval_external`](air::Statement::eval_external)** — Returns cross-AIR
 //!    assertion values that are zero iff the proof's cross-AIR interactions are well-formed for the
 //!    given aux values and public inputs.
@@ -67,6 +68,7 @@ mod config;
 pub mod debug;
 pub(crate) mod domain;
 pub mod lmcs;
+pub mod memory;
 mod order;
 pub mod pcs;
 mod preprocessed;
@@ -78,9 +80,12 @@ pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use debug::check_constraints;
-// `domain` and `order` are internal modules, but these error types surface through the public
-// `ProverError` / `VerifierError`, so they need a public path of their own.
-pub use domain::DomainError;
+// `domain` and `order` are internal modules. Their error types surface through the public
+// `ProverError` / `VerifierError`, and quotient-degree derivation is part of the relation
+// configuration contract, so these items need public paths of their own.
+pub use domain::{
+    DomainError, QuotientRecompositionInputs, log_quotient_degree, quotient_recomposition_inputs,
+};
 pub use order::ShapeError;
 pub use preprocessed::{Preprocessed, PreprocessedValidationError};
 pub use prover::{ProverError, ProverInstance};
@@ -102,6 +107,7 @@ pub mod air {
         AirBuilder,
         AirBuilderWithContext,
         BaseAir,
+        ConstraintCounts,
         ConstraintDegrees,
         ExtensionBuilder,
         FilteredAirBuilder,
@@ -138,9 +144,9 @@ pub mod hasher {
     };
 }
 
-/// Testing infrastructure: configurations, fixtures, and example AIRs.
+/// Shared test support and FRI vector generation.
 ///
-/// Available when the `testing` feature is enabled or during `cargo test`.
-/// Integration tests should use `cargo test --features testing`.
+/// Available during `cargo test`; external consumers must enable the `testing` feature. That
+/// feature also exposes hash configurations and example AIRs.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

@@ -19,21 +19,21 @@ parse_version() {
     local prefix="$2"
     local major minor patch
 
-    IFS=. read -r major minor patch <<<"$version"
-    if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ || ! "$patch" =~ ^[0-9]+$ ]]; then
+    if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
         echo "::error::could not parse semantic version '$version'"
         exit 1
     fi
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
 
     eval "${prefix}_major=\$major"
     eval "${prefix}_minor=\$minor"
     eval "${prefix}_patch=\$patch"
 }
 
-cargo_incompatible_release_line_changed() {
-    (( baseline_major != current_major )) ||
-        (( baseline_major == 0 && baseline_minor != current_minor )) ||
-        (( baseline_major == 0 && baseline_minor == 0 && baseline_patch != current_patch ))
+mast_root_break_allowed() {
+    (( baseline_major == 0 && current_major == 1 && current_minor == 0 && current_patch == 0 ))
 }
 
 latest_release_tag_on_head() {
@@ -46,8 +46,6 @@ latest_release_tag_on_head() {
 
 parse_version "$workspace_version" current
 
-git -C "$repo_root" fetch --tags origin
-
 baseline_tag="$(latest_release_tag_on_head)"
 if [[ -z "$baseline_tag" ]]; then
     echo "No release tag found on the current branch history; skipping MASM root stability check"
@@ -57,8 +55,8 @@ fi
 baseline_version="${baseline_tag#v}"
 parse_version "$baseline_version" baseline
 
-if cargo_incompatible_release_line_changed; then
-    echo "workspace version changed Cargo-incompatible release line from ${baseline_version} to ${workspace_version}; skipping MASM root stability check"
+if mast_root_break_allowed; then
+    echo "workspace version changed from ${baseline_version} to ${workspace_version}; allowing MAST root changes for the 0.x to 1.0 transition"
     exit 0
 fi
 
@@ -107,11 +105,11 @@ for project in "${projects[@]}"; do
         continue
     fi
 
-    echo "Checking MASM root stability for $relative_project against $baseline_tag"
-    RUSTC_WRAPPER= rustup run nightly cargo -Zscript \
+    echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
+    RUSTC_BOOTSTRAP=1 RUSTC_WRAPPER= rustup run stable cargo -Zscript \
         "$check_script" \
         "$baseline_project" \
         "$current_project"
 done
 
-echo "MASM procedure roots are stable against $baseline_tag"
+echo "MASM release compatibility checks passed against $baseline_tag"

@@ -115,7 +115,7 @@ fn prove_queries(
     let mut prover_channel = prover_channel();
     let fri_polys =
         FriPolys::<Felt, QuadFelt, _>::new(params, lmcs, domain, evals, &mut prover_channel);
-    fri_polys.prove_queries(params, tree_indices, &mut prover_channel);
+    fri_polys.prove_queries(params, lmcs, tree_indices, &mut prover_channel);
     prover_channel.finalize()
 }
 

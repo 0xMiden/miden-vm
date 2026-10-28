@@ -43,14 +43,14 @@
 //! // ... bind AIR configurations + air ordering (see below) ...
 //!
 //! // --- Prove ---
-//! let prover_instance = ProverInstance::new(&config, &prover_statement, None)?;
-//! let output = prover_instance.prove(ch)?;
+//! let prover_instance = ProverInstance::new(&config, prover_statement, None)?;
+//! let (output, statement) = prover_instance.prove(ch)?;
 //!
 //! // --- Verify (identical binding + the same statement) ---
 //! let mut ch = Challenger::new(perm);
 //! ch.observe_slice(&b"MY_APP_V1".map(|b| F::from_u8(b)));
 //! ch.observe(F::from_u8(config.pcs().log_blowup()));
-//! let verifier_instance = VerifierInstance::new(&config, prover_instance.statement(), None)?;
+//! let verifier_instance = VerifierInstance::new(&config, &statement, None)?;
 //! let verifier_digest = verifier_instance.verify(&output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
@@ -103,8 +103,8 @@ use crate::{
 // ProverInstance
 // ============================================================================
 
-/// Prover-side bundle: a [`StarkConfig`], a borrowed [`ProverStatement`], and
-/// the optional borrowed [`Preprocessed`] data.
+/// Prover-side bundle containing a [`StarkConfig`], a statement with owned main
+/// traces, and optional borrowed [`Preprocessed`] data.
 ///
 /// Construction validates preprocessed presence parity (and, when present, the
 /// bundle's shape against the AIRs and STARK config), so holding a
@@ -118,7 +118,8 @@ where
     SC: StarkConfig<F, EF>,
 {
     config: &'a SC,
-    prover_statement: &'a ProverStatement<F, EF, MA>,
+    statement: Statement<F, EF, MA>,
+    traces: Vec<RowMajorMatrix<F>>,
     preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
 }
 
@@ -138,7 +139,7 @@ where
     /// config.
     pub fn new(
         config: &'a SC,
-        prover_statement: &'a ProverStatement<F, EF, MA>,
+        prover_statement: ProverStatement<F, EF, MA>,
         preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
     ) -> Result<Self, PreprocessedValidationError> {
         let expected =
@@ -148,13 +149,17 @@ where
             return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
         }
         if let Some(p) = preprocessed {
-            validate_preprocessed(config, prover_statement, p)?;
+            validate_preprocessed(config, &prover_statement, p)?;
         }
-        Ok(Self { config, prover_statement, preprocessed })
+        let (statement, traces) = prover_statement.into_parts();
+        Ok(Self { config, statement, traces, preprocessed })
     }
 
-    /// Prove this instance.
-    pub fn prove(&self, challenger: SC::Challenger) -> Result<StarkOutput<F, EF, SC>, ProverError> {
+    /// Consume this instance and return the proof with its verifier statement.
+    pub fn prove(
+        self,
+        challenger: SC::Challenger,
+    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError> {
         prove(self, challenger)
     }
 
@@ -163,14 +168,14 @@ where
         self.config
     }
 
-    /// Borrow the wrapped air-crate prover statement.
-    pub fn prover_statement(&self) -> &ProverStatement<F, EF, MA> {
-        self.prover_statement
-    }
-
     /// Borrow the verifier-side statement (the AIRs + public inputs).
     pub fn statement(&self) -> &Statement<F, EF, MA> {
-        self.prover_statement.statement()
+        &self.statement
+    }
+
+    /// Consume the prover instance and return its verifier-side statement.
+    pub fn into_statement(self) -> Statement<F, EF, MA> {
+        self.statement
     }
 
     /// Commitment to the preprocessed tree, for the verifier's
@@ -178,11 +183,6 @@ where
     /// is none.
     pub fn preprocessed_commitment(&self) -> Option<<SC::Lmcs as Lmcs>::Commitment> {
         self.preprocessed.map(Preprocessed::commitment)
-    }
-
-    /// Borrow the preprocessed bundle, if any.
-    pub(crate) fn preprocessed(&self) -> Option<&Preprocessed<F, SC::Lmcs>> {
-        self.preprocessed
     }
 }
 
@@ -202,7 +202,7 @@ where
 /// from your test harness to enforce it in debug builds.
 ///
 /// ## Validated
-/// - per AIR: `air.num_public_values() == statement.air_inputs().len()`
+/// - per AIR: `air.num_public_values() == statement.air_inputs()[i].len()`
 /// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
 /// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
 /// - per AIR: `trace.width() == air.width()`
@@ -220,31 +220,26 @@ where
 ///   shapes.
 ///
 /// # Arguments
-/// - `instance`: the config, the validated prover statement (AIRs, shared `air_inputs`, and per-AIR
-///   traces, all in instance order), and the optional preprocessed bundle
+/// - `instance`: the config, the validated prover statement (AIRs, per-AIR `air_inputs`, and
+///   per-AIR traces, all in instance order), and the optional preprocessed bundle
 /// - `challenger`: Fiat-Shamir challenger pre-bound to protocol parameters and AIR configurations
 ///
 /// # Returns
-/// `Ok(StarkOutput { digest, proof })`, or a [`ProverError`] if validation fails.
+/// `Ok((StarkOutput { digest, proof }, statement))`, or a [`ProverError`] if validation fails.
 #[instrument(name = "prove", skip_all)]
 pub(crate) fn prove<F, EF, MA, SC>(
-    instance: &ProverInstance<'_, F, EF, MA, SC>,
+    instance: ProverInstance<'_, F, EF, MA, SC>,
     mut challenger: SC::Challenger,
-) -> Result<StarkOutput<F, EF, SC>, ProverError>
+) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
 {
-    // --- Trust boundary (see doc-block above). -------------------------------
-    let config = instance.config();
-    let prover_statement = instance.prover_statement();
-    let preprocessed = instance.preprocessed();
-    let statement = prover_statement.statement();
+    let ProverInstance { config, statement, traces, preprocessed } = instance;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
-    let traces = prover_statement.traces();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
         .expect("ProverStatement::new should reject malformed heights");
@@ -261,14 +256,7 @@ where
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
     // a reference); traces likewise via `&RowMajorMatrix<F>`.
     let air_refs: Vec<&MA::Air> = airs.iter().collect();
-    let trace_refs: Vec<&RowMajorMatrix<F>> = traces.iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
-    let proof_ordered_traces = trace_order.to_proof_order(&trace_refs);
-    let proof_ordered: Vec<_> = proof_ordered_airs
-        .iter()
-        .copied()
-        .zip(proof_ordered_traces.iter().copied())
-        .collect();
 
     let log_blowup = config.pcs().log_blowup();
     let log_max_trace_height = trace_order.max_log_height();
@@ -293,9 +281,9 @@ where
     let mut channel = ProverTranscript::new(challenger);
 
     // Infer per-AIR quotient degrees from symbolic analysis (per-AIR optimization).
-    let log_quotient_degrees: Vec<u8> = proof_ordered
+    let log_quotient_degrees: Vec<u8> = proof_ordered_airs
         .iter()
-        .map(|&(air, _)| log_quotient_degree::<F, EF, _>(air))
+        .map(|&air| log_quotient_degree::<F, EF, _>(air))
         .collect();
     let log_quotient_degree = log_quotient_degrees
         .iter()
@@ -327,11 +315,22 @@ where
     //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
-    let main_traces: Vec<_> = proof_ordered
+    let main_traces: Vec<_> = trace_order
+        .instance_indices()
         .iter()
-        .map(|&(_, trace)| {
+        .map(|&instance_idx| {
+            let trace = &traces[instance_idx as usize];
             let src = &trace.values;
             let mut values = Vec::with_capacity(src.len() * blowup);
+            #[cfg(feature = "concurrent")]
+            if current_num_threads() == 1 {
+                values.extend_from_slice(src);
+            } else {
+                // Indexed collection preserves row-major order while first-touching pages across
+                // the Rayon pool.
+                src.par_iter().copied().collect_into_vec(&mut values);
+            }
+            #[cfg(not(feature = "concurrent"))]
             values.extend_from_slice(src);
             RowMajorMatrix::new(values, trace.width())
         })
@@ -342,7 +341,7 @@ where
 
     // 2. Sample randomness, build aux traces, and commit them
     let max_num_randomness =
-        proof_ordered.iter().map(|&(air, _)| air.num_randomness()).max().unwrap_or(0);
+        proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
 
     let randomness: Vec<EF> = (0..max_num_randomness)
         .map(|_| channel.sample_algebra_element::<EF>())
@@ -351,20 +350,25 @@ where
     // Build aux traces in instance order. The output shapes are trusted (see
     // trust contract above); a malformed output is caught downstream by the
     // LDE/commit or by verification.
+    let preprocessed_traces = preprocessed.map(Preprocessed::raw_traces);
     let aux_inputs = statement.aux_inputs();
     let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = info_span!("build aux traces")
         .in_scope(|| {
             airs.par_iter()
                 .zip(traces.par_iter())
-                .map(|(air, main)| {
+                .enumerate()
+                .map(|(air_index, (air, main))| {
                     let num_randomness = air.num_randomness();
                     debug_assert!(
                         randomness.len() >= num_randomness,
                         "AIR requested more aux randomness than the shared challenge pool contains",
                     );
-                    let (trace, values) = air.build_aux_trace(
+                    let preprocessed_trace =
+                        preprocessed_traces.and_then(|traces| traces[air_index].as_ref());
+                    let (trace, values) = air.build_aux_trace_with_preprocessed(
                         main,
-                        air_inputs,
+                        preprocessed_trace,
+                        &air_inputs[air_index],
                         aux_inputs,
                         &randomness[..num_randomness],
                     );
@@ -393,6 +397,10 @@ where
             return Err(ProverError::ExternalAssertionFailed { assertion: k });
         }
     }
+
+    // Auxiliary trace construction is the last use of the main traces. Release
+    // them before the quotient and opening phases.
+    drop(traces);
 
     // External assertions are defined in instance-order terms; now reorder aux
     // traces and aux values to proof order for commitment and the prover loop.
@@ -437,13 +445,13 @@ where
     let mut accumulator: Vec<EF> = Vec::with_capacity(max_quotient_height * blowup);
 
     // Pre-compute per-AIR constraint layouts.
-    let layouts: Vec<_> = proof_ordered
+    let layouts: Vec<_> = proof_ordered_airs
         .iter()
-        .map(|&(air, _)| get_constraint_layout::<F, EF, _>(air))
+        .map(|&air| get_constraint_layout::<F, EF, _>(air))
         .collect();
 
     info_span!("evaluate constraints").in_scope(|| {
-        for (i, &(air, _)) in proof_ordered.iter().enumerate() {
+        for (i, &air) in proof_ordered_airs.iter().enumerate() {
             let this_log_quotient_degree = log_quotient_degrees[i];
             let this_quotient_degree = 1usize << this_log_quotient_degree;
 
@@ -500,7 +508,7 @@ where
                     &this_quotient_eval_domain,
                     alpha,
                     &randomness[..air.num_randomness()],
-                    air_inputs,
+                    &air_inputs[trace_order.instance_indices()[i] as usize],
                     &periodic_lde,
                     &layouts[i],
                     aux_values_i,
@@ -574,7 +582,7 @@ where
         log_trace_heights: trace_order.log_heights().to_vec(),
         transcript,
     };
-    Ok(StarkOutput { digest, proof })
+    Ok((StarkOutput { digest, proof }, statement))
 }
 
 /// Errors from proving — runtime validation failures of caller-supplied data.

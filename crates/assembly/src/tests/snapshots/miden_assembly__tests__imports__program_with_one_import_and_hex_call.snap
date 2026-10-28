@@ -1,0 +1,24 @@
+---
+source: crates/assembly/src/tests/imports.rs
+expression: program
+---
+begin
+    join
+        join
+            basic_block
+                push(2147483648)
+                push(4294967294)
+                mstore
+                drop
+                push(4)
+                push(3)
+                noop
+                noop
+                noop
+                noop
+            end
+            external.0xea4386710a2f3a5e4efb64d894343e14cae4f7daaa9e4b6e2a8b091e63f0fe28
+        end
+        call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
+    end
+end

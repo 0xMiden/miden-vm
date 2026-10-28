@@ -5,54 +5,75 @@ sidebar_position: 4
 
 # Performance
 
-The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons that many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
-
-A few general notes on performance:
-
-- Execution time is dominated by proof generation time. In fact, the time needed to run the program is usually under 0.01% of the time needed to generate the proof.
-- Proof verification time is really fast. In most cases it is under 1 ms, but sometimes gets as high as 2 ms or 3 ms.
-- Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
-- Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
+These benchmarks use Eidos, Miden VM's native hash function, for STARK proof generation.
+The resulting proofs are therefore recursion-friendly: they can be efficiently verified inside Miden VM.
 
 ## Single-core prover performance
 
-When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.
+The VM executes the [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1) program on an Apple M4 Pro with one Rayon worker.
+The rows measure chains of 2, 8, 32, and 128 Blake3 calls, with VM cycles padded to a power of two.
+The default proof parameters target 96-bit conjectured security.
+See the [Eidos security and usage guide](design/eidos-security.md).
 
-|   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
-| :------------: | :------------: | :----------: | :----------: | :--------: |
-| 2<sup>14</sup> |    0.3 ms      |    885 ms    |    200 MB    |   80 KB    |
-| 2<sup>16</sup> |    0.7 ms      |   3.6 sec    |    750 MB    |  100 KB    |
-| 2<sup>18</sup> |    1.2 ms      |  14.7 sec    |    2.9 GB    |  116 KB    |
-| 2<sup>20</sup> |    11.1 ms     |   59 sec     |    11 GB     |  136 KB    |
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 3.00 ms        | 1.04 sec     | 0.60 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 2.95 ms        | 2.42 sec     | 0.79 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 3.97 ms        | 9.02 sec     | 1.91 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 7.68 ms        | 38.92 sec    | 6.46 GiB     | 192.0 KiB  |
 
-As can be seen from the above, proving time roughly doubles with every doubling in the number of cycles, but proof size grows much slower.
+The Apple M5 Max results use one Rayon worker.
+Timings and proof sizes are medians of five samples after one warmup proof.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 2.63 ms        | 0.92 sec     | 0.65 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 2.75 ms        | 2.13 sec     | 1.35 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 3.18 ms        | 7.48 sec     | 2.25 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 5.21 ms        | 30.01 sec    | 6.93 GiB     | 192.0 KiB  |
+
+The AMD Ryzen 9 9950X results use one Rayon worker.
+Ryzen timings and proof sizes are medians of five samples.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 5.99 ms        | 0.95 sec     | 0.37 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 6.29 ms        | 2.30 sec     | 0.54 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 6.87 ms        | 8.46 sec     | 1.59 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 9.04 ms        | 33.78 sec    | 5.66 GiB     | 192.0 KiB  |
 
 ## Multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
-
-In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
+The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</sup>).
 
 | Machine                        | Execution time | Proving time | Execution % | Implied Frequency |
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
-| Apple M1 Pro (16 threads)      |     14.5 ms    |   14.7 sec   |    0.1%     |      70 KHz       |
-| Apple M4 Max (16 threads)      |     6 ms       |   5.9 sec    |    0.2%     |      170 KHz      |
-| Amazon Graviton 4 (64 threads) |     11 ms      |   4.9 sec    |    0.2%     |      205 KHz      |
-| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   3.7 sec    |    0.2%     |      270 KHz      |
-| AMD Ryzen 9 9950X (16 threads) |     7.2 ms     |   7.2 sec    |    0.1%     |      145 KHz      |
-| AMD Ryzen 9 9950X (32 threads) |     6.5 ms     |   6.5 sec    |    0.1%     |      161 KHz      |
+| Apple M1 Pro (12 threads)      | 9.4 ms         | 7.75 sec     | 0.12%       | 135 KHz           |
+| Apple M4 Pro (14 threads)      | 6.3 ms         | 4.36 sec     | 0.14%       | 240 KHz           |
+| Apple M4 Max (16 threads)      | 5.9 ms         | 2.97 sec     | 0.20%       | 353 KHz           |
+| Apple M5 Max (18 threads)      | 5.8 ms         | 2.69 sec     | 0.22%       | 390 KHz           |
+| Amazon Graviton 4 (64 threads) |                |              |             |                   |
+| AMD EPYC 9R45 (64 threads)     |                |              |             |                   |
+| AMD Ryzen 9 9950X (16 threads) | 9.7 ms         | 3.78 sec     | 0.26%       | 277 KHz           |
+| AMD Ryzen 9 9950X (32 threads) | 9.5 ms         | 3.83 sec     | 0.25%       | 274 KHz           |
 
-## Recursion-friendly proofs
+Execution % is execution time divided by proving time. Implied frequency is the padded VM cycle
+count (2<sup>20</sup> = 1,048,576 for these runs) divided by proving time, reported in KHz.
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+## Reproducing the results
 
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+Run these commands from the workspace root:
 
-| Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
-| ------------------------------ | :------------: | :----------: | :----------------: |
-| Apple M1 Pro (16 threads)      |     14.5 ms    |   31.9 sec   |     2.2x           |
-| Apple M4 Max (16 threads)      |     6 ms       |   10.1 sec   |     1.7x           |
-| Amazon Graviton 4 (64 threads) |     11 ms      |   7.7 sec    |     1.6x           |
-| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   6.9 sec    |     1.9x           |
-| AMD Ryzen 9 9950X (16 threads) |     7.2 ms     |   16.0 sec   |     2.2x           |
-| AMD Ryzen 9 9950X (32 threads) |     6.5 ms     |   12.9 sec   |     2.0x           |
+```bash
+cargo build --locked --profile optimized -p miden-vm-blake3-bench --bin vm-performance
+target/optimized/vm-performance --hash eidos --threads 14 --iterations 128 --samples 5
+```
+
+For the single-core rows, use `--threads 1` with `--iterations 2`, `8`, `32`, or `128`.
+For multi-core results, set `--threads` to the thread count in the machine's table row.
+
+With `--samples 5`, the runner collects five measured samples after one unmeasured warmup proof
+and verifies every proof. Report median execution and proving times and median proof sizes.
+
+Execution time measures the fast interpreter. Proving time includes trace generation but excludes
+witness construction. RAM consumed is peak process memory.

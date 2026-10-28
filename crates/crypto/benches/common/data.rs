@@ -29,10 +29,12 @@
 
 use std::iter;
 
-use miden_crypto::{
-    Felt, ONE, Word,
-    rand::test_utils::{prng_array, rand_value},
+use miden_crypto::{Felt, ONE, Word};
+use rand::{
+    RngExt, SeedableRng,
+    distr::{Distribution, StandardUniform},
 };
+use rand_chacha::ChaCha20Rng;
 
 // === Byte Array Generation ===
 
@@ -43,7 +45,7 @@ pub fn generate_byte_array_sequential(size: usize) -> Vec<u8> {
 
 /// Generate byte array of specified size with random data
 pub fn generate_byte_array_random(size: usize) -> Vec<u8> {
-    iter::from_fn(|| Some(rand_value::<u8>())).take(size).collect()
+    iter::from_fn(|| Some(rand::random::<u8>())).take(size).collect()
 }
 
 // === Field Element Generation ===
@@ -55,9 +57,7 @@ pub fn generate_felt_array_sequential(size: usize) -> Vec<Felt> {
 
 /// Generate byte array of specified size with random data
 pub fn generate_felt_array_random(size: usize) -> Vec<Felt> {
-    iter::from_fn(|| Some(Felt::new_unchecked(rand_value::<u64>())))
-        .take(size)
-        .collect()
+    iter::from_fn(|| Some(rand::random::<Felt>())).take(size).collect()
 }
 
 // === Word and Value Generation ===
@@ -77,23 +77,17 @@ pub enum WordPattern {
 
 /// Generate a Word from seed using PRNG
 pub fn generate_word(seed: &mut [u8; 32]) -> Word {
-    *seed = prng_array(*seed);
-    let nums: [u64; 4] = prng_array(*seed);
-    Word::new([
-        Felt::new_unchecked(nums[0]),
-        Felt::new_unchecked(nums[1]),
-        Felt::new_unchecked(nums[2]),
-        Felt::new_unchecked(nums[3]),
-    ])
+    *seed = ChaCha20Rng::from_seed(*seed).random();
+    Word::new(ChaCha20Rng::from_seed(*seed).random())
 }
 
 /// Generate a generic value from seed using PRNG
-pub fn generate_value<T: miden_crypto::rand::Randomizable + std::fmt::Debug + Clone>(
-    seed: &mut [u8; 32],
-) -> T {
-    *seed = prng_array(*seed);
-    let value: [T; 1] = prng_array(*seed);
-    value[0].clone()
+pub fn generate_value<T>(seed: &mut [u8; 32]) -> T
+where
+    StandardUniform: Distribution<T>,
+{
+    *seed = ChaCha20Rng::from_seed(*seed).random::<[u8; 32]>();
+    ChaCha20Rng::from_seed(*seed).random::<T>()
 }
 
 /// Generate word using specified pattern
@@ -132,25 +126,6 @@ pub fn generate_words_merkle_std(count: usize) -> Vec<Word> {
     generate_words_pattern(count, WordPattern::MerkleStandard)
 }
 
-/// Prepare key-value entries for SMT benchmarks
-pub fn prepare_smt_entries(pair_count: u64, seed: &mut [u8; 32]) -> Vec<(Word, Word)> {
-    let entries: Vec<(Word, Word)> = (0..pair_count)
-        .map(|i| {
-            let count = pair_count as f64;
-            let idx = ((i as f64 / count) * (count)) as u64;
-            let key = Word::new([
-                generate_value(seed),
-                ONE,
-                Felt::new_unchecked(i),
-                Felt::new_unchecked(idx),
-            ]);
-            let value = generate_word(seed);
-            (key, value)
-        })
-        .collect();
-    entries
-}
-
 /// Generate test key-value pairs for SMT benchmarks (sequential)
 pub fn generate_smt_entries_sequential(count: usize) -> Vec<(Word, Word)> {
     (0..count as u64)
@@ -183,7 +158,7 @@ pub fn generate_smt_entries_mixed(count: usize) -> Vec<(Word, Word)> {
     (0..count as u64)
         .map(|i| {
             // Use different patterns for keys based on index to create more realistic distribution
-            let key_pattern = match rand_value::<u8>() % 4 {
+            let key_pattern = match rand::random::<u8>() % 4 {
                 0 => WordPattern::Sequential,
                 1 => WordPattern::SpreadSequential,
                 2 => WordPattern::MerkleStandard,
@@ -193,24 +168,6 @@ pub fn generate_smt_entries_mixed(count: usize) -> Vec<(Word, Word)> {
             // Values use offset sequential pattern
             let value = generate_word_pattern(i + 1000, WordPattern::Sequential);
             let key = generate_word_pattern(i, key_pattern);
-
-            (key, value)
-        })
-        .collect()
-}
-
-/// Generate SMT entries with clustered distribution (more realistic access patterns)
-pub fn generate_smt_entries_clustered(count: usize, clusters: usize) -> Vec<(Word, Word)> {
-    let cluster_size = count / clusters;
-    (0..count as u64)
-        .map(|i| {
-            let cluster_id = (i as usize / cluster_size) as u64;
-            let cluster_offset = i % cluster_size as u64;
-
-            // Keys are clustered around specific base values
-            let base = cluster_id * 10000;
-            let key = generate_word_pattern(base + cluster_offset, WordPattern::Sequential);
-            let value = generate_word_pattern(i, WordPattern::SpreadSequential);
 
             (key, value)
         })

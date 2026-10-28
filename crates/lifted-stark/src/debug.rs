@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{
     AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder, ProverStatement,
@@ -53,8 +53,9 @@ where
 
 /// Evaluate AIR constraints against concrete trace values and panic on failure.
 ///
-/// Constraints are checked row-by-row using the trace + aux trace built by
-/// [`ProverStatement`]. All AIRs see the same `air_inputs` from `statement`.
+/// Base-field constraints are checked before auxiliary-trace construction, whose builders may
+/// assume valid selectors. The full constraint check then uses the constructed auxiliary traces.
+/// Each AIR sees its own public-input slice from the [`ProverStatement`].
 ///
 /// Derives auxiliary-trace challenges from the supplied challenger using only
 /// statement-owned data plus the instance count and log trace heights. This is
@@ -98,10 +99,21 @@ pub fn check_constraints<F, EF, MA, Ch>(
 
     let mut aux_traces = Vec::with_capacity(airs.len());
     let mut aux_values_per_air = Vec::with_capacity(airs.len());
-    for (air, main) in airs.iter().zip(traces.iter()) {
+    for (i, (air, main)) in airs.iter().zip(traces.iter()).enumerate() {
         let num_randomness = air.num_randomness();
+        // Auxiliary builders may assume selectors are boolean. Check base-field constraints
+        // first so malformed witnesses fail an AIR constraint before reaching those assumptions.
+        check_single_trace(
+            air,
+            main,
+            None,
+            &vec![EF::ZERO; air.num_aux_values()],
+            &air_inputs[i],
+            &challenges,
+            i,
+        );
         let (aux_trace, aux_values) =
-            air.build_aux_trace(main, air_inputs, aux_inputs, &challenges[..num_randomness]);
+            air.build_aux_trace(main, &air_inputs[i], aux_inputs, &challenges[..num_randomness]);
         aux_traces.push(aux_trace);
         aux_values_per_air.push(aux_values);
     }
@@ -134,16 +146,17 @@ pub fn check_constraints<F, EF, MA, Ch>(
             aux_trace.height()
         );
 
-        check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
+        check_single_trace(air, main, Some(aux_trace), aux_values, &air_inputs[i], &challenges, i);
     }
 }
 
-/// Check constraints for one instance's traces row by row.
+/// Check constraints row by row, or only base-field constraints when no auxiliary trace is
+/// supplied.
 #[allow(clippy::too_many_arguments)]
 fn check_single_trace<F, EF, A>(
     air: &A,
     main: &RowMajorMatrix<F>,
-    aux_trace: &RowMajorMatrix<EF>,
+    aux_trace: Option<&RowMajorMatrix<EF>>,
     aux_values: &[EF],
     public_values: &[F],
     challenges: &[EF],
@@ -169,6 +182,7 @@ fn check_single_trace<F, EF, A>(
     }
 
     let periodic_matrix = air.periodic_columns_matrix();
+    let dummy_aux_row = vec![EF::ZERO; air.aux_width()];
     for row in 0..height {
         let next_row = (row + 1) % height;
 
@@ -177,8 +191,8 @@ fn check_single_trace<F, EF, A>(
         let main_next = main.row_slice(next_row).unwrap();
 
         // Aux trace rows.
-        let aux_current = aux_trace.row_slice(row).unwrap();
-        let aux_next = aux_trace.row_slice(next_row).unwrap();
+        let aux_current = aux_trace.map(|trace| trace.row_slice(row).unwrap());
+        let aux_next = aux_trace.map(|trace| trace.row_slice(next_row).unwrap());
 
         // Periodic values for this row via modulo indexing into the periodic table.
         let periodic_row = periodic_matrix.as_ref().map(|m| m.row_slice(row % m.height()).unwrap());
@@ -194,7 +208,10 @@ fn check_single_trace<F, EF, A>(
                 preprocessed_current.as_deref().unwrap_or(&[]),
                 preprocessed_next.as_deref().unwrap_or(&[]),
             ),
-            permutation: RowWindow::from_two_rows(&aux_current, &aux_next),
+            permutation: RowWindow::from_two_rows(
+                aux_current.as_deref().unwrap_or(&dummy_aux_row),
+                aux_next.as_deref().unwrap_or(&dummy_aux_row),
+            ),
             randomness: &challenges[..air.num_randomness()],
             public_values,
             periodic_values,
@@ -204,6 +221,7 @@ fn check_single_trace<F, EF, A>(
             is_transition: F::from_bool(row != height - 1),
             instance_index,
             row_index: row,
+            check_extension_constraints: aux_trace.is_some(),
         };
 
         #[cfg(debug_assertions)]
@@ -219,7 +237,8 @@ fn check_single_trace<F, EF, A>(
 
 /// Lightweight constraint builder that checks constraints against concrete trace values.
 ///
-/// Evaluates constraints row-by-row and panics immediately on the first nonzero constraint.
+/// Checks base-field constraints and, once the auxiliary trace is available, extension-field
+/// constraints. Panics immediately on a nonzero constraint.
 /// Uses base field `F` for the main trace and extension field `EF` for the auxiliary
 /// (permutation) trace, matching the actual field layout of lifted STARK traces.
 struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
@@ -235,6 +254,7 @@ struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     is_transition: F,
     instance_index: usize,
     row_index: usize,
+    check_extension_constraints: bool,
 }
 
 impl<'a, F, EF> AirBuilder for DebugConstraintBuilder<'a, F, EF>
@@ -302,13 +322,15 @@ where
     where
         I: Into<Self::ExprEF>,
     {
-        assert_eq!(
-            x.into(),
-            EF::ZERO,
-            "ext constraint not satisfied at instance {}, row {}",
-            self.instance_index,
-            self.row_index
-        );
+        if self.check_extension_constraints {
+            assert_eq!(
+                x.into(),
+                EF::ZERO,
+                "ext constraint not satisfied at instance {}, row {}",
+                self.instance_index,
+                self.row_index
+            );
+        }
     }
 }
 

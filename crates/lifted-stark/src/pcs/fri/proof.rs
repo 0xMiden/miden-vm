@@ -37,7 +37,7 @@ where
     /// Reads commitments, verifies PoW witnesses, samples challenges, and
     /// reads the final polynomial. Does not verify low-degree claims;
     /// that validation happens in `FriOracle::test_low_degree`.
-    pub(in crate::pcs) fn read_from_channel<Ch>(
+    pub(crate) fn read_from_channel<Ch>(
         params: &FriParams,
         domain: &LiftedDomain<F>,
         channel: &mut Ch,

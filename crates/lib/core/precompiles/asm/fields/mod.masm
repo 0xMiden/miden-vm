@@ -1,4 +1,0 @@
-#! Field precompile support wrappers.
-
-pub mod k1_base
-pub mod k1_scalar

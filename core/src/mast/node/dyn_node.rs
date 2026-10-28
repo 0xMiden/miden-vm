@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
@@ -18,8 +15,6 @@ use crate::{
 
 /// A Dyn node specifies that the node to be executed next is defined dynamically via the stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct DynNode {
     is_dyncall: bool,
     digest: Word,
@@ -38,18 +33,18 @@ impl DynNode {
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(16830415514927835337),
-        Felt::new_unchecked(12164645914672292987),
-        Felt::new_unchecked(13192574193032437705),
-        Felt::new_unchecked(4604554596675732269),
+        Felt::new_unchecked(4929465990501260251),
+        Felt::new_unchecked(4252574327229227746),
+        Felt::new_unchecked(7664706718614035214),
+        Felt::new_unchecked(5262722615979198255),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(16952228088962355159),
-        Felt::new_unchecked(5793482471479538911),
-        Felt::new_unchecked(14446299416172848527),
-        Felt::new_unchecked(13522295374716441620),
+        Felt::new_unchecked(5054859371585090225),
+        Felt::new_unchecked(3018626251158572130),
+        Felt::new_unchecked(8979003943310009950),
+        Felt::new_unchecked(3514735682419267206),
     ]);
 }
 
@@ -150,32 +145,6 @@ impl MastNodeExt for DynNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for DynNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        // Generate whether it's a dyncall or dynexec
-        any::<bool>()
-            .prop_map(|is_dyncall| {
-                if is_dyncall {
-                    DynNodeBuilder::new_dyncall().build()
-                } else {
-                    DynNodeBuilder::new_dyn().build()
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`DynNode`] instances.
 #[derive(Debug)]
@@ -267,9 +236,8 @@ impl proptest::prelude::Arbitrary for DynNodeBuilder {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::poseidon2::Poseidon2;
-
     use super::*;
+    use crate::chiplets::hasher;
 
     /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
     /// domain.
@@ -280,16 +248,16 @@ mod tests {
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
-            Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+            hasher::merge_in_mast_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         let dyncall_node_id = forest.push_node(DynNodeBuilder::new_dyncall()).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
-            Poseidon2::merge_in_domain(
+            hasher::merge_in_mast_domain(
                 &[Word::default(), Word::default()],
-                DynNode::DYNCALL_DOMAIN
+                DynNode::DYNCALL_DOMAIN,
             )
         );
     }

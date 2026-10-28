@@ -22,7 +22,6 @@ type Leaves = super::Leaves<Word>;
 ///
 /// The root of the tree is recomputed on each new leaf update.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SimpleSmt<const DEPTH: u8> {
     root: Word,
     inner_nodes: InnerNodes,

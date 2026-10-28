@@ -8,7 +8,9 @@
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
-//! - [`falcon512_poseidon2`]: Falcon-512 with Poseidon2 hashing
+//! - [`ecdsa_p256_sha256`]: ECDSA over P-256 with SHA-256 hashing
+//! - [`eddsa_25519_sha512`]: Ed25519 with SHA-512 hashing
+//! - [`falcon512_eidos`]: Falcon-512 with the native VM hash
 
 // ECDSA K256 KECCAK
 // ================================================================================================
@@ -16,9 +18,16 @@
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
 /// Functions in this module generate the public-key commitment and native advice witness expected
-/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
-/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
-/// Rust verifier, the MASM verifier intentionally accepts high-s values.
+/// by the `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes` ABIs. The public-key
+/// coordinates are bound by that commitment, but `r` and `s` are not committed to a particular
+/// signature encoding. Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally
+/// accepts high-s values.
+///
+/// These helpers encode only the advice witness consumed by the verification procedures. The
+/// recovery procedures instead read a word-aligned native EVM recovery witness from memory as
+/// `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 27 or 28. Callers must convert external EVM
+/// wire signatures, whose scalar components are fixed-width big-endian byte strings, into that
+/// native memory layout.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
@@ -44,13 +53,13 @@ pub mod ecdsa_k256_keccak {
     }
 
     /// Encodes the provided public key and signature into the native advice-stack format expected
-    /// by `ecdsa_k256_keccak::verify`.
+    /// by `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The encoding is the structural order consumed from the advice stack:
-    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
-    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
-    /// to the supplied signature encoding.
+    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each scalar value is a little-endian
+    /// `u32` limb represented as a field element. The signature portion preserves `r` and `s`
+    /// exactly, omits the recovery ID, and does not normalize or enforce low-s. The result is
+    /// advice witness data, not a commitment to the supplied signature encoding.
     ///
     /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
     /// commitment returned by [`public_key_commitment()`].
@@ -62,13 +71,14 @@ pub mod ecdsa_k256_keccak {
             "ECDSA public key elements must be QX[8] || QY[8] native limbs",
         );
 
-        let mut out = Vec::with_capacity(32);
+        let mut out = Vec::with_capacity(16 + 16);
         out.extend(pk_elements);
         out.extend_from_slice(&signature_felts(sig));
         out
     }
 
-    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.
+    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify` and
+    /// `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The commitment is delegated to [`PublicKey::to_commitment()`], which commits to the same
     /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].
@@ -95,30 +105,157 @@ pub mod ecdsa_k256_keccak {
     }
 }
 
-// FALCON 512 POSEIDON2
+// ECDSA P256 SHA256
 // ================================================================================================
 
-/// Falcon-512 with Poseidon2 hashing signature helpers.
+/// ECDSA P-256 with SHA-256 signature helpers.
+///
+/// Functions in this module generate the public-key commitment and native advice witness expected
+/// by the `ecdsa_p256_sha256::verify` and `ecdsa_p256_sha256::verify_bytes` ABIs. Coordinates and
+/// scalars are little-endian u32 limbs. The public-key coordinates are bound by the commitment;
+/// `r` and `s` are an uncommitted witness, and high-s values are accepted.
+///
+/// The recovery procedures instead read a word-aligned native recovery witness from memory as
+/// `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 0 or 1 (the y-parity of R).
+pub mod ecdsa_p256_sha256 {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, Word};
+    use miden_crypto::hash::{eidos::Eidos, sha2::Sha256};
+    use p256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::hazmat::PrehashSigner};
+
+    /// Signs the 32 little-endian bytes of `msg` hashed with SHA-256 and encodes the public key
+    /// and signature as advice for `ecdsa_p256_sha256::verify`.
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
+        let digest: [u8; 32] = Sha256::hash(&word_le_bytes(msg)).into();
+        let sig: Signature = sk.sign_prehash(&digest).expect("SHA-256 prehash is valid");
+        encode_signature(sk.verifying_key(), &sig)
+    }
+
+    /// Encodes `[QX[8] || QY[8] || R[8] || S[8]]` in advice-consumption order, each value as
+    /// little-endian u32 limbs. No normalization is performed.
+    pub fn encode_signature(pk: &VerifyingKey, sig: &Signature) -> Vec<Felt> {
+        let mut out = public_key_elements(pk).to_vec();
+        let (r, s) = sig.split_bytes();
+        out.extend(be_bytes_to_le_felts(&r.into()));
+        out.extend(be_bytes_to_le_felts(&s.into()));
+        out
+    }
+
+    /// Returns `PK_COMM = Eidos::hash_elements(QX[8] || QY[8])`.
+    pub fn public_key_commitment(pk: &VerifyingKey) -> Word {
+        Eidos::hash_elements(&public_key_elements(pk))
+    }
+
+    /// Converts big-endian affine coordinates to `QX[8] || QY[8]` little-endian u32 limbs.
+    pub(crate) fn public_key_felts(x: &[u8; 32], y: &[u8; 32]) -> [Felt; 16] {
+        let mut felts = [Felt::ZERO; 16];
+        felts[..8].copy_from_slice(&be_bytes_to_le_felts(x));
+        felts[8..].copy_from_slice(&be_bytes_to_le_felts(y));
+        felts
+    }
+
+    fn public_key_elements(pk: &VerifyingKey) -> [Felt; 16] {
+        let point = pk.to_sec1_point(false);
+        let x = point.x().expect("uncompressed point has an x-coordinate");
+        let y = point.y().expect("uncompressed point has a y-coordinate");
+        public_key_felts(&(*x).into(), &(*y).into())
+    }
+
+    fn be_bytes_to_le_felts(bytes: &[u8; 32]) -> [Felt; 8] {
+        core::array::from_fn(|i| {
+            let offset = 28 - 4 * i;
+            let limb = u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 limb"));
+            Felt::from_u32(limb)
+        })
+    }
+
+    /// Returns each felt of `msg` as eight little-endian bytes, which is the `(lo, hi)` u32 split
+    /// performed by the MASM `store_word_u32s_le`.
+    fn word_le_bytes(msg: Word) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        for (i, felt) in msg.iter().enumerate() {
+            bytes[8 * i..8 * (i + 1)].copy_from_slice(&felt.as_canonical_u64().to_le_bytes());
+        }
+        bytes
+    }
+}
+
+// EDDSA 25519 SHA512
+// ================================================================================================
+
+/// Ed25519 signature helpers for the `eddsa_25519_sha512::verify` and `verify_bytes` MASM ABIs.
+///
+/// Verification requires canonical public-key and signature encodings and rejects small-order
+/// public keys and signature points. The public-key commitment matches `miden-crypto`; the
+/// signature remains an uncommitted advice witness.
+pub mod eddsa_25519_sha512 {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
+    use miden_crypto::{
+        SequentialCommit,
+        dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey},
+    };
+
+    /// Signs the 32 little-endian bytes of a Word and encodes the public key and signature as
+    /// advice for the MASM verifier. Use [`public_key_commitment()`] for its operand-stack input.
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
+        encode_signature(&sk.public_key(), &sk.sign(msg))
+    }
+
+    /// Encodes `[A[8] || R[8] || S[8]]` in advice-consumption order, where each element is a
+    /// packed little-endian u32 limb of the original RFC 8032 byte encodings. No normalization
+    /// is performed. The same witness format serves Word and arbitrary-byte verification.
+    pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
+        let mut elements = pk.to_elements();
+        elements.extend(bytes_to_packed_u32_elements(&sig.to_bytes()));
+        elements
+    }
+
+    /// Returns the Eidos commitment to the compressed public key's eight packed u32 limbs,
+    /// matching the `PK_COMM` input to both MASM verification procedures.
+    pub fn public_key_commitment(pk: &PublicKey) -> Word {
+        pk.to_commitment()
+    }
+}
+
+// FALCON 512
+// ================================================================================================
+
+/// Falcon-512 signature helpers.
 ///
 /// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::falcon512_poseidon2::verify` MASM procedure.
-pub mod falcon512_poseidon2 {
+/// `miden::core::crypto::dsa::falcon512_eidos::verify` MASM procedure.
+pub mod falcon512_eidos {
     extern crate alloc;
 
     use alloc::vec::Vec;
 
     // Re-export signature type for users
-    pub use miden_core::crypto::dsa::falcon512_poseidon2::{PublicKey, SecretKey, Signature};
+    pub use miden_core::crypto::dsa::falcon512_eidos::{PublicKey, SecretKey, Signature};
     use miden_core::{
         Felt, Word,
-        crypto::{dsa::falcon512_poseidon2::Polynomial, hash::Poseidon2},
+        crypto::hash::Eidos,
+        program::domain::{FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN},
     };
 
-    /// Signs the provided message with the provided secret key and returns the resulting signature
-    /// encoded in the format required by the `falcon512_poseidon2::verify` procedure, or `None` if
-    /// the secret key is malformed due to either incorrect length or failed decoding.
+    /// The Falcon modulus.
+    const M: u32 = 12289;
+
+    /// Half of the Falcon modulus rounded down, i.e., (M - 1) / 2.
+    const M_HALF: u32 = (M - 1) / 2;
+
+    const N: usize = 512;
+
+    /// Signs the message and encodes the signature for the `falcon512_eidos::verify` procedure.
     ///
-    /// This is equivalent to calling [`encode_signature`] on the result of signing the message.
+    /// The result is always `Some`. Key decoding errors are reported when deserializing a
+    /// [`SecretKey`], before calling this function.
     ///
     /// See [`encode_signature`] for the encoding format.
     pub fn sign(sk: &SecretKey, msg: Word) -> Option<Vec<Felt>> {
@@ -127,54 +264,96 @@ pub mod falcon512_poseidon2 {
     }
 
     /// Encodes the provided Falcon public key and signature into a vector of field elements in the
-    /// format expected by `miden::core::crypto::dsa::falcon512_poseidon2::verify` procedure.
+    /// format expected by `miden::core::crypto::dsa::falcon512_eidos::verify` procedure.
     ///
-    /// The encoding format is (in reverse order on the advice stack):
+    /// The advice stream contains:
     ///
-    /// 1. The challenge point, a tuple of elements representing an element in the quadratic
-    ///    extension field, at which we evaluate the polynomials in the subsequent three points to
-    ///    check the product relationship.
+    /// 1. The challenge point as `[tau1, tau0]` in the quadratic extension field, used to check
+    ///    that the product polynomial equals the public-key polynomial times the centered signature
+    ///    polynomial. The verifier checks that the point matches the transcript of the public-key
+    ///    commitment, shifted signature, and product.
     /// 2. The expanded public key represented as the coefficients of a polynomial of degree < 512.
-    /// 3. The signature represented as the coefficients of a polynomial of degree < 512.
-    /// 4. The product of the above two polynomials in the ring of polynomials with coefficients in
-    ///    the Miden field.
+    /// 3. The signature represented as the coefficients of a polynomial of degree < 512, in the
+    ///    shifted representation s2'_i = s2_i + (M - 1) / 2, where s2_i in [-(M-1)/2, (M-1)/2] is
+    ///    the centered representative of the i-th coefficient. This representation allows the MASM
+    ///    verifier to compute the square norm of each coefficient without any conditional
+    ///    centering.
+    /// 4. The product of the expanded public key and the centered signature polynomial in the ring
+    ///    of polynomials with coefficients in the Miden field.
     /// 5. The nonce represented as 8 field elements.
     ///
     /// The result can be streamed straight to the advice provider before invoking
-    /// `falcon512_poseidon2::verify`.
+    /// `falcon512_eidos::verify`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the public key or signature polynomial does not contain 512 coefficients.
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
-        use alloc::vec;
+        assert_eq!(pk.coefficients.len(), N, "public key must contain 512 coefficients");
+        assert_eq!(sig.sig_poly().coefficients.len(), N, "s2 must contain 512 coefficients");
 
-        // The signature is composed of a nonce and a polynomial s2
+        // The product uses centered coefficients; advice carries shifted coefficients.
+        let s2_balanced = sig.sig_poly().to_balanced_values();
 
-        // The nonce is represented as 8 field elements.
-        let nonce = sig.nonce();
+        // Each convolution coefficient has absolute value at most
+        // 512 * (M - 1) * (M - 1) / 2, so the signed sum fits in i64.
+        let h_elements = pk.to_elements();
+        let mut pi = [0i64; 2 * N];
+        for (i, h_i) in h_elements.iter().enumerate() {
+            let h_i = h_i.as_canonical_u64() as i64;
+            for (j, &s2_j) in s2_balanced.iter().enumerate() {
+                pi[i + j] += h_i * i64::from(s2_j);
+            }
+        }
 
-        // We convert the signature to a polynomial
-        let s2 = sig.sig_poly();
+        let nonce = sig.nonce().to_elements();
+        let mut result = Vec::with_capacity(2 + 4 * N + nonce.len());
+        // Reserve the challenge slots until the polynomial transcript is complete.
+        result.extend([Felt::ZERO; 2]);
+        result.extend(h_elements);
+        // Shifted s2 coefficients lie in [0, M).
+        result
+            .extend(s2_balanced.iter().map(|&c| Felt::from_u32((c as i32 + M_HALF as i32) as u32)));
+        result.extend(pi.iter().map(|&a| {
+            let abs = Felt::new_unchecked(a.unsigned_abs());
+            if a < 0 { -abs } else { abs }
+        }));
 
-        // Lastly, for the probabilistic product routine that is part of the verification
-        // procedure, we need to compute the product of the expanded key and the signature
-        // polynomial in the ring of polynomials with coefficients in the Miden field.
-        let pi = Polynomial::mul_modulo_p(pk, s2);
-
-        // We now push the expanded key, the signature polynomial, and the product of the
-        // expanded key and the signature polynomial to the advice stack. We also push
-        // the challenge point at which the previous polynomials will be evaluated.
-        // Finally, we push the nonce needed for the hash-to-point algorithm.
-
-        let mut polynomials = pk.to_elements();
-        polynomials.extend(s2.to_elements());
-        polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
-
-        let digest_polynomials = Poseidon2::hash_elements(&polynomials);
-        let challenge = (digest_polynomials[0], digest_polynomials[1]);
+        let digest = product_check_digest(
+            pk.to_commitment(),
+            &result[2 + N..2 + 2 * N],
+            &result[2 + 2 * N..],
+        );
 
         // Push [tau1, tau0] so two `adv_push` ops leave [tau0, tau1, ...] on the operand stack.
-        let mut result: Vec<Felt> = vec![challenge.1, challenge.0];
-        result.extend_from_slice(&polynomials);
-        result.extend_from_slice(&nonce.to_elements());
+        result[..2].copy_from_slice(&[digest[1], digest[0]]);
+        result.extend(nonce);
 
         result
+    }
+
+    /// Computes the Falcon product-check transcript digest.
+    ///
+    /// The transcript binds the public-key commitment, shifted signature coefficients in [0, M),
+    /// and the claimed product with the centered signature polynomial. The verifier recomputes the
+    /// public-key commitment separately from the expanded key.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `s2_shifted` contains 512 coefficients and `product` contains 1024.
+    pub fn product_check_digest(public_key: Word, s2_shifted: &[Felt], product: &[Felt]) -> Word {
+        assert_eq!(s2_shifted.len(), N, "s2 must contain 512 coefficients");
+        assert_eq!(product.len(), 2 * N, "product must contain 1024 coefficients");
+
+        let mut cv =
+            Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
+        let first_block = core::array::from_fn(|i| if i < 4 { public_key[i] } else { Felt::ZERO });
+        cv = Eidos::compress(cv, first_block);
+
+        for chunk in s2_shifted.chunks(8).chain(product.chunks(8)) {
+            cv = Eidos::compress(cv, chunk.try_into().expect("chunk length checked above"));
+        }
+
+        cv
     }
 }

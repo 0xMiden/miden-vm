@@ -9,6 +9,9 @@ use alloc::{boxed::Box, string::String};
 /// - Higher-level value and subtree decode failures
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
+    /// Cached hashes use a different construction, or their hash-scheme marker is missing.
+    #[error("incompatible SMT hash scheme; rebuild storage from key-value entries")]
+    IncompatibleHashScheme,
     /// Backend I/O or database error (e.g., RocksDB).
     #[error("backend error: {0}")]
     Backend(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),

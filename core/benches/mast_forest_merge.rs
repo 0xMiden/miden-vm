@@ -4,7 +4,8 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_core::mast::{
-    MastForest, MastForestError, MastForestRootMap, arbitrary::MastForestParams,
+    MastForest, MastForestError, MastForestRootMap,
+    arbitrary::{GenerationMode, MastForestParams},
 };
 use proptest::{
     arbitrary::any_with,
@@ -44,9 +45,11 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
             max_splits: blocks_per_forest.min(8),
             max_loops: blocks_per_forest.min(4),
             max_calls: blocks_per_forest.min(4),
-            max_syscalls: 0, // Disabled for executable benchmark forests
+            max_syscalls: 0,
             max_externals: blocks_per_forest.min(2),
             max_dyns: blocks_per_forest.min(2),
+            mode: GenerationMode::StructureOnly,
+            ..Default::default()
         };
 
         // Pre-generate inputs (excluded from timing).

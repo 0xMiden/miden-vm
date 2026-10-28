@@ -12,7 +12,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Poseidon2};
+use miden_core::{Word, chiplets::hasher};
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -31,7 +31,6 @@ use crate::{ast::*, parser::WordValue};
 /// * Documentation comments are attached to items they decorate
 /// * Import table is constructed
 /// * Symbol resolution is performed:
-///   * Constants referenced by name are replaced with the value of that constant.
 ///   * Calls to imported procedures are resolved concretely
 /// * Semantic analysis is performed on the module to validate it
 pub fn analyze(
@@ -43,9 +42,6 @@ pub fn analyze(
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<Box<Module>, SyntaxError> {
     log::debug!(target: "sema", "starting semantic analysis for '{}' (kind = {kind:?})", path.map(Path::as_str).unwrap_or("None"));
-    let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
-    analyzer.set_warnings_as_errors(warnings_as_errors);
-
     let expected_path = match path {
         Some(path) => Some(normalize_namespace_path(path).map_err(|err| SyntaxError {
             source_file: source.clone(),
@@ -57,6 +53,8 @@ pub fn analyze(
         None => None,
     };
     let module_path = expected_path.as_deref().unwrap_or(Path::new(""));
+    let mut analyzer = AnalysisContext::new(module_path, source.clone(), source_manager);
+    analyzer.set_warnings_as_errors(warnings_as_errors);
     let mut module = Box::new(
         Module::new(kind.unwrap_or_default(), module_path).with_span(source.source_span()),
     );
@@ -209,6 +207,10 @@ pub fn analyze(
             return Err(analyzer.into_result().unwrap_err());
         }
     }
+    if let Err(err) = analyzer.set_module(&module) {
+        analyzer.error(err);
+        analyzer.has_failed()?;
+    }
 
     // Check all forms that have kind-specific restrictions now that the kind is concrete
     if !actual_kind.is_library() {
@@ -245,22 +247,13 @@ pub fn analyze(
         }
     }
 
-    // Simplify all constant declarations
-    analyzer.simplify_constants();
-    for item in module.items_mut() {
-        let Item::Constant(constant) = item else {
-            continue;
-        };
-        constant.value = analyzer
-            .get_constant(&constant.name)
-            .expect("semantic analysis tracks all module constants")
-            .clone();
-    }
+    // Evaluate constant declarations for validation, but preserve their source expressions.
+    analyzer.evaluate_constants();
 
     // Define enums now that all constant declarations have been discovered
     for mut ty in enums {
         for variant in ty.variants_mut() {
-            variant.discriminant = analyzer.get_constant(&variant.name).unwrap().clone();
+            variant.discriminant = analyzer.get_evaluated_constant(&variant.name).unwrap();
         }
 
         if let Err(err) = module.define_enum(ty) {
@@ -283,6 +276,12 @@ pub fn analyze(
     for import in module.imports() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.unused_span() });
+        }
+    }
+
+    for constant in module.constants() {
+        if !analyzer.is_constant_used(constant) {
+            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
         }
     }
 
@@ -412,7 +411,11 @@ fn verify_exported_type_expr(
                 return;
             };
 
-            if !type_decl.visibility().is_public() {
+            let publicly_aliased = path
+                .as_ident()
+                .and_then(|name| module.get_import(name.as_str()))
+                .is_some_and(|import| import.visibility().is_public());
+            if !type_decl.visibility().is_public() && !publicly_aliased {
                 analyzer.error(usage.private_type_error(path.span(), type_decl.name().span()));
                 return;
             }
@@ -446,7 +449,22 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             (import.local_name().as_str().to_string(), LocalInvokeTarget::from(import))
         }),
     );
-    let mut used_aliases = BTreeSet::default();
+    // Import targets can themselves name a local import, including a private alias.
+    let mut used_aliases = module
+        .imports()
+        .filter_map(|import| match import {
+            Import::Item(import)
+                if import.module_path().as_str() == "self"
+                    || import
+                        .module_path()
+                        .to_absolute()
+                        .is_ok_and(|path| path.as_ref() == module.path()) =>
+            {
+                Some(import.source_name().as_str().to_string())
+            },
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let mut items = VecDeque::from(module.take_items());
     while let Some(item) = items.pop_front() {
         match item {
@@ -456,24 +474,26 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                     procedure.set_syscall(true);
                 }
 
-                // Evaluate all named immediates to their concrete values
+                // Evaluate a clone so semantic checks do not change the parsed procedure.
                 log::debug!(target: "const-eval", "visiting procedure {}", procedure.name());
-                {
+                let evaluated = {
+                    let mut evaluated = procedure.clone();
                     let mut visitor = ConstEvalVisitor::new(analyzer);
-                    let _ = visitor.visit_mut_procedure(&mut procedure);
+                    let _ = visitor.visit_mut_procedure(&mut evaluated);
                     if let Err(errs) = visitor.into_result() {
                         for err in errs {
                             log::error!(target: "const-eval", "error found in procedure {}: {err}", procedure.name());
                             analyzer.error(err);
                         }
                     }
-                }
+                    evaluated
+                };
 
                 // Ensure repeat counts are within acceptable bounds.
                 log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = VerifyRepeatCounts::new(analyzer);
-                    let _ = visitor.visit_procedure(&procedure);
+                    let _ = visitor.visit_procedure(&evaluated);
                 }
 
                 // Next, verify invoke targets:
@@ -506,6 +526,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                         &mut used_aliases,
                         None,
                     );
+                    visitor.set_current_constant(Some(constant.name.clone()));
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 if let Err(err) = module.push_export(Item::Constant(constant)) {
@@ -530,6 +551,8 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             },
         }
     }
+
+    analyzer.resolve_constant_usage(module, &mut used_aliases);
 
     for import in module.imports_mut() {
         if import.is_used() || !used_aliases.contains(import.local_name().as_str()) {
@@ -653,12 +676,12 @@ fn define_procedure(
     Ok(())
 }
 
-/// Inserts a new entry in the Advice Map and defines a constant corresposnding to the entry's
+/// Inserts a new entry in the Advice Map and defines a constant corresponding to the entry's
 /// key.
 fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mut AnalysisContext) {
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
-        None => Poseidon2::hash_elements(&entry.value),
+        None => hasher::hash_elements(&entry.value),
     };
     let cst = Constant::new(
         entry.span,
@@ -667,6 +690,7 @@ fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mu
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );
     context.define_constant(module, cst);
+    context.mark_constant_used(&entry.name);
     match module.advice_map.get(&key) {
         Some(_) => {
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });

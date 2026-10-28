@@ -359,7 +359,7 @@ fn explicit_namespace_conflict_still_reports_expected_path() {
 }
 
 #[test]
-fn exported_constant_with_private_local_dependency_is_fully_evaluated_in_analysis() {
+fn exported_constant_with_private_local_dependency_is_preserved_in_analysis() {
     let context = SyntaxTestContext::default();
     let module = context
         .parse_module(
@@ -373,11 +373,43 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
         .expect("expected semantic analysis to succeed");
 
     let exported = exported_constant(&module, "ACCOUNT_ID_SUFFIX_OFFSET");
-    assert_eq!(exported.value.expect_int().as_int(), 6);
-    assert!(
-        exported.value.references().is_empty(),
-        "expected semantic analysis to remove private local constant references from exported constants",
-    );
+    let references = exported.value.references();
+    assert_eq!(references.len(), 1);
+    assert_eq!(references[0].inner().as_str(), "ACCOUNT_ID_AND_NONCE_OFFSET");
+}
+
+#[test]
+fn deferred_binary_expr_reports_invalid_rhs_operand() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            r#"
+namespace test
+
+use {N} from dep
+
+const BAD = (N + 1) + "hello"
+"#,
+        )
+        .expect_err("string operand in an arithmetic constant expression must be rejected");
+    let syntax_error = syntax_error(&error);
+    let operand = syntax_error
+        .errors
+        .iter()
+        .find_map(|error| match error {
+            SemanticAnalysisError::ConstEvalError(ConstEvalError::InvalidConstExprOperand {
+                operand,
+                ..
+            }) => Some(*operand),
+            _ => None,
+        })
+        .expect("expected an invalid constant expression operand");
+    let operand_text = syntax_error
+        .source_file
+        .source_slice(operand)
+        .expect("invalid operand span should refer to the source");
+
+    assert_eq!(operand_text, r#""hello""#);
 }
 
 #[test]

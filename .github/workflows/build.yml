@@ -11,6 +11,13 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
 
 jobs:
   no-std:
@@ -19,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
+        target: [wasm32-unknown-unknown, wasm32-wasip1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,10 +35,9 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Build for no-std
         run: |
-          rustup update --no-self-update ${{ matrix.toolchain }}
-          rustup +${{ matrix.toolchain }} target add wasm32-unknown-unknown
-          rustup default ${{ matrix.toolchain }}
-          make build-no-std
+          rustup update --no-self-update stable
+          rustup +stable target add ${{ matrix.target }}
+          RUSTUP_TOOLCHAIN=stable NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target
@@ -61,14 +67,14 @@ jobs:
         run: |
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
-      - name: Install cargo-binstall
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
-        with:
-          tool: cargo-binstall
       - name: Install wasmtime
-        run: cargo binstall --no-confirm --strategies crate-meta-data wasmtime-cli@45.0.2
-      - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: wasmtime-cli@45.0.2
+      - name: Run packed arithmetic and hash tests under WASM SIMD128
         run: make test-wasm-simd
+      - name: Run overlapped trace-build tests on a threadless wasm target
+        run: make test-wasm-threadless
 
   fuzz-check:
     name: Check fuzz workspaces

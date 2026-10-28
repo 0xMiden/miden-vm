@@ -1,9 +1,6 @@
 use alloc::{string::ToString, sync::Arc};
 use core::{fmt, iter::FusedIterator};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{Path, PathError};
 use crate::{ast::Ident, debuginfo::Span};
 
@@ -12,7 +9,6 @@ use crate::{ast::Ident, debuginfo::Span};
 
 /// Represents a single component of a [Path]
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PathComponent<'a> {
     /// The root anchor, indicating that the path is absolute/fully qualified
     Root,

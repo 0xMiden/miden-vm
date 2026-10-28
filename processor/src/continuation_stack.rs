@@ -1,10 +1,124 @@
 use alloc::{sync::Arc, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
 
-use miden_core::{mast::MastNodeId, program::Program};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_core::{
+    mast::{MastForestId, MastNodeId},
+    program::Program,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
+use miden_mast_package::debug_info::{DebugSourceInlineCall, DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
+
+#[derive(Clone, Debug)]
+pub(crate) struct DebugActivationId {
+    execution: Arc<AtomicU64>,
+    generation: u64,
+}
+
+impl PartialEq for DebugActivationId {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.execution, &other.execution) && self.generation == other.generation
+    }
+}
+
+impl Eq for DebugActivationId {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DebugActivations {
+    active: DebugActivationId,
+    pending: Vec<u64>,
+}
+
+impl DebugActivations {
+    fn new(count: usize) -> Self {
+        let mut activations = Self {
+            active: DebugActivationId {
+                execution: Arc::new(AtomicU64::new(1)),
+                generation: 0,
+            },
+            pending: Vec::with_capacity(count),
+        };
+        for _ in 0..count {
+            let generation = activations.next_generation();
+            activations.pending.push(generation);
+        }
+        activations
+    }
+
+    fn next_generation(&self) -> u64 {
+        let execution = &self.active.execution;
+        let mut generation = execution.load(Ordering::Relaxed);
+        loop {
+            let next = generation.checked_add(1).expect("debug activation generation exhausted");
+            match execution.compare_exchange_weak(
+                generation,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(previous) => return previous,
+                Err(current) => generation = current,
+            }
+        }
+    }
+
+    fn activation_at(&self, position: usize) -> Option<DebugActivationId> {
+        Some(DebugActivationId {
+            execution: self.active.execution.clone(),
+            generation: *self.pending.get(position)?,
+        })
+    }
+}
+
+/// Package-owned source context whose inline-call rows remain active across a dynamic target.
+#[derive(Debug, Clone)]
+pub struct SourceInlineCallContext {
+    package_debug_info: Arc<PackageDebugInfo>,
+    source_node_id: DebugSourceNodeId,
+    op_idx: u32,
+}
+
+impl SourceInlineCallContext {
+    pub(crate) fn new(
+        package_debug_info: Arc<PackageDebugInfo>,
+        source_node_id: DebugSourceNodeId,
+        op_idx: u32,
+    ) -> Self {
+        Self {
+            package_debug_info,
+            source_node_id,
+            op_idx,
+        }
+    }
+
+    pub(crate) fn for_source_boundary(
+        package_debug_info: Arc<PackageDebugInfo>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) -> Option<Self> {
+        let source_node_id = source_node_id?;
+        let op_idx = package_debug_info.source_node(source_node_id)?.op_start;
+        package_debug_info.inline_calls_for_operation(source_node_id, op_idx).next()?;
+        Some(Self::new(package_debug_info, source_node_id, op_idx))
+    }
+
+    /// Returns the package debug information which owns this source occurrence.
+    pub fn debug_info(&self) -> &Arc<PackageDebugInfo> {
+        &self.package_debug_info
+    }
+
+    /// Returns the source occurrence whose boundary inline rows form this context.
+    pub fn source_node_id(&self) -> DebugSourceNodeId {
+        self.source_node_id
+    }
+
+    /// Returns the inline calls inherited at this source boundary.
+    pub fn inline_calls(&self) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.package_debug_info
+            .inline_calls_for_operation(self.source_node_id, self.op_idx)
+    }
+}
 
 // CONTINUATION
 // ================================================================================================
@@ -18,7 +132,11 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 /// [`Continuation::EnterForest`] variant. For live execution this is `Arc<MastForest>`; for the
 /// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
 /// `mast_forest_store` of the trace generation context.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(MastForestId))
+)]
 pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
@@ -58,6 +176,8 @@ pub enum Continuation<F> {
     EnterForest {
         forest: F,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
+        /// Inline-context stack depth to restore when returning to this forest.
+        inline_context_depth: usize,
     },
 }
 
@@ -114,19 +234,50 @@ impl<F> Continuation<F> {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug, Clone)]
+///
+/// Note: the binary wire format for this type is deliberately lossy (`package_debug_info` and
+/// `source_node_ids` are not serialized), so the exact-equality round-trip test generated by
+/// `serde_test` does not apply; `continuation_stack_mast_forest_id_round_trip_omits_debug_metadata`
+/// covers the lossy round trip instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(MastForestId))
+)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
     source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
+    debug_activations: Option<DebugActivations>,
 }
 
 impl<F> Default for ContinuationStack<F> {
     fn default() -> Self {
-        Self { stack: Vec::new(), source_node_ids: None }
+        Self {
+            stack: Vec::new(),
+            source_node_ids: None,
+            debug_activations: None,
+        }
     }
 }
 
 impl<F> ContinuationStack<F> {
+    pub(crate) fn debug_activation_at(&self, position: usize) -> Option<DebugActivationId> {
+        self.debug_activations.as_ref()?.activation_at(position)
+    }
+
+    pub(crate) fn iter_with_source_node_ids(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&Continuation<F>, Option<DebugSourceNodeId>)> {
+        self.stack.iter().enumerate().map(|(index, continuation)| {
+            let source_node_id = self
+                .source_node_ids
+                .as_deref()
+                .and_then(|ids| ids.get(index).copied())
+                .flatten();
+            (continuation, source_node_id)
+        })
+    }
+
     /// Creates a new continuation stack for a program.
     ///
     /// # Arguments
@@ -135,7 +286,11 @@ impl<F> ContinuationStack<F> {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
-        Self { stack, source_node_ids: None }
+        Self {
+            stack,
+            source_node_ids: None,
+            debug_activations: None,
+        }
     }
 
     pub(crate) fn new_with_source_node_id(
@@ -158,6 +313,7 @@ impl<F> ContinuationStack<F> {
         Self {
             stack,
             source_node_ids: Some(source_node_ids),
+            debug_activations: Some(DebugActivations::new(1)),
         }
     }
 
@@ -179,21 +335,36 @@ impl<F> ContinuationStack<F> {
         self.push_source_node_id(source_node_id);
     }
 
+    pub(crate) fn push_resumed_with_source_node_id(
+        &mut self,
+        continuation: Continuation<F>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) {
+        self.stack.push(continuation);
+        self.push_source_node_id_with_resumption(source_node_id, true);
+    }
+
     /// Pushes a continuation to enter the given MAST forest on the continuation stack.
     ///
     /// # Arguments
     /// * `forest` - The MAST forest to enter
     pub fn push_enter_forest(&mut self, forest: F) {
-        self.push_enter_forest_with_package_debug_info(forest, None);
+        self.push_enter_forest_with_package_debug_info(forest, None, 0, None);
     }
 
     pub(crate) fn push_enter_forest_with_package_debug_info(
         &mut self,
         forest: F,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
+        inline_context_depth: usize,
+        source_node_id: Option<DebugSourceNodeId>,
     ) {
-        self.stack.push(Continuation::EnterForest { forest, package_debug_info });
-        self.push_source_node_id(None);
+        self.stack.push(Continuation::EnterForest {
+            forest,
+            package_debug_info,
+            inline_context_depth,
+        });
+        self.push_source_node_id(source_node_id);
     }
 
     /// Pushes a join finish continuation onto the stack.
@@ -239,9 +410,7 @@ impl<F> ContinuationStack<F> {
     /// associated MAST forest.
     pub fn pop_continuation(&mut self) -> Option<Continuation<F>> {
         let continuation = self.stack.pop()?;
-        if let Some(source_node_ids) = &mut self.source_node_ids {
-            source_node_ids.pop();
-        }
+        self.pop_source_node_id();
         Some(continuation)
     }
 
@@ -249,7 +418,7 @@ impl<F> ContinuationStack<F> {
         &mut self,
     ) -> Option<(Continuation<F>, Option<DebugSourceNodeId>)> {
         let continuation = self.stack.pop()?;
-        let source_node_id = self.source_node_ids.as_mut().and_then(Vec::pop).flatten();
+        let source_node_id = self.pop_source_node_id();
         Some((continuation, source_node_id))
     }
 
@@ -260,9 +429,34 @@ impl<F> ContinuationStack<F> {
     }
 
     fn push_source_node_id(&mut self, source_node_id: Option<DebugSourceNodeId>) {
+        self.push_source_node_id_with_resumption(source_node_id, false);
+    }
+
+    fn push_source_node_id_with_resumption(
+        &mut self,
+        source_node_id: Option<DebugSourceNodeId>,
+        resumed: bool,
+    ) {
         if let Some(source_node_ids) = &mut self.source_node_ids {
             source_node_ids.push(source_node_id);
+            if let Some(activations) = &mut self.debug_activations {
+                let generation =
+                    if !resumed && matches!(self.stack.last(), Some(Continuation::StartNode(_))) {
+                        activations.next_generation()
+                    } else {
+                        activations.active.generation
+                    };
+                activations.pending.push(generation);
+            }
         }
+    }
+
+    fn pop_source_node_id(&mut self) -> Option<DebugSourceNodeId> {
+        let source_node_ids = self.source_node_ids.as_mut()?;
+        if let Some(activations) = &mut self.debug_activations {
+            activations.active.generation = activations.pending.pop().unwrap();
+        }
+        source_node_ids.pop().flatten()
     }
 
     pub(crate) fn start_tracking_source_nodes(
@@ -275,6 +469,7 @@ impl<F> ContinuationStack<F> {
             *source_node_id = next_source_node_id;
         }
         self.source_node_ids = Some(source_node_ids);
+        self.debug_activations = Some(DebugActivations::new(self.stack.len()));
     }
 
     // PUBLIC ACCESSORS
@@ -357,6 +552,212 @@ impl<F> ContinuationStack<F> {
     }
 }
 
+impl ContinuationStack<MastForestId> {
+    pub(crate) fn iter_enter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.stack.iter().filter_map(|continuation| match continuation {
+            Continuation::EnterForest { forest, .. } => Some(*forest),
+            _ => None,
+        })
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+const TAG_START_NODE: u8 = 0;
+const TAG_FINISH_JOIN: u8 = 1;
+const TAG_FINISH_SPLIT: u8 = 2;
+const TAG_FINISH_LOOP: u8 = 3;
+const TAG_FINISH_CALL: u8 = 4;
+const TAG_FINISH_DYN: u8 = 5;
+const TAG_RESUME_BASIC_BLOCK: u8 = 6;
+const TAG_RESPAN: u8 = 7;
+const TAG_FINISH_BASIC_BLOCK: u8 = 8;
+const TAG_ENTER_FOREST: u8 = 9;
+
+// NOTE: `package_debug_info` is deliberately *not* serialized: it is reconstructable from the
+// package a witness was produced from and would bloat the wire with data irrelevant to proving.
+// Round-tripping a `Continuation` (or any struct containing one, such as `ContinuationStack`)
+// therefore does not restore debug info exactly: deserialized continuations always carry
+// `package_debug_info: None`.
+impl Serializable for Continuation<MastForestId> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::StartNode(node_id) => {
+                TAG_START_NODE.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishJoin(node_id) => {
+                TAG_FINISH_JOIN.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishSplit(node_id) => {
+                TAG_FINISH_SPLIT.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishLoop(node_id) => {
+                TAG_FINISH_LOOP.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishCall(node_id) => {
+                TAG_FINISH_CALL.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishDyn(node_id) => {
+                TAG_FINISH_DYN.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                TAG_RESUME_BASIC_BLOCK.write_into(target);
+                node_id.write_into(target);
+                batch_index.write_into(target);
+                op_idx_in_batch.write_into(target);
+            },
+            Self::Respan { node_id, batch_index } => {
+                TAG_RESPAN.write_into(target);
+                node_id.write_into(target);
+                batch_index.write_into(target);
+            },
+            Self::FinishBasicBlock(node_id) => {
+                TAG_FINISH_BASIC_BLOCK.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::EnterForest {
+                forest,
+                package_debug_info: _,
+                inline_context_depth,
+            } => {
+                TAG_ENTER_FOREST.write_into(target);
+                forest.write_into(target);
+                inline_context_depth.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for Continuation<MastForestId> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match u8::read_from(source)? {
+            TAG_START_NODE => Ok(Self::StartNode(MastNodeId::read_from(source)?)),
+            TAG_FINISH_JOIN => Ok(Self::FinishJoin(MastNodeId::read_from(source)?)),
+            TAG_FINISH_SPLIT => Ok(Self::FinishSplit(MastNodeId::read_from(source)?)),
+            TAG_FINISH_LOOP => Ok(Self::FinishLoop(MastNodeId::read_from(source)?)),
+            TAG_FINISH_CALL => Ok(Self::FinishCall(MastNodeId::read_from(source)?)),
+            TAG_FINISH_DYN => Ok(Self::FinishDyn(MastNodeId::read_from(source)?)),
+            TAG_RESUME_BASIC_BLOCK => Ok(Self::ResumeBasicBlock {
+                node_id: MastNodeId::read_from(source)?,
+                batch_index: usize::read_from(source)?,
+                op_idx_in_batch: usize::read_from(source)?,
+            }),
+            TAG_RESPAN => Ok(Self::Respan {
+                node_id: MastNodeId::read_from(source)?,
+                batch_index: usize::read_from(source)?,
+            }),
+            TAG_FINISH_BASIC_BLOCK => Ok(Self::FinishBasicBlock(MastNodeId::read_from(source)?)),
+            TAG_ENTER_FOREST => Ok(Self::EnterForest {
+                forest: MastForestId::read_from(source)?,
+                package_debug_info: None,
+                inline_context_depth: usize::read_from(source)?,
+            }),
+            tag => {
+                Err(DeserializationError::InvalidValue(format!("invalid continuation tag {tag}")))
+            },
+        }
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size() + MastNodeId::min_serialized_size()
+    }
+}
+
+// `source_node_ids` is deliberately *not* serialized: those indices point into a package's
+// `PackageDebugInfo`, which is itself absent from the wire (see the note above), so they would be
+// dangling references on the deserialized side. A restored stack simply does not track source
+// nodes, matching a non-debug-aware execution, which is all proving requires.
+impl Serializable for ContinuationStack<MastForestId> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.stack.write_into(target);
+    }
+}
+
+impl Deserializable for ContinuationStack<MastForestId> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let stack = Vec::<Continuation<MastForestId>>::read_from(source)?;
+        Ok(Self {
+            stack,
+            source_node_ids: None,
+            debug_activations: None,
+        })
+    }
+}
+
+// ARBITRARY (proptest)
+// ===============================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use miden_core::mast::{MastForestId, MastNodeId};
+    use proptest::prelude::*;
+
+    use super::{Continuation, ContinuationStack};
+
+    impl Arbitrary for Continuation<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every variant is any-valid on the wire. EnterForest always carries
+            // package_debug_info: None - the wire format skips it, so Some would break the
+            // exact-equality oracle (that lossiness is covered by the dedicated deterministic
+            // test instead).
+            prop_oneof![
+                any::<MastNodeId>().prop_map(Self::StartNode).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishJoin).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishSplit).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishLoop).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishCall).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishDyn).boxed(),
+                (any::<MastNodeId>(), any::<usize>(), any::<usize>())
+                    .prop_map(|(node_id, batch_index, op_idx_in_batch)| Self::ResumeBasicBlock {
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    })
+                    .boxed(),
+                (any::<MastNodeId>(), any::<usize>())
+                    .prop_map(|(node_id, batch_index)| Self::Respan { node_id, batch_index })
+                    .boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishBasicBlock).boxed(),
+                (any::<MastForestId>(), any::<usize>())
+                    .prop_map(|(forest, inline_context_depth)| Self::EnterForest {
+                        forest,
+                        package_debug_info: None,
+                        inline_context_depth,
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ContinuationStack<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader omits source-node tracking, so generated stacks keep it disabled.
+            // The wire contract test below covers stacks that track source nodes.
+            proptest::collection::vec(any::<Continuation<MastForestId>>(), 0..=6)
+                .prop_map(|stack| Self {
+                    stack,
+                    source_node_ids: None,
+                    debug_activations: None,
+                })
+                .boxed()
+        }
+    }
+}
+
 // TESTS
 // ================================================================================================
 
@@ -365,8 +766,93 @@ mod tests {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastForest;
+    use miden_mast_package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceInlineCall, DebugSourceNode,
+        PackageDebugInfoBuilder,
+    };
 
     use super::*;
+
+    #[test]
+    fn debug_activation_identity_survives_resumption_but_not_reentry() {
+        let node_id = MastNodeId::from(1);
+        let source_id = Some(DebugSourceNodeId::from(2));
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        stack.push_start_node(node_id);
+        stack.start_tracking_source_nodes(source_id);
+        let initial = stack.debug_activation_at(0).unwrap();
+
+        let (continuation, source_id) = stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_resumed_with_source_node_id(continuation, source_id);
+        assert_eq!(stack.debug_activation_at(0).unwrap(), initial);
+
+        stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_with_source_node_id(Continuation::FinishJoin(node_id), source_id);
+        assert_eq!(stack.debug_activation_at(0).unwrap(), initial);
+
+        stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_with_source_node_id(Continuation::StartNode(node_id), source_id);
+        assert_ne!(stack.debug_activation_at(0).unwrap(), initial);
+    }
+
+    #[test]
+    fn debug_activation_generations_are_unique_across_cloned_stacks() {
+        let node_id = MastNodeId::from(1);
+        let mut first: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        first.push_start_node(node_id);
+        first.start_tracking_source_nodes(Some(DebugSourceNodeId::from(2)));
+        let mut second = first.clone();
+        assert_eq!(first.debug_activation_at(0), second.debug_activation_at(0));
+
+        first.pop_continuation().unwrap();
+        second.pop_continuation().unwrap();
+        first.push_start_node(node_id);
+        second.push_start_node(node_id);
+        assert_ne!(first.debug_activation_at(0), second.debug_activation_at(0));
+    }
+
+    #[test]
+    fn source_unaware_continuations_do_not_track_activations() {
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        stack.push_start_node(MastNodeId::from(1));
+        assert!(stack.debug_activations.is_none());
+        assert!(stack.debug_activation_at(0).is_none());
+        stack.pop_continuation().unwrap();
+        assert!(stack.debug_activations.is_none());
+    }
+
+    #[test]
+    fn debug_activation_generations_return_the_previous_counter_value() {
+        let activations = DebugActivations::new(0);
+        activations.active.execution.store(u64::MAX - 1, Ordering::Relaxed);
+        assert_eq!(activations.next_generation(), u64::MAX - 1);
+        assert_eq!(activations.active.execution.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn debug_activation_generations_are_unique_under_contention() {
+        let activations = DebugActivations::new(0);
+        let mut generations = std::thread::scope(|scope| {
+            let handles: [_; 4] = core::array::from_fn(|_| {
+                scope.spawn(|| (0..128).map(|_| activations.next_generation()).collect::<Vec<_>>())
+            });
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().expect("activation worker panicked"))
+                .collect::<Vec<_>>()
+        });
+        generations.sort_unstable();
+        assert_eq!(generations, (1..=512).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[should_panic(expected = "debug activation generation exhausted")]
+    fn debug_activation_generations_reject_overflow() {
+        let activations = DebugActivations::new(0);
+        activations.active.execution.store(u64::MAX, Ordering::Relaxed);
+        activations.next_generation();
+    }
 
     #[test]
     fn get_next_clock_cycle_increment_empty_stack() {
@@ -394,6 +880,7 @@ mod tests {
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
@@ -412,10 +899,12 @@ mod tests {
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
@@ -424,5 +913,126 @@ mod tests {
         assert!(matches!(result[0], Continuation::EnterForest { .. }));
         assert!(matches!(result[1], Continuation::EnterForest { .. }));
         assert!(matches!(result[2], Continuation::StartNode(_)));
+    }
+
+    #[test]
+    fn inline_call_context_uses_the_source_boundary_index() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_node_id = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: Vec::new(),
+                op_start: 7,
+                op_end: 7,
+                asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
+                inline_calls: vec![DebugSourceInlineCall {
+                    op_idx: 7,
+                    op_end: 7,
+                    callee_idx: DebugFunctionIdx::from(0),
+                    loc_idx: DebugLocIdx::from(0),
+                }],
+            })
+            .unwrap();
+        let debug_info = Arc::from(builder.build());
+
+        let context =
+            SourceInlineCallContext::for_source_boundary(debug_info, Some(source_node_id))
+                .expect("boundary row should create inherited inline context");
+
+        assert_eq!(context.inline_calls().map(|row| row.op_idx).collect::<Vec<_>>(), [7]);
+    }
+
+    #[test]
+    fn continuation_stack_mast_forest_id_round_trip_omits_debug_metadata() {
+        let mut stack: ContinuationStack<MastForestId> = ContinuationStack::default();
+        stack.push_continuation(Continuation::StartNode(MastNodeId::from(1)));
+        stack.push_continuation(Continuation::EnterForest {
+            forest: MastForestId::from(2),
+            package_debug_info: None,
+            inline_context_depth: 0,
+        });
+        stack.push_continuation(Continuation::ResumeBasicBlock {
+            node_id: MastNodeId::from(3),
+            batch_index: 4,
+            op_idx_in_batch: 5,
+        });
+        stack.start_tracking_source_nodes(None);
+        stack.source_node_ids =
+            Some(vec![Some(DebugSourceNodeId::from(10)), None, Some(DebugSourceNodeId::from(11))]);
+        assert!(stack.debug_activations.is_some());
+
+        let bytes = stack.to_bytes();
+        let restored = ContinuationStack::<MastForestId>::read_from_bytes(&bytes).unwrap();
+
+        assert_eq!(restored.stack.len(), 3);
+        assert!(matches!(
+            restored.stack[0],
+            Continuation::StartNode(node_id) if node_id == MastNodeId::from(1)
+        ));
+        assert!(matches!(
+            restored.stack[1],
+            Continuation::EnterForest {
+                forest,
+                package_debug_info: None,
+                inline_context_depth: 0,
+            } if forest == MastForestId::from(2)
+        ));
+        assert!(matches!(
+            restored.stack[2],
+            Continuation::ResumeBasicBlock {
+                node_id,
+                batch_index: 4,
+                op_idx_in_batch: 5,
+            } if node_id == MastNodeId::from(3)
+        ));
+        // source_node_ids is not serialized: indices without their owning package debug info
+        // would be dangling on the restored side.
+        assert_eq!(restored.source_node_ids, None);
+        assert!(restored.debug_activations.is_none());
+    }
+}
+
+// WIRE CONTRACT PIN
+// ================================================================================================
+
+#[cfg(test)]
+mod wire_contract_pin {
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::{
+        mast::{MastForestId, MastNodeId},
+        serde::{Deserializable, Serializable, SliceReader},
+    };
+
+    use super::*;
+
+    /// Source-node tracking is omitted from serialization. Enabling tracking must not change the
+    /// bytes, and decoding must leave tracking disabled.
+    #[test]
+    fn tracked_and_untracked_stacks_serialize_identically() {
+        let mut tracked = ContinuationStack::<MastForestId>::default();
+        tracked.start_tracking_source_nodes(None);
+        tracked.push_with_source_node_id(
+            Continuation::FinishJoin(MastNodeId::from(0u32)),
+            Some(DebugSourceNodeId::from(0u32)),
+        );
+        assert_eq!(tracked.source_node_ids, Some(vec![Some(DebugSourceNodeId::from(0u32))]));
+
+        let mut untracked = ContinuationStack::<MastForestId>::default();
+        untracked.push_continuation(Continuation::FinishJoin(MastNodeId::from(0u32)));
+
+        let mut tracked_bytes = Vec::new();
+        tracked.write_into(&mut tracked_bytes);
+        let mut untracked_bytes = Vec::new();
+        untracked.write_into(&mut untracked_bytes);
+
+        assert_eq!(tracked_bytes, untracked_bytes);
+
+        let decoded =
+            ContinuationStack::<MastForestId>::read_from(&mut SliceReader::new(&tracked_bytes))
+                .expect("tracked stack round-trips through the wire");
+        assert_eq!(decoded, untracked);
+        assert_eq!(decoded.source_node_ids, None);
     }
 }

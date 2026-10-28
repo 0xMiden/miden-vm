@@ -234,8 +234,8 @@ pub enum SystemEvent {
     /// Where `values` are the elements located in memory[start_addr..end_addr].
     MemToMap,
 
-    /// Reads two word from the operand stack and inserts them into the advice map under the key
-    /// defined by the hash of these words.
+    /// Reads two words from the operand stack and inserts them into the advice map under
+    /// `hdword(A, B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, ...]
@@ -245,22 +245,8 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed as hash(A || B, domain=0).
+    /// KEY is the generic Eidos hash of the eight Felts in `A || B`.
     HdwordToMap,
-
-    /// Reads two words from the operand stack and inserts them into the advice map under the key
-    /// defined by the hash of these words (using `d` as the domain).
-    ///
-    /// Inputs:
-    ///   Operand stack: [A, B, d, ...]
-    ///   Advice map: {...}
-    ///
-    /// Outputs:
-    ///   Operand stack: [A, B, d, ...]
-    ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
-    ///
-    /// Where KEY is computed as hash(A || B, d).
-    HdwordToMapWithDomain,
 
     /// Reads four words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words.
@@ -274,12 +260,12 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: [A, B, C, D]} (16 elements)
     ///
     /// Where:
-    /// - KEY is computed as hash_elements([A, B, C, D]) using the sponge construction (sequential
-    ///   absorption; two rounds for four words).
+    /// - KEY is computed as the canonical Eidos hash of `[A, B, C, D]`, using two 8-Felt
+    ///   compression blocks with the full 16-Felt length bound into the initial chaining value.
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying a Poseidon2 permutation to all three words.
+    /// under the key `Eidos::compress(C, A || B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, C, ...]
@@ -289,31 +275,33 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
-    /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-    HpermToMap,
+    /// In particular, using the framed initial CV for `(domain_tag = d, param0 = 8)` produces
+    /// `Eidos::hash_elements_in_domain(A || B, d)`.
+    CompressToMap,
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Registers and eagerly evaluates a deferred node whose full payload is on the operand stack.
     ///
-    /// `TAG` is one word (4 field elements). `PAYLOAD_LO || PAYLOAD_HI` is eight field elements:
-    /// either one [`crate::deferred::DataChunk`], two child digests (`lhs || rhs`) for a join, or
-    /// one `lhs || rhs` pair for a pair-list node. Exact [`crate::deferred::Tag::CHUNKS`]
-    /// (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed id-2 tags are rejected during tag
-    /// decode. The installed registry decodes `TAG` via
-    /// [`crate::deferred::DeferredState::decode`]; `TRUE` is not accepted by this event. Tags that
+    /// `CV` is one word containing the framed initial Eidos chaining value.
+    /// `PAYLOAD_LO || PAYLOAD_HI` is eight field elements:
+    /// either one [`crate::deferred::DataChunk`], two child digests (`lhs || rhs`) for a
+    /// precompile-owned join, or one `lhs || rhs` pair for a pair-list node. The installed registry
+    /// recovers the semantic
+    /// [`crate::deferred::EidosFrame`] from `CV` and decodes it via
+    /// [`crate::deferred::DeferredState::decode`]. Framework-owned AND and `TRUE` nodes are not
+    /// accepted by this generic event; `log_deferred` constructs rolling AND nodes. Frames that
     /// semantically require more data chunks or pairs are rejected during precompile-specific
-    /// evaluation. Registration is performed by [`crate::deferred::DeferredState::register`], so
-    /// semantic failures surface immediately.
+    /// evaluation. Registration is performed by
+    /// [`crate::deferred::DeferredState::register`], so semantic failures surface immediately.
     ///
     /// This event does not push advice or return the node digest. The stack arguments are visible
     /// in the VM execution trace, but the host-side registration is not constrained by the event.
     /// Assembly code that later relies on the digest must compute it inside the VM from the same
-    /// `TAG` and payload.
+    /// `CV` and payload.
     ///
     /// Inputs:
-    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    ///   Operand stack: [event_id, CV, PAYLOAD_LO, PAYLOAD_HI, ...]
     ///
     /// Outputs:
     ///   Operand stack:  unchanged
@@ -321,17 +309,18 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegister,
 
-    /// Evaluates a registered deferred node and pushes its canonical tag and payload as advice.
+    /// Evaluates a registered deferred node and pushes its canonical frame and payload as advice.
     ///
     /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
     /// state. The handler evaluates it with [`crate::deferred::DeferredState::evaluate_digest`],
-    /// fetches the canonical node, and pushes its tag followed by its payload to the advice stack.
+    /// fetches the canonical node, and pushes its frame followed by its payload to the advice
+    /// stack.
     ///
-    /// The tag is emitted first in advice-pop order so `adv_pushw adv_pushw adv_pushw` leaves
-    /// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack for a single 8-felt payload. Data
-    /// payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving canonical
-    /// chunk order. Join payloads use the same two-word LIFO convention, leaving
-    /// `[lhs, rhs, TAG, ...]`. `TRUE` pushes only `Tag::TRUE`. These felts are unbound host hints.
+    /// The frame is emitted first in advice-pop order so `adv_pushw adv_pushw adv_pushw` leaves
+    /// `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand stack for a single 8-felt payload.
+    /// Data payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving
+    /// canonical chunk order. Join payloads use the same two-word LIFO convention, leaving
+    /// `[lhs, rhs, FRAME, ...]`. `TRUE` pushes one zero word. These felts are unbound host hints.
     /// Before proof-relevant use, assembly code must relate them with VM instructions to values
     /// established independently of that advice.
     ///
@@ -340,14 +329,14 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: unchanged
-    ///   Advice stack:  canonical tag, then canonical payload words for `adv_pushw` LIFO
+    ///   Advice stack:  canonical frame, then canonical payload words for `adv_pushw` LIFO
     /// consumption
     DeferredEvaluate,
 
-    /// Evaluates a registered deferred node and pushes only its canonical tag as advice.
+    /// Evaluates a registered deferred node and pushes only its canonical frame as advice.
     ///
     /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
-    /// state. `TRUE` pushes `Tag::TRUE`. The returned tag is an unbound host hint; before
+    /// state. `TRUE` pushes one zero word. The returned frame is an unbound host hint; before
     /// proof-relevant use, assembly code must relate it with VM instructions to a value established
     /// independently of that advice.
     ///
@@ -356,18 +345,17 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: unchanged
-    ///   Advice stack:  canonical tag only
-    DeferredEvaluateTag,
+    ///   Advice stack:  canonical frame only
+    DeferredEvaluateFrame,
 
     /// Evaluates a registered deferred node and pushes only its canonical payload as advice.
     ///
-    /// This is the payload-only compatibility event. Data payloads push two words per 8-felt chunk
-    /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
-    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join payloads use
-    /// the same two-word LIFO convention, leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE`
-    /// pushes no advice. These felts are unbound host hints. Before proof-relevant use, assembly
-    /// code must relate them with VM instructions to values established independently of that
-    /// advice.
+    /// Data payloads push two words per 8-felt chunk in advice order `HIGH, LOW` so
+    /// `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack for that chunk. Chunks
+    /// are emitted in canonical chunk order. Join payloads use the same two-word LIFO convention,
+    /// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These felts are
+    /// unbound host hints. Before proof-relevant use, assembly code must relate them with VM
+    /// instructions to values established independently of that advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -379,29 +367,31 @@ pub enum SystemEvent {
 
     /// Registers and eagerly evaluates a memory-backed deferred node.
     ///
-    /// `TAG` is one word (4 field elements), and the installed registry decodes it to determine the
-    /// memory-backed payload shape. The stack-supplied `ptr` and `n_chunks` are visible in the VM
+    /// `CV` is one word containing the framed initial Eidos chaining value. The installed registry
+    /// recovers its semantic frame to determine the memory-backed payload shape. The stack-supplied
+    /// `ptr` and `n_chunks` are visible in the VM
     /// execution trace and select the range `[ptr, ptr + 8 * n_chunks)`. The host reads `n_chunks`
     /// 8-felt [`crate::deferred::DataChunk`] values from that range, but this event adds no AIR
     /// constraint tying the registered contents to those memory cells.
     ///
-    /// Exact [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) registers the chunks as
-    /// framework-owned opaque data, while other data tags remain precompile-owned. Malformed id-2
-    /// tags are rejected during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs.
-    /// Join tags require `n_chunks == 1` and interpret the single chunk as `lhs || rhs`. `TRUE` is
-    /// not accepted. The handler performs a cheap budget pre-check before allocating or reading
-    /// memory, then delegates registration to [`crate::deferred::DeferredState::register`].
+    /// The registered deferred-CHUNKS domain denotes framework-owned opaque data, while other data
+    /// frames remain precompile-owned. Pair-list frames interpret chunks as `lhs || rhs` pairs.
+    /// Precompile-owned join frames require `n_chunks == 1` and interpret the single chunk as
+    /// `lhs || rhs`. Framework-owned AND and `TRUE` nodes are not accepted by this generic event;
+    /// `log_deferred` constructs rolling AND nodes. The handler performs a cheap budget pre-check
+    /// before allocating or reading memory, then delegates registration to
+    /// [`crate::deferred::DeferredState::register`].
     ///
     /// This event does not push advice or return the node digest. A program that relies on the
-    /// registered node must compute its digest with VM instructions from the same `TAG` and ordered
-    /// chunk sequence. The `register_mem` MASM wrapper does this by applying a Poseidon2 linear
-    /// hash to the same range, with one absorption per chunk and `TAG` as the initial capacity
-    /// word. If the event and the VM hash different chunk sequences, the VM-computed digest
-    /// does not identify the host-registered node and cannot bind that registration into a
-    /// proof-relevant deferred claim.
+    /// registered node must compute its digest with VM instructions from the same `CV` and ordered
+    /// chunk sequence. The `register_mem` MASM wrapper does this with the canonical Eidos deferred
+    /// framing: the frame determines the initial chaining word, then payload chunks are compressed
+    /// in order. If the event and the VM hash different chunk
+    /// sequences, the VM-computed digest does not identify the host-registered node and cannot bind
+    /// that registration into a proof-relevant deferred claim.
     ///
     /// Inputs:
-    ///   Operand stack: [event_id, TAG, ptr, n_chunks, ...]
+    ///   Operand stack: [event_id, n_chunks, CV, ptr, ...]
     ///
     /// Outputs:
     ///   Operand stack:  unchanged
@@ -409,17 +399,38 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegisterData,
 
+    /// Exports a registered true assertion's witness into the advice map.
+    ///
+    /// The selected node may be unlogged, but cannot be literal TRUE. Its original digest is
+    /// both the witness root and map key; any existing value is replaced with the computed witness.
+    /// The value is `[byte_len, packed_u32_le(witness_bytes)...]`. Only the final u32 limb is
+    /// zero-padded, and `byte_len` excludes padding.
+    ///
+    /// Both stacks and the deferred root are preserved. Errors leave existing advice unchanged.
+    /// Consumers must validate the witness and bind its root to an independently established
+    /// expected digest.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack: unchanged
+    ///   Advice map: {NODE_DIGEST: [byte_len, packed_u32_le(witness_bytes)...]}
+    DeferredExportWitness,
+
     // NON-MUTATING SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Signals an optional, read-only trace event to the host.
     ///
-    /// When `emit` observes this system event ID at stack position 0, the VM forwards the user
-    /// trace event ID at stack position 1 to the host's trace handler. This is typically emitted
-    /// as `push.<user_trace_id> push.<sys::trace_event> emit`. Trace handlers can observe
-    /// the processor state, but cannot mutate VM state or the advice provider. If no handler is
-    /// registered for the user trace event ID, the event is a no-op.
+    /// Assembly programs emit trace events with `trace`, `trace.CONST`, or `trace.event("...")`.
+    /// When the underlying `emit` observes this system event ID at stack position 0, the VM
+    /// forwards the user trace event ID at stack position 1 to the host's trace handler. The
+    /// immediate form lowers to `push.<user_trace_id> push.<sys::trace_event> emit drop drop`.
+    /// Trace handlers can observe the processor state, but cannot mutate VM state or the advice
+    /// provider. If no handler is registered for the user trace event ID, the event is a no-op.
     ///
-    /// Hosts are expected to not raise an error if they encounter a `user_trace_id` for which no
+    /// Hosts are expected not to raise an error if they encounter a `user_trace_id` for which no
     /// trace handler is registered.
     ///
     /// Inputs:
@@ -498,14 +509,14 @@ impl SystemEvent {
             Self::ILog2,
             Self::MemToMap,
             Self::HdwordToMap,
-            Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
-            Self::HpermToMap,
+            Self::CompressToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
-            Self::DeferredEvaluateTag,
+            Self::DeferredEvaluateFrame,
             Self::DeferredEvaluatePayload,
             Self::DeferredRegisterData,
+            Self::DeferredExportWitness,
             Self::TraceEvent,
         ]
     }
@@ -636,34 +647,32 @@ impl SystemEvent {
             name: "sys::hdword_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(6143777601072385586),
-            event: SystemEvent::HdwordToMapWithDomain,
-            name: "sys::hdword_to_map_with_domain",
-        },
-        SystemEventEntry {
             id: EventId::from_u64(11723176702659679401),
             event: SystemEvent::HqwordToMap,
             name: "sys::hqword_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(6190830263511605775),
-            event: SystemEvent::HpermToMap,
-            name: "sys::hperm_to_map",
+            // This string is part of the event identity and is hashed into compiled programs.
+            // Changing it requires a MAST format transition even though the assembly instruction is
+            // spelled `adv.insert_compress`.
+            id: EventId::from_u64(454105713963103935),
+            event: SystemEvent::CompressToMap,
+            name: "sys::bcompress_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(3200266522440553751),
+            id: EventId::from_u64(2036565939244996992),
             event: SystemEvent::DeferredRegister,
             name: "sys::adv::register_deferred",
         },
         SystemEventEntry {
-            id: EventId::from_u64(12566028600487412345),
+            id: EventId::from_u64(2795079927114754645),
             event: SystemEvent::DeferredEvaluate,
             name: "sys::adv::evaluate_deferred",
         },
         SystemEventEntry {
-            id: EventId::from_u64(15463062559264590613),
-            event: SystemEvent::DeferredEvaluateTag,
-            name: "sys::adv::evaluate_deferred_tag",
+            id: EventId::from_u64(7236367774590045862),
+            event: SystemEvent::DeferredEvaluateFrame,
+            name: "sys::adv::evaluate_deferred_frame",
         },
         SystemEventEntry {
             id: EventId::from_u64(8091749904895009326),
@@ -674,6 +683,11 @@ impl SystemEvent {
             id: EventId::from_u64(13021247594355482329),
             event: SystemEvent::DeferredRegisterData,
             name: "sys::adv::register_deferred_data",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(15159456528524262446),
+            event: SystemEvent::DeferredExportWitness,
+            name: "sys::adv::export_deferred_witness",
         },
         SystemEventEntry {
             id: EventId::from_u64(1768618069850226410),
@@ -748,6 +762,12 @@ mod test {
                 "SystemEvent name should start with 'sys::': {}",
                 entry.name
             );
+            assert_eq!(
+                entry.id,
+                EventId::from_name(entry.name),
+                "LOOKUP entry for {} has a stale hardcoded event ID",
+                entry.name
+            );
 
             // Verify from_event_id lookup works
             let looked_up =
@@ -785,16 +805,22 @@ mod test {
                 | SystemEvent::ILog2
                 | SystemEvent::MemToMap
                 | SystemEvent::HdwordToMap
-                | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::HpermToMap
+                | SystemEvent::CompressToMap
                 | SystemEvent::DeferredRegister
                 | SystemEvent::DeferredEvaluate
-                | SystemEvent::DeferredEvaluateTag
+                | SystemEvent::DeferredEvaluateFrame
                 | SystemEvent::DeferredEvaluatePayload
                 | SystemEvent::DeferredRegisterData
+                | SystemEvent::DeferredExportWitness
                 | SystemEvent::TraceEvent => {},
             }
         }
+    }
+
+    #[test]
+    fn compress_to_map_preserves_its_wire_identity() {
+        assert_eq!(SystemEvent::CompressToMap.event_id(), EventId::from_u64(454105713963103935));
+        assert_eq!(SystemEvent::CompressToMap.event_name().as_str(), "sys::bcompress_to_map");
     }
 }

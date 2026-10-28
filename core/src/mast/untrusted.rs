@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::panic::Location;
 
 use super::{AdviceMap, MastForest, MastForestError, serialization};
 use crate::serde::{BudgetedReader, ByteReader, DeserializationError, SliceReader};
@@ -76,6 +77,18 @@ impl UntrustedMastForestReadOptions {
 }
 
 impl UntrustedMastForest {
+    /// Deserializes an [`UntrustedMastForest`] from a byte reader.
+    ///
+    /// Note: This method does not apply budgeting. For untrusted bytes, prefer
+    /// [`read_from_bytes`](Self::read_from_bytes) or
+    /// [`read_from_bytes_with_options`](Self::read_from_bytes_with_options).
+    #[track_caller]
+    pub fn read_from_reader<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let caller = Location::caller();
+        serialization::read_untrusted_with_flags_and_caller(source, caller)
+            .map(|(forest, _flags)| forest)
+    }
+
     /// Validates the forest by checking structural invariants and recomputing all node hashes.
     ///
     /// This method performs a complete validation of the deserialized forest:
@@ -142,6 +155,7 @@ impl UntrustedMastForest {
     /// // Validate before use
     /// let forest = untrusted.validate()?;
     /// ```
+    #[track_caller]
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from_bytes_with_options(bytes, UntrustedMastForestReadOptions::default())
     }
@@ -151,16 +165,20 @@ impl UntrustedMastForest {
     /// The wire byte budget limits wire-driven parsing and collection pre-sizing. The validation
     /// helper-allocation budget is derived from that wire budget and caps tracked hashless helper
     /// allocations such as digest slot tables and rebuilt digest tables.
+    #[track_caller]
     pub fn read_from_bytes_with_options(
         bytes: &[u8],
         options: UntrustedMastForestReadOptions,
     ) -> Result<Self, DeserializationError> {
+        let caller = Location::caller();
         let wire_byte_budget = options.wire_byte_budget(bytes.len());
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), wire_byte_budget);
-        let (forest, _flags) = serialization::read_untrusted_with_flags_and_allocation_budget(
-            &mut reader,
-            options.validation_allocation_budget(wire_byte_budget),
-        )?;
+        let (forest, _flags) =
+            serialization::read_untrusted_with_flags_allocation_budget_and_caller(
+                &mut reader,
+                options.validation_allocation_budget(wire_byte_budget),
+                caller,
+            )?;
         if reader.has_more_bytes() {
             return Err(DeserializationError::InvalidValue(
                 "extra bytes after MastForest payload".into(),

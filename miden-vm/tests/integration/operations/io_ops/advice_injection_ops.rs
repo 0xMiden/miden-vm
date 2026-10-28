@@ -1,0 +1,624 @@
+use miden_assembly::Assembler;
+use miden_core::Felt;
+use miden_processor::{
+    ExecutionError, ExecutionOptions, FastProcessor, StackInputs, TestHost,
+    advice::{AdviceError, AdviceInputs},
+};
+use miden_prover::Word;
+use miden_utils_testing::{build_test, crypto::MerkleStore};
+
+// ADVICE INJECTION
+// ================================================================================================
+
+#[test]
+fn advice_insert_mem() {
+    let source = "begin
+    # stack: [1, 2, 3, 4, 5, 6, 7, 8]
+
+    # write to memory and drop first word from stack to use second word as the key for advice map.
+    # mem_storew_be reverses the order of field elements in the word when it's stored in memory.
+    mem_storew_be.8 dropw mem_storew_be.12
+    # State Transition:
+    # stack: [5, 6, 7, 8]
+    # mem[8..11]: [4, 3, 2, 1]
+    # mem[12..15]: [8, 7, 6, 5]
+
+    # copy from memory to advice map
+    # the key used is in the reverse order of the field elements in the word at the top of the
+    # stack.
+    push.16 movdn.4 push.8 movdn.4
+    adv.insert_mem
+    # State Transition:
+    # stack: [5, 6, 7, 8, 4, 16]
+    # advice_map: k: [8, 7, 6, 5], v: [4, 3, 2, 1, 8, 7, 6, 5]
+
+    # copy from advice map to advice stack
+    adv.push_mapval dropw
+    # State Transition:
+    # stack: [4, 16, 0, 0]
+    # advice_stack: [4, 3, 2, 1, 8, 7, 6, 5]
+
+    # copy first word from advice stack to stack
+    # adv_loadw copies the word to the stack with elements in the reverse order.
+    adv_loadw
+    # State Transition:
+    # stack: [1, 2, 3, 4, 0, 0, 0, 0]
+    # advice_stack: [8, 7, 6, 5]
+
+    # swap first 2 words on stack
+    swapw
+    # State Transition:
+    # stack: [0, 0, 0, 0, 1, 2, 3, 4]
+
+    # copy next word from advice stack to stack
+    # adv_loadw copies the word to the stack with elements in the reverse order.
+    adv_loadw
+    # State Transition:
+    # stack: [5, 6, 7, 8, 1, 2, 3, 4]
+    # advice_stack: []
+
+    end";
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8];
+    let test = build_test!(source, &stack_inputs);
+    test.expect_stack(&[8, 7, 6, 5, 4, 3, 2, 1]);
+}
+
+#[test]
+fn advice_push_mapval() {
+    // --- test simple adv.push_mapval ---------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        padw adv_loadw
+        swapw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    // Stack key is [1, 2, 3, 4] with 1 on top
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[5, 6, 7, 8]);
+
+    // --- test simple adv.push_mapval_count ---------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, ...]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval_count
+        dropw
+
+        # move the number of values from the advice stack to the operand stack
+        adv_push
+        swap drop
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[5]);
+}
+
+#[test]
+fn adv_push_mapvaln() {
+    // --- test simple adv.push_mapvaln --------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        adv.push_mapvaln
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        repeat.6 adv_push end
+        swapdw dropw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[15, 14, 13, 12, 11, 5]);
+}
+
+#[test]
+fn adv_push_mapvaln_padding() {
+    // --- test adv.push_mapvaln.0 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 0 was provided as an immediate value, the resulting map values should not be padded
+        adv.push_mapvaln.0
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        repeat.6 adv_push end
+        swapdw dropw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[15, 14, 13, 12, 11, 5]);
+
+    // --- test adv.push_mapvaln.4 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 4 was provided as an immediate value, the resulting map values should be padded to
+        # the next multiple of 4
+        adv.push_mapvaln.4
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        repeat.5 adv_push end
+        swapdw dropw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![Felt::new_unchecked(11), Felt::new_unchecked(12), Felt::new_unchecked(13)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 13, 12, 11, 3]);
+
+    // --- test adv.push_mapvaln.8 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 8 was provided as an immediate value, the resulting map values should be padded to
+        # the next multiple of 8
+        adv.push_mapvaln.8
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        repeat.8 adv_push end swapdw dropw dropw
+        adv_push movup.9 drop
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 0, 16, 15, 14, 13, 12, 11, 6]);
+}
+
+#[test]
+fn advice_has_mapkey() {
+    // --- test adv.has_mapkey: key is present --------------------------------
+    let source: &str = r#"
+    begin
+        # stack: [1, 2, 3, 4]
+
+        # push the flag on the advice stack indicating if key [1, 2, 3, 4] exists in advice map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push
+
+        # check that the flag equals 1 -- the key is present in the map
+        dup assert.err="presence flag should be equal 1"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_key).unwrap(),
+        vec![
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[1, 1, 2, 3, 4]);
+
+    // --- test adv.has_mapkey: key is not present ----------------------------
+    let source: &str = r#"
+    begin
+        # stack: [1, 2, 3, 4]
+
+        # push the flag on the advice stack indicating if key [1, 2, 3, 4] exists in advice map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push
+
+        # check that the flag equals 0 -- the key is not present in the map
+        dup assertz.err="presence flag should be equal 0"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let map_key = [5u64, 6, 7, 8];
+    let adv_map = [(
+        Word::try_from(map_key).unwrap(),
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn advice_insert_hdword() {
+    // --- test hashing without domain ----------------------------------------
+    let source: &str = "
+    begin
+        # stack: [1, 2, 3, 4, 5, 6, 7, 8, ...]
+        # W0 = [1,2,3,4], W1 = [5,6,7,8]
+
+        # hash and insert top two words into the advice map
+        adv.insert_hdword
+
+        # manually compute the hash of the two words
+        # hdword computes hash(W0 || W1), matching adv.insert_hdword
+        hdword
+        # => [KEY, ...]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        # Values stored as [W0, W1], advice stack top is W0
+        # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
+        adv_loadw swapw adv_loadw swapw
+    end";
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8];
+    let test = build_test!(source, &stack_inputs);
+    // Values are stored as [W0, W1] in advice map.
+    // Retrieval: adv_loadw swapw adv_loadw swapw produces [W0, W1].
+    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+}
+
+#[test]
+fn advice_insert_compress() {
+    let source: &str = "
+    begin
+        # stack: [BLOCK_LO, BLOCK_HI, CV]
+
+        # Store the two block words under the raw compression output CV.
+        adv.insert_compress
+
+        # Recompute that key from the unchanged input state.
+        compress
+        swapw.2
+        # => [CV', BLOCK_HI, BLOCK_LO]
+
+        # Load the inserted block words and remove the compression state.
+        adv.push_mapval
+        dropw dropw dropw
+
+        # Reconstruct [BLOCK_LO, BLOCK_HI] from the advice stack.
+        adv_loadw swapw adv_loadw swapw
+    end";
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    build_test!(source, &stack_inputs).expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+}
+
+#[test]
+fn advice_insert_hqword() {
+    let source: &str = "
+    begin
+        # stack: [A, B, C, D] = [11-14, 21-24, 31-34, 41-44]
+
+        # hash and insert top four words into the advice map
+        adv.insert_hqword
+
+        # Hash the four words with Eidos length binding for 16 input felts.
+        push.6620516959492505600.11170449401267093504.11912009168875159568.13503953893947607553
+        movdnw.2
+        compress
+        dropw dropw
+        movdnw.2
+        compress
+        dropw dropw
+        # => [KEY]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        repeat.4
+            movupw.3
+            adv_loadw reversew
+        end
+    end";
+    let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
+    let test = build_test!(source, &stack_inputs);
+    // Values retrieved from advice map in LIFO order
+    test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
+}
+
+/// Inserting a map value at the combined advice-provider boundary must succeed.
+#[test]
+fn test_adv_insert_mem_at_boundary() {
+    let max_size = 8;
+    run_insert_mem_with_max_value_elements(max_size as u32, max_size).unwrap();
+}
+
+/// Inserting one element over the combined advice-provider boundary must be rejected.
+#[test]
+fn test_adv_insert_mem_over_boundary() {
+    let max_size = 8;
+    let err = run_insert_mem_with_max_value_elements((max_size + 1) as u32, max_size).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(msg.contains("SizeBudgetExceeded"), "expected size-exceeded error, got: {msg}");
+}
+
+/// Re-inserting an unchanged map value at the boundary must remain a no-op.
+#[test]
+fn test_adv_insert_mem_reinsert_at_boundary() {
+    let max_size = 8;
+    run_insert_mem_twice_with_max_value_elements(max_size as u32, max_size).unwrap();
+}
+
+/// An existing map key must not bypass the advice budget for a larger memory range.
+#[test]
+fn test_adv_insert_mem_existing_key_respects_advice_size_budget() {
+    const RANGE_LEN: u32 = 8_192;
+
+    let err = run_insert_mem_after_empty_insertion(RANGE_LEN).unwrap_err();
+    assert!(matches!(
+        err,
+        ExecutionError::AdviceError {
+            err: AdviceError::SizeBudgetExceeded { .. },
+            ..
+        }
+    ));
+}
+
+/// A conflicting value at the budget boundary must be rejected before it is collected.
+#[test]
+fn test_adv_insert_mem_conflict_at_budget_is_rejected_before_allocation() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    assert!(matches!(
+        err,
+        ExecutionError::AdviceError {
+            err: AdviceError::SizeBudgetExceeded {
+                current,
+                added,
+                max: actual_max,
+            },
+            ..
+        } if current == max && added == entry_bytes && actual_max == max
+    ));
+}
+
+/// A conflicting value is reported when the budget permits collecting the candidate.
+#[test]
+fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + 2 * entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    let ExecutionError::AdviceError {
+        err: AdviceError::MapKeyAlreadyPresent { prev_values, new_values, .. },
+        ..
+    } = err
+    else {
+        panic!("expected conflicting advice map value, got: {err:?}");
+    };
+    assert_eq!(prev_values, vec![Felt::new_unchecked(1); RANGE_LEN]);
+    assert_eq!(new_values, vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Runs `adv.insert_mem` with a budget sized for a map value of `max_value_elements`.
+fn run_insert_mem_with_max_value_elements(
+    range_len: u32,
+    max_value_elements: usize,
+) -> Result<(), ExecutionError> {
+    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 1)
+}
+
+fn run_insert_mem_twice_with_max_value_elements(
+    range_len: u32,
+    max_value_elements: usize,
+) -> Result<(), ExecutionError> {
+    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 2)
+}
+
+fn run_insert_mem_with_max_value_elements_and_repeats(
+    range_len: u32,
+    max_value_elements: usize,
+    repeats: usize,
+) -> Result<(), ExecutionError> {
+    let start_addr: u32 = 0;
+    let end_addr = start_addr + range_len;
+
+    // Write `range_len` elements to memory, then call adv.insert_mem with a dummy key.
+    let mem_stores: String = (start_addr..end_addr)
+        .map(|addr| format!("push.1 push.{addr} mem_store"))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let insert = format!(
+        r#"push.{end_addr} push.{start_addr}
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop"#,
+    );
+    let inserts = core::iter::repeat_n(insert, repeats).collect::<Vec<_>>().join(" ");
+    let source = format!(
+        r#"begin
+            {mem_stores}
+            {inserts}
+        end"#,
+    );
+
+    let program = Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let map_entry_bytes = Word::SERIALIZED_SIZE + max_value_elements * felt_bytes;
+    let options =
+        ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .execute_sync(&program, &mut host)?;
+    Ok(())
+}
+
+fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionError> {
+    let source = format!(
+        r#"begin
+            push.0 push.0
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop
+
+            push.{range_len} push.0
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop
+        end"#,
+    );
+    let program = Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let options = ExecutionOptions::default()
+        .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .execute_sync(&program, &mut host)?;
+    Ok(())
+}
+
+fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionError> {
+    let source = "begin
+        push.1 push.0 mem_store
+        push.1 push.1 mem_store
+
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+
+        push.2 push.1 mem_store
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+    end";
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .execute_sync(&program, &mut host)?;
+    Ok(())
+}

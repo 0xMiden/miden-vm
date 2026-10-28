@@ -5,8 +5,6 @@ use miden_core::{
     field::PrimeField64,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 // PUSH VALUE
 // ================================================================================================
@@ -75,11 +73,9 @@ impl crate::prettier::PrettyPrint for PushValue {
 // ================================================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -179,11 +175,9 @@ impl Deserializable for WordValue {
 /// Represents one of the various types of values that have a hex-encoded representation in Miden
 /// Assembly source files.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum IntValue {
     /// A tiny value
@@ -319,7 +313,7 @@ impl fmt::Display for IntValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", value.as_canonical_u64().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", value.as_canonical_u64()),
         }
     }
 }
@@ -417,13 +411,29 @@ impl proptest::arbitrary::Arbitrary for IntValue {
 
 #[inline]
 pub(crate) fn shrink_u64_hex(n: u64) -> IntValue {
-    if n <= (u8::MAX as u64) {
+    if u8::try_from(n).is_ok() {
         IntValue::U8(n as u8)
-    } else if n <= (u16::MAX as u64) {
+    } else if u16::try_from(n).is_ok() {
         IntValue::U16(n as u16)
-    } else if n <= (u32::MAX as u64) {
+    } else if u32::try_from(n).is_ok() {
         IntValue::U32(n as u32)
     } else {
         IntValue::Felt(Felt::new_unchecked(n))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::format;
+
+    use super::*;
+
+    #[test]
+    fn felt_display_preserves_canonical_hex() {
+        // A value that sits above the u32 range so Display takes the Felt arm.
+        // Without `to_be()`, this must print the canonical hex; with the old
+        // byte-swap it printed `0x1000000` instead of `0x100000000`.
+        let value = IntValue::Felt(Felt::new_unchecked(1u64 << 32));
+        assert_eq!(format!("{value}"), "0x100000000");
     }
 }

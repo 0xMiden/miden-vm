@@ -1,0 +1,476 @@
+//! Behavioral oracles for the PVM auxiliary-trace verifier hook.
+
+use std::fmt::Write as _;
+
+use miden_air::precompiles::relations::MAX_MESSAGE_WIDTH;
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
+};
+use miden_precompiles::{CurveId, UintDomain};
+
+use super::pvm_layout_const;
+use crate::helpers::read_memory_felt;
+
+const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
+const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
+const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
+const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
+const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
+type LogHeights = [u8; 12];
+
+// BytePairLut is fixed at 2^16. The other entries meet their AIRs' minimum heights while
+// exercising distinct proof-order positions, including an equal-height tie.
+const EQUAL_EIDOS_BYTE_PAIR_HEIGHTS: LogHeights = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
+const EIDOS_PRECEDES_ORDINARY_HEIGHTS: LogHeights = [8, 5, 7, 16, 6, 9, 10, 11, 12, 13, 14, 15];
+const BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS: LogHeights =
+    [18, 17, 19, 16, 20, 21, 22, 23, 24, 25, 26, 27];
+const PROOF_ORDER_CASES: [(&str, LogHeights); 3] = [
+    ("equal Eidos and byte-pair heights", EQUAL_EIDOS_BYTE_PAIR_HEIGHTS),
+    ("Eidos before ordinary AIRs", EIDOS_PRECEDES_ORDINARY_HEIGHTS),
+    ("BytePairLut before Eidos", BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS),
+];
+const AUX_VALUE_WIDTHS: [usize; 12] = [1; 12];
+
+fn random_coin_setup_masm() -> String {
+    let cv = INITIAL_CV;
+    format!(
+        r#"
+        push.{cv3}.{cv2}.{cv1}.{cv0}
+        mem_storew_le.RANDOM_COIN_CV_PTR dropw
+        padw mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR dropw
+        padw mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR dropw
+        padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+        "#,
+        cv0 = cv[0],
+        cv1 = cv[1],
+        cv2 = cv[2],
+        cv3 = cv[3],
+    )
+}
+
+fn direct_random_coin_setup_masm() -> String {
+    format!(
+        "{}\npush.{} mem_store.AUX_RAND_ELEM_ADDRESS_PTR",
+        random_coin_setup_masm(),
+        pvm_layout_const("AUX_RAND_ELEM_PTR")
+    )
+}
+
+fn setup_masm(log_heights: &LogHeights) -> String {
+    let mut heights = String::new();
+    for (index, &height) in log_heights.iter().enumerate() {
+        let offset = if index == 0 {
+            String::new()
+        } else {
+            format!(" add.{index}")
+        };
+        writeln!(heights, "push.{height} push.LOG_AIR_TRACE_LENGTHS_PTR{offset} mem_store")
+            .expect("write height setup");
+    }
+
+    format!(
+        r#"
+        {random_coin_setup}
+        {heights}
+        "#,
+        random_coin_setup = direct_random_coin_setup_masm(),
+    )
+}
+
+fn sampler_source(log_heights: &LogHeights) -> String {
+    format!(
+        r#"
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            {}
+            exec.random_coin::generate_aux_randomness
+        end
+        "#,
+        setup_masm(log_heights)
+    )
+}
+
+fn hook_source(log_heights: &LogHeights) -> String {
+    format!(
+        r#"
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
+        use miden::core::sys::pvm::aux_trace
+        use miden::core::sys::pvm::ood_frames
+
+        begin
+            {}
+            exec.ood_frames::stage_proof_order_maps
+            exec.aux_trace::observe_aux_trace
+        end
+        "#,
+        setup_masm(log_heights)
+    )
+}
+
+/// Reference transcript path using the public buffered word API for the same seven advice words.
+fn reference_source(log_heights: &LogHeights) -> String {
+    format!(
+        r#"
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
+        use miden::core::stark::random_coin
+        use miden::core::sys::pvm::layout
+
+        begin
+            {}
+            exec.random_coin::generate_aux_randomness
+
+            padw adv_loadw
+            mem_storew_le.AUX_TRACE_COM_PTR
+            exec.random_coin::observe_word
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr mem_storew_le
+            exec.random_coin::observe_word
+
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+            exec.random_coin::observe_word
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le
+            exec.random_coin::observe_word
+
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le
+            exec.random_coin::observe_word
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
+            exec.random_coin::observe_word
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+            exec.random_coin::observe_word
+        end
+        "#,
+        setup_masm(log_heights)
+    )
+}
+
+fn sampled_challenges(log_heights: &LogHeights) -> (QuadFelt, QuadFelt) {
+    let (output, _) = build_test!(&sampler_source(log_heights), &[])
+        .execute_for_output()
+        .expect("challenge sampler must execute");
+    let aux_rand_elem_ptr = pvm_layout_const("AUX_RAND_ELEM_PTR");
+    let beta = QuadFelt::new([
+        read_memory_felt(&output, aux_rand_elem_ptr),
+        read_memory_felt(&output, aux_rand_elem_ptr + 1),
+    ]);
+    let alpha = QuadFelt::new([
+        read_memory_felt(&output, aux_rand_elem_ptr + 2),
+        read_memory_felt(&output, aux_rand_elem_ptr + 3),
+    ]);
+    (alpha, beta)
+}
+
+fn encode_message(alpha: QuadFelt, beta: QuadFelt, scale: u32, payload: &[u32]) -> QuadFelt {
+    let gamma = (0..MAX_MESSAGE_WIDTH).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    let message = payload
+        .iter()
+        .rev()
+        .fold(QuadFelt::ZERO, |acc, value| acc * beta + QuadFelt::from(Felt::from_u32(*value)));
+    alpha + gamma * QuadFelt::from(Felt::from_u32(scale)) + message
+}
+
+/// Derives the verifier-side fixed consumes from the public semantic definitions, independently
+/// of the MASM literals and folding procedures.
+fn fixed_boundary_correction(alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
+    let uint_messages = UintDomain::ALL.into_iter().map(|domain| {
+        let ptr = domain.bound_ptr();
+        let mut payload = vec![ptr, ptr];
+        payload.extend_from_slice(&domain.minus_one());
+        payload
+    });
+    let coefficient_messages = CurveId::ALL.into_iter().flat_map(|curve| {
+        let bound_ptr = curve.base_domain().bound_ptr();
+        [
+            {
+                let mut payload = vec![curve.a_ptr(), bound_ptr];
+                payload.extend_from_slice(&curve.a_value());
+                payload
+            },
+            {
+                let mut payload = vec![curve.b_ptr(), bound_ptr];
+                payload.extend_from_slice(&curve.b_value());
+                payload
+            },
+        ]
+    });
+    let endomorphism_messages = CurveId::ALL.into_iter().flat_map(|curve| {
+        let base_bound_ptr = curve.base_domain().bound_ptr();
+        let scalar_bound_ptr = curve.scalar_domain().bound_ptr();
+        curve.endomorphism().into_iter().flat_map(move |endomorphism| {
+            [
+                {
+                    let mut payload = vec![endomorphism.beta_ptr, base_bound_ptr];
+                    payload.extend_from_slice(&endomorphism.beta);
+                    payload
+                },
+                {
+                    let mut payload = vec![endomorphism.lambda_ptr, scalar_bound_ptr];
+                    payload.extend_from_slice(&endomorphism.lambda);
+                    payload
+                },
+            ]
+        })
+    });
+
+    let uint_correction = uint_messages
+        .chain(coefficient_messages)
+        .chain(endomorphism_messages)
+        .fold(QuadFelt::ZERO, |acc, payload| {
+            acc + encode_message(alpha, beta, 11, &payload)
+                .try_inverse()
+                .expect("nonzero fixed UintVal denominator")
+        });
+    CurveId::ALL.into_iter().fold(uint_correction, |acc, curve| {
+        let (beta_ptr, lambda_ptr) = curve
+            .endomorphism()
+            .map(|endomorphism| (endomorphism.beta_ptr, endomorphism.lambda_ptr))
+            .unwrap_or((0, 0));
+        let payload = [
+            curve.group_ptr(),
+            curve.a_ptr(),
+            curve.b_ptr(),
+            curve.base_domain().bound_ptr(),
+            curve.scalar_domain().bound_ptr(),
+            beta_ptr,
+            lambda_ptr,
+        ];
+        acc + encode_message(alpha, beta, 15, &payload)
+            .try_inverse()
+            .expect("nonzero fixed EcGroup denominator")
+    })
+}
+
+fn proof_order(log_heights: &LogHeights) -> [usize; 12] {
+    let mut order = core::array::from_fn(|index| index);
+    order.sort_by_key(|&index| (log_heights[index], index));
+    order
+}
+
+fn balanced_normalized_sums(correction: QuadFelt, log_heights: &LogHeights) -> [Vec<QuadFelt>; 12] {
+    let mut next = 1u32;
+    let mut normalized_sums: [Vec<QuadFelt>; 12] = core::array::from_fn(|air_index| {
+        (0..AUX_VALUE_WIDTHS[air_index])
+            .map(|_| {
+                let value = QuadFelt::new([Felt::from_u32(next), Felt::from_u32(next + 1)]);
+                next += 2;
+                value
+            })
+            .collect()
+    });
+
+    // Reserve a single-width AIR as the balancing term, then apply the same trace-length weighting
+    // as `MultiAir::eval_external`.
+    normalized_sums[11][0] = QuadFelt::ZERO;
+    let partial =
+        normalized_sums.iter().enumerate().fold(QuadFelt::ZERO, |sum, (index, values)| {
+            let n = Felt::new_unchecked(1u64 << log_heights[index]);
+            sum + values.iter().copied().sum::<QuadFelt>() * n
+        });
+    let balancing_n_inv = Felt::new_unchecked(1u64 << log_heights[11])
+        .try_inverse()
+        .expect("nonzero trace length");
+    normalized_sums[11][0] = (-correction - partial) * balancing_n_inv;
+    normalized_sums
+}
+
+fn proof_ordered_normalized_sums(
+    values: &[Vec<QuadFelt>; 12],
+    log_heights: &LogHeights,
+) -> Vec<QuadFelt> {
+    proof_order(log_heights)
+        .into_iter()
+        .flat_map(|air_index| values[air_index].iter().copied())
+        .collect()
+}
+
+fn advice(normalized_sums: &[Vec<QuadFelt>; 12], log_heights: &LogHeights) -> Vec<u64> {
+    let ordered = proof_ordered_normalized_sums(normalized_sums, log_heights);
+    COMMITMENT
+        .into_iter()
+        .chain(ordered.iter().flat_map(|value| {
+            value
+                .as_basis_coefficients_slice()
+                .iter()
+                .map(|felt: &Felt| felt.as_canonical_u64())
+        }))
+        .collect()
+}
+
+#[test]
+fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
+    for (case, log_heights) in PROOF_ORDER_CASES {
+        let (alpha, beta) = sampled_challenges(&log_heights);
+        let correction = fixed_boundary_correction(alpha, beta);
+        let normalized_sums = balanced_normalized_sums(correction, &log_heights);
+        let advice = advice(&normalized_sums, &log_heights);
+
+        let (hook_output, _) = build_test!(&hook_source(&log_heights), &[], &advice)
+            .execute_for_output()
+            .unwrap_or_else(|error| {
+                panic!("{case}: PVM aux hook rejected balanced boundary: {error}")
+            });
+        let (reference_output, _) = build_test!(&reference_source(&log_heights), &[], &advice)
+            .execute_for_output()
+            .unwrap_or_else(|error| panic!("{case}: reference transcript failed: {error}"));
+
+        for addr in RANDOM_COIN_CV_PTR..RANDOM_COIN_CV_PTR + 4 {
+            assert_eq!(
+                read_memory_felt(&hook_output, addr),
+                read_memory_felt(&reference_output, addr),
+                "{case}: transcript state differs at address {addr}"
+            );
+        }
+        for addr in [
+            RANDOM_COIN_INPUT_LENGTH_PTR,
+            RANDOM_COIN_OUTPUT_LENGTH_PTR,
+            RANDOM_COIN_COUNTER_PTR,
+        ] {
+            assert_eq!(
+                read_memory_felt(&hook_output, addr),
+                read_memory_felt(&reference_output, addr),
+                "{case}: transcript counter differs at address {addr}"
+            );
+        }
+
+        let gamma = (0..MAX_MESSAGE_WIDTH).fold(QuadFelt::ONE, |acc, _| acc * beta);
+        let expected_gamma: &[Felt] = gamma.as_basis_coefficients_slice();
+        let bus_gamma_ptr = pvm_layout_const("BUS_GAMMA_PTR");
+        assert_eq!(
+            read_memory_felt(&hook_output, bus_gamma_ptr),
+            expected_gamma[0],
+            "{case}: bus gamma coordinate 0 mismatch"
+        );
+        assert_eq!(
+            read_memory_felt(&hook_output, bus_gamma_ptr + 1),
+            expected_gamma[1],
+            "{case}: bus gamma coordinate 1 mismatch"
+        );
+        assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 2), Felt::ZERO);
+        assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 3), Felt::ZERO);
+
+        let expected_correction: &[Felt] = correction.as_basis_coefficients_slice();
+        let c_total_ptr = pvm_layout_const("C_TOTAL_PTR");
+        assert_eq!(
+            read_memory_felt(&hook_output, c_total_ptr),
+            expected_correction[0],
+            "{case}: fixed correction coordinate 0 mismatch"
+        );
+        assert_eq!(
+            read_memory_felt(&hook_output, c_total_ptr + 1),
+            expected_correction[1],
+            "{case}: fixed correction coordinate 1 mismatch"
+        );
+        assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 2), Felt::ZERO);
+        assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 3), Felt::ZERO);
+
+        // The hook absorbs the values in proof order and then scatters them, so the region the
+        // constraint circuit reads must end up in the canonical numbering: `ChipletAir::all()`
+        // order.
+        let aux_bus_boundary_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+        let canonical: Vec<QuadFelt> =
+            normalized_sums.iter().flat_map(|values| values.iter().copied()).collect();
+        assert_ne!(
+            canonical,
+            proof_ordered_normalized_sums(&normalized_sums, &log_heights),
+            "{case}: the fixture heights must induce a non-identity proof order"
+        );
+        for (i, value) in canonical.iter().enumerate() {
+            let coefficients: &[Felt] = value.as_basis_coefficients_slice();
+            for (coord, expected) in coefficients.iter().enumerate() {
+                assert_eq!(
+                    read_memory_felt(
+                        &hook_output,
+                        aux_bus_boundary_ptr + 2 * i as u32 + coord as u32,
+                    ),
+                    *expected,
+                    "{case}: canonical normalized LogUp value {i} coordinate {coord} is not at \
+                     the address the circuit reads"
+                );
+            }
+        }
+        for (i, expected) in COMMITMENT.into_iter().enumerate() {
+            assert_eq!(
+                read_memory_felt(&hook_output, AUX_TRACE_COM_PTR + i as u32),
+                Felt::new_unchecked(expected),
+                "{case}: aux commitment coordinate {i} mismatch"
+            );
+        }
+    }
+}
+
+#[test]
+fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
+    let mut source = String::from(
+        "use miden::core::sys::pvm::fixed_boundary\n\
+         use miden::core::sys::pvm::layout\n\
+         begin\n",
+    );
+    // Keep caller values in both the addressable stack window and the overflow table.
+    for value in 1..=24 {
+        writeln!(source, "push.{value}").unwrap();
+    }
+    source.push_str(
+        "push.13.11.19.17 exec.layout::aux_rand_elem_ptr mem_storew_le dropw\n\
+         exec.fixed_boundary::compute_fixed_boundary_correction\n",
+    );
+    for value in (1..=24).rev() {
+        writeln!(source, "push.{value} assert_eq").unwrap();
+    }
+    source.push_str("end");
+
+    let (output, _) = build_test!(&source).execute_for_output().unwrap();
+    let alpha = QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)]);
+    let beta = QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)]);
+    let expected = fixed_boundary_correction(alpha, beta);
+    let coordinates: &[Felt] = expected.as_basis_coefficients_slice();
+    for (coord, value) in coordinates.iter().enumerate() {
+        assert_eq!(
+            read_memory_felt(&output, pvm_layout_const("C_TOTAL_PTR") + coord as u32),
+            *value,
+        );
+    }
+}
+
+#[test]
+fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
+    let log_heights = EIDOS_PRECEDES_ORDINARY_HEIGHTS;
+    let (alpha, beta) = sampled_challenges(&log_heights);
+    for index in [4, 11] {
+        // Cover an inner value and the last value: omitting the final word from the external
+        // identity must fail even when the other eleven values balance.
+        let mut normalized_sums =
+            balanced_normalized_sums(fixed_boundary_correction(alpha, beta), &log_heights);
+        normalized_sums[index][0] += QuadFelt::ONE;
+        let advice = advice(&normalized_sums, &log_heights);
+
+        let test = build_test!(&hook_source(&log_heights), &[], &advice);
+        // The release package retains the assertion code but not the source message. The
+        // matching balanced fixture above reaches this point successfully; changing only one
+        // normalized sum therefore isolates the final fixed-boundary assertion.
+        expect_assert_error_message!(test);
+    }
+}

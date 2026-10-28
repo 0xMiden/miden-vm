@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -96,9 +96,9 @@ impl BaseAir<Felt> for PeriodicPowerAir {
         1
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         // Period 2: entries [1, 0] repeat across the trace.
-        vec![vec![Felt::ONE, Felt::ZERO]]
+        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
     }
 }
 
@@ -209,7 +209,7 @@ fn one_chunk_quadratic_quotient_proves() {
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![air]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
 
 fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_height: usize) {
@@ -222,7 +222,7 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
 
 #[test]
@@ -251,5 +251,5 @@ fn upsample_fires_with_periodic_columns() {
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }

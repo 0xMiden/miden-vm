@@ -10,7 +10,7 @@ use super::{
     LEAVES_CF,
     iterator::PersistentBackendEntriesIterator,
     keys::{LeafKey, SubtreeKey},
-    subtree_cf_name,
+    lineage_entries_read_options, subtree_cf_name,
     tree_metadata::TreeMetadata,
 };
 use crate::{
@@ -208,14 +208,13 @@ impl BackendReader for PersistentBackendReader {
         }
         let lineage_bytes = lineage.to_bytes();
         let cf = self.cf(LEAVES_CF)?;
-        let mut read_opts = db::ReadOptions::default();
-        read_opts.set_prefix_same_as_start(true);
-        let pfx_iterator = self.inner.snapshot.iterator_cf_opt(
+        let read_options = lineage_entries_read_options(&lineage_bytes);
+        let entries_iterator = self.inner.snapshot.iterator_cf_opt(
             cf,
-            read_opts,
+            read_options,
             db::IteratorMode::From(&lineage_bytes, db::Direction::Forward),
         );
-        Ok(PersistentBackendEntriesIterator::new(lineage, pfx_iterator))
+        Ok(PersistentBackendEntriesIterator::new(lineage, entries_iterator))
     }
 }
 

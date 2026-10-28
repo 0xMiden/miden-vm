@@ -1,13 +1,19 @@
-use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HasherState, RATE_LEN, STATE_WIDTH},
+    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
 };
-use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
+use miden_core::{
+    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
+};
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    AceError, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -16,9 +22,15 @@ use crate::{
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
-    trace::chiplets::CircuitEvaluation,
+    trace::chiplets::{AEAD_STREAM_CYCLE_LEN, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
+    tracer::merkle_index_helper_values,
     utils::Idx,
 };
+
+mod serde;
+
+#[cfg(test)]
+mod serialization_tests;
 
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
@@ -40,12 +52,21 @@ use crate::{
 /// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
 ///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
 ///    [`miden_core::mast::DynNode`]).
-#[derive(Debug)]
+///
+/// Note: the binary wire format is deliberately lossy because the embedded
+/// [`ContinuationStack`](crate::continuation_stack::ContinuationStack) drops its debug metadata
+/// (`package_debug_info` and `source_node_ids`), so the exact-equality round-trip test generated
+/// by `serde_test` does not apply to this type.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
     /// Continuation stack with forest references encoded as [`MastForestId`]s into the
-    /// `mast_forest_store` of the owning [`crate::TraceGenerationContext`].
+    /// `mast_forest_store` of the owning trace replay.
     pub continuation: ContinuationStack<MastForestId>,
     /// MAST forest active at the start of this fragment.
     pub initial_mast_forest_id: MastForestId,
@@ -56,7 +77,11 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -71,6 +96,10 @@ pub struct CoreTraceState {
 /// This struct captures the complete state of the system at a specific clock cycle, allowing for
 /// reconstruction of the system trace during concurrent execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SystemState {
     /// Current clock cycle (row index in the trace)
     pub clk: RowIndex,
@@ -106,7 +135,11 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -155,7 +188,11 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -281,7 +318,11 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -296,7 +337,11 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -323,7 +368,11 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -332,14 +381,6 @@ pub struct BlockStackReplay {
 }
 
 impl BlockStackReplay {
-    /// Creates a new instance of `BlockStackReplay`.
-    pub fn new() -> Self {
-        Self {
-            node_start_parent_addr: VecDeque::new(),
-            node_end: VecDeque::new(),
-        }
-    }
-
     /// Records the node's parent address
     pub fn record_node_start_parent_addr(&mut self, parent_addr: Felt) {
         self.node_start_parent_addr.push_back(parent_addr);
@@ -376,50 +417,43 @@ impl BlockStackReplay {
     }
 }
 
-/// The flags written in the second word of the hasher state for END operations.
-#[derive(Debug)]
-pub struct NodeFlags {
-    is_loop_body: bool,
-    is_loop: bool,
-    is_call: bool,
-    is_syscall: bool,
+/// The semantic block-stack entry kind consumed by an END operation.
+#[derive(Debug, Clone, Copy)]
+pub enum EndBlockStackEntryKind {
+    /// An ordinary control-flow continuation.
+    Continuation,
+    /// A LOOP continuation, whose block-stack message carries the loop marker.
+    LoopContinuation,
+    /// A caller frame whose saved state is restored by this END.
+    CallerFrame,
 }
 
-impl NodeFlags {
-    /// Creates a new instance of `NodeFlags`.
-    pub fn new(is_loop_body: bool, is_loop: bool, is_call: bool, is_syscall: bool) -> Self {
-        Self {
-            is_loop_body,
-            is_loop,
-            is_call,
-            is_syscall,
-        }
+/// The flags written in the second word of the hasher state for END operations.
+///
+/// `entry_kind` is typed so trace construction cannot accidentally emit an invalid combination
+/// such as a caller-frame END that is also marked as a LOOP END.
+#[derive(Debug)]
+pub struct EndBlockFlags {
+    is_loop_body: bool,
+    entry_kind: EndBlockStackEntryKind,
+}
+
+impl EndBlockFlags {
+    /// Creates END flags for the specified block-stack entry kind.
+    pub fn new(is_loop_body: bool, entry_kind: EndBlockStackEntryKind) -> Self {
+        Self { is_loop_body, entry_kind }
     }
 
-    /// Returns ONE if this node is a body of a LOOP node; otherwise returns ZERO.
-    pub fn is_loop_body(&self) -> Felt {
-        if self.is_loop_body { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this END is closing a LOOP node; otherwise returns ZERO.
-    pub fn is_loop(&self) -> Felt {
-        if self.is_loop { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this node is a CALL or DYNCALL; otherwise returns ZERO.
-    pub fn is_call(&self) -> Felt {
-        if self.is_call { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this node is a SYSCALL; otherwise returns ZERO.
-    pub fn is_syscall(&self) -> Felt {
-        if self.is_syscall { ONE } else { ZERO }
-    }
-
-    /// Convenience method that writes the flags in the proper order to be written to the second
-    /// word of the hasher state for the trace row of an END operation.
+    /// Encodes the flags in their hasher-state column order.
     pub fn to_hasher_state_second_word(&self) -> Word {
-        [self.is_loop_body(), self.is_loop(), self.is_call(), self.is_syscall()].into()
+        let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
+        let (is_loop, restores_caller_frame) = match self.entry_kind {
+            EndBlockStackEntryKind::Continuation => (ZERO, ZERO),
+            EndBlockStackEntryKind::LoopContinuation => (ONE, ZERO),
+            EndBlockStackEntryKind::CallerFrame => (ZERO, ONE),
+        };
+
+        [is_loop_body, is_loop, restores_caller_frame, ZERO].into()
     }
 }
 
@@ -428,7 +462,11 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -442,7 +480,11 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -458,10 +500,14 @@ pub struct ExecutionContextSystemInfo {
 /// a procedure not present in the current forest.
 ///
 /// The forest reference is stored as a [`MastForestId`] into the `mast_forest_store` of the
-/// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
-/// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
+/// trace replay that owns this data. This avoids holding a strong `Arc<MastForest>` reference per
+/// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -480,6 +526,10 @@ impl MastForestResolutionReplay {
             .pop_front()
             .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
     }
+
+    pub(crate) fn iter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.mast_forest_resolutions.iter().map(|(_node_id, forest_id)| *forest_id)
+    }
 }
 
 // MEMORY REPLAY
@@ -496,7 +546,11 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -566,7 +620,11 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -658,7 +716,11 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -749,16 +811,44 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
 }
 
+/// One 8-row AEAD stream entry to replay into the bitwise chiplet.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AeadStreamReplayEntry {
+    pub ctx: Felt,
+    pub clk: Felt,
+    pub src_ptr: Felt,
+    pub dst_ptr: Felt,
+    pub lane_base: Felt,
+    pub plaintext: [Felt; 4],
+    pub keystream: [Felt; 8],
+    pub ciphertext: [Felt; 8],
+}
+
+/// Replay entry for the bitwise chiplet.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BitwiseReplayEntry {
+    U32(BitwiseOp, Felt, Felt),
+    AeadStream(Box<AeadStreamReplayEntry>),
+}
+
 /// Replay data for bitwise operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BitwiseReplay {
-    u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
+    entries: VecDeque<BitwiseReplayEntry>,
 }
 
 impl BitwiseReplay {
@@ -767,27 +857,39 @@ impl BitwiseReplay {
 
     /// Records the operands of a u32and operation.
     pub fn record_u32and(&mut self, a: Felt, b: Felt) {
-        self.u32op_with_operands.push_back((BitwiseOp::U32And, a, b));
+        self.entries.push_back(BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b));
     }
 
     /// Records the operands of a u32xor operation.
     pub fn record_u32xor(&mut self, a: Felt, b: Felt) {
-        self.u32op_with_operands.push_back((BitwiseOp::U32Xor, a, b));
+        self.entries.push_back(BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b));
     }
 
-    /// Returns the number of recorded operations.
-    pub fn num_operations(&self) -> usize {
-        self.u32op_with_operands.len()
+    /// Records one 8-row AEAD stream entry.
+    pub fn record_aead_stream(&mut self, entry: AeadStreamReplayEntry) {
+        self.entries.push_back(BitwiseReplayEntry::AeadStream(Box::new(entry)));
+    }
+
+    /// Returns the number of trace rows contributed by the recorded operations, or `None` on
+    /// overflow.
+    pub fn trace_len(&self) -> Option<usize> {
+        self.entries.iter().try_fold(0usize, |len, entry| {
+            let entry_len = match entry {
+                BitwiseReplayEntry::U32(..) => 1,
+                BitwiseReplayEntry::AeadStream(..) => AEAD_STREAM_CYCLE_LEN,
+            };
+            len.checked_add(entry_len)
+        })
     }
 }
 
 impl IntoIterator for BitwiseReplay {
-    type Item = (BitwiseOp, Felt, Felt);
-    type IntoIter = <VecDeque<(BitwiseOp, Felt, Felt)> as IntoIterator>::IntoIter;
+    type Item = BitwiseReplayEntry;
+    type IntoIter = <VecDeque<BitwiseReplayEntry> as IntoIterator>::IntoIter;
 
     /// Returns an iterator over all recorded u32 operations with their operands.
     fn into_iter(self) -> Self::IntoIter {
-        self.u32op_with_operands.into_iter()
+        self.entries.into_iter()
     }
 }
 
@@ -795,7 +897,11 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -824,7 +930,11 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -833,10 +943,19 @@ impl AceReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
-    /// Records the evaluation of a circuit.
-    pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
+    /// Records a circuit evaluation, rejecting invocations beyond the witness collection limit.
+    pub fn record_circuit_evaluation(
+        &mut self,
+        circuit_eval: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        if self.circuit_evaluations.len() >= MAX_EVAL_CIRCUIT_INVOCATIONS as usize {
+            return Err(AceError(format!(
+                "number of recorded eval_circuit invocations cannot exceed {MAX_EVAL_CIRCUIT_INVOCATIONS}"
+            )));
+        }
         let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
+        Ok(())
     }
 
     /// Returns the total number of trace rows contributed by recorded evaluations, or `None` on
@@ -861,12 +980,36 @@ impl IntoIterator for AceReplay {
 // RANGE CHECKER REPLAY
 // ================================================================================================
 
+/// Values requested from the 16-bit range-check table by a single operation.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
+pub enum RangeCheckReplayValues {
+    Two([u16; 2]),
+    Four([u16; 4]),
+    Five([u16; 5]),
+}
+
+impl AsRef<[u16]> for RangeCheckReplayValues {
+    fn as_ref(&self) -> &[u16] {
+        match self {
+            Self::Two(values) => values,
+            Self::Four(values) => values,
+            Self::Five(values) => values,
+        }
+    }
+}
+
 /// Replay data for range checking operations.
-///
-/// This currently only records
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct RangeCheckerReplay {
-    range_checks_u32_ops: VecDeque<[u16; 4]>,
+    range_checks: VecDeque<RangeCheckReplayValues>,
 }
 
 impl RangeCheckerReplay {
@@ -875,24 +1018,62 @@ impl RangeCheckerReplay {
 
     /// Records the set of range checks which result from a u32 operation.
     pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
-        self.range_checks_u32_ops.push_back(u16_limbs);
+        self.range_checks.push_back(RangeCheckReplayValues::Four(u16_limbs));
+    }
+
+    /// Records the two range checks which enforce that a Merkle depth is in `[1, 64]`.
+    pub fn record_merkle_depth(&mut self, depth: Felt) {
+        let depth =
+            u16::try_from(depth.as_canonical_u64()).expect("Merkle depth must fit in 16 bits");
+        let scaled_depth = depth
+            .checked_sub(1)
+            .and_then(|depth_minus_one| depth_minus_one.checked_mul(MERKLE_DEPTH_RANGE_SCALE))
+            .expect("Merkle depth must be in the range 1..=64");
+
+        self.range_checks.push_back(RangeCheckReplayValues::Two([depth, scaled_depth]));
+    }
+
+    /// Records the five range checks which bind a Merkle index to its canonical field
+    /// representative: the four limbs of `y = (p - 1 - index - bit) / 2`, plus twice the top
+    /// limb to enforce `y < 2^63`.
+    pub fn record_merkle_index(&mut self, index: Felt) {
+        let (_, limbs) = merkle_index_helper_values(index);
+        let doubled_top = limbs[3]
+            .checked_mul(2)
+            .expect("canonical Merkle-index witness top limb must be below 2^15");
+        self.range_checks.push_back(RangeCheckReplayValues::Five([
+            limbs[0],
+            limbs[1],
+            limbs[2],
+            limbs[3],
+            doubled_top,
+        ]));
+    }
+
+    /// Records the two 16-bit limbs of `divisor - remainder - 1` for U32DIV.
+    pub fn record_u32div_remainder_diff(&mut self, u16_limbs: [u16; 2]) {
+        self.range_checks.push_back(RangeCheckReplayValues::Two(u16_limbs));
     }
 }
 
 impl IntoIterator for RangeCheckerReplay {
-    type Item = [u16; 4];
-    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
+    type Item = RangeCheckReplayValues;
+    type IntoIter = <VecDeque<RangeCheckReplayValues> as IntoIterator>::IntoIter;
 
-    /// Returns an iterator over all recorded range checks resulting from u32 operations.
+    /// Returns an iterator over all range checks recorded during execution.
     fn into_iter(self) -> Self::IntoIter {
-        self.range_checks_u32_ops.into_iter()
+        self.range_checks.into_iter()
     }
 }
 
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -922,12 +1103,16 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher operations from permutation operations (HPerm).
+    /// Recorded hasher operations from Compress requests.
     ///
     /// Each entry contains (address, output_state)
-    permutation_operations: VecDeque<(Felt, [Felt; 12])>,
+    compression_operations: VecDeque<(Felt, [Felt; 12])>,
 
     /// Recorded hasher operations from Merkle path verification operations.
     ///
@@ -944,10 +1129,9 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records a `Hasher::permute` operation with its address and result (after applying the
-    /// permutation)
-    pub fn record_permute(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
-        self.permutation_operations.push_back((addr, hashed_state));
+    /// Records a `Hasher::compress` operation with its address and compressed state.
+    pub fn record_compression(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
+        self.compression_operations.push_back((addr, hashed_state));
     }
 
     /// Records a Merkle path verification with its address and computed root
@@ -963,11 +1147,11 @@ impl HasherResponseReplay {
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
 
-    /// Replays a `Hasher::permute` operation, returning its address and result
-    pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
-        self.permutation_operations
+    /// Replays a `Hasher::compress` operation, returning its address and compressed state.
+    pub fn replay_compression(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
+        self.compression_operations
             .pop_front()
-            .ok_or(OperationError::Internal("no permutation operations recorded"))
+            .ok_or(OperationError::Internal("no compression operations recorded"))
     }
 
     /// Replays a Merkle path verification, returning the pre-recorded address and computed root
@@ -986,8 +1170,18 @@ impl HasherResponseReplay {
 }
 
 impl HasherInterface for HasherResponseReplay {
-    fn permute(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
-        self.replay_permute()
+    fn compress(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
+        self.replay_compression()
+    }
+
+    fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError> {
+        Ok(miden_core::chiplets::eidos_compression::compress_raw_xof_lanes(&state)
+            .map(Felt::from_u32))
     }
 
     fn verify_merkle_root(
@@ -1029,23 +1223,29 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum HasherOp {
-    Permute([Felt; STATE_WIDTH]),
+    Compress([Felt; STATE_WIDTH]),
+    AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
-    /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
+    /// `mast_forest_store` of the trace replay that owns this operation.
     HashBasicBlock((MastForestId, MastNodeId, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
 
 impl HasherOp {
-    /// Resolves the four forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
+    /// Resolves the five forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
     /// needs forest access.
     fn resolve_forest_free<'a>(self) -> Option<ResolvedHasherOp<'a>> {
         match self {
-            HasherOp::Permute(s) => Some(ResolvedHasherOp::Permute(s)),
+            HasherOp::Compress(s) => Some(ResolvedHasherOp::Compress(s)),
+            HasherOp::AeadXof(ctx, clk, s) => Some(ResolvedHasherOp::AeadXof(ctx, clk, s)),
             HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
             HasherOp::HashBasicBlock(_) => None,
             HasherOp::BuildMerkleRoot(x) => Some(ResolvedHasherOp::BuildMerkleRoot(x)),
@@ -1060,7 +1260,7 @@ pub enum ResolvedBasicBlockGroups<'a> {
     /// Buffered replay borrows batches from the finalized MAST forest.
     Borrowed(&'a [OpBatch]),
     /// Streamed replay owns the group hashes because it crosses a thread boundary.
-    Owned(Vec<[Felt; RATE_LEN]>),
+    Owned(Vec<OpBatch>),
 }
 
 /// A hasher-chiplet request with all operands resolved, so it can be replayed without further
@@ -1071,7 +1271,8 @@ pub enum ResolvedBasicBlockGroups<'a> {
 /// streaming path resolves at record time and forwards owned data to the concurrent builder.
 #[derive(Debug)]
 pub enum ResolvedHasherOp<'a> {
-    Permute([Felt; STATE_WIDTH]),
+    Compress([Felt; STATE_WIDTH]),
+    AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     HashBasicBlock((ResolvedBasicBlockGroups<'a>, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
@@ -1087,6 +1288,10 @@ pub enum ResolvedHasherOp<'a> {
 /// a hasher-chiplet builder running concurrently with execution; see
 /// `FastProcessor::execute_and_build_trace_sync`.
 #[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct HasherRequestReplay {
     sink: HasherOpSink,
 }
@@ -1097,6 +1302,20 @@ enum HasherOpSink {
     #[cfg(feature = "std")]
     Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
 }
+
+impl PartialEq for HasherRequestReplay {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.sink, &other.sink) {
+            (HasherOpSink::Buffered(lhs), HasherOpSink::Buffered(rhs)) => lhs == rhs,
+            #[cfg(feature = "std")]
+            (HasherOpSink::Streamed(_), HasherOpSink::Streamed(_)) => true,
+            #[cfg(feature = "std")]
+            _ => false,
+        }
+    }
+}
+
+impl Eq for HasherRequestReplay {}
 
 impl Default for HasherOpSink {
     fn default() -> Self {
@@ -1158,9 +1377,19 @@ impl HasherRequestReplay {
         }
     }
 
-    /// Records a `Hasher::permute()` request.
-    pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.record(HasherOp::Permute(state));
+    /// Records a `Hasher::compress()` request.
+    pub fn record_compress_input(&mut self, state: [Felt; STATE_WIDTH]) {
+        self.record(HasherOp::Compress(state));
+    }
+
+    /// Records an AEAD-XOF compression request.
+    pub fn record_aead_xof_input(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        state: [Felt; STATE_WIDTH],
+    ) {
+        self.record(HasherOp::AeadXof(ctx, clk, state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.
@@ -1188,9 +1417,7 @@ impl HasherRequestReplay {
         let expected_hash = basic_block_node.digest();
         self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
             ResolvedHasherOp::HashBasicBlock((
-                ResolvedBasicBlockGroups::Owned(
-                    basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
-                ),
+                ResolvedBasicBlockGroups::Owned(basic_block_node.op_batches().to_vec()),
                 expected_hash,
             ))
         });
@@ -1210,6 +1437,31 @@ impl HasherRequestReplay {
         index: Felt,
     ) {
         self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
+    }
+
+    /// Returns the forest IDs referenced by buffered basic-block hash requests.
+    ///
+    /// Trace replay deserialization uses these IDs to validate that every request points into the
+    /// replay's finalized MAST forest store. Streamed requests have already been delivered to the
+    /// concurrent trace builder, so they yield no IDs here.
+    pub(crate) fn iter_hash_basic_block_forest_ids(
+        &self,
+    ) -> impl Iterator<Item = MastForestId> + '_ {
+        self.buffered_ops()
+            .into_iter()
+            .flat_map(|ops| ops.iter())
+            .filter_map(|op| match op {
+                HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
+                _ => None,
+            })
+    }
+
+    fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
+        match &self.sink {
+            HasherOpSink::Buffered(ops) => Some(ops),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => None,
+        }
     }
 
     /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
@@ -1272,7 +1524,11 @@ impl HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
@@ -1361,7 +1617,55 @@ impl StackOverflowReplay {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use core::mem::size_of;
+
     use super::*;
+
+    #[test]
+    fn end_block_flags_encode_each_entry_kind() {
+        let cases = [
+            (
+                EndBlockFlags::new(false, EndBlockStackEntryKind::Continuation),
+                [ZERO, ZERO, ZERO, ZERO].into(),
+            ),
+            (
+                EndBlockFlags::new(true, EndBlockStackEntryKind::LoopContinuation),
+                [ONE, ONE, ZERO, ZERO].into(),
+            ),
+            (
+                EndBlockFlags::new(false, EndBlockStackEntryKind::CallerFrame),
+                [ZERO, ZERO, ONE, ZERO].into(),
+            ),
+        ];
+
+        for (flags, expected) in cases {
+            assert_eq!(flags.to_hasher_state_second_word(), expected);
+        }
+    }
+
+    #[test]
+    fn bitwise_replay_trace_len_accounts_for_aead_stream_rows() {
+        let mut replay = BitwiseReplay::default();
+        replay.record_u32and(ZERO, ZERO);
+        for lane_base in [ZERO, Felt::new_unchecked(8)] {
+            replay.record_aead_stream(AeadStreamReplayEntry {
+                ctx: ZERO,
+                clk: ZERO,
+                src_ptr: ZERO,
+                dst_ptr: ZERO,
+                lane_base,
+                plaintext: [ZERO; 4],
+                keystream: [ZERO; 8],
+                ciphertext: [ZERO; 8],
+            });
+        }
+
+        assert_eq!(replay.trace_len(), Some(1 + 2 * AEAD_STREAM_CYCLE_LEN));
+        assert!(
+            size_of::<BitwiseReplayEntry>() < size_of::<AeadStreamReplayEntry>(),
+            "ordinary replay entries must not pay for the inline AEAD stream payload",
+        );
+    }
 
     /// A streamed replay reaching the buffered trace-build path is a logic error
     /// and must surface immediately, not as a silently empty hasher chiplet.
@@ -1372,5 +1676,574 @@ mod tests {
         let mut ops = replay.into_resolved_ops(&[]);
         assert!(matches!(ops.next(), Some(Err(ExecutionError::Internal(_)))));
         assert!(ops.next().is_none());
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use miden_air::trace::RowIndex;
+    use proptest::prelude::*;
+
+    use super::{
+        AdviceReplay, BitwiseOp, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceState, DecoderState, ExecutionContextReplay, ExecutionContextSystemInfo,
+        KernelReplay, MIN_STACK_DEPTH, MemoryReadsReplay, MemoryWritesReplay, NodeEndData,
+        RangeCheckReplayValues, RangeCheckerReplay, StackState, SystemState,
+    };
+    use crate::{ContextId, Felt, Word};
+
+    impl Arbitrary for SystemState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All fields are any-valid on the wire.
+            (any::<RowIndex>(), any::<ContextId>(), any::<Word>(), any::<Word>())
+                .prop_map(|(clk, ctx, fn_hash, deferred_root)| Self {
+                    clk,
+                    ctx,
+                    fn_hash,
+                    deferred_root,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for DecoderState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<Felt>(), any::<Felt>())
+                .prop_map(|(current_addr, parent_addr)| Self { current_addr, parent_addr })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for StackState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects stack_depth < MIN_STACK_DEPTH; bound it by construction and
+            // keep a small overflow margin so the depth stays representative and shrinking stays
+            // cheap.
+            (
+                any::<[Felt; MIN_STACK_DEPTH]>(),
+                (MIN_STACK_DEPTH..=(MIN_STACK_DEPTH + 8)),
+                any::<Felt>(),
+            )
+                .prop_map(|(stack_top, stack_depth, last_overflow_addr)| {
+                    Self::new(stack_top, stack_depth, last_overflow_addr)
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for NodeEndData {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<Felt>(), any::<Felt>(), any::<Felt>())
+                .prop_map(|(ended_node_addr, prev_addr, prev_parent_addr)| Self {
+                    ended_node_addr,
+                    prev_addr,
+                    prev_parent_addr,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextSystemInfo {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<ContextId>(), any::<Word>())
+                .prop_map(|(parent_ctx, parent_fn_hash)| Self { parent_ctx, parent_fn_hash })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the public recording API (fields are private).
+            proptest::collection::vec(any::<ExecutionContextSystemInfo>(), 0..=4)
+                .prop_map(|contexts| {
+                    let mut replay = Self::default();
+                    for ctx_info in contexts {
+                        replay.record_execution_context(ctx_info);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockStackReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the public recording API (fields are private).
+            (
+                proptest::collection::vec(any::<Felt>(), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Felt>(), any::<Felt>()), 0..=4),
+            )
+                .prop_map(|(parent_addrs, node_ends)| {
+                    let mut replay = Self::default();
+                    for parent_addr in parent_addrs {
+                        replay.record_node_start_parent_addr(parent_addr);
+                    }
+                    for (ended_node_addr, prev_addr, prev_parent_addr) in node_ends {
+                        replay.record_node_end(ended_node_addr, prev_addr, prev_parent_addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryReadsReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(
+                    (any::<Felt>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+                proptest::collection::vec(
+                    (any::<Word>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+            )
+                .prop_map(|(element_rows, word_rows)| {
+                    let mut replay = Self::default();
+                    for (element, addr, ctx, clk) in element_rows {
+                        replay.record_read_element(element, addr, ctx, clk);
+                    }
+                    for (word, addr, ctx, clk) in word_rows {
+                        replay.record_read_word(word, addr, ctx, clk);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryWritesReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(
+                    (any::<Felt>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+                proptest::collection::vec(
+                    (any::<Word>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+            )
+                .prop_map(|(element_rows, word_rows)| {
+                    let mut replay = Self::default();
+                    for (element, addr, ctx, clk) in element_rows {
+                        replay.record_write_element(element, addr, ctx, clk);
+                    }
+                    for (word, addr, ctx, clk) in word_rows {
+                        replay.record_write_word(word, addr, ctx, clk);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for AdviceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(any::<Felt>(), 0..=4),
+                proptest::collection::vec(any::<Word>(), 0..=4),
+                proptest::collection::vec(any::<[Word; 2]>(), 0..=4),
+            )
+                .prop_map(|(stack_pops, stack_word_pops, stack_dword_pops)| {
+                    let mut replay = Self::default();
+                    for value in stack_pops {
+                        replay.record_pop_stack(value);
+                    }
+                    for word in stack_word_pops {
+                        replay.record_pop_stack_word(word);
+                    }
+                    for dword in stack_dword_pops {
+                        replay.record_pop_stack_dword(dword);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![Just(Self::U32And), Just(Self::U32Xor)].boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the recording API; both op tags are exercised via the mask.
+            proptest::collection::vec((any::<BitwiseOp>(), any::<Felt>(), any::<Felt>()), 0..=4)
+                .prop_map(|rows| {
+                    let mut replay = Self::default();
+                    for (op, a, b) in rows {
+                        match op {
+                            BitwiseOp::U32And => replay.record_u32and(a, b),
+                            BitwiseOp::U32Xor => replay.record_u32xor(a, b),
+                        }
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for KernelReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec(any::<Word>(), 0..=4)
+                .prop_map(|hashes| {
+                    let mut replay = Self::default();
+                    for proc_hash in hashes {
+                        replay.record_kernel_proc_access(proc_hash);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RangeCheckReplayValues {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                any::<[u16; 2]>().prop_map(Self::Two).boxed(),
+                any::<[u16; 4]>().prop_map(Self::Four).boxed(),
+                any::<[u16; 5]>().prop_map(Self::Five).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for RangeCheckerReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Record five-limb rows from canonical field indices so the doubled top limb
+            // matches the Merkle-index witness. The other rows accept independent limbs.
+            proptest::collection::vec((any::<RangeCheckReplayValues>(), any::<Felt>()), 0..=4)
+                .prop_map(|values| {
+                    let mut replay = Self::default();
+                    for (value, index) in values {
+                        match &value {
+                            RangeCheckReplayValues::Four(limbs) => {
+                                replay.record_range_check_u32(*limbs);
+                            },
+                            RangeCheckReplayValues::Two(limbs) => {
+                                replay.record_u32div_remainder_diff(*limbs);
+                            },
+                            RangeCheckReplayValues::Five(_) => {
+                                replay.record_merkle_index(index);
+                            },
+                        }
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockAddressReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec(any::<Felt>(), 0..=4)
+                .prop_map(|addresses| {
+                    let mut replay = Self::default();
+                    for addr in addresses {
+                        replay.record_block_address(addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes three already-covered parts; all fields are pub.
+            (any::<SystemState>(), any::<DecoderState>(), any::<StackState>())
+                .prop_map(|(system, decoder, stack)| Self { system, decoder, stack })
+                .boxed()
+        }
+    }
+}
+
+// ARBITRARY EXTENSIONS (proptest) — replay types with private fields / hasher state
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary_replays {
+    use miden_core::mast::{MastForestId, MastNodeId};
+    use proptest::prelude::*;
+
+    use super::{
+        AdviceReplay, BlockAddressReplay, BlockStackReplay, CoreTraceFragmentContext,
+        CoreTraceState, ExecutionContextReplay, ExecutionReplay, HasherOp, HasherRequestReplay,
+        HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
+        StackOverflowReplay,
+    };
+    use crate::{ContextId, Felt, RowIndex, Word, crypto::merkle::MerklePath};
+
+    impl Arbitrary for StackOverflowReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec((any::<Felt>(), any::<Felt>()), 0..=4),
+                proptest::collection::vec((any::<usize>(), any::<Felt>()), 0..=4),
+            )
+                .prop_map(|(overflow_values, restore_context_info)| {
+                    let mut replay = StackOverflowReplay::new();
+                    for (value, new_overflow_addr) in overflow_values {
+                        replay.record_pop_overflow(value, new_overflow_addr);
+                    }
+                    for (stack_depth, addr) in restore_context_info {
+                        replay.record_restore_context_overflow_addr(stack_depth, addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Cover all six wire tags; control-block domains must fit in a u32.
+            prop_oneof![
+                any::<[Felt; STATE_WIDTH]>().prop_map(Self::Compress).boxed(),
+                (any::<ContextId>(), any::<RowIndex>(), any::<[Felt; STATE_WIDTH]>())
+                    .prop_map(|(ctx, clk, state)| Self::AeadXof(ctx, clk, state))
+                    .boxed(),
+                (any::<Word>(), any::<Word>(), any::<u32>(), any::<Word>())
+                    .prop_map(|(h1, h2, domain, expected_hash)| {
+                        Self::HashControlBlock((h1, h2, Felt::from(domain), expected_hash))
+                    })
+                    .boxed(),
+                (any::<MastForestId>(), any::<MastNodeId>(), any::<Word>())
+                    .prop_map(|(forest_id, node_id, expected_hash)| {
+                        Self::HashBasicBlock((forest_id, node_id, expected_hash))
+                    })
+                    .boxed(),
+                (any::<Word>(), any::<MerklePath>(), any::<Felt>())
+                    .prop_map(|(leaf, path, index)| Self::BuildMerkleRoot((leaf, path, index)))
+                    .boxed(),
+                (any::<Word>(), any::<Word>(), any::<MerklePath>(), any::<Felt>())
+                    .prop_map(|(old_root, new_root, path, index)| {
+                        Self::UpdateMerkleRoot((old_root, new_root, path, index))
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherResponseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec((any::<Felt>(), any::<[Felt; 12]>()), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Word>()), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Word>(), any::<Word>()), 0..=4),
+            )
+                .prop_map(|(compressions, merkle_roots, mrupdates)| {
+                    let mut replay = Self::default();
+                    for (addr, hashed_state) in compressions {
+                        replay.record_compression(addr, hashed_state);
+                    }
+                    for (addr, computed_root) in merkle_roots {
+                        replay.record_build_merkle_root(addr, computed_root);
+                    }
+                    for (addr, old_root, new_root) in mrupdates {
+                        replay.record_update_merkle_root(addr, old_root, new_root);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherRequestReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Buffered-only: the write side panics on Streamed and the reader always yields
+            // Buffered, so Default (Buffered) + record is the exact-roundtrip regime.
+            proptest::collection::vec(any::<HasherOp>(), 0..=4)
+                .prop_map(|ops| {
+                    let mut replay = Self::default();
+                    for op in ops {
+                        replay.record(op);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MastForestResolutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec((any::<MastNodeId>(), any::<MastForestId>()), 0..=4)
+                .prop_map(|resolutions| {
+                    let mut replay = Self::default();
+                    for (node_id, forest_id) in resolutions {
+                        replay.record_resolution(node_id, forest_id);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes eight already-covered replay parts; all fields are pub.
+            (
+                any::<BlockStackReplay>(),
+                any::<ExecutionContextReplay>(),
+                any::<StackOverflowReplay>(),
+                any::<MemoryReadsReplay>(),
+                any::<AdviceReplay>(),
+                any::<HasherResponseReplay>(),
+                any::<BlockAddressReplay>(),
+                any::<MastForestResolutionReplay>(),
+            )
+                .prop_map(
+                    |(
+                        block_stack,
+                        execution_context,
+                        stack_overflow,
+                        memory_reads,
+                        advice,
+                        hasher,
+                        block_address,
+                        mast_forest_resolution,
+                    )| {
+                        Self {
+                            block_stack,
+                            execution_context,
+                            stack_overflow,
+                            memory_reads,
+                            advice,
+                            hasher,
+                            block_address,
+                            mast_forest_resolution,
+                        }
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceFragmentContext {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes four covered parts; all fields are pub.
+            (
+                any::<CoreTraceState>(),
+                any::<ExecutionReplay>(),
+                any::<crate::continuation_stack::ContinuationStack<MastForestId>>(),
+                any::<MastForestId>(),
+            )
+                .prop_map(|(state, replay, continuation, initial_mast_forest_id)| Self {
+                    state,
+                    replay,
+                    continuation,
+                    initial_mast_forest_id,
+                })
+                .boxed()
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod ace_replay_arbitrary {
+    use proptest::prelude::*;
+
+    use super::AceReplay;
+    use crate::trace::chiplets::CircuitEvaluation;
+
+    impl Arbitrary for AceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the recording API; the pair's clk is derived from the evaluation.
+            proptest::collection::vec(any::<CircuitEvaluation>(), 0..=3)
+                .prop_map(|evaluations| {
+                    let mut replay = Self::default();
+                    for circuit_eval in evaluations {
+                        // The draw is bounded to 3 entries, far below the recording limit, so
+                        // this never rejects; ignore the Result to keep the generator infallible.
+                        let _ = replay.record_circuit_evaluation(circuit_eval);
+                    }
+                    replay
+                })
+                .boxed()
+        }
     }
 }

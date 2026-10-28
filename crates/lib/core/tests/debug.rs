@@ -20,15 +20,27 @@ use miden_core_lib::{
     },
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, HostLibrary, MemoryError,
-    StackInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
+    MemoryError, Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
-    execute_sync,
 };
 
 // HARNESS
 // ================================================================================================
+
+/// Runs `program` against `host`, constructing a [`FastProcessor`] the way production callers do.
+fn execute_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ExecutionOptions,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .expect("failed to construct FastProcessor");
+    processor.execute_sync(program, host)
+}
 
 /// A [`fmt::Write`] that appends into a shared, thread-safe string buffer.
 #[derive(Clone)]
@@ -407,7 +419,7 @@ fn print_mem_rejects_full_range() {
 fn print_adv_stack_all_outputs_advice_stack() {
     let mut stack = AdviceStack::new();
     stack.append_elements([Felt::new_unchecked(7), Felt::new_unchecked(8), Felt::new_unchecked(9)]);
-    let advice = AdviceInputs::default().with_advice_stack(stack);
+    let advice = AdviceInputs::default().with_stack(stack);
     let source = "
     use miden::core::debug
     begin
@@ -431,7 +443,7 @@ fn print_adv_stack_outputs_range() {
         Felt::new_unchecked(9),
         Felt::new_unchecked(10),
     ]);
-    let advice = AdviceInputs::default().with_advice_stack(stack);
+    let advice = AdviceInputs::default().with_stack(stack);
     let source = "
     use miden::core::debug
     begin
@@ -571,7 +583,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
     ";
     let mut stack = AdviceStack::new();
     stack.append_element(Felt::new_unchecked(7));
-    let advice = AdviceInputs::default().with_advice_stack(stack);
+    let advice = AdviceInputs::default().with_stack(stack);
 
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()

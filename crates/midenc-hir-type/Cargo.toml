@@ -1,7 +1,7 @@
 [package]
 name = "midenc-hir-type"
 description = "Type system and utilities for Miden HIR"
-version = "0.10.0"
+version.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -16,18 +16,22 @@ exclude.workspace = true
 
 [features]
 default = ["serde"]
+arbitrary = ["dep:proptest", "serde"]
 serde = [
-  "dep:serde",
-  "dep:serde_repr",
   "dep:miden-serde-utils",
   "smallvec/serde",
 ]
 std = ["miden-serde-utils/std"]
 
 [dependencies]
+proptest = { workspace = true, optional = true }
 miden-formatting.workspace = true
 miden-serde-utils = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["drain_filter"] }
-serde = { workspace = true, optional = true }
-serde_repr = { workspace = true, optional = true }
 thiserror.workspace = true
+
+[dev-dependencies]
+miden-test-serialization-macros.workspace = true
+# std enables proptest's contextualize_config, so PROPTEST_CASES can scale the
+# pinned case counts for one-off high-confidence verification runs.
+proptest = { workspace = true, features = ["std"] }

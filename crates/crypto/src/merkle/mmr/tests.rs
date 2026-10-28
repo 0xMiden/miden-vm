@@ -3,13 +3,15 @@ use alloc::vec::Vec;
 use assert_matches::assert_matches;
 
 use super::{
-    super::{InnerNodeInfo, Poseidon2, Word},
-    Mmr, MmrError, MmrPeaks, PartialMmr, nodes_from_mask,
+    super::{Eidos, InnerNodeInfo, Word},
+    Mmr, MmrError, MmrPeaks, PartialMmr,
+    full::NodeStore,
+    nodes_from_mask,
 };
 use crate::{
-    Felt,
+    hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
     merkle::{
-        MerklePath, MerkleTree, NodeIndex, int_to_node,
+        MerkleError, MerklePath, MerkleTree, NodeIndex, int_to_node,
         mmr::{
             InOrderIndex, MmrPath, MmrProof,
             forest::{Forest, TreeSizeIterator, high_bitmask},
@@ -175,17 +177,6 @@ fn test_forest_new_limit() {
     assert!(Forest::new(Forest::MAX_LEAVES + 1).is_err());
 }
 
-#[cfg(feature = "serde")]
-#[test]
-fn test_forest_serde_rejects_large_value() {
-    use serde::{Deserialize, de::value::UsizeDeserializer};
-
-    let result = Forest::deserialize(UsizeDeserializer::<serde::de::value::Error>::new(
-        Forest::MAX_LEAVES + 1,
-    ));
-    assert!(result.is_err());
-}
-
 #[test]
 fn test_forest_with_single_leaf_limit() {
     let forest = Forest::new(Forest::MAX_LEAVES).unwrap();
@@ -221,7 +212,7 @@ fn test_forest_without_trees_does_not_add_bits() {
 fn test_mmr_add_limit_prevents_mutation() {
     let mut mmr = Mmr {
         forest: Forest::new(Forest::MAX_LEAVES).unwrap(),
-        nodes: Vec::new(),
+        nodes: NodeStore::new(),
     };
     let result = mmr.add(Word::empty());
     assert_matches!(result, Err(MmrError::ForestSizeExceeded { .. }));
@@ -336,22 +327,22 @@ fn test_forest_to_root_index() {
 
     // When there is a single tree in the forest, the index is equivalent to the number of
     // leaves in that tree, which is `2^n`.
-    assert_eq!(Forest::new(0b0001).unwrap().root_in_order_index(), idx(1));
-    assert_eq!(Forest::new(0b0010).unwrap().root_in_order_index(), idx(2));
-    assert_eq!(Forest::new(0b0100).unwrap().root_in_order_index(), idx(4));
-    assert_eq!(Forest::new(0b1000).unwrap().root_in_order_index(), idx(8));
+    assert_eq!(Forest::new(0b0001).unwrap().root_in_order_index_unchecked(), idx(1));
+    assert_eq!(Forest::new(0b0010).unwrap().root_in_order_index_unchecked(), idx(2));
+    assert_eq!(Forest::new(0b0100).unwrap().root_in_order_index_unchecked(), idx(4));
+    assert_eq!(Forest::new(0b1000).unwrap().root_in_order_index_unchecked(), idx(8));
 
-    assert_eq!(Forest::new(0b0011).unwrap().root_in_order_index(), idx(5));
-    assert_eq!(Forest::new(0b0101).unwrap().root_in_order_index(), idx(9));
-    assert_eq!(Forest::new(0b1001).unwrap().root_in_order_index(), idx(17));
-    assert_eq!(Forest::new(0b0111).unwrap().root_in_order_index(), idx(13));
-    assert_eq!(Forest::new(0b1011).unwrap().root_in_order_index(), idx(21));
-    assert_eq!(Forest::new(0b1111).unwrap().root_in_order_index(), idx(29));
+    assert_eq!(Forest::new(0b0011).unwrap().root_in_order_index_unchecked(), idx(5));
+    assert_eq!(Forest::new(0b0101).unwrap().root_in_order_index_unchecked(), idx(9));
+    assert_eq!(Forest::new(0b1001).unwrap().root_in_order_index_unchecked(), idx(17));
+    assert_eq!(Forest::new(0b0111).unwrap().root_in_order_index_unchecked(), idx(13));
+    assert_eq!(Forest::new(0b1011).unwrap().root_in_order_index_unchecked(), idx(21));
+    assert_eq!(Forest::new(0b1111).unwrap().root_in_order_index_unchecked(), idx(29));
 
-    assert_eq!(Forest::new(0b0110).unwrap().root_in_order_index(), idx(10));
-    assert_eq!(Forest::new(0b1010).unwrap().root_in_order_index(), idx(18));
-    assert_eq!(Forest::new(0b1100).unwrap().root_in_order_index(), idx(20));
-    assert_eq!(Forest::new(0b1110).unwrap().root_in_order_index(), idx(26));
+    assert_eq!(Forest::new(0b0110).unwrap().root_in_order_index_unchecked(), idx(10));
+    assert_eq!(Forest::new(0b1010).unwrap().root_in_order_index_unchecked(), idx(18));
+    assert_eq!(Forest::new(0b1100).unwrap().root_in_order_index_unchecked(), idx(20));
+    assert_eq!(Forest::new(0b1110).unwrap().root_in_order_index_unchecked(), idx(26));
 }
 
 #[test]
@@ -362,26 +353,26 @@ fn test_forest_to_rightmost_index() {
 
     for forest in 1..256 {
         assert!(
-            Forest::new(forest).unwrap().rightmost_in_order_index().inner() % 2 == 1,
+            Forest::new(forest).unwrap().rightmost_in_order_index_unchecked().inner() % 2 == 1,
             "Leaves are always odd"
         );
     }
 
-    assert_eq!(Forest::new(0b0001).unwrap().rightmost_in_order_index(), idx(1));
-    assert_eq!(Forest::new(0b0010).unwrap().rightmost_in_order_index(), idx(3));
-    assert_eq!(Forest::new(0b0011).unwrap().rightmost_in_order_index(), idx(5));
-    assert_eq!(Forest::new(0b0100).unwrap().rightmost_in_order_index(), idx(7));
-    assert_eq!(Forest::new(0b0101).unwrap().rightmost_in_order_index(), idx(9));
-    assert_eq!(Forest::new(0b0110).unwrap().rightmost_in_order_index(), idx(11));
-    assert_eq!(Forest::new(0b0111).unwrap().rightmost_in_order_index(), idx(13));
-    assert_eq!(Forest::new(0b1000).unwrap().rightmost_in_order_index(), idx(15));
-    assert_eq!(Forest::new(0b1001).unwrap().rightmost_in_order_index(), idx(17));
-    assert_eq!(Forest::new(0b1010).unwrap().rightmost_in_order_index(), idx(19));
-    assert_eq!(Forest::new(0b1011).unwrap().rightmost_in_order_index(), idx(21));
-    assert_eq!(Forest::new(0b1100).unwrap().rightmost_in_order_index(), idx(23));
-    assert_eq!(Forest::new(0b1101).unwrap().rightmost_in_order_index(), idx(25));
-    assert_eq!(Forest::new(0b1110).unwrap().rightmost_in_order_index(), idx(27));
-    assert_eq!(Forest::new(0b1111).unwrap().rightmost_in_order_index(), idx(29));
+    assert_eq!(Forest::new(0b0001).unwrap().rightmost_in_order_index_unchecked(), idx(1));
+    assert_eq!(Forest::new(0b0010).unwrap().rightmost_in_order_index_unchecked(), idx(3));
+    assert_eq!(Forest::new(0b0011).unwrap().rightmost_in_order_index_unchecked(), idx(5));
+    assert_eq!(Forest::new(0b0100).unwrap().rightmost_in_order_index_unchecked(), idx(7));
+    assert_eq!(Forest::new(0b0101).unwrap().rightmost_in_order_index_unchecked(), idx(9));
+    assert_eq!(Forest::new(0b0110).unwrap().rightmost_in_order_index_unchecked(), idx(11));
+    assert_eq!(Forest::new(0b0111).unwrap().rightmost_in_order_index_unchecked(), idx(13));
+    assert_eq!(Forest::new(0b1000).unwrap().rightmost_in_order_index_unchecked(), idx(15));
+    assert_eq!(Forest::new(0b1001).unwrap().rightmost_in_order_index_unchecked(), idx(17));
+    assert_eq!(Forest::new(0b1010).unwrap().rightmost_in_order_index_unchecked(), idx(19));
+    assert_eq!(Forest::new(0b1011).unwrap().rightmost_in_order_index_unchecked(), idx(21));
+    assert_eq!(Forest::new(0b1100).unwrap().rightmost_in_order_index_unchecked(), idx(23));
+    assert_eq!(Forest::new(0b1101).unwrap().rightmost_in_order_index_unchecked(), idx(25));
+    assert_eq!(Forest::new(0b1110).unwrap().rightmost_in_order_index_unchecked(), idx(27));
+    assert_eq!(Forest::new(0b1111).unwrap().rightmost_in_order_index_unchecked(), idx(29));
 }
 
 #[test]
@@ -597,7 +588,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[0]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 1);
     assert_eq!(mmr.nodes.len(), 1);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 1);
@@ -606,7 +597,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[1]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 2);
     assert_eq!(mmr.nodes.len(), 3);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 2);
@@ -615,7 +606,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[2]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 3);
     assert_eq!(mmr.nodes.len(), 4);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 3);
@@ -624,7 +615,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[3]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 4);
     assert_eq!(mmr.nodes.len(), 7);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 4);
@@ -633,7 +624,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[4]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 5);
     assert_eq!(mmr.nodes.len(), 8);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 5);
@@ -642,7 +633,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[5]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 6);
     assert_eq!(mmr.nodes.len(), 10);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 6);
@@ -651,7 +642,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[6]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 7);
     assert_eq!(mmr.nodes.len(), 11);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 7);
@@ -1053,10 +1044,10 @@ fn test_mmr_inner_nodes() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
     let nodes: Vec<InnerNodeInfo> = mmr.inner_nodes().collect();
 
-    let h01 = Poseidon2::merge(&[LEAVES[0], LEAVES[1]]);
-    let h23 = Poseidon2::merge(&[LEAVES[2], LEAVES[3]]);
-    let h0123 = Poseidon2::merge(&[h01, h23]);
-    let h45 = Poseidon2::merge(&[LEAVES[4], LEAVES[5]]);
+    let h01 = Eidos::merge(&[LEAVES[0], LEAVES[1]]);
+    let h23 = Eidos::merge(&[LEAVES[2], LEAVES[3]]);
+    let h0123 = Eidos::merge(&[h01, h23]);
+    let h45 = Eidos::merge(&[LEAVES[4], LEAVES[5]]);
     let postorder = vec![
         InnerNodeInfo {
             value: h01,
@@ -1124,11 +1115,11 @@ fn test_mmr_hash_peaks() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
     let peaks = mmr.peaks();
 
-    let first_peak = Poseidon2::merge(&[
-        Poseidon2::merge(&[LEAVES[0], LEAVES[1]]),
-        Poseidon2::merge(&[LEAVES[2], LEAVES[3]]),
+    let first_peak = Eidos::merge(&[
+        Eidos::merge(&[LEAVES[0], LEAVES[1]]),
+        Eidos::merge(&[LEAVES[2], LEAVES[3]]),
     ]);
-    let second_peak = Poseidon2::merge(&[LEAVES[4], LEAVES[5]]);
+    let second_peak = Eidos::merge(&[LEAVES[4], LEAVES[5]]);
     let third_peak = LEAVES[6];
 
     // minimum length is 16
@@ -1468,11 +1459,7 @@ fn test_mmr_proof_num_peaks_exceeds_current_num_peaks() {
         MmrPath::new(Forest::new(5).unwrap(), 4, original_proof.path().merkle_path().clone());
     let invalid_proof = MmrProof::new(invalid_path, original_proof.leaf());
     let err = mmr.peaks().verify(LEAVES[3], invalid_proof).unwrap_err();
-    assert_matches!(
-        err,
-        MmrError::PeakOutOfBounds { peak_idx, peaks_len }
-            if peak_idx == 1 && peaks_len == mmr.peaks().num_peaks()
-    );
+    assert_matches!(err, MmrError::PositionNotFound(4));
 }
 
 /// Tests that a proof whose peak count exceeds the peak count of the MMR returns an error.
@@ -1493,8 +1480,10 @@ fn test_mmr_old_proof_num_peaks_exceeds_current_num_peaks() {
     let err = mmr.peaks().verify(LEAVES[leaf_idx], proof).unwrap_err();
     assert_matches!(
         err,
-        MmrError::PeakOutOfBounds { peak_idx, peaks_len }
-            if peak_idx == 1 && peaks_len == mmr.peaks().num_peaks()
+        MmrError::InvalidMerklePath(MerkleError::InvalidNodeIndexDepth {
+            expected: 2,
+            provided: 0
+        })
     );
 }
 
@@ -1532,22 +1521,21 @@ mod property_tests {
 // ================================================================================================
 
 fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
-    let padded_peak_elements = Word::words_as_elements(padded_peaks);
-    let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peak_elements.len());
-    elements.extend_from_slice(&[
-        Felt::new_unchecked(num_leaves),
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-    ]);
-    elements.extend_from_slice(padded_peak_elements);
+    let mut cv = Eidos::init_chaining_word_with_params(
+        MMR_PEAKS,
+        [num_leaves as u32, (num_leaves >> 32) as u32, 0],
+    );
 
-    Poseidon2::hash_elements(&elements)
+    for block in Word::words_as_elements(padded_peaks).chunks_exact(BLOCK_LEN) {
+        cv = Eidos::compress(cv, block.try_into().expect("MMR peaks are block-aligned"));
+    }
+
+    cv
 }
 
-// short hand for the Poseidon2 hash, used to make test code more concise and easy to read
+// Short hand for the Eidos hash, used to make test code more concise and easy to read.
 fn merge(l: Word, r: Word) -> Word {
-    Poseidon2::merge(&[l, r])
+    Eidos::merge(&[l, r])
 }
 
 /// Given a leaf index and the current forest, return the tree number responsible for
@@ -1559,4 +1547,44 @@ fn leaf_to_corresponding_tree(leaf_idx: usize, forest: usize) -> Option<u32> {
 /// Return the total number of nodes of a given forest
 fn nodes_in_forest(forest: usize) -> usize {
     nodes_from_mask(forest)
+}
+
+#[test]
+fn test_peaks_verify_rejects_short_path() {
+    let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
+    let peaks = mmr.peaks();
+
+    // H(leaf0, leaf1) claimed as the value of leaf 0 with a one-node path.
+    let inner = Eidos::merge(&[LEAVES[0], LEAVES[1]]);
+    let sibling = Eidos::merge(&[LEAVES[2], LEAVES[3]]);
+    let proof = MmrProof::new(MmrPath::new(mmr.forest(), 0, MerklePath::new(vec![sibling])), inner);
+    assert!(peaks.verify(inner, proof).is_err());
+}
+
+#[test]
+fn test_peaks_verify_rejects_proof_for_other_forest() {
+    // Leaves 4 and 5 are subtree hashes, so peak 1 = H(H(a, b), H(c, d)) is also the root of a
+    // depth-2 tree over a, b, c, d.
+    let [a, b, c, d] = [10, 11, 12, 13].map(int_to_node);
+    let mut leaves = LEAVES;
+    leaves[4] = Eidos::merge(&[a, b]);
+    leaves[5] = Eidos::merge(&[c, d]);
+    let mmr = Mmr::try_from_iter(leaves.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
+    let peaks = mmr.peaks();
+
+    // In a forest of 3 leaves, position 2 is in peak 1 at relative position 0. The path has depth
+    // 2, which matches the height of the tree holding position 2 in forest 7.
+    let path = MerklePath::new(vec![b, leaves[5]]);
+    assert!(path.verify(0, a, &peaks.peaks()[1]).is_ok());
+
+    let proof = MmrProof::new(MmrPath::new(Forest::new(3).unwrap(), 2, path), a);
+    assert_matches!(peaks.verify(a, proof), Err(MmrError::InvalidMerklePath(_)));
+}
+
+#[test]
+fn test_peaks_verify_out_of_range_position() {
+    let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+    let peaks = mmr.peaks();
+    let proof = MmrProof::new(MmrPath::new(mmr.forest(), 100, MerklePath::default()), LEAVES[0]);
+    assert_matches!(peaks.verify(LEAVES[0], proof), Err(MmrError::PositionNotFound(100)));
 }

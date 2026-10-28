@@ -1,0 +1,22 @@
+---
+source: crates/assembly/src/tests/comments.rs
+expression: program
+---
+begin
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        push(3552896704587349321)
+        push(3637637378289913370)
+        push(5749965354529271724)
+        push(8603627480471668713)
+        noop
+        noop
+        push(17843484659000820118)
+        emit
+        drop
+        assert(0)
+    end
+end

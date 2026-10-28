@@ -8,7 +8,13 @@ on:
     branches:
       - main
       - next
+      - release/v*
+      - release-v*
   workflow_call:
+    outputs:
+      packages:
+        description: "JSON array of checked packages that need publication."
+        value: ${{ jobs.package-versions.outputs.packages }}
     inputs:
       ref:
         description: "Git ref or SHA to check. Empty checks the caller ref."
@@ -20,6 +26,16 @@ on:
         required: false
         default: ""
         type: string
+      allow_existing:
+        description: "Allow crate versions that already exist on crates.io."
+        required: false
+        default: true
+        type: boolean
+      skip_checks:
+        description: "Generate a publication plan without version, archive or semver validation for manual recovery. Requires explicit packages."
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       packages:
@@ -27,15 +43,24 @@ on:
         required: false
         default: ""
         type: string
+      allow_existing:
+        description: "Allow crate versions that already exist on crates.io."
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
-  group: "${{ github.workflow }} @ ${{ github.event_name }} @ ${{ inputs.ref || github.ref }} @ ${{ inputs.packages || '' }}"
+  # Isolate manual runs without putting their full package selections in the key.
+  # Push checks still cancel an older check for the same ref.
+  group: "${{ github.workflow }} @ ${{ github.event_name }} @ ${{ inputs.ref || github.ref }} @ ${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}"
   cancel-in-progress: true
 
 jobs:
   package-versions:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: warp-ubuntu-latest-x64-8x
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
     env:
       RUSTC_BOOTSTRAP: "1"
     steps:
@@ -49,9 +74,19 @@ jobs:
         run: rustup toolchain install --no-self-update
 
       - name: Install cargo-semver-checks
-        run: cargo install cargo-semver-checks --version 0.49.0 --locked
+        if: ${{ !inputs.skip_checks }}
+        # Rust 1.99 emits rustdoc JSON v61, supported by cargo-semver-checks 0.51.
+        run: cargo install cargo-semver-checks --version 0.51.0 --locked
 
       - name: Check package versions
-        run: scripts/check-package-release-plan.sh "$PACKAGE_VERSION_GATE_PACKAGES"
+        id: plan
+        run: |
+          args=("--allow-existing=$PACKAGE_VERSION_GATE_ALLOW_EXISTING")
+          if [[ "$PACKAGE_VERSION_GATE_SKIP_CHECKS" == true ]]; then
+            args+=(--skip-checks)
+          fi
+          bash scripts/check-package-release-plan.sh "${args[@]}" "$PACKAGE_VERSION_GATE_PACKAGES"
         env:
           PACKAGE_VERSION_GATE_PACKAGES: ${{ inputs.packages || '' }}
+          PACKAGE_VERSION_GATE_ALLOW_EXISTING: ${{ github.event_name == 'push' || inputs.allow_existing }}
+          PACKAGE_VERSION_GATE_SKIP_CHECKS: ${{ inputs.skip_checks || false }}

@@ -1,15 +1,16 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, Stopper, Word,
-    continuation_stack::{Continuation, ContinuationStack},
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::PackageSourceDebugContext,
     host::default::NoopHost,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
     operation::OperationError,
+    option_map_break_reason,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -49,11 +50,19 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub stopper: &'a S,
     pub source_debug_info: Option<Arc<PackageDebugInfo>>,
     pub current_source_node_id: Option<DebugSourceNodeId>,
+    pub inline_call_contexts: &'a mut Vec<Option<SourceInlineCallContext>>,
 }
 
 impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     pub fn current_source_node_id(&self) -> Option<DebugSourceNodeId> {
         self.current_source_node_id
+    }
+
+    pub fn current_inline_call_context(&self) -> Option<SourceInlineCallContext> {
+        SourceInlineCallContext::for_source_boundary(
+            self.source_debug_info.clone()?,
+            self.current_source_node_id,
+        )
     }
 
     pub fn child_source_node_id(
@@ -106,9 +115,9 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::FastProcessor::execute_trace_inputs`]
-/// execution mode needs to build a [`crate::TraceGenerationContext`] which records information
-/// necessary to build the trace at each clock cycle, while the
+/// the program is executed. For example, the [`crate::FastProcessor::execute_for_proving`]
+/// execution mode needs to build a private trace replay which records information necessary to
+/// build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
 /// essentially by recording the processor state at each clock cycle. For this purpose, the
 /// [`Self::execute_impl`] method takes in [`Tracer`] argument that abstracts away the "information
@@ -151,7 +160,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
-///    
+///
 ///             // As per `InternalBreakReason::Emit` documentation, we call `finish_emit_op_execution`
 ///             // to complete the execution of the Emit operation.
 ///             finish_emit_op_execution(...);
@@ -159,7 +168,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::LoadMastForestFromDyn { callee_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
-///    
+///
 ///             // As per `InternalBreakReason::LoadMastForestFromDyn` documentation, we call
 ///             // `finish_load_mast_forest_from_dyn_start` to complete the execution of the operation.
 ///             finish_load_mast_forest_from_dyn_start(...);
@@ -167,7 +176,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::LoadMastForestFromExternal { external_node_id, procedure_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
-///    
+///
 ///             // As per `InternalBreakReason::LoadMastForestFromExternal` documentation, we call
 ///             // `finish_load_mast_forest_from_external_start` to complete the execution of the operation.
 ///             finish_load_mast_forest_from_external_start(...);
@@ -184,6 +193,7 @@ pub(crate) fn execute_impl<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -200,6 +210,7 @@ where
         tracer,
         stopper,
         source_debug_info,
+        inline_call_contexts,
     )
 }
 
@@ -212,6 +223,7 @@ pub(crate) fn execute_impl_noop_host<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -228,6 +240,7 @@ where
         tracer,
         stopper,
         source_debug_info,
+        inline_call_contexts,
     )
 }
 
@@ -240,6 +253,7 @@ fn execute_impl_inner<P, H, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -268,6 +282,7 @@ where
             tracer,
             stopper,
             source_debug_info,
+            inline_call_contexts,
         )
     }
 }
@@ -282,6 +297,7 @@ fn execute_impl_with_source<P, H, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -299,6 +315,7 @@ where
         stopper,
         source_debug_info: source_debug_info.clone(),
         current_source_node_id: None,
+        inline_call_contexts,
     };
 
     while let Some((continuation, source_node_id)) =
@@ -307,7 +324,11 @@ where
         state.current_source_node_id = source_node_id;
         match continuation {
             Continuation::StartNode(node_id) => {
-                let node = current_forest.get_node_by_id(node_id).unwrap();
+                let node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id),
+                    "node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 match node {
                     MastNode::Block(basic_block_node) => {
@@ -364,8 +385,11 @@ where
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_op_idx(
                     &mut state,
@@ -377,8 +401,11 @@ where
                 )?
             },
             Continuation::Respan { node_id, batch_index } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_batch(
                     &mut state,
@@ -392,11 +419,16 @@ where
                 basic_block::finish_basic_block(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::EnterForest { forest, package_debug_info } => {
+            Continuation::EnterForest {
+                forest,
+                package_debug_info,
+                inline_context_depth,
+            } => {
                 // Restore the previous forest
                 *current_forest = forest;
                 state.source_debug_info = package_debug_info.clone();
                 *source_debug_info = package_debug_info;
+                state.inline_call_contexts.truncate(inline_context_depth);
             },
         }
     }
@@ -422,6 +454,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    let mut inline_call_contexts = Vec::new();
     let mut state = ExecutionState {
         processor,
         continuation_stack,
@@ -431,12 +464,17 @@ where
         stopper,
         source_debug_info: None,
         current_source_node_id: None,
+        inline_call_contexts: &mut inline_call_contexts,
     };
 
     while let Some(continuation) = state.continuation_stack.pop_continuation() {
         match continuation {
             Continuation::StartNode(node_id) => {
-                let node = current_forest.get_node_by_id(node_id).unwrap();
+                let node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id),
+                    "node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 match node {
                     MastNode::Block(basic_block_node) => {
@@ -498,8 +536,11 @@ where
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_op_idx(
                     &mut state,
@@ -511,8 +552,11 @@ where
                 )?
             },
             Continuation::Respan { node_id, batch_index } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_batch(
                     &mut state,

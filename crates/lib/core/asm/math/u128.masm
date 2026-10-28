@@ -1,3 +1,7 @@
+
+#! Low 96 bits of a shifted integer, in least-significant-limb-first stack order.
+type Shifted96 = struct { lo: u32, mid: u32, hi: u32 }
+
 const U32_MAX = 0xFFFFFFFF
 
 # ===== ADDITION ==================================================================================
@@ -1177,7 +1181,7 @@ end
 #! Output: [c0, c1, c2, c3, ...]
 #! For i in {0, 1, 2}: c_i = a_i / 2^m + (a_{i+1} mod 2^m) * 2^(32-m)
 #! c_3 = a_3 / 2^m
-proc shr_k0
+proc shr_k0(m: u8, a: u128) -> u128
     # compute 2^(32-m) for left shift operations
     push.32 dup.1 u32wrapping_sub pow2
     # stack: [2^(32-m), m, a0, a1, a2, a3, ...]
@@ -1220,12 +1224,12 @@ end
 
 #! Helper for shr with k=1 (shift by 32+m bits)
 #! Input: [m, a0, a1, a2, a3, ...]
-#! Output: [c0, c1, c2, c3, ...] where c = a >> (32+m)
+#! Output: [c0, c1, c2, ...] where c = a >> (32+m)
 #! c0 = (a1 >> m) | (a2 << (32-m))
 #! c1 = (a2 >> m) | (a3 << (32-m))
 #! c2 = a3 >> m
-#! c3 = 0
-proc shr_k1
+#! The caller supplies the trailing zero limb.
+proc shr_k1(m: u8, a: u128) -> Shifted96
     # handle m=0 case (shift by exactly 32)
     dup eq.0
     if.true
@@ -1265,11 +1269,11 @@ end
 
 #! Helper for shr with k=2 (shift by 64+m bits)
 #! Input: [m, a0, a1, a2, a3, ...]
-#! Output: [c0, c1, c2, c3, ...] where c = a >> (64+m)
+#! Output: [c0, c1, ...] where c = a >> (64+m)
 #! c0 = (a2 >> m) | (a3 << (32-m))
 #! c1 = a3 >> m
-#! c2 = 0, c3 = 0
-proc shr_k2
+#! The caller supplies the two trailing zero limbs.
+proc shr_k2(m: u8, a: u128) -> u64
     # handle m=0 case (shift by exactly 64)
     dup eq.0
     if.true
@@ -1300,10 +1304,10 @@ end
 
 #! Helper for shr with k=3 (shift by 96+m bits)
 #! Input: [m, a0, a1, a2, a3, ...]
-#! Output: [c0, c1, c2, c3, ...] where c = a >> (96+m)
+#! Output: [c0, ...] where c = a >> (96+m)
 #! c0 = a3 >> m
-#! c1 = 0, c2 = 0, c3 = 0
-proc shr_k3
+#! The caller supplies the three trailing zero limbs.
+proc shr_k3(m: u8, a: u128) -> u32
     # c0 = a3 >> m
     movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
     # clean up: drop a0, a1, a2

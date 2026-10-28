@@ -11,6 +11,13 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
 
 jobs:
   cargo-deny:
@@ -48,7 +55,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-binstall
       - name: Install workspace inheritance checker
@@ -84,8 +91,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Rustfmt
         run: |
-          rustup update --no-self-update nightly
-          rustup +nightly component add rustfmt
+          make install-rustfmt
           make format-check
 
   doc:

@@ -70,8 +70,7 @@ pub struct BlockInfo {
 // EXECUTION CONTEXT INFO
 // ================================================================================================
 
-/// Contains information about an execution context. Execution contexts are relevant only for CALL
-/// and SYSCALL blocks.
+/// Saved caller state carried by CALL, DYNCALL, and SYSCALL block-stack entries.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ExecutionContextInfo {
     /// Context ID of the block's parent.
@@ -79,9 +78,10 @@ pub struct ExecutionContextInfo {
     /// Hash of the function which initiated execution of the block's parent. If the parent is a
     /// root context, this will be set to [ZERO; 4].
     pub parent_fn_hash: Word,
-    /// Depth of the operand stack right before a CALL operation is executed.
+    /// Operand-stack depth to restore in the caller. DYNCALL records the depth after consuming its
+    /// address operand; CALL and SYSCALL record the current depth directly.
     pub parent_stack_depth: u32,
-    /// Address of the top row in the overflow table right before a CALL operations is executed.
+    /// Address of the caller's top overflow row at the same restoration point.
     pub parent_next_overflow_addr: Felt,
 }
 

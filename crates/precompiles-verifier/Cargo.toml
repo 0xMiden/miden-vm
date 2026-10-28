@@ -1,0 +1,59 @@
+[package]
+name = "miden-precompiles-verifier"
+version.workspace = true
+description = "Verifier for Miden VM precompile proofs"
+documentation = "https://docs.rs/miden-precompiles-verifier"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "verifier", "zkp"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+concurrent = [
+    "std",
+    "miden-air/concurrent",
+]
+constants-tools = [
+    "std",
+    "dep:miden-air-definitions",
+    "miden-ace-codegen/compiler",
+    "miden-air-definitions/compiler",
+]
+std = [
+    "dep:miden-ace-codegen",
+    "miden-core/std",
+    "miden-crypto/std",
+    "miden-air/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-ace-codegen = { workspace = true, optional = true }
+miden-air-definitions = { workspace = true, optional = true }
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-lifted-air.workspace = true
+miden-lifted-stark.workspace = true
+miden-air.workspace = true
+miden-serde-utils.workspace = true
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+wincode.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+miden-air = { workspace = true, features = ["std", "compiler"] }
+miden-air-definitions = { workspace = true, features = ["compiler"] }
+miden-ace-codegen = { workspace = true, features = ["testing"] }
+
+[[bin]]
+name = "pvm-constants-regen"
+path = "src/bin/pvm_constants_regen.rs"
+required-features = ["constants-tools"]

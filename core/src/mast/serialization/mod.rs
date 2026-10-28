@@ -82,7 +82,8 @@
 //! - [`crate::mast::SparseMastForest::read_from_bytes`]: separate trusted sparse replay payloads
 //!   for serialized trace-generation inputs. Sparse payloads preserve the sparse node and digest
 //!   maps produced by tracing; they do not share the dense `MastForest` wire format and are not an
-//!   untrusted validation boundary.
+//!   untrusted validation boundary. They are version-local and must not be persisted across
+//!   releases.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
@@ -90,7 +91,7 @@
 #[cfg(test)]
 use alloc::string::ToString;
 use alloc::{boxed::Box, format, vec::Vec};
-use core::mem::size_of;
+use core::{mem::size_of, panic::Location};
 
 use miden_utils_sync::OnceLockCompat;
 
@@ -200,20 +201,21 @@ const FLAGS_RESERVED_MASK: u8 = 0xfd;
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). Trusted deserialization rejects HASHLESS. Split
 ///   fixed-width node entries from digest storage. External digests moved to a dedicated section.
 ///   Hashless serialization omits the general node-hash section entirely. Removed the unused
-///   metadata-count field from the wire header. Before any public release on this branch, the same
-///   unreleased wire version also grew explicit internal/external node counts in the header.
+///   metadata-count field from the wire header and added explicit internal/external node counts.
 /// - [0, 0, 4]: Removed the legacy inline metadata wire slots entirely. All assembly op metadata
 ///   and debug variable metadata are now stored in the DebugInfo section as separate indexed
-///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
-///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
+///   records. MAST nodes are metadata-free identifiers. Reserved bit 0 and removed the forest-level
 ///   debug-presence flag.
+/// - [0, 0, 5]: Replaced opcode 0x50's HPERM semantics with COMPRESS. Rejecting version 4 prevents
+///   an old serialized node from retaining its stored digest while being executed with the new
+///   operation semantics on load paths that do not recompute node digests.
 ///
 /// Legacy wire versions (pre-#3192 decorator terminology):
 ///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
 ///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
 ///   [0,0,3] removed the unused decorator-count wire field.
 ///   [0,0,4] eliminated the decorator wire slots entirely.
-const VERSION: [u8; 3] = [0, 0, 4];
+const VERSION: [u8; 3] = [0, 0, 5];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -323,6 +325,8 @@ pub enum MastForestReadView<'a> {
 /// structural sections needed for random access, but it does not fully materialize the forest.
 /// Hashless payloads are rejected because trusted cache bytes must be complete. Trailing payloads
 /// are rejected because debug metadata now belongs to package-owned debug sections.
+/// Internal digest limbs are decoded on access, so an in-range node may still produce a decoding
+/// error. External digests are decoded during construction to validate their ordering.
 ///
 /// Use this when callers need random access to roots or node metadata without deserializing the
 /// full forest. For strict trusted deserialization, use
@@ -364,7 +368,8 @@ impl<'a> MastForestWireView<'a> {
     /// delegated to the same single-pass scanner used by reader-based deserialization paths.
     ///
     /// This constructor validates the header and sections needed for node/roots/random-access
-    /// metadata, indexes `AdviceMap` keys for on-demand lookup, and rejects trailing payloads.
+    /// metadata, checks dense node ordering and backward child references, indexes `AdviceMap` keys
+    /// for on-demand lookup, and rejects trailing payloads.
     ///
     /// Treat this as a trusted cache API, not as an untrusted-validation entry point. It is
     /// appropriate for local tools that need random access over serialized structure, but callers
@@ -373,7 +378,6 @@ impl<'a> MastForestWireView<'a> {
     /// In particular, this constructor does **not** protect callers from untrusted-input concerns
     /// that are enforced by [`crate::mast::UntrustedMastForest::validate`]. It does not:
     /// - verify that serialized non-external digests match the structure they describe
-    /// - check topological ordering / forward-reference constraints
     /// - validate basic-block batch invariants
     /// - materialize or expose package-owned debug sections
     ///
@@ -381,8 +385,11 @@ impl<'a> MastForestWireView<'a> {
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
     /// Digest lookup follows the wire layout:
-    /// - Non-external node digests are read from the internal-hash section.
-    /// - External node digests are read from the external-digest section.
+    /// - Non-external node digests are read from the internal-hash section on demand. Invalid field
+    ///   limbs produce an error from `node_digest_at` and `node_info_at`, even for in-range
+    ///   indices.
+    /// - External node digests are read from the external-digest section and decoded during
+    ///   construction to check their ordering.
     ///
     /// # Examples
     ///
@@ -439,7 +446,7 @@ impl<'a> MastForestWireView<'a> {
 
     /// Returns the `MastNodeInfo` at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the node's digest cannot be decoded.
     ///
     /// # Examples
     ///
@@ -477,7 +484,8 @@ impl<'a> MastForestWireView<'a> {
 
     /// Returns the digest for the node at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the digest cannot be decoded.
+    /// Non-external digest limbs are validated on access.
     pub fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
     }
@@ -778,27 +786,32 @@ impl super::UntrustedMastForest {
     }
 }
 
-pub(super) fn read_untrusted_with_flags<R: ByteReader>(
+pub(super) fn read_untrusted_with_flags_and_caller<R: ByteReader>(
     source: &mut R,
+    caller: &'static Location<'static>,
 ) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
     let (flags, forest) = decode_from_reader(source, true)?;
-    log_untrusted_overspecification(flags);
+    log_untrusted_overspecification(flags, caller);
     Ok((forest, flags.bits()))
 }
 
-pub(super) fn read_untrusted_with_flags_and_allocation_budget<R: ByteReader>(
+pub(super) fn read_untrusted_with_flags_allocation_budget_and_caller<R: ByteReader>(
     source: &mut R,
     allocation_budget: usize,
+    caller: &'static Location<'static>,
 ) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
     let (flags, forest) = decode_from_reader_inner(source, true, Some(allocation_budget))?;
-    log_untrusted_overspecification(flags);
+    log_untrusted_overspecification(flags, caller);
     Ok((forest, flags.bits()))
 }
 
-fn log_untrusted_overspecification(flags: WireFlags) {
+fn log_untrusted_overspecification(flags: WireFlags, caller: &'static Location<'static>) {
     if !flags.is_hashless() {
-        log::error!(
-            "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes, and validation will recompute them and require them to match"
+        log::warn!(
+            "UntrustedMastForest expected HASHLESS input at {}:{}:{}; supplied artifact includes wire node hashes, and validation will recompute them and require them to match",
+            caller.file(),
+            caller.line(),
+            caller.column(),
         );
     }
 }
@@ -866,8 +879,9 @@ impl Deserializable for super::UntrustedMastForest {
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_untrusted_with_flags(source).map(|(forest, _flags)| forest)
+        super::UntrustedMastForest::read_from_reader(source)
     }
 
     /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
@@ -878,6 +892,7 @@ impl Deserializable for super::UntrustedMastForest {
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         super::UntrustedMastForest::read_from_bytes(bytes)
     }

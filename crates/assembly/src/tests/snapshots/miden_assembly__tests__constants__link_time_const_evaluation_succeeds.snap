@@ -1,0 +1,21 @@
+---
+source: crates/assembly/src/tests/constants.rs
+expression: program
+---
+begin
+    join
+        join
+            basic_block
+                push(2147483648)
+                push(4294967294)
+                mstore
+                drop
+                pad
+                incr
+                noop
+            end
+            external.0x5e32b0bada16504f63d32dff1f7ece008c78b3c516486068ca1366b6cd9f9648
+        end
+        basic_block add add end
+    end
+end

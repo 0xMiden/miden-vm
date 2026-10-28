@@ -91,6 +91,7 @@ impl fmt::Display for BinErrorKind {
 // PARSING ERROR
 // ================================================================================================
 
+#[non_exhaustive]
 #[derive(Debug, Default, thiserror::Error, Diagnostic)]
 #[repr(u8)]
 pub enum ParsingError {
@@ -169,6 +170,27 @@ pub enum ParsingError {
     CodeBlockTooBig {
         #[label]
         span: SourceSpan,
+    },
+    #[error("control-flow nesting depth exceeded")]
+    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    ControlFlowNestingDepthExceeded {
+        #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
+    #[error("constant expression nesting depth exceeded")]
+    #[diagnostic(help("constant expression nesting exceeded the maximum depth of {max_depth}"))]
+    ConstantExpressionNestingDepthExceeded {
+        #[label("constant expression nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
+    #[error("type expression nesting depth exceeded")]
+    #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
+    TypeExpressionNestingDepthExceeded {
+        #[label("type expression nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
     },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
@@ -308,9 +330,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help(
-        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
-    ))]
+    #[diagnostic(help("expected one of: '@packed', '@packed(N)', '@transparent', or '@align(N)'"))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,
@@ -393,6 +413,26 @@ pub enum ParsingError {
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error("conflicting attributes for procedure definition")]
+    #[diagnostic()]
+    CallConvAttributeConflict {
+        #[label(
+            "conflict occurs because @callconv conflicts with convention implied by other attribute"
+        )]
+        cc_span: SourceSpan,
+        #[label("this attribute implies @callconv(\"component-model\")")]
+        attr_span: SourceSpan,
+    },
+    #[error("conflicting attributes for procedure definition")]
+    #[diagnostic()]
+    ConflictingProtocolAbiAttribute {
+        #[label(
+            "this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified"
+        )]
+        span: SourceSpan,
+        #[label("this attribute already specifies the protocol ABI for this procedure")]
+        prev: SourceSpan,
     },
 }
 

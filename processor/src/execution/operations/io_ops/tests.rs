@@ -24,7 +24,7 @@ fn test_op_advpop() {
     // popping from the advice stack should push the value onto the operand stack
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_element(Felt::new_unchecked(3));
-    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
+    let advice_inputs = AdviceInputs::default().with_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");
@@ -57,7 +57,7 @@ fn test_op_advpopw() {
         ]
         .into(),
     );
-    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
+    let advice_inputs = AdviceInputs::default().with_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");
@@ -416,7 +416,7 @@ fn test_op_pipe() {
     .into();
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_dword([advice_word1, advice_word2]);
-    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
+    let advice_inputs = AdviceInputs::default().with_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");

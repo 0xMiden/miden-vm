@@ -3,6 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
+use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
@@ -79,6 +80,11 @@ pub enum ExecutionError {
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
+    /// This means the modelled peak prover memory for the trace exceeds the configured budget.
+    #[error(
+        "estimated prover memory of {estimated_bytes} bytes exceeds the budget of {budget_bytes} bytes"
+    )]
+    ProverMemoryExceeded { estimated_bytes: u64, budget_bytes: u64 },
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -329,6 +335,10 @@ pub enum OperationError {
     #[error("FRI operation failed: {0}")]
     FriError(String),
     #[error(
+        "Horner evaluation point at memory address {addr} in context {ctx} must be encoded as [alpha0, alpha1, 0, 0]"
+    )]
+    InvalidHornerEvaluationPointWord { ctx: ContextId, addr: u64 },
+    #[error(
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
     )]
     InvalidMerklePathLength { path_len: usize, depth: Felt },
@@ -340,6 +350,8 @@ pub enum OperationError {
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
     MalformedMastForestInHost { root_digest: Word },
+    #[error("Merkle tree depth must be in the range 1..={MAX_MERKLE_DEPTH}, but was {depth}")]
+    MerkleDepthOutOfRange { depth: Felt },
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
       value = to_hex(inner.value.as_bytes()),
       root = to_hex(inner.root.as_bytes()),

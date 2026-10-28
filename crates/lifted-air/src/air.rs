@@ -83,10 +83,13 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 
     /// Build this AIR's auxiliary trace and aux values.
     ///
-    /// `challenges` contains exactly [`num_randomness`](Self::num_randomness)
-    /// extension-field elements for this AIR. The returned `aux_trace` has width
-    /// [`aux_width`](Self::aux_width) and the same height as `main`; `aux_values` has
-    /// length [`num_aux_values`](Self::num_aux_values).
+    /// `air_inputs` is this AIR's public-input slice; `aux_inputs` contains the
+    /// statement-level inputs. `challenges` contains exactly
+    /// [`num_randomness`](Self::num_randomness) extension-field elements for this AIR. The
+    /// returned `aux_trace` has width [`aux_width`](Self::aux_width) and the same height as
+    /// `main`; `aux_values` has length [`num_aux_values`](Self::num_aux_values). The default
+    /// [`build_aux_trace_with_preprocessed`](Self::build_aux_trace_with_preprocessed)
+    /// delegates to this method.
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<F>,
@@ -94,6 +97,22 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         aux_inputs: &[F],
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>);
+
+    /// Build the auxiliary trace using the cached preprocessed trace when present.
+    ///
+    /// The prover supplies the preprocessed trace cached in its setup bundle:
+    /// `Some` exactly when this AIR declares preprocessed columns. AIRs that
+    /// do not need it can use the default implementation.
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _preprocessed: Option<&RowMajorMatrix<F>>,
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        self.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
 
     /// Return the [`AirLayout`] describing this AIR's dimensions.
     ///
@@ -173,6 +192,41 @@ impl ConstraintDegrees {
     }
 }
 
+/// Symbolic constraint counts, split by constraint kind.
+///
+/// Soundness of the constraint-batching round scales with how many constraints are folded into the
+/// composition polynomial, so a security estimate needs the count alongside
+/// [`ConstraintDegrees`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintCounts {
+    /// Number of base-field constraints.
+    pub base: usize,
+    /// Number of extension-field constraints.
+    pub ext: usize,
+}
+
+impl ConstraintCounts {
+    /// Compute symbolic constraint counts from an AIR.
+    pub fn from_air<F, EF, A>(air: &A) -> Self
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
+        let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
+        air.eval(&mut builder);
+
+        Self {
+            base: builder.base_constraints().len(),
+            ext: builder.extension_constraints().len(),
+        }
+    }
+
+    /// Total number of constraints folded into the composition polynomial.
+    pub fn total(&self) -> usize {
+        self.base + self.ext
+    }
+}
+
 /// Boxed error returned by [`MultiAir::eval_external`].
 pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 
@@ -197,8 +251,9 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 ///
 /// Prover/verifier hot paths assume the structural invariants checked by
 /// [`crate::debug::assert_multi_air_valid`]. In particular, `airs()` must be
-/// non-empty, all AIRs must agree on their public value count, and overridable
-/// helpers such as [`Self::num_air_inputs`] must agree with the raw AIR data.
+/// non-empty and each AIR's dimensions and periodic columns must be well-formed.
+/// Public inputs are stored in instance order, with each AIR's slice sized
+/// by [`BaseAir::num_public_values`].
 pub trait MultiAir<F, EF>
 where
     F: Field,
@@ -210,32 +265,11 @@ where
     /// The AIRs in instance order — the single source of that ordering.
     fn airs(&self) -> &[Self::Air];
 
-    /// Number of public inputs shared by every AIR.
-    ///
-    /// All AIRs read the same `air_inputs`, so they must agree on
-    /// [`num_public_values`](p3_air::BaseAir::num_public_values). The default
-    /// returns that shared count. It assumes the structural contract checked by
-    /// [`crate::debug::assert_multi_air_valid`], including non-empty `airs()`;
-    /// override to return it directly when known statically.
-    /// [`Statement::new`](crate::Statement::new) checks `air_inputs.len()` against it.
-    fn num_air_inputs(&self) -> usize {
-        let airs = self.airs();
-        let n = airs
-            .first()
-            .expect("a MultiAir must carry at least one AIR")
-            .num_public_values();
-        assert!(
-            airs.iter().all(|air| air.num_public_values() == n),
-            "AIRs disagree on num_public_values",
-        );
-        n
-    }
-
     /// Upper bound on the extra statement inputs accepted by
     /// [`Self::eval_external`].
     ///
-    /// These inputs are public/verifier-visible, but are not passed to each AIR
-    /// as `air_inputs` and are unrelated to aux trace columns. They are
+    /// These inputs are public/verifier-visible, but are separate from each AIR's
+    /// `air_inputs` and are unrelated to aux trace columns. They are
     /// available only to the statement-level cross-AIR assertions. Validated by
     /// [`Statement::new`](crate::Statement::new) before any cryptographic work.
     /// Default `0`; implementations that consume `aux_inputs` must override so
@@ -261,7 +295,9 @@ where
     /// # Arguments
     /// - `challenges`: shared extension-field challenge pool; each AIR consumes the prefix of
     ///   length `air.num_randomness()`.
-    /// - `air_inputs`, `aux_inputs`: the inputs from the [`Statement`](crate::Statement).
+    /// - `air_inputs`: public inputs per AIR in instance order, with lengths validated by
+    ///   [`Statement::new`](crate::Statement::new).
+    /// - `aux_inputs`: the extra inputs from the [`Statement`](crate::Statement).
     /// - `aux_values`, `log_trace_heights`: parallel per-AIR slices in instance order.
     ///   `aux_values[i]` and `log_trace_heights[i]` both describe `self.airs()[i]`. The protocol
     ///   derives proof order by stable-sorting instance indices by `(log_trace_height,
@@ -272,7 +308,7 @@ where
     fn eval_external(
         &self,
         challenges: &[EF],
-        air_inputs: &[F],
+        air_inputs: &[Vec<F>],
         aux_inputs: &[F],
         aux_values: &[&[EF]],
         log_trace_heights: &[u8],
@@ -288,8 +324,8 @@ where
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// The default order is `air_inputs.len()`, `air_inputs`,
-    /// `max_aux_inputs()`, `aux_inputs.len()`, then `aux_inputs`. The protocol
+    /// The default order is the total public-input count, public inputs flattened in instance
+    /// order, `max_aux_inputs()`, `aux_inputs.len()`, then `aux_inputs`. The protocol
     /// observes the instance count and `log_trace_heights` separately after this
     /// hook, but passes the heights here so custom bindings can include AIR
     /// metadata that depends on the prover-chosen trace ordering or heights.
@@ -307,19 +343,17 @@ where
     fn observe<C: CanObserve<F>>(
         &self,
         challenger: &mut C,
-        air_inputs: &[F],
+        air_inputs: &[Vec<F>],
         aux_inputs: &[F],
         log_trace_heights: &[u8],
     ) {
-        challenger.observe(F::from_usize(air_inputs.len()));
-        for &v in air_inputs {
-            challenger.observe(v);
+        crate::StatementEncoding {
+            num_public_values: air_inputs.iter().map(Vec::len).sum(),
+            max_aux_inputs: self.max_aux_inputs(),
+            num_aux_inputs: aux_inputs.len(),
+            num_airs: self.airs().len(),
         }
-        challenger.observe(F::from_usize(self.max_aux_inputs()));
-        challenger.observe(F::from_usize(aux_inputs.len()));
-        for &v in aux_inputs {
-            challenger.observe(v);
-        }
+        .observe(challenger, air_inputs.iter().flatten().copied(), aux_inputs);
         let _ = log_trace_heights;
     }
 }

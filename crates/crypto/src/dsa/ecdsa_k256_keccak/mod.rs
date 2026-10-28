@@ -1,7 +1,7 @@
 //! ECDSA (Elliptic Curve Digital Signature Algorithm) signature implementation over secp256k1
 //! curve using Keccak to hash the messages when signing.
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec::Vec};
 use core::fmt;
 
 use k256::{
@@ -20,8 +20,8 @@ use crate::{
     Felt, SequentialCommit, Word,
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_sensitive_array, zeroize::ZeroizeOnDrop,
+        ByteReader, ByteWriter, Deserializable, DeserializationError, HexParseError, Serializable,
+        hex_to_bytes, read_sensitive_array, zeroize::ZeroizeOnDrop,
     },
 };
 
@@ -34,6 +34,8 @@ mod tests;
 const SECRET_KEY_BYTES: usize = 32;
 /// Length of public key in bytes when using compressed format encoding
 pub(crate) const PUBLIC_KEY_BYTES: usize = 33;
+/// Length of public key in bytes when using uncompressed format encoding
+const PUBLIC_KEY_UNCOMPRESSED_BYTES: usize = 65;
 /// Length of signature in bytes using our custom serialization
 const SIGNATURE_BYTES: usize = 65;
 /// Length of signature in bytes using standard serialization i.e., `SEC1`
@@ -233,7 +235,7 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    /// Returns a commitment to the public key using the Poseidon2 hash function.
+    /// Returns a commitment to the public key using the Eidos hash function.
     ///
     /// Public key serialization remains compressed SEC1. The commitment preimage is not the
     /// compressed SEC1 encoding; it is `qx || qy`, where each secp256k1 affine coordinate is
@@ -267,6 +269,24 @@ impl PublicKey {
     /// message.
     pub fn recover_from(message: Word, signature: &Signature) -> Result<Self, PublicKeyError> {
         let message_digest = hash_message(message);
+        Self::recover_from_prehash(message_digest, signature)
+    }
+
+    /// Recovers the public key associated with a signature over a pre-hashed message.
+    ///
+    /// # Security
+    ///
+    /// `message_digest` must be produced by a cryptographically secure hash of the intended
+    /// message. If an attacker can choose it as arbitrary algebraic data, they can construct a
+    /// signature that recovers a target public key without knowing the corresponding secret key.
+    ///
+    /// Recovery returns a key consistent with the supplied digest and signature; it does not by
+    /// itself authenticate an identity. Before authorizing an action, callers must compare the
+    /// recovered key with an expected key from trusted state.
+    pub fn recover_from_prehash(
+        message_digest: [u8; 32],
+        signature: &Signature,
+    ) -> Result<Self, PublicKeyError> {
         let signature_data = ecdsa::Signature::from_scalars(*signature.r(), *signature.s())
             .map_err(|_| PublicKeyError::RecoveryFailed)?;
 
@@ -288,6 +308,69 @@ impl PublicKey {
         let verifying_key = VerifyingKey::from_public_key_der(bytes)
             .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         Ok(PublicKey { inner: verifying_key })
+    }
+
+    /// Creates a public key from SEC1-encoded bytes.
+    ///
+    /// Accepts only the 33-byte compressed encoding (tag byte `0x02` or `0x03`) and the 65-byte
+    /// uncompressed encoding (tag byte `0x04`). Any other tag byte is rejected, including the
+    /// identity (`0x00`) and the compact encoding (`0x05`). The point is fully validated: an
+    /// uncompressed key whose coordinates do not lie on the curve is rejected.
+    pub fn from_sec1_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        if bytes.len() != PUBLIC_KEY_BYTES && bytes.len() != PUBLIC_KEY_UNCOMPRESSED_BYTES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported ECDSA public key length: expected {PUBLIC_KEY_BYTES} (compressed) or \
+                {PUBLIC_KEY_UNCOMPRESSED_BYTES} (uncompressed) bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        // The length check above guarantees that `bytes` is not empty.
+        let tag = bytes[0];
+        if !matches!(
+            (bytes.len(), tag),
+            (PUBLIC_KEY_BYTES, 0x02 | 0x03) | (PUBLIC_KEY_UNCOMPRESSED_BYTES, 0x04)
+        ) {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported ECDSA public key tag byte {tag:#04x}: expected 0x02 or 0x03 \
+                ({PUBLIC_KEY_BYTES}-byte compressed) or 0x04 \
+                ({PUBLIC_KEY_UNCOMPRESSED_BYTES}-byte uncompressed)"
+            )));
+        }
+
+        let verifying_key = VerifyingKey::from_sec1_bytes(bytes)
+            .map_err(|_| DeserializationError::InvalidValue("Invalid public key".to_string()))?;
+        Ok(PublicKey { inner: verifying_key })
+    }
+
+    /// Creates a public key from a `0x`-prefixed hex string in SEC1 format.
+    ///
+    /// Accepts the 33-byte compressed and the 65-byte uncompressed encoding (the form Ledger and
+    /// other Ethereum-style signers export). See [`Self::from_sec1_bytes`] for the accepted tag
+    /// bytes and for validation.
+    pub fn from_hex(encoded: &str) -> Result<Self, DeserializationError> {
+        let invalid_hex = |err: HexParseError| DeserializationError::InvalidValue(err.to_string());
+
+        let hex_digits = encoded.strip_prefix("0x").ok_or_else(|| {
+            DeserializationError::InvalidValue(
+                "ECDSA public key must use a 0x-prefixed hexadecimal encoding".to_string(),
+            )
+        })?;
+
+        match hex_digits.len() {
+            len if len == PUBLIC_KEY_BYTES * 2 => Self::from_sec1_bytes(
+                &hex_to_bytes::<PUBLIC_KEY_BYTES>(encoded).map_err(invalid_hex)?,
+            ),
+            len if len == PUBLIC_KEY_UNCOMPRESSED_BYTES * 2 => Self::from_sec1_bytes(
+                &hex_to_bytes::<PUBLIC_KEY_UNCOMPRESSED_BYTES>(encoded).map_err(invalid_hex)?,
+            ),
+            len => Err(DeserializationError::InvalidValue(format!(
+                "unsupported ECDSA public key length: expected {} (compressed) or {} \
+                (uncompressed) hexadecimal digits after the 0x prefix, got {len}",
+                PUBLIC_KEY_BYTES * 2,
+                PUBLIC_KEY_UNCOMPRESSED_BYTES * 2,
+            ))),
+        }
     }
 }
 
@@ -312,7 +395,7 @@ pub enum PublicKeyError {
 ///
 /// ## Serialization Formats
 ///
-/// This implementation supports 2 serialization formats:
+/// This implementation supports two serialization formats:
 ///
 /// ### Custom Format (65 bytes):
 /// - Bytes 0-31: r component (32 bytes, big-endian)
@@ -330,11 +413,12 @@ pub enum PublicKeyError {
 /// use miden_crypto::{
 ///     Felt, Word,
 ///     dsa::ecdsa_k256_keccak::{Signature, SigningKey},
-///     rand::test_utils::seeded_rng,
 /// };
 /// use miden_serde_utils::{Deserializable, Serializable};
+/// use rand::SeedableRng;
+/// use rand_chacha::ChaCha20Rng;
 ///
-/// let mut rng = seeded_rng([7; 32]);
+/// let mut rng = ChaCha20Rng::from_seed([7; 32]);
 /// let signing_key = SigningKey::with_rng(&mut rng);
 /// let message = Word::new([
 ///     Felt::new_unchecked(1),

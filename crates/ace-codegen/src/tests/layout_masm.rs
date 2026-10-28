@@ -13,6 +13,9 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     };
     let layout = InputLayout::new_masm(counts);
 
+    // One `adv_pipe` block carries four extension-field slots (eight base-field felts).
+    assert!(layout.total_inputs.is_multiple_of(4));
+
     let public_base = layout.index(InputKey::Public(0)).unwrap();
     assert_eq!(public_base % 8, 0);
     let rand_base = layout.index(InputKey::AuxRandBeta).unwrap();

@@ -1,0 +1,1313 @@
+//! EcMsm chiplet end-to-end tests — building MSM expressions through the
+//! [`Session`] and closing the full ten-chiplet bus.
+//!
+//! Two flavours. The chiplet-only checks drive an *unused* final op
+//! (combine or neg): its operands are consumed (their `MsmTerm` / `MsmExpr`
+//! provides matched), it routes all external demand (`EcGroupAdd` value,
+//! `EcGroup`, ordering `Range16`, intro `UintVal`, neg's `is_c_zero`
+//! `UintAdd`), and its own provides sit at mult 0, closing every bus short
+//! of the DAG claim. The `msm_resolve_*` tests then prove + verify the full
+//! in-circuit resolve through the eval `EcMsm` seam — the positionless
+//! `MsmClaimTerm` multiset match, so the absorb (root) order is the caller's.
+
+use std::{format, string::String, vec::Vec};
+
+use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
+use miden_air::lookup::{
+    LookupAir, ProverLookupBuilder,
+    debug::{ValidateLayout, ValidateLookupAir},
+};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_precompiles::{CurveId, CurvePoint, phi_generator};
+
+use crate::{
+    ec::msm::{
+        COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_B_DIFF_HI, COL_B_DIFF_LO, COL_BASE,
+        COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_INTRO, COL_IS_NEG,
+        COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
+        NUM_MAIN_COLS as MSM_COLS,
+    },
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    math::{U256, from_hex, from_limbs32, to_limbs32},
+    session::{
+        EcNode, Session,
+        strategies::{
+            glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table,
+            wnaf_table_endo,
+        },
+    },
+    tests::{SessionTracesTestExt, check_local, check_local_inputs, verify_deferred},
+    transcript::eval::{
+        COL_FRAME_PARAM1, COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir,
+    },
+};
+
+/// secp256k1 VM-owned uint/group pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
+const SN_PTR: u32 = CurveId::Secp256k1.scalar_domain().bound_ptr();
+
+fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
+    let hex: String = bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    from_hex(&hex)
+}
+
+fn k256_coords(p: &ProjectivePoint) -> (U256, U256) {
+    let enc = p.to_affine().to_sec1_point(false);
+    (
+        be_to_u256(enc.x().expect("finite point")),
+        be_to_u256(enc.y().expect("finite point")),
+    )
+}
+
+fn create(s: &mut Session, x: U256, y: U256) -> EcNode {
+    let xn = s.uint_leaf(x, FP);
+    let yn = s.uint_leaf(y, FP);
+    s.ec_create(GROUP_PTR, &xn, &yn)
+}
+
+/// `⟨G×1⟩ ⊕ ⟨2G×1⟩` (disjoint bases — a pure-copy walk, value `G + 2G =
+/// 3G`). The combine is unused (mult 0): it consumes its operands and
+/// routes the value/group/ordering/intro demand, closing the bus.
+fn msm_two_intro_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y);
+
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let _c = s.msm_combine(ga, qb);
+
+    // This intro-only fixture has no MSM resolve consumer, so fold tautologies to consume the EC
+    // create nodes and close their eval bindings.
+    let claim_g = s.ec_is(&g_pt, &g_pt);
+    let claim_q = s.ec_is(&q_pt, &q_pt);
+    let root = s.assert_and_fold([claim_g, claim_q]);
+    s.finish(root)
+}
+
+#[test]
+fn shape_and_degree_match_design() {
+    let air = EcMsmAir;
+
+    assert_eq!(air.width(), 35);
+    assert_eq!(air.aux_width(), 12);
+    assert_eq!(
+        <EcMsmAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
+        &[2; 12],
+    );
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 3, ext: 3 }
+    );
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
+
+    ValidateLookupAir::validate(
+        &air,
+        ValidateLayout {
+            preprocessed_width: air.preprocessed_width(),
+            trace_width: air.width(),
+            num_public_values: 0,
+            num_periodic_columns: air.periodic_columns().len(),
+            permutation_width: air.aux_width(),
+            num_permutation_challenges: NUM_RANDOMNESS,
+            num_permutation_values: NUM_LOGUP_VALUES,
+        },
+    )
+    .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
+    let traces = msm_two_intro_traces();
+    let mut main = traces.mains()[9].clone();
+    let width = EcMsmAir.width();
+    let row = (0..main.height())
+        .find(|&row| {
+            let offset = row * width;
+            main.values[offset + COL_IS_INTRO] == Felt::ONE
+                && main.values[offset + COL_EXPR_PTR] == Felt::ONE
+        })
+        .expect("the first intro row exists");
+    let offset = row * width;
+
+    // Overlay a neg selector on the boundary intro row. Supply the native neg
+    // witnesses and the residual intro_endo scalar witness so every other
+    // local equation still holds. The residual selector is then -1, which its
+    // Boolean legality constraint must reject.
+    main.values[offset + COL_IS_NEG] = Felt::ONE;
+    main.values[offset + COL_A_EXPR] = Felt::ZERO;
+    main.values[offset + COL_A_DIFF_LO] = Felt::ZERO;
+    main.values[offset + COL_A_DIFF_HI] = Felt::ZERO;
+    main.values[offset + COL_LAMBDA_PTR] = main.values[offset + COL_SCALAR];
+
+    check_local(EcMsmAir, &main);
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn shared_mint_flag_rejected_on_intro() {
+    let traces = msm_two_intro_traces();
+    let mut main = traces.mains()[9].clone();
+    let width = EcMsmAir.width();
+    let row = (0..main.height())
+        .find(|&row| main.values[row * width + COL_IS_INTRO] == Felt::ONE)
+        .expect("an intro row exists");
+
+    // The shared mint cell is Boolean, but may be nonzero only for neg or
+    // intro_endo. On an intro row no other native constraint reads this cell.
+    main.values[row * width + COL_NEG_MINTED] = Felt::ONE;
+
+    check_local(EcMsmAir, &main);
+}
+
+#[test]
+fn msm_two_intro_combine_checks() {
+    let traces = msm_two_intro_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_two_intro_combine_proves() {
+    verify_deferred(&msm_two_intro_traces().prove())
+        .expect("EcMsm intro+combine round-trip must verify");
+}
+
+/// The same `⟨G×1⟩ ⊕ ⟨2G×1⟩` copy walk as [`msm_two_intro_traces`], with the
+/// group's scalar field constrained to the curve order `n ≠ p` before the intro operations.
+/// Point-store rows and MSM consumers must use this scalar bound while coordinates remain bounded
+/// by `p`.
+fn msm_scalar_bound_n_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y);
+    // Route the shared group's scalars under `n`, before the intros so their
+    // literal-1 scalars intern under `n` (G and 2G share one group).
+    s.constrain_scalar_bound(&g_pt, SN_PTR);
+
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let _c = s.msm_combine(ga, qb);
+
+    let claim_g = s.ec_is(&g_pt, &g_pt);
+    let claim_q = s.ec_is(&q_pt, &q_pt);
+    let root = s.assert_and_fold([claim_g, claim_q]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_scalar_bound_n_checks() {
+    let traces = msm_scalar_bound_n_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_scalar_bound_n_proves() {
+    verify_deferred(&msm_scalar_bound_n_traces().prove())
+        .expect("MSM under scalar bound n ≠ p must verify");
+}
+
+/// `⟨G×1⟩` negated to `⟨G×−1⟩` (value `−G` via its shared x-coordinate
+/// and y-flip `UintAdd`; scalar `−1` via a second `is_c_zero` `UintAdd`). The neg is unused
+/// (mult 0):
+/// it consumes its operand and routes the value/group/ordering/scalar
+/// demand, closing the bus.
+fn msm_intro_neg_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+
+    let ga = s.msm_intro(&g_pt);
+    let _n = s.msm_neg(ga);
+
+    let claim_g = s.ec_is(&g_pt, &g_pt);
+    let root = s.assert_and_fold([claim_g]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_intro_neg_checks() {
+    let traces = msm_intro_neg_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_intro_neg_proves() {
+    verify_deferred(&msm_intro_neg_traces().prove())
+        .expect("EcMsm intro+neg round-trip must verify");
+}
+
+/// `⟨G × λ⟩` — GLV's endomorphism leaf, value `φ(G)`. Unused (mult 0): it
+/// consumes `G` and routes the coordinate/`UintMul`/on-curve-cert demand,
+/// closing the bus. Cross-checks the in-circuit value against
+/// [`CurveId::endomorphisms`]'s independently-defined `φ(G)` (itself tested
+/// against the β-orbit in `glv.rs`), so this is a correctness check of
+/// `require::intro_endo`'s native math, not just its local constraints.
+fn msm_intro_endo_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let _e = s.msm_intro_endo(&g_pt);
+
+    let claim_g = s.ec_is(&g_pt, &g_pt);
+    let root = s.assert_and_fold([claim_g]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_intro_endo_checks() {
+    let traces = msm_intro_endo_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_intro_endo_proves() {
+    verify_deferred(&msm_intro_endo_traces().prove())
+        .expect("EcMsm intro_endo round-trip must verify");
+}
+
+#[test]
+fn msm_intro_endo_value_matches_endomorphism_image() {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let expr = s.msm_intro_endo(&g_pt);
+    let (x, y) = s.msm_value_coords(expr);
+
+    let CurvePoint::Affine { x: expected_x, y: expected_y } = phi_generator() else {
+        panic!("phi(G) must be an affine point");
+    };
+    assert_eq!(x, from_limbs32(&expected_x), "intro_endo's φ(G).x must match phi_generator()");
+    assert_eq!(y, from_limbs32(&expected_y), "intro_endo's φ(G).y must match phi_generator()");
+}
+
+/// `glv_joint_wnaf_with_tables`'s value for a genuinely large (not 1, not small) scalar `u·G`,
+/// cross-checked against `CurveId::mul_scalar`'s independent native reference — the real
+/// correctness check that the GLV split (`glv_decompose`), the two per-half wNAF ladders (plain +
+/// endomorphism), and `msm_combine`'s shared-base merge back onto `⟨G × u⟩` all land on the same
+/// value a plain double-and-add would.
+#[test]
+fn glv_joint_wnaf_value_matches_native_mul_scalar() {
+    let curve = CurveId::Secp256k1;
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    // An arbitrary large scalar, safely canonical under n (n's top byte is
+    // 0xff, so any 256-bit value with a smaller top byte is < n).
+    let u = from_hex("89abcdef0123456789abcdef0123456789abcdef0123456789abcdef012345");
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let plain = wnaf_table(&mut s, &g_pt, 5);
+    let endo = wnaf_table_endo(&mut s, &g_pt, 5);
+    let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, Some(&endo), u)]);
+    let (x, y) = s.msm_value_coords(expr);
+
+    let expected = curve
+        .mul_scalar(curve.generator(), to_limbs32(u))
+        .expect("valid scalar multiplication");
+    let CurvePoint::Affine { x: expected_x, y: expected_y } = expected else {
+        panic!("u·G must be finite for this u");
+    };
+    assert_eq!(x, from_limbs32(&expected_x), "GLV value.x must match the native reference");
+    assert_eq!(y, from_limbs32(&expected_y), "GLV value.y must match the native reference");
+}
+
+/// `glv_joint_wnaf_with_tables`'s cached-table path — the shape `translate_ec_msm` uses across a
+/// signature batch: `G`'s plain/endo tables are built once, then reused across several claims
+/// with different scalars (and hence different GLV split signs, since each half's sign rides the
+/// digit selection, not the table's seed). Each claim's value is checked against the native
+/// reference, so this exercises every sign combination `glv_decompose` can hand back against the
+/// same positive-only tables.
+#[test]
+fn glv_joint_wnaf_with_tables_reused_across_scalars() {
+    let curve = CurveId::Secp256k1;
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let plain = wnaf_table(&mut s, &g_pt, 5);
+    let endo = wnaf_table_endo(&mut s, &g_pt, 5);
+
+    for u in [
+        from_hex("1"),
+        from_hex("89abcdef0123456789abcdef0123456789abcdef0123456789abcdef012345"),
+        from_hex("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+        from_hex("123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"),
+    ] {
+        let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, Some(&endo), u)]);
+        let (x, y) = s.msm_value_coords(expr);
+        let expected =
+            curve.mul_scalar(curve.generator(), to_limbs32(u)).expect("valid scalar mul");
+        let CurvePoint::Affine { x: expected_x, y: expected_y } = expected else {
+            panic!("u·G must be finite for this u");
+        };
+        assert_eq!(x, from_limbs32(&expected_x), "cached GLV value.x must match for u={u:?}");
+        assert_eq!(y, from_limbs32(&expected_y), "cached GLV value.y must match for u={u:?}");
+    }
+}
+
+/// In-circuit resolve of the 1-term claim `R = 1·G` (`R = G`): `msm_intro`
+/// then `msm_resolve` lays the eval `EcMsm` node (a single absorb row, the
+/// initial CV derived from its MSM frame) binding the value, and the `Is` ties it to `G`. The claim
+/// folds into the transcript root — the real DAG consumer of the MSM.
+fn msm_resolve_one_term_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let expr = s.msm_intro(&g_pt);
+    // The scalar `1`, leafed under the group's scalar-domain bound.
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    // R = 1·G = G.
+    let value = s.ec_msm(expr, &[(g_pt, one)]);
+    let claim = s.ec_is(&value, &g_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_one_term_checks() {
+    let traces = msm_resolve_one_term_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_one_term_proves() {
+    verify_deferred(&msm_resolve_one_term_traces().prove())
+        .expect("EcMsm 1-term resolve round-trip must verify");
+}
+
+/// In-circuit resolve of the 2-term claim `R = 1·G + 1·Q` (`R = G + Q`):
+/// `msm_combine` builds `⟨G×1, Q×1⟩`, `msm_resolve` lays the **two-row**
+/// compression chain (the second row's CV chained from the first's output),
+/// and the `Is` ties the value to `G + Q`. Exercises the CV-threading
+/// constraint across rows.
+fn msm_resolve_two_term_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y); // Q = 2G, a distinct base
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine(ga, qb); // ⟨G×1, Q×1⟩, value G + Q
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let r_pt = s.ec_add(&g_pt, &q_pt); // R = G + Q
+    let value = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_two_term_checks() {
+    let traces = msm_resolve_two_term_traces();
+    traces.check();
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn msm_resolve_pair_count_must_match_the_absorb_run() {
+    let traces = msm_resolve_two_term_traces();
+    let mut eval = crate::tests::transcript_eval_main(&traces);
+    let ncols = eval.width();
+
+    // Keep the frame parameter constant across the run, but claim three pairs for its two rows.
+    // The terminal position counter binds the semantic MSM arity to the actual run length.
+    for row in 0..eval.height() {
+        if eval.values[row * ncols + COL_IS_EC_MSM] == Felt::ONE {
+            eval.values[row * ncols + COL_FRAME_PARAM1] = Felt::from_u8(3);
+        }
+    }
+
+    check_local_inputs(TranscriptEvalAir, &eval, traces.public_root().as_array().to_vec());
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_two_term_proves() {
+    verify_deferred(&msm_resolve_two_term_traces().prove())
+        .expect("EcMsm 2-term resolve round-trip must verify");
+}
+
+/// The packaged [`straus`] strategy: `3·G + 5·Q` with `Q = 2G` (so the
+/// claim value is `13G`), built by the subset-table joint double-and-add
+/// and resolved in-circuit. Validates the helper end to end.
+fn msm_straus_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g; // Q = 2G, a distinct base
+    let r = (0..13).fold(ProjectivePoint::IDENTITY, |acc, _| acc + g); // 3·G + 5·Q = 13G
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+    let (rx, ry) = k256_coords(&r);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let r_pt = create(&mut s, rx, ry);
+
+    // Straus over the 2-base table {∞, G, Q, G+Q} (scan length inferred).
+    let acc = straus(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))]);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
+    let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_straus_checks() {
+    let traces = msm_straus_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_straus_proves() {
+    verify_deferred(&msm_straus_traces().prove()).expect("Straus strategy round-trip must verify");
+}
+
+/// The **separate wNAF** strategy on the same claim `3·G + 5·Q = 13G` — two
+/// per-base windowed-NAF scalar-muls over precomputed odd-multiple tables
+/// ([`wnaf_table`] stage 1, [`wnaf_msm`] stage 2), combined and resolved.
+/// `G`'s table is built once and passed in (the reuse the two-stage split
+/// buys); here it also drives the lone `Q`.
+fn msm_wnaf_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g; // Q = 2G, a distinct base
+    let r = (0..13).fold(ProjectivePoint::IDENTITY, |acc, _| acc + g); // 3G + 5·2G = 13G
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+    let (rx, ry) = k256_coords(&r);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let r_pt = create(&mut s, rx, ry);
+
+    // Stage 1: precompute each base's odd-multiple table (window 4 → {1,3,5,7}P).
+    let g_table = wnaf_table(&mut s, &g_pt, 4);
+    let q_table = wnaf_table(&mut s, &q_pt, 4);
+    // Stage 2: separate scalar-muls over the tables, then combine.
+    let acc = wnaf_msm(&mut s, &[(&g_table, from_hex("3")), (&q_table, from_hex("5"))]);
+
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
+    let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_wnaf_checks() {
+    let traces = msm_wnaf_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_wnaf_proves() {
+    verify_deferred(&msm_wnaf_traces().prove())
+        .expect("separate-wNAF strategy round-trip must verify");
+}
+
+/// The packaged [`joint_naf`] strategy on the same claim `3·G + 5·Q = 13G`
+/// — the signed table `{±P, ±Q, ±(P±Q)}` (via `neg` nodes) reaches the same
+/// value by a different chain. Validates the signed strategy end to end.
+fn msm_joint_naf_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g; // Q = 2G
+    let r = (0..13).fold(ProjectivePoint::IDENTITY, |acc, _| acc + g); // 3·G + 5·Q = 13G
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+    let (rx, ry) = k256_coords(&r);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let r_pt = create(&mut s, rx, ry);
+
+    let acc = joint_naf(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))]);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
+    let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_joint_naf_checks() {
+    let traces = msm_joint_naf_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_joint_naf_proves() {
+    verify_deferred(&msm_joint_naf_traces().prove())
+        .expect("joint_naf strategy round-trip must verify");
+}
+
+/// The **interleaved wNAF** strategy ([`joint_wnaf`], `w = 4`) on the same
+/// claim `3·G + 5·Q = 13G` — one shared double-and-add ladder, each base
+/// adding its own (signed, sparse) wNAF digit. Reaches the same value as
+/// [`straus`] by a different chain (shared doublings, fewer adds); the GLV
+/// example's 4-base lever. Validates it end to end.
+fn msm_joint_wnaf_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g; // Q = 2G, a distinct base
+    let r = (0..13).fold(ProjectivePoint::IDENTITY, |acc, _| acc + g); // 3·G + 5·Q = 13G
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+    let (rx, ry) = k256_coords(&r);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let r_pt = create(&mut s, rx, ry);
+
+    let acc = joint_wnaf(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))], 4);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
+    let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_joint_wnaf_checks() {
+    let traces = msm_joint_wnaf_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_joint_wnaf_proves() {
+    verify_deferred(&msm_joint_wnaf_traces().prove())
+        .expect("joint_wnaf strategy round-trip must verify");
+}
+
+/// Unit scalars put every base in one wNAF column, exposing term-list copying at large arity.
+fn msm_joint_wnaf_unit_scalars(count: usize) -> crate::session::SessionTraces {
+    let mut s = Session::new();
+    let mut point = ProjectivePoint::IDENTITY;
+    let mut expected = ProjectivePoint::IDENTITY;
+    let mut terms = Vec::with_capacity(count);
+    for _ in 0..count {
+        point += ProjectivePoint::GENERATOR;
+        expected += point;
+        let (x, y) = k256_coords(&point);
+        terms.push((create(&mut s, x, y), U256::from(1u64)));
+    }
+    s.constrain_scalar_bound(&terms[0].0, SN_PTR);
+    let expr = joint_wnaf(&mut s, &terms, 2);
+    let one = s.uint_leaf(U256::from(1u64), SN_PTR);
+    let claim_terms: Vec<_> = terms.iter().map(|(point, _)| (*point, one)).collect();
+    let value = s.ec_msm(expr, &claim_terms);
+    let (x, y) = k256_coords(&expected);
+    let expected = create(&mut s, x, y);
+    let claim = s.ec_is(&value, &expected);
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_joint_wnaf_large_arity_avoids_quadratic_term_rows_and_proves() {
+    use crate::ec::msm::COL_ACT;
+
+    let small = msm_joint_wnaf_unit_scalars(32);
+    let large = msm_joint_wnaf_unit_scalars(64);
+    let rows = |traces: &crate::session::SessionTraces| {
+        let msm = traces.mains()[9];
+        msm.values
+            .chunks_exact(msm.width)
+            .filter(|row| row[COL_ACT] == Felt::ONE)
+            .count()
+    };
+    let (small_rows, large_rows) = (rows(&small), rows(&large));
+    assert!(
+        large_rows < 3 * small_rows,
+        "doubling arity must not quadruple MSM term rows: {small_rows} -> {large_rows}"
+    );
+    small.check();
+    large.check();
+    verify_deferred(&large.prove()).expect("large-arity joint wNAF claim must verify");
+}
+
+/// Relation-identity dedup: a repeated `intro` / `combine` collapses onto
+/// the one expression it already produced (like every other chiplet), so a
+/// strategy that re-derives a sub-expression pays for it once. The
+/// collapsed claim `R = G + Q` still resolves + proves.
+fn msm_dedup_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g; // Q = 2G
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+    let (rx, ry) = k256_coords(&(g + q)); // R = G + Q
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+
+    let ga = s.msm_intro(&g_pt);
+    let ga_again = s.msm_intro(&g_pt);
+    assert_eq!(ga, ga_again, "intro(G) must dedup");
+    let qb = s.msm_intro(&q_pt);
+
+    let c1 = s.msm_combine(ga, qb);
+    let c2 = s.msm_combine(ga, qb);
+    assert_eq!(c1, c2, "combine(G, Q) must dedup");
+    assert_eq!(s.msm_expr_count(), 3, "only ⟨G⟩, ⟨Q⟩, ⟨G,Q⟩ laid — the repeats collapsed",);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let r_pt = create(&mut s, rx, ry);
+    let value = s.ec_msm(c1, &[(g_pt, one), (q_pt, one)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_dedup_checks() {
+    let traces = msm_dedup_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_dedup_proves() {
+    verify_deferred(&msm_dedup_traces().prove()).expect("deduped MSM round-trip must verify");
+}
+
+/// The claim `⟨G×1, Q×1⟩` (value `G + Q`) resolved with the two `(base,
+/// scalar)` pairs in a chosen order — `swap` reverses them. The chiplet stores
+/// its terms in one fixed (base-ptr) order regardless; only the pair order
+/// passed to `ec_msm` changes.
+fn msm_two_term_ordered(swap: bool) -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y);
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine(ga, qb);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let r_pt = s.ec_add(&g_pt, &q_pt);
+    let value = if swap {
+        s.ec_msm(expr, &[(q_pt, one), (g_pt, one)])
+    } else {
+        s.ec_msm(expr, &[(g_pt, one), (q_pt, one)])
+    };
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+/// The resolve seam matches the claim's terms as a positionless **multiset**
+/// (`MsmClaimTerm`), so the absorb — and thus the transcript root — follows
+/// the **caller's** term-pair order, not the chiplet's internal storage order
+/// (and so not the addition-chain strategy). Both orders are valid; their
+/// roots differ. This is the determinism contract: the root is a function of
+/// the declared claim, decoupled from how the witness was built.
+#[test]
+fn msm_resolve_absorb_order_is_caller_declared() {
+    let t_gq = msm_two_term_ordered(false);
+    let t_qg = msm_two_term_ordered(true);
+
+    // Extract roots first (order-independent of the borrow `check` takes).
+    let root_gq = t_gq.public_root().as_array();
+    let root_qg = t_qg.public_root().as_array();
+    assert_ne!(
+        root_gq, root_qg,
+        "absorb order (hence root) must follow the caller's term-pair order",
+    );
+
+    // Both are sound — the seam balances for either order.
+    t_gq.check();
+    t_qg.check();
+}
+
+/// A claim naming the same base twice (here both slots are `G`, so `Q`'s
+/// term goes uncovered) is rejected at recording when `expr` was built with
+/// ordinary [`Session::msm_combine`], which merges `G`'s two `intro`s into
+/// one row: the claim's terms must match `expr`'s own rows as an exact
+/// multiset, and this claim over-consumes the single `G` row while never
+/// naming `Q`. A genuinely repeated declared base is supported — see
+/// [`msm_resolve_repeated_base_via_terms_preserving_combine`] — but only
+/// when `expr` is built with
+/// [`Session::msm_combine_terms_preserving`] so the repeat survives as its
+/// own row.
+#[test]
+#[should_panic(expected = "claim terms do not match this MSM expression")]
+fn msm_resolve_duplicate_base_rejected() {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y);
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine(ga, qb);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    // Two G slots, no Q — `expr`'s rows were merged, so this over-consumes.
+    let _ = s.ec_msm(expr, &[(g_pt, one), (g_pt, one)]);
+}
+
+/// The counterpart to [`msm_resolve_duplicate_base_rejected`].
+fn msm_resolve_repeated_base_via_terms_preserving_combine_traces() -> crate::session::SessionTraces
+{
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (rx, ry) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let r_pt = create(&mut s, rx, ry);
+    let ga = s.msm_intro(&g_pt);
+    let expr = s.msm_combine_terms_preserving(ga, ga);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, one), (g_pt, one)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_repeated_base_via_terms_preserving_combine_checks() {
+    let traces = msm_resolve_repeated_base_via_terms_preserving_combine_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_repeated_base_via_terms_preserving_combine_proves() {
+    verify_deferred(&msm_resolve_repeated_base_via_terms_preserving_combine_traces().prove())
+        .expect("EcMsm repeated-base term-preserving-combine round-trip must verify");
+}
+
+/// The zero-scalar leaf resolved directly: `⟨G × 0⟩` (via
+/// [`Session::msm_intro_zero`]) claims the single term `(G, 0)` and resolves
+/// to the point at infinity.
+fn msm_resolve_zero_scalar_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let expr = s.msm_intro_zero(&g_pt);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero)]);
+    let pai_pt = s.ec_sub(&g_pt, &g_pt);
+    let claim = s.ec_is(&value, &pai_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_zero_scalar_checks() {
+    let traces = msm_resolve_zero_scalar_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_zero_scalar_proves() {
+    verify_deferred(&msm_resolve_zero_scalar_traces().prove())
+        .expect("EcMsm zero-scalar resolve round-trip must verify");
+}
+
+/// A mixed zero/nonzero-term claim: `⟨G×0⟩ ⊕ ⟨Q×1⟩` (term-preserving —
+/// though nothing merges here since the bases already differ) resolves to
+/// `Q` alone, the zero term contributing nothing.
+fn msm_resolve_mixed_zero_and_nonzero_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let za = s.msm_intro_zero(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine_terms_preserving(za, qb);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero), (q_pt, one)]);
+    let claim = s.ec_is(&value, &q_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_mixed_zero_and_nonzero_checks() {
+    let traces = msm_resolve_mixed_zero_and_nonzero_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_mixed_zero_and_nonzero_proves() {
+    verify_deferred(&msm_resolve_mixed_zero_and_nonzero_traces().prove())
+        .expect("EcMsm mixed zero/nonzero resolve round-trip must verify");
+}
+
+/// Multiple all-zero terms: `⟨G×0⟩ ⊕ ⟨Q×0⟩` resolves to the point at
+/// infinity.
+fn msm_resolve_all_zero_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let za = s.msm_intro_zero(&g_pt);
+    let zb = s.msm_intro_zero(&q_pt);
+    let expr = s.msm_combine_terms_preserving(za, zb);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero), (q_pt, zero)]);
+    let pai_pt = s.ec_sub(&g_pt, &g_pt);
+    let claim = s.ec_is(&value, &pai_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_all_zero_checks() {
+    let traces = msm_resolve_all_zero_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_all_zero_proves() {
+    verify_deferred(&msm_resolve_all_zero_traces().prove())
+        .expect("EcMsm all-zero resolve round-trip must verify");
+}
+
+/// A 5-term term-preserving fallback, combined through the same balanced
+/// binary-tree shape `msm_term_preserving_expr` builds for an odd term
+/// count: two level-1 pairs, a level-2 pair of those results, and a final
+/// pair against the term that carried through both levels unpaired.
+/// `⟨G×1⟩ ⊕ ⟨G×0⟩ ⊕ ⟨Q×1⟩ ⊕ ⟨G×1⟩ ⊕ ⟨Q×0⟩` resolves to `2G + Q = 4G` (`Q =
+/// 2G`), the two zero terms contributing nothing.
+fn msm_resolve_balanced_tree_five_terms_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+
+    // Level 0 leaves, in declared term order.
+    let l1 = s.msm_intro(&g_pt);
+    let l2 = s.msm_intro_zero(&g_pt);
+    let l3 = s.msm_intro(&q_pt);
+    let l4 = s.msm_intro(&g_pt);
+    let l5 = s.msm_intro_zero(&q_pt);
+
+    // Level 1: pair up; `l5` has no partner and carries through unpaired.
+    let a = s.msm_combine_terms_preserving(l1, l2);
+    let b = s.msm_combine_terms_preserving(l3, l4);
+    // Level 2: pair the level-1 results; `l5` carries through again.
+    let c = s.msm_combine_terms_preserving(a, b);
+    // Level 3: the final pair.
+    let expr = s.msm_combine_terms_preserving(c, l5);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value =
+        s.ec_msm(expr, &[(g_pt, one), (g_pt, zero), (q_pt, one), (g_pt, one), (q_pt, zero)]);
+    let expected_pt = s.ec_add(&q_pt, &q_pt);
+    let claim = s.ec_is(&value, &expected_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_balanced_tree_five_terms_checks() {
+    let traces = msm_resolve_balanced_tree_five_terms_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_balanced_tree_five_terms_proves() {
+    verify_deferred(&msm_resolve_balanced_tree_five_terms_traces().prove())
+        .expect("EcMsm balanced-tree 5-term fallback resolve round-trip must verify");
+}
+
+/// An absorb run must name **one** expression on every row. The boundary
+/// binds the node's value via `MsmExpr(msm_expr, …)` and each row attributes
+/// its term via `MsmClaimTerm(msm_expr, …)`; if `msm_expr` could change
+/// mid-run, a prover could hash one expression's terms (a root-matching hash)
+/// while binding the node to another expression's value — a forged value
+/// under a correct hash that root-comparison would *not* catch. The within-run
+/// constancy constraint forbids it: tamper a non-boundary row's `COL_MSM_EXPR`
+/// and the local check rejects the trace.
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn msm_resolve_run_expr_must_be_constant() {
+    let traces = msm_resolve_two_term_traces();
+    let eval = crate::tests::transcript_eval_main(&traces);
+    let ncols = eval.width();
+
+    // The first absorb row of a 2-term run is non-boundary.
+    let row = (0..eval.height())
+        .find(|&r| {
+            eval.values[r * ncols + COL_IS_EC_MSM] == Felt::ONE
+                && eval.values[r * ncols + COL_IS_MSM_LAST] == Felt::ZERO
+        })
+        .expect("a non-boundary absorb row");
+
+    let mut forged = eval;
+    let here = forged.values[row * ncols + COL_MSM_EXPR];
+    forged.values[row * ncols + COL_MSM_EXPR] = here + Felt::ONE;
+
+    // The constancy constraint rejects this mutation.
+    check_local_inputs(TranscriptEvalAir, &forged, traces.public_root().as_array().to_vec());
+}
+
+// CERTIFICATE ORDERING
+// ================================================================================================
+
+/// The EcMsm main trace of `traces` and the index of its first row with `flag = 1` (on a
+/// boundary).
+fn msm_main_and_minting_row(
+    traces: &crate::session::SessionTraces,
+    flag: usize,
+) -> (RowMajorMatrix<Felt>, usize) {
+    let main = traces.mains()[9].clone();
+    let row = (0..main.height())
+        .find(|&r| {
+            main.values[r * MSM_COLS + flag] == Felt::ONE
+                && main.values[r * MSM_COLS + COL_IS_BOUNDARY] == Felt::ONE
+        })
+        .expect("the session mints a certified point");
+    check_local(EcMsmAir, &main);
+    (main, row)
+}
+
+#[test]
+fn intro_endo_cannot_certify_its_own_base() {
+    // φ(P) is minted with a certificate resting on P. Pointing `val` back at `base` would let a
+    // point certify itself (e.g. `(0, y)`, since β·0 = 0), with nothing checking it is on the
+    // curve.
+    let traces = msm_intro_endo_traces();
+    let (mut main, row) = msm_main_and_minting_row(&traces, COL_ENDO_MINTED);
+    main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_BASE];
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
+}
+
+#[test]
+fn neg_cannot_certify_its_own_operand_value() {
+    // −val_a is minted with a certificate resting on val_a (a `y = 0` point is its own negation).
+    let traces = msm_intro_neg_traces();
+    let (mut main, row) = msm_main_and_minting_row(&traces, COL_NEG_MINTED);
+    main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_VAL_A];
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
+}
+
+#[test]
+fn certificate_ordering_limbs_are_range_checked() {
+    // If a minted point reuses its source, the ordering holds locally with limbs encoding −1.
+    // Both minting paths must request `Range16(−1)`, which the byte-pair table cannot provide.
+    use std::collections::HashMap;
+
+    use miden_air::lookup::Challenges;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    use crate::{
+        logup::LookupMessage,
+        primitives::byte_pair_lut::Range16Msg,
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        tests::bus_balance::fold_balance,
+    };
+
+    let mut rng = StdRng::seed_from_u64(0xce47);
+    let rand_qf = |rng: &mut StdRng| {
+        use rand::RngExt;
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()])
+    };
+    let challenges =
+        Challenges::new(rand_qf(&mut rng), rand_qf(&mut rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let out_of_range = Range16Msg { w: -Felt::ONE }.encode(&challenges);
+    for (traces, flag, source) in [
+        (msm_intro_endo_traces(), COL_ENDO_MINTED, COL_BASE),
+        (msm_intro_neg_traces(), COL_NEG_MINTED, COL_VAL_A),
+    ] {
+        let (mut main, row) = msm_main_and_minting_row(&traces, flag);
+        main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + source];
+        main.values[row * MSM_COLS + COL_B_DIFF_LO] = -Felt::ONE;
+        main.values[row * MSM_COLS + COL_B_DIFF_HI] = Felt::ZERO;
+        check_local(EcMsmAir, &main);
+
+        let mut net = HashMap::new();
+        fold_balance(&EcMsmAir, &main, &challenges, &mut net);
+        let mult = net.get(&out_of_range).map_or(Felt::ZERO, |(mult, _)| *mult);
+        assert_eq!(mult, Felt::ONE, "the minting row must range-check its ordering limbs");
+    }
+}
+
+// CLAIMED EXPRESSIONS
+// ================================================================================================
+
+/// Lays one expression and claims it through two value nodes that hash differently but name the
+/// same `(base, scalar)` pointers. `build` returns both value-equality claims.
+fn claimed_twice_traces(
+    build: impl FnOnce(&mut Session) -> [crate::session::Truthy; 2],
+) -> crate::session::SessionTraces {
+    let mut s = Session::new();
+    let claims = build(&mut s);
+    let root = s.assert_and_fold(claims);
+    s.finish(root)
+}
+
+/// Checks `traces` and that every claim has an expression of its own: no EcMsm expression serves
+/// more than one claim, and `claims` expressions are claimed.
+fn assert_each_claim_has_its_own_expression(traces: &crate::session::SessionTraces, claims: usize) {
+    traces.check();
+    let main = &traces.mains()[9];
+    let rows = || main.values.chunks(MSM_COLS);
+    assert!(
+        rows().all(|row| row[COL_IS_CLAIMED] == Felt::ZERO || row[COL_IS_CLAIMED] == Felt::ONE),
+        "no expression may serve more than one claim",
+    );
+    let claimed = rows()
+        .filter(|row| row[COL_IS_BOUNDARY] == Felt::ONE && row[COL_IS_CLAIMED] == Felt::ONE)
+        .count();
+    assert_eq!(claimed, claims, "each claim has its own expression");
+}
+
+/// The points `G` and `Q = 2G`.
+fn generator_points(s: &mut Session) -> (EcNode, EcNode) {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+    (create(s, gx, gy), create(s, g2x, g2y))
+}
+
+/// `G + Q`, created from its coordinates and derived by `ec_add`: the two nodes hash differently
+/// but name one point.
+fn sum_points(s: &mut Session, g_pt: &EcNode, q_pt: &EcNode) -> (EcNode, EcNode) {
+    let g = ProjectivePoint::GENERATOR;
+    let (g3x, g3y) = k256_coords(&(g + g + g));
+    (create(s, g3x, g3y), s.ec_add(g_pt, q_pt))
+}
+
+/// One expression `⟨G×1, Q×1⟩` claimed by two value nodes that declare its terms in opposite
+/// orders. Repeating either claim returns its existing node and lays no expression.
+fn msm_expression_claimed_twice_traces() -> crate::session::SessionTraces {
+    claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let r_pt = s.ec_add(&g_pt, &q_pt);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let expr = s.msm_combine(ga, qb);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_gq = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]);
+        let exprs = s.msm_expr_count();
+        assert_eq!(s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]).id, value_gq.id);
+        assert_eq!(s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]).id, value_qg.id);
+        assert_eq!(s.msm_expr_count(), exprs, "a repeated claim lays no expression");
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    })
+}
+
+#[test]
+fn msm_expression_claimed_twice_claims_each_copy_once() {
+    // Every claim consumes the claim terms of an expression no other claim uses, so the second
+    // claim takes a fresh copy of the shared expression.
+    assert_each_claim_has_its_own_expression(&msm_expression_claimed_twice_traces(), 2);
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_expression_claimed_twice_proves() {
+    verify_deferred(&msm_expression_claimed_twice_traces().prove())
+        .expect("two claims on one expression must verify");
+}
+
+#[test]
+fn term_preserving_combine_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let r_pt = s.ec_add(&g_pt, &q_pt);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let expr = s.msm_combine_terms_preserving(ga, qb);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_gq = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]);
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn neg_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt, ..) = generator_points(s);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let gq = s.msm_combine(ga, qb);
+        let expr = s.msm_neg(gq);
+        let minus_one =
+            s.uint_leaf(from_limbs32(&CurveId::Secp256k1.scalar_domain().minus_one()), SN_PTR);
+        let neg_g3 = -(ProjectivePoint::GENERATOR * k256::Scalar::from(3u64));
+        let (nx, ny) = k256_coords(&neg_g3);
+        let r_pt = create(s, nx, ny);
+        let value_gq = s.ec_msm(expr, &[(g_pt, minus_one), (q_pt, minus_one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, minus_one), (g_pt, minus_one)]);
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let (r_created, r_added) = sum_points(s, &g_pt, &q_pt);
+        let expr = s.msm_intro(&r_created);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_created = s.ec_msm(expr, &[(r_created, one)]);
+        let value_added = s.ec_msm(expr, &[(r_added, one)]);
+        [s.ec_is(&value_created, &r_created), s.ec_is(&value_added, &r_added)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_zero_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let (r_created, r_added) = sum_points(s, &g_pt, &q_pt);
+        let expr = s.msm_intro_zero(&r_created);
+        let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+        let pai_pt = s.ec_sub(&g_pt, &g_pt);
+        let value_created = s.ec_msm(expr, &[(r_created, zero)]);
+        let value_added = s.ec_msm(expr, &[(r_added, zero)]);
+        [s.ec_is(&value_created, &pai_pt), s.ec_is(&value_added, &pai_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_endo_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt, ..) = generator_points(s);
+        let g_derived = s.ec_sub(&q_pt, &g_pt);
+        let expr = s.msm_intro_endo(&g_pt);
+        let endo = CurveId::Secp256k1.endomorphism().expect("secp256k1 has a GLV endomorphism");
+        let lambda = s.uint_leaf(from_limbs32(&endo.lambda), SN_PTR);
+        let CurvePoint::Affine { x, y } = phi_generator() else {
+            panic!("phi(G) must be an affine point");
+        };
+        let phi_pt = create(s, from_limbs32(&x), from_limbs32(&y));
+        let value_created = s.ec_msm(expr, &[(g_pt, lambda)]);
+        let value_derived = s.ec_msm(expr, &[(g_derived, lambda)]);
+        [s.ec_is(&value_created, &phi_pt), s.ec_is(&value_derived, &phi_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn is_claimed_must_be_boolean() {
+    // Two claims on one expression jointly consume twice its claim terms, so either claim could
+    // absorb a different multiset, e.g. `{(G, 1), (G, 1)}` bound to the value of
+    // `{(G, 1), (Q, 1)}`. An `is_claimed` value above one must be rejected.
+    let traces = msm_two_term_ordered(false);
+    let mut main = traces.mains()[9].clone();
+    check_local(EcMsmAir, &main);
+    let mut forged_rows = 0;
+    for row in main.values.chunks_mut(MSM_COLS) {
+        if row[COL_IS_CLAIMED] == Felt::ONE {
+            row[COL_IS_CLAIMED] = Felt::from(2u8);
+            forged_rows += 1;
+        }
+    }
+    assert_eq!(forged_rows, 2, "the claimed expression spans two term rows");
+    crate::tests::assert_local_rejects(EcMsmAir, &main);
+}

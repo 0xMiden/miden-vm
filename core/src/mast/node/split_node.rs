@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
@@ -26,8 +23,6 @@ use crate::{
 /// the `on_true` child is executed. If the value is `0`, then the `on_false` child is executed. If
 /// the value is neither `0` nor `1`, the execution fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct SplitNode {
     branches: [MastNodeId; 2],
     digest: Word,
@@ -106,10 +101,10 @@ impl MastNodeExt for SplitNode {
     /// domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::SplitNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let on_true_digest = Word::default();
     /// # let on_false_digest = Word::default();
-    /// Hasher::merge_in_domain(&[on_true_digest, on_false_digest], SplitNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[on_true_digest, on_false_digest], SplitNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -151,36 +146,6 @@ impl MastNodeExt for SplitNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for SplitNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate two MastNodeId values and digest for the children
-        (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
-            .prop_map(|(true_branch, false_branch, digest_array)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                SplitNode {
-                    branches: [true_branch, false_branch],
-                    digest,
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`SplitNode`] instances.
 #[derive(Debug)]
@@ -211,7 +176,7 @@ impl SplitNodeBuilder {
             let true_branch_hash = true_branch.digest();
             let false_branch_hash = false_branch.digest();
 
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
         };
 
         Ok(SplitNode { branches: self.branches, digest })
@@ -256,7 +221,7 @@ impl MastForestContributor for SplitNodeBuilder {
                 })?
                 .digest();
 
-            hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &self.branches, context, hash_by_node_id)

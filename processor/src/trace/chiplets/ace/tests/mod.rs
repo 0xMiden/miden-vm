@@ -29,6 +29,7 @@ use crate::{
     execution::eval_circuit_impl,
     fast::Memory,
     trace::chiplets::ace::{
+        MAX_EVAL_CIRCUIT_WIRES,
         instruction::{Op, decode_instruction},
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
@@ -40,6 +41,20 @@ mod encoder;
 
 const PTR_OFFSET_ELEM: Felt = Felt::ONE;
 const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
+
+#[test]
+fn eval_circuit_accepts_wire_limit() {
+    let instruction = Instruction {
+        node_l: NodeID::Input(0),
+        node_r: NodeID::Input(0),
+        op: Op::Sub,
+    };
+    // Eight inputs and a multiple of eight gates need no encoding padding.
+    let circuit =
+        Circuit::new(8, vec![], vec![instruction; MAX_EVAL_CIRCUIT_WIRES as usize - 8]).unwrap();
+    let encoded_circuit = EncodedCircuit::try_from_circuit(&circuit).unwrap();
+    verify_eval_circuit(&encoded_circuit, &[QuadFelt::ZERO; 8]);
+}
 
 #[test]
 fn test_var_plus_one() {
@@ -262,7 +277,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     assert_eq!(inputs.len(), circuit.num_inputs());
 
     // Inputs are store two by two in the fest set of words, followed by the instructions.
-    let mut mem = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
+    let mut mem: Vec<Felt> = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
     // Add inputs
     mem.extend(
         inputs
@@ -273,12 +288,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     mem.extend(circuit.encoded_circuit().iter());
 
     // Convert to words
-    mem.chunks_exact(4)
-        .map(|word| {
-            let result: [Felt; WORD_SIZE] = word.try_into().unwrap();
-            result.into()
-        })
-        .collect()
+    mem.as_chunks::<4>().0.iter().map(|word| Word::new(*word)).collect()
 }
 
 /// Given an EvaluationContext

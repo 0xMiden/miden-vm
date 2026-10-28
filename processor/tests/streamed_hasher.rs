@@ -1,16 +1,20 @@
 //! The overlapped execute-and-build path must produce exactly the trace the
 //! buffered path produces: same values, byte for byte, in every segment.
+//!
+//! `make test-wasm-threadless` runs the equality tests through the compact
+//! buffered fallback and proves the entry point returns without trapping.
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
-    trace::build_trace,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
+    advice::AdviceInputs,
+    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace},
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
 /// A program mixing basic blocks (including repeats, which exercise the
-/// hasher's memoized-trace path), control blocks, and an `hperm` (a streamed
-/// `Permute` request). The test processor uses a small fragment size so the
+/// hasher's memoized-trace path), control blocks, and a `compress` request. The test processor
+/// uses a small fragment size so the
 /// run spans multiple trace fragments.
 const PROGRAM: &str = "
 begin
@@ -24,9 +28,24 @@ begin
     else
         push.7 add
     end
-    padw padw padw hperm dropw dropw dropw
+    padw padw padw compress dropw dropw dropw
     repeat.4
         push.11 u32wrapping_add
+    end
+    drop
+end
+";
+
+/// Replays the same large basic block often enough that streaming it without a consumer would
+/// retain many owned request payloads.
+const QUEUE_HEAVY_PROGRAM: &str = "
+begin
+    push.0
+    repeat.1024
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
     end
     drop
 end
@@ -54,30 +73,48 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
 
     let buffered = {
         let mut host = DefaultHost::default();
-        let inputs = processor(stack, advice.clone())
-            .execute_trace_inputs_sync(&program, &mut host)
+        let execution_witness = processor(stack, advice.clone())
+            .execute_for_proving_sync(&program, &mut host)
             .unwrap();
-        build_trace(inputs).unwrap()
+        let (vm_witness, precompiles_witness) = execution_witness.into_parts();
+        assert!(precompiles_witness.is_none());
+        build_trace(vm_witness).unwrap()
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
-        processor(stack, advice.clone())
-            .execute_and_build_trace_sync(&program, &mut host)
-            .unwrap()
+        let (trace, precompiles_witness) = processor(stack, advice.clone())
+            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .unwrap();
+        assert!(precompiles_witness.is_none());
+        trace
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());
-    let (b_core, b_chiplets, b_p2) = buffered.main_trace().to_air_matrices();
-    let (s_core, s_chiplets, s_p2) = streamed.main_trace().to_air_matrices();
+    let (b_core, b_chiplets, b_eidos_compression, b_and8) =
+        buffered.main_trace().clone_air_matrices();
+    let (s_core, s_chiplets, s_eidos_compression, s_and8) =
+        streamed.main_trace().clone_air_matrices();
     assert_eq!(b_core, s_core, "core segment diverged");
     assert_eq!(b_chiplets, s_chiplets, "chiplets segment diverged");
-    assert_eq!(b_p2, s_p2, "poseidon2 segment diverged");
+    assert_eq!(b_eidos_compression, s_eidos_compression, "EidosCompression segment diverged");
+    assert_eq!(b_and8, s_and8, "And8 segment diverged");
 }
 
 #[test]
 fn overlapped_build_matches_buffered() {
     assert_overlapped_matches_buffered(PROGRAM, &[1], &AdviceInputs::default());
+}
+
+#[test]
+fn single_worker_handles_queue_heavy_program() {
+    #[cfg(not(target_family = "wasm"))]
+    rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
+        assert_overlapped_matches_buffered(QUEUE_HEAVY_PROGRAM, &[], &AdviceInputs::default());
+    });
+
+    #[cfg(target_family = "wasm")]
+    assert_overlapped_matches_buffered(QUEUE_HEAVY_PROGRAM, &[], &AdviceInputs::default());
 }
 
 /// Covers the two Merkle op kinds in the streamed replay (`BuildMerkleRoot`
@@ -119,27 +156,25 @@ fn overlapped_build_matches_buffered_merkle() {
     assert_overlapped_matches_buffered("begin mtree_set end", &set_stack, &advice);
 }
 
-/// The overlap path spawns the hasher builder on its own thread; span context is
-/// thread-local, so the builder re-enters the `execute_and_build_trace_sync` span
-/// to stay attributed under it. This asserts the span is entered on both threads:
-/// once by `#[instrument]` on the caller and once by the builder.
+/// The overlap path makes the hasher builder available to Rayon workers. The caller is an ordinary
+/// test thread, so a second thread entering the span proves a global-pool worker ran the builder.
 #[test]
 fn overlap_builder_thread_enters_the_instrument_span() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        collections::HashSet,
+        sync::{Arc, Mutex},
+        thread::ThreadId,
     };
 
     use tracing::span::{Attributes, Id};
     use tracing_subscriber::{Registry, layer::SubscriberExt};
 
-    #[derive(Default)]
-    struct EnterCounter {
-        target: std::sync::Mutex<Option<Id>>,
-        enters: Arc<AtomicUsize>,
+    struct EnteringThreads {
+        target: Mutex<Option<Id>>,
+        threads: Arc<Mutex<HashSet<ThreadId>>>,
     }
 
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EnterCounter {
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EnteringThreads {
         fn on_new_span(
             &self,
             attrs: &Attributes<'_>,
@@ -153,29 +188,32 @@ fn overlap_builder_thread_enters_the_instrument_span() {
 
         fn on_enter(&self, id: &Id, _ctx: tracing_subscriber::layer::Context<'_, S>) {
             if self.target.lock().unwrap().as_ref() == Some(id) {
-                self.enters.fetch_add(1, Ordering::SeqCst);
+                self.threads.lock().unwrap().insert(std::thread::current().id());
             }
         }
     }
 
-    let enters = Arc::new(AtomicUsize::new(0));
-    let layer = EnterCounter {
-        target: std::sync::Mutex::new(None),
-        enters: Arc::clone(&enters),
+    let threads = Arc::new(Mutex::new(HashSet::new()));
+    let layer = EnteringThreads {
+        target: Mutex::new(None),
+        threads: Arc::clone(&threads),
     };
     let subscriber = Registry::default().with(layer);
 
     let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
+    let caller = std::thread::current().id();
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
         processor(&[1], AdviceInputs::default())
-            .execute_and_build_trace_sync(&program, &mut host)
+            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
             .unwrap();
     });
 
+    let threads = threads.lock().unwrap();
+    assert!(threads.contains(&caller), "the caller did not enter the instrument span");
     assert_eq!(
-        enters.load(Ordering::SeqCst),
+        threads.len(),
         2,
-        "span must be entered by the caller and re-entered by the builder thread"
+        "expected execution and the hasher builder to use separate threads, got {threads:?}"
     );
 }

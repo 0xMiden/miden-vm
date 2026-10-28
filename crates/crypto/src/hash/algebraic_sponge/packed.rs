@@ -3,47 +3,14 @@
 //! `DuplexChallenger`'s `GrindingChallenger` impl requires the permutation to also work over
 //! `[Felt::Packing; STATE_WIDTH]` so that proof-of-work grinding can test one witness candidate
 //! per SIMD lane. Poseidon2 delegates to Plonky3's vectorized packed-Goldilocks permutation.
-//! RPO and RPX have no vectorized implementation, so their impls apply the scalar permutation
-//! to each lane independently: throughput matches the scalar path.
 
-use miden_field::{PackedFelt, PackedValue};
+use miden_field::PackedFelt;
 use p3_symmetric::{CryptographicPermutation, Permutation};
 
 use super::{
-    Felt, STATE_WIDTH,
+    STATE_WIDTH,
     poseidon2::{Poseidon2Permutation256, p3_permute_packed},
-    rescue::{rpo::RpoPermutation256, rpx::RpxPermutation256},
 };
-
-/// Applies a scalar permutation independently to each SIMD lane of a packed sponge state.
-fn permute_lanes(state: &mut [PackedFelt; STATE_WIDTH], permute: fn(&mut [Felt; STATE_WIDTH])) {
-    let mut scalars = [Felt::ZERO; STATE_WIDTH];
-    for lane in 0..PackedFelt::WIDTH {
-        for (scalar, packed) in scalars.iter_mut().zip(state.iter()) {
-            *scalar = packed.as_slice()[lane];
-        }
-        permute(&mut scalars);
-        for (packed, scalar) in state.iter_mut().zip(scalars) {
-            packed.as_slice_mut()[lane] = scalar;
-        }
-    }
-}
-
-impl Permutation<[PackedFelt; STATE_WIDTH]> for RpoPermutation256 {
-    fn permute_mut(&self, state: &mut [PackedFelt; STATE_WIDTH]) {
-        permute_lanes(state, Self::apply_permutation);
-    }
-}
-
-impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for RpoPermutation256 {}
-
-impl Permutation<[PackedFelt; STATE_WIDTH]> for RpxPermutation256 {
-    fn permute_mut(&self, state: &mut [PackedFelt; STATE_WIDTH]) {
-        permute_lanes(state, Self::apply_permutation);
-    }
-}
-
-impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for RpxPermutation256 {}
 
 impl Permutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutation256 {
     fn permute_mut(&self, state: &mut [PackedFelt; STATE_WIDTH]) {
@@ -55,9 +22,10 @@ impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutatio
 
 #[cfg(test)]
 mod tests {
-    use miden_field::PrimeCharacteristicRing;
+    use miden_field::{PackedValue, PrimeCharacteristicRing};
 
     use super::*;
+    use crate::Felt;
 
     const LANES: usize = PackedFelt::WIDTH;
 
@@ -98,16 +66,6 @@ mod tests {
         check_with(scalar_permute, packed_permute, |i, lane| {
             Felt::new_unchecked((1 + i * LANES + lane) as u64)
         });
-    }
-
-    #[test]
-    fn rpo_packed_permutation_matches_scalar() {
-        check(RpoPermutation256::apply_permutation, |s| RpoPermutation256.permute_mut(s));
-    }
-
-    #[test]
-    fn rpx_packed_permutation_matches_scalar() {
-        check(RpxPermutation256::apply_permutation, |s| RpxPermutation256.permute_mut(s));
     }
 
     #[test]

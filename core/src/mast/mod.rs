@@ -50,11 +50,6 @@ use dense_order::{
 };
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "serde")]
-use crate::serde::SliceReader;
 
 mod dense_order;
 mod node;
@@ -71,7 +66,6 @@ pub use node::{
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    crypto::hash::Poseidon2,
     serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
@@ -126,7 +120,7 @@ mod tests;
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
@@ -150,8 +144,8 @@ pub struct MastForest {
 /// - [`MastForest::advice_commitment`] identifies the stored advice map only.
 /// - [`MastForest::commitment`] identifies the stored dense forest data: public roots, external
 ///   dependencies, and advice. Direct forest-backed static libraries use this value as their source
-///   identity. Package-backed static libraries use the package digest, which is derived from this
-///   forest commitment.
+///   identity. Package-backed static libraries use the package commitment, which is derived from
+///   this forest commitment.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct MastForestCommitment {
     /// Commitment to the forest's roots, external dependencies, and advice map.
@@ -470,8 +464,8 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> MastForestCommitment {
-    let interface_commitment = Poseidon2::merge_many(&[]);
-    let dependency_commitment = Poseidon2::merge_many(&[]);
+    let interface_commitment = crate::chiplets::hasher::hash_words(&[]);
+    let dependency_commitment = crate::chiplets::hasher::hash_words(&[]);
     let advice_commitment = AdviceMap::default().commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
@@ -482,7 +476,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::hash_words(&digests)
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
@@ -492,7 +486,7 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
         .map(MastNodeExt::digest)
         .collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::hash_words(&digests)
 }
 
 impl MastForestCommitment {
@@ -501,7 +495,7 @@ impl MastForestCommitment {
         dependency_commitment: Word,
         advice_commitment: Word,
     ) -> Self {
-        let commitment = Poseidon2::merge_many(&[
+        let commitment = crate::chiplets::hasher::hash_words(&[
             interface_commitment,
             dependency_commitment,
             advice_commitment,
@@ -753,11 +747,7 @@ impl MastForest {
 
             // Check topological ordering and compute digest.
             let computed_digest = match node {
-                MastNode::Block(block) => {
-                    let op_groups: Vec<Felt> =
-                        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-                    hasher::hash_elements(&op_groups)
-                },
+                MastNode::Block(block) => node::hash_op_batches(block.op_batches()),
                 MastNode::Join(join) => {
                     let left_id = join.first();
                     let right_id = join.second();
@@ -766,7 +756,7 @@ impl MastForest {
 
                     let left_digest = computed_hashes[left_id.0 as usize];
                     let right_digest = computed_hashes[right_id.0 as usize];
-                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
                 },
                 MastNode::Split(split) => {
                     let true_id = split.on_true();
@@ -776,14 +766,14 @@ impl MastForest {
 
                     let true_digest = computed_hashes[true_id.0 as usize];
                     let false_digest = computed_hashes[false_id.0 as usize];
-                    hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
                 },
                 MastNode::Loop(loop_node) => {
                     let body_id = loop_node.body();
                     check_no_forward_ref(node_id, body_id)?;
 
                     let body_digest = computed_hashes[body_id.0 as usize];
-                    hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
                 },
                 MastNode::Call(call) => {
                     let callee_id = call.callee();
@@ -795,7 +785,7 @@ impl MastForest {
                     } else {
                         CallNode::CALL_DOMAIN
                     };
-                    hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+                    hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
                 },
                 MastNode::Dyn(dyn_node) => {
                     if dyn_node.is_dyncall() {
@@ -929,8 +919,10 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -1109,26 +1101,3 @@ pub enum MastForestError {
 }
 
 // Custom serde implementation for MastForest delegates to the binary serialization format.
-#[cfg(feature = "serde")]
-impl Serialize for MastForest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let bytes = Serializable::to_bytes(self);
-        serializer.serialize_bytes(&bytes)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for MastForest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize bytes, then use miden-crypto Deserializable
-        let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = SliceReader::new(&bytes);
-        Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
-    }
-}

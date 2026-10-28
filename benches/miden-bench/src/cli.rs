@@ -20,19 +20,18 @@ pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 /// Available AIR types (with short aliases):
 ///
 ///   keccak (k)     Keccak-f(1600) permutation, 24 rows/hash
-///   poseidon2 (p)  Poseidon2 permutation (Goldilocks), 1 row/hash
 ///   blake3 (b)     Blake3 compression, 1 row/hash
-///   miden (m)      Dummy degree-9 constraint (Miden VM shape)
+///   miden (m)      Dummy degree-9 constraints with configurable trace widths
 ///
 /// WIDTH and AUX_COLS only apply to `miden` (defaults: 51, 8).
 ///
 /// Examples:
 ///
-///   bench                                             # default: blake3:15 keccak:18 poseidon2:19
+///   bench                                             # default: blake3:15 keccak:18
 ///   bench keccak:15 keccak:18 keccak:19               # 3x Keccak at different heights
 ///   bench -v keccak:15                                 # full tracing tree
-///   bench miden:18:51 miden:19:20                      # two Miden-shaped traces (auto blowup=3)
-///   bench -m batch keccak:15 keccak:18 keccak:19       # batch-STARK comparison
+///   bench miden:18:51 miden:19:20                      # two dummy traces (auto blowup=3)
+///   bench -m batch -H blake3 keccak:15 keccak:18 keccak:19       # batch-STARK comparison
 ///   bench -H keccak keccak:15                          # use Keccak hash for commitments
 ///   bench -H blake3 keccak:15                          # use BLAKE3 (32B) hash for commitments
 ///   bench -H blake3-192 keccak:15                      # use BLAKE3-192 (24B) hash for commitments
@@ -42,7 +41,7 @@ pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 pub(crate) struct Cli {
     /// Trace specs (`AIR:LOG_HEIGHT[:WIDTH[:AUX_COLS]]`).
     ///
-    /// When omitted, defaults to: blake3:15 keccak:18 poseidon2:19
+    /// When omitted, defaults to: blake3:15 keccak:18
     #[arg(value_name = "TRACE")]
     pub(crate) traces: Vec<TraceSpec>,
 
@@ -52,8 +51,8 @@ pub(crate) struct Cli {
 
     /// Hash function for the commitment scheme.
     ///
-    /// Only applies to lifted mode; batch mode always uses poseidon2.
-    #[arg(long, short = 'H', value_enum, default_value_t = HashFn::Poseidon2)]
+    /// Eidos is available in lifted mode. Batch mode supports the byte-oriented hashes.
+    #[arg(long, short = 'H', value_enum, default_value_t = HashFn::Eidos)]
     pub(crate) hash: HashFn,
 
     /// Print the full hierarchical tracing tree (default: summary only).
@@ -111,7 +110,7 @@ pub(crate) enum Mode {
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum HashFn {
-    Poseidon2,
+    Eidos,
     Keccak,
     Blake3,
     #[value(name = "blake3-192")]
@@ -121,7 +120,7 @@ pub(crate) enum HashFn {
 impl fmt::Display for HashFn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HashFn::Poseidon2 => write!(f, "poseidon2"),
+            HashFn::Eidos => write!(f, "eidos"),
             HashFn::Keccak => write!(f, "keccak"),
             HashFn::Blake3 => write!(f, "blake3"),
             HashFn::Blake3_192 => write!(f, "blake3-192"),
@@ -144,7 +143,6 @@ pub(crate) struct TraceSpec {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AirType {
     Keccak,
-    Poseidon2,
     Blake3,
     Miden,
 }
@@ -153,7 +151,6 @@ impl fmt::Display for AirType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Keccak => write!(f, "keccak"),
-            Self::Poseidon2 => write!(f, "poseidon2"),
             Self::Blake3 => write!(f, "blake3"),
             Self::Miden => write!(f, "miden"),
         }
@@ -171,7 +168,6 @@ impl FromStr for TraceSpec {
 
         let air_type = match parts[0] {
             "keccak" | "k" => AirType::Keccak,
-            "poseidon2" | "p" => AirType::Poseidon2,
             "blake3" | "b" => AirType::Blake3,
             "miden" | "m" => AirType::Miden,
             other => return Err(format!("unknown AIR type '{other}'")),

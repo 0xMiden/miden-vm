@@ -2,12 +2,12 @@ use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USE
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
-    field::{BasedVectorSpace, Field, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{ExecutableMastForest, MastNodeId},
 };
 
 use crate::{
-    ContextId, ExecutionError,
+    AceError, ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
@@ -18,9 +18,9 @@ use crate::{
 /// A trait for tracing the execution of a processor.
 ///
 /// Allows for recording different aspects of the processor's execution. For example, the
-/// [`crate::FastProcessor::execute_trace_inputs`] execution mode needs to build a
-/// [`crate::TraceGenerationContext`] which records information necessary to build the trace at each
-/// clock cycle.
+/// [`crate::FastProcessor::execute_for_proving`] execution mode needs to build a
+/// private trace replay which records information necessary to build the trace at each clock
+/// cycle.
 ///
 /// A useful mental model to differentiate between the processor and the tracer is:
 /// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)
@@ -134,13 +134,24 @@ pub trait Tracer {
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records the result of a call to `Hasher::permute()`.
+    /// Records the result of a block-preserving Eidos compression.
     ///
-    /// Called by: `HPERM`, `LOG_DEFERRED`.
-    fn record_hasher_permute(
+    /// Called by: `COMPRESS`, `LOG_DEFERRED`.
+    fn record_hasher_compress(
         &mut self,
         _input_state: [Felt; STATE_WIDTH],
         _output_state: [Felt; STATE_WIDTH],
+    ) {
+    }
+
+    /// Records one AEAD-XOF compression request.
+    ///
+    /// Called by: `AEADSTREAM`.
+    fn record_hasher_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        _input_state: [Felt; STATE_WIDTH],
     ) {
     }
 
@@ -154,6 +165,7 @@ pub trait Tracer {
         &mut self,
         _node: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _output_root: Word,
     ) {
@@ -170,6 +182,7 @@ pub trait Tracer {
         _old_value: Word,
         _new_value: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _old_root: Word,
         _new_root: Word,
@@ -190,7 +203,7 @@ pub trait Tracer {
 
     /// Records the word read from memory at the given address.
     ///
-    /// Called by: `MLOADW`, `HORNER_EVAL_EXT`, `DYN`.
+    /// Called by: `MLOADW`, `HORNER_EVAL_BASE`, `HORNER_EVAL_EXT`, `DYN`.
     fn record_memory_read_word(
         &mut self,
         _word: Word,
@@ -224,20 +237,6 @@ pub trait Tracer {
     ) {
     }
 
-    /// Records two element reads at the given addresses.
-    ///
-    /// Called by: `HORNER_EVAL_BASE`.
-    fn record_memory_read_element_pair(
-        &mut self,
-        _element_0: Felt,
-        _addr_0: Felt,
-        _element_1: Felt,
-        _addr_1: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-    }
-
     /// Records two consecutive word reads (a "dword" read) starting at the given address.
     ///
     /// Called by: `MSTREAM`.
@@ -264,15 +263,15 @@ pub trait Tracer {
     ) {
     }
 
-    /// Records a `CRYPTO_STREAM` operation: reading 2 plaintext words from source memory and
-    /// writing 2 ciphertext words to destination memory.
+    /// Records an `AEADSTREAM` operation.
     ///
-    /// Called by: `CRYPTO_STREAM`.
-    fn record_crypto_stream(
+    /// Called by: `AEADSTREAM`.
+    fn record_aead_stream(
         &mut self,
         _plaintext: [Word; 2],
         _src_addr: Felt,
-        _ciphertext: [Word; 2],
+        _keystream: [Felt; 16],
+        _ciphertext: [Felt; 16],
         _dst_addr: Felt,
         _ctx: ContextId,
         _clk: RowIndex,
@@ -306,12 +305,27 @@ pub trait Tracer {
     /// Called by: `U32XOR`.
     fn record_u32xor(&mut self, _a: Felt, _b: Felt) {}
 
-    /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
-    /// the range checker. This is expected to result in four 16-bit range checks.
+    /// Records the high and low 32-bit limbs of the result of a u32 operation. This is expected to
+    /// result in four 16-bit range-check requests.
     ///
-    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
-    /// `U32ASSERT2`.
+    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32ASSERT2`.
     fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
+
+    /// Records the quotient, remainder, and `divisor - remainder - 1` range checks.
+    ///
+    /// Implementations that populate range-check replay data must override this method to record
+    /// the final difference. The default preserves no-op behavior for tracers that do not own that
+    /// replay data.
+    ///
+    /// Called by: `U32DIV`.
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        _remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+    }
 
     /// Records the procedure hash of a syscall.
     ///
@@ -320,8 +334,15 @@ pub trait Tracer {
 
     /// Records the evaluation of a circuit.
     ///
+    /// Returns an error if recording the evaluation would exceed the tracer's resource limits.
+    ///
     /// Called by: `EVAL_CIRCUIT`.
-    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {}
+    fn record_circuit_evaluation(
+        &mut self,
+        _circuit_evaluation: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        Ok(())
+    }
 }
 
 // OPERATION HELPER REGISTERS
@@ -428,11 +449,18 @@ pub enum OperationHelperRegisters {
     /// Helper for the `U32DIV` operation, which divides `a` by `b` and pushes the quotient and
     /// remainder.
     ///
-    /// - `lo`: `numerator - quotient`, used to range-check that `quotient <= numerator`.
-    /// - `hi`: `denominator - remainder - 1`, used to range-check that `remainder < denominator`.
+    /// - `quotient`: the quotient.
+    /// - `remainder`: the remainder.
+    /// - `remainder_diff`: `divisor - remainder - 1`, used to establish that the remainder is
+    ///   smaller than the divisor.
     ///
-    /// The helper registers hold the four 16-bit limbs of `lo` and `hi`.
-    U32Div { lo: Felt, hi: Felt },
+    /// The helper registers hold the four 16-bit limbs of `quotient` and `remainder`, followed by
+    /// the two 16-bit limbs of `remainder_diff`.
+    U32Div {
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    },
     /// Helper for the `U32ASSERT2` operation, which asserts that the top two stack elements are
     /// valid u32 values.
     ///
@@ -442,16 +470,19 @@ pub enum OperationHelperRegisters {
     /// The helper registers hold the four 16-bit limbs of `second` and `first` (used for range
     /// checking).
     U32Assert2 { first: Felt, second: Felt },
-    /// Helper for the `HPERM` operation, which applies a Poseidon2 permutation to the top 12
-    /// stack elements.
+    /// Helper for the `COMPRESS` operation.
     ///
-    /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
-    HPerm { addr: Felt },
+    /// - `addr`: the address in the hasher chiplet where the compression is recorded.
+    Compress { addr: Felt },
     /// Helper for Merkle path operations (`MPVERIFY` and `MRUPDATE`), which verify or update a
     /// node in a Merkle tree.
     ///
     /// - `addr`: the address in the hasher chiplet where the Merkle path computation is recorded.
-    MerklePath { addr: Felt },
+    /// - `index`: the canonical field representative of the Merkle node index.
+    ///
+    /// Besides `addr`, the helper registers carry the first Merkle direction bit and a bounded
+    /// witness for index canonicality. See [`merkle_index_helper_values`].
+    MerklePath { addr: Felt, index: Felt },
     /// Helper for the `HORNER_EVAL_BASE` operation, which performs 8 steps of Horner evaluation
     /// on a polynomial with base-field coefficients.
     ///
@@ -467,22 +498,15 @@ pub enum OperationHelperRegisters {
     /// on a polynomial with extension-field coefficients.
     ///
     /// - `alpha`: the evaluation point, read from memory.
-    /// - `k0`, `k1`: auxiliary values read from the same memory word as `alpha` (elements 2 and 3
-    ///   of the word).
     /// - `acc_tmp`: the intermediate accumulator after processing the first 2 (highest-degree)
     ///   coefficients: `(acc * alpha + s[0]) * alpha + s[1]`.
-    HornerEvalExt {
-        alpha: QuadFelt,
-        k0: Felt,
-        k1: Felt,
-        acc_tmp: QuadFelt,
-    },
+    HornerEvalExt { alpha: QuadFelt, acc_tmp: QuadFelt },
     /// Helper for the `LOG_DEFERRED` operation, which folds a verified statement digest into
-    /// the rolling deferred root via a Poseidon2 permutation.
+    /// the rolling deferred root via the VM hasher (Eidos compression).
     ///
-    /// - `addr`: start row of the hasher-chiplet permutation.
+    /// - `addr`: address in the hasher chiplet where the compression is recorded.
     /// - `state_prev`: the previous deferred root, provided non-deterministically and used as the
-    ///   rate0 input to the permutation.
+    ///   low block word of the compression.
     LogDeferred { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
@@ -585,17 +609,18 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::U32Div { lo, hi } => {
-                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+            Self::U32Div { quotient, remainder, remainder_diff } => {
+                let (q1, q0) = split_u32_into_u16(quotient.as_canonical_u64());
+                let (r1, r0) = split_u32_into_u16(remainder.as_canonical_u64());
+                let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
 
                 [
-                    Felt::from_u16(t0),
-                    Felt::from_u16(t1),
-                    Felt::from_u16(t2),
-                    Felt::from_u16(t3),
-                    ZERO,
-                    ZERO,
+                    Felt::from_u16(q0),
+                    Felt::from_u16(q1),
+                    Felt::from_u16(r0),
+                    Felt::from_u16(r1),
+                    Felt::from_u16(d0),
+                    Felt::from_u16(d1),
                 ]
             },
             Self::U32Assert2 { first, second } => {
@@ -611,8 +636,18 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::HPerm { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
-            Self::MerklePath { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::Compress { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::MerklePath { addr, index } => {
+                let (direction_bit, y_limbs) = merkle_index_helper_values(*index);
+                [
+                    *addr,
+                    direction_bit,
+                    Felt::from_u16(y_limbs[0]),
+                    Felt::from_u16(y_limbs[1]),
+                    Felt::from_u16(y_limbs[2]),
+                    Felt::from_u16(y_limbs[3]),
+                ]
+            },
             Self::HornerEvalBase { alpha, tmp0, tmp1 } => [
                 alpha.as_basis_coefficients_slice()[0],
                 alpha.as_basis_coefficients_slice()[1],
@@ -621,11 +656,11 @@ impl OperationHelperRegisters {
                 tmp0.as_basis_coefficients_slice()[0],
                 tmp0.as_basis_coefficients_slice()[1],
             ],
-            Self::HornerEvalExt { alpha, k0, k1, acc_tmp } => [
+            Self::HornerEvalExt { alpha, acc_tmp } => [
                 alpha.as_basis_coefficients_slice()[0],
                 alpha.as_basis_coefficients_slice()[1],
-                *k0,
-                *k1,
+                ZERO,
+                ZERO,
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],
@@ -635,4 +670,20 @@ impl OperationHelperRegisters {
             Self::Empty => [ZERO; NUM_USER_OP_HELPERS],
         }
     }
+}
+
+/// Returns the first Merkle direction bit and the four little-endian 16-bit limbs of
+/// `y = (p - 1 - index - bit) / 2`, where `p` is the base-field modulus.
+///
+/// The first direction bit is the parity of the canonical representative of `index`, so the
+/// numerator is even. Since `index < p`, `y < 2^63`; this bound is enforced in the AIR by range
+/// checking all four limbs and twice the top limb.
+pub(crate) fn merkle_index_helper_values(index: Felt) -> (Felt, [u16; 4]) {
+    let index = index.as_canonical_u64();
+    let direction_bit = index & 1;
+    let y = (Felt::ORDER_U64 - 1 - index - direction_bit) / 2;
+    let limbs = [y as u16, (y >> 16) as u16, (y >> 32) as u16, (y >> 48) as u16];
+
+    debug_assert!(limbs[3] < 1 << 15);
+    (Felt::from_u64(direction_bit), limbs)
 }

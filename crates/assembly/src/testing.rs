@@ -225,7 +225,7 @@ mod package_features {
 
     impl TestRegistry {
         pub fn add_package(&mut self, package: Arc<Package>) -> Version {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.publish_package(package).expect("failed to add test package");
             version
         }
@@ -251,7 +251,7 @@ mod package_features {
         }
 
         pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.packages.retain(|(name, existing), _| {
                 name != &package.name || existing.version != package.version
             });
@@ -313,7 +313,7 @@ mod package_features {
         type Error = Report;
 
         fn cache_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.caches.lock().unwrap().push(format!("{}@{version}", package.name));
             if let Some(record) = self.get_by_semver(&package.name, &package.version) {
                 if record.version() == &version {
@@ -339,7 +339,7 @@ mod package_features {
 
     impl PackageStore for TestRegistry {
         fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             let dependencies = package
                 .manifest
                 .dependencies()

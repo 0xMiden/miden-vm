@@ -40,6 +40,8 @@ pub type BoxedFallibleLeafIterator<'a> =
 /// This trait outlines the operations required to retrieve the components of an SMT: leaves and
 /// deeper subtrees. Implementations of this trait can provide various storage solutions, like
 /// in-memory maps or persistent databases (e.g., RocksDB).
+/// Cached roots and subtree hashes must use the current native hash construction. Persistent
+/// implementations must check compatibility before exposing stored data to [`super::LargeSmt`].
 ///
 /// All methods are expected to handle potential storage errors by returning a
 /// `Result<_, StorageError>`.

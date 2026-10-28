@@ -597,6 +597,45 @@ where
     log2_ceil_u8(quotient_chunks)
 }
 
+/// Inputs used by ACE to reconstruct a quotient polynomial from its chunks.
+///
+/// These values have deliberately different provenance:
+/// - `shift_ratio` is the primitive `D`-th root of unity, where `D = 2^log_quotient_degree` is the
+///   quotient chunk count;
+/// - `first_shift` is the canonical LDE coset shift raised to the trace height, and therefore
+///   depends on the PCS blowup but not on `D`;
+/// - `first_weight = 1 / (D * first_shift^(D - 1))` depends on both.
+///
+/// Keeping this derivation in the domain layer prevents callers from conflating quotient degree
+/// with LDE blowup when the two happen to be equal.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct QuotientRecompositionInputs<F> {
+    pub shift_ratio: F,
+    pub first_shift: F,
+    pub first_weight: F,
+}
+
+/// Derive the quotient-recomposition inputs for a canonical lifted-STARK domain.
+///
+/// The result is independent of the trace height: the canonical LDE shift changes with the trace
+/// height in exactly the inverse way to the final `N`-th power. The implementation constructs the
+/// height-one canonical domain and delegates to the same evaluation-domain implementation used by
+/// the verifier's quotient reconstruction.
+pub fn quotient_recomposition_inputs<F: TwoAdicField>(
+    log_quotient_degree: u8,
+    log_blowup: u8,
+) -> Result<QuotientRecompositionInputs<F>, DomainError> {
+    if log_quotient_degree > log_blowup {
+        return Err(DomainError::ConstraintDegreeTooHigh {
+            log_quotient: log_quotient_degree,
+            log_blowup,
+        });
+    }
+
+    let lifted = LiftedDomain::<F>::try_canonical(0, log_blowup)?;
+    Ok(EvaluationDomain::new(lifted, log_quotient_degree).recomposition_inputs())
+}
+
 // ============================================================================
 // EvaluationDomain
 // ============================================================================
@@ -659,6 +698,21 @@ impl<F: TwoAdicField> EvaluationDomain<F> {
     #[inline]
     pub fn quotient_degree(&self) -> usize {
         1 << self.log_quotient_degree as usize
+    }
+
+    /// Derive the ACE quotient-recomposition inputs from this evaluation domain.
+    fn recomposition_inputs(&self) -> QuotientRecompositionInputs<F> {
+        let quotient_degree = self.quotient_degree();
+        let shift_ratio = self.subgroup().shrink(self.log_trace_height()).generator();
+        let first_shift = self.shift().exp_power_of_2(self.log_trace_height() as usize);
+        let denominator =
+            F::from_usize(quotient_degree) * first_shift.exp_u64((quotient_degree - 1) as u64);
+
+        QuotientRecompositionInputs {
+            shift_ratio,
+            first_shift,
+            first_weight: denominator.inverse(),
+        }
     }
 
     /// Log₂ of the trace height — the trace subgroup `H`'s order.
@@ -829,6 +883,7 @@ impl<F: TwoAdicField> Coset<F> for EvaluationDomain<F> {
 #[cfg(test)]
 mod tests {
     use p3_field::{Field, PrimeCharacteristicRing};
+    use proptest::prelude::*;
 
     use super::*;
     use crate::testing::{
@@ -1063,5 +1118,131 @@ mod tests {
         let eval: EvaluationDomain<Felt> = canonical_domain::<Felt>(8, 2).evaluation_domain(2);
         assert_eq!(eval.log_quotient_degree(), 2);
         assert_eq!(eval.quotient_degree(), 4);
+    }
+
+    #[test]
+    fn quotient_recomposition_inputs_match_reconstruct_quotient() {
+        const LOG_QUOTIENT_DEGREE: u8 = 2;
+        const LOG_BLOWUP: u8 = 3;
+
+        let params = quotient_recomposition_inputs::<Felt>(LOG_QUOTIENT_DEGREE, LOG_BLOWUP)
+            .expect("valid quotient and blowup");
+        let chunks: Vec<QuadFelt> = (0..1usize << LOG_QUOTIENT_DEGREE)
+            .map(|i| QuadFelt::from(Felt::from_usize(17 * i + 3)))
+            .collect();
+        let z = QuadFelt::from(Felt::from_u32(12345));
+
+        // The same generated inputs must work at different trace heights.
+        for log_trace_height in [8, 12] {
+            let eval = canonical_domain::<Felt>(log_trace_height, LOG_BLOWUP)
+                .evaluation_domain(LOG_QUOTIENT_DEGREE);
+            assert_eq!(eval.recomposition_inputs(), params);
+
+            // ACE's product-form Lagrange interpolation is deliberately independent of
+            // `EvaluationDomain::reconstruct_quotient`'s normalized barycentric formula.
+            let z_pow_n = z.exp_power_of_2(log_trace_height as usize);
+            let mut shifts = Vec::with_capacity(chunks.len());
+            let mut weights = Vec::with_capacity(chunks.len());
+            let mut shift = params.first_shift;
+            let mut weight = params.first_weight;
+            for _ in 0..chunks.len() {
+                shifts.push(shift);
+                weights.push(weight);
+                shift *= params.shift_ratio;
+                weight *= params.shift_ratio;
+            }
+
+            let mut product_form = QuadFelt::ZERO;
+            for (i, &chunk) in chunks.iter().enumerate() {
+                let mut basis = QuadFelt::ONE;
+                for (j, &point) in shifts.iter().enumerate() {
+                    if i != j {
+                        basis *= z_pow_n - point;
+                    }
+                }
+                product_form += QuadFelt::from(weights[i]) * basis * chunk;
+            }
+
+            assert_eq!(
+                product_form,
+                eval.reconstruct_quotient(z, &chunks),
+                "ACE recomposition diverged at log trace height {log_trace_height}"
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn quotient_recomposition_matches_across_arities_and_blowups(
+            log_trace_height in 1u8..=16,
+            z_coords in any::<[u64; 2]>(),
+            chunk_coords in any::<[[u64; 2]; 8]>(),
+        ) {
+            let z = QuadFelt::new([
+                Felt::from_u64(z_coords[0]),
+                Felt::from_u64(z_coords[1]) + Felt::ONE,
+            ]);
+            let chunks: Vec<QuadFelt> = chunk_coords
+                .map(|coords| {
+                    QuadFelt::new([
+                        Felt::from_u64(coords[0]),
+                        Felt::from_u64(coords[1]) + Felt::ONE,
+                    ])
+                })
+                .into_iter()
+                .collect();
+
+            for log_quotient_degree in 1..=3 {
+                for log_blowup in log_quotient_degree..=4 {
+                    let params = quotient_recomposition_inputs::<Felt>(
+                        log_quotient_degree,
+                        log_blowup,
+                    )
+                    .expect("valid quotient and blowup");
+                    let num_chunks = 1usize << log_quotient_degree;
+
+                    for height in [log_trace_height, 17 - log_trace_height] {
+                        let eval = canonical_domain::<Felt>(height, log_blowup)
+                            .evaluation_domain(log_quotient_degree);
+                        prop_assert_eq!(eval.recomposition_inputs(), params);
+
+                        let z_pow_n = z.exp_power_of_2(height as usize);
+                        let mut shifts = Vec::with_capacity(num_chunks);
+                        let mut weights = Vec::with_capacity(num_chunks);
+                        let mut shift = params.first_shift;
+                        let mut weight = params.first_weight;
+                        for _ in 0..num_chunks {
+                            shifts.push(shift);
+                            weights.push(weight);
+                            shift *= params.shift_ratio;
+                            weight *= params.shift_ratio;
+                        }
+                        prop_assume!(
+                            shifts
+                                .iter()
+                                .all(|&point| z_pow_n != QuadFelt::from(point))
+                        );
+
+                        let mut product_form = QuadFelt::ZERO;
+                        for (i, &chunk) in chunks[..num_chunks].iter().enumerate() {
+                            let mut basis = QuadFelt::ONE;
+                            for (j, &point) in shifts.iter().enumerate() {
+                                if i != j {
+                                    basis *= z_pow_n - point;
+                                }
+                            }
+                            product_form += QuadFelt::from(weights[i]) * basis * chunk;
+                        }
+
+                        prop_assert_eq!(
+                            product_form,
+                            eval.reconstruct_quotient(z, &chunks[..num_chunks]),
+                        );
+                    }
+                }
+            }
+        }
     }
 }

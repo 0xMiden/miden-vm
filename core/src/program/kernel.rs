@@ -1,8 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::Word;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use miden_crypto::{Word, hash::eidos::EidosDomain};
 
 use crate::{
     chiplets::hasher,
@@ -12,10 +10,8 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-/// Domain tag for the kernel commitment: the registered selector
-/// `(KERNEL_COMMITMENT_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const KERNEL_DOMAIN_TAG: crate::Felt =
-    super::domain::domain_selector(super::domain::KERNEL_COMMITMENT_DOMAIN_ID, 1);
+/// Registered domain tag for the kernel commitment.
+pub const KERNEL_DOMAIN_TAG: crate::Felt = super::domain::KernelCommitmentDomain::TAG.as_felt();
 
 // KERNEL
 // ================================================================================================
@@ -25,11 +21,9 @@ pub const KERNEL_DOMAIN_TAG: crate::Felt =
 /// The internally-stored list always has a consistent order, regardless of the order of procedure
 /// list used to instantiate a descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct KernelDescriptor(Vec<Word>);
 
@@ -107,12 +101,13 @@ impl KernelDescriptor {
     /// This is the fixed-size identifier observed by the recursive verifier in place of the raw
     /// digest list. The encoding is normative:
     /// - element order is this descriptor's canonical procedure order (fixed at construction);
-    /// - length binding comes from the Sponge2 padding rule (<https://eprint.iacr.org/2024/911>:
-    ///   the first capacity element carries `len % rate` and inputs are zero-padded to a rate
-    ///   multiple), so digest lists of different lengths cannot collide;
-    /// - the empty kernel hashes to the rule's canonical empty-input value.
+    /// - Eidos initializes its chaining word from the registered domain and exact logical length,
+    ///   preventing ambiguity between a partial block and its zero-padded form.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements_in_domain(Word::words_as_elements(&self.0), KERNEL_DOMAIN_TAG)
+        hasher::hash_elements_in_domain(
+            Word::words_as_elements(&self.0),
+            super::domain::KERNEL_COMMITMENT,
+        )
     }
 }
 
@@ -130,17 +125,6 @@ impl Deserializable for KernelDescriptor {
         let len = source.read_u8()? as usize;
         let kernel = source.read_many_iter::<Word>(len)?.collect::<Result<_, _>>()?;
         Self::from_hashes(kernel).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for KernelDescriptor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let kernel = Vec::<Word>::deserialize(deserializer)?;
-        Self::from_hashes(kernel).map_err(serde::de::Error::custom)
     }
 }
 
@@ -162,18 +146,27 @@ mod tests {
     use super::KernelDescriptor;
     use crate::{
         Felt, Word,
+        program::domain,
         serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
 
     #[test]
-    fn empty_kernel_commitment_matches_hash_of_no_elements() {
-        // The empty kernel's commitment must equal the canonical domain-tagged hash of zero
-        // elements, which the recursive verifier mirrors via
-        // `hash_elements_in_domain(ptr, 0, KERNEL_DOMAIN_TAG)`.
+    fn empty_kernel_commitment_matches_known_vector() {
+        let expected = Word::from(
+            [
+                7_629_329_411_056_522_819,
+                2_158_594_640_249_218_307,
+                769_500_264_184_883_565,
+                419_898_756_627_082_940,
+            ]
+            .map(Felt::new_unchecked),
+        );
         let empty = KernelDescriptor::default();
+
+        assert_eq!(empty.commitment(), expected);
         assert_eq!(
             empty.commitment(),
-            crate::chiplets::hasher::hash_elements_in_domain(&[], super::KERNEL_DOMAIN_TAG)
+            crate::chiplets::hasher::hash_elements_in_domain(&[], domain::KERNEL_COMMITMENT)
         );
     }
 
@@ -238,54 +231,6 @@ mod tests {
         assert!(
             result.is_err(),
             "expected KernelDescriptor::read_from to reject duplicate procedure hashes"
-        );
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn kernel_serde_deserialisation_rejects_duplicate_procedure_hashes() {
-        let a: Word = [
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-            Felt::new_unchecked(4),
-        ]
-        .into();
-
-        assert!(
-            KernelDescriptor::new(&[a, a]).is_err(),
-            "test precondition: KernelDescriptor::new must reject duplicates"
-        );
-
-        // KernelDescriptor deserialization should reject duplicates.
-        let json = serde_json::to_string(&vec![a, a]).unwrap();
-        let result: Result<KernelDescriptor, _> = serde_json::from_str(&json);
-        assert!(
-            result.is_err(),
-            "expected serde deserialization to reject duplicate procedure hashes"
-        );
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn kernel_serde_deserialisation_rejects_too_many_procedure_hashes() {
-        let proc_hashes: Vec<Word> = (0u64..=255)
-            .map(|n| {
-                [
-                    Felt::new_unchecked(n),
-                    Felt::new_unchecked(n + 1),
-                    Felt::new_unchecked(n + 2),
-                    Felt::new_unchecked(n + 3),
-                ]
-                .into()
-            })
-            .collect();
-
-        let json = serde_json::to_string(&proc_hashes).unwrap();
-        let result: Result<KernelDescriptor, _> = serde_json::from_str(&json);
-        assert!(
-            result.is_err(),
-            "expected serde deserialization to reject more than MAX_NUM_PROCEDURES hashes"
         );
     }
 }

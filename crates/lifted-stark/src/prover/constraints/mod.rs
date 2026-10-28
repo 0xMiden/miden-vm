@@ -108,13 +108,23 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     assert_eq!(output.len(), gj_height);
     let width = P::<F>::WIDTH;
 
-    assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
+    assert!(
+        gj_height < width || gj_height.is_multiple_of(width),
+        "quotient height must be smaller than or divisible by packing width"
+    );
     assert_eq!(inv_z_h.len(), quotient_degree, "inv_z_h length must equal D_j");
     // Bitmask for `i % inv_z_h.len()`; len is `2^log_blowup` by construction.
     let inv_z_h_mask: usize = inv_z_h.len() - 1;
 
     // Precompute selectors over the quotient evaluation coset.
-    let sels = eval_domain.selectors();
+    let mut sels = eval_domain.selectors();
+    if gj_height < width {
+        // Packed arithmetic is lane-wise. Pad the unused selector lanes; trace and periodic
+        // readers wrap around the domain, and only the real output lanes are written below.
+        sels.is_first_row.resize(width, F::ZERO);
+        sels.is_last_row.resize(width, F::ZERO);
+        sels.is_transition.resize(width, F::ZERO);
+    }
 
     // ─── Decompose alpha powers by constraint layout ───
     let aux_ef_width = air.aux_width();
@@ -153,7 +163,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                           aux_pe_buf: &mut Vec<PE<F, EF>>,
                           g: usize,
                           big_slice: &mut [EF]| {
-        for (sub_r, chunk) in big_slice.chunks_exact_mut(width).enumerate() {
+        for (sub_r, chunk) in big_slice.chunks_mut(width).enumerate() {
             let r = g * ROW_BLOCKS_PER_PARALLEL_TASK + sub_r;
             let i_start = r * width;
 

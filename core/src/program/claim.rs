@@ -16,20 +16,19 @@
 //! ```
 //!
 //! The code context comes first so that callsites that pin `(P, K)` can resume the claim hash
-//! from a precomputed sponge state; 40 elements is exactly five Poseidon2 rate blocks, so no
-//! padding block is absorbed and both read points (the `(P, K)` prefix state and the claim
-//! commitment) fall on permutation boundaries.
+//! from a precomputed chaining value. Forty elements is exactly five Eidos blocks, so no partial
+//! block is synthesized and both read points (the `(P, K)` prefix state and the claim commitment)
+//! fall on compression boundaries.
 //!
 //! # Claim commitment
 //!
-//! `CLAIM_HASH = Poseidon2::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`, i.e. the
-//! domain tag rides in the second capacity element while the first carries the Sponge2 padding
-//! rule of <https://eprint.iacr.org/2024/911> (here `40 % 8 = 0`).
+//! `CLAIM_HASH = Eidos::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`. The initial
+//! chaining value binds both the registered domain and the exact logical length (`40`), after
+//! which Eidos processes five compression blocks in sequence.
 
-use super::{
-    KernelDescriptor, ProgramInfo, StackInputs, StackOutputs,
-    domain::{EXECUTION_CLAIM_DOMAIN_ID, PROOF_REQUEST_DOMAIN_ID, domain_selector},
-};
+use miden_crypto::hash::eidos::EidosDomain;
+
+use super::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs};
 use crate::{Felt, Word, ZERO, chiplets::hasher};
 
 // CONSTANTS
@@ -38,13 +37,8 @@ use crate::{Felt, Word, ZERO, chiplets::hasher};
 /// Number of field elements in the canonical claim encoding: `P ‖ K ‖ I ‖ O`.
 pub const NUM_CLAIM_ELEMENTS: usize = 40;
 
-/// Domain tag for the claim commitment: the registered selector
-/// `(EXECUTION_CLAIM_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const CLAIM_DOMAIN_TAG: Felt = domain_selector(EXECUTION_CLAIM_DOMAIN_ID, 1);
-
-/// Domain tag for the proof-request key: the registered selector
-/// `(PROOF_REQUEST_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1);
+/// Registered domain tag for the claim commitment.
+pub const CLAIM_DOMAIN_TAG: Felt = super::domain::ExecutionClaimDomain::TAG.as_felt();
 
 // EXECUTION CLAIM
 // ================================================================================================
@@ -148,24 +142,7 @@ impl ExecutionClaim {
 /// This is the single implementation of `CLAIM_HASH`; every native computation of the claim
 /// commitment (including the transcript observation in `miden-air`) must go through it.
 pub fn claim_commitment(elements: &[Felt; NUM_CLAIM_ELEMENTS]) -> Word {
-    hasher::hash_elements_in_domain(elements, CLAIM_DOMAIN_TAG)
-}
-
-/// Returns the advice-map key addressing a proof package for `claim_commitment` under the
-/// verifier identified by `verifier_root`.
-///
-/// The key is `H_tag(claim_commitment ‖ verifier_root)` (one rate block, domain-separated). It
-/// is a lookup address, not a trust anchor: the verifier re-checks the retrieved package against
-/// the claim, so a wrong package fails verification. Both inputs are values the requester owns
-/// (the verifier's MAST root; the claim commitment it computed or holds from its own inputs) —
-/// neither is taken from advice.
-pub fn request_key(verifier_root: Word, claim_commitment: Word) -> Word {
-    // Absorb claim_commitment first so the MASM mirror needs a single word-swap to place the
-    // rate; the order is otherwise arbitrary (a domain-separated hash of the two words).
-    let mut preimage = [ZERO; 2 * 4];
-    preimage[0..4].copy_from_slice(claim_commitment.as_elements());
-    preimage[4..8].copy_from_slice(verifier_root.as_elements());
-    hasher::hash_elements_in_domain(&preimage, REQUEST_DOMAIN_TAG)
+    hasher::hash_elements_in_domain(elements, super::domain::EXECUTION_CLAIM)
 }
 
 // TESTS
@@ -174,7 +151,7 @@ pub fn request_key(verifier_root: Word, claim_commitment: Word) -> Word {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::{KERNEL_DOMAIN_TAG, KernelDescriptor},
+        super::{KernelDescriptor, domain},
         *,
     };
 
@@ -196,7 +173,7 @@ mod tests {
     }
 
     /// The commitment must bind every field and the I/O order, be domain-separated, and use
-    /// the registered selector.
+    /// the registered domain tag.
     #[test]
     fn commitment_binds_fields_order_and_domain() {
         let base = test_claim();
@@ -243,14 +220,10 @@ mod tests {
         );
         assert_ne!(
             base_commitment,
-            hasher::hash_elements_in_domain(&elements, KERNEL_DOMAIN_TAG),
+            hasher::hash_elements_in_domain(&elements, domain::KERNEL_COMMITMENT),
             "claim commitment must differ from a kernel-tagged hash of the same data"
         );
 
-        // the tag is the registered selector
-        assert_eq!(
-            CLAIM_DOMAIN_TAG.as_canonical_u64(),
-            (u64::from(EXECUTION_CLAIM_DOMAIN_ID) << 8) | 1
-        );
+        assert_eq!(CLAIM_DOMAIN_TAG, domain::ExecutionClaimDomain::TAG.as_felt());
     }
 }

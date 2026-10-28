@@ -190,7 +190,7 @@ use super::*;
 // ---- horner ops --------------------------------
 #[case(None,
     "begin
-        push.1.2.3.4 mem_storew_le.40 dropw
+        push.0.0.3.4 mem_storew_le.40 dropw
         horner_eval_base
     end",
     vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),
@@ -199,7 +199,7 @@ use super::*;
 )]
 #[case(None,
     "begin
-        push.1.2.3.4 mem_storew_le.40 dropw
+        push.0.0.3.4 mem_storew_le.40 dropw
         horner_eval_ext
         end",
     vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),
@@ -209,10 +209,9 @@ use super::*;
 // ---- log deferred ops --------------------------------
 // Drift marker only: this snapshot guards the `log_deferred` deferred-root output against
 // silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
-// Stack: [1, 2, 3, 4, 0, 0, 0, 0] with 1 at top; TRUE_DIGEST is at offsets 4..8.
+// TRUE_DIGEST is the zero word at the top of the stack.
 #[case(None, "begin log_deferred end",
-    vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
-         ZERO, ZERO, ZERO, ZERO],
+    vec![ZERO; 8],
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected
@@ -368,39 +367,21 @@ fn test_masm_errors_consistency(
     insta::assert_debug_snapshot!(testname, fast_err);
 }
 
-/// Tests that `log_deferred` correctly folds a verified statement digest into the rolling
-/// deferred root via Poseidon2.
-///
-/// Verifies:
-/// 1. Poseidon2 input layout `[DEFERRED_ROOT_PREV, STATEMENT, Tag::AND]`.
-/// 2. Output identity-mapped to the stack: rate0_out → `stack[0..4]` (= `DEFERRED_ROOT_NEW`),
-///    rate1_out → `stack[4..8]`, cap_out → `stack[8..12]`.
-/// 3. Deferred root initialised to `[0, 0, 0, 0]` (`TRUE_DIGEST`) for the first call.
+/// Tests that `log_deferred` folds a statement word into the rolling deferred root.
 #[test]
 fn test_log_deferred_correctness() {
-    use miden_core::{
-        crypto::hash::Poseidon2,
-        deferred::{Node, TRUE_DIGEST, Tag},
-    };
+    use miden_core::deferred::TRUE_DIGEST;
 
-    // The opcode reads STATEMENT from stack[4..8]; use implicit TRUE so the empty deferred registry
-    // can verify the statement.
-    let stack_inputs = [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12].map(Felt::new_unchecked);
-    let statement = TRUE_DIGEST;
-    let state_prev = TRUE_DIGEST;
-
-    // Hasher input: [RATE0 = DEFERRED_ROOT_PREV, RATE1 = STATEMENT, CAP = Tag::AND].
-    let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(state_prev.as_slice());
-    hasher_state[4..8].copy_from_slice(statement.as_slice());
-    hasher_state[8..12].copy_from_slice(&Tag::AND.as_word());
-
-    Poseidon2::apply_permutation(&mut hasher_state);
-
-    let expected_state_new: Word = hasher_state[0..4].try_into().unwrap();
-    assert_eq!(expected_state_new, Node::and(state_prev, statement).digest());
-    let expected_out_rate1: Word = hasher_state[4..8].try_into().unwrap();
-    let expected_out_cap: Word = hasher_state[8..12].try_into().unwrap();
+    // The opcode replaces STMNT at stack[0..4] with STATE_NEW.
+    // `log_deferred` only accepts a registered statement that evaluates to TRUE. The framework
+    // TRUE node is implicitly registered by every processor, so it is the minimal valid fixture
+    // for testing the constrained root transition directly.
+    let mut stack_inputs =
+        [0, 0, 0, 0, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map(Felt::new_unchecked);
+    stack_inputs[0..4].copy_from_slice(TRUE_DIGEST.as_elements());
+    let stmnt = TRUE_DIGEST;
+    let state_prev = Word::empty();
+    let expected_state_new = deferred_and_digest(state_prev, stmnt);
 
     let program_source = "begin log_deferred end";
     let program = {
@@ -416,12 +397,166 @@ fn test_log_deferred_correctness() {
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
     let actual_state_new = execution_output.stack.get_word(0).unwrap();
-    let actual_out_rate1 = execution_output.stack.get_word(4).unwrap();
-    let actual_out_cap = execution_output.stack.get_word(8).unwrap();
 
     assert_eq!(expected_state_new, actual_state_new, "STATE_NEW mismatch");
-    assert_eq!(expected_out_rate1, actual_out_rate1, "OUT_RATE1 mismatch");
-    assert_eq!(expected_out_cap, actual_out_cap, "OUT_CAP mismatch");
+    for (offset, expected) in stack_inputs[4..].iter().enumerate() {
+        assert_eq!(
+            execution_output.stack.get_element(offset + 4),
+            Some(*expected),
+            "stack tail changed at position {}",
+            offset + 4
+        );
+    }
+}
+
+/// Exporting an unlogged assertion preserves its original root and the execution's deferred root.
+#[test]
+fn export_deferred_witness_opens_an_unlogged_shared_graph() {
+    use miden_core::{
+        advice::AdviceStack,
+        deferred::{Node, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST},
+        utils::packed_u32_elements_to_bytes,
+    };
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let state = processor.deferred_state_mut();
+    let shared = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
+    let branch = state.register(Node::and(shared, shared)).unwrap();
+    let selected = state.register(Node::and(branch, branch)).unwrap();
+    let unrelated = state.register(Node::and(shared, TRUE_DIGEST)).unwrap();
+    let logged_root = state.log_statement(unrelated).unwrap();
+    let byte_len = state
+        .witness_for(selected, &miden_precompiles::default_verification_precompile_limits())
+        .unwrap()
+        .to_bytes()
+        .len();
+    assert!(!byte_len.is_multiple_of(4), "exercise final-limb padding");
+
+    let mut stack_inputs = [Felt::from_u32(7); 16];
+    stack_inputs[..4].copy_from_slice(selected.as_elements());
+    for (offset, value) in stack_inputs.iter().copied().enumerate() {
+        processor.stack_write(offset, value);
+    }
+    let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
+    processor = processor
+        .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
+        .unwrap();
+    let program = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program(
+            "program",
+            r#"begin
+                # Insert one zero felt under the selected root before exporting its witness.
+                push.0.1 movdn.5 movdn.4 adv.insert_mem
+                movup.4 drop movup.4 drop
+                adv.export_deferred_witness
+                emit.event("sys::adv::export_deferred_witness")
+            end"#,
+        )
+        .unwrap()
+        .unwrap_program();
+    let output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+
+    assert_eq!(output.precompile_root(), logged_root);
+    for (offset, expected) in stack_inputs.into_iter().enumerate() {
+        assert_eq!(output.stack.get_element(offset), Some(expected));
+    }
+    assert_eq!(output.advice.stack(), advice_stack);
+    assert_eq!(output.advice.map().len(), 1);
+    let value = output.advice.get_mapped_values(&selected).unwrap();
+    assert_eq!(value[0].as_canonical_u64() as usize, byte_len);
+    assert_eq!(value.len(), 1 + byte_len.div_ceil(4));
+    let bytes = packed_u32_elements_to_bytes(&value[1..]);
+    assert!(bytes[byte_len..].iter().all(|byte| *byte == 0));
+    let witness = PrecompileWitness::read_from_bytes(&bytes[..byte_len]).unwrap();
+    let prepared = witness
+        .prepare(
+            Arc::new(PrecompileRegistry::new()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        )
+        .unwrap();
+    assert_eq!(prepared.root(), selected);
+    let mut digests = vec![TRUE_DIGEST];
+    digests.extend(prepared.into_nodes().map(|node| node.digest()));
+    assert_eq!(digests, [TRUE_DIGEST, shared, branch, selected]);
+}
+
+/// Tests that successive `log_deferred` calls fold registered DAG roots in execution order.
+#[test]
+fn successive_log_deferred_calls_build_an_ordered_and_chain() {
+    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, TRUE_DIGEST};
+
+    let first_node = Node::and(TRUE_DIGEST, TRUE_DIGEST);
+    let first_statement = first_node.digest();
+    let second_node = Node::and(first_statement, TRUE_DIGEST);
+    let second_statement = second_node.digest();
+
+    let mut stack_inputs = [ZERO; 16];
+    stack_inputs[0..4].copy_from_slice(first_statement.as_elements());
+    stack_inputs[4..8].copy_from_slice(second_statement.as_elements());
+    for (offset, value) in stack_inputs[8..].iter_mut().enumerate() {
+        *value = Felt::new_unchecked(offset as u64 + 9);
+    }
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", "begin log_deferred dropw log_deferred end")
+        .unwrap()
+        .unwrap_program();
+
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    processor.deferred_state_mut().register(first_node).unwrap();
+    processor.deferred_state_mut().register(second_node).unwrap();
+
+    let first_root = deferred_and_digest(TRUE_DIGEST, first_statement);
+    let expected_root = deferred_and_digest(first_root, second_statement);
+    let reversed_root =
+        deferred_and_digest(deferred_and_digest(TRUE_DIGEST, second_statement), first_statement);
+    assert_ne!(expected_root, reversed_root);
+
+    let execution_output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+
+    assert_eq!(execution_output.stack.get_word(0), Some(expected_root));
+    assert_eq!(execution_output.precompile_root(), expected_root);
+    let prepared = execution_output
+        .precompile_witness
+        .expect("log_deferred leaves a precompile witness")
+        .prepare(
+            Arc::new(miden_precompiles::registry()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        )
+        .expect("execution-produced witness must prepare");
+    assert_eq!(prepared.root(), expected_root);
+    let nodes = prepared.into_nodes().collect::<Vec<_>>();
+    // Check both prepared AND steps bind the expected child commitments.
+    for (digest, expected_children) in [
+        (first_root, (TRUE_DIGEST, first_statement)),
+        (expected_root, (first_root, second_statement)),
+    ] {
+        let prepared = nodes
+            .iter()
+            .find(|prepared| prepared.digest() == digest)
+            .expect("AND node is in the witness");
+        let node = prepared.node();
+        assert_eq!(node.frame(), Some(DEFERRED_AND_FRAME));
+        assert_eq!(node.payload().as_join().unwrap(), expected_children);
+    }
+    for (offset, expected) in stack_inputs[8..].iter().enumerate() {
+        assert_eq!(
+            execution_output.stack.get_element(offset + 4),
+            Some(*expected),
+            "stack tail changed at position {}",
+            offset + 4,
+        );
+    }
+}
+
+fn deferred_and_digest(lhs: Word, rhs: Word) -> Word {
+    use miden_core::{crypto::hash::Eidos, deferred::DEFERRED_AND_INIT_CV};
+
+    let mut block = [ZERO; 8];
+    block[0..4].copy_from_slice(lhs.as_slice());
+    block[4..8].copy_from_slice(rhs.as_slice());
+    Eidos::compress(DEFERRED_AND_INIT_CV, block)
 }
 
 // Workaround to make insta and rstest work together.

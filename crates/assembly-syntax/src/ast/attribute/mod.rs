@@ -7,8 +7,6 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Spanned};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 pub use self::{
     meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},
@@ -39,10 +37,9 @@ use crate::{ast::Ident, prettier};
 /// Any remaining attributes we don't explicitly handle in the assembler, will be passed along as
 /// metadata attached to the procedures in the MAST output by the assembler.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum Attribute {
     /// A named behavior, trait or action; e.g. `@inline`

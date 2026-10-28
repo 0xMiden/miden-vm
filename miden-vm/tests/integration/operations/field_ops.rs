@@ -4,7 +4,6 @@ use miden_core::field::Field;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
     Felt, ONE, PrimeField64, ZERO, build_op_test, build_test, expect_exec_error_matches,
-    rand::rand_value,
 };
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::{WORD_SIZE, prop_randw, proptest::prelude::*};
@@ -30,7 +29,8 @@ fn add() {
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[2, 5, c]);
     test.expect_stack(&[7, c]);
 }
@@ -57,7 +57,8 @@ fn add_b() {
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(build_asm_op(2), &[5, c]);
     test.expect_stack(&[7, c]);
 }
@@ -78,7 +79,8 @@ fn sub() {
     test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[0, c]);
 }
@@ -99,7 +101,8 @@ fn sub_b() {
     test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[0, c]);
 }
@@ -122,7 +125,8 @@ fn mul() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[4, c]);
 }
@@ -148,7 +152,8 @@ fn mul_b() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[4, c]);
 }
@@ -171,7 +176,8 @@ fn div() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[5, 10, c]);
     test.expect_stack(&[2, c]);
 }
@@ -212,7 +218,8 @@ fn div_b() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(build_asm_op(5), &[10, c]);
     test.expect_stack(&[2, c]);
 }
@@ -244,7 +251,8 @@ fn neg() {
     test.expect_stack(&[0]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::ORDER_U64 - 5, c]);
 }
@@ -281,7 +289,8 @@ fn inv() {
     test.expect_stack(&[Felt::new_unchecked(64).inverse().as_canonical_u64()]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    // Stack-preservation sentinel: deterministic (randomized preservation lives in the proptest).
+    let c = 0xdead_beef_cafe_f00d;
     let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::new_unchecked(5).inverse().as_canonical_u64(), c]);
 }
@@ -326,8 +335,8 @@ fn pow2_fail() {
 
     // --- random u32 values > 63 ------------------------------------------------------
 
-    let mut value = rand_value::<u32>() as u64;
-    value += (u32::MAX as u64) + 1;
+    // Deterministic value above the valid pow2 input range (must be > 63)
+    let value = (u32::MAX as u64) + 1 + 77;
 
     let test = build_op_test!(asm_op, &[value]);
 
@@ -371,18 +380,18 @@ fn exp_bits_length_fail() {
 
     #[cfg(feature = "testing")]
     {
-        //---------------------- exp containing more than 64 bits -------------------------------------
+        //---------------------- exp containing more than 63 bits -------------------------------------
 
         let base = 9;
         let pow = 1021; // pow is a 10 bit number
-        let test = build_op_test!(build_asm_op(65), &[pow, base]);
+        let test = build_op_test!(build_asm_op(64), &[pow, base]);
 
         assert_assembler_diagnostic!(
             test,
             "invalid literal: expected value to be a valid bit size, e.g. 0..63",
             regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
             "12 |",
-            "13 | begin exp.u65 exec.truncate_stack end",
+            "13 | begin exp.u64 exec.truncate_stack end",
             "   :            ^^",
             "   `----"
         );
@@ -393,12 +402,100 @@ fn exp_bits_length_fail() {
 fn exp_small_pow() {
     let build_asm_op = |param: u64| format!("exp.{param}");
 
-    let base = rand_value::<u64>();
+    let base = 0xdead_beef_cafe_f00d;
     let pow = 7;
     let expected = Felt::new_unchecked(base).exp_u64(pow);
 
     let test = build_op_test!(build_asm_op(pow), &[base]);
     test.expect_stack(&[expected.as_canonical_u64()]);
+}
+
+#[test]
+fn exp_addition_chains_preserve_the_full_stack() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for pow in [4, 5, 6, 7, 8, 16] {
+        for base in [0, 1, 2, u32::MAX as u64, 1_u64 << 32, Felt::ORDER_U64 - 1] {
+            inputs[0] = base;
+            let mut expected = inputs.clone();
+            expected[0] = Felt::new_unchecked(base).exp_u64(pow).as_canonical_u64();
+
+            // Avoid build_op_test!'s stack truncation: it could hide an extra overflow row.
+            let test = build_test!(&format!("begin exp.{pow} end"), &inputs);
+            test.expect_stack(&expected);
+        }
+    }
+}
+
+#[test]
+fn zero_immediate_comparisons_preserve_the_full_stack() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for (op, zero_result, positive_result) in
+        [("lt", 0, 0), ("lte", 1, 0), ("gt", 0, 1), ("gte", 1, 1)]
+    {
+        for value in [0, 1, u32::MAX as u64, 1_u64 << 32, Felt::ORDER_U64 - 1] {
+            inputs[0] = value;
+            let mut expected = inputs.clone();
+            expected[0] = if value == 0 { zero_result } else { positive_result };
+
+            // Constant results must replace the top value without changing stack depth.
+            let test = build_test!(&format!("begin {op}.0 end"), &inputs);
+            test.expect_stack(&expected);
+        }
+    }
+}
+
+#[test]
+fn optimized_lowerings_preserve_overflow_values_and_satisfy_constraints() {
+    let inputs: Vec<u64> = (1..=16).collect();
+    let test = build_test!(
+        "begin
+            push.7
+            exp.4 exp.5 exp.6 exp.7 exp.8 exp.16
+            lt.0 lte.0 gt.0 gte.0
+            push.7 u32max push.7 assert_eq
+        end",
+        &inputs
+    );
+    test.expect_stack(&inputs);
+    test.check_constraints();
+}
+
+#[test]
+fn bare_exp_accepts_63_bit_boundaries() {
+    let asm_op = "exp";
+    let base = 7_u64;
+
+    for pow in [0, 1, (u32::MAX as u64) - 1, u32::MAX as u64, 1_u64 << 32, (1_u64 << 63) - 1] {
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
+        let test = build_op_test!(asm_op, &[pow, base]);
+        test.expect_stack(&[expected.as_canonical_u64()]);
+    }
+}
+
+#[test]
+fn bare_exp_rejects_64_bit_exponents() {
+    let asm_op = "exp";
+    let base = 7_u64;
+
+    for pow in [1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let test = build_op_test!(asm_op, &[pow, base]);
+        expect_exec_error_matches!(
+            test,
+            ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+            if err_code == ZERO && err_msg.is_none()
+        );
+    }
+}
+
+#[test]
+fn exp_imm_accepts_full_field_range() {
+    let base = 7_u64;
+
+    for pow in [1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
+        let test = build_op_test!(format!("exp.{pow}"), &[base]);
+        test.expect_stack(&[expected.as_canonical_u64()]);
+    }
 }
 
 #[test]
@@ -753,24 +850,25 @@ fn gte() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
-    fn add_proptest(a in any::<u64>(), b in any::<u64>()) {
+    fn add_proptest(a in any::<u64>(), b in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "add";
 
         // allow a possible overflow then mod by the Felt Modulus
         let expected = (a as u128 + b as u128) % Felt::ORDER_U64 as u128;
 
-        // b provided via the stack
-        let test = build_op_test!(asm_op, &[a, b]);
-        test.prop_expect_stack(&[expected as u64])?;
+        // b provided via the stack, with an unrelated element `e` below to verify that the
+        // rest of the stack is preserved.
+        let test = build_op_test!(asm_op, &[a, b, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
 
         // b provided as a parameter
         let asm_op = format!("{asm_op}.{b}");
-        let test = build_op_test!(&asm_op, &[a]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[a, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn sub_proptest(val1 in any::<u64>(), val2 in any::<u64>()) {
+    fn sub_proptest(val1 in any::<u64>(), val2 in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "sub";
 
         // assign the larger value to a and the smaller value to b
@@ -783,60 +881,61 @@ proptest! {
         let expected = a - b;
 
         // b provided via the stack: stack [b, a] computes a - b
-        let test = build_op_test!(asm_op, &[b, a]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(asm_op, &[b, a, e]);
+        test.prop_expect_stack(&[expected, e])?;
 
         // underflow by a provided via the stack: stack [a, b] computes b - a
-        let test = build_op_test!(asm_op, &[a, b]);
-        test.prop_expect_stack(&[Felt::ORDER_U64 - expected])?;
+        let test = build_op_test!(asm_op, &[a, b, e]);
+        test.prop_expect_stack(&[Felt::ORDER_U64 - expected, e])?;
 
         // b provided as a parameter
         let asm_op_b = format!("{asm_op}.{b}");
-        let test = build_op_test!(&asm_op_b, &[a]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(&asm_op_b, &[a, e]);
+        test.prop_expect_stack(&[expected, e])?;
 
         // underflow by a provided as a parameter
         let asm_op_b = format!("{asm_op}.{a}");
-        let test = build_op_test!(asm_op_b, &[b]);
-        test.prop_expect_stack(&[Felt::ORDER_U64 - expected])?;
+        let test = build_op_test!(asm_op_b, &[b, e]);
+        test.prop_expect_stack(&[Felt::ORDER_U64 - expected, e])?;
     }
 
     #[test]
-    fn mul_proptest(a in any::<u64>(), b in any::<u64>()) {
+    fn mul_proptest(a in any::<u64>(), b in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "mul";
 
         // allow a possible overflow then mod by the Felt Modulus
         let expected = (a as u128 * b as u128) % Felt::ORDER_U64 as u128;
 
-        // b provided via the stack
-        let test = build_op_test!(asm_op, &[a, b]);
-        test.prop_expect_stack(&[expected as u64])?;
+        // b provided via the stack, with an unrelated element `e` below to verify that the
+        // rest of the stack is preserved.
+        let test = build_op_test!(asm_op, &[a, b, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
 
         // b provided as a parameter
         let asm_op = format!("{asm_op}.{b}");
-        let test = build_op_test!(&asm_op, &[a]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[a, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn div_proptest(a in any::<u64>(), b in 1..u64::MAX) {
+    fn div_proptest(a in any::<u64>(), b in 1..u64::MAX, e in 0..Felt::ORDER_U64) {
         let asm_op = "div";
 
         // allow a possible overflow then mod by the Felt Modulus
         let expected = (Felt::new_unchecked(b).inverse().as_canonical_u64() as u128 * a as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack: stack [b, a] computes a / b
-        let test = build_op_test!(asm_op, &[b, a]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_op, &[b, a, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
 
         // b provided as a parameter
         let asm_op = format!("{asm_op}.{b}");
-        let test = build_op_test!(&asm_op, &[a]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[a, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn neg_proptest(a in any::<u64>()) {
+    fn neg_proptest(a in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "neg";
 
         let expected = if a > 0 {
@@ -845,18 +944,18 @@ proptest! {
             0
         };
 
-        let test = build_op_test!(asm_op, &[a]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(asm_op, &[a, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn inv_proptest(a in 1..u64::MAX) {
+    fn inv_proptest(a in 1..u64::MAX, e in 0..Felt::ORDER_U64) {
         let asm_op = "inv";
 
         let expected = Felt::new_unchecked(a).inverse().as_canonical_u64();
 
-        let test = build_op_test!(asm_op, &[a]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(asm_op, &[a, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
@@ -869,7 +968,7 @@ proptest! {
     }
 
     #[test]
-    fn exp_proptest(a in any::<u64>(), b in any::<u64>()) {
+    fn bare_exp_proptest(a in any::<u64>(), b in 0_u64..(1 << 63)) {
         // --- exp with no parameter --------------------------------------------------------------
         let asm_op = "exp";
         let base = a;
@@ -878,7 +977,10 @@ proptest! {
 
         let test = build_op_test!(asm_op, &[pow, base]);
         test.prop_expect_stack(&[expected.as_canonical_u64()])?;
+    }
 
+    #[test]
+    fn exp_imm_proptest(a in any::<u64>(), b in 0_u64..Felt::ORDER_U64) {
         // --- exp with parameter containing pow --------------------------------------------------
         let build_asm_op = |param: u64| format!("exp.{param}");
         let base = a;

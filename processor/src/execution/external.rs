@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BreakReason,
-    continuation_stack::{Continuation, ContinuationStack},
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
@@ -57,9 +57,11 @@ pub fn finish_load_mast_forest_from_external<F, T>(
     new_mast_forest: F,
     new_package_debug_info: Option<Arc<PackageDebugInfo>>,
     new_source_node_id: Option<DebugSourceNodeId>,
-    external_node_id_old_forest: MastNodeId,
+    inline_call_context: Option<SourceInlineCallContext>,
+    external_origin: (MastNodeId, Option<DebugSourceNodeId>),
     current_forest: &mut F,
     current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
 ) -> ControlFlow<BreakReason<F>>
@@ -67,6 +69,7 @@ where
     F: ExecutableMastForest + Clone,
     T: Tracer<Forest = F>,
 {
+    let (external_node_id_old_forest, old_source_node_id) = external_origin;
     let old_forest = current_forest as &F;
     let external_node_old_forest = option_map_break_reason(
         old_forest.get_node_by_id(external_node_id_old_forest),
@@ -88,10 +91,18 @@ where
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
     let old_package_debug_info = current_package_debug_info.clone();
+    let inline_context_depth = inline_call_contexts.len();
+    if let Some(inline_call_context) = inline_call_context {
+        inline_call_contexts.push(Some(inline_call_context));
+    }
 
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack
-        .push_enter_forest_with_package_debug_info(old_forest.clone(), old_package_debug_info);
+    continuation_stack.push_enter_forest_with_package_debug_info(
+        old_forest.clone(),
+        old_package_debug_info,
+        inline_context_depth,
+        old_source_node_id,
+    );
 
     // Push the root node of the external MAST forest onto the continuation stack.
     continuation_stack.push_with_source_node_id(
@@ -145,20 +156,24 @@ mod tests {
             ContinuationStack::new_with_source_node_id(&program, caller_source_node_id);
         let mut tracer = NoopTracer;
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         let result = finish_load_mast_forest_from_external(
             target_id,
             new_mast_forest,
             None,
             None,
-            external_id,
+            None,
+            (external_id, None),
             &mut current_forest,
             &mut package_debug_info,
+            &mut inline_call_contexts,
             &mut continuation_stack,
             &mut tracer,
         );
 
         assert_matches!(result, ControlFlow::Continue(()));
+        assert!(inline_call_contexts.is_empty());
         assert_matches!(
             continuation_stack.pop_continuation_with_source_node_id(),
             Some((Continuation::StartNode(node_id), None)) if node_id == target_id

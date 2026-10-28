@@ -1,0 +1,33 @@
+name: Release metadata
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - main
+      - next
+      - release/v*
+      - release-v*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+jobs:
+  release-metadata:
+    name: check release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test release policy
+        run: cargo test --locked --package miden-release-policy
+
+      - name: Check release metadata
+        run: scripts/check-release-metadata.sh "${{ github.event.pull_request.base.sha }}"

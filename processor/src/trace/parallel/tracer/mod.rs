@@ -19,7 +19,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     mast::{ExecutableMastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
-    trace::trace_state::NodeFlags,
+    trace::trace_state::{EndBlockFlags, EndBlockStackEntryKind},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -307,31 +307,29 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         None
     }
 
-    /// Returns the `NodeFlags` for an END operation based on the continuation type and state
+    /// Returns the `EndBlockFlags` for an END operation based on the continuation type and state
     /// captured in `start_clock_cycle`.
-    fn compute_node_flags(
+    fn compute_end_block_flags(
         &self,
         continuation: &Continuation<Arc<SparseMastForest>>,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<NodeFlags, ExecutionError> {
+    ) -> Result<EndBlockFlags, ExecutionError> {
         let is_loop_body = self.is_loop_body;
 
         match continuation {
             Continuation::FinishLoop(_) => {
                 // The Loop node itself is ending. With do-while semantics every loop is entered, so
                 // the `is_loop` flag is unconditionally true here.
-                Ok(NodeFlags::new(is_loop_body, true, false, false))
+                Ok(EndBlockFlags::new(is_loop_body, EndBlockStackEntryKind::LoopContinuation))
             },
             Continuation::FinishCall(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
-                let MastNode::Call(call_node) = node else {
+                let MastNode::Call(_) = node else {
                     return Err(ExecutionError::Internal(
                         "expected call node in FinishCall continuation",
                     ));
                 };
-                let is_syscall = call_node.is_syscall();
-                let is_call = !is_syscall;
-                Ok(NodeFlags::new(is_loop_body, false, is_call, is_syscall))
+                Ok(EndBlockFlags::new(is_loop_body, EndBlockStackEntryKind::CallerFrame))
             },
             Continuation::FinishDyn(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
@@ -340,17 +338,21 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                         "expected dyn node in FinishDyn continuation",
                     ));
                 };
-                let is_call = dyn_node.is_dyncall();
-                Ok(NodeFlags::new(is_loop_body, false, is_call, false))
+                let entry_kind = if dyn_node.is_dyncall() {
+                    EndBlockStackEntryKind::CallerFrame
+                } else {
+                    EndBlockStackEntryKind::Continuation
+                };
+                Ok(EndBlockFlags::new(is_loop_body, entry_kind))
             },
             Continuation::FinishJoin(_)
             | Continuation::FinishSplit(_)
             | Continuation::FinishBasicBlock(_) => {
-                Ok(NodeFlags::new(is_loop_body, false, false, false))
+                Ok(EndBlockFlags::new(is_loop_body, EndBlockStackEntryKind::Continuation))
             },
-            _ => {
-                Err(ExecutionError::Internal("compute_node_flags called for non-END continuation"))
-            },
+            _ => Err(ExecutionError::Internal(
+                "compute_end_block_flags called for non-END continuation",
+            )),
         }
     }
 
@@ -458,7 +460,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishJoin(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    let flags = self.compute_end_block_flags(continuation, current_forest)?;
                     self.fill_end_trace_row(
                         &processor.system,
                         &processor.stack,
@@ -468,7 +470,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishSplit(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    let flags = self.compute_end_block_flags(continuation, current_forest)?;
                     self.fill_end_trace_row(
                         &processor.system,
                         &processor.stack,
@@ -504,7 +506,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     } else {
                         // Loop is finished, so fill in an END row.
                         let node = get_node_in_forest(current_forest, *node_id)?;
-                        let flags = self.compute_node_flags(continuation, current_forest)?;
+                        let flags = self.compute_end_block_flags(continuation, current_forest)?;
                         self.fill_end_trace_row(
                             &processor.system,
                             &processor.stack,
@@ -515,7 +517,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishCall(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    let flags = self.compute_end_block_flags(continuation, current_forest)?;
                     self.fill_end_trace_row(
                         &processor.system,
                         &processor.stack,
@@ -525,7 +527,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishDyn(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    let flags = self.compute_end_block_flags(continuation, current_forest)?;
                     self.fill_end_trace_row(
                         &processor.system,
                         &processor.stack,
@@ -602,7 +604,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         ));
                     };
 
-                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    let flags = self.compute_end_block_flags(continuation, current_forest)?;
                     self.fill_basic_block_end_trace_row(
                         &processor.system,
                         &processor.stack,
@@ -690,10 +692,6 @@ mod tests {
     /// `parent_next_overflow_addr` equal to the stack's `last_overflow_addr` (which is ZERO),
     /// rather than peeking at the replay queue and returning the post-pop overflow address from the
     /// future/unrelated overflow pop (which is non-zero).
-    ///
-    /// (`last_overflow_addr != ZERO`). The overflow replay queue contains a stale entry whose
-    /// post-pop overflow address is 42. The method should return the stack's `last_overflow_addr`,
-    /// but instead peeks at the replay queue and returns ZERO.
     #[test]
     fn get_execution_context_for_dyncall_at_min_stack_depth_with_overflow_entries() {
         // Build a MastForest with a single DYNCALL node.

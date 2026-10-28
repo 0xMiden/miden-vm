@@ -3,8 +3,8 @@
 //! - [`Proof`]: Single-opening proof with rows, optional salt, and authentication path.
 //! - [`BatchProof`]: Batch opening data with per-leaf rows/salt and a [`MerkleWitness`].
 //!
-//! Use [`Lmcs::read_batch_proof`] to parse transcript hints
-//! into a [`BatchProof`] without verifying against a commitment.
+//! Use [`Lmcs::batch_proof`] to construct a proof from a tree or [`Lmcs::read_batch_proof`]
+//! to parse one from transcript hints.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
@@ -27,7 +27,7 @@ pub struct Proof<F, C, const SALT_ELEMS: usize = 0> {
     pub siblings: Vec<C>,
 }
 
-/// Batch opening data parsed from transcript hints without verification.
+/// Batch opening data with a Merkle witness for authentication paths.
 ///
 /// Bundles opened leaf data (rows + salt) with the reconstructed [`MerkleWitness`] for
 /// authentication path queries. Indices here are leaf indices after any virtual-lift folding.
@@ -40,12 +40,16 @@ pub struct BatchProof<F, C, const SALT_ELEMS: usize = 0> {
 
 /// Accessor trait for batch proof data.
 ///
-/// Provides read access to individual openings, authentication paths, and leaf indices.
+/// Provides read access to individual openings, their hashes, authentication paths, and leaf
+/// indices.
 /// This allows consumers (e.g. the Miden VM recursive verifier) to work with batch proofs
 /// through the opaque `Lmcs::BatchProof` associated type.
 pub trait BatchProofView<F, C> {
     /// Get the opened rows for a given leaf index.
     fn opening(&self, index: usize) -> Option<&RowList<F>>;
+
+    /// Get the hash computed from an opened leaf.
+    fn leaf_hash(&self, index: usize) -> Option<&C>;
 
     /// Get the salt for a given leaf index.
     ///
@@ -62,6 +66,11 @@ pub trait BatchProofView<F, C> {
 impl<F, C: Clone, const SALT_ELEMS: usize> BatchProofView<F, C> for BatchProof<F, C, SALT_ELEMS> {
     fn opening(&self, index: usize) -> Option<&RowList<F>> {
         self.openings.get(&index).map(|o| &o.rows)
+    }
+
+    fn leaf_hash(&self, index: usize) -> Option<&C> {
+        self.openings.get(&index)?;
+        self.witness.leaf_node(index)
     }
 
     fn salt(&self, index: usize) -> Option<&[F]> {
@@ -184,7 +193,18 @@ mod tests {
                     *verified_rows, opening.rows,
                     "row mismatch between open_batch and batch witness at index {idx}"
                 );
+                let expected_hash = lmcs.hash(opening.rows.iter_rows());
+                assert_eq!(witness.leaf_hash(idx), Some(&expected_hash));
             }
+
+            // Authentication siblings also live at leaf depth, but they are not openings.
+            let sibling = (0..tree.height())
+                .find(|index| {
+                    !witness.openings.contains_key(index)
+                        && witness.witness.leaf_node(*index).is_some()
+                })
+                .expect("batch witness should contain an unopened sibling at leaf depth");
+            assert_eq!(witness.leaf_hash(sibling), None);
         };
 
         test(1, &[(8, 4)], &[0, 3, 7]);

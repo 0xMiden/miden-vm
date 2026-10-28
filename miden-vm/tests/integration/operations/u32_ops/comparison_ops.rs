@@ -1,8 +1,9 @@
+#[cfg(feature = "arbitrary")]
 use core::cmp::Ordering;
 
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{build_op_test, rand::rand_value};
+use miden_utils_testing::{Felt, PrimeField64, build_op_test, build_test};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================
@@ -55,13 +56,37 @@ fn u32max() {
     test_max(asm_op);
 }
 
+#[test]
+fn u32max_preserves_the_full_stack_for_both_selection_branches() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for (a, b, expected_max) in [
+        (0, 0, 0),
+        (0, 1, 1),
+        (1, 0, 1),
+        (u32::MAX as u64, 0, u32::MAX as u64),
+        (0, u32::MAX as u64, u32::MAX as u64),
+        (u32::MAX as u64, u32::MAX as u64, u32::MAX as u64),
+    ] {
+        inputs[0] = a;
+        let mut expected = inputs.clone();
+        expected[0] = expected_max;
+
+        for source in [format!("begin push.{b} u32max end"), format!("begin u32max.{b} end")] {
+            let test = build_test!(&source, &inputs);
+            test.expect_stack(&expected);
+        }
+    }
+}
+
 // U32 OPERATIONS TESTS - RANDOMIZED - COMPARISON OPERATIONS
 // ================================================================================================
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
-    fn u32lt_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32lt_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = match a.cmp(&b) {
             Ordering::Less => 1,
             Ordering::Equal => 0,
@@ -69,12 +94,17 @@ proptest! {
         };
 
         let asm_op = "u32lt";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        // Immediate variant.
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32lte_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32lte_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = match a.cmp(&b) {
             Ordering::Less => 1,
             Ordering::Equal => 1,
@@ -82,12 +112,15 @@ proptest! {
         };
 
         let asm_op = "u32lte";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32gt_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32gt_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = match a.cmp(&b) {
             Ordering::Less => 0,
             Ordering::Equal => 0,
@@ -95,12 +128,15 @@ proptest! {
         };
 
         let asm_op = "u32gt";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32gte_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32gte_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = match a.cmp(&b) {
             Ordering::Less => 0,
             Ordering::Equal => 1,
@@ -108,26 +144,54 @@ proptest! {
         };
 
         let asm_op = "u32gte";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32min_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32min_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = if a < b { a } else { b };
 
         let asm_op = "u32min";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn u32max_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32max_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = if a > b { a } else { b };
 
         let asm_op = "u32max";
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
+    }
+
+    /// Use equal operands to exercise equality in every generated case.
+    #[test]
+    fn u32comparisons_equal_operands_proptest(
+        a in any::<u32>(),
+        e in 0..Felt::ORDER_U64,
+        (asm_op, expected) in prop::sample::select(vec![
+            ("u32lt", 0),
+            ("u32lte", 1),
+            ("u32gt", 0),
+            ("u32gte", 1),
+        ]),
+    ) {
+        let test = build_op_test!(asm_op, &[a as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        let test = build_op_test!(format!("{asm_op}.{a}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 }
 
@@ -165,32 +229,32 @@ fn test_comparison_op(asm_op: &str, expected_lt: u64, expected_eq: u64, expected
     let test = build_op_test!(asm_op_imm, &[1]);
     test.expect_stack(&[expected_gt]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u64>() as u32;
-    let b = rand_value::<u64>() as u32;
-    let expected = match a.cmp(&b) {
-        Ordering::Less => expected_lt,
-        Ordering::Equal => expected_eq,
-        Ordering::Greater => expected_gt,
-    };
+    // --- extreme values -------------------------------------------------------------------------
+    // a = 0, b = u32::MAX (less-than case); stack is [b, a] with b on top
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0]);
+    test.expect_stack(&[expected_lt]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[expected]);
+    let test = build_op_test!(format!("{asm_op}.{}", u32::MAX), &[0]);
+    test.expect_stack(&[expected_lt]);
 
-    // same test with immediate value
-    let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
-    test.expect_stack(&[expected]);
+    // a = u32::MAX, b = 0 (greater-than case)
+    let test = build_op_test!(asm_op, &[0, u32::MAX as u64]);
+    test.expect_stack(&[expected_gt]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let test = build_op_test!(asm_op_imm, &[u32::MAX as u64]);
+    test.expect_stack(&[expected_gt]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[expected, c]);
+    for a in [0, u32::MAX] {
+        let e = Felt::ORDER_U64 - 1;
+        let test = build_op_test!(asm_op, &[a as u64, a as u64, e]);
+        test.expect_stack(&[expected_eq, e]);
 
-    // same test with immediate value
-    let test = build_op_test!(asm_op_imm, &[a as u64, c]);
-    test.expect_stack(&[expected, c]);
+        let test = build_op_test!(format!("{asm_op}.{a}"), &[a as u64, e]);
+        test.expect_stack(&[expected_eq, e]);
+    }
+
+    // Randomized coverage, including immediate variants and stack preservation, lives in the
+    // u32{lt,lte,gt,gte}_proptest tests below.
 }
 
 /// Tests a u32min assembly operation against a number of cases to ensure that the operation puts
@@ -219,30 +283,21 @@ fn test_min(asm_op: &str) {
     let test = build_op_test!(asm_op_imm, &[1]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let expected = match a.cmp(&b) {
-        Ordering::Less => a,
-        Ordering::Equal => b,
-        Ordering::Greater => b,
-    };
+    // --- extreme values -------------------------------------------------------------------------
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0]);
+    test.expect_stack(&[0]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op, &[0, u32::MAX as u64]);
+    test.expect_stack(&[0]);
 
-    let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(format!("{asm_op}.{}", u32::MAX), &[0]);
+    test.expect_stack(&[0]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let test = build_op_test!(asm_op_imm, &[u32::MAX as u64]);
+    test.expect_stack(&[0]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[expected as u64, c]);
-
-    let test = build_op_test!(asm_op_imm, &[a as u64, c]);
-    test.expect_stack(&[expected as u64, c]);
+    // Randomized coverage, including immediate variants and stack preservation, lives in
+    // u32min_proptest.
 }
 
 /// Tests a u32max assembly operation against a number of cases to ensure that the operation puts
@@ -271,28 +326,19 @@ fn test_max(asm_op: &str) {
     let test = build_op_test!(asm_op_imm, &[1]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let expected = match a.cmp(&b) {
-        Ordering::Less => b,
-        Ordering::Equal => b,
-        Ordering::Greater => a,
-    };
+    // --- extreme values -------------------------------------------------------------------------
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op, &[0, u32::MAX as u64]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(format!("{asm_op}.{}", u32::MAX), &[0]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let test = build_op_test!(asm_op_imm, &[u32::MAX as u64]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[expected as u64, c]);
-
-    let test = build_op_test!(asm_op_imm, &[a as u64, c]);
-    test.expect_stack(&[expected as u64, c]);
+    // Randomized coverage, including immediate variants and stack preservation, lives in
+    // u32max_proptest.
 }

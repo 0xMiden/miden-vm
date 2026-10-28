@@ -1,4 +1,19 @@
-use miden::core::stark::constants
+use miden::core::stark::types
+use {
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    DEEP_ALPHA_ADVICE_PTR,
+    DEEP_COMPOSITION_COEFS_PTR,
+    DOMAIN_OFFSET_PTR,
+    FRI_COM_PTR,
+    FRI_QUERIES_ADDRESS_PTR,
+    HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR,
+    LDE_DOMAIN_INFO_PTR,
+    OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
+    OOD_POINT_PTR,
+    TMP1_PTR,
+    TMP2_PTR,
+    TRACE_DOMAIN_GENERATOR_PTR,
+} from miden::core::stark::constants
 
 #! Takes a query index and computes poe := domain_gen^index and x := offset * poe. It also computes
 #! the denominators (x - z) and (x - gz).
@@ -11,9 +26,14 @@ use miden::core::stark::constants
 #! - poe := domain_gen^index
 #! - x := offset * poe
 #! - Y is a "garbage" word
-proc compute_denominators
+proc compute_denominators(
+    scratch: word,
+    preserved: word,
+    index: u32,
+    query_ptr: ptr<word>,
+) -> (types::EvaluationPair, word, felt, u32, ptr<word>)
     # Compute poe and x.
-    exec.constants::get_lde_domain_info_word
+    mem_loadw_le.LDE_DOMAIN_INFO_PTR
     #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
     movup.2
     #=> [domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
@@ -21,14 +41,14 @@ proc compute_denominators
     #=> [index, domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
     exp.u32
     dup movdn.8
-    exec.constants::get_domain_offset mul
+    mem_load.DOMAIN_OFFSET_PTR mul
     #=> [x, lde_size, depth, 0, Y, poe, index, ...]
 
     # Get z and gz from memory
     movdn.3
     #=> [lde_size, depth, 0, x, Y, poe, index, ...]
     push.0
-    exec.constants::tmp1 mem_loadw_le
+    mem_loadw_le.TMP1_PTR
     #=> [-z0, -z1, -gz0, -gz1, x, Y, poe, index, ...]
 
     # Compute denominators and place poe after Y for word alignment.
@@ -45,13 +65,19 @@ end
 #! Computes the DEEP query.
 #!
 #! Input: [Z, X, Y, W, query_ptr, ...]
-#! Output: [eval0, eval1, Y, query_ptr, ...]
+#! Output: [eval0, eval1, Y, W, query_ptr, ...]
 #!
 #! where:
 #!
 #! 1. X is [q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]
 #! 2. W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
-proc divide_and_add
+proc divide_and_add(
+    denominators: types::EvaluationPair,
+    query_evaluations: types::EvaluationPair,
+    cursor: types::DeepQueryCursor,
+    fixed_evaluations: types::EvaluationPair,
+    query_ptr: ptr<word>,
+) -> (types::QuadFelt, types::DeepQueryCursor, types::EvaluationPair, ptr<word>)
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
     dupw.3
@@ -80,16 +106,16 @@ proc divide_and_add
 
     # Multiply res_gz by challenge_points (beta) for point batching.
     # DEEP formula: Q(X) = res_z + beta * res_gz
-    # beta is stored at deep_rand_coef_ptr (positions 0,1).
-    exec.constants::deep_rand_coef_ptr mem_load
-    exec.constants::deep_rand_coef_ptr add.1 mem_load
+    # beta is stored at DEEP_COMPOSITION_COEFS_PTR (positions 0,1).
+    mem_load.DEEP_COMPOSITION_COEFS_PTR
+    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_load
     swap
     #=> [beta0, beta1, res_gz_0, res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
     ext2mul
     #=> [beta_res_gz_0, beta_res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
 
     ext2add
-    # => [eval0, eval1, Y, query_ptr, ...]
+    # => [eval0, eval1, Y, W, query_ptr, ...]
 end
 
 #! Prepares the stack for the computation of the DEEP composition polynomial FRI queries.
@@ -108,45 +134,50 @@ end
 #!    storing the computed FRI queries,
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
-pub proc prepare_stack_deep_queries_computation
-    exec.constants::get_fri_queries_address
+pub proc prepare_stack_deep_queries_computation() -> (
+    word,
+    ptr<word>,
+    ptr<word>,
+    types::EvaluationPair,
+    ptr<word>,
+)
+    mem_load.FRI_QUERIES_ADDRESS_PTR
     # => [query_ptr, ...]
 
-    padw exec.constants::ood_fixed_term_horner_evaluations_ptr mem_loadw_le
+    padw mem_loadw_le.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR
     # => [q_z_0, q_z_1, q_gz_0, q_gz_1, query_ptr, ...]
     # => [W, query_ptr, ...] where W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
 
     # Get pointer to help test for the last query to be processed
-    exec.constants::fri_com_ptr
+    push.FRI_COM_PTR
     # => [query_end_ptr, W, query_ptr, ...]
     dup.5
     # => [query_ptr, query_end_ptr, W, query_ptr, ...]
 
-    # Store pointers to alpha, memory region to store trace row for current query and a fresh
-    # accumulator value i.e., (0, 0).
+    # Store the relation-local query-row pointer, alpha pointer, and a fresh accumulator (0, 0).
     push.0.0
-    exec.constants::deep_rand_alpha_nd_ptr
-    exec.constants::current_trace_row_ptr
-    exec.constants::tmp2 mem_storew_le
+    push.DEEP_ALPHA_ADVICE_PTR
+    mem_load.CURRENT_TRACE_ROW_ADDRESS_PTR
+    mem_storew_le.TMP2_PTR
 
     # Compute the negations of z and gz where z is the OOD point
     # We do it here as this computation is common to all queries.
-    exec.constants::z_ptr mem_loadw_le
+    mem_loadw_le.OOD_POINT_PTR
     # => [zN_0, zN_1, z0, z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     drop drop
     neg swap neg
     swap
     # => [-z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     dup
-    exec.constants::get_trace_domain_generator mul
+    mem_load.TRACE_DOMAIN_GENERATOR_PTR mul
     # => [-gz0, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     dup.2
-    exec.constants::get_trace_domain_generator mul
+    mem_load.TRACE_DOMAIN_GENERATOR_PTR mul
     # => [-gz1, -gz0, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     movdn.3 movdn.2
     # => [-z0, -z1, -gz0, -gz1, query_ptr, query_end_ptr, W, query_ptr, ...]
-    # Save to temporary location `tmp1` for later use when computing the denominators
-    exec.constants::tmp1 mem_storew_le
+    # Save to temporary location `TMP1_PTR` for later use when computing the denominators
+    mem_storew_le.TMP1_PTR
     # => [Y, query_ptr, query_end_ptr, W, query_ptr, ...]
 end
 
@@ -167,7 +198,15 @@ end
 #! 6. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 #! 7. `?` is a binary flag indicating if there are further queries to process.
-pub proc compute_deep_query
+pub proc compute_deep_query(
+    scratch: word,
+    evaluations: types::EvaluationPair,
+    index: u32,
+    query_ptr: ptr<word>,
+    query_end_ptr: ptr<word>,
+    fixed_evaluations: types::EvaluationPair,
+    queries_ptr: ptr<word>,
+) -> (i1, types::FriQuery, ptr<word>, ptr<word>, types::EvaluationPair, ptr<word>)
     # 1) Compute poe := domain_gen^index, x := offset * poe, and denominators (x - z)
     # and (x - gz).
     exec.compute_denominators
@@ -200,10 +239,10 @@ end
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc compute_deep_composition_polynomial_queries
+pub proc compute_deep_composition_polynomial_queries()
     # Prepare the stack for the core procedure computing the queries
     exec.prepare_stack_deep_queries_computation
     # => [Y, query_ptr, query_end_ptr, W, query_ptr]
-    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr dynexec
+    push.HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR dynexec
     # => [...]
 end

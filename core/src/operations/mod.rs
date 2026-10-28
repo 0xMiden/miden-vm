@@ -1,8 +1,5 @@
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 mod debug_metadata;
 pub use debug_metadata::AssemblyOp;
 
@@ -103,7 +100,7 @@ pub mod opcodes {
     pub const U32ADD3: u8        = 0b0100_1100;
     pub const U32MADD: u8        = 0b0100_1110;
 
-    pub const HPERM: u8          = 0b0101_0000;
+    pub const COMPRESS: u8      = 0b0101_0000;
     pub const MPVERIFY: u8       = 0b0101_0001;
     pub const PIPE: u8           = 0b0101_0010;
     pub const MSTREAM: u8        = 0b0101_0011;
@@ -139,8 +136,11 @@ pub mod opcodes {
 /// Note though that those operations have their own unique opcode which lives in the same 7-bit
 /// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
     /// Advances cycle counter, but does not change the state of user stack.
@@ -174,7 +174,8 @@ pub enum Operation {
     ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
     /// - System events are identified by reserved [`SystemEvent`](crate::events::SystemEvent) IDs.
     ///   Most are handled by the VM; `SystemEvent::TraceEvent` triggers the host's optional
-    ///   read-only trace handler for the trace event id at stack position 1.
+    ///   read-only trace handler for the trace event id at stack position 1. Assembly exposes this
+    ///   through `trace`, `trace.CONST`, and `trace.event("...")`.
     /// - Any non system event ID is forwarded to the host's regular event handler.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
@@ -484,32 +485,23 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = opcodes::PIPE,
 
-    /// Encrypts data from source memory to destination memory using the Poseidon2 sponge keystream.
-    ///
-    /// Two consecutive words (8 elements) are loaded from source memory, each element is added
-    /// to the corresponding element in the rate (top 8 stack elements), and the resulting
-    /// ciphertext is written to destination memory and replaces the rate. Source and destination
-    /// addresses are incremented by 8.
+    /// Encrypts two memory words with an Eidos XOF keystream.
     ///
     /// Stack transition:
     /// ```text
-    /// [rate(8), cap(4), src, dst, ...]
+    /// [K_CTR(4), counter, src, dst, remaining, ...]
     ///     ↓
-    /// [ct(8), cap(4), src+8, dst+8, ...]
+    /// [K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]
     /// ```
-    /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
-    ///
-    /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
     CryptoStream = opcodes::CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
-    /// Performs a Poseidon2 permutation on the top 3 words of the operand stack,
-    /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
-    /// A), and the digest output is the middle word E.
+    /// Performs a block-preserving Eidos compression on the top 3 words of the operand
+    /// stack.
     ///
     /// Stack transition:
-    /// [C, B, A, ...] -> [F, E, D, ...]
-    HPerm = opcodes::HPERM,
+    /// [block(8), cv(4), ...] -> [block(8), cv'(4), ...]
+    Compress = opcodes::COMPRESS,
 
     /// Verifies that a Merkle path from the specified node resolves to the specified root. This
     /// operation can be used to prove that the prover knows a path in the specified Merkle tree
@@ -554,13 +546,13 @@ pub enum Operation {
     /// This operation:
     /// - Folds 4 query values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1)
     /// - Computes new value of the domain generator power: poe' = poe^4
-    /// - Increments layer pointer (cptr) by 2
+    /// - Increments layer pointer (cptr) by 8
     /// - Checks that the previous folding was done correctly
     /// - Shifts the stack to move an item from the overflow table to stack position 15
     ///
     /// Stack transition:
-    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
-    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0,
+    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, coset, poe, pe1, pe0, a1, a0, cptr, ...]
+    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+8, f_pos, poe^4, ne1, ne0,
     /// eptr, ...] where eptr is moved from the stack overflow table and is the address of the
     /// final FRI layer.
     FriE2F4 = opcodes::FRIE2F4,
@@ -792,7 +784,7 @@ impl fmt::Display for Operation {
             Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
-            Self::HPerm => write!(f, "hperm"),
+            Self::Compress => write!(f, "compress"),
             Self::MpVerify(err_code) => write!(f, "mpverify({err_code})"),
             Self::MrUpdate => write!(f, "mrupdate"),
 
@@ -802,6 +794,112 @@ impl fmt::Display for Operation {
             Self::HornerExt => write!(f, "horner_eval_ext"),
             Self::EvalCircuit => write!(f, "eval_circuit"),
             Self::LogDeferred => write!(f, "log_deferred"),
+        }
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod operation_arbitrary {
+    use proptest::prelude::*;
+
+    use super::Operation;
+    use crate::Felt;
+
+    impl Arbitrary for Operation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All 81 variants are any-valid on the wire: unit variants carry only the op code,
+            // and the four data-carrying variants (Assert, U32assert2, Push, MpVerify) take an
+            // arbitrary Felt. prop_oneof exercises every discriminant in both directions.
+            prop_oneof![
+                any::<Felt>().prop_map(Self::Assert).boxed(),
+                any::<Felt>().prop_map(Self::U32assert2).boxed(),
+                any::<Felt>().prop_map(Self::Push).boxed(),
+                any::<Felt>().prop_map(Self::MpVerify).boxed(),
+                Just(Self::Noop),
+                Just(Self::SDepth),
+                Just(Self::Caller),
+                Just(Self::Clk),
+                Just(Self::Emit),
+                Just(Self::Add),
+                Just(Self::Neg),
+                Just(Self::Mul),
+                Just(Self::Inv),
+                Just(Self::Incr),
+                Just(Self::And),
+                Just(Self::Or),
+                Just(Self::Not),
+                Just(Self::Eq),
+                Just(Self::Eqz),
+                Just(Self::Expacc),
+                Just(Self::Ext2Mul),
+                Just(Self::U32split),
+                Just(Self::U32add),
+                Just(Self::U32add3),
+                Just(Self::U32sub),
+                Just(Self::U32mul),
+                Just(Self::U32madd),
+                Just(Self::U32div),
+                Just(Self::U32and),
+                Just(Self::U32xor),
+                Just(Self::Pad),
+                Just(Self::Drop),
+                Just(Self::Dup0),
+                Just(Self::Dup1),
+                Just(Self::Dup2),
+                Just(Self::Dup3),
+                Just(Self::Dup4),
+                Just(Self::Dup5),
+                Just(Self::Dup6),
+                Just(Self::Dup7),
+                Just(Self::Dup9),
+                Just(Self::Dup11),
+                Just(Self::Dup13),
+                Just(Self::Dup15),
+                Just(Self::Swap),
+                Just(Self::SwapW),
+                Just(Self::SwapW2),
+                Just(Self::SwapW3),
+                Just(Self::SwapDW),
+                Just(Self::MovUp2),
+                Just(Self::MovUp3),
+                Just(Self::MovUp4),
+                Just(Self::MovUp5),
+                Just(Self::MovUp6),
+                Just(Self::MovUp7),
+                Just(Self::MovUp8),
+                Just(Self::MovDn2),
+                Just(Self::MovDn3),
+                Just(Self::MovDn4),
+                Just(Self::MovDn5),
+                Just(Self::MovDn6),
+                Just(Self::MovDn7),
+                Just(Self::MovDn8),
+                Just(Self::CSwap),
+                Just(Self::CSwapW),
+                Just(Self::AdvPop),
+                Just(Self::AdvPopW),
+                Just(Self::MLoadW),
+                Just(Self::MStoreW),
+                Just(Self::MLoad),
+                Just(Self::MStore),
+                Just(Self::MStream),
+                Just(Self::Pipe),
+                Just(Self::CryptoStream),
+                Just(Self::Compress),
+                Just(Self::MrUpdate),
+                Just(Self::FriE2F4),
+                Just(Self::HornerBase),
+                Just(Self::HornerExt),
+                Just(Self::EvalCircuit),
+                Just(Self::LogDeferred),
+            ]
+            .boxed()
         }
     }
 }
@@ -892,7 +990,7 @@ impl Serializable for Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -986,7 +1084,7 @@ impl Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -1078,7 +1176,7 @@ impl Deserializable for Operation {
             opcodes::U32ADD3 => Self::U32add3,
             opcodes::U32MADD => Self::U32madd,
 
-            opcodes::HPERM => Self::HPerm,
+            opcodes::COMPRESS => Self::Compress,
             opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             opcodes::PIPE => Self::Pipe,
             opcodes::MSTREAM => Self::MStream,
