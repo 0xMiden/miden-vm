@@ -79,21 +79,28 @@ pub trait MastForestRead: ExecutableMastForest {
 struct ContentMatcher<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> {
     candidate: &'a C,
     source: &'a S,
-    source_full_ids: Vec<MastNodeId>,
-    source_digest_ids: Vec<MastNodeId>,
+    source_full_ids_by_digest: BTreeMap<Word, Vec<MastNodeId>>,
+    source_digests: BTreeSet<Word>,
     matching_pairs: BTreeSet<(MastNodeId, MastNodeId)>,
-    rejected_pairs: BTreeSet<(MastNodeId, MastNodeId)>,
 }
 
 impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<'a, C, S> {
     fn new(candidate: &'a C, source: &'a S) -> Self {
+        let mut source_full_ids_by_digest = BTreeMap::<Word, Vec<MastNodeId>>::new();
+        let mut source_digests = BTreeSet::new();
+        for (node_id, node) in source.node_entries() {
+            let digest = node.digest();
+            source_full_ids_by_digest.entry(digest).or_default().push(node_id);
+            source_digests.insert(digest);
+        }
+        source_digests.extend(source.digest_entries().map(|(_, digest)| digest));
+
         Self {
             candidate,
             source,
-            source_full_ids: source.node_entries().map(|(id, _)| id).collect(),
-            source_digest_ids: source.digest_entries().map(|(id, _)| id).collect(),
+            source_full_ids_by_digest,
+            source_digests,
             matching_pairs: BTreeSet::new(),
-            rejected_pairs: BTreeSet::new(),
         }
     }
 
@@ -118,8 +125,14 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
     }
 
     fn has_matching_full_node(&mut self, candidate_id: MastNodeId) -> bool {
-        for index in 0..self.source_full_ids.len() {
-            let source_id = self.source_full_ids[index];
+        let Some(digest) = self.candidate.get_digest_by_id(candidate_id) else {
+            return false;
+        };
+        let Some(num_candidates) = self.source_full_ids_by_digest.get(&digest).map(Vec::len) else {
+            return false;
+        };
+        for index in 0..num_candidates {
+            let source_id = self.source_full_ids_by_digest[&digest][index];
             if self.full_nodes_match(candidate_id, source_id) {
                 return true;
             }
@@ -128,29 +141,56 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
     }
 
     fn source_has_digest(&self, digest: Word) -> bool {
-        self.source_full_ids
-            .iter()
-            .chain(&self.source_digest_ids)
-            .any(|&node_id| self.source.get_digest_by_id(node_id) == Some(digest))
+        self.source_digests.contains(&digest)
     }
 
     fn exports_are_subset(&mut self) -> bool {
-        let source_roots = self.source.procedure_roots();
-        let mut used = vec![false; source_roots.len()];
-        for &candidate_root in self.candidate.procedure_roots() {
-            let mut found = false;
-            for (index, &source_root) in source_roots.iter().enumerate() {
-                if !used[index] && self.entries_match(candidate_root, source_root) {
-                    used[index] = true;
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
+        let candidate_roots = self.candidate.procedure_roots().to_vec();
+        let source_roots = self.source.procedure_roots().to_vec();
+        if candidate_roots.len() > source_roots.len() {
+            return false;
+        }
+
+        let mut source_owners = vec![None; source_roots.len()];
+        for candidate_index in 0..candidate_roots.len() {
+            let mut visited = vec![false; source_roots.len()];
+            if !self.assign_export(
+                candidate_index,
+                &candidate_roots,
+                &source_roots,
+                &mut source_owners,
+                &mut visited,
+            ) {
                 return false;
             }
         }
         true
+    }
+
+    fn assign_export(
+        &mut self,
+        candidate_index: usize,
+        candidate_roots: &[MastNodeId],
+        source_roots: &[MastNodeId],
+        source_owners: &mut [Option<usize>],
+        visited: &mut [bool],
+    ) -> bool {
+        for source_index in 0..source_roots.len() {
+            if visited[source_index]
+                || !self.entries_match(candidate_roots[candidate_index], source_roots[source_index])
+            {
+                continue;
+            }
+            visited[source_index] = true;
+
+            if source_owners[source_index].is_none_or(|owner| {
+                self.assign_export(owner, candidate_roots, source_roots, source_owners, visited)
+            }) {
+                source_owners[source_index] = Some(candidate_index);
+                return true;
+            }
+        }
+        false
     }
 
     fn entries_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
@@ -169,9 +209,6 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
         if self.matching_pairs.contains(&pair) {
             return true;
         }
-        if self.rejected_pairs.contains(&pair) {
-            return false;
-        }
 
         let Some(candidate) = self.candidate.get_node_by_id(candidate_id) else {
             return false;
@@ -180,7 +217,6 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
             return false;
         };
         if candidate.digest() != source.digest() {
-            self.rejected_pairs.insert(pair);
             return false;
         }
 
@@ -207,8 +243,6 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
         };
         if matches {
             self.matching_pairs.insert(pair);
-        } else {
-            self.rejected_pairs.insert(pair);
         }
         matches
     }
@@ -458,5 +492,33 @@ mod tests {
                 .unwrap();
         assert_eq!(full[full_id].digest(), different_error_code[different_id].digest());
         assert!(!full.is_content_subset_of(&different_error_code));
+    }
+
+    #[test]
+    fn content_subset_finds_non_greedy_export_pairing() {
+        let mut dense = MastForest::new();
+        let dense_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut dense)
+            .unwrap();
+        let digest = dense[dense_id].digest();
+        let full_id = MastNodeId::new_unchecked(0);
+        let opaque_id = MastNodeId::new_unchecked(1);
+
+        let candidate = SparseMastForest::from_serialized_parts(
+            vec![(full_id, dense[dense_id].clone())],
+            vec![(opaque_id, digest)],
+            vec![opaque_id, full_id],
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let source = SparseMastForest::from_serialized_parts(
+            vec![(full_id, dense[dense_id].clone())],
+            vec![(opaque_id, digest)],
+            vec![full_id, opaque_id],
+            AdviceMap::default(),
+        )
+        .unwrap();
+
+        assert!(candidate.is_content_subset_of(&source));
     }
 }
