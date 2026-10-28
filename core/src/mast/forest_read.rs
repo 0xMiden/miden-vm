@@ -3,12 +3,12 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::{iter, slice};
+use core::{cmp::Reverse, iter, slice};
 
 use super::{
     ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest,
 };
-use crate::Word;
+use crate::{Felt, Word, chiplets::hasher};
 
 type DenseNodeIter<'a> = iter::Map<
     iter::Enumerate<slice::Iter<'a, MastNode>>,
@@ -146,22 +146,49 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
 
     fn exports_are_subset(&mut self) -> bool {
         let mut source_capacity_by_digest = BTreeMap::<Word, usize>::new();
-        let mut source_full_roots = BTreeMap::<Word, BTreeMap<MastNodeId, usize>>::new();
+        let mut source_full_roots = BTreeMap::<Word, BTreeMap<Word, (MastNodeId, usize)>>::new();
+        let mut source_fingerprints = BTreeMap::new();
         for &source_root in self.source.procedure_roots() {
             let Some(digest) = self.source.get_digest_by_id(source_root) else {
                 continue;
             };
             *source_capacity_by_digest.entry(digest).or_default() += 1;
             if self.source.get_node_by_id(source_root).is_some() {
-                *source_full_roots.entry(digest).or_default().entry(source_root).or_default() += 1;
+                let Some(fingerprint) =
+                    entry_content_fingerprint(self.source, source_root, &mut source_fingerprints)
+                else {
+                    continue;
+                };
+                source_full_roots
+                    .entry(digest)
+                    .or_default()
+                    .entry(fingerprint)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((source_root, 1));
             }
         }
 
-        let mut candidate_full_roots = BTreeMap::<MastNodeId, usize>::new();
+        let mut candidate_full_roots = BTreeMap::<Word, BTreeMap<Word, (MastNodeId, usize)>>::new();
         let mut candidate_opaque_roots = BTreeMap::<Word, usize>::new();
+        let mut candidate_fingerprints = BTreeMap::new();
         for &candidate_root in self.candidate.procedure_roots() {
             if self.candidate.get_node_by_id(candidate_root).is_some() {
-                *candidate_full_roots.entry(candidate_root).or_default() += 1;
+                let Some(digest) = self.candidate.get_digest_by_id(candidate_root) else {
+                    return false;
+                };
+                let Some(fingerprint) = entry_content_fingerprint(
+                    self.candidate,
+                    candidate_root,
+                    &mut candidate_fingerprints,
+                ) else {
+                    return false;
+                };
+                candidate_full_roots
+                    .entry(digest)
+                    .or_default()
+                    .entry(fingerprint)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((candidate_root, 1));
             } else if let Some(digest) = self.candidate.get_digest_by_id(candidate_root) {
                 *candidate_opaque_roots.entry(digest).or_default() += 1;
             } else {
@@ -169,48 +196,47 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
             }
         }
 
-        let mut source_groups = Vec::new();
-        let mut source_indices_by_digest = BTreeMap::<Word, Vec<usize>>::new();
-        for (digest, roots) in source_full_roots {
-            for (source_root, count) in roots {
-                let source_index = source_groups.len();
-                source_groups.push((source_root, count, digest));
-                source_indices_by_digest.entry(digest).or_default().push(source_index);
-            }
-        }
-
-        let candidate_groups: Vec<_> = candidate_full_roots.into_iter().collect();
-        let mut compatible_sources = Vec::with_capacity(candidate_groups.len());
-        for &(candidate_root, _) in &candidate_groups {
-            let Some(digest) = self.candidate.get_digest_by_id(candidate_root) else {
+        for (digest, candidate_groups) in candidate_full_roots {
+            let Some(source_groups) = source_full_roots.get(&digest) else {
                 return false;
             };
-            let Some(source_indices) = source_indices_by_digest.get(&digest) else {
-                return false;
-            };
-            let mut matches = Vec::new();
-            for &source_index in source_indices {
-                if self.full_nodes_match(candidate_root, source_groups[source_index].0) {
-                    matches.push(source_index);
+            let candidate_groups: Vec<_> = candidate_groups.values().copied().collect();
+            let source_groups: Vec<_> = source_groups.values().copied().collect();
+            let mut matched_candidate_groups = Vec::with_capacity(candidate_groups.len());
+            for &(candidate_root, count) in &candidate_groups {
+                let mut matches = Vec::new();
+                for (source_index, &(source_root, _)) in source_groups.iter().enumerate() {
+                    if self.full_nodes_match(candidate_root, source_root) {
+                        matches.push(source_index);
+                    }
                 }
+                if matches.is_empty() {
+                    return false;
+                }
+                matched_candidate_groups.push((count, matches));
             }
-            if matches.is_empty() {
+            matched_candidate_groups.sort_by_key(|(_, matches)| Reverse(matches.len()));
+
+            let candidate_counts: Vec<_> =
+                matched_candidate_groups.iter().map(|(count, _)| *count).collect();
+            let compatible_sources: Vec<_> =
+                matched_candidate_groups.into_iter().map(|(_, matches)| matches).collect();
+            let source_counts: Vec<_> = source_groups.iter().map(|(_, count)| *count).collect();
+            let Some(source_used) = assign_export_multiplicities(
+                &candidate_counts,
+                &source_counts,
+                &compatible_sources,
+            ) else {
+                return false;
+            };
+            let used: usize = source_used.into_iter().sum();
+            let capacity = source_capacity_by_digest
+                .get_mut(&digest)
+                .expect("source root digest capacity must exist");
+            if *capacity < used {
                 return false;
             }
-            compatible_sources.push(matches);
-        }
-
-        let candidate_counts: Vec<_> = candidate_groups.iter().map(|(_, count)| *count).collect();
-        let source_counts: Vec<_> = source_groups.iter().map(|(_, count, _)| *count).collect();
-        let Some(source_used) =
-            assign_export_multiplicities(&candidate_counts, &source_counts, &compatible_sources)
-        else {
-            return false;
-        };
-        for (source_index, used) in source_used.into_iter().enumerate() {
-            *source_capacity_by_digest
-                .get_mut(&source_groups[source_index].2)
-                .expect("source root digest capacity must exist") -= used;
+            *capacity -= used;
         }
 
         candidate_opaque_roots.into_iter().all(|(digest, count)| {
@@ -271,6 +297,51 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
         }
         matches
     }
+}
+
+const FULL_ENTRY_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
+const OPAQUE_ENTRY_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0004);
+
+fn entry_content_fingerprint<F: MastForestRead + ?Sized>(
+    forest: &F,
+    node_id: MastNodeId,
+    fingerprints: &mut BTreeMap<MastNodeId, Word>,
+) -> Option<Word> {
+    if let Some(&fingerprint) = fingerprints.get(&node_id) {
+        return Some(fingerprint);
+    }
+
+    let fingerprint = if let Some(node) = forest.get_node_by_id(node_id) {
+        let (tag, payload) = match node {
+            MastNode::Block(block) => (0, block.content_fingerprint()),
+            MastNode::Join(_) => (1, node.digest()),
+            MastNode::Split(_) => (2, node.digest()),
+            MastNode::Loop(_) => (3, node.digest()),
+            MastNode::Call(_) => (4, node.digest()),
+            MastNode::Dyn(_) => (5, node.digest()),
+            MastNode::External(_) => (6, node.digest()),
+        };
+        let mut elements = Vec::new();
+        elements.push(FULL_ENTRY_FINGERPRINT_DOMAIN);
+        elements.push(Felt::new_unchecked(tag));
+        elements.extend_from_slice(payload.as_elements());
+
+        let mut children = Vec::new();
+        node.append_children_to(&mut children);
+        for child_id in children {
+            let child_fingerprint = entry_content_fingerprint(forest, child_id, fingerprints)?;
+            elements.extend_from_slice(child_fingerprint.as_elements());
+        }
+        hasher::hash_elements(&elements)
+    } else {
+        let digest = forest.get_digest_by_id(node_id)?;
+        let mut elements = Vec::with_capacity(5);
+        elements.push(OPAQUE_ENTRY_FINGERPRINT_DOMAIN);
+        elements.extend_from_slice(digest.as_elements());
+        hasher::hash_elements(&elements)
+    };
+    fingerprints.insert(node_id, fingerprint);
+    Some(fingerprint)
 }
 
 fn assign_export_multiplicities(
@@ -677,7 +748,7 @@ mod tests {
                 (strict_root, high_template[high_join].clone()),
             ],
             vec![(opaque_child, child_digest)],
-            vec![broad_root, strict_root],
+            vec![broad_root, broad_root, broad_root, strict_root, strict_root],
             AdviceMap::default(),
         )
         .unwrap();
@@ -688,12 +759,24 @@ mod tests {
                 (strict_root, high_template[high_join].clone()),
             ],
             vec![(full_child, child_digest)],
-            vec![broad_root, strict_root],
+            vec![broad_root, broad_root, strict_root, strict_root, strict_root],
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let insufficient_source = SparseMastForest::from_serialized_parts(
+            vec![
+                (opaque_child, low_template[low_child].clone()),
+                (broad_root, low_template[low_join].clone()),
+                (strict_root, high_template[high_join].clone()),
+            ],
+            vec![(full_child, child_digest)],
+            vec![broad_root, strict_root, strict_root, strict_root, strict_root],
             AdviceMap::default(),
         )
         .unwrap();
 
         assert!(candidate.is_content_subset_of(&source));
+        assert!(!candidate.is_content_subset_of(&insufficient_source));
     }
 
     #[test]
@@ -724,5 +807,30 @@ mod tests {
 
         assert!(candidate.is_content_subset_of(&source));
         assert!(!candidate.is_content_subset_of(&too_small));
+    }
+
+    #[test]
+    fn content_subset_groups_distinct_ids_with_identical_full_content() {
+        let mut template = MastForest::new();
+        let template_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut template)
+            .unwrap();
+        let node = template[template_id].clone();
+        let nodes: Vec<_> = (0..10_000)
+            .map(|index| (MastNodeId::new_unchecked(index), node.clone()))
+            .collect();
+        let roots: Vec<_> = nodes.iter().map(|(node_id, _)| *node_id).collect();
+        let candidate = SparseMastForest::from_serialized_parts(
+            nodes.clone(),
+            Vec::new(),
+            roots.clone(),
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let source =
+            SparseMastForest::from_serialized_parts(nodes, Vec::new(), roots, AdviceMap::default())
+                .unwrap();
+
+        assert!(candidate.is_content_subset_of(&source));
     }
 }

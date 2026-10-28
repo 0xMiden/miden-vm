@@ -137,6 +137,11 @@ impl BasicBlockNode {
         &self.op_batches
     }
 
+    /// Returns the deduplication fingerprint, including runtime error codes.
+    pub(in crate::mast) fn content_fingerprint(&self) -> Word {
+        fingerprint_basic_block_error_codes(self.digest, &self.op_batches)
+    }
+
     /// Returns the number of operation batches in this basic block.
     pub fn num_op_batches(&self) -> usize {
         self.op_batches.len()
