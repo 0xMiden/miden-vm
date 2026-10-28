@@ -124,12 +124,35 @@ pub(crate) struct MixedMastForestMerger<'forest> {
     node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     opaque_by_digest: BTreeMap<Word, MastNodeId>,
-    full_by_fingerprint: BTreeMap<Word, MastNodeId>,
+    full_by_fingerprint: BTreeMap<Word, Vec<MastNodeId>>,
     fingerprint_by_id: IndexVec<MastNodeId, Word>,
     non_external_by_digest: BTreeMap<Word, (usize, MastNodeId)>,
-    fingerprints_by_digest: BTreeMap<Word, BTreeSet<Word>>,
-    resolved_external_digests: BTreeSet<Word>,
+    full_ids_by_digest: BTreeMap<Word, BTreeSet<MastNodeId>>,
+    resolved_digests: BTreeSet<Word>,
     visiting: BTreeSet<(usize, MastNodeId)>,
+}
+
+enum MergeTask {
+    EnterFull {
+        forest_idx: usize,
+        node_id: MastNodeId,
+    },
+    FinishFull {
+        forest_idx: usize,
+        node_id: MastNodeId,
+        node: MastNode,
+    },
+    EnterDigest {
+        forest_idx: usize,
+        node_id: MastNodeId,
+        digest: Word,
+    },
+    FinishReplacement {
+        forest_idx: usize,
+        node_id: MastNodeId,
+        replacement_forest: usize,
+        replacement_id: MastNodeId,
+    },
 }
 
 impl<'forest> MixedMastForestMerger<'forest> {
@@ -138,7 +161,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let mut merger = Self::new(forests)?;
         merger.merge_entries()?;
-        merger.merge_roots(false)?;
+        merger.merge_roots()?;
 
         if let Some((&node_id, _)) = merger.digests.iter().next() {
             return Err(MastForestError::MissingNodeOnDenseMerge(node_id));
@@ -169,7 +192,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
 
         let mut merger = Self::new(forests)?;
         merger.merge_entries()?;
-        merger.merge_roots(true)?;
+        merger.merge_roots()?;
         let Self {
             nodes,
             digests,
@@ -210,16 +233,21 @@ impl<'forest> MixedMastForestMerger<'forest> {
             full_by_fingerprint: BTreeMap::new(),
             fingerprint_by_id: IndexVec::new(),
             non_external_by_digest,
-            fingerprints_by_digest: BTreeMap::new(),
-            resolved_external_digests: BTreeSet::new(),
+            full_ids_by_digest: BTreeMap::new(),
+            resolved_digests: BTreeSet::new(),
             visiting: BTreeSet::new(),
         })
     }
 
     fn merge_entries(&mut self) -> Result<(), MastForestError> {
+        let mut digest_entries = Vec::new();
         for forest_idx in 0..self.forests.len() {
             let entries = self.forests[forest_idx].digest_entries().collect::<Vec<_>>();
             for (node_id, digest) in entries {
+                digest_entries.push((forest_idx, node_id, digest));
+                if self.non_external_by_digest.contains_key(&digest) {
+                    continue;
+                }
                 let merged_id = if let Some(&merged_id) = self.opaque_by_digest.get(&digest) {
                     merged_id
                 } else {
@@ -235,6 +263,12 @@ impl<'forest> MixedMastForestMerger<'forest> {
             }
         }
 
+        for (forest_idx, node_id, digest) in digest_entries {
+            if self.non_external_by_digest.contains_key(&digest) {
+                self.merge_tasks(vec![MergeTask::EnterDigest { forest_idx, node_id, digest }])?;
+            }
+        }
+
         for forest_idx in 0..self.forests.len() {
             let node_ids = self.forests[forest_idx]
                 .node_entries()
@@ -245,8 +279,8 @@ impl<'forest> MixedMastForestMerger<'forest> {
             }
         }
 
-        for digest in &self.resolved_external_digests {
-            if self.fingerprints_by_digest.get(digest).is_some_and(|values| values.len() > 1) {
+        for digest in &self.resolved_digests {
+            if self.full_ids_by_digest.get(digest).is_some_and(|values| values.len() > 1) {
                 return Err(MastForestError::ConflictingNodeDigestOnMerge(*digest));
             }
         }
@@ -258,43 +292,125 @@ impl<'forest> MixedMastForestMerger<'forest> {
         forest_idx: usize,
         node_id: MastNodeId,
     ) -> Result<MastNodeId, MastForestError> {
-        if let Some(&merged_id) = self.node_maps[forest_idx].get(&node_id) {
-            return Ok(merged_id);
-        }
-        if !self.visiting.insert((forest_idx, node_id)) {
-            return Err(MastForestError::CyclicDependencyOnMerge(node_id));
-        }
+        self.merge_tasks(vec![MergeTask::EnterFull { forest_idx, node_id }])?;
+        Ok(*self.node_maps[forest_idx]
+            .get(&node_id)
+            .expect("a completed merge task must map its requested node"))
+    }
 
-        let node = self.forests[forest_idx].get_node_by_id(node_id).cloned().ok_or_else(|| {
-            MastForestError::NodeIdOverflow(node_id, self.forests[forest_idx].node_span())
-        })?;
+    fn merge_tasks(&mut self, mut tasks: Vec<MergeTask>) -> Result<(), MastForestError> {
+        while let Some(task) = tasks.pop() {
+            match task {
+                MergeTask::EnterFull { forest_idx, node_id } => {
+                    if self.node_maps[forest_idx].contains_key(&node_id) {
+                        continue;
+                    }
+                    if !self.visiting.insert((forest_idx, node_id)) {
+                        return Err(MastForestError::CyclicDependencyOnMerge(node_id));
+                    }
 
-        if node.is_external()
-            && let Some(&(replacement_forest, replacement_id)) =
-                self.non_external_by_digest.get(&node.digest())
-        {
-            self.resolved_external_digests.insert(node.digest());
-            let merged_id = self.merge_full_node(replacement_forest, replacement_id)?;
-            self.node_maps[forest_idx].insert(node_id, merged_id);
-            self.visiting.remove(&(forest_idx, node_id));
-            return Ok(merged_id);
-        }
+                    let node = self.forests[forest_idx]
+                        .get_node_by_id(node_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            MastForestError::NodeIdOverflow(
+                                node_id,
+                                self.forests[forest_idx].node_span(),
+                            )
+                        })?;
 
-        let mut children = Vec::new();
-        node.for_each_child(|child_id| children.push(child_id));
-        for child_id in children {
-            if !self.node_maps[forest_idx].contains_key(&child_id) {
-                if self.forests[forest_idx].get_node_by_id(child_id).is_some() {
-                    self.merge_full_node(forest_idx, child_id)?;
-                } else {
-                    return Err(MastForestError::NodeIdOverflow(
-                        child_id,
-                        self.forests[forest_idx].node_span(),
-                    ));
-                }
+                    if node.is_external()
+                        && let Some(&(replacement_forest, replacement_id)) =
+                            self.non_external_by_digest.get(&node.digest())
+                    {
+                        self.resolved_digests.insert(node.digest());
+                        tasks.push(MergeTask::FinishReplacement {
+                            forest_idx,
+                            node_id,
+                            replacement_forest,
+                            replacement_id,
+                        });
+                        tasks.push(MergeTask::EnterFull {
+                            forest_idx: replacement_forest,
+                            node_id: replacement_id,
+                        });
+                        continue;
+                    }
+
+                    let mut children = Vec::new();
+                    node.for_each_child(|child_id| children.push(child_id));
+                    tasks.push(MergeTask::FinishFull { forest_idx, node_id, node });
+                    for child_id in children.into_iter().rev() {
+                        if self.node_maps[forest_idx].contains_key(&child_id) {
+                            continue;
+                        }
+                        if self.forests[forest_idx].get_node_by_id(child_id).is_some() {
+                            tasks.push(MergeTask::EnterFull { forest_idx, node_id: child_id });
+                        } else if let Some(digest) =
+                            self.forests[forest_idx].get_digest_by_id(child_id)
+                        {
+                            tasks.push(MergeTask::EnterDigest {
+                                forest_idx,
+                                node_id: child_id,
+                                digest,
+                            });
+                        } else {
+                            return Err(MastForestError::NodeIdOverflow(
+                                child_id,
+                                self.forests[forest_idx].node_span(),
+                            ));
+                        }
+                    }
+                },
+                MergeTask::FinishFull { forest_idx, node_id, node } => {
+                    self.finish_full_node(forest_idx, node_id, node)?;
+                },
+                MergeTask::EnterDigest { forest_idx, node_id, digest } => {
+                    if self.node_maps[forest_idx].contains_key(&node_id) {
+                        continue;
+                    }
+                    if !self.visiting.insert((forest_idx, node_id)) {
+                        return Err(MastForestError::CyclicDependencyOnMerge(node_id));
+                    }
+                    let &(replacement_forest, replacement_id) = self
+                        .non_external_by_digest
+                        .get(&digest)
+                        .expect("resolved digest tasks must have a full replacement");
+                    self.resolved_digests.insert(digest);
+                    tasks.push(MergeTask::FinishReplacement {
+                        forest_idx,
+                        node_id,
+                        replacement_forest,
+                        replacement_id,
+                    });
+                    tasks.push(MergeTask::EnterFull {
+                        forest_idx: replacement_forest,
+                        node_id: replacement_id,
+                    });
+                },
+                MergeTask::FinishReplacement {
+                    forest_idx,
+                    node_id,
+                    replacement_forest,
+                    replacement_id,
+                } => {
+                    let merged_id = *self.node_maps[replacement_forest]
+                        .get(&replacement_id)
+                        .expect("a replacement node must be mapped before its source");
+                    self.node_maps[forest_idx].insert(node_id, merged_id);
+                    self.visiting.remove(&(forest_idx, node_id));
+                },
             }
         }
+        Ok(())
+    }
 
+    fn finish_full_node(
+        &mut self,
+        forest_idx: usize,
+        node_id: MastNodeId,
+        node: MastNode,
+    ) -> Result<(), MastForestError> {
         let builder = super::super::build_node_with_remapped_ids(
             node_id,
             node.clone(),
@@ -302,49 +418,46 @@ impl<'forest> MixedMastForestMerger<'forest> {
             &self.node_maps[forest_idx],
         )?;
         let fingerprint = builder.fingerprint_for_node(&self.builder, &self.fingerprint_by_id)?;
-        let merged_id = if let Some(&merged_id) = self.full_by_fingerprint.get(&fingerprint) {
+        let remapped_node = builder.build_linked()?;
+        let merged_id = self.full_by_fingerprint.get(&fingerprint).and_then(|candidates| {
+            candidates
+                .iter()
+                .copied()
+                .find(|candidate| self.nodes.get(candidate) == Some(&remapped_node))
+        });
+        let merged_id = if let Some(merged_id) = merged_id {
             merged_id
         } else {
+            let builder = super::super::build_node_with_remapped_ids(
+                node_id,
+                node.clone(),
+                &self.builder_source,
+                &self.node_maps[forest_idx],
+            )?;
             let merged_id = self.builder.push_node(builder)?;
-            let stored_node = self
-                .builder
-                .get_node_by_id(merged_id)
-                .expect("a node just pushed into the merge builder must exist")
-                .clone();
-            self.nodes.insert(merged_id, stored_node);
-            self.full_by_fingerprint.insert(fingerprint, merged_id);
+            self.nodes.insert(merged_id, remapped_node);
+            self.full_by_fingerprint.entry(fingerprint).or_default().push(merged_id);
             self.fingerprint_by_id
                 .push(fingerprint)
                 .map_err(|_| MastForestError::TooManyNodes)?;
             merged_id
         };
         if !node.is_external() {
-            self.fingerprints_by_digest
-                .entry(node.digest())
-                .or_default()
-                .insert(fingerprint);
+            self.full_ids_by_digest.entry(node.digest()).or_default().insert(merged_id);
         }
         self.node_maps[forest_idx].insert(node_id, merged_id);
         self.visiting.remove(&(forest_idx, node_id));
-        Ok(merged_id)
+        Ok(())
     }
 
-    fn merge_roots(&mut self, allow_missing: bool) -> Result<(), MastForestError> {
+    fn merge_roots(&mut self) -> Result<(), MastForestError> {
         for forest_idx in 0..self.forests.len() {
             let roots = self.forests[forest_idx].procedure_roots().to_vec();
             for root in roots {
                 let merged_root = if let Some(&merged_id) = self.node_maps[forest_idx].get(&root) {
                     merged_id
-                } else if allow_missing {
-                    let merged_id =
-                        self.builder.push_node(ExternalNodeBuilder::new(Word::default()))?;
-                    self.fingerprint_by_id
-                        .push(Word::default())
-                        .map_err(|_| MastForestError::TooManyNodes)?;
-                    self.node_maps[forest_idx].insert(root, merged_id);
-                    merged_id
                 } else {
-                    return Err(MastForestError::MissingNodeOnDenseMerge(root));
+                    return Err(MastForestError::MissingRootOnMerge(root));
                 };
                 self.root_maps[forest_idx].insert(root, merged_root);
                 if !self.roots.contains(&merged_root) {
