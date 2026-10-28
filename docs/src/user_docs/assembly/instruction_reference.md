@@ -204,6 +204,7 @@ _Push to Advice Stack:_
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
 | `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes its canonical frame and payload felts to the advice stack. See deferred DAG details below. |
 | `adv.evaluate_deferred_frame` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical frame to the advice stack. |
+| `adv.push_deferred_root` | `[...]` | `[...]` | Pushes the current global deferred accumulator commitment as one advice word; four zeros when empty. Preserves the operand stack and deferred state. |
 | `adv.evaluate_deferred_payload` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical payload felts to the advice stack. |
 
 _Deferred DAG (host-side registration; no advice output):_
@@ -215,6 +216,10 @@ _Deferred DAG (host-side registration; no advice output):_
 
 Deferred DAG details:
 
+- `adv.push_deferred_root` takes no arguments and pushes the current rolling root in word order
+  for `adv_pushw`. It reads the accumulator commitment without evaluating or changing it, from any
+  execution context. This is an advice hint; proof-relevant code must authenticate it with VM
+  instructions. The system event is `sys::adv::push_deferred_root`.
 - The initial `CV`, the frame returned by evaluation, and every digest each occupy one word (4
   field elements). `CV` is derived from `(domain_tag, param0, param1, param2)`. The selected domain
   defines the three parameters. One deferred data chunk is 8 field elements, i.e. two words.

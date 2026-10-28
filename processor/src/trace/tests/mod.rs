@@ -186,13 +186,23 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
 
     use crate::ExecutionWitness;
 
-    let mut operations = vec![Operation::LogDeferred, Operation::ClearDeferred];
-    operations.extend(core::iter::repeat_n(Operation::Noop, TEST_TRACE_FRAGMENT_SIZE));
-    operations.push(Operation::LogDeferred);
-    let mut mast_forest = MastForest::new();
-    let block = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
-    mast_forest.make_root(block);
-    let program = Program::new(mast_forest.into(), block);
+    // Read the logged root after one fragment boundary, then read the cleared root after another.
+    let source = alloc::format!(
+        "begin
+            log_deferred dropw
+            repeat.{TEST_TRACE_FRAGMENT_SIZE} nop end
+            adv.push_deferred_root adv_loadw
+            clear_deferred
+            repeat.{TEST_TRACE_FRAGMENT_SIZE} nop end
+            adv.push_deferred_root padw adv_loadw
+            assertz assertz assertz assertz
+            log_deferred
+        end"
+    );
+    let program = miden_assembly::Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
     let witness = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -210,6 +220,7 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
     assert_eq!(vm_witness.precompile_root, expected_root);
     assert!(precompile_witness.is_some());
     let trace = build_trace(vm_witness).unwrap();
+    assert_eq!(trace.stack_outputs().get_word(0), Some(expected_root));
     assert_eq!(trace.precompile_root(), expected_root);
     trace.check_constraints();
 }

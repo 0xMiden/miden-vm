@@ -120,7 +120,11 @@ fn test_clear_deferred_prove_verify() {
     // Exercise proof plumbing for the unsafe opcode. A production kernel epilogue must
     // recursively verify the top stack root before executing clear_deferred.
     assert_prove_verify(
-        "begin padw log_deferred clear_deferred dropw end",
+        "begin
+            padw log_deferred dropw
+            adv.push_deferred_root padw adv_loadw
+            clear_deferred dropw
+        end",
         HashFunction::Eidos,
         "Eidos",
         false,

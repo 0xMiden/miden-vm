@@ -4,6 +4,16 @@
 use super::*;
 
 #[test]
+fn push_deferred_root_matches_explicit_system_event() -> TestResult {
+    let context = TestContext::new();
+    let shorthand = context.assemble("begin adv.push_deferred_root end")?;
+    let explicit = context.assemble(r#"begin emit.event("sys::adv::push_deferred_root") end"#)?;
+
+    assert_eq!(shorthand.hash(), explicit.hash());
+    Ok(())
+}
+
+#[test]
 fn emit_u32_immediate_is_rejected() {
     let context = TestContext::new();
     let program_source = r#"
