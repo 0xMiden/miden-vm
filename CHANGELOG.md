@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+#### Features
+
+- Added a standalone core MASM advice-analysis CLI with target selection and compact reports ([#4011](https://github.com/0xMiden/miden-vm/pull/4011)).
+
 #### Changes
 
 - [BREAKING] Unified VM and precompile prover memory estimation in `miden_lifted_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
