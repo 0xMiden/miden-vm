@@ -88,7 +88,7 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 mod tests {
     use alloc::{format, string::String, vec::Vec};
 
-    use miden_ace_codegen::InputKey;
+    use miden_ace::InputKey;
     use miden_air::precompiles::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
@@ -204,7 +204,7 @@ mod tests {
             }
             let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
 
-            let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+            let direct = miden_ace::testing::eval_multi_air_constraints(
                 &airs,
                 canonical_layout,
                 &canonical_inputs,
@@ -247,8 +247,8 @@ mod tests {
             .iter()
             .map(|air| {
                 (
-                    format!("{air:?}"),
-                    miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
+                    format!("{:?}", air.0),
+                    miden_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
                 )
             })
             .collect();
@@ -276,7 +276,7 @@ mod tests {
     fn pvm_canonical_ace_shape_matches_current_air() {
         assert!(
             ChipletAir::all().iter().all(|air| {
-                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
+                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
                     air,
                 ) <= 128
             }),
@@ -289,7 +289,7 @@ mod tests {
         let num_aux_values: usize = ChipletAir::all()
             .iter()
             .map(|air| {
-                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
+                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
             })
             .sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
@@ -362,12 +362,12 @@ mod tests {
         );
         assert_ne!(
             PVM_RELATION_DIGEST,
-            miden_air::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
+            miden_air::vm::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
             "PVM_RELATION_DIGEST must not collide with the VM's RELATION_DIGEST"
         );
         assert_ne!(
             PVM_ACE_CIRCUIT_DIGEST,
-            miden_air::config::ACE_CIRCUIT_DIGEST.map(|felt| felt.as_canonical_u64()),
+            miden_air::vm::config::ACE_CIRCUIT_DIGEST.map(|felt| felt.as_canonical_u64()),
             "PVM_ACE_CIRCUIT_DIGEST must not collide with the VM's ACE_CIRCUIT_DIGEST"
         );
     }
@@ -381,7 +381,7 @@ mod tests {
 
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
-            .map(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
+            .map(miden_stark::air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
             .collect();
         assert_eq!(
             derived,
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
         use miden_air::precompiles::ChipletMultiAir;
-        use miden_lifted_air::{BaseAir, MultiAir};
+        use miden_stark::air::{BaseAir, MultiAir};
 
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
-        use miden_lifted_air::{BaseAir, LiftedAir};
+        use miden_stark::air::{BaseAir, LiftedAir};
 
         assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
@@ -593,7 +593,8 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, air)| {
-                let wrapper_checks_equality = matches!(air, ChipletAir::BytePairLut);
+                let wrapper_checks_equality =
+                    matches!(air.0, miden_air_definitions::precompiles::ChipletAir::BytePairLut);
                 assert_eq!(
                     air.fixed_log_height().is_some(),
                     wrapper_checks_equality,
@@ -626,7 +627,7 @@ mod tests {
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
-        let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+        let sample_bits = miden_air::vm::security::EIDOS_CHALLENGE_SAMPLE_BITS;
         for (name, expected) in [
             ("FP_SHIFT", u64::from(fractional_bits)),
             ("FP_ONE", fixed_point_one),
@@ -760,7 +761,7 @@ mod tests {
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
-        let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
+        let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
             miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
         )
@@ -802,7 +803,7 @@ mod tests {
     #[test]
     fn external_assertion_matches_the_protocol_version() {
         use miden_air::precompiles::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
-        use miden_lifted_air::Statement;
+        use miden_stark::air::Statement;
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
@@ -847,18 +848,18 @@ mod tests {
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
-            ChipletAir::ChunkNodeSponge,
-            ChipletAir::EidosCompression,
-            ChipletAir::KeccakRound,
-            ChipletAir::BytePairLut,
-            ChipletAir::TranscriptEval,
-            ChipletAir::UintStoreMul,
-            ChipletAir::UintAdd,
-            ChipletAir::EcPointStoreGroups,
-            ChipletAir::EcGroupAdd,
-            ChipletAir::EcMsm,
-            ChipletAir::Sha512,
-            ChipletAir::Sha256,
+            ChipletAir::CHUNK_NODE_SPONGE,
+            ChipletAir::EIDOS_COMPRESSION,
+            ChipletAir::KECCAK_ROUND,
+            ChipletAir::BYTE_PAIR_LUT,
+            ChipletAir::TRANSCRIPT_EVAL,
+            ChipletAir::UINT_STORE_MUL,
+            ChipletAir::UINT_ADD,
+            ChipletAir::EC_POINT_STORE_GROUPS,
+            ChipletAir::EC_GROUP_ADD,
+            ChipletAir::EC_MSM,
+            ChipletAir::SHA512,
+            ChipletAir::SHA256,
         ];
         assert_eq!(
             ChipletAir::all(),

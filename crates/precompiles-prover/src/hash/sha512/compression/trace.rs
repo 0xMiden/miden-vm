@@ -6,7 +6,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::hash::sha512::compression::{
+use miden_air_definitions::precompiles::hash::sha512::compression::{
     self,
     program::{self, Op},
 };
@@ -127,39 +127,17 @@ fn populate_block(
         let r = match s.op {
             Op::Input => {
                 let index = s.src_a as usize;
-                let value = if index < 16 {
+                if index < 16 {
                     rec.block[index]
                 } else {
                     rec.state[index - 16]
-                };
-                for j in 0..8 {
-                    bpl.require(BytePairOp::Xor, 0, value.to_le_bytes()[j]);
                 }
-                value
             },
             Op::Const(v) => v,
-            Op::Xor => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::Xor, a.to_le_bytes()[j], b.to_le_bytes()[j]);
-                }
-                a ^ b
-            },
-            Op::And => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::AndNot, 255 - a.to_le_bytes()[j], b.to_le_bytes()[j]);
-                }
-                a & b
-            },
-            Op::AndNot => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::AndNot, a.to_le_bytes()[j], b.to_le_bytes()[j]);
-                }
-                (!a) & b
-            },
+            Op::Xor => a ^ b,
+            Op::And => a & b,
+            Op::AndNot => (!a) & b,
             Op::Add => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::Xor, 0, (a.wrapping_add(b)).to_le_bytes()[j]);
-                }
                 let (lo, c0) = (a as u32).overflowing_add(b as u32);
                 let (hi0, c1a) = ((a >> 32) as u32).overflowing_add((b >> 32) as u32);
                 let (hi, c1b) = hi0.overflowing_add(c0 as u32);
@@ -201,13 +179,24 @@ fn populate_block(
             rows[base + compression::COL_B_BEGIN..base + compression::COL_B_BEGIN + 8]
                 .copy_from_slice(&witness_b.to_le_bytes().map(Felt::from));
         }
-        // ROL's result is reconstructed from its range-checked limbs on the destination bus.
-        let raw = match s.op {
-            Op::Rol(_) => a,
-            _ => r,
-        };
-        rows[base + compression::COL_R_BEGIN..base + compression::COL_R_BEGIN + 8]
-            .copy_from_slice(&raw.to_le_bytes().map(Felt::from));
+        // Logic rows store the canonical XOR witness. Other semantic results use u16 limbs;
+        // ROL publishes its result directly from the decomposition in B.
+        let result_cells =
+            &mut rows[base + compression::COL_R_BEGIN..base + compression::COL_R_BEGIN + 8];
+        if matches!(s.op, Op::Xor | Op::And | Op::AndNot) {
+            result_cells.copy_from_slice(&(a ^ b).to_le_bytes().map(Felt::from));
+            for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
+                bpl.require(BytePairOp::Xor, x, y);
+            }
+        } else if !matches!(s.op, Op::Rol(_)) {
+            for (j, cell) in result_cells[..4].iter_mut().enumerate() {
+                let limb = (r >> (16 * j)) as u16;
+                *cell = Felt::from(limb);
+                if matches!(s.op, Op::Input | Op::Add) {
+                    bpl.require_range16(limb);
+                }
+            }
+        }
         if matches!(s.op, Op::Add) {
             rows[base + compression::COL_CARRY_LO] = Felt::from(clo);
             rows[base + compression::COL_CARRY_HI] = Felt::from(chi);

@@ -1,10 +1,7 @@
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::{
-    lookup::Challenges,
-    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
-};
+use miden_air::precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -13,11 +10,11 @@ use miden_core::{
     serde::{Deserializable, Serializable},
     utils::Matrix,
 };
-use miden_lifted_stark::memory;
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 use miden_precompiles_verifier::{VerifyError, verify_deferred};
+use miden_stark::{lookup::Challenges, memory};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -25,13 +22,11 @@ use crate::{
     deferred::session::session_from_witnesses,
     hash::{
         chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
-        chunk_node::NODE_COL_OFFSET,
         chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
         keccak::{
             node::{
                 COL_ABSORPTION_ID_CHUNKS as NODE_COL_ABSORPTION_ID_CHUNKS, COL_ACT as NODE_COL_ACT,
                 COL_H_INPUT_CHUNKS_BEGIN, COL_N_CHUNKS as NODE_COL_N_CHUNKS, COL_N_CHUNKS_INV,
-                NUM_MAIN_COLS as NODE_NUM_MAIN_COLS,
             },
             sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
         },
@@ -551,10 +546,9 @@ fn prove_precompiles_with_budget_corner_cases() {
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
 /// (`miden_air::precompiles::preprocessed`, keyed by LMCS type). Proving and
-/// verifying twice per hash function exercises both the cold path (first
-/// call in the process, builds and caches the bundle) and the warm path
-/// (later calls, reused from cache) for every slot, guarding against a
-/// mismatched or stale cached bundle being reused across hash functions.
+/// verifying twice per hash function exercises bundle reuse and agreement
+/// with the verifier's pinned commitment for every slot, guarding against
+/// a mismatched or stale bundle being reused across hash functions.
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn prove_deferred_state_round_trips_for_every_hash_function() {
@@ -627,7 +621,7 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
 fn keccak_node_chunk_count_is_bound_by_cross_air_relations() {
     let traces = keccak_session_traces(&[0xa5; 33]);
     let mains = traces.mains();
-    let n_chunks_col = NODE_COL_OFFSET + NODE_COL_N_CHUNKS;
+    use super::chunk_node_sponge::{read_node, write_node};
 
     let challenges = Challenges::new(
         QuadFelt::from_u64(101),
@@ -635,11 +629,13 @@ fn keccak_node_chunk_count_is_bound_by_cross_air_relations() {
         MAX_MESSAGE_WIDTH,
         NUM_BUS_IDS,
     );
-    assert_eq!(mains[0].values[n_chunks_col], Felt::from_u8(2));
+    assert_eq!(read_node(mains[0], 0)[NODE_COL_N_CHUNKS], Felt::from_u8(2));
 
     for forged_count in [Felt::ZERO, Felt::from_u8(3), -Felt::ONE] {
         let mut forged = mains[0].clone();
-        forged.values[n_chunks_col] = forged_count;
+        let mut record = read_node(&forged, 0);
+        record[NODE_COL_N_CHUNKS] = forged_count;
+        write_node(&mut forged, 0, &record);
 
         crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged);
 
@@ -666,21 +662,13 @@ fn chain_head_distinguishes_a_crossed_terminal_digest_request() {
     let mains = traces.mains();
 
     let owner = mains[0];
-    let owner_width = owner.width;
-    let active_rows: Vec<_> = owner
-        .values
-        .chunks_exact(owner_width)
-        .enumerate()
-        .filter_map(|(row_idx, row)| {
-            (row[NODE_COL_OFFSET + NODE_COL_ACT] == Felt::ONE).then_some(row_idx)
-        })
+    use super::chunk_node_sponge::{read_node, write_node};
+    let active: Vec<_> = (0..owner.height() / SPONGE_PERIOD)
+        .filter(|&i| read_node(owner, i)[NODE_COL_ACT] == Felt::ONE)
         .collect();
-    assert_eq!(active_rows.len(), 2);
-
-    let second_row_idx = active_rows[1];
-    let second_row =
-        &owner.values[second_row_idx * owner_width..(second_row_idx + 1) * owner_width];
-    let new_head = second_row[NODE_COL_OFFSET + NODE_COL_ABSORPTION_ID_CHUNKS];
+    assert_eq!(active.len(), 2);
+    let second_row_idx = active[1];
+    let new_head = read_node(owner, second_row_idx)[NODE_COL_ABSORPTION_ID_CHUNKS];
     let new_head_idx = new_head.as_canonical_u64() as usize;
     assert!(new_head_idx > 0);
     let old_tail = new_head - Felt::ONE;
@@ -727,12 +715,11 @@ fn chain_head_distinguishes_a_crossed_terminal_digest_request() {
     );
 
     let mut forged_owner = owner.clone();
-    let forged_row =
-        &mut forged_owner.values[second_row_idx * owner_width..(second_row_idx + 1) * owner_width];
-    forged_row[NODE_COL_OFFSET + NODE_COL_N_CHUNKS] = Felt::ZERO;
-    forged_row[NODE_COL_OFFSET + COL_H_INPUT_CHUNKS_BEGIN
-        ..NODE_COL_OFFSET + COL_H_INPUT_CHUNKS_BEGIN + old_digest.len()]
+    let mut forged_row = read_node(owner, second_row_idx);
+    forged_row[NODE_COL_N_CHUNKS] = Felt::ZERO;
+    forged_row[COL_H_INPUT_CHUNKS_BEGIN..COL_H_INPUT_CHUNKS_BEGIN + old_digest.len()]
         .copy_from_slice(&old_digest);
+    write_node(&mut forged_owner, second_row_idx, &forged_row);
 
     // Both the local chunk-count constraints and the cross-AIR relations reject this owner.
     crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged_owner);
@@ -749,15 +736,14 @@ fn reordering_chunks_within_an_eidos_chain_unbalances_the_bus() {
     let traces = keccak_session_traces(&[0xa5; 33]);
     let mains = traces.mains();
     let mut forged = mains[0].clone();
-    let width = forged.width;
-
+    use super::chunk_node_sponge::chunk_cell;
     assert_ne!(
-        &forged.values[CHUNK_COL_F_BEGIN..CHUNK_COL_F_END],
-        &forged.values[width + CHUNK_COL_F_BEGIN..width + CHUNK_COL_F_END],
-        "the two input chunks must differ for the reorder mutant"
+        forged.values[chunk_cell(0, CHUNK_COL_F_BEGIN)],
+        forged.values[chunk_cell(1, CHUNK_COL_F_BEGIN)],
+        "the reordered chunks must differ"
     );
     for col in CHUNK_COL_F_BEGIN..CHUNK_COL_F_END {
-        forged.values.swap(col, width + col);
+        forged.values.swap(chunk_cell(0, col), chunk_cell(1, col));
     }
 
     crate::tests::check_local(ChunkNodeSpongeAir, &forged);
@@ -789,11 +775,13 @@ fn merged_empty_keccak_node_cannot_redirect_chunk_tail() {
     let traces = keccak_session_traces(&[]);
     traces.check();
     let mut merged = traces.mains()[0].clone();
-    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_ACT], Felt::ONE);
-    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_N_CHUNKS], Felt::ONE);
-
-    merged.values[NODE_COL_OFFSET + NODE_COL_N_CHUNKS] = Felt::from(2u8);
-    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    use super::chunk_node_sponge::{read_node, write_node};
+    let mut record = read_node(&merged, 0);
+    assert_eq!(record[NODE_COL_ACT], Felt::ONE);
+    assert_eq!(record[NODE_COL_N_CHUNKS], Felt::ONE);
+    record[NODE_COL_N_CHUNKS] = Felt::from(2u8);
+    record[COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    write_node(&mut merged, 0, &record);
     crate::tests::assert_constraint_failure(|| {
         crate::tests::check_local(ChunkNodeSpongeAir, &merged)
     });
@@ -805,9 +793,10 @@ fn merged_keccak_chunk_remainder_is_range_checked() {
     let traces = keccak_session_traces(&[0x5a; 32]);
     traces.check();
     let mut merged = traces.mains()[0].clone();
-    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    let mut node_row = super::chunk_node_sponge::read_node(&merged, 0);
     assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
-    let tuple = super::keccak_node::forge_out_of_range_remainder(node_row);
+    let tuple = super::keccak_node::forge_out_of_range_remainder(&mut node_row);
+    super::chunk_node_sponge::write_node(&mut merged, 0, &node_row);
     crate::tests::check_local(ChunkNodeSpongeAir, &merged);
     crate::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
 }
@@ -831,9 +820,10 @@ fn merged_keccak_sponge_perm_count_is_range_checked() {
     let traces = keccak_session_traces(&[0x5a; 32]);
     traces.check();
     let mut merged = traces.mains()[0].clone();
-    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    let mut node_row = super::chunk_node_sponge::read_node(&merged, 0);
     assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
-    super::keccak_node::forge_sponge_perms(node_row, -Felt::ONE);
+    super::keccak_node::forge_sponge_perms(&mut node_row, -Felt::ONE);
+    super::chunk_node_sponge::write_node(&mut merged, 0, &node_row);
     crate::tests::check_local(ChunkNodeSpongeAir, &merged);
     crate::tests::bus_balance::assert_unprovidable_range16_lookup(
         &ChunkNodeSpongeAir,

@@ -10,11 +10,13 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use eidos::{Felt, QuadFelt, test_challenger, test_lmcs};
-use miden_lifted_stark::testing::{
-    BENCH_PCS_PARAMS, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS, canonical_domain,
-    generate_matrices_from_specs, open_with_channel, total_elements,
+use miden_stark::{
+    testing::{
+        BENCH_PCS_PARAMS, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS,
+        canonical_domain, generate_matrices_from_specs, open_with_channel, total_elements,
+    },
+    transcript::ProverTranscript,
 };
-use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};

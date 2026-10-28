@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::and8_lookup::{
+use miden_air_definitions::vm::trace::and8_lookup::{
     AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_PAIR_RELATION_COUNT, BYTE_PAIR_ROWS,
     NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL,
 };

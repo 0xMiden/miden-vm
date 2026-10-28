@@ -1,6 +1,6 @@
 //! Batch STARK AIR wrappers, lookup implementations, and prove/verify runner.
 
-use miden_lifted_stark::air::BaseAir;
+use miden_stark::air::BaseAir;
 use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_batch_stark::{ProverData, StarkInstance, prove_batch, verify_batch};
 use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
@@ -225,7 +225,7 @@ pub(crate) fn run_batch_keccak(
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
-    use miden_lifted_stark::testing::configs::goldilocks_keccak as keccak;
+    use miden_stark::testing::configs::goldilocks_keccak as keccak;
     use p3_keccak::KeccakF;
     use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
 
@@ -252,7 +252,7 @@ pub(crate) fn run_batch_blake3(
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
-    use miden_lifted_stark::testing::configs::goldilocks_blake3 as blake3;
+    use miden_stark::testing::configs::goldilocks_blake3 as blake3;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 
     let leaf = SerializingHasher::new(p3_blake3::Blake3);
@@ -278,7 +278,7 @@ pub(crate) fn run_batch_blake3_192(
     log_blowup: u8,
     cli: &Cli,
 ) -> RunResult {
-    use miden_lifted_stark::testing::configs::goldilocks_blake3_192 as blake3_192;
+    use miden_stark::testing::configs::goldilocks_blake3_192 as blake3_192;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 
     let h = blake3_192::Blake3_192::new(p3_blake3::Blake3);

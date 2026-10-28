@@ -19,7 +19,7 @@ concurrent = [
     "std",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
-    "miden-lifted-stark/concurrent",
+    "miden-stark/concurrent",
     "miden-precompiles-prover/concurrent",
     "miden-processor/concurrent",
 ]
@@ -38,7 +38,7 @@ miden-core.workspace = true
 miden-precompiles-prover.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true
-miden-lifted-stark.workspace = true
+miden-stark.workspace = true
 
 # External dependencies
 serde.workspace = true
@@ -47,6 +47,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+miden-air-definitions.workspace = true
 miden-assembly.workspace = true
 miden-core = { workspace = true, features = ["testing"] }
 miden-debug-types.workspace = true

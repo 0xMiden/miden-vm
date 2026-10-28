@@ -6,11 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::precompiles::{
-    ChipletMultiAir,
-    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
-    stark_config::precompile_pcs_params,
-};
+use miden_air::precompiles::{ChipletMultiAir, stark_config::precompile_pcs_params};
+use miden_air_definitions::precompiles::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
 use miden_core::{
     Felt,
     deferred::{
@@ -22,11 +19,11 @@ use miden_core::{
     program::domain::DeferredChunksDomain,
 };
 use miden_crypto::hash::eidos::EidosDomain;
-use miden_lifted_stark::memory;
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
     UintBinaryOp, UintDomain, UintOp, UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
+use miden_stark::memory;
 
 use crate::{
     PrecompileProvingError,

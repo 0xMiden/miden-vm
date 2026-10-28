@@ -1,0 +1,448 @@
+//! Integration tests for LMCS.
+
+use alloc::vec;
+
+use gl::{
+    Compress, DIGEST, Felt, PackedFelt, Sponge, TestCommitment, TestDigest, TestTranscriptData,
+    WIDTH,
+};
+use hiding_config::HidingLmcsConfig;
+use lifted_tree::LiftedMerkleTree;
+use miden_crypto::hash::stateful::{Alignable, StatefulHasher};
+use p3_field::PrimeCharacteristicRing;
+use p3_matrix::dense::RowMajorMatrix;
+use proof::BatchProofView;
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
+
+use super::*;
+use crate::air::log2_strict_u8;
+// ============================================================================
+// Test Helpers and Re-exports
+// ============================================================================
+use crate::{testing::configs::goldilocks_poseidon2 as gl, util::align::aligned_len};
+
+type OpenedRows = BTreeMap<usize, RowList<Felt>>;
+
+/// Build leaf hashes for a single matrix (used for equivalence testing).
+pub fn build_leaves_single(matrix: &RowMajorMatrix<Felt>, sponge: &Sponge) -> Vec<[Felt; DIGEST]> {
+    matrix
+        .rows()
+        .map(|row| {
+            let mut state = [Felt::ZERO; WIDTH];
+            sponge.absorb_into(&mut state, row);
+            sponge.squeeze(&state)
+        })
+        .collect()
+}
+
+fn verify_open_batch<C>(
+    lmcs: &C,
+    commitment: &TestCommitment,
+    widths: &[usize],
+    indices: &TreeIndices,
+    transcript: &TestTranscriptData,
+    prover_digest: &TestDigest,
+) -> Result<OpenedRows, LmcsError>
+where
+    C: Lmcs<F = Felt, Commitment = TestCommitment>,
+{
+    let mut verifier_channel = gl::verifier_channel(transcript);
+    let result = lmcs.open_batch(commitment, widths, indices, &mut verifier_channel);
+    if result.is_ok() {
+        let verifier_digest =
+            verifier_channel.finalize().expect("transcript should finalize cleanly");
+        assert_eq!(verifier_digest, *prover_digest);
+    }
+    result
+}
+
+pub fn roundtrip_open_batch<C, M>(
+    lmcs: &C,
+    tree: &C::Tree<M>,
+    indices: &[usize],
+) -> Result<(TestTranscriptData, OpenedRows), LmcsError>
+where
+    C: Lmcs<F = Felt, Commitment = TestCommitment>,
+    M: Matrix<Felt>,
+{
+    let widths = tree.aligned_widths();
+    let log_max_height = log2_strict_u8(tree.height());
+    let tree_indices = TreeIndices::new(indices.iter().copied(), log_max_height).unwrap();
+
+    let (prover_digest, transcript) = {
+        let mut prover_channel = gl::prover_channel();
+        tree.prove_batch(lmcs, &tree_indices, &mut prover_channel);
+        prover_channel.finalize()
+    };
+    let opened_rows =
+        verify_open_batch(lmcs, &tree.root(), &widths, &tree_indices, &transcript, &prover_digest)?;
+    Ok((transcript, opened_rows))
+}
+
+// ============================================================================
+// Hiding LMCS Types and Helpers
+// ============================================================================
+
+const SALT: usize = 4;
+type HidingTree<M> = LiftedMerkleTree<Felt, Felt, M, DIGEST, SALT>;
+type HidingConfig =
+    HidingLmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, SmallRng, WIDTH, DIGEST, SALT>;
+
+fn hiding_lmcs(rng: SmallRng) -> HidingConfig {
+    let (_, sponge, compress) = gl::test_components();
+    HidingLmcsConfig::new(sponge, compress, rng)
+}
+
+// ============================================================================
+// Integration Tests
+// ============================================================================
+
+#[test]
+fn lmcs_roundtrip() {
+    let test = |seed: u64, matrices: &[(usize, usize)], num_queries: usize| {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let lmcs = gl::test_lmcs();
+        let matrices: Vec<_> =
+            matrices.iter().map(|&(h, w)| RowMajorMatrix::rand(&mut rng, h, w)).collect();
+
+        let tree = lmcs.build_tree(matrices);
+        let widths = tree.aligned_widths();
+        let max_height = tree.height();
+        let indices: Vec<usize> =
+            (0..num_queries).map(|_| rng.random_range(0..max_height)).collect();
+        let (_transcript, opened_rows) =
+            roundtrip_open_batch(&lmcs, &tree, &indices).expect("batch opening should verify");
+
+        for (&leaf_idx, rows_for_query) in &opened_rows {
+            assert_eq!(rows_for_query.num_rows(), widths.len());
+            assert_eq!(*rows_for_query, tree.aligned_rows(leaf_idx));
+        }
+    };
+
+    test(1, &[(8, 4)], 1); // single matrix
+    test(42, &[(4, 3), (8, 5), (16, 7)], 4); // multi-height
+    test(99, &[(32, 2)], 8); // tall matrix
+}
+
+#[test]
+fn lmcs_duplicate_indices_roundtrip() {
+    let mut rng = SmallRng::seed_from_u64(123);
+    let lmcs = gl::test_lmcs();
+    let matrices = vec![RowMajorMatrix::rand(&mut rng, 4, 5), RowMajorMatrix::rand(&mut rng, 8, 3)];
+
+    let tree = lmcs.build_tree(matrices);
+    let widths = tree.aligned_widths();
+    let log_max_height = log2_strict_u8(tree.height());
+    let indices = [3usize, 1, 3, 0, 1];
+
+    let (transcript, opened_rows) =
+        roundtrip_open_batch(&lmcs, &tree, &indices).expect("batch opening should verify");
+
+    // BTreeMap coalesces duplicates: 5 indices → 3 unique keys
+    assert_eq!(opened_rows.len(), 3);
+
+    for (&index, rows) in &opened_rows {
+        assert_eq!(*rows, tree.aligned_rows(index), "row mismatch for index {index}");
+    }
+
+    let tree_indices = TreeIndices::new(indices.iter().copied(), log_max_height).unwrap();
+    let mut verifier_channel = gl::verifier_channel(&transcript);
+    let batch = lmcs
+        .read_batch_proof(&widths, &tree_indices, &mut verifier_channel)
+        .expect("batch witness should parse from transcript");
+
+    assert_eq!(batch.openings.len(), 3);
+    for &index in &[0usize, 1, 3] {
+        let opening = batch.openings.get(&index).expect("opening for index");
+        assert_eq!(
+            opening.rows,
+            tree.aligned_rows(index),
+            "batch witness rows mismatch for index {index}"
+        );
+    }
+}
+
+#[test]
+fn hiding_roundtrip() {
+    let test = |seed: u64, matrices: &[(usize, usize)], indices: &[usize]| {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let matrices: Vec<_> =
+            matrices.iter().map(|&(h, w)| RowMajorMatrix::rand(&mut rng, h, w)).collect();
+
+        let config = hiding_lmcs(rng);
+        let tree: HidingTree<_> = config.build_tree(matrices);
+        let (_transcript, opened_rows) =
+            roundtrip_open_batch(&config, &tree, indices).expect("batch opening should verify");
+
+        for (&leaf_idx, rows) in &opened_rows {
+            assert_eq!(*rows, tree.aligned_rows(leaf_idx));
+        }
+    };
+
+    test(99, &[(4, 3), (8, 5)], &[1, 3, 5]);
+
+    // Different salts should produce different commitments
+    let matrices1 = vec![RowMajorMatrix::rand(&mut SmallRng::seed_from_u64(100), 4, 3)];
+    let matrices2 = matrices1.clone();
+
+    let config1 = hiding_lmcs(SmallRng::seed_from_u64(1));
+    let config2 = hiding_lmcs(SmallRng::seed_from_u64(2));
+
+    let tree1: HidingTree<_> = config1.build_tree(matrices1);
+    let tree2: HidingTree<_> = config2.build_tree(matrices2);
+
+    assert_ne!(tree1.root(), tree2.root());
+}
+
+fn assert_typed_streamed_parity<C, M>(
+    lmcs: &C,
+    tree: &C::Tree<M>,
+    query_indices: &[usize],
+    query_depth: u8,
+) where
+    C: Lmcs<F = Felt, Commitment = TestCommitment>,
+    M: Matrix<Felt>,
+{
+    let indices = TreeIndices::new(query_indices.iter().copied(), query_depth).unwrap();
+    let tree_depth = log2_strict_u8(tree.height());
+    let typed = lmcs.lifted_batch_proof(tree, &indices).unwrap();
+
+    let mut prover_channel = gl::prover_channel();
+    tree.prove_lifted_batch(lmcs, &indices, &mut prover_channel);
+    let (_, transcript) = prover_channel.finalize();
+    let mut verifier_channel = gl::verifier_channel(&transcript);
+    let streamed = lmcs
+        .read_lifted_batch_proof(
+            &tree.aligned_widths(),
+            &indices,
+            tree_depth,
+            &mut verifier_channel,
+        )
+        .unwrap();
+    assert!(verifier_channel.is_empty());
+
+    assert_eq!(typed.indices().collect::<Vec<_>>(), streamed.indices().collect::<Vec<_>>());
+    for index in typed.indices() {
+        assert_eq!(typed.opening(index), streamed.opening(index));
+        assert_eq!(typed.salt(index), streamed.salt(index));
+        assert_eq!(typed.leaf_hash(index), streamed.leaf_hash(index));
+        assert_eq!(typed.path(index), streamed.path(index));
+    }
+}
+
+#[test]
+fn typed_batch_proof_matches_streamed_openings() {
+    let mut rng = SmallRng::seed_from_u64(321);
+    let matrices =
+        vec![RowMajorMatrix::rand(&mut rng, 8, 3), RowMajorMatrix::rand(&mut rng, 64, 5)];
+    let lmcs = gl::test_lmcs();
+    let tree = lmcs.build_aligned_tree(matrices.clone());
+    assert_typed_streamed_parity(&lmcs, &tree, &[63, 1, 17, 1, 32, 0], 6);
+    assert_typed_streamed_parity(&lmcs, &tree, &[127, 63, 64, 0, 65], 7);
+    assert_typed_streamed_parity(&lmcs, &tree, &[], 6);
+    assert_typed_streamed_parity(&lmcs, &tree, &(0..64).collect::<Vec<_>>(), 6);
+
+    let unaligned_tree = lmcs.build_tree(matrices.clone());
+    assert_typed_streamed_parity(&lmcs, &unaligned_tree, &[63, 1, 17, 1, 32, 0], 6);
+
+    let single = lmcs.build_tree(vec![RowMajorMatrix::rand(&mut rng, 1, 2)]);
+    assert_typed_streamed_parity(&lmcs, &single, &[0, 1, 7], 3);
+
+    let hiding = hiding_lmcs(rng);
+    let hiding_tree = hiding.build_aligned_tree(matrices);
+    assert_typed_streamed_parity(&hiding, &hiding_tree, &[127, 63, 64, 0, 65], 7);
+
+    let wrong_depth = TreeIndices::new([0], 7).unwrap();
+    assert!(matches!(lmcs.batch_proof(&tree, &wrong_depth), Err(LmcsError::InvalidProof)));
+    let shallow_query = TreeIndices::new([0], 5).unwrap();
+    assert!(matches!(
+        lmcs.lifted_batch_proof(&tree, &shallow_query),
+        Err(LmcsError::InvalidProof)
+    ));
+}
+
+#[test]
+fn open_batch_handles_empty_or_oob() {
+    let mut rng = SmallRng::seed_from_u64(7);
+    let lmcs = gl::test_lmcs();
+    let matrix = RowMajorMatrix::rand(&mut rng, 4, 3);
+    let tree = lmcs.build_tree(vec![matrix]);
+    let widths = tree.aligned_widths();
+    let log_max_height = log2_strict_u8(tree.height());
+    let commitment = tree.root();
+
+    let (prover_digest, transcript) = gl::prover_channel().finalize();
+
+    // Empty indices → open_batch returns InvalidProof.
+    let empty = TreeIndices::new([], log_max_height).unwrap();
+    assert_eq!(
+        verify_open_batch(&lmcs, &commitment, &widths, &empty, &transcript, &prover_digest),
+        Err(LmcsError::InvalidProof)
+    );
+
+    // Out-of-range index → TreeIndices construction returns InvalidProof.
+    assert_eq!(TreeIndices::new([tree.height()], log_max_height), Err(LmcsError::InvalidProof));
+}
+
+#[test]
+fn build_tree_alignment_modes() {
+    let mut rng = SmallRng::seed_from_u64(123);
+    let lmcs = gl::test_lmcs();
+    let m1 = RowMajorMatrix::rand(&mut rng, 4, 3);
+    let m2 = RowMajorMatrix::rand(&mut rng, 8, 5);
+
+    let tree_unaligned = lmcs.build_tree(vec![m1.clone(), m2.clone()]);
+    let tree_aligned = lmcs.build_aligned_tree(vec![m1, m2]);
+    let alignment = tree_aligned.alignment();
+    let expected_alignment = <Sponge as Alignable<Felt, Felt>>::ALIGNMENT;
+
+    assert_eq!(tree_unaligned.alignment(), 1);
+    assert_eq!(alignment, expected_alignment);
+    assert_eq!(tree_unaligned.root(), tree_aligned.root());
+
+    let widths_aligned = tree_aligned.aligned_widths();
+    assert_eq!(widths_aligned[0], aligned_len(3, expected_alignment));
+    assert_eq!(widths_aligned[1], aligned_len(5, expected_alignment));
+
+    let widths_unaligned = tree_unaligned.widths();
+    assert_eq!(widths_unaligned, vec![3, 5]);
+    if expected_alignment > 1 {
+        assert_ne!(widths_unaligned, widths_aligned);
+    }
+
+    let rows_aligned = tree_aligned.aligned_rows(0);
+    let widths_a: Vec<usize> = rows_aligned.iter_rows().map(<[Felt]>::len).collect();
+    assert_eq!(widths_a, widths_aligned);
+
+    let rows_unaligned = tree_unaligned.rows(0);
+    let widths_u: Vec<usize> = rows_unaligned.iter_rows().map(<[Felt]>::len).collect();
+    assert_eq!(widths_u, widths_unaligned);
+
+    let indices = [0usize, 1usize];
+    let (_transcript, opened_rows) = roundtrip_open_batch(&lmcs, &tree_aligned, &indices)
+        .expect("aligned opening should verify");
+    for (&idx, rows) in &opened_rows {
+        assert_eq!(*rows, tree_aligned.aligned_rows(idx));
+    }
+}
+
+#[test]
+fn batch_proof_handles_empty_or_oob() {
+    let mut rng = SmallRng::seed_from_u64(9);
+    let lmcs = gl::test_lmcs();
+    let matrix = RowMajorMatrix::rand(&mut rng, 4, 3);
+    let tree = lmcs.build_tree(vec![matrix]);
+    let widths = tree.aligned_widths();
+    let log_max_height = log2_strict_u8(tree.height());
+
+    let idx0 = TreeIndices::new([0], log_max_height).unwrap();
+    let mut prover_channel = gl::prover_channel();
+    tree.prove_batch(&lmcs, &idx0, &mut prover_channel);
+    let (_, transcript) = prover_channel.finalize();
+
+    // Empty indices → no openings parsed.
+    let empty = TreeIndices::new([], log_max_height).unwrap();
+    let mut verifier_channel = gl::verifier_channel(&transcript);
+    let batch = lmcs.read_batch_proof(&widths, &empty, &mut verifier_channel).unwrap();
+    assert!(batch.openings.is_empty());
+
+    // Zero-width openings with a valid index.
+    let mut verifier_channel = gl::verifier_channel(&transcript);
+    let batch = lmcs.read_batch_proof(&[], &idx0, &mut verifier_channel).unwrap();
+    assert_eq!(batch.openings.len(), 1);
+    let opening = batch.openings.get(&0).expect("opening for index 0");
+    assert_eq!(opening.rows.num_rows(), 0);
+    assert!(opening.salt.is_empty());
+    assert_eq!(batch.witness.path(0).unwrap().len(), 2);
+}
+
+#[test]
+fn block_consumer_preserves_salted_openings() {
+    use p3_field::PackedValue;
+    use p3_matrix::dense::RowMajorMatrixView;
+    use p3_maybe_rayon::prelude::*;
+
+    let lanes = PackedFelt::WIDTH.max(2);
+    let mut rng = SmallRng::seed_from_u64(42);
+    for (shapes, block_rows) in [
+        (vec![(1, 3)], 1),
+        (vec![(1, 3), (4, 9), (4, 7), (16 * lanes, 17)], 1),
+        (vec![(1, 3), (4, 9), (4, 7), (16 * lanes, 17)], 4 * lanes),
+    ] {
+        let mut matrices: Vec<_> = shapes
+            .into_iter()
+            .map(|(height, width)| RowMajorMatrix::rand(&mut rng, height, width))
+            .collect();
+        let lmcs = hiding_lmcs(rng.clone());
+        // Both constructions must use the same salt.
+        let eager_lmcs = lmcs.clone();
+        let expected = eager_lmcs.build_aligned_tree(
+            matrices.iter().map(|matrix| matrix.as_view().bit_reverse_rows()).collect(),
+        );
+        let expected_root = expected.root();
+        let indices = [0, expected.height() / 2, expected.height() - 1];
+        let (expected_proof, _) = roundtrip_open_batch(&eager_lmcs, &expected, &indices).unwrap();
+        drop(expected);
+        let matrix = matrices.pop().unwrap();
+        let actual =
+            lmcs.build_aligned_tree_with_blocks(matrices, matrix.dimensions(), |make_consumer| {
+                let consume = make_consumer.unwrap()(block_rows);
+                matrix
+                    .values
+                    .par_chunks_exact(block_rows * matrix.width())
+                    .enumerate()
+                    .rev()
+                    .for_each(|(index, values)| {
+                        consume(
+                            index * block_rows,
+                            RowMajorMatrixView::new(values, matrix.width()),
+                        );
+                    });
+                matrix
+            });
+        assert_eq!(actual.root(), expected_root);
+        let (actual_proof, _) = roundtrip_open_batch(&lmcs, &actual, &indices).unwrap();
+        assert_eq!(actual_proof.as_slices(), expected_proof.as_slices());
+        assert_typed_streamed_parity(&lmcs, &actual, &indices, log2_strict_u8(actual.height()));
+    }
+}
+
+#[test]
+#[should_panic(expected = "missing block")]
+fn block_consumer_rejects_missing_block() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        make_consumer.unwrap()(1)(0, matrix.split_rows(1).0);
+        matrix
+    });
+}
+
+#[test]
+#[should_panic(expected = "duplicate block")]
+fn block_consumer_rejects_duplicate_block() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        let consume = make_consumer.unwrap()(1);
+        let block = matrix.split_rows(1).0;
+        consume(0, block);
+        consume(0, block);
+        matrix
+    });
+}
+
+#[test]
+#[should_panic(expected = "missing block")]
+fn block_consumer_rejects_unused_factory() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |_| matrix);
+}
+
+#[test]
+#[should_panic(expected = "block height must be a power of two")]
+fn block_consumer_rejects_invalid_height() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 4]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        let _consume = make_consumer.unwrap()(3);
+        matrix
+    });
+}

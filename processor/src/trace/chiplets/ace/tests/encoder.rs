@@ -1,9 +1,8 @@
 use alloc::vec::Vec;
 
-use super::{
-    super::instruction::{ID_BITS, MAX_ID},
-    *,
-};
+use miden_ace::instruction::{MAX_ID, encode_instruction};
+
+use super::*;
 use crate::{Felt, ZERO};
 
 #[derive(Debug)]
@@ -128,14 +127,7 @@ impl EncodedCircuit {
         let id_l = layout.encoded_node_id(&instruction.node_l)?;
         let id_r = layout.encoded_node_id(&instruction.node_r)?;
 
-        let op = match instruction.op {
-            Op::Sub => 0,
-            Op::Mul => 1,
-            Op::Add => 2,
-        };
-
-        let encoded = id_l as u64 + ((id_r as u64) << ID_BITS) + (op << (2 * ID_BITS));
-        Some(Felt::new_unchecked(encoded))
+        encode_instruction(id_l, id_r, instruction.op)
     }
 }
 

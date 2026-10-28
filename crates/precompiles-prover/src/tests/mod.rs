@@ -37,7 +37,6 @@ mod vm_uint;
 
 use std::{string::String, vec, vec::Vec};
 
-use miden_air::lookup::{LookupAir, ProverLookupBuilder};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -45,9 +44,12 @@ use miden_core::{
     proof::StarkProof,
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
-use miden_lifted_stark::check_constraints;
 use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
+use miden_stark::{
+    air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement},
+    check_constraints,
+    lookup::{Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions},
+};
 
 use crate::{
     session::SessionTraces,
@@ -175,7 +177,7 @@ pub(crate) fn log_quotient_degree<A>(air: &A) -> u8
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
+    miden_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
 }
 
 /// Return an AIR's LogUp column shape without exposing its private backing constant.
@@ -184,6 +186,42 @@ where
     A: for<'a> LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     LookupAir::<ProverLookupBuilder<'_, Felt, QuadFelt>>::column_shape(air)
+}
+
+/// Build lookup fractions using the AIR's periodic and preprocessed columns.
+pub(crate) fn lookup_fractions<A>(
+    air: &A,
+    main: &RowMajorMatrix<Felt>,
+    challenges: &Challenges<QuadFelt>,
+) -> LookupFractions<Felt, QuadFelt>
+where
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    let periodic = air.periodic_columns();
+    let preprocessed = air.preprocessed_trace();
+    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges)
+}
+
+/// Fold each row's lookup columns without inverting denominators.
+pub(crate) fn lookup_column_folds(
+    fractions: &LookupFractions<Felt, QuadFelt>,
+) -> Vec<Vec<(QuadFelt, QuadFelt)>> {
+    let mut cursor = 0;
+    let mut rows = Vec::with_capacity(fractions.num_rows());
+    for row_counts in fractions.counts().chunks(fractions.num_columns()) {
+        let mut row = Vec::with_capacity(fractions.num_columns());
+        for &count in row_counts {
+            let column = &fractions.fractions()[cursor..cursor + count];
+            cursor += count;
+            row.push(sum_rational_folds(
+                column.iter().map(|&(multiplicity, encoded)| (multiplicity.into(), encoded)),
+            ));
+        }
+        rows.push(row);
+    }
+    assert_eq!(cursor, fractions.fractions().len());
+    rows
 }
 
 /// Add two rational folds represented as `(numerator, denominator)` pairs.

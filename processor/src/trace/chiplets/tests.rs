@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     CHIPLETS_CLK_COL, CHIPLETS_MODE_COL, CHIPLETS_WIDTH, TRACE_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
@@ -213,7 +213,7 @@ fn build_trace(
 /// Checks:
 /// - s_ctrl (column 0) = 1 on controller rows
 /// - Controller rows have the correct selectors for operation type and boundary flags
-/// - Padding rows: selectors [0, 1, 0], non-selector columns are zero
+/// - Padding rows: selectors [0, 1, 0], zero data columns except the controller discriminator
 fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_rows: usize) {
     // Column indices within chiplets trace.
     // Column 0 = s_ctrl. Hasher internal columns start at column 1.
@@ -246,9 +246,10 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
         assert_eq!(trace[s2_col][row], ZERO, "padding row {row}: s2 should be 0");
 
         // Non-selector hasher columns should be zero on padding rows, except the shared
-        // controller discriminator. Controller constraints bind this cell to
+        // controller discriminator. Controller constraints bind this cell to one on padding rows.
         // The trailing column (chip_clk, CHIPLETS_WIDTH - 1) is the chiplet-trace row counter
-        // and is non-zero on every row by design; see `air/src/constraints/chiplets/chip_clk.rs`.
+        // and is non-zero on every row by design; see
+        // `crates/air/source/src/vm/constraints/chiplets/mod.rs`.
         for col in 4..CHIPLETS_WIDTH - 1 {
             if col == CHIPLETS_MODE_COL {
                 assert_eq!(trace[col][row], ONE, "padding row {row}: mode cell should be 1");

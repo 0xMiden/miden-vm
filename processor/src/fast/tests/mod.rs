@@ -6,7 +6,8 @@ use alloc::{
 };
 use core::{assert_matches, cell::Cell, str::FromStr};
 
-use miden_air::{MidenMultiAir, trace::MIN_TRACE_LEN};
+use miden_air::vm::MidenMultiAir;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
@@ -27,7 +28,6 @@ use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
     Span, Uri,
 };
-use miden_lifted_stark::memory::prover_peak_bytes;
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
     debug_info::{
@@ -35,6 +35,7 @@ use miden_mast_package::{
         PackageDebugInfoBuilder,
     },
 };
+use miden_stark::memory::prover_peak_bytes;
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 
@@ -2432,7 +2433,7 @@ fn test_prover_memory_budget_exceeded() {
     };
 
     let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
-    let params = miden_air::config::pcs_params();
+    let params = miden_air::vm::config::pcs_params();
     let heights = measured
         .trace_len_summary()
         .padded_heights()

@@ -7,10 +7,9 @@
 //! height is larger, the inactive all-zero mul tail extends to match it. The two column ranges are
 //! concatenated row by row.
 
-use alloc::vec::Vec;
-
 use miden_core::{
     Felt,
+    field::PrimeCharacteristicRing,
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -42,15 +41,19 @@ pub fn generate_trace(
     let store_main = store_trace_padded_to(store, bpl, store_min_blocks);
     let h_merged = store_main.height();
 
-    let mut mul_vals = mul_main.values;
-    mul_vals.resize(h_merged * MUL_NUM_MAIN_COLS, Felt::ZERO);
-
-    let mut vals = Vec::with_capacity(h_merged * NUM_MAIN_COLS);
-    for r in 0..h_merged {
-        vals.extend_from_slice(
-            &store_main.values[r * STORE_NUM_MAIN_COLS..(r + 1) * STORE_NUM_MAIN_COLS],
-        );
-        vals.extend_from_slice(&mul_vals[r * MUL_NUM_MAIN_COLS..(r + 1) * MUL_NUM_MAIN_COLS]);
-    }
+    use miden_crypto::parallel::*;
+    let mut vals = Felt::zero_vec(h_merged * NUM_MAIN_COLS);
+    vals.par_chunks_mut(NUM_MAIN_COLS)
+        .zip(store_main.values.par_chunks(STORE_NUM_MAIN_COLS))
+        .enumerate()
+        .for_each(|(r, (out, store))| {
+            out[..STORE_NUM_MAIN_COLS].copy_from_slice(store);
+            // Mul's inactive tail is already zero; no padded intermediate matrix is needed.
+            if r < mul_main.height() {
+                out[STORE_NUM_MAIN_COLS..].copy_from_slice(
+                    &mul_main.values[r * MUL_NUM_MAIN_COLS..(r + 1) * MUL_NUM_MAIN_COLS],
+                );
+            }
+        });
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
 }

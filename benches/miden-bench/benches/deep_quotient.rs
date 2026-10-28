@@ -21,7 +21,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use eidos::{Felt, QuadFelt, test_lmcs};
-use miden_lifted_stark::testing::{
+use miden_stark::testing::{
     Coset, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, PointQuotients, RELATIVE_SPECS,
     canonical_domain, generate_matrices_from_specs, total_elements,
 };
