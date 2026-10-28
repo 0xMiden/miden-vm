@@ -740,79 +740,16 @@ impl MastForest {
     ///
     /// Returns [`MastForestError::ForwardReference`] if nodes are not in topological order.
     fn compute_node_hashes(&self) -> Result<Vec<Word>, MastForestError> {
-        use crate::chiplets::hasher;
-
-        /// Checks that child_id references a node that appears before node_id in topological order.
-        fn check_no_forward_ref(
-            node_id: MastNodeId,
-            child_id: MastNodeId,
-        ) -> Result<(), MastForestError> {
-            if child_id.0 >= node_id.0 {
-                return Err(MastForestError::ForwardReference(node_id, child_id));
-            }
-            Ok(())
-        }
-
         let mut computed_hashes = Vec::with_capacity(self.nodes.len());
         for (node_idx, node) in self.nodes.iter().enumerate() {
             let node_id = MastNodeId::new_unchecked(node_idx as u32);
-
-            // Check topological ordering and compute digest.
-            let computed_digest = match node {
-                MastNode::Block(block) => node::hash_op_batches(block.op_batches()),
-                MastNode::Join(join) => {
-                    let left_id = join.first();
-                    let right_id = join.second();
-                    check_no_forward_ref(node_id, left_id)?;
-                    check_no_forward_ref(node_id, right_id)?;
-
-                    let left_digest = computed_hashes[left_id.0 as usize];
-                    let right_digest = computed_hashes[right_id.0 as usize];
-                    hasher::merge_in_mast_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
-                },
-                MastNode::Split(split) => {
-                    let true_id = split.on_true();
-                    let false_id = split.on_false();
-                    check_no_forward_ref(node_id, true_id)?;
-                    check_no_forward_ref(node_id, false_id)?;
-
-                    let true_digest = computed_hashes[true_id.0 as usize];
-                    let false_digest = computed_hashes[false_id.0 as usize];
-                    hasher::merge_in_mast_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
-                },
-                MastNode::Loop(loop_node) => {
-                    let body_id = loop_node.body();
-                    check_no_forward_ref(node_id, body_id)?;
-
-                    let body_digest = computed_hashes[body_id.0 as usize];
-                    hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
-                },
-                MastNode::Call(call) => {
-                    let callee_id = call.callee();
-                    check_no_forward_ref(node_id, callee_id)?;
-
-                    let callee_digest = computed_hashes[callee_id.0 as usize];
-                    let domain = if call.is_syscall() {
-                        CallNode::SYSCALL_DOMAIN
-                    } else {
-                        CallNode::CALL_DOMAIN
-                    };
-                    hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
-                },
-                MastNode::Dyn(dyn_node) => {
-                    if dyn_node.is_dyncall() {
-                        DynNode::DYNCALL_DEFAULT_DIGEST
-                    } else {
-                        DynNode::DYN_DEFAULT_DIGEST
-                    }
-                },
-                MastNode::External(_) => {
-                    // External nodes have externally-provided digests that cannot be recomputed.
-                    node.digest()
-                },
-            };
-
-            computed_hashes.push(computed_digest);
+            let digest = node.compute_digest(|child_id| {
+                if child_id >= node_id {
+                    return Err(MastForestError::ForwardReference(node_id, child_id));
+                }
+                Ok(computed_hashes[child_id.0 as usize])
+            })?;
+            computed_hashes.push(digest);
         }
 
         Ok(computed_hashes)

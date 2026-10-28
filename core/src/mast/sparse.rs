@@ -10,7 +10,7 @@ use miden_utils_indexing::newtype_id;
 use crate::{
     Word,
     advice::AdviceMap,
-    mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
+    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeExt, MastNodeId},
     serde::DeserializationError,
     utils::Idx,
 };
@@ -72,9 +72,10 @@ mod mast_forest_id_arbitrary {
 /// the full child node, and they make accidental entry into a pruned node a clean
 /// `get_node_by_id` miss rather than a partially-populated node.
 ///
-/// Its serialized form is a trusted, version-local trace-replay format. It has no stable wire
-/// version and must not be persisted across releases or accepted as an untrusted program format;
-/// use the validated [`MastForest`] entry points for those cases.
+/// Its serialized form is a version-local replay format. The default reader checks full-node
+/// hashes against available child digests. Digest-only entries and external nodes remain opaque:
+/// these checks do not prove membership in a source forest. The explicit trusted reader skips
+/// hash recomputation. This format must not be persisted across releases.
 #[derive(Debug)]
 pub struct SparseMastForest {
     /// Subset of the original forest's nodes, keyed by their original [`MastNodeId`].
@@ -93,6 +94,35 @@ pub struct SparseMastForest {
 }
 
 impl SparseMastForest {
+    /// Checks block invariants, child ordering, and full-node hashes.
+    ///
+    /// Digest-only entries and external nodes are opaque inputs to these checks. Their membership
+    /// in a particular source forest must be checked separately against that source.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        for (&node_id, node) in &self.nodes {
+            if let MastNode::Block(block) = node {
+                block
+                    .validate_batch_invariants()
+                    .map_err(|message| MastForestError::InvalidBatchPadding(node_id, message))?;
+            }
+            let computed = node.compute_digest(|child_id| {
+                if child_id >= node_id {
+                    return Err(MastForestError::ForwardReference(node_id, child_id));
+                }
+                self.get_digest_by_id(child_id)
+                    .ok_or_else(|| MastForestError::NodeIdOverflow(child_id, self.num_nodes()))
+            })?;
+            if computed != node.digest() {
+                return Err(MastForestError::HashMismatch {
+                    node_id,
+                    expected: node.digest(),
+                    computed,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the underlying nodes of this sparse forest, keyed by their original
     /// [`MastNodeId`].
     pub fn nodes(&self) -> &BTreeMap<MastNodeId, MastNode> {
@@ -259,6 +289,12 @@ fn require_child_digest(
     digests: &BTreeMap<MastNodeId, Word>,
 ) -> Result<(), DeserializationError> {
     validate_sparse_id(child_id, "child")?;
+    if child_id >= parent_id {
+        return Err(DeserializationError::InvalidValue(format!(
+            "sparse full node {} references non-preceding child {}",
+            parent_id.0, child_id.0
+        )));
+    }
     if !nodes.contains_key(&child_id) && !digests.contains_key(&child_id) {
         return Err(DeserializationError::InvalidValue(format!(
             "sparse full node {} references child {} without a full node or digest-only entry",
