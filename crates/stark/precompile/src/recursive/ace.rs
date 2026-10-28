@@ -635,17 +635,11 @@ mod tests {
             ("SECURITY_CAP_BITS", pvm_security::testing::SECURITY_CAP >> fractional_bits),
             (
                 "DEEP_FIELD_BASE_BITS",
-                (sample_bits >> fractional_bits)
-                    - u64::from(
-                        miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
-                    ),
+                (sample_bits >> fractional_bits) - u64::from(precompile_pcs_params().log_blowup()),
             ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::testing::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::testing::LOG2_E),
-            (
-                "MAX_CONSTRAINT_DEGREE",
-                (1u64 << miden_air::precompiles::policy::precompile_pcs_params().log_blowup()) + 1,
-            ),
+            ("MAX_CONSTRAINT_DEGREE", (1u64 << precompile_pcs_params().log_blowup()) + 1),
         ] {
             assert_eq!(
                 masm_const(SECURITY_ESTIMATOR_PATH, name),
@@ -773,7 +767,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
+            precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 

@@ -1,16 +1,13 @@
-//! STARK configuration for proving/verifying custom chiplet AIRs.
+//! PVM STARK configuration.
 //!
-//! This module provides production-style configuration factories matching the Miden VM
-//! hash-function surface, along with a smaller Eidos configuration for local tests.
-//!
-//! This module supplies the PVM transcript domain. Generic factories and transcript observation
-//! live in [`miden_stark::config`]; immutable PCS policy lives in
+//! The Eidos factory supplies the PVM transcript domain. Generic factories and transcript
+//! observation live in [`miden_stark::config`]; immutable PCS policy lives in
 //! [`miden_air::precompiles::policy`].
 
 use miden_core::{Felt, program::domain::STARK_TRANSCRIPT};
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 use miden_crypto::hash::eidos::MidenEidosChallenger;
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 use miden_stark::StarkConfig;
 pub use miden_stark::{
     config::{EidosConfig, RelationDigest},
@@ -19,8 +16,7 @@ pub use miden_stark::{
 
 /// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.
 ///
-/// The generated raw limbs live with the canonical ACE constants; this public field-valued view
-/// is the value passed to every production PVM configuration.
+/// The accepted value is pinned in [`miden_air::precompiles::protocol::PINS`].
 pub(crate) const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
     let [d0, d1, d2, d3] = miden_air::precompiles::PVM_RELATION_DIGEST;
     [
@@ -35,7 +31,7 @@ pub(crate) const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Eidos;
 
-/// Creates the PVM Eidos configuration with its existing transcript domain.
+/// Creates the Eidos configuration with the PVM transcript domain.
 pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
     miden_stark::config::eidos_config(params, relation_digest, STARK_TRANSCRIPT)
 }
@@ -44,7 +40,7 @@ pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> Eidos
 // ================================================================================================
 
 /// Eidos STARK configuration with reduced PCS parameters for tests.
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 pub(crate) type TestConfig = EidosConfig;
 
 /// Test PCS parameters (fast but insecure — for testing only).
@@ -54,7 +50,7 @@ pub(crate) type TestConfig = EidosConfig;
 /// - log_folding_arity: 1 (arity = 2)
 /// - log_final_degree: 3 (final poly = 8)
 /// - num_queries: 4
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 pub(crate) fn test_pcs_params() -> PcsParams {
     PcsParams::new(
         3, // log_blowup (must be >= log_quotient_degree)
@@ -69,13 +65,13 @@ pub(crate) fn test_pcs_params() -> PcsParams {
 }
 
 /// Creates a fresh challenger for the Eidos test configuration.
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 pub(crate) fn test_challenger() -> MidenEidosChallenger {
     test_config().challenger()
 }
 
 /// Creates an Eidos STARK configuration with reduced PCS parameters.
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 pub(crate) fn test_config() -> TestConfig {
     eidos_config(test_pcs_params(), PRECOMPILE_RELATION_DIGEST)
 }

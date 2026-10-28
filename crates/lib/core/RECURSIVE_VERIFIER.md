@@ -37,9 +37,8 @@ The relation digest, ACE circuit digest, and setup commitments are pinned in
 `crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
 to these values, and the generated MASM embeds them. Two checks guard the pins, for different reasons:
 
-- The `miden-air` tests detect drift. They recompute every pin from the authored AIRs, so an edit
-  that changes the relation fails `cargo test` even when nobody regenerates the MASM. They answer
-  whether the pins still name the relation the authored AIRs define.
+- The AIR and STARK backend tests compare the pins with digests and commitments recomputed from
+  the authored AIRs and setup tables. A stale pin fails these tests independently of MASM regeneration.
 - The generators enforce change control. They compare the compiled circuit and relation digests
   with the pins and fail when they differ, and they take the setup commitments from the pins as
   trusted inputs. They read the pins but never write them, so regeneration cannot introduce a new
@@ -89,6 +88,7 @@ verifier-root consistency check:
 
 ```sh
 cargo test -p miden-air
+cargo test -p miden-vm-stark --lib
 cargo test -p miden-precompile-stark --features constants-tools --lib
 cargo test -p miden-core-lib --features constraints-tools --test core-lib
 cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library
