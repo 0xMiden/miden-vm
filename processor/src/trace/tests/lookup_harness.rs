@@ -210,8 +210,8 @@ impl<'a> Expectations<'a> {
 // HELPERS
 // ================================================================================================
 
-/// Slice the flat `LookupFractions` buffer into per-row bags using the row-major `counts`
-/// layout (see `crates/air/source/src/lookup/aux_builder.rs` for the ordering spec).
+/// Slice the flat fraction buffer into per-row bags using the row-major
+/// [`LookupFractions::counts`] layout.
 fn split_rows(fractions: &LookupFractions<Felt, QuadFelt>) -> Vec<Vec<(Felt, QuadFelt)>> {
     let num_cols = fractions.num_columns();
     let counts = fractions.counts();

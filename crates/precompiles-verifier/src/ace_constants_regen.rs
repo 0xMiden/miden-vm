@@ -643,7 +643,7 @@ fn render_pvm_parameters(
 
 /// Compares the compiled circuit with the relation identity pinned in `miden-air`.
 fn pinned_identity_matches(artifacts: &GeneratedArtifacts) -> Result<(), String> {
-    const PINS_PATH: &str = "crates/air/generated/src/precompiles/protocol.rs";
+    const PINS_PATH: &str = "crates/air/generated/src/precompile/protocol.rs";
     for (name, actual, expected) in [
         ("relation_digest", PVM_RELATION_DIGEST, artifacts.relation_digest),
         ("ace_circuit_digest", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),

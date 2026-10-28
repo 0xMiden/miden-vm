@@ -32,10 +32,10 @@ against them. The PVM layout is generated as a complete module.
 
 ## Pinned relation identities
 
-The relation digest, ACE circuit digest, and setup commitments are pinned in `crates/air/generated/src/config.rs`
-for the VM and `crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
-to these values, and the generated MASM embeds them. Two checks guard the pins, for different
-reasons:
+The relation digest, ACE circuit digest, and setup commitments are pinned in
+`crates/air/generated/src/vm/config.rs` for the VM and
+`crates/air/generated/src/precompile/protocol.rs` for the PVM. Native proving and verification bind
+to these values, and the generated MASM embeds them. Two checks guard the pins, for different reasons:
 
 - The `miden-air` tests detect drift. They recompute every pin from the authored AIRs, so an edit
   that changes the relation fails `cargo test` even when nobody regenerates the MASM. They answer

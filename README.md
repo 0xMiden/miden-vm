@@ -67,7 +67,7 @@ The VM proof commits to the deferred claims.
 To complete verification, you must also verify a precompile proof for those claims.
 See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
 
-The [precompile VM](crates/air/generated/src/precompiles) proves deferred claims with specialized circuits.
+The [precompile VM](crates/air/generated/src/precompile) proves deferred claims with specialized circuits.
 The [precompiles](crates/precompiles) support Keccak-256, SHA-256 and SHA-512 hashing. They also support 256-bit integer arithmetic and elliptic curve operations.
 The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
 
@@ -107,7 +107,7 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
 | VM | [processor](processor) | Executes programs and builds execution traces. |
 | Proof system | [air](crates/air/generated) | Defines the production VM and precompile AIRs and their generated artifacts. |
-| Proof system | [air-definitions](crates/air/source) | Defines the authored VM and precompile constraints that generation captures. |
+| Proof system | [air-source](crates/air/source) | Defines the authored VM and precompile constraints that generation captures. |
 | VM | [prover](prover) | Produces STARK proofs from execution traces. |
 | VM | [verifier](verifier) | Verifies VM execution proofs. |
 | VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
