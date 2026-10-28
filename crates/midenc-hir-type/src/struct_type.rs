@@ -13,6 +13,7 @@ pub enum InvalidStructTypeError {
 }
 
 /// Align `offset` up to `align`, which must be a power of two, or fail if that overflows `u32`.
+#[inline]
 fn checked_align_up(offset: u32, align: u16) -> Result<u32, InvalidStructTypeError> {
     assert!(align.is_power_of_two(), "invalid alignment: expected a power of two");
     offset
@@ -24,6 +25,7 @@ fn checked_align_up(offset: u32, align: u16) -> Result<u32, InvalidStructTypeErr
 ///
 /// The size is computed with checked arithmetic, so a field whose size overflows `usize` (such
 /// as `[[felt; 2^30]; 2^29]`) is rejected instead of panicking or wrapping.
+#[inline]
 fn field_size(ty: &Type) -> Result<u32, InvalidStructTypeError> {
     ty.checked_size_in_bytes()
         .and_then(|size| u32::try_from(size).ok())
