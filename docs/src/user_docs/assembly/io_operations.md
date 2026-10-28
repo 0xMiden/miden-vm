@@ -99,6 +99,8 @@ The exact framework AND frame is accepted by `adv.register_deferred`, with the o
 `lhs_digest || rhs_digest`, without changing the built-in root. Parameterized AND-domain frames
 and `TRUE` nodes are rejected. Memory-backed AND registration remains unsupported.
 `log_deferred` constructs an AND node and also advances the built-in root.
+The related, unsafe [`clear_deferred`](./cryptographic_operations.md#precompile-accumulator)
+instruction resets the accumulator to zero; use it only after kernel-epilogue recursive verification.
 
 The register arguments are visible in the VM execution trace, but the event does not constrain the
 host-side registration. `adv.register_deferred_data` additionally performs direct host reads without

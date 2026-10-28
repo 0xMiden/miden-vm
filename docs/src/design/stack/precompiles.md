@@ -31,7 +31,8 @@ modules are internal implementation details used by core-library facades and tes
   native evaluation or recording import. `Prover::prove_precompiles` imports an owned batch directly
   into one Session to validate and prove the assertions.
 - **Deferred root** — A single digest public value. Each logged statement appends
-  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
+  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. The
+  unsafe `clear_deferred` operation resets it to `TRUE_DIGEST` (the zero word).
 
 ## Lifecycle overview
 
@@ -54,10 +55,30 @@ modules are internal implementation details used by core-library facades and tes
    `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
    deferred state records the corresponding `AND` node.
 
+## Clearing the accumulator in a kernel epilogue
+
+`clear_deferred` reads `ROOT` from the top word of the operand stack and resets the rolling
+deferred root to `[0, 0, 0, 0]` (`TRUE_DIGEST`) in one cycle. It requires `ROOT` to equal the active
+accumulator and fails outside the root execution context (`ctx == 0`). Its stack effect is
+`[ROOT, ...] -> [ROOT, ...]`: the entire operand stack is preserved.
+
+**Unsafe: use this instruction only inside a trusted kernel's epilogue, after a recursive verifier
+has proved the exact final accumulator being cleared.** The epilogue must bind the verifier's
+statement to the same `ROOT` word passed to `clear_deferred` and must not log unverified
+statements between verification and clearing. Clearing removes earlier logged claims from the
+final outstanding precompile obligation; host-side evaluation of those claims is not a substitute
+for proving them. The instruction itself performs no proof verification.
+
+Root context includes both top-level program execution and kernel procedures entered by `syscall`.
+The context check therefore does not enforce kernel-only placement or prior verification; the
+trusted kernel must enforce those requirements. Only the accumulator is reset: registered nodes,
+evaluation caches, and consumed execution work remain in host state. Later logging starts from
+`TRUE_DIGEST`.
+
 ## Responsibilities
 
-- **VM** — Executes deferred advice events and `log_deferred`, maintains the rolling deferred
-  root, and exposes the final root as a public value.
+- **VM** — Executes deferred advice events, `log_deferred`, and `clear_deferred`, maintains the
+  rolling deferred root, and exposes the final root as a public value.
 - **Host / advice provider** — Maintains `DeferredState`, runs trusted precompile implementations,
   and supplies evaluation advice when wrappers request it.
 - **MASM wrapper** — Registers concrete deferred nodes and computes node and statement digests
@@ -80,6 +101,7 @@ Proving, verification, transport, and resource policy are specified in the
     insertion.
 - `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
   `ROOT_NEW` after the root transition has been constrained.
+- `clear_deferred` stack effect: `[ROOT, ...] -> [ROOT, ...]`; `ROOT` is the active accumulator.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 
@@ -94,6 +116,6 @@ Proving, verification, transport, and resource policy are specified in the
 ## Related reading
 
 - [Deferred computation](../deferred/index.md) – deferred DAG, wire, and proof lifecycle.
-- [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack
-  behaviour and opcode semantics.
+- [Precompile accumulator instructions](../../user_docs/assembly/instruction_reference.md#precompile-accumulator) –
+  `log_deferred`, `clear_deferred`, and the clearing safety contract.
 - `PrecompileWitness` implementation (`core/src/deferred/wire.rs`) – portable canonical opening.

@@ -11,7 +11,6 @@ use super::{
 };
 
 // Valid interpolation slots that do not currently map to an `Operation`.
-const UNUSED_DEGREE_7_NO_SHIFT_ROUTE_OPCODE: u8 = 6;
 const UNUSED_DEGREE_7_LEFT_SHIFT_ROUTE_OPCODE: u8 = 47;
 const UNUSED_DEGREE_5_REJECTED_OPCODE: u8 = 95;
 
@@ -48,7 +47,7 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
         | opcodes::CALL
         | opcodes::SYSCALL
         | opcodes::EVALCIRCUIT
-        | UNUSED_DEGREE_7_NO_SHIFT_ROUTE_OPCODE => set(&mut no_shift, 0..16),
+        | opcodes::CLEARDEFERRED => set(&mut no_shift, 0..16),
         opcodes::END if !is_loop_end => set(&mut no_shift, 0..16),
         opcodes::END => set(&mut left_shift, 1..16),
 

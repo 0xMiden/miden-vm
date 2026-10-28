@@ -391,7 +391,12 @@ where:
 
 The ACE chiplet adds the matching message with multiplicity $+1$.
 
-## LOG_DEFERRED
+## Precompile accumulator
+
+`log_deferred` appends a statement to the rolling deferred root, and `clear_deferred` resets
+that root to `TRUE_DIGEST` (the zero word). Both use the `LogDeferredRoot` lookup relation.
+
+### LOG_DEFERRED
 
 The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as one Eidos
@@ -399,7 +404,7 @@ compression using the fixed chaining value derived from the registered deferred-
 `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`. The VM STARK
 authenticates the final root as one public value.
 
-### Operation Overview
+#### Operation Overview
 
 The stack is expected to be arranged as `[STMNT, ...]`. `STMNT` must already be present in the
 processor's deferred state and evaluate to `TRUE`; otherwise execution fails when the opcode
@@ -429,9 +434,9 @@ The operation uses the following helper registers:
 Note: helper registers expose `ROOT_PREV` for bus constraints only; the VM maintains the deferred
 root internally between invocations.
 
-### Bus Communication
+#### Bus Communication
 
-#### Hasher chiplet
+##### Hasher chiplet
 
 The following two messages are sent to the hasher controller, ensuring the validity of the
 compression. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
@@ -473,10 +478,38 @@ The Core row removes both messages with multiplicity $-1$. Matching positive con
 enforce that they occur on one hasher-controller row backed by the same physical Eidos
 compression cycle.
 
-### Deferred-root Initialization
+### CLEAR_DEFERRED
+
+The `clear_deferred` operation uses opcode $6$ (`000_0110`) and reads `ROOT` from the top
+operand-stack word, which must equal the active accumulator. It resets the accumulator to
+`TRUE_DIGEST` in one cycle with stack effect `[ROOT, ...] -> [ROOT, ...]`, without helper registers
+or hasher requests.
+
+**Unsafe:** use only in a trusted kernel epilogue after recursively verifying the supplied `ROOT`.
+See the [full safety contract](./precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
+
+The AIR asserts that the current execution context is root:
+
+$$
+f_{clear\_precompiles} \cdot ctx = 0 \qquad \text{degree} = 8.
+$$
+
+The selector has degree $7$, and `ctx` has degree $1$. Ordinary stack and system transitions
+preserve the operand stack and context.
+
+### Deferred-root state
 
 Inside the VM, the deferred root is tracked by the typed `LogDeferredRoot` virtual-table relation:
 each `log_deferred` update removes the previous root before inserting the next one.
+`clear_deferred` removes the supplied stack root and inserts constant zero. Its removed root is
+read directly from the current row's stack:
+
+$$
+\mathsf{ROOT\_CLEAR}_i = s_i \qquad i \in \{0,1,2,3\}.
+$$
+
+This binds the removed obligation to the verified stack word. An unconstrained helper could remove
+an unrelated obligation, because this relation authenticates a multiset rather than update order.
 
 Let $D(r) = P_{log\_deferred} + \sum_{j=0}^{3}\beta^j r_j$. We denote the messages for
 removing and inserting the root as
@@ -490,6 +523,17 @@ v_{ins} = D(\mathsf{ROOT\_NEW})
 $$
 
 The previous-root message has multiplicity $-1$ and the new-root message has multiplicity $+1$.
+For `clear_deferred`, the messages are instead
+
+$$
+v_{rem,clear} = D(\mathsf{ROOT\_CLEAR}), \qquad
+v_{ins,clear} = D([0,0,0,0]).
+$$
+
+The zero-root denominator is constant and the stack-root denominator has degree $1$. The degree-$7$
+selector therefore gives batch numerator and denominator degrees at most $8$, keeping the lookup
+transition within the existing degree-$9$ column budget.
+
 The verifier supplies two boundary contributions so the chain has fixed endpoints: it adds the
 initial `TRUE_DIGEST` (the zero word) and removes the final four-felt deferred root committed by
 the VM trace.
@@ -504,6 +548,7 @@ $$
 v_{rem,last} = D(\mathsf{ROOT\_FINAL}).
 $$
 
-Because this compression uses the domain-derived `DEFERRED_AND_INIT_CV` and outputs an updated chaining
-word directly, that word is the deferred root at every step. The final deferred root is a fixed
-four-field-element value committed by `VmProof`, not a variable-length request transcript.
+Each `log_deferred` compression uses the domain-derived `DEFERRED_AND_INIT_CV` and outputs the
+updated root directly; `clear_deferred` replaces it with `TRUE_DIGEST`. Later logging starts a
+new chain from that zero root. The final deferred root is a fixed four-field-element value
+committed by `VmProof`, not a variable-length request transcript.

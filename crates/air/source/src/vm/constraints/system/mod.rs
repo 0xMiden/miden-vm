@@ -67,6 +67,10 @@ pub fn enforce_main<AB>(
     {
         builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
     }
+    // Clearing the deferred obligation is allowed only in the root memory context.
+    // The degree-7 opcode selector times ctx has degree 8.
+    builder.when(op_flags.clear_deferred()).assert_zero(local.system.ctx);
+
     let f_call = op_flags.call();
     let f_syscall = op_flags.syscall();
     let f_dyncall = op_flags.dyncall();
@@ -279,6 +283,23 @@ mod tests {
         let mut builder = SharedBuilder::new().with_row_flags(false, false, true);
         enforce_main(&mut builder, local, next, &op_flags);
         builder.evaluations
+    }
+
+    #[test]
+    fn clear_deferred_requires_root_context() {
+        let mut local = generate_test_row(opcodes::CLEARDEFERRED.into());
+        let mut next = generate_test_row(opcodes::NOOP.into());
+        next.system.clk = local.system.clk + Felt::ONE;
+        assert!(eval_system(&local, &next).iter().all(|v| *v == QuadFelt::ZERO));
+
+        // Keep the context unchanged so this is rejected by the operation's permission check,
+        // rather than the ordinary system context transition constraint.
+        local.system.ctx = Felt::new_unchecked(7);
+        next.system.ctx = local.system.ctx;
+        assert!(
+            eval_system(&local, &next).iter().any(|v| *v != QuadFelt::ZERO),
+            "CLEARDEFERRED must reject a non-root context"
+        );
     }
 
     /// Builds an END row carrying the given caller-frame restoration flag, with a non-root context

@@ -162,6 +162,7 @@ fn confirm_operation_structure() {
         Operation::EvalCircuit => (),
         Operation::Emit => (),
         Operation::LogDeferred => (),
+        Operation::ClearDeferred => (),
     };
 }
 
@@ -252,6 +253,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::EvalCircuit,
         Operation::Emit,
         Operation::LogDeferred,
+        Operation::ClearDeferred,
     ]
 }
 
@@ -337,7 +339,8 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::HornerExt
         | Operation::EvalCircuit
         | Operation::Emit
-        | Operation::LogDeferred) => {
+        | Operation::LogDeferred
+        | Operation::ClearDeferred) => {
             assert_eq!(operation.encoded_size(), operation.to_bytes().len());
         },
     }

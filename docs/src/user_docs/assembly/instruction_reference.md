@@ -395,7 +395,20 @@ Instructions for communicating with the host through events.
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Defined system events are reserved and use names in the `sys::` namespace.     |
 | `trace.<trace_id>` | `[...]`           | `[...]`           | 5      | Emits an optional, read-only trace event with the specified `trace_id`. Expands to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Immediate `trace_id` must be defined via `const.ID=event("...")` or inlined as `trace.event("...")`. The instruction is stack-neutral. Example: `trace.event("foo")` or `trace.MY_TRACE`. If no handler is registered for the trace ID, the event is a no-op. |
 | `trace`            | `[trace_id, ...]` | `[trace_id, ...]` | 3      | Emits an optional, read-only trace event using the `trace_id` at the top of the stack without consuming it. Expands to `push.<sys::trace_event> emit drop`. Trace handlers can inspect processor state but cannot mutate VM state or the advice provider. If no handler is registered for the trace ID, the event is a no-op. |
-| `log_deferred`   | `[STMNT, ...]` | `[ROOT_NEW, ...]` | 1 | Folds `STMNT` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`; precompile support code normally wraps this low-level opcode. |
+
+## Precompile accumulator
+
+Instructions for maintaining the rolling deferred root committed by the VM proof.
+
+| Instruction | Stack Input | Stack Output | Cycles | Notes |
+| ----------- | ----------- | ------------ | ------ | ----- |
+| `log_deferred` | `[STMNT, ...]` | `[ROOT_NEW, ...]` | 1 | Folds `STMNT` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`; precompile support code normally wraps this low-level opcode. |
+| `clear_deferred` | `[ROOT, ...]` | `[ROOT, ...]` | 1 | **Unsafe.** Requires the top word `ROOT` to match the active precompile accumulator, then resets the accumulator to `[0, 0, 0, 0]` (`TRUE_DIGEST`). Fails outside root context (`ctx == 0`); preserves `ROOT` and the entire operand stack. |
+
+**Call `clear_deferred` only inside a trusted kernel epilogue, after a recursive verifier has
+proved the exact `ROOT` supplied on the stack.** It removes outstanding proof obligations without
+verifying them; root context alone does not make this safe. See the
+[full safety contract](../../design/stack/precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
 
 ## Debugging Operations
 

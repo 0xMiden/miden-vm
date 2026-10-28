@@ -2,7 +2,7 @@
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 and Merkle-depth range-check removes: gated by u32 or Merkle opcodes.
-//! - Log-deferred transcript-state: gated by the log deferred opcode.
+//! - Deferred transcript-state: gated by LOGDEFERRED or CLEARDEFERRED.
 //!
 //! Soundness of the merge relies on the bus families using distinct `bus_prefix[bus]` bases
 //! (so their rationals remain linearly independent in the extension field) and on all
@@ -17,7 +17,8 @@
 //! - u32 range-check batch: 4 removes gated by `u32_rc_op`.
 //! - Merkle range-check batches: depth bounds plus part of the canonical-index witness, gated by
 //!   MPVERIFY / MRUPDATE.
-//! - Log-deferred transcript-state batch: 1 remove + 1 add gated by `log_deferred`.
+//! - Deferred transcript-state batches: 1 remove + 1 add gated by `log_deferred` or
+//!   `clear_deferred`.
 //!
 //! # Mutual exclusivity
 //!
@@ -29,7 +30,7 @@
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
 //!   U32MADD, …} — prefix_100 in the opcode encoding.
 //! - Merkle: {MPVERIFY, MRUPDATE}.
-//! - LOGDEFERRED: {LOGDEFERRED} — a single opcode.
+//! - Deferred-root updates: {LOGDEFERRED, CLEARDEFERRED}.
 //!
 //! No row can fire two of these simultaneously. The continuation / caller-frame END split
 //! inside block-stack is mutually exclusive because the caller-frame restoration selector is
@@ -55,8 +56,9 @@
 //! |MPVERIFY Merkle batch (k=3, f=mpverify deg 5)|—       |Range, denom 1       |**8**   |**7**   |
 //! |MRUPDATE Merkle batch (k=4, f=mrupdate deg 4)|—       |Range, denom 1       |**8**   |**7**   |
 //! |logpre batch (k=2, f=log_deferred deg 5)     |—       |LogDeferred, denom 1 |**7**   |**6**   |
+//! |clear batch (f=clear_deferred deg 7)     |—       |Root + constant zero |**8**   |**8**   |
 //!
-//! Column max: `U = 8, V = 7`; transition degree is `max(1 + 8, 7) = 9`.
+//! Column max: `U = 8, V = 8`; transition degree is `max(1 + 8, 8) = 9`.
 
 use core::array;
 
@@ -312,9 +314,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
                     merkle::emit_core_range_checks::<LB, _>(g, ctx);
 
-                    // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
-                    // Remove the previous deferred root, add the next. Mutually exclusive with all
-                    // block-stack branches and with the u32 and Merkle-depth range checks.
+                    // ---- Deferred-root updates (BusId::LogDeferredRoot) ----
+                    // Mutually exclusive with block-stack and range-check branches.
                     g.batch(
                         "log_deferred_state",
                         f_log_deferred,
@@ -334,10 +335,137 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         },
                         Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
+
+                    let root_to_clear: [LB::Var; 4] = array::from_fn(|i| stk.get(i));
+                    g.batch(
+                        "clear_deferred_state",
+                        op_flags.clear_deferred(),
+                        |b| {
+                            b.remove(
+                                "clear_deferred_state_remove",
+                                LogDeferredMsg { state: root_to_clear.map(LB::Expr::from) },
+                                Deg { v: 7, u: 8 },
+                            );
+                            b.add(
+                                "clear_deferred_state_add",
+                                LogDeferredMsg {
+                                    state: array::from_fn(|_| LB::Expr::ZERO),
+                                },
+                                Deg { v: 7, u: 7 },
+                            );
+                        },
+                        // The constant new root keeps the lookup transition at degree 9.
+                        Deg { v: 8, u: 8 },
+                    );
                 },
-                Deg { v: 7, u: 8 },
+                Deg { v: 8, u: 8 },
             );
         },
-        Deg { v: 7, u: 8 },
+        Deg { v: 8, u: 8 },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{
+        Felt,
+        field::{Field, PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+        utils::RowMajorMatrix,
+    };
+    use miden_stark::lookup::{Challenges, build_lookup_fractions};
+
+    use crate::vm::{
+        CoreCols, MidenAir,
+        constraints::{
+            columns::NUM_CORE_COLS,
+            lookup::{BusId, messages::MIDEN_MAX_MESSAGE_WIDTH},
+            op_flags::generate_test_row,
+        },
+        trace::log_deferred::HELPER_STATE_PREV_RANGE,
+    };
+
+    fn root_lookup_sum(rows: &[CoreCols<Felt>]) -> QuadFelt {
+        let main = RowMajorMatrix::new(
+            rows.iter().flat_map(|row| row.as_slice().iter().copied()).collect(),
+            NUM_CORE_COLS,
+        );
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::from_u32(7),
+            QuadFelt::from_u32(11),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+        let fractions = build_lookup_fractions(&MidenAir::Core, &main, None, &[], &challenges);
+        let mut offset = 0;
+        let mut sum = QuadFelt::ZERO;
+        for (i, &count) in fractions.counts().iter().enumerate() {
+            if i % fractions.num_columns() == 0 {
+                for &(multiplicity, denominator) in &fractions.fractions()[offset..offset + count] {
+                    sum += denominator.inverse() * multiplicity;
+                }
+            }
+            offset += count;
+        }
+        sum
+    }
+
+    #[test]
+    fn clear_deferred_consumes_the_root_on_the_stack() {
+        let log = generate_test_row(opcodes::LOGDEFERRED.into());
+        let mut logged = generate_test_row(opcodes::NOOP.into());
+        let mut clear = generate_test_row(opcodes::CLEARDEFERRED.into());
+        let mut after = generate_test_row(opcodes::NOOP.into());
+        for i in 0..4 {
+            let limb = Felt::from_u32(100 + i as u32);
+            logged.stack.top[i] = limb;
+            clear.stack.top[i] = limb;
+            after.stack.top[i] = limb;
+            // Clear has no root helper witness. Forging the LOGDEFERRED helper range must not
+            // change which root it consumes.
+            clear.decoder.hasher_state[2 + HELPER_STATE_PREV_RANGE.start + i] = limb + Felt::ONE;
+        }
+
+        // The log starts at zero, and clearing returns to zero, so the root bus telescopes.
+        assert_eq!(
+            root_lookup_sum(&[log.clone(), logged.clone(), clear.clone(), after.clone()]),
+            QuadFelt::ZERO
+        );
+
+        for i in 0..4 {
+            let mut forged = clear.clone();
+            forged.stack.top[i] += Felt::ONE;
+            assert_ne!(
+                root_lookup_sum(&[log.clone(), logged.clone(), forged, after.clone()]),
+                QuadFelt::ZERO,
+                "clearing must consume the root on the stack, including limb {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn clear_deferred_cannot_discard_a_later_unverified_root() {
+        let log_a = generate_test_row(opcodes::LOGDEFERRED.into());
+        let mut clear = generate_test_row(opcodes::CLEARDEFERRED.into());
+        let mut log_b = generate_test_row(opcodes::LOGDEFERRED.into());
+        let mut after = generate_test_row(opcodes::NOOP.into());
+        for i in 0..4 {
+            let root_a = Felt::from_u32(100 + i as u32);
+            let root_b = Felt::from_u32(200 + i as u32);
+            clear.stack.top[i] = root_a;
+            log_b.stack.top[i] = root_a;
+            log_b.decoder.hasher_state[2 + HELPER_STATE_PREV_RANGE.start + i] = root_a;
+            after.stack.top[i] = root_b;
+
+            // An unconstrained helper root would let clear consume the later log's output,
+            // balancing 0 -> A -> B -> 0 after trusted code verified only A. The clear opcode
+            // must consume A from its stack even when a malicious helper claims B.
+            clear.decoder.hasher_state[2 + HELPER_STATE_PREV_RANGE.start + i] = root_b;
+        }
+        assert_ne!(
+            root_lookup_sum(&[log_a, clear, log_b, after]),
+            QuadFelt::ZERO,
+            "a later logged obligation must remain in the final root"
+        );
+    }
 }
