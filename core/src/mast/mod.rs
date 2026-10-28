@@ -83,8 +83,8 @@ mod untrusted;
 pub use untrusted::{UntrustedMastForest, UntrustedMastForestReadOptions};
 
 mod merger;
-pub(crate) use merger::MastForestMerger;
-pub use merger::MastForestRootMap;
+pub use merger::{MastForestMergeSource, MastForestRootMap};
+pub(crate) use merger::{MastForestMerger, MixedMastForestMerger};
 
 mod multi_forest_node_iterator;
 pub(crate) use multi_forest_node_iterator::*;
@@ -369,10 +369,20 @@ impl MastForest {
     /// If any forest being merged contains an `External(qux)` node and another forest contains a
     /// node whose digest is `qux`, then the external node will be replaced with the `qux` node,
     /// which is effectively deduplication.
-    pub fn merge<'forest>(
-        forests: impl IntoIterator<Item = &'forest MastForest>,
-    ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
-        MastForestMerger::merge(forests)
+    pub fn merge<'forest, F>(
+        forests: impl IntoIterator<Item = F>,
+    ) -> Result<(MastForest, MastForestRootMap), MastForestError>
+    where
+        F: Into<MastForestMergeSource<'forest>>,
+    {
+        let forests = forests.into_iter().map(Into::into).collect::<Vec<_>>();
+        if forests.iter().all(|forest| forest.as_dense().is_some()) {
+            return MastForestMerger::merge(forests.iter().map(|forest| {
+                forest.as_dense().expect("all merge sources were checked as dense")
+            }));
+        }
+
+        MixedMastForestMerger::merge_dense(forests)
     }
 }
 
@@ -1032,6 +1042,14 @@ pub enum MastForestError {
     EmptyBasicBlock,
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
+    #[error("sparse MAST merge cannot retain advice map entries")]
+    AdviceMapNotSupportedInSparseMerge,
+    #[error("dense MAST merge requires full node data for {0:?}")]
+    MissingNodeOnDenseMerge(MastNodeId),
+    #[error("external node digest {0} resolves to conflicting full nodes")]
+    ConflictingNodeDigestOnMerge(Word),
+    #[error("cyclic dependency encountered while merging node {0:?}")]
+    CyclicDependencyOnMerge(MastNodeId),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
