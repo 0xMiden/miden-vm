@@ -95,6 +95,9 @@ pub use node_builder_utils::build_node_with_remapped_ids;
 mod sparse;
 pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitKind};
 
+mod forest_read;
+pub use forest_read::MastForestRead;
+
 #[cfg(test)]
 mod tests;
 
