@@ -1,7 +1,13 @@
-use alloc::collections::{BTreeMap, btree_map};
+use alloc::{
+    collections::{BTreeMap, BTreeSet, btree_map},
+    vec,
+    vec::Vec,
+};
 use core::{iter, slice};
 
-use super::{ExecutableMastForest, MastForest, MastNode, MastNodeId, SparseMastForest};
+use super::{
+    ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest,
+};
 use crate::Word;
 
 type DenseNodeIter<'a> = iter::Map<
@@ -57,6 +63,154 @@ pub trait MastForestRead: ExecutableMastForest {
                 .advice_map()
                 .iter()
                 .all(|(key, value)| source.advice_map().get(key) == Some(value))
+    }
+
+    /// Returns true when this forest's stored contents are a subset of `source`.
+    ///
+    /// Forest-local node IDs may differ. Full nodes must match by kind, payload, and ordered child
+    /// contents. An opaque digest-only entry may match either an opaque entry or a full node with
+    /// that digest, but it cannot establish that a full node is present. Export multiplicity and
+    /// advice entries are checked independently.
+    fn is_content_subset_of<S: MastForestRead + ?Sized>(&self, source: &S) -> bool {
+        ContentMatcher::new(self, source).is_subset()
+    }
+}
+
+struct ContentMatcher<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> {
+    candidate: &'a C,
+    source: &'a S,
+    source_full_ids: Vec<MastNodeId>,
+    source_digest_ids: Vec<MastNodeId>,
+    matching_pairs: BTreeSet<(MastNodeId, MastNodeId)>,
+    rejected_pairs: BTreeSet<(MastNodeId, MastNodeId)>,
+}
+
+impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<'a, C, S> {
+    fn new(candidate: &'a C, source: &'a S) -> Self {
+        Self {
+            candidate,
+            source,
+            source_full_ids: source.node_entries().map(|(id, _)| id).collect(),
+            source_digest_ids: source.digest_entries().map(|(id, _)| id).collect(),
+            matching_pairs: BTreeSet::new(),
+            rejected_pairs: BTreeSet::new(),
+        }
+    }
+
+    fn is_subset(&mut self) -> bool {
+        for (candidate_id, _) in self.candidate.node_entries() {
+            if !self.has_matching_full_node(candidate_id) {
+                return false;
+            }
+        }
+        for (_, digest) in self.candidate.digest_entries() {
+            if !self.source_has_digest(digest) {
+                return false;
+            }
+        }
+        if !self.exports_are_subset() {
+            return false;
+        }
+        self.candidate
+            .advice_map()
+            .iter()
+            .all(|(key, value)| self.source.advice_map().get(key) == Some(value))
+    }
+
+    fn has_matching_full_node(&mut self, candidate_id: MastNodeId) -> bool {
+        for index in 0..self.source_full_ids.len() {
+            let source_id = self.source_full_ids[index];
+            if self.full_nodes_match(candidate_id, source_id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn source_has_digest(&self, digest: Word) -> bool {
+        self.source_full_ids
+            .iter()
+            .chain(&self.source_digest_ids)
+            .any(|&node_id| self.source.get_digest_by_id(node_id) == Some(digest))
+    }
+
+    fn exports_are_subset(&mut self) -> bool {
+        let source_roots = self.source.procedure_roots();
+        let mut used = vec![false; source_roots.len()];
+        for &candidate_root in self.candidate.procedure_roots() {
+            let mut found = false;
+            for (index, &source_root) in source_roots.iter().enumerate() {
+                if !used[index] && self.entries_match(candidate_root, source_root) {
+                    used[index] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn entries_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
+        if self.candidate.get_node_by_id(candidate_id).is_some() {
+            self.source.get_node_by_id(source_id).is_some()
+                && self.full_nodes_match(candidate_id, source_id)
+        } else if let Some(digest) = self.candidate.get_digest_by_id(candidate_id) {
+            self.source.get_digest_by_id(source_id) == Some(digest)
+        } else {
+            false
+        }
+    }
+
+    fn full_nodes_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
+        let pair = (candidate_id, source_id);
+        if self.matching_pairs.contains(&pair) {
+            return true;
+        }
+        if self.rejected_pairs.contains(&pair) {
+            return false;
+        }
+
+        let Some(candidate) = self.candidate.get_node_by_id(candidate_id) else {
+            return false;
+        };
+        let Some(source) = self.source.get_node_by_id(source_id) else {
+            return false;
+        };
+        if candidate.digest() != source.digest() {
+            self.rejected_pairs.insert(pair);
+            return false;
+        }
+
+        let matches = match (candidate, source) {
+            (MastNode::Block(left), MastNode::Block(right)) => left == right,
+            (MastNode::Dyn(left), MastNode::Dyn(right)) => left == right,
+            (MastNode::External(left), MastNode::External(right)) => left == right,
+            (MastNode::Join(left), MastNode::Join(right)) => {
+                self.entries_match(left.first(), right.first())
+                    && self.entries_match(left.second(), right.second())
+            },
+            (MastNode::Split(left), MastNode::Split(right)) => {
+                self.entries_match(left.on_true(), right.on_true())
+                    && self.entries_match(left.on_false(), right.on_false())
+            },
+            (MastNode::Loop(left), MastNode::Loop(right)) => {
+                self.entries_match(left.body(), right.body())
+            },
+            (MastNode::Call(left), MastNode::Call(right)) => {
+                left.is_syscall() == right.is_syscall()
+                    && self.entries_match(left.callee(), right.callee())
+            },
+            _ => false,
+        };
+        if matches {
+            self.matching_pairs.insert(pair);
+        } else {
+            self.rejected_pairs.insert(pair);
+        }
+        matches
     }
 }
 
@@ -232,5 +386,77 @@ mod tests {
         let wrong_advice = MastForest::new()
             .with_advice_map(AdviceMap::from_iter([(advice_key, vec![Felt::new_unchecked(6)])]));
         assert!(!wrong_advice.is_source_subset_of(&source));
+    }
+
+    #[test]
+    fn content_subset_matches_remapped_ordered_children() {
+        let mut candidate = MastForest::new();
+        let candidate_left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut candidate)
+            .unwrap();
+        let candidate_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut candidate)
+            .unwrap();
+        let candidate_root = crate::mast::JoinNodeBuilder::new([candidate_left, candidate_right])
+            .add_to_forest(&mut candidate)
+            .unwrap();
+        candidate.make_root(candidate_root);
+
+        let mut source = MastForest::new();
+        BasicBlockNodeBuilder::new(vec![Operation::Drop])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let source_left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let source_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let source_root = crate::mast::JoinNodeBuilder::new([source_left, source_right])
+            .add_to_forest(&mut source)
+            .unwrap();
+        source.make_root(source_root);
+
+        assert!(!candidate.is_source_subset_of(&source));
+        assert!(candidate.is_content_subset_of(&source));
+
+        let mut reversed = MastForest::new();
+        let reversed_left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut reversed)
+            .unwrap();
+        let reversed_right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut reversed)
+            .unwrap();
+        let reversed_root = crate::mast::JoinNodeBuilder::new([reversed_right, reversed_left])
+            .add_to_forest(&mut reversed)
+            .unwrap();
+        reversed.make_root(reversed_root);
+        assert!(!candidate.is_content_subset_of(&reversed));
+    }
+
+    #[test]
+    fn content_subset_distinguishes_full_nodes_from_opaque_digests_and_error_codes() {
+        let mut full = MastForest::new();
+        let full_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(7))])
+            .add_to_forest(&mut full)
+            .unwrap();
+
+        let opaque = SparseMastForest::from_serialized_parts(
+            Vec::new(),
+            vec![(MastNodeId::new_unchecked(19), full[full_id].digest())],
+            Vec::new(),
+            AdviceMap::default(),
+        )
+        .unwrap();
+        assert!(opaque.is_content_subset_of(&full));
+        assert!(!full.is_content_subset_of(&opaque));
+
+        let mut different_error_code = MastForest::new();
+        let different_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(8))])
+                .add_to_forest(&mut different_error_code)
+                .unwrap();
+        assert_eq!(full[full_id].digest(), different_error_code[different_id].digest());
+        assert!(!full.is_content_subset_of(&different_error_code));
     }
 }
