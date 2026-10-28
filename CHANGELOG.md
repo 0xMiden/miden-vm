@@ -2,6 +2,10 @@
 
 ## v0.36.4 (Unreleased)
 
+#### Changes
+
+- Allow core MASM package patch versions to differ from the `miden-core-lib` crate. Require matching major/minor versions and prerelease identifiers. Keep the core MASM package at 0.36.3 ([#4100](https://github.com/0xMiden/miden-vm/pull/4100)).
+
 ## v0.36.3 (2026-10-27)
 
 #### Fixes
