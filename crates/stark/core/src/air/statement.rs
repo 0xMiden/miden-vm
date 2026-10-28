@@ -143,7 +143,7 @@ where
     /// use p3_challenger::CanObserve;
     /// use p3_matrix::{Matrix, dense::RowMajorMatrix};
     ///
-    /// use crate::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
+    /// use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
     ///
     /// #[derive(Clone)]
     /// struct ExampleAir;
