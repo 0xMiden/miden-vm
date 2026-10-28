@@ -1,12 +1,9 @@
 //! Process-lifetime caching of the chiplet stack's preprocessed bundle.
 //!
-//! `Preprocessed::build` LDEs and commits the fixed `BytePairLut` table — a
-//! pure function of the fixed twelve-chiplet list and the STARK config's
-//! blowup/LMCS/DFT — yet both `prove_stark` and `verify_stark` rebuild it on
-//! every call. Under `std`, each hash function's bundle is built once per
-//! process and reused via `OnceLock`; without `std` (e.g. a `no_std`
-//! verifier target), every call rebuilds it, matching the pre-caching
-//! behavior exactly.
+//! `Preprocessed::build` LDEs and commits the fixed `BytePairLut` table using the twelve-chiplet
+//! list and the STARK config's blowup, LMCS and DFT. Provers need the full bundle; verifiers use
+//! pinned commitments. Under `std`, each hash function's bundle is built once per process
+//! and reused via `OnceLock`; without `std`, each accessor call builds an owned bundle.
 
 use alloc::vec;
 use core::ops::Deref;

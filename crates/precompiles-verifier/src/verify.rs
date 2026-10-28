@@ -1,7 +1,11 @@
 use alloc::{vec, vec::Vec};
 
 use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, preprocessed,
+    ChipletAir, ChipletMultiAir,
+    protocol::{
+        PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
+        PVM_PREPROCESSED_COMMITMENT,
+    },
     security::{self, ProofSecurityParameters},
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
@@ -17,7 +21,7 @@ use miden_core::{
 };
 use miden_lifted_air::Statement;
 use miden_lifted_stark::{
-    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
+    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
     lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
 };
 use miden_serde_utils::deserialize_schema_exact;
@@ -56,25 +60,37 @@ fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, us
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
             let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::blake3();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                PVM_BLAKE3_PREPROCESSED_COMMITMENT.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
         HashFunction::Keccak => {
             let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::keccak();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                PVM_KECCAK_PREPROCESSED_COMMITMENT.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
         HashFunction::Eidos => {
             let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::eidos();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                PVM_PREPROCESSED_COMMITMENT.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
     }
 }
 
 fn verify_stark_with_config<SC>(
     config: &SC,
-    preprocessed: &Preprocessed<Felt, SC::Lmcs>,
+    preprocessed_commitment: <SC::Lmcs as LmcsTrait>::Commitment,
     proof_bytes: &[u8],
     public_root: EidosDigest,
 ) -> Result<(u32, usize), VerifyError>
@@ -99,7 +115,7 @@ where
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
 
-    VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
+    VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
         .verify(&proof, challenger)?;
 
     let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));

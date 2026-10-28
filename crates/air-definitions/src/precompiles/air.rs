@@ -492,6 +492,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn each_chiplet_preserves_its_degree_and_quotient_budget() {
+        use miden_lifted_air::ConstraintDegrees;
+        let expected = [
+            (5, 5, 2),
+            (3, 3, 1),
+            (2, 5, 2),
+            (0, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (2, 3, 1),
+            (3, 3, 1),
+            (3, 3, 1),
+            (5, 5, 2),
+            (5, 5, 2),
+        ];
+        for (air, (base, ext, log_quotient)) in ChipletAir::all().into_iter().zip(expected) {
+            let derived = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+            assert_eq!(derived, ConstraintDegrees { base, ext }, "{air:?}");
+            assert_eq!(air.constraint_degree(), derived, "{air:?}: declared degree");
+            assert_eq!(
+                miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air),
+                log_quotient,
+                "{air:?}: quotient factor"
+            );
+        }
+    }
+
     /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
     /// Intentional changes require a protocol-version bump and a breaking changelog entry.
     #[test]

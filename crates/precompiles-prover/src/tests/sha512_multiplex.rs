@@ -49,7 +49,7 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 #[test]
 fn sha512_opcode_lookup_packing_preserves_degree() {
     assert_eq!(Sha512Air.width(), 54);
-    assert_eq!(Sha512Air.aux_width(), 14);
+    assert_eq!(Sha512Air.aux_width(), 7);
     assert_eq!(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&Sha512Air).max(), 5);
     assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }

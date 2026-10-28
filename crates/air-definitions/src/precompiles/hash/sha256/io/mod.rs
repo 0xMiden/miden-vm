@@ -33,8 +33,8 @@ use crate::precompiles::{
 };
 
 pub const NUM_MAIN_COLS: usize = 28;
-pub const NUM_AUX_COLS: usize = 9;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1];
+pub const NUM_AUX_COLS: usize = 4;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2; NUM_AUX_COLS];
 pub const COL_ACT: usize = 0;
 pub const COL_BLOCK_ID: usize = 1;
 pub const COL_FIRST_BLOCK: usize = 2;
@@ -56,6 +56,9 @@ pub const COL_RAW_BUFFER: usize = 21;
 pub const COL_STATE_HI: usize = 12;
 pub const COL_STATE_LO: usize = 13;
 pub const COL_DIGEST_BEGIN: usize = 12;
+/// XOR witnesses for adjacent digest-byte pairs, live only on rows 20..24.
+/// These cells are idle in the digest controller and its incoming next-row references.
+pub const COL_DIGEST_XOR: [usize; 4] = [20, 25, 26, 27];
 pub const COL_PREVIOUS_DIGEST: usize = 21;
 pub const COL_CHUNK_HEAD_DIGEST: usize = 23;
 pub const COL_DIGEST_EIDOS: usize = 6;
@@ -320,19 +323,6 @@ fn digest_block<E: Algebra<Felt>, V: Copy + Into<E>>(
     ]
 }
 
-/// Degree after the mutually exclusive row-phase batch flags, including IO activity.
-pub(super) fn lookup_column_degree(index: usize, continuation: bool) -> Deg {
-    match index {
-        0 => Deg { v: 2, u: 3 },
-        4 => Deg { v: 5, u: 4 },
-        8 => Deg {
-            v: 3,
-            u: if continuation { 4 } else { 3 },
-        },
-        _ => Deg { v: 4, u: 4 },
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Batch {
     Word,
@@ -349,9 +339,81 @@ enum Batch {
     DigestWords,
     Length,
     DigestBlock,
+    Resume,
+    Continue,
 }
 
-/// Add IO batches to the same group as compression: their row flags are mutually exclusive.
+impl Batch {
+    fn degree(self) -> Deg {
+        match self {
+            Self::Word => Deg { v: 0, u: 1 },
+            Self::StateHi
+            | Self::StateLo
+            | Self::Init
+            | Self::Out
+            | Self::NodeIn
+            | Self::DigestBytes(_)
+            | Self::DigestWords => Deg { v: 2, u: 2 },
+            Self::NodeOut => Deg { v: 3, u: 2 },
+            Self::RawBytes(_) | Self::Left => Deg { v: 1, u: 2 },
+            Self::RawBlock | Self::Length | Self::DigestBlock | Self::Resume | Self::Continue => {
+                Deg { v: 1, u: 1 }
+            },
+        }
+    }
+}
+
+fn phase_batches(phase: usize, index: usize) -> &'static [Batch] {
+    use Batch::*;
+    match (phase, index) {
+        (0, 0) => &[Word, Resume],
+        (1, 0) => &[Word, RawBlock],
+        (2, 0) => &[Word, Length],
+        (3, 0) => &[Word],
+        (0..=3, 1) => &[RawBytes(0)],
+        (0..=3, 2) => &[RawBytes(2)],
+        (0..=3, 3) => &[Left],
+        (4, 0) => &[StateHi],
+        (4, 1) => &[StateLo],
+        (5 | 6, 0) => &[DigestWords],
+        (5 | 6, 1) => &[DigestBytes(0)],
+        (5 | 6, 2) => &[DigestBytes(2)],
+        (5, 3) => &[DigestBlock],
+        (7, 0) => &[Init],
+        (7, 1) => &[Out],
+        (7, 2) => &[NodeIn],
+        (7, 3) => &[NodeOut],
+        (8, 0) => &[Continue],
+        _ => &[],
+    }
+}
+
+fn selected_batches(phase: usize, index: usize, continuation: bool) -> impl Iterator<Item = Batch> {
+    phase_batches(phase, index)
+        .iter()
+        .copied()
+        .filter(move |b| continuation || !matches!(b, Batch::Resume | Batch::Continue))
+}
+
+fn phase_degree(phase: usize, index: usize, continuation: bool) -> Option<Deg> {
+    selected_batches(phase, index, continuation)
+        .map(Batch::degree)
+        .reduce(|a, b| Deg {
+            v: (a.v + b.u).max(b.v + a.u),
+            u: a.u + b.u,
+        })
+        .map(|d| Deg { v: d.v + 2, u: d.u + 2 })
+}
+
+pub(super) fn lookup_column_degree(index: usize, continuation: bool) -> Deg {
+    (0..9)
+        .filter_map(|phase| phase_degree(phase, index, continuation))
+        .reduce(|a, b| Deg { v: a.v.max(b.v), u: a.u.max(b.u) })
+        .unwrap()
+}
+
+/// Add IO batches under disjoint fixed row masks. Continuation endpoints replace adjacent-row
+/// state transport when the IO rows share a trace with compression.
 pub(super) fn eval_lookup_group<G, V>(
     group: &mut G,
     index: usize,
@@ -359,52 +421,36 @@ pub(super) fn eval_lookup_group<G, V>(
     next: &[V; NUM_MAIN_COLS],
     p: &[G::Expr; NUM_PERIODIC_COLS],
     act: G::Expr,
+    continuation: bool,
 ) where
     G: LookupGroup,
     G::Expr: Algebra<Felt>,
     V: Copy + Into<G::Expr>,
 {
     use program::*;
-    let batches: &[(usize, Batch, Deg)] = match index {
-        0 => &[(P_RAW, Batch::Word, Deg { v: 2, u: 3 })],
-        1 => &[
-            (P_STATE, Batch::StateHi, Deg { v: 4, u: 4 }),
-            (P_BIND, Batch::Init, Deg { v: 4, u: 4 }),
-        ],
-        2 => &[
-            (P_STATE, Batch::StateLo, Deg { v: 4, u: 4 }),
-            (P_BIND, Batch::Out, Deg { v: 4, u: 4 }),
-        ],
-        3 => &[
-            (P_RAW, Batch::RawBytes(0), Deg { v: 3, u: 4 }),
-            (P_DIGEST, Batch::DigestBytes(0), Deg { v: 4, u: 4 }),
-            (P_BIND, Batch::NodeIn, Deg { v: 4, u: 4 }),
-        ],
-        4 => &[
-            (P_RAW, Batch::RawBytes(2), Deg { v: 3, u: 4 }),
-            (P_DIGEST, Batch::DigestBytes(2), Deg { v: 4, u: 4 }),
-            (P_BIND, Batch::NodeOut, Deg { v: 5, u: 4 }),
-        ],
-        5 => &[
-            (P_RAW, Batch::Left, Deg { v: 3, u: 4 }),
-            (P_DIGEST, Batch::DigestBytes(4), Deg { v: 4, u: 4 }),
-        ],
-        6 => &[
-            (P_RAW_EMIT, Batch::RawBlock, Deg { v: 3, u: 3 }),
-            (P_DIGEST, Batch::DigestBytes(6), Deg { v: 4, u: 4 }),
-        ],
-        7 => &[
-            (P_DIGEST, Batch::DigestWords, Deg { v: 4, u: 4 }),
-            (P_LENGTH, Batch::Length, Deg { v: 3, u: 3 }),
-        ],
-        8 => &[(P_DIGEST_EMIT, Batch::DigestBlock, Deg { v: 3, u: 3 })],
-        _ => unreachable!(),
-    };
-    for &(selector, kind, degree) in batches {
+    let masks = [
+        p[P_FIRST].clone(),
+        p[P_RAW_EMIT].clone(),
+        p[P_LENGTH].clone(),
+        p[P_RAW].clone() - p[P_FIRST].clone() - p[P_RAW_EMIT].clone() - p[P_LENGTH].clone(),
+        p[P_STATE].clone(),
+        p[P_DIGEST_EMIT].clone(),
+        p[P_DIGEST].clone() - p[P_DIGEST_EMIT].clone(),
+        p[P_BIND].clone(),
+        p[P_LAST].clone(),
+    ];
+    for (phase, mask) in masks.into_iter().enumerate() {
+        let Some(degree) = phase_degree(phase, index, continuation) else {
+            continue;
+        };
         group.batch(
             "io-phase",
-            act.clone() * p[selector].clone(),
-            |batch| eval_batch(batch, kind, local, next, p),
+            act.clone() * mask,
+            |batch| {
+                for kind in selected_batches(phase, index, continuation) {
+                    eval_batch(batch, kind, local, next, p);
+                }
+            },
             degree,
         );
     }
@@ -510,6 +556,8 @@ fn eval_batch<B, V>(
             );
         },
         Batch::NodeIn => {
+            // Bind the exact byte length: CHUNKS zero-padding alone cannot distinguish a
+            // message from the same bytes followed by zeros.
             let frame = [
                 B::Expr::from(Sha256Precompile::domain().as_felt()),
                 B::Expr::from_u32(Sha256Precompile::ASSERT_OP_ID),
@@ -554,16 +602,32 @@ fn eval_batch<B, V>(
                 Deg { v: 2, u: 1 },
             );
         },
-        Batch::RawBytes(offset) | Batch::DigestBytes(offset) => {
-            let is_digest = matches!(kind, Batch::DigestBytes(_));
-            let base = if is_digest { COL_DIGEST_BEGIN } else { COL_RAW_BEGIN };
-            let mult = if is_digest { final_block } else { one };
+        Batch::RawBytes(offset) => {
             for i in offset..offset + 2 {
                 batch.insert(
                     "byte",
-                    mult.clone(),
-                    BytePairLutMsg::from_xor(B::Expr::ZERO, e(base + i), e(base + i)),
-                    if is_digest { d1 } else { d0 },
+                    one.clone(),
+                    BytePairLutMsg::from_xor(
+                        B::Expr::ZERO,
+                        e(COL_RAW_BEGIN + i),
+                        e(COL_RAW_BEGIN + i),
+                    ),
+                    d0,
+                );
+            }
+        },
+        Batch::DigestBytes(offset) => {
+            // Each canonical XOR tuple ranges two digest bytes and pins its scratch witness.
+            for (i, &column) in COL_DIGEST_XOR.iter().enumerate().skip(offset).take(2) {
+                batch.insert(
+                    "digest-byte-pair",
+                    final_block.clone(),
+                    BytePairLutMsg::from_xor(
+                        e(COL_DIGEST_BEGIN + 2 * i),
+                        e(COL_DIGEST_BEGIN + 2 * i + 1),
+                        e(column),
+                    ),
+                    d1,
                 );
             }
         },
@@ -611,6 +675,33 @@ fn eval_batch<B, V>(
             },
             d1,
         ),
+        Batch::Resume | Batch::Continue => {
+            // Resume compares the preceding block's tail ID, before this block's first active
+            // chunk advances it. Subtract that increment when matching continuation state.
+            let resume = matches!(kind, Batch::Resume);
+            let (mult, block_id, input_eidos) = if resume {
+                (
+                    one - e(COL_FIRST_BLOCK),
+                    e(COL_BLOCK_ID),
+                    e(COL_INPUT_EIDOS) - e(COL_CHUNK_ACTIVE),
+                )
+            } else {
+                (final_block - one, e(COL_BLOCK_ID) + B::Expr::ONE, e(COL_INPUT_EIDOS))
+            };
+            batch.insert(
+                "continuation",
+                mult,
+                super::Sha256IoContinuation {
+                    block_id,
+                    input_eidos,
+                    len: e(COL_LEN),
+                    left: e(COL_LEFT),
+                    before: e(COL_BEFORE),
+                    input_head: e(COL_INPUT_HEAD),
+                },
+                d1,
+            );
+        },
     }
 }
 
@@ -629,7 +720,7 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
             |column| {
                 column.group(
                     "io",
-                    |group| eval_lookup_group(group, index, &local, &next, &p, act.clone()),
+                    |group| eval_lookup_group(group, index, &local, &next, &p, act.clone(), false),
                     degree,
                 )
             },

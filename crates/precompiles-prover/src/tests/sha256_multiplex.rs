@@ -58,10 +58,10 @@ fn sha256_trace_meets_per_block_memory_budget() {
         &[QuadFelt::from_u64(17), QuadFelt::from_u64(31)],
     );
     // Each commitment row is padded independently to eight base-field elements.
-    // IO must fit within a 40-main + 24-aux aligned footprint per compression row.
+    // IO must fit within a 40-main + 8-aux aligned footprint per compression row.
     let committed_cells = main.height() * main.width.next_multiple_of(8)
         + aux.height() * (2 * aux.width).next_multiple_of(8);
-    assert!(committed_cells <= 64 * 4096, "SHA-256 cells per block: {committed_cells}");
+    assert!(committed_cells <= 48 * 4096, "SHA-256 cells per block: {committed_cells}");
     check_local(Sha256Air, &main);
 }
 
