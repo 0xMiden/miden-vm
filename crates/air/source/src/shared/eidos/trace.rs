@@ -17,10 +17,6 @@ use super::{
 /// One row of the Eidos compression main trace over the VM base field.
 pub type EidosCompressionFeltRow = [Felt; NUM_COLS];
 
-#[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
-pub use super::testing::write_core_felt_footer_rows;
-
 const CANONICALITY_HIGH_WORD_MAX: u64 = u32::MAX as u64;
 const INV_TWO_POW_16: Felt = Felt::new_unchecked(18_446_462_594_437_939_201);
 const INV_TWO_POW_24: Felt = Felt::new_unchecked(18_446_742_969_902_956_801);

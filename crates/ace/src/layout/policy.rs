@@ -138,7 +138,17 @@ impl InputLayout {
         Self::build_multi_air(counts, num_airs, None, true)
     }
 
-    pub(crate) fn build_multi_air(
+    #[cfg(feature = "compiler")]
+    pub(crate) fn for_relation(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width: usize,
+        masm: bool,
+    ) -> Self {
+        Self::build_multi_air(counts, num_airs, Some(quotient_width), masm)
+    }
+
+    fn build_multi_air(
         counts: InputCounts,
         num_airs: usize,
         quotient_width: Option<usize>,

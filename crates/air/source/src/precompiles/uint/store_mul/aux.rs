@@ -5,7 +5,6 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::lookup::build_logup_aux_trace;
 
 use super::{
     AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_LOGUP_COLS, NUM_MAIN_COLS,

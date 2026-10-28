@@ -6,7 +6,6 @@
 mod circuit;
 mod dag;
 mod encode;
-mod layout;
 mod masm;
 mod ood_scatter;
 mod order_maps;

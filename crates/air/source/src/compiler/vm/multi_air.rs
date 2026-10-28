@@ -11,6 +11,9 @@ const LMCS_ALIGNMENT: usize = 8;
 
 /// Builds the order-invariant Miden circuit with canonical trace offsets and per-AIR fold
 /// coefficients.
+///
+/// Cross-AIR LogUp closure is checked outside this circuit; see
+/// [`crate::vm::statement::eval_external`].
 pub fn build_canonical_multi_air_ace_circuit(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError> {

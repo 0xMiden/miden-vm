@@ -49,7 +49,6 @@ macro_rules! frac_col {
     };
 }
 pub(crate) use frac_col;
-// Preserve the precompile lookup facade for downstream callers.
 pub use miden_stark::lookup::{
     BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
     LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
