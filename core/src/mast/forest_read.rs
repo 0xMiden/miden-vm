@@ -1,6 +1,5 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet, btree_map},
-    vec,
     vec::Vec,
 };
 use core::{iter, slice};
@@ -145,52 +144,59 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
     }
 
     fn exports_are_subset(&mut self) -> bool {
-        let candidate_roots = self.candidate.procedure_roots().to_vec();
-        let source_roots = self.source.procedure_roots().to_vec();
-        if candidate_roots.len() > source_roots.len() {
-            return false;
+        let mut source_capacity_by_digest = BTreeMap::<Word, usize>::new();
+        let mut source_full_roots = BTreeMap::<Word, BTreeMap<MastNodeId, usize>>::new();
+        for &source_root in self.source.procedure_roots() {
+            let Some(digest) = self.source.get_digest_by_id(source_root) else {
+                continue;
+            };
+            *source_capacity_by_digest.entry(digest).or_default() += 1;
+            if self.source.get_node_by_id(source_root).is_some() {
+                *source_full_roots.entry(digest).or_default().entry(source_root).or_default() += 1;
+            }
         }
 
-        let mut source_owners = vec![None; source_roots.len()];
-        for candidate_index in 0..candidate_roots.len() {
-            let mut visited = vec![false; source_roots.len()];
-            if !self.assign_export(
-                candidate_index,
-                &candidate_roots,
-                &source_roots,
-                &mut source_owners,
-                &mut visited,
-            ) {
+        let mut candidate_full_roots = BTreeMap::<MastNodeId, usize>::new();
+        let mut candidate_opaque_roots = BTreeMap::<Word, usize>::new();
+        for &candidate_root in self.candidate.procedure_roots() {
+            if self.candidate.get_node_by_id(candidate_root).is_some() {
+                *candidate_full_roots.entry(candidate_root).or_default() += 1;
+            } else if let Some(digest) = self.candidate.get_digest_by_id(candidate_root) {
+                *candidate_opaque_roots.entry(digest).or_default() += 1;
+            } else {
                 return false;
             }
         }
-        true
-    }
 
-    fn assign_export(
-        &mut self,
-        candidate_index: usize,
-        candidate_roots: &[MastNodeId],
-        source_roots: &[MastNodeId],
-        source_owners: &mut [Option<usize>],
-        visited: &mut [bool],
-    ) -> bool {
-        for source_index in 0..source_roots.len() {
-            if visited[source_index]
-                || !self.entries_match(candidate_roots[candidate_index], source_roots[source_index])
-            {
-                continue;
+        for (candidate_root, mut remaining) in candidate_full_roots {
+            let Some(digest) = self.candidate.get_digest_by_id(candidate_root) else {
+                return false;
+            };
+            let Some(source_roots) = source_full_roots.get_mut(&digest) else {
+                return false;
+            };
+            for (&source_root, available) in source_roots.iter_mut() {
+                if *available == 0 || !self.full_nodes_match(candidate_root, source_root) {
+                    continue;
+                }
+                let consumed = remaining.min(*available);
+                remaining -= consumed;
+                *available -= consumed;
+                *source_capacity_by_digest
+                    .get_mut(&digest)
+                    .expect("source root digest capacity must exist") -= consumed;
+                if remaining == 0 {
+                    break;
+                }
             }
-            visited[source_index] = true;
-
-            if source_owners[source_index].is_none_or(|owner| {
-                self.assign_export(owner, candidate_roots, source_roots, source_owners, visited)
-            }) {
-                source_owners[source_index] = Some(candidate_index);
-                return true;
+            if remaining != 0 {
+                return false;
             }
         }
-        false
+
+        candidate_opaque_roots.into_iter().all(|(digest, count)| {
+            source_capacity_by_digest.get(&digest).copied().unwrap_or_default() >= count
+        })
     }
 
     fn entries_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
@@ -520,5 +526,35 @@ mod tests {
         .unwrap();
 
         assert!(candidate.is_content_subset_of(&source));
+    }
+
+    #[test]
+    fn content_subset_counts_repeated_opaque_exports() {
+        let root = MastNodeId::new_unchecked(0);
+        let digest = Word::default();
+        let candidate = SparseMastForest::from_serialized_parts(
+            Vec::new(),
+            vec![(root, digest)],
+            vec![root; 10_000],
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let source = SparseMastForest::from_serialized_parts(
+            Vec::new(),
+            vec![(root, digest)],
+            vec![root; 10_000],
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let too_small = SparseMastForest::from_serialized_parts(
+            Vec::new(),
+            vec![(root, digest)],
+            vec![root; 9_999],
+            AdviceMap::default(),
+        )
+        .unwrap();
+
+        assert!(candidate.is_content_subset_of(&source));
+        assert!(!candidate.is_content_subset_of(&too_small));
     }
 }
