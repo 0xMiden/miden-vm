@@ -42,6 +42,11 @@ impl VmTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
+    /// Combines main-trace matrices with their public inputs and row-count summary.
+    ///
+    /// The caller must supply public inputs and a summary for the same execution as `main_trace`.
+    /// The summary's padded heights must match the matrices in [`crate::vm::AIRS`] order.
+    /// Construction does not evaluate the AIR constraints.
     pub fn new_from_parts(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
