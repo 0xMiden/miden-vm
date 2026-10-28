@@ -31,13 +31,13 @@ const SPARSE_EXTERNAL: u8 = 8;
 // WRITER
 // ================================================================================================
 
-/// Writes trusted sparse trace replay data.
+/// Writes version-local sparse trace replay data.
 ///
 /// This format preserves the sparse maps produced by execution tracing. It does not prove that
 /// this sparse view is a subset of a committed [`MastForest`], and it does not share the dense
-/// [`MastForest`] wire format. Callers must only read these bytes from a trusted producer, or after
-/// an outer transport/authentication layer has accepted them. The format is version-local and is
-/// not suitable for persistence across releases.
+/// [`MastForest`] wire format. Checking full-node hashes does not authenticate opaque child
+/// digests or establish source membership. The format is not suitable for persistence across
+/// releases.
 fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
     write_node_ids(forest.procedure_roots(), target);
     write_sparse_nodes(forest.nodes(), target);
@@ -129,30 +129,62 @@ impl Serializable for SparseMastForest {
 
 impl Deserializable for SparseMastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_sparse_from(source)
+        let forest = read_sparse_from(source)?;
+        forest
+            .validate()
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+        Ok(forest)
     }
 
     fn min_serialized_size() -> usize {
         usize::min_serialized_size()
     }
 
-    /// Reads one trusted sparse replay payload and rejects trailing bytes.
+    /// Reads a bounded sparse replay payload and checks its full-node hashes.
     ///
-    /// This is not an untrusted input format. The reader performs cheap structural checks, but a
-    /// producer controls collection lengths and can drive allocation. Callers must only read these
-    /// bytes from a trusted producer, or after an outer transport/authentication layer has accepted
-    /// them. Payloads are version-local and must not be persisted across releases.
+    /// Digest-only entries and external nodes remain opaque. This does not prove membership in
+    /// a particular source forest. Trailing bytes are rejected.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        let budget = bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        let forest = read_sparse_from(&mut reader)?;
-        if reader.has_more_bytes() {
-            return Err(DeserializationError::InvalidValue(
-                "extra bytes after SparseMastForest payload".to_string(),
-            ));
-        }
-        Ok(forest)
+        read_sparse_from_bytes(bytes, false)
     }
+}
+
+impl SparseMastForest {
+    /// Reads trusted replay data without recomputing node hashes.
+    ///
+    /// Structural checks still apply. The caller supplies any byte-consumption budget through
+    /// `source`; use the default byte-slice reader for untrusted input.
+    pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        read_sparse_from(source)
+    }
+
+    /// Reads trusted replay bytes without recomputing node hashes. Rejects trailing bytes.
+    pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        read_sparse_from_bytes(bytes, true)
+    }
+}
+
+fn read_sparse_from_bytes(
+    bytes: &[u8],
+    trusted: bool,
+) -> Result<SparseMastForest, DeserializationError> {
+    let budget = if trusted {
+        bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER)
+    } else {
+        bytes.len()
+    };
+    let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+    let forest = if trusted {
+        SparseMastForest::read_from_trusted(&mut reader)?
+    } else {
+        SparseMastForest::read_from(&mut reader)?
+    };
+    if reader.has_more_bytes() {
+        return Err(DeserializationError::InvalidValue(
+            "extra bytes after SparseMastForest payload".to_string(),
+        ));
+    }
+    Ok(forest)
 }
 
 // READER
@@ -241,7 +273,7 @@ fn read_sparse_node<R: ByteReader>(
             let len = read_bounded_count(source, 1, "basic block data length")?;
             let data = source.read_vec(len)?;
             let decoder = BasicBlockDataDecoder::new(&data);
-            let op_batches = decoder.decode_operations(0)?;
+            let op_batches = decoder.decode_operations_exact()?;
             BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
                 .build()
                 .map(Into::into)

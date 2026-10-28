@@ -62,6 +62,13 @@ features = ["parse", "display", "serde"]
 
 # Fuzz targets - each is a separate binary
 [[bin]]
+name = "sparse_mast_forest_deserialize"
+path = "fuzz_targets/sparse_mast_forest_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "mast_forest_deserialize"
 path = "fuzz_targets/mast_forest_deserialize.rs"
 test = false
