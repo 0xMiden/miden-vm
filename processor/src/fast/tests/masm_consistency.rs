@@ -409,6 +409,81 @@ fn test_log_deferred_correctness() {
     }
 }
 
+#[test]
+fn push_deferred_root_preserves_operands_and_existing_advice() {
+    use miden_core::{advice::AdviceStack, deferred::TRUE_DIGEST};
+
+    let stack_inputs: [Felt; 16] = core::array::from_fn(|i| Felt::from_u32(i as u32 + 1));
+    let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
+    let program = Assembler::default()
+        .assemble_program(
+            "program",
+            r#"begin
+                adv.push_deferred_root
+                emit.event("sys::adv::push_deferred_root")
+            end"#,
+        )
+        .unwrap()
+        .unwrap_program();
+    let output = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+        .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
+        .unwrap()
+        .execute_sync(&program, &mut DefaultHost::default())
+        .unwrap();
+
+    for (offset, expected) in stack_inputs.into_iter().enumerate() {
+        assert_eq!(output.stack.get_element(offset), Some(expected));
+    }
+    let mut expected_advice = vec![ZERO; 8];
+    expected_advice.extend(advice_stack);
+    assert_eq!(output.advice.stack(), expected_advice);
+    assert_eq!(output.precompile_root(), TRUE_DIGEST);
+    assert!(output.precompile_witness.is_none());
+}
+
+#[test]
+fn push_deferred_root_reads_the_global_rolling_commitment() {
+    use miden_core::{advice::AdviceStack, deferred::TRUE_DIGEST};
+
+    // A regular call runs in a new context but observes the root logged by its caller.
+    let program = Assembler::default()
+        .assemble_program(
+            "program",
+            r#"proc read_root
+                adv.push_deferred_root adv_loadw
+                emit.event("sys::adv::push_deferred_root") adv_loadw
+            end
+            begin log_deferred call.read_root end"#,
+        )
+        .unwrap()
+        .unwrap_program();
+    let stack_inputs = [0, 0, 0, 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(Felt::from_u32);
+    let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
+    let advice_inputs = AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone()));
+    let output = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+        .with_advice(advice_inputs.clone())
+        .unwrap()
+        .execute_sync(&program, &mut DefaultHost::default())
+        .unwrap();
+    let stepped = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+        .with_advice(advice_inputs)
+        .unwrap()
+        .execute_by_step_sync(&program, &mut DefaultHost::default())
+        .unwrap();
+
+    // The committed root is nonzero even though evaluating it yields canonical TRUE.
+    let expected_root = deferred_and_digest(TRUE_DIGEST, TRUE_DIGEST);
+    assert_ne!(expected_root, TRUE_DIGEST);
+    assert_eq!(output.stack.get_word(0), Some(expected_root));
+    assert_eq!(output.precompile_root(), expected_root);
+    assert_eq!(output.stack, stepped);
+    for (offset, expected) in stack_inputs.into_iter().enumerate().skip(4) {
+        assert_eq!(output.stack.get_element(offset), Some(expected));
+    }
+    assert_eq!(output.advice.stack(), advice_stack);
+    assert!(output.precompile_witness.is_some());
+}
+
 /// Exporting an unlogged assertion preserves its original root and the execution's deferred root.
 #[test]
 fn export_deferred_witness_opens_an_unlogged_shared_graph() {

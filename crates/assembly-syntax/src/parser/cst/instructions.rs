@@ -189,6 +189,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
     },
     PrimitiveSpec {
+        spelling: "adv.push_deferred_root",
+        build: || Instruction::SysEvent(SystemEventNode::PushDeferredRoot),
+    },
+    PrimitiveSpec {
         spelling: "adv.register_deferred",
         build: || Instruction::SysEvent(SystemEventNode::DeferredRegister),
     },

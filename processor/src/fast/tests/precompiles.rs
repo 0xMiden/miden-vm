@@ -1,39 +1,26 @@
-use miden_core::deferred::{DeferredError, Node, PrecompileError, TRUE_DIGEST};
+use miden_core::deferred::{DeferredError, PrecompileError, TRUE_DIGEST};
 
 use super::*;
 
 #[test]
 fn clear_deferred_in_kernel_preserves_stack() {
     // Production epilogues must recursively verify the stack root before clearing it.
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let kernel =
-        parse_kernel_source(source_manager.clone(), "pub proc epilogue clear_deferred end");
-    let kernel_lib = Arc::<Package>::from(
-        Assembler::new(source_manager.clone())
-            .assemble_kernel("kernel", kernel, None)
-            .unwrap(),
+    let test = build_test!(
+        "proc worker syscall.epilogue end
+         begin
+            push.1.2.3.4 padw log_deferred call.worker
+            dropw push.1.2.3.4 assert_eqw
+         end"
+    )
+    .with_kernel(
+        "pub proc epilogue
+            adv.push_deferred_root clear_deferred
+            dupw dupw adv_loadw assert_eqw
+        end",
     );
-    let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-        .unwrap()
-        .assemble_program(
-            "program",
-            "proc worker syscall.epilogue end begin log_deferred call.worker end",
-        )
-        .unwrap()
-        .unwrap_program();
-    let stack_inputs = [0, 0, 0, 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(Felt::from_u32);
-    let mut host = DefaultHost::default();
-    host.load_library(kernel_lib.mast_forest()).unwrap();
-    let output = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
-        .execute_sync(&program, &mut host)
-        .unwrap();
-
-    assert_eq!(output.precompile_root(), TRUE_DIGEST);
-    assert!(output.precompile_witness.is_none());
-    assert_eq!(output.stack.get_word(0), Some(Node::and(TRUE_DIGEST, TRUE_DIGEST).digest()));
-    for (offset, expected) in stack_inputs.iter().copied().enumerate().skip(4) {
-        assert_eq!(output.stack.get_element(offset), Some(expected));
-    }
+    let trace = test.execute().unwrap();
+    assert_eq!(trace.precompile_root(), TRUE_DIGEST);
+    assert_eq!(trace.stack_outputs().get_num_elements(16), &[ZERO; 16]);
 }
 
 #[test]

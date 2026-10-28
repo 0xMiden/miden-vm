@@ -136,6 +136,13 @@ root with an independently established expected digest.
 
 The underlying system event is `sys::adv::export_deferred_witness`.
 
+`adv.push_deferred_root` pushes the current rolling deferred root onto the advice stack as one
+word, ready for `adv_pushw`. It takes no arguments and preserves the operand stack and deferred
+state. The root is global across execution contexts and is four zeros when the accumulator is
+empty. This returns the accumulator commitment, not its evaluated canonical digest. The returned
+word is an advice hint; proof-relevant code must authenticate it with VM instructions. The
+underlying system event is `sys::adv::push_deferred_root`.
+
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | adv.push_mapval                              | [K, ... ]          | [K, ... ]          | Pushes a list of field elements onto the advice stack. The list is looked up in the advice map using word $K$ as the key.                                                                                                                                            |
@@ -144,6 +151,7 @@ The underlying system event is `sys::adv::export_deferred_witness`.
 | adv.has_mapkey                               | [K, ... ]          | [K, ... ]          | Pushes `1` on the advice stack if the key placed at the top of the operand stack exists in the advice map, or `0` otherwise.                                                                                                                                         |
 | adv.push_mtnode                              | [d, i, R, ... ]    | [d, i, R, ... ]    | Pushes a node of a Merkle tree with root $R$ at depth $d$ and index $i$ from Merkle store onto the advice stack.                                                                                                                                                     |
 | adv.register_deferred                        | [CV, PAYLOAD_LO, PAYLOAD_HI, ...] | [CV, PAYLOAD_LO, PAYLOAD_HI, ...] | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. |
+| adv.push_deferred_root                       | [...] | [...] | Pushes the current deferred root as one advice word. Preserves the operand stack and deferred state. |
 | adv.register_deferred_data                   | [n_chunks, CV, ptr, ...] | [n_chunks, CV, ptr, ...] | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. |
 | adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical frame and payload felts onto the advice stack. |
 | adv.evaluate_deferred_frame                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical frame onto the advice stack. |
