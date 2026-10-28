@@ -5,10 +5,10 @@ configuration, security reporting, and recursive verifier inputs. Native verific
 available without default features. `std` enables shared setup and circuit caches; `prover`
 enables proving, and `concurrent` enables parallel computation.
 
-Execution and trace construction remain in `miden-processor`. Both packages use the completed
-`miden_air_definitions::vm::VmTrace`; this backend has no normal dependency on processor. Existing
-`miden-prover` and `miden-verifier` entrypoints still coordinate execution proofs, precompile
-obligations, and application acceptance policy.
+Execution and trace construction live in `miden-processor`. Both packages use the completed
+`miden_air_definitions::vm::VmTrace`; this backend has no normal dependency on processor.
+`miden-prover` and `miden-verifier` entrypoints coordinate execution proofs, precompile obligations,
+and application acceptance policy.
 
 ## Trace construction and budgets
 
@@ -17,27 +17,28 @@ Low-level processor callers supply a budget before trace construction:
 ```rust,ignore
 let budget = miden_vm_stark::memory::canonical_budget(max_prover_memory_bytes);
 let trace = miden_processor::trace::build_trace(vm_witness, &budget)?;
-let proof = miden_vm_stark::prover::prove(trace, hash_function)?;
+let hash_lde_blocks = false;
+let proof = miden_vm_stark::prover::prove(trace, hash_function, hash_lde_blocks)?;
 ```
 
-`memory::default_budget()` uses the existing 64 GiB limit. The supplied value carries a shared
-`miden_stark::memory::ProverMemoryModel` and the caller's byte limit. Processor applies its
-existing early chiplet cap, raw fragment-buffer check, padded-height check, and streaming
-hasher cap. The model bounds dominant VM proof allocations; it does not bound total process
-memory, the fixed And8 setup, or precompile proving.
+Set `hash_lde_blocks` to `true` to hash completed blocks during the final trace LDE when the
+commitment scheme supports it.
 
-`VmTrace::check_constraints()` is replaced by `miden_vm_stark::debug::check_constraints(&trace)`.
-The data type retains trace inspection and buffer access; production constraint evaluation and
-proof-memory estimates belong to this backend.
+`memory::default_budget()` uses a 64 GiB limit. The supplied value carries a shared
+`miden_stark::memory::ProverMemoryModel` and the caller's byte limit. Processor applies an early
+chiplet cap, a raw fragment-buffer check, a padded-height check, and a streaming hasher cap.
+The model estimates dominant VM proving allocations, including preprocessing and hash scratch.
+It does not bound total process memory, concurrent proofs, or cached setups for other configurations.
 
-Authored equations and statement semantics remain in source AIR. Production AIR retains its
-generated evaluators, geometry and embedded ACE instructions, along with explicitly accepted
-PCS presets and relation, circuit and setup pins. This crate consumes those artifacts without
-compiling AIR at runtime or changing accepted identities.
+Use `miden_vm_stark::debug::check_constraints(&trace)` to evaluate production constraints over a
+completed trace. `VmTrace` provides trace inspection and buffer access.
 
-The backend exposes the VM transcript-bound factory at `setup::config::eidos_config`,
-with its input and output types. Immutable PCS presets and accepted pins belong to
-`miden_air::vm::config`; generic hash factories and transcript helpers belong to
-`miden_stark::config`. Generated security geometry and constants belong to
-`miden_air::vm::security`, while this backend supplies the VM security estimators
-and their input and output types. Generic estimators belong to `miden_stark::security`.
+Authored constraints and statement semantics live in `miden_air_definitions::vm`. The backend
+consumes native evaluators and embedded ACE instructions from `miden-air` without compiling AIRs
+at runtime.
+
+`miden_air::vm::config` defines PCS presets and accepted relation, circuit, and setup digests;
+`setup::config::eidos_config` supplies the VM transcript domain. Generated security geometry and
+constants live in `miden_air::vm::security`; this backend's `security` module constructs the
+VM-specific inputs to the shared estimator. Generic configuration factories and security estimators
+live in `miden_stark::{config,security}`.

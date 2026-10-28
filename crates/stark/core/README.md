@@ -11,8 +11,8 @@ reviewers). Per-module API details live in `src/prover/README.md` and
 
 This crate owns shared AIR contracts, transcript channels, LogUp lookup support,
 configuration factories, common MASM advice encoding, and the lifted STARK prover and
-verifier. Relation-specific PCS presets, protocol versions, and transcript domains stay
-with the relation backends.
+verifier. Production AIR owns relation-specific PCS presets and protocol versions; relation
+backends construct configurations with the corresponding transcript domains.
 
 ```
 miden-stark              ← this crate
