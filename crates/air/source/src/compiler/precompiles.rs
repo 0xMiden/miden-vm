@@ -7,13 +7,10 @@ use miden_ace::{
     compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
 };
 use miden_core::field::QuadFelt;
-use p3_security::budget::{AirShape, LookupShape};
+use p3_security::budget::AirShape;
 
 use crate::{
-    precompiles::{
-        ChipletAir, ace::PvmRecursiveAceCircuit, geometry::fractions_per_row_of, relation::AIRS,
-        relations::MAX_MESSAGE_WIDTH,
-    },
+    precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
     shared::geometry::NUM_OOD_POINTS,
 };
 
@@ -56,16 +53,12 @@ pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircu
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
     let geometry = relation.geometry();
     assert_eq!(geometry.airs.len(), crate::precompiles::NUM_CHIPLETS);
-    let fractions_per_row: usize = ChipletAir::all().into_iter().map(fractions_per_row_of).sum();
     AirShape {
         num_composed_constraints: (geometry.num_constraints + geometry.airs.len() - 1) as u32,
         max_constraint_degree: geometry.max_constraint_degree as u32,
         num_quotient_chunks: geometry.num_quotient_chunks as u32,
         max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(geometry.committed_width() as u32 + NUM_OOD_POINTS),
-        lookup: Some(LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MAX_MESSAGE_WIDTH as u32,
-        }),
+        lookup: Some(lookup_shape()),
     }
 }

@@ -20,15 +20,20 @@ pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     crate::shared::geometry::derive_air_shape(
         &airs,
-        LookupShape {
-            fractions_per_row: airs.iter().cloned().map(fractions_per_row_of).sum::<usize>() as u32,
-            max_message_width: MAX_MESSAGE_WIDTH as u32,
-        },
+        lookup_shape(),
         crate::precompiles::ace::LMCS_ALIGNMENT,
     )
 }
 
-pub(crate) fn fractions_per_row_of(air: ChipletAir) -> usize {
+pub(crate) fn lookup_shape() -> LookupShape {
+    LookupShape {
+        fractions_per_row: ChipletAir::all().into_iter().map(fractions_per_row_of).sum::<usize>()
+            as u32,
+        max_message_width: MAX_MESSAGE_WIDTH as u32,
+    }
+}
+
+fn fractions_per_row_of(air: ChipletAir) -> usize {
     type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
 
     fn shape_of<A>(air: A) -> usize
