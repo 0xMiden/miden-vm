@@ -140,10 +140,9 @@ where
     ///
     /// ```
     /// use miden_crypto::Felt;
+    /// use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
     /// use p3_challenger::CanObserve;
     /// use p3_matrix::{Matrix, dense::RowMajorMatrix};
-    ///
-    /// use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
     ///
     /// #[derive(Clone)]
     /// struct ExampleAir;
