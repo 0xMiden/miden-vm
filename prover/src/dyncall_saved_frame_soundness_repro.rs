@@ -82,7 +82,11 @@ fn build_fixture_with_setup(dyncall_setup: &str, pre_dyncall_depth: u64) -> Fixt
 
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host, &crate::memory::default_budget())
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 

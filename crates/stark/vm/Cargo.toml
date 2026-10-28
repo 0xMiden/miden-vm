@@ -36,10 +36,6 @@ tracing = { workspace = true, optional = true }
 [dev-dependencies]
 miden-crypto.workspace = true
 p3-security.workspace = true
-rayon.workspace = true
-miden-processor = { workspace = true, features = ["std"] }
-miden-assembly.workspace = true
-miden-verifier = { workspace = true, features = ["std"] }
 miden-core = { workspace = true, features = ["testing"] }
 miden-air-definitions = { workspace = true, features = ["compiler"] }
 

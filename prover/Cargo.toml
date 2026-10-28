@@ -42,6 +42,11 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+miden-air.workspace = true
+miden-air-definitions.workspace = true
+miden-crypto.workspace = true
+miden-stark.workspace = true
+rayon.workspace = true
 miden-assembly.workspace = true
 miden-debug-types = { workspace = true, features = ["std"] }
 miden-verifier = { workspace = true, features = ["std"] }

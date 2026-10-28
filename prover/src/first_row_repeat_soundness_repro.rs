@@ -43,7 +43,7 @@ fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace 
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, &crate::memory::default_budget())
+        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     trace
