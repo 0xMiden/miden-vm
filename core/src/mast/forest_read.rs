@@ -1,5 +1,6 @@
 use alloc::{
-    collections::{BTreeMap, BTreeSet, btree_map},
+    collections::{BTreeMap, BTreeSet, VecDeque, btree_map},
+    vec,
     vec::Vec,
 };
 use core::{iter, slice};
@@ -168,30 +169,48 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
             }
         }
 
-        for (candidate_root, mut remaining) in candidate_full_roots {
+        let mut source_groups = Vec::new();
+        let mut source_indices_by_digest = BTreeMap::<Word, Vec<usize>>::new();
+        for (digest, roots) in source_full_roots {
+            for (source_root, count) in roots {
+                let source_index = source_groups.len();
+                source_groups.push((source_root, count, digest));
+                source_indices_by_digest.entry(digest).or_default().push(source_index);
+            }
+        }
+
+        let candidate_groups: Vec<_> = candidate_full_roots.into_iter().collect();
+        let mut compatible_sources = Vec::with_capacity(candidate_groups.len());
+        for &(candidate_root, _) in &candidate_groups {
             let Some(digest) = self.candidate.get_digest_by_id(candidate_root) else {
                 return false;
             };
-            let Some(source_roots) = source_full_roots.get_mut(&digest) else {
+            let Some(source_indices) = source_indices_by_digest.get(&digest) else {
                 return false;
             };
-            for (&source_root, available) in source_roots.iter_mut() {
-                if *available == 0 || !self.full_nodes_match(candidate_root, source_root) {
-                    continue;
-                }
-                let consumed = remaining.min(*available);
-                remaining -= consumed;
-                *available -= consumed;
-                *source_capacity_by_digest
-                    .get_mut(&digest)
-                    .expect("source root digest capacity must exist") -= consumed;
-                if remaining == 0 {
-                    break;
+            let mut matches = Vec::new();
+            for &source_index in source_indices {
+                if self.full_nodes_match(candidate_root, source_groups[source_index].0) {
+                    matches.push(source_index);
                 }
             }
-            if remaining != 0 {
+            if matches.is_empty() {
                 return false;
             }
+            compatible_sources.push(matches);
+        }
+
+        let candidate_counts: Vec<_> = candidate_groups.iter().map(|(_, count)| *count).collect();
+        let source_counts: Vec<_> = source_groups.iter().map(|(_, count, _)| *count).collect();
+        let Some(source_used) =
+            assign_export_multiplicities(&candidate_counts, &source_counts, &compatible_sources)
+        else {
+            return false;
+        };
+        for (source_index, used) in source_used.into_iter().enumerate() {
+            *source_capacity_by_digest
+                .get_mut(&source_groups[source_index].2)
+                .expect("source root digest capacity must exist") -= used;
         }
 
         candidate_opaque_roots.into_iter().all(|(digest, count)| {
@@ -252,6 +271,97 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
         }
         matches
     }
+}
+
+fn assign_export_multiplicities(
+    candidate_counts: &[usize],
+    source_counts: &[usize],
+    compatible_sources: &[Vec<usize>],
+) -> Option<Vec<usize>> {
+    let mut candidate_flows = vec![BTreeMap::<usize, usize>::new(); candidate_counts.len()];
+    let mut source_flows = vec![BTreeMap::<usize, usize>::new(); source_counts.len()];
+    let mut source_used = vec![0usize; source_counts.len()];
+
+    for start_candidate in 0..candidate_counts.len() {
+        let mut remaining = candidate_counts[start_candidate];
+        while remaining > 0 {
+            let mut candidate_seen = vec![false; candidate_counts.len()];
+            let mut candidate_parent = vec![None; candidate_counts.len()];
+            let mut source_parent = vec![None; source_counts.len()];
+            let mut queue = VecDeque::new();
+            candidate_seen[start_candidate] = true;
+            queue.push_back(start_candidate);
+
+            let mut found_source = None;
+            'search: while let Some(candidate_index) = queue.pop_front() {
+                for &source_index in &compatible_sources[candidate_index] {
+                    if source_parent[source_index].is_some() {
+                        continue;
+                    }
+                    source_parent[source_index] = Some(candidate_index);
+                    if source_used[source_index] < source_counts[source_index] {
+                        found_source = Some(source_index);
+                        break 'search;
+                    }
+                    for (&assigned_candidate, &flow) in &source_flows[source_index] {
+                        if flow > 0 && !candidate_seen[assigned_candidate] {
+                            candidate_seen[assigned_candidate] = true;
+                            candidate_parent[assigned_candidate] = Some(source_index);
+                            queue.push_back(assigned_candidate);
+                        }
+                    }
+                }
+            }
+
+            let mut path_source = found_source?;
+            let mut flow = remaining.min(source_counts[path_source] - source_used[path_source]);
+            loop {
+                let candidate_index = source_parent[path_source]
+                    .expect("visited source must have a candidate parent");
+                if candidate_index == start_candidate {
+                    break;
+                }
+                let previous_source = candidate_parent[candidate_index]
+                    .expect("reassigned candidate must have a source parent");
+                flow = flow.min(candidate_flows[candidate_index][&previous_source]);
+                path_source = previous_source;
+            }
+
+            path_source = found_source.expect("found source must remain available");
+            loop {
+                let candidate_index = source_parent[path_source]
+                    .expect("visited source must have a candidate parent");
+                *candidate_flows[candidate_index].entry(path_source).or_default() += flow;
+                *source_flows[path_source].entry(candidate_index).or_default() += flow;
+                source_used[path_source] += flow;
+
+                if candidate_index == start_candidate {
+                    break;
+                }
+                let previous_source = candidate_parent[candidate_index]
+                    .expect("reassigned candidate must have a source parent");
+                let candidate_flow = candidate_flows[candidate_index]
+                    .get_mut(&previous_source)
+                    .expect("alternating path must follow assigned flow");
+                *candidate_flow -= flow;
+                if *candidate_flow == 0 {
+                    candidate_flows[candidate_index].remove(&previous_source);
+                }
+                let source_flow = source_flows[previous_source]
+                    .get_mut(&candidate_index)
+                    .expect("alternating path must follow assigned flow");
+                *source_flow -= flow;
+                if *source_flow == 0 {
+                    source_flows[previous_source].remove(&candidate_index);
+                }
+                source_used[previous_source] -= flow;
+                path_source = previous_source;
+            }
+            remaining -= flow;
+        }
+    }
+
+    Some(source_used)
 }
 
 fn roots_are_subset(subset: &[MastNodeId], source: &[MastNodeId]) -> bool {
@@ -521,6 +631,64 @@ mod tests {
             vec![(full_id, dense[dense_id].clone())],
             vec![(opaque_id, digest)],
             vec![full_id, opaque_id],
+            AdviceMap::default(),
+        )
+        .unwrap();
+
+        assert!(candidate.is_content_subset_of(&source));
+    }
+
+    #[test]
+    fn content_subset_reassigns_broad_full_export() {
+        let opaque_child = MastNodeId::new_unchecked(0);
+        let broad_root = MastNodeId::new_unchecked(1);
+        let full_child = MastNodeId::new_unchecked(2);
+        let strict_root = MastNodeId::new_unchecked(3);
+
+        let mut low_template = MastForest::new();
+        let low_child = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut low_template)
+            .unwrap();
+        let low_join = crate::mast::JoinNodeBuilder::new([low_child, low_child])
+            .add_to_forest(&mut low_template)
+            .unwrap();
+        assert_eq!((low_child, low_join), (opaque_child, broad_root));
+
+        let mut high_template = MastForest::new();
+        BasicBlockNodeBuilder::new(vec![Operation::Drop])
+            .add_to_forest(&mut high_template)
+            .unwrap();
+        BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut high_template)
+            .unwrap();
+        let high_child = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut high_template)
+            .unwrap();
+        let high_join = crate::mast::JoinNodeBuilder::new([high_child, high_child])
+            .add_to_forest(&mut high_template)
+            .unwrap();
+        assert_eq!((high_child, high_join), (full_child, strict_root));
+
+        let child_digest = low_template[low_child].digest();
+        let candidate = SparseMastForest::from_serialized_parts(
+            vec![
+                (broad_root, low_template[low_join].clone()),
+                (full_child, high_template[high_child].clone()),
+                (strict_root, high_template[high_join].clone()),
+            ],
+            vec![(opaque_child, child_digest)],
+            vec![broad_root, strict_root],
+            AdviceMap::default(),
+        )
+        .unwrap();
+        let source = SparseMastForest::from_serialized_parts(
+            vec![
+                (opaque_child, low_template[low_child].clone()),
+                (broad_root, low_template[low_join].clone()),
+                (strict_root, high_template[high_join].clone()),
+            ],
+            vec![(full_child, child_digest)],
+            vec![broad_root, strict_root],
             AdviceMap::default(),
         )
         .unwrap();
