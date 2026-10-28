@@ -659,7 +659,7 @@ fn correction_fp(boundary: u64, frac: u64, h: u64) -> u64 {
 fn recursive_verifier_ranges_fit_security_estimator_envelope() {
     use miden_air::vm::security as vm;
     use miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
-    use miden_precompile_stark::setup::security as pvm;
+    use miden_precompiles_stark::setup::security as pvm;
 
     assert_eq!(PVM_LOG_HEIGHT_MIN, TRACE_HEIGHT.ilog2() as u64);
     assert_eq!(vm::FIXED_POINT_FRACTIONAL_BITS, pvm::testing::FIXED_POINT_FRACTIONAL_BITS);
@@ -802,7 +802,7 @@ fn security_estimator_root_matches_procref() {
 /// every cell against the native PVM implementation.
 fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
     use miden_air::precompiles::policy::precompile_pcs_params;
-    use miden_precompile_stark::setup::security;
+    use miden_precompiles_stark::setup::security;
 
     let air_shape = miden_air::precompiles::protocol::metadata().air_shape;
 

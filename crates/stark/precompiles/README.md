@@ -1,4 +1,4 @@
-# miden-precompile-stark
+# miden-precompiles-stark
 
 STARK proving, verification, runtime setup, and recursive advice for the Miden precompile
 relation. Authored AIRs live in `miden_air_definitions::precompiles`; `miden_air::precompiles`

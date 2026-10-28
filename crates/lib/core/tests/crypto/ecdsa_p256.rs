@@ -17,13 +17,13 @@ use miden_core_lib::{
     },
 };
 use miden_crypto::hash::{eidos::Eidos, sha2::Sha256};
-use miden_precompile_stark::{
-    prover::{HashFunction, prove_precompiles},
-    verifier::verify_deferred,
-};
 use miden_precompiles::{
     CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, UintPrecompile,
     ZERO_LIMBS,
+};
+use miden_precompiles_stark::{
+    prover::{HashFunction, prove_precompiles},
+    verifier::verify_deferred,
 };
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,

@@ -40,7 +40,7 @@ impl Prover {
 
     /// Default maximum modelled peak memory, in bytes, for proving a precompile witness.
     pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
-        miden_precompile_stark::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
+        miden_precompiles_stark::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub fn new() -> Self {
@@ -178,7 +178,7 @@ impl Prover {
         &self,
         witnesses: Vec<PrecompileWitness>,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompile_stark::prover::prove_precompiles_with_limits_and_budget(
+        miden_precompiles_stark::prover::prove_precompiles_with_limits_and_budget(
             witnesses,
             self.hash_fn,
             &self.verification_precompile_limits,
@@ -192,7 +192,7 @@ impl Prover {
         witness: PrecompileWitness,
         expected_root: Word,
     ) -> Result<PrecompileProof, ProverError> {
-        miden_precompile_stark::prover::prove_precompile_for_root_with_limits_and_budget(
+        miden_precompiles_stark::prover::prove_precompile_for_root_with_limits_and_budget(
             witness,
             expected_root,
             self.hash_fn,
@@ -379,7 +379,7 @@ mod tests {
     fn prove_precompiles_applies_the_configured_memory_budget() {
         // A 1-byte budget must reject even the minimal chiplet trace shapes, and the returned
         // error carries the configured budget. Exact-boundary behavior is covered by
-        // `miden-precompile-stark`.
+        // `miden-precompiles-stark`.
         let err = Prover::new()
             .with_max_precompile_prover_memory_bytes(1)
             .prove_precompiles(alloc::vec![trivial_precompile_witness()])

@@ -228,7 +228,7 @@ impl Verifier {
         let aggregate_root =
             proof.aggregate_root().expect("precompile roots were checked to be non-empty");
         let security_parameters =
-            miden_precompile_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
+            miden_precompiles_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
         self.check_security_level(&security_parameters)?;
         Ok(security_parameters)
     }
@@ -288,7 +288,7 @@ impl Verifier {
         let size = proof.proof.bytes().len();
         if size > MAX_STARK_PROOF_BYTES {
             return Err(VerificationError::PrecompileStarkVerification(
-                miden_precompile_stark::verifier::VerifyError::ProofTooLarge {
+                miden_precompiles_stark::verifier::VerifyError::ProofTooLarge {
                     size,
                     max: MAX_STARK_PROOF_BYTES,
                 },
@@ -407,7 +407,7 @@ pub enum VerificationError {
     PrecompileStarkVerification(#[from] PrecompileVerificationError),
 }
 
-pub use miden_precompile_stark::verifier::VerifyError as PrecompileVerificationError;
+pub use miden_precompiles_stark::verifier::VerifyError as PrecompileVerificationError;
 pub use miden_vm_stark::verifier::VerificationError as StarkVerificationError;
 
 // HELPER FUNCTIONS
@@ -609,7 +609,7 @@ mod tests {
         assert!(matches!(
             error,
             VerificationError::PrecompileStarkVerification(
-                miden_precompile_stark::verifier::VerifyError::ProofTooLarge { size, max }
+                miden_precompiles_stark::verifier::VerifyError::ProofTooLarge { size, max }
             ) if size == MAX_STARK_PROOF_BYTES + 1 && max == MAX_STARK_PROOF_BYTES
         ));
     }

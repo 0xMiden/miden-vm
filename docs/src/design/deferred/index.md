@@ -270,7 +270,7 @@ and do not guarantee that maximal admitted work fits the proving-memory budget.
 The **Precompile VM (PVM)** proves correct evaluation of the committed deferred DAG in a separate
 STARK proof bound to the ordered input roots. The execution proof's deferred root connects that
 proof to the VM execution. The
-[precompile STARK backend](https://github.com/0xMiden/miden-vm/blob/next/crates/stark/precompile/README.md)
+[precompile STARK backend](https://github.com/0xMiden/miden-vm/blob/next/crates/stark/precompiles/README.md)
 provides proving, native verification, and inputs for the in-VM verifier. See the
 [proof obligations and composition contract](./semantics.md#proof-obligations-and-composition)
 for how the two proofs are completed and verified together.

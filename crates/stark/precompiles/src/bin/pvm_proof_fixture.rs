@@ -11,11 +11,11 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_precompile_stark::{prover::prove_precompiles, verifier::verify_deferred};
 use miden_precompiles::{
     Keccak256Precompile, default_execution_precompile_limits,
     default_verification_precompile_limits,
 };
+use miden_precompiles_stark::{prover::prove_precompiles, verifier::verify_deferred};
 
 const PROOF_PATH: &str = "tests/fixtures/pvm_eidos_v1_0.bin";
 const ROOT_PATH: &str = "tests/fixtures/pvm_eidos_v1_0.root";

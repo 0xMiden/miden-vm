@@ -117,7 +117,7 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
 | Proof system | [vm-stark](crates/stark/vm) | VM relation proving, verification, setup, and recursive inputs. |
-| Proof system | [precompile-stark](crates/stark/precompile) | Precompile relation proving, verification, setup, and recursive inputs. |
+| Proof system | [precompiles-stark](crates/stark/precompiles) | Precompile relation proving, verification, setup, and recursive inputs. |
 | Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |
 | Packages and tools | [mast-package](crates/mast-package) | Stores compiled MAST artifacts with their dependencies and exports. |
 | Packages and tools | [project](crates/project) | Loads and builds Miden projects. |

@@ -2,7 +2,7 @@
 
 use miden_core::{Word, advice::AdviceInputs};
 use miden_core_lib::CoreLibrary;
-use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
+use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::advice::AdviceStack;
 
 use super::{

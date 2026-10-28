@@ -17,7 +17,7 @@ use miden_core::{
     utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
+use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
 use miden_verifier::Verifier;
 use miden_vm::{

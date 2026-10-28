@@ -1,5 +1,5 @@
 ---
-source: crates/stark/precompile/src/recursive/ace.rs
+source: crates/stark/precompiles/src/recursive/ace.rs
 expression: snapshot
 ---
 layout_inputs: 1616

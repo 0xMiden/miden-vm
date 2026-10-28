@@ -76,7 +76,7 @@ miden-debug-types.workspace = true
 miden-stark = { workspace = true, features = ["testing"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-precompile-stark = { workspace = true, features = ["concurrent", "prover", "testing"] }
+miden-precompiles-stark = { workspace = true, features = ["concurrent", "prover", "testing"] }
 miden-prover = { workspace = true, features = ["concurrent"] }
 miden-utils-testing.workspace = true
 miden-verifier = { workspace = true, features = ["std"] }

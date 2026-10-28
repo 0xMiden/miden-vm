@@ -14,7 +14,7 @@ use miden_core::{Felt, Word};
 
 /// Command line that regenerates the generated MASM modules, quoted in their headers.
 #[cfg(any(test, feature = "constants-tools"))]
-pub(crate) const GENERATED_BY: &str = "cargo run -p miden-precompile-stark --release \
+pub(crate) const GENERATED_BY: &str = "cargo run -p miden-precompiles-stark --release \
      --features constants-tools --bin pvm-constants-regen -- --write";
 
 /// Protocol version included in the PVM relation digest.

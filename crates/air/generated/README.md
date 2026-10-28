@@ -6,7 +6,7 @@ This crate exposes the production VM and precompile AIRs through `vm` and `preco
 
 Cargo generates native evaluators, security metadata, and canonical ACE streams into `OUT_DIR`. Compiler tooling is a build dependency; runtime consumers use the generated artifacts. The recursive verifier MASM in the core library imports parameters generated from the same captures; see [Maintaining recursive-verifier MASM](../../lib/core/RECURSIVE_VERIFIER.md).
 
-Relation setup and transcript-domain adapters live in `miden-vm-stark` and `miden-precompile-stark`. Shared AIR contracts, transcript channels, lookup mechanisms, configuration factories, and security estimators live in `miden-stark`.
+Relation setup and transcript-domain adapters live in `miden-vm-stark` and `miden-precompiles-stark`. Shared AIR contracts, transcript channels, lookup mechanisms, configuration factories, and security estimators live in `miden-stark`.
 
 AIR is a STARK-specific format of describing a computation. It consists of defining a set of constraints expressed as low-degree polynomials. Miden prover evaluates these polynomials over an execution trace produced by Miden processor and includes the results in the execution proof. To verify the proof, the verifier checks that the constraints are evaluated correctly against the execution trace committed to by the prover.
 

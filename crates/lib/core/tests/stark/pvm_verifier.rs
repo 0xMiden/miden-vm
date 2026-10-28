@@ -22,11 +22,11 @@ use miden_core_lib::{
     dsa::{ecdsa_p256_sha256, eddsa_25519_sha512},
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
-use miden_precompile_stark::{
+use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
+use miden_precompiles_stark::{
     prover::prove_precompiles,
     recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
-use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
@@ -421,7 +421,7 @@ fn run_pvm_verifier_with_advice(
 
 #[track_caller]
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
-    use miden_precompile_stark::setup::security;
+    use miden_precompiles_stark::setup::security;
 
     let air_shape = miden_air::precompiles::protocol::metadata().air_shape;
 

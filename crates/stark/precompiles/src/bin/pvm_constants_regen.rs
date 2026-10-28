@@ -1,9 +1,9 @@
 //! Checks or regenerates the PVM ACE constants and their generated MASM artifacts.
 //!
-//! Usage: `cargo run -p miden-precompile-stark --features constants-tools --release \
+//! Usage: `cargo run -p miden-precompiles-stark --features constants-tools --release \
 //!         --bin pvm-constants-regen -- [--check | --write]`
 
-use miden_precompile_stark::recursive::ace_constants_regen::{Mode, run};
+use miden_precompiles_stark::recursive::ace_constants_regen::{Mode, run};
 
 fn parse_mode(args: Vec<String>) -> Result<Mode, Vec<String>> {
     match args.as_slice() {

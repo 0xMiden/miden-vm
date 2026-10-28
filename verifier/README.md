@@ -42,7 +42,7 @@ verification exposes the authenticated obligation through
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof policy.
 
 Recursive advice preparation is owned by `miden-vm-stark::recursive` and
-`miden-precompile-stark::recursive`. Import those backends directly when constructing the inputs
+`miden-precompiles-stark::recursive`. Import those backends directly when constructing the inputs
 consumed by the MASM relation verifiers.
 
 ## Crate features

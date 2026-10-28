@@ -17,7 +17,7 @@ pub use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof},
     serde::DeserializationError,
 };
-pub use miden_precompile_stark::prover::PrecompileProvingError;
+pub use miden_precompiles_stark::prover::PrecompileProvingError;
 pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness, FutureMaybeSend, Host,
     SyncHost, VmWitness,

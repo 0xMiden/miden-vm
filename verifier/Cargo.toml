@@ -22,7 +22,7 @@ default = ["std"]
 std = [
     "miden-core/std",
     "miden-precompiles/std",
-    "miden-precompile-stark/std",
+    "miden-precompiles-stark/std",
     "miden-vm-stark/std",
     "thiserror/std",
 ]
@@ -32,7 +32,7 @@ std = [
 miden-core.workspace = true
 miden-stark.workspace = true
 miden-precompiles.workspace = true
-miden-precompile-stark.workspace = true
+miden-precompiles-stark.workspace = true
 miden-vm-stark.workspace = true
 
 # External dependencies

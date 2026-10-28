@@ -75,7 +75,7 @@ worker uses compact buffered replay. Proof generation remains configured on `Pro
 
 The prover uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
 Relation configuration and runtime setup live in `miden-vm-stark::setup` and
-`miden-precompile-stark::setup`. Import those backends directly for relation proving or setup;
+`miden-precompiles-stark::setup`. Import those backends directly for relation proving or setup;
 `miden-prover` owns complete/deferred proof orchestration and application proving policy.
 
 ### Hash Function Selection

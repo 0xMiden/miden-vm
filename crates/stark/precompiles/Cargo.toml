@@ -1,8 +1,8 @@
 [package]
-name = "miden-precompile-stark"
+name = "miden-precompiles-stark"
 version.workspace = true
 description = "STARK backend for the Miden precompile relation"
-documentation = "https://docs.rs/miden-precompile-stark"
+documentation = "https://docs.rs/miden-precompiles-stark"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["miden", "precompile", "stark", "zkp"]

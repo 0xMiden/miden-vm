@@ -242,7 +242,7 @@ mod tests {
                 workload.keccaks + workload.ecdsas,
                 "{name} must include the requested Keccaks and one prehash per ECDSA",
             );
-            miden_precompile_stark::prover::testing::import(
+            miden_precompiles_stark::prover::testing::import(
                 vec![witness],
                 &fixture.verification_limits,
             )
