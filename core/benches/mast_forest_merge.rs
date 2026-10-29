@@ -1,10 +1,11 @@
 //! Benchmark MastForest::merge on a handful of randomly generated forests.
 
-use std::hint::black_box;
+use std::{hint::black_box, sync::Arc};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_core::mast::{
-    MastForest, MastForestError, MastForestMergeSource, MastForestRootMap, SparseMastForest,
+    MastForest, MastForestError, MastForestMergeSource, MastForestRead, MastForestRootMap,
+    SparseMastForest, SparseMastForestBuilder, VisitKind,
     arbitrary::{GenerationMode, MastForestParams},
 };
 use proptest::{
@@ -49,8 +50,23 @@ fn make_sparse_forest_set(forests: &[MastForest]) -> Vec<SparseMastForest> {
     forests
         .iter()
         .map(|forest| {
-            SparseMastForest::from_procedure_roots(forest, forest.procedure_roots())
-                .expect("generated procedure roots must be valid")
+            let mut builder = SparseMastForestBuilder::new(Arc::new(forest.clone()));
+            for (index, (node_id, node)) in forest.node_entries().enumerate() {
+                let kind = if index % 2 == 1 && !node.is_external() {
+                    VisitKind::DigestOnly
+                } else {
+                    VisitKind::FullVisit
+                };
+                builder.record_visit(node_id, kind);
+            }
+            let sparse = builder.finalize();
+            assert!(sparse.node_entries().next().is_some());
+            assert!(sparse.digest_entries().next().is_some());
+            assert_eq!(
+                sparse.node_entries().count() + sparse.digest_entries().count(),
+                forest.num_nodes() as usize
+            );
+            sparse
         })
         .collect()
 }
@@ -62,13 +78,8 @@ fn mixed_sources<'forest>(
     dense
         .iter()
         .zip(sparse)
-        .enumerate()
-        .map(|(index, (dense, sparse))| {
-            if index % 2 == 0 {
-                MastForestMergeSource::from(dense)
-            } else {
-                MastForestMergeSource::from(sparse)
-            }
+        .flat_map(|(dense, sparse)| {
+            [MastForestMergeSource::from(dense), MastForestMergeSource::from(sparse)]
         })
         .collect()
 }
@@ -115,7 +126,7 @@ fn bench_mixed_merge_varied_sizes(c: &mut Criterion) {
         let dense = make_forest_set(num_forests, forest_params(blocks_per_forest));
         let sparse = make_sparse_forest_set(&dense);
         let sources = mixed_sources(&dense, &sparse);
-        group.throughput(Throughput::Elements((num_forests * blocks_per_forest) as u64));
+        group.throughput(Throughput::Elements((2 * num_forests * blocks_per_forest) as u64));
 
         group.bench_with_input(
             BenchmarkId::new("dense_output", blocks_per_forest),
