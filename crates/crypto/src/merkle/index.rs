@@ -158,7 +158,15 @@ impl NodeIndex {
     }
 
     /// Returns `true` if the n-th node on the path points to a right child.
+    ///
+    /// Returns `false` for any `n >= 64` since `position` is a `u64` and has no bit at
+    /// that index. Without this guard, a shift of 64 or more on a `u64` would panic in
+    /// debug builds and silently read the wrong bit in release builds (Rust masks the
+    /// shift amount to `n & 63`).
     pub const fn is_nth_bit_odd(&self, n: u8) -> bool {
+        if n >= 64 {
+            return false;
+        }
         (self.position >> n) & 1 == 1
     }
 
@@ -377,6 +385,17 @@ mod tests {
             let position = if depth == 0 { 0 } else { position_bits % (1u64 << depth) };
             let index = NodeIndex::new(depth, position).unwrap();
             assert!(index.to_scalar_index().is_ok());
+        }
+
+        #[test]
+        fn arbitrary_n_wont_panic_on_is_nth_bit_odd(
+            index in node_index(),
+            n in prop::num::u8::ANY,
+        ) {
+            let result = index.is_nth_bit_odd(n);
+            if n >= 64 {
+                assert!(!result, "is_nth_bit_odd should return false for n >= 64, got true for n={n}");
+            }
         }
     }
 
