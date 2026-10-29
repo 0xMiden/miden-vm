@@ -1,9 +1,9 @@
 use alloc::{
-    collections::{BTreeMap, BTreeSet, VecDeque, btree_map},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     vec,
     vec::Vec,
 };
-use core::{cmp::Reverse, iter, slice};
+use core::{cmp::Reverse, iter};
 
 use super::{
     ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest,
@@ -11,39 +11,16 @@ use super::{
 };
 use crate::Word;
 
-type DenseNodeIter<'a> = iter::Map<
-    iter::Enumerate<slice::Iter<'a, MastNode>>,
-    fn((usize, &'a MastNode)) -> (MastNodeId, &'a MastNode),
->;
-
-type SparseNodeIter<'a> = iter::Map<
-    btree_map::Iter<'a, MastNodeId, MastNode>,
-    fn((&'a MastNodeId, &'a MastNode)) -> (MastNodeId, &'a MastNode),
->;
-
-type SparseDigestIter<'a> = iter::Map<
-    btree_map::Iter<'a, MastNodeId, Word>,
-    fn((&'a MastNodeId, &'a Word)) -> (MastNodeId, Word),
->;
-
 /// Read-only storage access shared by dense and sparse MAST forests.
 ///
 /// Full nodes and opaque digest-only entries are separate. Implementations must iterate only
 /// stored entries; a sparse forest's node count describes its ID span rather than its entry count.
 pub trait MastForestRead: ExecutableMastForest {
-    type NodeIter<'a>: Iterator<Item = (MastNodeId, &'a MastNode)>
-    where
-        Self: 'a;
-
-    type DigestIter<'a>: Iterator<Item = (MastNodeId, Word)>
-    where
-        Self: 'a;
-
     /// Iterates full nodes with their forest-local IDs.
-    fn node_entries(&self) -> Self::NodeIter<'_>;
+    fn node_entries(&self) -> impl Iterator<Item = (MastNodeId, &MastNode)>;
 
     /// Iterates opaque digest-only entries with their forest-local IDs.
-    fn digest_entries(&self) -> Self::DigestIter<'_>;
+    fn digest_entries(&self) -> impl Iterator<Item = (MastNodeId, Word)>;
 
     /// Returns exported procedure roots in this forest's ID space.
     fn procedure_roots(&self) -> &[MastNodeId];
@@ -348,46 +325,29 @@ impl<'a, F: MastForestRead + ?Sized> StoredContentIds<'a, F> {
     }
 
     fn get(&mut self, node_id: MastNodeId) -> Option<usize> {
-        stored_content_id(
-            self.forest,
-            node_id,
-            &mut self.by_node_id,
-            &mut self.by_content,
-            &mut self.visiting,
-        )
-    }
-}
+        if let Some(&content_id) = self.by_node_id.get(&node_id) {
+            return Some(content_id);
+        }
+        if !self.visiting.insert(node_id) {
+            return None;
+        }
 
-fn stored_content_id<F: MastForestRead + ?Sized>(
-    forest: &F,
-    node_id: MastNodeId,
-    by_node_id: &mut BTreeMap<MastNodeId, usize>,
-    by_content: &mut BTreeMap<StoredContentKey<usize>, usize>,
-    visiting: &mut BTreeSet<MastNodeId>,
-) -> Option<usize> {
-    if let Some(&content_id) = by_node_id.get(&node_id) {
-        return Some(content_id);
-    }
-    if !visiting.insert(node_id) {
-        return None;
-    }
+        let forest = self.forest;
+        let key = (|| {
+            let node = match forest.get_node_by_id(node_id) {
+                Some(node) => node,
+                None => return Some(StoredContentKey::Opaque(forest.get_digest_by_id(node_id)?)),
+            };
+            StoredContentKey::from_node(node, |child_id| self.get(child_id))
+        })();
+        self.visiting.remove(&node_id);
+        let key = key?;
 
-    let key = (|| {
-        let node = match forest.get_node_by_id(node_id) {
-            Some(node) => node,
-            None => return Some(StoredContentKey::Opaque(forest.get_digest_by_id(node_id)?)),
-        };
-        StoredContentKey::from_node(node, |child_id| {
-            stored_content_id(forest, child_id, by_node_id, by_content, visiting)
-        })
-    })();
-    visiting.remove(&node_id);
-    let key = key?;
-
-    let next_content_id = by_content.len();
-    let content_id = *by_content.entry(key).or_insert(next_content_id);
-    by_node_id.insert(node_id, content_id);
-    Some(content_id)
+        let next_content_id = self.by_content.len();
+        let content_id = *self.by_content.entry(key).or_insert(next_content_id);
+        self.by_node_id.insert(node_id, content_id);
+        Some(content_id)
+    }
 }
 
 fn assign_export_multiplicities(
@@ -499,14 +459,14 @@ fn roots_are_subset(subset: &[MastNodeId], source: &[MastNodeId]) -> bool {
 }
 
 impl MastForestRead for MastForest {
-    type NodeIter<'a> = DenseNodeIter<'a>;
-    type DigestIter<'a> = iter::Empty<(MastNodeId, Word)>;
-
-    fn node_entries(&self) -> Self::NodeIter<'_> {
-        self.nodes().iter().enumerate().map(dense_node_entry)
+    fn node_entries(&self) -> impl Iterator<Item = (MastNodeId, &MastNode)> {
+        self.nodes()
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (MastNodeId::new_unchecked(index as u32), node))
     }
 
-    fn digest_entries(&self) -> Self::DigestIter<'_> {
+    fn digest_entries(&self) -> impl Iterator<Item = (MastNodeId, Word)> {
         iter::empty()
     }
 
@@ -516,34 +476,19 @@ impl MastForestRead for MastForest {
 }
 
 impl MastForestRead for SparseMastForest {
-    type NodeIter<'a> = SparseNodeIter<'a>;
-    type DigestIter<'a> = SparseDigestIter<'a>;
-
-    fn node_entries(&self) -> Self::NodeIter<'_> {
-        self.nodes().iter().map(sparse_node_entry)
+    fn node_entries(&self) -> impl Iterator<Item = (MastNodeId, &MastNode)> {
+        self.nodes().iter().map(|(&node_id, node)| (node_id, node))
     }
 
-    fn digest_entries(&self) -> Self::DigestIter<'_> {
-        SparseMastForest::digest_entries(self).iter().map(sparse_digest_entry)
+    fn digest_entries(&self) -> impl Iterator<Item = (MastNodeId, Word)> {
+        SparseMastForest::digest_entries(self)
+            .iter()
+            .map(|(&node_id, &digest)| (node_id, digest))
     }
 
     fn procedure_roots(&self) -> &[MastNodeId] {
         SparseMastForest::procedure_roots(self)
     }
-}
-
-fn dense_node_entry((index, node): (usize, &MastNode)) -> (MastNodeId, &MastNode) {
-    (MastNodeId::new_unchecked(index as u32), node)
-}
-
-fn sparse_node_entry<'a>(
-    (&node_id, node): (&'a MastNodeId, &'a MastNode),
-) -> (MastNodeId, &'a MastNode) {
-    (node_id, node)
-}
-
-fn sparse_digest_entry((&node_id, &digest): (&MastNodeId, &Word)) -> (MastNodeId, Word) {
-    (node_id, digest)
 }
 
 #[cfg(test)]
