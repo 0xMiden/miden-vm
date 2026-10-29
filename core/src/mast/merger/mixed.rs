@@ -10,10 +10,9 @@ use crate::{
     advice::AdviceMap,
     mast::{
         DenseMastForestBuilder, ExecutableMastForest, ExternalNodeBuilder, MastForest,
-        MastForestContributor, MastForestError, MastForestRead, MastForestRootMap, MastNode,
-        MastNodeExt, MastNodeId, SparseMastForest,
+        MastForestError, MastForestRead, MastForestRootMap, MastNode, MastNodeExt, MastNodeId,
+        SparseMastForest,
     },
-    utils::IndexVec,
 };
 
 /// A borrowed dense or sparse forest accepted by the shared merge operations.
@@ -124,8 +123,7 @@ pub(crate) struct MixedMastForestMerger<'forest> {
     node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     opaque_by_digest: BTreeMap<Word, MastNodeId>,
-    full_by_fingerprint: BTreeMap<Word, Vec<MastNodeId>>,
-    fingerprint_by_id: IndexVec<MastNodeId, Word>,
+    full_by_content: BTreeMap<MergedContentKey, MastNodeId>,
     non_external_by_digest: BTreeMap<Word, (usize, MastNodeId)>,
     full_ids_by_digest: BTreeMap<Word, BTreeSet<MastNodeId>>,
     resolved_digests: BTreeSet<Word>,
@@ -153,6 +151,34 @@ enum MergeTask {
         replacement_forest: usize,
         replacement_id: MastNodeId,
     },
+}
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+enum MergedContentKey {
+    Block(Word, Vec<u8>),
+    Join(Word, MastNodeId, MastNodeId),
+    Split(Word, MastNodeId, MastNodeId),
+    Loop(Word, MastNodeId),
+    Call(Word, bool, MastNodeId),
+    Dyn(Word, bool),
+    External(Word),
+}
+
+impl MergedContentKey {
+    fn from_node(node: &MastNode) -> Self {
+        let digest = node.digest();
+        match node {
+            MastNode::Block(block) => {
+                Self::Block(digest, super::super::serialization::basic_block_content_key(block))
+            },
+            MastNode::Join(join) => Self::Join(digest, join.first(), join.second()),
+            MastNode::Split(split) => Self::Split(digest, split.on_true(), split.on_false()),
+            MastNode::Loop(loop_node) => Self::Loop(digest, loop_node.body()),
+            MastNode::Call(call) => Self::Call(digest, call.is_syscall(), call.callee()),
+            MastNode::Dyn(dyn_node) => Self::Dyn(digest, dyn_node.is_dyncall()),
+            MastNode::External(_) => Self::External(digest),
+        }
+    }
 }
 
 impl<'forest> MixedMastForestMerger<'forest> {
@@ -230,8 +256,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
             node_maps: vec![BTreeMap::new(); count],
             root_maps: vec![BTreeMap::new(); count],
             opaque_by_digest: BTreeMap::new(),
-            full_by_fingerprint: BTreeMap::new(),
-            fingerprint_by_id: IndexVec::new(),
+            full_by_content: BTreeMap::new(),
             non_external_by_digest,
             full_ids_by_digest: BTreeMap::new(),
             resolved_digests: BTreeSet::new(),
@@ -252,9 +277,6 @@ impl<'forest> MixedMastForestMerger<'forest> {
                     merged_id
                 } else {
                     let merged_id = self.builder.push_node(ExternalNodeBuilder::new(digest))?;
-                    self.fingerprint_by_id
-                        .push(digest)
-                        .map_err(|_| MastForestError::TooManyNodes)?;
                     self.digests.insert(merged_id, digest);
                     self.opaque_by_digest.insert(digest, merged_id);
                     merged_id
@@ -417,15 +439,9 @@ impl<'forest> MixedMastForestMerger<'forest> {
             &self.builder_source,
             &self.node_maps[forest_idx],
         )?;
-        let fingerprint = builder.fingerprint_for_node(&self.builder, &self.fingerprint_by_id)?;
         let remapped_node = builder.build_linked()?;
-        let merged_id = self.full_by_fingerprint.get(&fingerprint).and_then(|candidates| {
-            candidates
-                .iter()
-                .copied()
-                .find(|candidate| self.nodes.get(candidate) == Some(&remapped_node))
-        });
-        let merged_id = if let Some(merged_id) = merged_id {
+        let content_key = MergedContentKey::from_node(&remapped_node);
+        let merged_id = if let Some(&merged_id) = self.full_by_content.get(&content_key) {
             merged_id
         } else {
             let builder = super::super::build_node_with_remapped_ids(
@@ -436,10 +452,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
             )?;
             let merged_id = self.builder.push_node(builder)?;
             self.nodes.insert(merged_id, remapped_node);
-            self.full_by_fingerprint.entry(fingerprint).or_default().push(merged_id);
-            self.fingerprint_by_id
-                .push(fingerprint)
-                .map_err(|_| MastForestError::TooManyNodes)?;
+            self.full_by_content.insert(content_key, merged_id);
             merged_id
         };
         if !node.is_external() {
