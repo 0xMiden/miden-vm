@@ -4,10 +4,10 @@ use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 
-use miden_air::{
-    ChipletCols, MidenAir,
+use miden_air::vm::MidenAir;
+use miden_air_definitions::vm::{
+    ChipletCols,
     logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupMessage, build_lookup_fractions},
     trace::{
         MIN_TRACE_LEN, RowIndex,
         chiplets::hasher::{HASH_ABSORB, LINEAR_HASH, PADDING},
@@ -22,16 +22,16 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::BaseAir;
 use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
-
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
+
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
@@ -52,13 +52,16 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     trace
 }
 
-fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<Felt> {
+fn core_row(
+    matrix: &RowMajorMatrix<Felt>,
+    row: usize,
+) -> &miden_air_definitions::vm::CoreCols<Felt> {
     let width = matrix.width();
     matrix.values[row * width..(row + 1) * width].borrow()
 }

@@ -145,12 +145,14 @@ impl FastProcessor {
     /// (inherently sequential) execution itself. When the caller is Rayon's only worker, this uses
     /// compact buffered replay and builds the trace after execution.
     ///
-    /// `max_prover_memory_bytes` applies the same modelled peak-memory bound as
-    /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
+    /// `budget` applies the same modelled peak-memory bound as
+    /// [`crate::trace::build_trace`] does; the streamed hasher builds ahead of that
     /// call, so it needs its own copy of the derived row cap.
+    /// The supplied model must satisfy the compatibility requirements documented on
+    /// [`crate::trace::build_trace`].
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
-    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace_with_budget`]. The optional
+    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional
     /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
     /// its authenticated root.
     #[cfg(feature = "std")]
@@ -159,27 +161,21 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl SyncHost,
-        max_prover_memory_bytes: u64,
+        budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use miden_air::{config, memory};
-
         use crate::trace::{
-            MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,
-            build_trace_with_prebuilt_hasher,
+            MAX_TRACE_LEN, build_hasher_chiplet, build_trace, build_trace_with_prebuilt_hasher,
         };
 
         if Self::rayon_has_no_parallel_worker() {
             let (vm_witness, precompiles_witness) =
                 self.execute_for_proving_sync(program, host)?.into_parts();
-            let trace = build_trace_with_budget(vm_witness, max_prover_memory_bytes)?;
+            let trace = build_trace(vm_witness, budget)?;
             return Ok((trace, precompiles_witness));
         }
 
         let stack_inputs = self.initial_stack_inputs();
-        let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
-            max_prover_memory_bytes,
-            &config::pcs_params(),
-        ));
+        let max_trace_len = MAX_TRACE_LEN.min(budget.max_any_height());
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),
@@ -237,7 +233,7 @@ impl FastProcessor {
             },
         };
 
-        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, max_prover_memory_bytes)?;
+        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, budget)?;
         Ok((trace, precompiles_witness))
     }
 
@@ -264,7 +260,9 @@ impl FastProcessor {
     ///     .execute_for_proving_sync(&program, &mut host)
     ///     .unwrap();
     /// let (vm_witness, _) = execution_witness.into_parts();
-    /// let trace = miden_processor::trace::build_trace(vm_witness).unwrap();
+    /// let trace =
+    ///     miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    ///         .unwrap();
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```

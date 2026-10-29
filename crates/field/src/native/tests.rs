@@ -127,6 +127,8 @@ proptest! {
             ga.try_inverse().map(Felt::from),
         );
 
+        prop_assert_eq!(fa.square(), fa * fa);
+        prop_assert_eq!(fa.square(), ga.square());
         prop_assert_eq!(fa.halve(), ga.halve());
         prop_assert_eq!(fa.mul_2exp_u64(shift as u64), ga.mul_2exp_u64(shift as u64));
         prop_assert_eq!(fa.div_2exp_u64(shift as u64), ga.div_2exp_u64(shift as u64));

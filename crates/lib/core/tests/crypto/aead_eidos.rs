@@ -315,7 +315,7 @@ fn auth_general_ad_matches_rust_across_segment_boundaries() {
             let trace = build_primitives_test(&source).execute().unwrap();
             assert_eq!(trace.last_stack_state(), StackOutputs::default());
             if (ad_len, ct_len) == (7, 9) {
-                trace.check_constraints();
+                miden_vm_stark::debug::check_constraints(&trace);
             }
         }
     }
@@ -547,7 +547,7 @@ fn auth_empty_ad_expanded_exact_matches_reference_for_exact_lengths() {
 
         let trace = build_primitives_test(&source).execute().unwrap();
         assert_eq!(trace.last_stack_state(), StackOutputs::default());
-        trace.check_constraints();
+        miden_vm_stark::debug::check_constraints(&trace);
     }
 }
 

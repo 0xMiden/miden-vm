@@ -1,9 +1,9 @@
 //! Portable singleton deferred witnesses and their versioned encoding.
 //!
-//! Index zero is implicit TRUE. Canonical witnesses reference earlier entries and end with the
-//! selected root, but decoding establishes only bounded transport syntax. Preparation validates
-//! the graph, computes commitments, accounts its declared work, and establishes the root before
-//! native or STARK-backed evaluation.
+//! The versioned encoding stores data chunks, joins, and ordered child-reference pairs. Wire
+//! index zero is implicit TRUE; stored entries have indices starting at one. Canonical witnesses
+//! reference earlier entries and end with the selected root. Decoding checks bounded transport
+//! syntax; [`PrecompileWitness::prepare`] establishes graph integrity and admission.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -98,9 +98,8 @@ impl WireEntry {
 
 /// Bounded, untrusted portable entries for one deferred execution obligation.
 ///
-/// Decoding establishes only canonical transport syntax and allocation bounds. Use
-/// [`Self::prepare`] to validate the graph, compute its commitments and root, and enforce declared
-/// work limits before evaluation.
+/// Construction and decoding check transport syntax and allocation bounds. Call [`Self::prepare`]
+/// before native or STARK-backed evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
@@ -121,8 +120,16 @@ impl PrecompileWitness {
         Ok(wire)
     }
 
-    /// Consumes and admits this graph under `registry` and `verification_limits`, computing each
-    /// commitment once without evaluating precompile semantics or establishing assertion truth.
+    /// Validates and admits this graph under `registry` and `verification_limits`.
+    ///
+    /// Consumes the entries, checks registry tags, payload shapes, backward references, and
+    /// canonical child-first order, and rejects duplicate commitments and unreachable entries.
+    /// Each node's declared work is charged before computing its commitment, which is hashed once.
+    /// The final entry establishes the non-TRUE root exposed by [`PreparedWitness::root`]; callers
+    /// must bind that root to the authenticated execution root before accepting the result as
+    /// evidence for that execution.
+    /// Preparation does not evaluate precompile semantics or establish assertion truth.
+    ///
     /// Callers retaining the portable witness must clone it explicitly.
     pub fn prepare(
         self,
@@ -196,7 +203,10 @@ impl PrecompileWitness {
         Ok(PreparedWitness { registry, nodes, root, work })
     }
 
-    /// Returns the bounded, untrusted wire entries. Index zero denotes implicit TRUE.
+    /// Returns the bounded, untrusted wire entries.
+    ///
+    /// Slice entry `entries[i]` has wire index `i + 1`. Wire index zero denotes implicit TRUE
+    /// and has no entry in this slice.
     pub fn entries(&self) -> &[WireEntry] {
         &self.entries
     }
@@ -207,6 +217,8 @@ impl PrecompileWitness {
     ) -> Result<(), IntegrityError> {
         // The same left-to-right DFS used by the exporter must emit exactly the supplied stream.
         // Backward references make this iterative traversal acyclic, including for shared graphs.
+        // Wire index 0 denotes implicit TRUE; stored nodes have indices 1..=nodes.len().
+        // Track visits by wire index, leaving seen[0] unused.
         let mut seen = alloc::vec![false; nodes.len() + 1];
         let mut pending = alloc::vec![(nodes.len(), false)];
         let mut next_index = 1;

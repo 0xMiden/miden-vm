@@ -10,7 +10,7 @@ pub const AND8_PREPROCESSED_TRACE_COM_1 = 2022626773377316756
 pub const AND8_PREPROCESSED_TRACE_COM_2 = 6941685244114430330
 pub const AND8_PREPROCESSED_TRACE_COM_3 = 5172579525468662096
 
-# Security descriptor from miden_air::security.
+# Security descriptor from miden_air::vm::security.
 pub const MAX_MESSAGE_WIDTH = 16
 pub const NUM_COMPOSED_CONSTRAINTS = 631
 pub const MAX_CONSTRAINT_DEGREE = 9

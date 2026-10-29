@@ -39,7 +39,7 @@ pub use domain::{
     NAMESPACE_REGISTRY, Transcript, namespace, render_masm_constants,
 };
 pub use frame::EidosFrame;
-pub use lmcs::{EidosLmcs, config as lmcs_config};
+pub use lmcs::{EidosLmcsCompressor, EidosLmcsHasher};
 
 /// Number of Felts in one Eidos message block.
 pub const BLOCK_LEN: usize = 8;

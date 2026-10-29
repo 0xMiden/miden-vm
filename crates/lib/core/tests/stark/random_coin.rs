@@ -1,23 +1,23 @@
 //! Rust oracles for the MASM random coin and verifier parameters.
 
-use miden_air::{config, trace::MIN_TRACE_LEN};
+use miden_air::vm::config;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_core::{
     Felt, Word,
     field::{
         BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt, TwoAdicField,
     },
 };
-use miden_crypto::{
-    hash::eidos::EidosChallenger,
-    stark::{
-        StarkConfig,
-        challenger::{CanObserve, FieldChallenger, GrindingChallenger},
+use miden_crypto::hash::eidos::EidosChallenger;
+use miden_processor::ExecutionOutput;
+use miden_stark::{
+    StarkConfig,
+    testing::{
+        Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
 };
-use miden_lifted_stark::testing::{
-    Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
-};
-use miden_processor::ExecutionOutput;
+use miden_vm_stark::setup::config::eidos_config;
+use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
@@ -406,8 +406,8 @@ fn init_seed_matches_the_rust_transcript_seeding() {
     let (output, _) =
         build_test!(&source, &[]).execute_for_output().expect("init_seed must execute");
 
-    let mut challenger = config::eidos_config(config::pcs_params(), relation_digest).challenger();
-    config::observe_protocol_params(&config::pcs_params(), &mut challenger);
+    let mut challenger = eidos_config(config::pcs_params(), relation_digest).challenger();
+    miden_stark::config::observe_protocol_params(&config::pcs_params(), &mut challenger);
     for _ in 0..4 {
         challenger.observe(Felt::ZERO);
     }

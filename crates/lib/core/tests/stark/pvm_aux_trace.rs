@@ -2,12 +2,12 @@
 
 use std::fmt::Write as _;
 
+use miden_air_definitions::precompiles::relations::MAX_MESSAGE_WIDTH;
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_precompiles::{CurveId, UintDomain};
-use miden_precompiles_air::relations::MAX_MESSAGE_WIDTH;
 
 use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;

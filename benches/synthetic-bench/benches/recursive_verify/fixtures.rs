@@ -17,14 +17,15 @@ use miden_core::{
     utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::Verifier;
 use miden_vm::{
     Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
     prove_sync, trace::build_trace,
 };
 use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload};
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 use super::{
     cache_key::{INNER_PROOF_HASH, pcs_params_bytes, tx_proof_cache_key},
@@ -164,13 +165,9 @@ fn store_cached_tx_proof(
 }
 
 fn pvm_proof_cache_key(root: Word) -> String {
-    let parameters =
-        pcs_params_bytes(&miden_precompiles_air::stark_config::precompile_pcs_params());
-    let relation = miden_precompiles_air::stark_config::PRECOMPILE_RELATION_DIGEST;
-    let relation_bytes: Vec<_> = relation
-        .iter()
-        .flat_map(|value| value.as_canonical_u64().to_le_bytes())
-        .collect();
+    let parameters = pcs_params_bytes(&miden_air::precompiles::policy::precompile_pcs_params());
+    let relation = miden_air::precompiles::PVM_RELATION_DIGEST;
+    let relation_bytes: Vec<_> = relation.iter().flat_map(|value| value.to_le_bytes()).collect();
     let digest: [u8; 32] = Blake3_256::hash_iter(
         [
             PVM_PROOF_CACHE_KEY_VERSION,
@@ -309,7 +306,8 @@ fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs
         .execute_for_proving_sync(program, &mut host)
         .expect("execute transaction fixture");
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness).expect("build transaction fixture trace");
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+        .expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE scenario={scenario}");
     let shape = trace_shape_summary_for(summary);

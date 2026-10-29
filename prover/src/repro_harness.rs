@@ -1,17 +1,19 @@
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String};
 use core::borrow::BorrowMut;
 
-use miden_air::{CoreCols, PublicInputs};
+use miden_air_definitions::vm::{
+    CoreCols, TraceLenSummary,
+    trace::{MainTrace, RowIndex},
+};
 use miden_core::{
     Felt,
     program::{ExecutionClaim, StackOutputs},
-    proof::{ExecutionProof, HashFunction, PrecompileStatus, StarkProof, VmProof},
+    proof::{ExecutionProof, HashFunction, PrecompileStatus, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::trace::VmTrace;
 use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
-
-use crate::{config, prove_stark};
+use miden_vm_stark::prover::prove;
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
@@ -32,6 +34,8 @@ pub struct ReproTrace {
     init_stack: miden_processor::StackInputs,
     precompile_root: miden_core::deferred::DeferredRoot,
     outputs: StackOutputs,
+    last_program_row: RowIndex,
+    summary: TraceLenSummary,
 }
 
 impl ReproTrace {
@@ -48,6 +52,8 @@ impl ReproTrace {
             init_stack: trace.init_stack_state(),
             precompile_root: trace.precompile_root(),
             outputs: *trace.stack_outputs(),
+            last_program_row: main.last_program_row(),
+            summary: *trace.trace_len_summary(),
         }
     }
 
@@ -75,7 +81,7 @@ impl ReproTrace {
         core: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let proof_bytes = self
+        let proof = self
             .prove(
                 core,
                 self.chiplets.clone(),
@@ -86,7 +92,7 @@ impl ReproTrace {
             .unwrap_or_else(|error| {
                 panic!("the low-level prover should encode the forged trace: {error}")
             });
-        self.verify(proof_bytes, outputs)
+        self.verify(proof, outputs)
     }
 
     /// Proves and verifies caller-supplied AIR matrices while permitting lookup construction to
@@ -99,8 +105,8 @@ impl ReproTrace {
         and8: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, String> {
-        let proof_bytes = match self.prove(core, chiplets, eidos_compression, and8, outputs) {
-            Ok(bytes) => bytes,
+        let proof = match self.prove(core, chiplets, eidos_compression, and8, outputs) {
+            Ok(proof) => proof,
             Err(error) => {
                 assert!(
                     error.contains("external assertion 0 is non-zero"),
@@ -110,7 +116,7 @@ impl ReproTrace {
             },
         };
 
-        self.verify(proof_bytes, outputs)
+        self.verify(proof, outputs)
             .map_err(|error| format!("verifier rejected: {error}"))
     }
 
@@ -136,31 +142,44 @@ impl ReproTrace {
         eidos_compression: RowMajorMatrix<Felt>,
         and8: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
-    ) -> Result<Vec<u8>, String> {
-        let public_inputs = PublicInputs::new(
+    ) -> Result<VmProof, String> {
+        let main = MainTrace::from_parts(
+            core.values,
+            chiplets.values,
+            eidos_compression.values,
+            and8.values,
+            self.last_program_row,
+        );
+        // Rebuilt compression witnesses can have different heights from the honest fixture.
+        let summary = TraceLenSummary::new(
+            self.summary.core_rows(),
+            self.summary.chiplets(),
+            self.summary.eidos_compression_rows(),
+            self.summary.byte_pair_lookup_rows(),
+            [
+                main.core_height(),
+                main.chiplets_height(),
+                main.eidos_compression_height(),
+                main.byte_pair_lookup_height(),
+            ],
+        );
+        let trace = VmTrace::new_from_parts(
             self.program_info.clone(),
             self.init_stack,
             outputs,
             self.precompile_root,
+            main,
+            summary,
         );
-        let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-        prove_stark(&config, core, chiplets, eidos_compression, and8, &public_values, &aux_inputs)
-            .map_err(|error| format!("{error}"))
+        prove(trace, HashFunction::Eidos, false).map_err(|error| format!("{error}"))
     }
 
     fn verify(
         &self,
-        proof_bytes: Vec<u8>,
+        proof: VmProof,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let proof = ExecutionProof::new(
-            VmProof {
-                proof: StarkProof::new(proof_bytes, HashFunction::Eidos),
-                precompile_root: self.precompile_root,
-            },
-            PrecompileStatus::Empty,
-        );
+        let proof = ExecutionProof::new(proof, PrecompileStatus::Empty);
         let claim =
             ExecutionClaim::from_program_info(self.program_info.clone(), self.init_stack, outputs);
         Verifier::new().verify(&claim, &proof)

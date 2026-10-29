@@ -14,7 +14,7 @@ Miden VM is a zero-knowledge virtual machine written in Rust.
 You can execute a program on Miden VM and generate a STARK proof of its execution.
 Anyone can verify the proof without executing the program again or knowing its source code.
 
-The prover uses the [lifted STARK protocol](crates/lifted-stark) with components from
+The prover uses the [lifted STARK protocol](crates/stark/core) with components from
 [Plonky3](https://github.com/Plonky3/Plonky3).
 
 For usage examples and the Rust API, see the [miden-vm crate](miden-vm).
@@ -67,7 +67,7 @@ The VM proof commits to the deferred claims.
 To complete verification, you must also verify a precompile proof for those claims.
 See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
 
-The [precompile VM](crates/precompiles-air) proves deferred claims with specialized circuits.
+The [precompile VM](crates/air/generated/src/precompiles) proves deferred claims with specialized circuits.
 The [precompiles](crates/precompiles) support Keccak-256, SHA-256 and SHA-512 hashing. They also support 256-bit integer arithmetic and elliptic curve operations.
 The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
 
@@ -106,20 +106,18 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | VM | [core](core) | Defines the instruction set and shared VM types. |
 | VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
 | VM | [processor](processor) | Executes programs and builds execution traces. |
-| VM | [air](air) | Defines the constraints checked for VM execution. |
+| Proof system | [air](crates/air/generated) | Defines the production VM and precompile AIRs and their generated artifacts. |
+| Proof system | [air-definitions](crates/air/source) | Defines the authored VM and precompile constraints that generation captures. |
 | VM | [prover](prover) | Produces STARK proofs from execution traces. |
 | VM | [verifier](verifier) | Verifies VM execution proofs. |
 | VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
 | Shared code | [field](crates/field) | Provides a common field element type for Miden Rust code. |
 | Shared code | [crypto](crates/crypto) | Provides the cryptographic primitives used across the workspace. |
-| Proof system | [lifted-air](crates/lifted-air) | Defines AIR traits and symbolic constraints for the lifted STARK protocol. |
-| Proof system | [lifted-stark](crates/lifted-stark) | Implements lifted STARK proving and verification. |
-| Proof system | [stark-transcript](crates/stark-transcript) | Provides transcript channels used by proof protocols. |
+| Proof system | [stark](crates/stark/core) | Provides AIR contracts, transcripts, lookup support, configuration factories, and lifted STARK proving and verification. |
 | Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
-| Precompiles | [precompiles-air](crates/precompiles-air) | Defines precompile AIRs and common proof setup. |
-| Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
-| Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs. |
+| Proof system | [vm-stark](crates/stark/vm) | VM relation proving, verification, setup, and recursive inputs. |
+| Proof system | [precompiles-stark](crates/stark/precompiles) | Precompile relation proving, verification, setup, and recursive inputs. |
 | Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |
 | Packages and tools | [mast-package](crates/mast-package) | Stores compiled MAST artifacts with their dependencies and exports. |
 | Packages and tools | [project](crates/project) | Loads and builds Miden projects. |

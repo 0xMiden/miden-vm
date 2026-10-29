@@ -26,8 +26,9 @@ harness = false
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }
-miden-precompiles-prover = { workspace = true, features = ["testing", "concurrent"] }
-miden-precompiles-air = { workspace = true }
+miden-precompiles-stark = { workspace = true, features = ["testing", "concurrent"] }
+miden-air = { workspace = true }
+miden-stark.workspace = true
 
 [[bench]]
 name = "pvm_bench"

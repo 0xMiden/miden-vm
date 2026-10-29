@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 use core::{borrow::BorrowMut, mem::size_of};
 
-use miden_air::{
+use miden_air_definitions::vm::{
     ControllerCols, CoreCols,
     logup::{HasherMsg, RangeMsg},
     trace::{
@@ -97,17 +97,23 @@ fn merkle_ops_emit_depth_range_checks_at_accepted_boundaries() {
 /// column-blind and therefore pins their semantic multiset rather than their physical placement.
 #[test]
 fn merkle_index_helpers_are_constrained_and_range_checked() {
-    build_mpverify_trace::<1>(1).check_constraints();
-    build_mpverify_trace::<MAX_MERKLE_DEPTH>(Felt::ORDER_U64 - 2).check_constraints();
-    build_mpverify_trace::<MAX_MERKLE_DEPTH>(Felt::ORDER_U64 - 1).check_constraints();
-    build_mrupdate_trace::<MAX_MERKLE_DEPTH>(Felt::ORDER_U64 - 1).check_constraints();
+    miden_vm_stark::debug::check_constraints(&build_mpverify_trace::<1>(1));
+    miden_vm_stark::debug::check_constraints(&build_mpverify_trace::<MAX_MERKLE_DEPTH>(
+        Felt::ORDER_U64 - 2,
+    ));
+    miden_vm_stark::debug::check_constraints(&build_mpverify_trace::<MAX_MERKLE_DEPTH>(
+        Felt::ORDER_U64 - 1,
+    ));
+    miden_vm_stark::debug::check_constraints(&build_mrupdate_trace::<MAX_MERKLE_DEPTH>(
+        Felt::ORDER_U64 - 1,
+    ));
 
     let trace = build_mpverify_trace::<MAX_MERKLE_DEPTH>(0);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
     assert_merkle_index_range_checks(&trace, opcodes::MPVERIFY);
 
     let trace = build_mrupdate_trace::<MAX_MERKLE_DEPTH>(0);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
     assert_merkle_index_range_checks(&trace, opcodes::MRUPDATE);
 
     // A helper-limb mutation is rejected by the gated reconstruction equation (and also leaves an
@@ -129,7 +135,7 @@ fn merkle_init_bus_binds_the_first_direction_bit() {
     const INDEX: u64 = 1_000;
 
     let trace = build_equal_sibling_mpverify_trace(INDEX);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcodes::MPVERIFY);
     let helper_addr = main.helper_register(0, op_row);

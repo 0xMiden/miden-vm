@@ -21,9 +21,9 @@ help:
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
-	@printf "  make check-pvm-constants         # Check PVM ACE constants and MASM artifacts\n"
+	@printf "  make check-pvm-constants         # Check PVM verifier MASM artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make regenerate-pvm-constants    # Regenerate PVM ACE constants and MASM artifacts\n"
+	@printf "  make regenerate-pvm-constants    # Regenerate PVM verifier MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -37,9 +37,6 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
-PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
-	crates/precompiles-air/src/protocol.rs
-
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
 
@@ -48,7 +45,7 @@ WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constant
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
-MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
+MIDEN_STARK_TEST_PACKAGES := -p miden-stark
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -71,6 +68,8 @@ FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        := testing
+FEATURES_vm-stark        := concurrent,prover
+FEATURES_precompiles-stark := concurrent,prover
 FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
@@ -216,7 +215,7 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		--cargo-profile test-dev \
 		-p miden-crypto \
 		--features miden-crypto/persistent-forest
-	$(MAKE) test-lifted-stark
+	$(MAKE) test-stark
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
@@ -273,6 +272,11 @@ build-no-std: ## Builds without the standard library
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
 
+.PHONY: test-wasm-handlers-host
+test-wasm-handlers-host: ## Runs the Wasm event handler tests inside a wasm32 host via wasmtime (smoke test for browser-class hosts)
+	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+	cargo test -p miden-wasm-event-handlers --target wasm32-wasip1 --test handlers --test determinism
+
 .PHONY: test-wasm-simd
 test-wasm-simd: ## Runs the packed Goldilocks/Eidos vs scalar tests under WASM SIMD128 (requires wasmtime)
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
@@ -315,9 +319,10 @@ fuzz-build-crypto: ## Builds imported crypto fuzz targets
 		$(FUZZ_CARGO) fuzz build --fuzz-dir tools/miden-serde-utils-fuzz $$target; \
 	done
 
-.PHONY: test-lifted-stark
-test-lifted-stark: ## Runs imported lifted STARK crate tests with parallel feature enabled
-	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/concurrent
+.PHONY: test-stark
+test-stark: ## Runs imported lifted STARK crate tests with parallel feature enabled
+	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-stark/concurrent
+	cargo test -p miden-crypto --lib hash::stateful
 
 # --- executable ----------------------------------------------------------------------------------
 
@@ -338,15 +343,13 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
 .PHONY: regenerate-constraints
-regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
+regenerate-constraints: ## Regenerate the checked-in VM verifier MASM artifacts
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
-	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: regenerate-pvm-constants
-regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
-	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
+regenerate-pvm-constants: ## Regenerate PVM verifier MASM artifacts
+	cargo run --release --package miden-precompiles-stark --features constants-tools --bin pvm-constants-regen -- --write
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: recursive-verifier-regeneration-handoff
@@ -363,8 +366,8 @@ recursive-verifier-regeneration-handoff:
 check-pvm-artifacts: check-precompile-masm check-pvm-constants check-pvm-proof-fixture ## Check generated artifacts for this release line
 
 .PHONY: check-pvm-constants
-check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
+check-pvm-constants: ## Check PVM verifier MASM artifacts and pinned relation identities for drift
+	cargo run --release --package miden-precompiles-stark --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift
@@ -388,16 +391,15 @@ check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 
 .PHONY: regenerate-pvm-proof-fixture
 regenerate-pvm-proof-fixture: ## Regenerate the pinned Eidos PVM proof and deferred root
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --write
+	cargo run --release --no-default-features --package miden-precompiles-stark --features fixture-tools --bin pvm-proof-fixture -- --write
 
 .PHONY: check-pvm-proof-fixture
 check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root for drift
-	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
+	cargo run --release --no-default-features --package miden-precompiles-stark --features fixture-tools --bin pvm-proof-fixture -- --check
 
 .PHONY: check-constraints
-check-constraints: ## Check the checked-in constraint artifacts for drift
+check-constraints: ## Check the checked-in VM verifier MASM artifacts and pinned relation identities for drift
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
-	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
@@ -509,6 +511,9 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	$(FUZZ_CARGO) fuzz run project_toml_parse --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run project_load --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run project_assemble --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run event_handler_section_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run wasm_handler_manifest --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run wasm_section_walk_differential --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	exit $$FAILED
 
 .PHONY: fuzz-list

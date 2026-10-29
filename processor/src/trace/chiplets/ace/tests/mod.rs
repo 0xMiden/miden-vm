@@ -2,7 +2,8 @@ use alloc::vec::Vec;
 use std::collections::HashMap;
 
 use encoder::EncodedCircuit;
-use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_ace::instruction::{Op, decode_instruction};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 
 // Chiplet-local column indices used by the ACE trace tests.
 const SELECTOR_START_IDX: usize = 0;
@@ -30,7 +31,6 @@ use crate::{
     fast::Memory,
     trace::chiplets::ace::{
         MAX_EVAL_CIRCUIT_WIRES,
-        instruction::{Op, decode_instruction},
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },

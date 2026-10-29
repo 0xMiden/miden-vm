@@ -12,9 +12,8 @@ version.workspace      = true
 
 [dependencies]
 # Internal
-miden-air.workspace = true
 miden-core.workspace = true
-miden-lifted-stark = { features = ["testing"], workspace = true }
+miden-stark = { features = ["testing"], workspace = true }
 
 # Plonky3
 p3-air.workspace           = true
@@ -44,11 +43,9 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace             = true
-miden-lifted-air.workspace       = true
-miden-stark-transcript.workspace = true
 
 [features]
-concurrent = ["miden-lifted-stark/concurrent"]
+concurrent = ["miden-stark/concurrent"]
 default    = []
 
 [[bench]]

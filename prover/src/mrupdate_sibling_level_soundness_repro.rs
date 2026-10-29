@@ -14,7 +14,9 @@
 
 use alloc::vec::Vec;
 
-use miden_air::trace::chiplets::hasher::{DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH};
+use miden_air_definitions::vm::trace::chiplets::hasher::{
+    DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH,
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
@@ -26,10 +28,7 @@ use miden_core::{
 use miden_crypto::merkle::{MerklePath, store::MerkleStore};
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 /// The controller overlay starts after `s_ctrl`, the first chiplets column.
 const CONTROLLER_OFFSET: usize = 1;
@@ -98,11 +97,15 @@ fn build_fixture() -> Fixture {
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_merkle_store(store))
         .unwrap()
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 
-    let (core, chiplets, eidos_compression, and8) = trace.clone_air_matrices();
+    let (core, chiplets, eidos_compression, and8) = trace.main_trace().clone_air_matrices();
     let honest_outputs =
         core::array::from_fn(|lane| trace.stack_outputs().get_element(lane).unwrap());
     Fixture {

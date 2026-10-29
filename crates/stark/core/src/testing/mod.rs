@@ -1,0 +1,201 @@
+//! Test fixtures and FRI vector generation.
+//!
+//! The `testing` feature also exposes example AIRs and four hash configurations:
+//!
+//! - `configs::goldilocks_poseidon2`
+//! - `configs::goldilocks_keccak`
+//! - `configs::goldilocks_blake3`
+//! - `configs::goldilocks_blake3_192`
+
+#[cfg(feature = "testing")]
+pub mod airs;
+#[cfg(any(test, feature = "testing"))]
+pub mod configs;
+pub mod fri_vectors;
+pub mod params;
+
+#[cfg(test)]
+mod test_external_assertions;
+#[cfg(test)]
+mod test_multi_aux_alignment;
+#[cfg(test)]
+mod test_per_air_degree;
+#[cfg(test)]
+mod test_preprocessed;
+#[cfg(test)]
+mod test_tiny_air;
+
+// Re-export commonly used params at the module level for convenience.
+use alloc::vec::Vec;
+
+use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+pub use params::{
+    BENCH_PCS_PARAMS, FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, LOG_HEIGHTS,
+    PARALLEL_STR, QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, RELATIVE_SPECS, TEST_SEED,
+};
+use rand::{
+    SeedableRng,
+    distr::{Distribution, StandardUniform},
+    rngs::SmallRng,
+};
+
+// Re-exports used by external integration tests and benches.
+pub use crate::air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
+pub use crate::{
+    domain::{Coset, LiftedDomain},
+    lmcs::{Lmcs, LmcsTree},
+    pcs::{
+        deep::interpolate::PointQuotients, fri::fold::FriFold, params::PcsParams,
+        prover::open_with_channel,
+    },
+    prover::quotient::commit_quotient,
+};
+
+// =============================================================================
+// Domain fixtures
+// =============================================================================
+
+/// Build the canonical [`LiftedDomain`] for `(log_trace_height, log_blowup)`,
+/// panicking on out-of-range parameters.
+///
+/// Fixtures pick their own sizes, so an out-of-range pair is a programmer error
+/// rather than a recoverable condition; this wraps the validated
+/// [`LiftedDomain::try_canonical`] so tests and benches don't repeat the
+/// `.expect(...)`.
+pub fn canonical_domain<F: TwoAdicField>(log_trace_height: u8, log_blowup: u8) -> LiftedDomain<F> {
+    LiftedDomain::try_canonical(log_trace_height, log_blowup)
+        .expect("canonical domain parameters out of range")
+}
+
+/// Number of FRI folding rounds the verifier expects for a codeword on `domain` under `params`.
+pub fn fri_num_rounds<F: TwoAdicField>(params: &PcsParams, domain: &LiftedDomain<F>) -> usize {
+    params.fri.num_rounds(domain)
+}
+
+/// Number of coefficients of the final FRI polynomial the verifier expects for a codeword on
+/// `domain` under `params`.
+pub fn fri_final_poly_degree<F: TwoAdicField>(
+    params: &PcsParams,
+    domain: &LiftedDomain<F>,
+) -> usize {
+    params.fri.final_poly_degree(domain)
+}
+
+/// Samples an OOD point and the next field element through the verifier's channel.
+pub fn sample_ood_point_and_next<F, EF, C, Ch>(domain: &LiftedDomain<F>, challenger: Ch) -> (EF, F)
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    C: Clone,
+    Ch: crate::transcript::TranscriptChallenger<F, C>,
+{
+    use crate::transcript::Channel;
+
+    let mut channel = crate::transcript::VerifierTranscript::<F, C, Ch>::new(challenger, &[], &[]);
+    let z = domain.sample_ood_point(&mut channel);
+    (z, channel.sample())
+}
+
+// =============================================================================
+// Matrix generation
+// =============================================================================
+
+/// Generate benchmark matrices from relative specs.
+///
+/// Creates matrices with heights relative to `max_height = 1 << log_max_height`.
+/// Each spec `(offset, width)` creates a matrix with:
+/// - height = `max_height >> offset`
+/// - width = `width`
+///
+/// Matrices in each group are sorted by ascending height.
+pub fn generate_matrices_from_specs<F: Field>(
+    specs: &[&[(usize, usize)]],
+    log_max_height: u8,
+) -> Vec<Vec<RowMajorMatrix<F>>>
+where
+    StandardUniform: Distribution<F>,
+{
+    let rng = &mut SmallRng::seed_from_u64(TEST_SEED);
+    let max_height = 1 << log_max_height as usize;
+
+    specs
+        .iter()
+        .map(|group_specs| {
+            let mut matrices: Vec<RowMajorMatrix<F>> = group_specs
+                .iter()
+                .map(|&(offset, width)| {
+                    let height = max_height >> offset;
+                    RowMajorMatrix::rand(rng, height, width)
+                })
+                .collect();
+            // Sort by ascending height (required by LMCS)
+            matrices.sort_by_key(Matrix::height);
+            matrices
+        })
+        .collect()
+}
+
+/// Calculate total elements across all matrices.
+pub fn total_elements<F: Field>(matrix_groups: &[Vec<RowMajorMatrix<F>>]) -> u64 {
+    matrix_groups
+        .iter()
+        .flat_map(|g| g.iter())
+        .map(|m| {
+            let dims = m.dimensions();
+            (dims.height * dims.width) as u64
+        })
+        .sum()
+}
+
+// =============================================================================
+// define_test_config! macro
+// =============================================================================
+
+/// Generates LMCS type aliases and channel helper functions for a test config.
+///
+/// Requires these items in scope from the base config module:
+/// `Felt`, `Sponge`, `Compress`, `Challenger`, `test_challenger`
+///
+/// Also requires `Lmcs` to be defined as a type alias in the invoking module.
+#[cfg(any(test, feature = "testing"))]
+macro_rules! define_lmcs_test_helpers {
+    () => {
+        use $crate::lmcs::Lmcs as LmcsTrait;
+
+        pub type TestTree = <Lmcs as LmcsTrait>::Tree<p3_matrix::dense::RowMajorMatrix<Felt>>;
+        pub type TestCommitment = <Lmcs as LmcsTrait>::Commitment;
+        pub type TestTranscriptData = crate::transcript::TranscriptData<Felt, TestCommitment>;
+        pub type TestDigest = <Challenger as p3_challenger::CanFinalizeDigest>::Digest;
+        pub type TestProverChannel =
+            crate::transcript::ProverTranscript<Felt, TestCommitment, Challenger>;
+        pub type TestVerifierChannel<'a> =
+            crate::transcript::VerifierTranscript<'a, Felt, TestCommitment, Challenger>;
+
+        pub fn prover_channel() -> TestProverChannel {
+            crate::transcript::ProverTranscript::new(test_challenger())
+        }
+
+        pub fn prover_channel_with_commitment(commitment: &TestCommitment) -> TestProverChannel {
+            let mut challenger = test_challenger();
+            p3_challenger::CanObserve::observe(&mut challenger, commitment.clone());
+            crate::transcript::ProverTranscript::new(challenger)
+        }
+
+        pub fn verifier_channel(data: &TestTranscriptData) -> TestVerifierChannel<'_> {
+            crate::transcript::VerifierTranscript::from_data(test_challenger(), data)
+        }
+
+        pub fn verifier_channel_with_commitment<'a>(
+            data: &'a TestTranscriptData,
+            commitment: &TestCommitment,
+        ) -> TestVerifierChannel<'a> {
+            let mut challenger = test_challenger();
+            p3_challenger::CanObserve::observe(&mut challenger, commitment.clone());
+            crate::transcript::VerifierTranscript::from_data(challenger, data)
+        }
+    };
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use define_lmcs_test_helpers;

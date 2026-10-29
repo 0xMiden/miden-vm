@@ -17,6 +17,9 @@ pub mod keccak;
 /// SHA-2 hash functions (SHA-256 and SHA-512).
 pub mod sha2;
 
+/// Stateful hashing traits and adapters.
+pub mod stateful;
+
 /// Poseidon2 hash function for standalone applications.
 ///
 /// Preserves the original Miden Poseidon2 hashing API and digest format. The VM's native hash

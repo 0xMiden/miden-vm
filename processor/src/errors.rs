@@ -3,7 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
@@ -180,8 +180,13 @@ pub enum AceEvalError {
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    #[error(
+        "attempted to add event handler for '{event}' (reserved '{namespace}' namespace)",
+        namespace = EventName::RESERVED_NAMESPACE
+    )]
     ReservedEventNamespace { event: EventName },
+    #[error("attempted to add event handler with an empty event name")]
+    EmptyEventName,
 }
 
 // IO ERROR

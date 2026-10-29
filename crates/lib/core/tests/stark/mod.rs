@@ -1,6 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, Statement, config};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, config};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -8,17 +8,16 @@ use miden_core::{
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
-use miden_crypto::stark::{
-    Preprocessed, StarkConfig,
-    challenger::{CanObserve, FieldChallenger},
-};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
+use miden_stark::{Preprocessed, StarkConfig, air::Statement};
 use miden_utils_testing::{
     AdviceInputs, Prover,
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
+use miden_vm_stark::setup::config::eidos_config;
+use p3_challenger::{CanObserve, FieldChallenger};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
@@ -161,7 +160,7 @@ fn stark_verifier_e2f4_with_kernel_flipped_order() {
     let expected = expected_order_from_shape(&data);
 
     assert_eq!(order, expected);
-    assert_ne!(order, ProofOrder::instance_order());
+    assert_ne!(order, (0..MIDEN_AIR_COUNT).collect::<Vec<_>>());
 }
 
 #[test]
@@ -254,22 +253,21 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
     let proof_order = expected_order_from_shape(&data);
     assert_ne!(
         proof_order,
-        ProofOrder::instance_order(),
+        (0..MIDEN_AIR_COUNT).collect::<Vec<_>>(),
         "fixture must have a non-identity proof order to exercise scatter routing"
     );
 
     let proof_position = |target| {
         proof_order
-            .airs()
             .iter()
-            .position(|air| *air == target)
+            .position(|&air| air == target)
             .expect("each Miden AIR occurs once in the proof order")
     };
     // Auxiliary destinations begin at table offset 12 and occupy two felts per proof position.
     // Core and Chiplets both use `pipe_2`, so exchanging only these cells keeps every procedure
     // digest and segment length valid while corrupting the routing permutation.
-    let core_aux_destination = 12 + 2 * proof_position(MidenAir::Core);
-    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::Chiplets);
+    let core_aux_destination = 12 + 2 * proof_position(MidenAir::CORE.instance_index());
+    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::CHIPLETS.instance_index());
 
     let source = |swap_destinations: bool| {
         let routing_mutation = if swap_destinations {
@@ -755,7 +753,7 @@ fn request_consumer_source() -> String {
 /// does not. No separate binding check is needed for the fetched proof package.
 #[test]
 fn request_flow_binds_proof_to_claim() {
-    use miden_utils_testing::recursive_verifier::proof_request_key;
+    use miden_core::program::proof_request_key;
 
     let intended = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
 
@@ -804,7 +802,8 @@ fn request_flow_binds_proof_to_claim() {
 /// mirrors (a mismatch is a missing advice-map key).
 #[test]
 fn stark_verifier_e2f4_request_multi_proof() {
-    use miden_utils_testing::{crypto::MerkleStore, recursive_verifier::proof_request_key};
+    use miden_core::program::proof_request_key;
+    use miden_utils_testing::crypto::MerkleStore;
 
     let mut inputs = fib_stack_inputs();
     let tx0 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs.clone(), None);
@@ -880,8 +879,8 @@ fn vm_verify_proof_program() -> String {
     )
 }
 
-fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
-    use miden_air::security;
+fn run_recursive_verifier(data: &VerifierData) -> Vec<usize> {
+    use miden_air::vm::security;
 
     let source = vm_verify_proof_program();
     let mut initial_stack = data.initial_stack().to_vec();
@@ -938,12 +937,12 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
 ///
 /// Proof-stream layout: 4 security parameters, the 4-felt deferred root, then the three
 /// execution-dependent log heights (the And8Lookup height is verifier-fixed).
-fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
-    ProofOrder::from_instance_log_heights(&[
-        data.proof_stream[8] as u8,
-        data.proof_stream[9] as u8,
-        data.proof_stream[10] as u8,
-        AND8_LOOKUP_LOG_HEIGHT,
+fn expected_order_from_shape(data: &VerifierData) -> Vec<usize> {
+    vm_scatter_bench::proof_order(&[
+        data.proof_stream[8],
+        data.proof_stream[9],
+        data.proof_stream[10],
+        u64::from(AND8_LOOKUP_LOG_HEIGHT),
     ])
 }
 
@@ -1116,7 +1115,7 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
 /// One circuit serves every proof order, so this is the canonical circuit's own digest — the
 /// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
 fn recursive_circuit_key() -> Word {
-    miden_air::ace::shared_recursive_circuit().commitment
+    miden_vm_stark::setup::ace::shared_recursive_circuit().commitment
 }
 
 // EXAMPLE PROGRAMS
@@ -1185,10 +1184,10 @@ fn log_deferred_stack_inputs() -> Vec<u64> {
 /// The trusted AND8 preprocessed-trace commitment for the canonical Miden statement shape, as
 /// bound by `load_air_context` (must match `AND8_PREPROCESSED_TRACE_COM_*` in `sys/vm/mod.masm`).
 fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
-        vec![(0, vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES])],
+        vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
         vec![],
     )
     .expect("zero public inputs satisfy the Miden statement shape");
@@ -1288,9 +1287,9 @@ fn public_input_transcript_matches_rust_challenger() {
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
     // Rust mirror over the identical observation stream.
-    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let config = eidos_config(params, config::RELATION_DIGEST);
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    miden_stark::config::observe_protocol_params(config.pcs(), &mut challenger);
     for element in and8_preprocessed_commitment() {
         challenger.observe(element);
     }
@@ -1352,9 +1351,9 @@ fn eidos_init_seed_matches_rust_challenger() {
     let test = build_test!(source.as_str(), &[], &shape);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let config = eidos_config(params, config::RELATION_DIGEST);
     let mut challenger = config.challenger();
-    config::observe_protocol_params(config.pcs(), &mut challenger);
+    miden_stark::config::observe_protocol_params(config.pcs(), &mut challenger);
     // `init_seed` also stages the trusted preprocessed-trace commitment onto the buffered stream.
     for element in and8_preprocessed_commitment() {
         challenger.observe(element);
@@ -1390,7 +1389,7 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
     let test = build_test!(source, &[], &shape);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let mut challenger = config.challenger();
     let expected_word = Word::new(array::from_fn(|_| challenger.sample_algebra_element()));
 
@@ -1623,7 +1622,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     //    root, and the aux randomness used by `compute_outer_logup_correction`.
     let digest_felts: Vec<Felt> =
         kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
+    let expected_kernel_h = miden_air_definitions::vm::hash_kernel_digests(&digest_felts);
     let mut claim_elements = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
     claim_elements[..WORD_SIZE].copy_from_slice(&program_digest.map(Felt::new_unchecked));
     claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&expected_kernel_h);
@@ -1804,12 +1803,12 @@ fn quotient_recomposition_constants_match_derivation() {
     let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
     let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
 
-    let log_quotient_degree = miden_air::AIRS
+    let log_quotient_degree = miden_air::vm::AIRS
         .iter()
-        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
-    let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
         config::pcs_params().log_blowup(),
     )

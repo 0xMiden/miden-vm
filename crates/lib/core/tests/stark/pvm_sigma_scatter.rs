@@ -10,11 +10,11 @@ use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
+const NUM_CHIPLETS: usize = miden_air::precompiles::NUM_CHIPLETS;
 
 /// Boundary values each chiplet exposes, in canonical instance order.
 ///
-/// `pvm_aux_hook_matches_every_chiplets_boundary_shape` (in `miden-precompiles-verifier`) pins
+/// `pvm_aux_hook_matches_every_chiplets_boundary_shape` (in `miden-core-lib`) pins
 /// this shape against `LiftedAir::num_aux_values`, so a chiplet that started exposing a second
 /// value fails there rather than silently reshaping the fixtures here.
 const BOUNDARY_WIDTHS: [usize; NUM_CHIPLETS] = [1; NUM_CHIPLETS];

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use miden_air::precompiles::NUM_CHIPLETS;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
@@ -22,10 +23,9 @@ use miden_core_lib::{
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
-use miden_precompiles_air::NUM_CHIPLETS;
-use miden_precompiles_prover::prove_precompiles;
-use miden_precompiles_verifier::masm_verifier::{
-    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
+use miden_precompiles_stark::{
+    prover::prove_precompiles,
+    recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
@@ -421,7 +421,9 @@ fn run_pvm_verifier_with_advice(
 
 #[track_caller]
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
-    use miden_precompiles_air::security;
+    use miden_precompiles_stark::setup::security;
+
+    let air_shape = miden_air::precompiles::protocol::metadata().air_shape;
 
     let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
         .expect("PVM MASM verifier rejected a valid proof");
@@ -433,13 +435,13 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         .max()
         .expect("the PVM relation has chiplet AIRs");
     let expected = [
-        u64::from(security::LOOKUP_POW_BITS),
-        u64::from(security::AIR_SHAPE.num_composed_constraints),
-        u64::from(security::AIR_SHAPE.max_constraint_degree),
-        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        u64::from(security::LOOKUP_SHAPE.max_message_width),
+        u64::from(security::testing::LOOKUP_POW_BITS),
+        u64::from(air_shape.num_composed_constraints),
+        u64::from(air_shape.max_constraint_degree),
+        u64::from(air_shape.num_deep_terms.unwrap()),
+        u64::from(security::testing::LOOKUP_SHAPE.max_message_width),
         u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        u64::from(security::LOOKUP_SHAPE.fractions_per_row),
+        u64::from(security::testing::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         stream[0].as_canonical_u64(),
         stream[1].as_canonical_u64(),

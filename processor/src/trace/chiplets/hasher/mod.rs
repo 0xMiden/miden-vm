@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     and8_lookup::{BYTE_LOOKUP_COUNT_LEN, byte_pair_count_index},
     chiplets::hasher::{
         BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
@@ -724,7 +724,10 @@ pub fn build_external_eidos_compression_traces(
 
     (
         RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
-        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+        RowMajorMatrix::new(
+            and8,
+            miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
+        ),
     )
 }
 
@@ -756,7 +759,10 @@ pub fn build_ordered_external_eidos_compression_traces(
 
     (
         RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
-        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+        RowMajorMatrix::new(
+            and8,
+            miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
+        ),
     )
 }
 

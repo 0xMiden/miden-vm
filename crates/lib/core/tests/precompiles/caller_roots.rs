@@ -525,7 +525,7 @@ fn manual_hashes_reject_forged_digest_advice() {
             .unwrap()
             .unwrap_program();
         let mut host = DefaultHost::default().with_library(&library).unwrap();
-        assert!(host.replace_handler(event, handler));
+        assert!(host.replace_handler(event, handler).unwrap());
         let error = FastProcessor::new_with_options(
             StackInputs::default(),
             AdviceInputs::default(),

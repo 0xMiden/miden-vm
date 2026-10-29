@@ -289,7 +289,7 @@ fn sha512_hash_bytes_mem_rejects_a_forged_upper_digest_half() {
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
-    assert!(host.replace_handler(SHA512_DIGEST_EVENT_NAME, handler));
+    assert!(host.replace_handler(SHA512_DIGEST_EVENT_NAME, handler).unwrap());
     let result = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -368,7 +368,7 @@ fn sha256_hash_bytes_mem_rejects_a_forged_digest() {
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
-    assert!(host.replace_handler(SHA256_DIGEST_EVENT_NAME, handler));
+    assert!(host.replace_handler(SHA256_DIGEST_EVENT_NAME, handler).unwrap());
     let result = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),

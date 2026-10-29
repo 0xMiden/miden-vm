@@ -1,0 +1,13 @@
+# The fixture project of the full-pipeline end-to-end test: a MASM program plus the Rust guest
+# crate that answers the event the program emits.
+[package]
+name = "handlerapp"
+version = "1.0.0"
+description = "MASM project with Wasm event handlers"
+
+[package.metadata.midenc.event-handlers]
+crate = "../guest"
+
+[[bin]]
+name = "main"
+path = "main.masm"

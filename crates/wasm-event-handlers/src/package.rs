@@ -1,0 +1,492 @@
+//! Loading Wasm event handlers out of a Miden package, and deriving the handler manifest from
+//! a compiled guest module.
+
+use alloc::{format, string::ToString, sync::Arc, vec::Vec};
+
+use miden_event_handler_abi::{ABI_VERSION, MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
+use miden_mast_package::{
+    EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
+    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package,
+};
+use miden_processor::{
+    HostLibrary,
+    event::{EventHandler, EventName},
+};
+use wasmparser::{Parser, Payload};
+
+use crate::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, module::module_statics};
+
+/// Loads the package's `event_handlers` section, validates the Wasm module, and returns one
+/// registered-handler pair per manifest entry.
+///
+/// Returns an empty vector when the package has no `event_handlers` section.
+///
+/// # Errors
+/// Returns an error when the section is malformed (see
+/// [`EventHandlerSectionError`](miden_mast_package::EventHandlerSectionError)) or when the
+/// handler module fails validation (see [`WasmHandlerLoadError`]).
+pub fn handlers_from_package(
+    package: &Package,
+    limits: WasmHandlerLimits,
+) -> Result<Vec<(EventName, Arc<dyn EventHandler>)>, WasmHandlerLoadError> {
+    let Some(section) = package.event_handlers()? else {
+        return Ok(Vec::new());
+    };
+    let manifest = section.handlers.into_iter().map(|entry| (entry.event, entry.export)).collect();
+    let module =
+        Arc::new(WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?);
+    Ok(module.handlers())
+}
+
+/// Builds a [`HostLibrary`] from a package: its MAST forest, its debug info, and the Wasm event
+/// handlers of its `event_handlers` section, if any.
+///
+/// Load the result into a host with
+/// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library), which registers
+/// the handlers next to the MAST forest.
+///
+/// # Errors
+/// Same failure conditions as [`handlers_from_package`].
+pub fn host_library_from_package(
+    package: &Arc<Package>,
+    limits: WasmHandlerLimits,
+) -> Result<HostLibrary, WasmHandlerLoadError> {
+    let handlers = handlers_from_package(package, limits)?;
+    Ok(HostLibrary::from(package.clone()).set_handlers(handlers))
+}
+
+// MANIFEST DERIVATION
+// ================================================================================================
+
+/// Reads the handler manifest embedded in a compiled guest module.
+///
+/// The guest SDK macro writes one record per handler into the `miden:event-manifest` custom
+/// section. This function collects the records so package tooling can construct the
+/// `event_handlers` section without a hand-written manifest.
+///
+/// The module is untrusted input, so the derivation stays inside the section caps of the package
+/// format: a module over [`MAX_MODULE_BYTES`] is refused before the parse, and the record loop
+/// stops at [`MAX_HANDLERS`] entries and at names over [`MAX_NAME_BYTES`].
+///
+/// # Errors
+/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap, and
+/// [`WasmHandlerLoadError::InvalidModule`] when the binary does not parse or a manifest record
+/// is malformed.
+///
+/// Returns [`WasmHandlerLoadError::InvalidManifest`] for the three manifest rules this function
+/// applies to the records themselves: an empty event or export name, a name over
+/// [`MAX_NAME_BYTES`], and more than [`MAX_HANDLERS`] entries. The other manifest rules of the
+/// package format — the reserved `sys::` namespace, duplicate events, and the canonical entry
+/// order — run later: [`EventHandlerSection::validate`] applies them to a derived section, and
+/// [`WasmHandlerModule::new`] applies them to the manifest it registers.
+pub fn manifest_from_module(
+    wasm: &[u8],
+) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
+    check_module_size(wasm)?;
+
+    // wasmparser borrows the section contents, so the other sections of the module cost no
+    // allocation here.
+    let mut entries = Vec::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        let payload = payload.map_err(|err| {
+            WasmHandlerLoadError::InvalidModule(format!("malformed section layout: {err}"))
+        })?;
+        if let Payload::CustomSection(section) = payload
+            && section.name() == MANIFEST_SECTION_NAME
+        {
+            parse_manifest_records(section.data(), &mut entries)?;
+        }
+    }
+    Ok(entries)
+}
+
+/// Builds an [`EventHandlerSection`] for a compiled guest module, deriving the manifest from
+/// the module's embedded `miden:event-manifest` records.
+///
+/// The entries are sorted by event name, and the manifest custom sections are removed from the
+/// module bytes: the records are link-ordered duplicates of the manifest the section carries.
+/// This makes the manifest order and the record order independent of the toolchain, but it does
+/// not make the module bytes independent of link order — the code and data sections also move
+/// when the linker changes their order.
+///
+/// The derived section is also dry-loaded with [`WasmHandlerModule::new`] under `limits`, so
+/// producer tooling cannot ship a package that every consumer refuses at load. Pass
+/// [`WasmHandlerLimits::default`] for the default host policy, or the limits of the target hosts
+/// when they are looser: a module that needs more fuel or memory than the default is a valid
+/// package for a host that grants it. Limits stay host policy in both directions, so a consumer
+/// with stricter limits can still refuse a section this function accepts.
+///
+/// # Errors
+/// Same failure conditions as [`manifest_from_module`], plus the section rules of
+/// [`EventHandlerSection::validate`] and the load rules of [`WasmHandlerModule::new`].
+pub fn section_from_module(
+    wasm: Vec<u8>,
+    limits: WasmHandlerLimits,
+) -> Result<EventHandlerSection, WasmHandlerLoadError> {
+    let mut handlers = manifest_from_module(&wasm)?;
+    handlers.sort_by(|a, b| a.event.as_str().cmp(b.event.as_str()));
+    let module = strip_manifest_sections(&wasm).ok_or_else(|| {
+        WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
+    })?;
+    // While only ABI v1 exists, the module cannot need more than the current version. This
+    // tripwire fails the build at the first version bump, because derivation must then compute
+    // the lowest ABI version the module's imports need — otherwise every derived package would
+    // declare the new version and older hosts would refuse modules that only use v1 imports.
+    const _: () = assert!(
+        ABI_VERSION == 1,
+        "ABI version bumped: section_from_module must compute the lowest version the module needs"
+    );
+    let section = EventHandlerSection {
+        abi_version: ABI_VERSION,
+        module,
+        handlers,
+    };
+    section.validate()?;
+
+    // The section rules say nothing about the module itself, so a section that passes them can
+    // still fail every consumer's load (no `memory` export, an import outside the host function
+    // set, a bad export signature). Move that failure to the producer's build.
+    let manifest = section
+        .handlers
+        .iter()
+        .map(|entry| (entry.event.clone(), entry.export.clone()))
+        .collect();
+    WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?;
+    Ok(section)
+}
+
+/// Returns `wasm` without its `miden:event-manifest` custom sections.
+///
+/// The result keeps the 8-byte header and every other top-level section with its contents
+/// unchanged; the size prefix of each kept section is re-encoded minimally, which toolchain
+/// output already is. Returns `None` when the binary does not parse.
+fn strip_manifest_sections(wasm: &[u8]) -> Option<Vec<u8>> {
+    /// The length of the Wasm binary header (magic + version).
+    const HEADER_LEN: usize = 8;
+
+    let mut out = Vec::with_capacity(wasm.len());
+    out.extend_from_slice(wasm.get(..HEADER_LEN)?);
+    for payload in Parser::new(0).parse_all(wasm) {
+        let payload = payload.ok()?;
+        if let Payload::CustomSection(section) = &payload
+            && section.name() == MANIFEST_SECTION_NAME
+        {
+            continue;
+        }
+        // `as_section` reports every top-level section with the range of its contents; the
+        // per-function `CodeSectionEntry` payloads return `None`, and the code section itself
+        // is covered once by `CodeSectionStart`.
+        if let Some((id, range)) = payload.as_section() {
+            out.push(id);
+            out.extend_from_slice(&leb_u32(range.len() as u32));
+            out.extend_from_slice(wasm.get(range)?);
+        }
+    }
+    Some(out)
+}
+
+/// Checks the size of an untrusted module against the section cap.
+fn check_module_size(wasm: &[u8]) -> Result<(), WasmHandlerLoadError> {
+    if wasm.len() > MAX_MODULE_BYTES {
+        return Err(WasmHandlerLoadError::ModuleTooLarge {
+            size: wasm.len(),
+            max: MAX_MODULE_BYTES,
+        });
+    }
+    Ok(())
+}
+
+/// Fuzzing support: returns `true` when the wasmparser pass the manifest readers use parses
+/// `wasm` completely.
+///
+/// Differential fuzzing checks this against wasmi's validator: the load path conservatively
+/// rejects a module that does not parse, and this crate pins wasmparser to the version wasmi
+/// validates with, so any module wasmi validates must parse. A disagreement means the two
+/// wasmparser versions drifted apart. Not part of the public API.
+#[doc(hidden)]
+pub fn fuzz_walk_sections(wasm: &[u8]) -> bool {
+    Parser::new(0).parse_all(wasm).all(|payload| payload.is_ok())
+}
+
+/// Fuzzing support: returns `true` when the loader's static analysis of `wasm` accepts the
+/// section layout (the memory, table, element, data, and start sections).
+///
+/// Differential fuzzing checks this against wasmi's validator: the load path conservatively
+/// rejects a module whose static analysis fails, so any module wasmi validates must also pass
+/// it. Not part of the public API.
+#[doc(hidden)]
+pub fn fuzz_module_statics(wasm: &[u8]) -> bool {
+    module_statics(wasm).is_some()
+}
+
+/// Test support: appends a `miden:event-manifest` custom section to `wasm` that holds one record
+/// per `(event, export)` pair, in the given order.
+///
+/// The section carries the layout the guest SDK macro writes, so a test or a fuzz target builds a
+/// manifest-carrying module without a Rust toolchain. Not part of the public API.
+#[doc(hidden)]
+pub fn test_append_manifest_section(mut wasm: Vec<u8>, handlers: &[(&str, &str)]) -> Vec<u8> {
+    let mut payload = leb_u32(MANIFEST_SECTION_NAME.len() as u32);
+    payload.extend_from_slice(MANIFEST_SECTION_NAME.as_bytes());
+    for (event, export) in handlers {
+        payload.push(MANIFEST_RECORD_VERSION);
+        for name in [event, export] {
+            payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+            payload.extend_from_slice(name.as_bytes());
+        }
+    }
+
+    // A custom section: ID 0, then the LEB128 payload size.
+    wasm.push(0x00);
+    wasm.extend_from_slice(&leb_u32(payload.len() as u32));
+    wasm.extend_from_slice(&payload);
+    wasm
+}
+
+/// Encodes `value` as LEB128.
+fn leb_u32(mut value: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Parses concatenated manifest records: one version byte, then the event name and the export
+/// name, each as a little-endian `u32` length followed by the bytes.
+///
+/// The records come from an untrusted module, so the caps of the package format apply here,
+/// before the manifest reaches [`WasmHandlerModule::new`]: `entries` holds at most
+/// [`MAX_HANDLERS`] entries, each name is not empty and holds at most [`MAX_NAME_BYTES`] bytes.
+/// The caps bound the memory the records can make this function allocate.
+fn parse_manifest_records(
+    mut records: &[u8],
+    entries: &mut Vec<EventHandlerManifestEntry>,
+) -> Result<(), WasmHandlerLoadError> {
+    /// Reports a manifest rule of the package format as a load error.
+    fn manifest_error(err: EventHandlerSectionError) -> WasmHandlerLoadError {
+        WasmHandlerLoadError::InvalidManifest(err)
+    }
+
+    /// Reads one length-prefixed UTF-8 name from `records`; returns the name and the rest of the
+    /// records. Returns `None` when the length or the bytes run past the end, or when the bytes
+    /// are not UTF-8.
+    fn read_name(records: &[u8]) -> Option<(&str, &[u8])> {
+        let len_bytes: [u8; 4] = records.get(..4)?.try_into().ok()?;
+        let len = u32::from_le_bytes(len_bytes) as usize;
+        let end = 4usize.checked_add(len)?;
+        let name = core::str::from_utf8(records.get(4..end)?).ok()?;
+        Some((name, &records[end..]))
+    }
+
+    while !records.is_empty() {
+        let malformed =
+            || WasmHandlerLoadError::InvalidModule("malformed manifest record".to_string());
+        let (&version, rest) = records.split_first().ok_or_else(malformed)?;
+        if version != MANIFEST_RECORD_VERSION {
+            return Err(WasmHandlerLoadError::InvalidModule(format!(
+                "unsupported manifest record version {version}"
+            )));
+        }
+        let (event, rest) = read_name(rest).ok_or_else(malformed)?;
+        let (export, rest) = read_name(rest).ok_or_else(malformed)?;
+        // The names are still borrowed from the module here, so the per-entry rules apply
+        // before the entry allocates. The rules and their messages come from the package
+        // format, so this early check cannot drift from `validate_manifest_entries`, which
+        // sees the same manifest later.
+        for (field, name) in [("event name", event), ("export name", export)] {
+            if name.is_empty() {
+                return Err(manifest_error(EventHandlerSectionError::EmptyName { field }));
+            }
+            if name.len() > MAX_NAME_BYTES {
+                return Err(manifest_error(EventHandlerSectionError::OverSizeCap {
+                    field,
+                    actual: name.len(),
+                    max: MAX_NAME_BYTES,
+                }));
+            }
+        }
+        if entries.len() >= MAX_HANDLERS {
+            return Err(manifest_error(EventHandlerSectionError::TooManyHandlers {
+                max: MAX_HANDLERS,
+            }));
+        }
+        entries.push(EventHandlerManifestEntry::new(
+            EventName::from_string(event.to_string()),
+            export,
+        ));
+        records = rest;
+    }
+    Ok(())
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::{string::String, vec};
+
+    use super::*;
+
+    /// Builds a loadable handler module: the exported linear memory plus one `() -> ()` export
+    /// per distinct name. Derivation dry-loads the section it builds, so the fixtures must pass
+    /// the load rules as well as the section rules.
+    fn base_module(exports: &[&str]) -> Vec<u8> {
+        let mut declared: Vec<&str> = Vec::new();
+        let mut funcs = String::new();
+        for export in exports {
+            if !declared.contains(export) {
+                declared.push(export);
+                funcs.push_str(&format!("(func (export \"{export}\"))"));
+            }
+        }
+        wat::parse_str(format!("(module (memory (export \"memory\") 1) {funcs})"))
+            .expect("the fixture WAT parses")
+    }
+
+    /// Encodes one custom section that is not a manifest: ID 0, the payload size, the name length,
+    /// the name, the content. Both lengths stay under 128, so each one is a single LEB128 byte.
+    fn other_custom_section(name: &str, content: &[u8]) -> Vec<u8> {
+        let payload_len = 1 + name.len() + content.len();
+        assert!(payload_len < 128, "the fixture section must fit a one-byte length");
+
+        let mut section = vec![0x00, payload_len as u8, name.len() as u8];
+        section.extend_from_slice(name.as_bytes());
+        section.extend_from_slice(content);
+        section
+    }
+
+    /// Builds a loadable Wasm binary that carries a `miden:event-manifest` custom section with
+    /// one record per `(event, export)` pair, in the given order.
+    fn module_with_manifest(handlers: &[(&str, &str)]) -> Vec<u8> {
+        let exports: Vec<&str> = handlers.iter().map(|(_, export)| *export).collect();
+        test_append_manifest_section(base_module(&exports), handlers)
+    }
+
+    #[test]
+    fn derived_manifest_is_sorted_by_event_name() {
+        let wasm = module_with_manifest(&[("test::wasm::b", "b"), ("test::wasm::a", "a")]);
+
+        // The raw records keep the link order of the module.
+        let entries = manifest_from_module(&wasm).expect("the manifest parses");
+        assert_eq!(entries[0].event.as_str(), "test::wasm::b");
+
+        // Derivation canonicalizes the order, so the link order cannot change the identity of
+        // the package.
+        let section =
+            section_from_module(wasm, WasmHandlerLimits::default()).expect("the section derives");
+        let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
+        assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
+    }
+
+    #[test]
+    fn derived_section_applies_the_section_rules() {
+        // Two handlers for one event.
+        let wasm = module_with_manifest(&[("test::wasm::a", "a"), ("test::wasm::a", "b")]);
+        assert!(matches!(
+            section_from_module(wasm, WasmHandlerLimits::default()),
+            Err(WasmHandlerLoadError::Section(_))
+        ));
+
+        // An event in the reserved namespace.
+        let wasm = module_with_manifest(&[("sys::a", "a")]);
+        assert!(matches!(
+            section_from_module(wasm, WasmHandlerLimits::default()),
+            Err(WasmHandlerLoadError::Section(_))
+        ));
+    }
+
+    #[test]
+    fn derivation_strips_the_manifest_sections() {
+        let other = other_custom_section("extra", b"keep me");
+        let base = base_module(&["a", "b"]);
+        let mut wasm = test_append_manifest_section(base.clone(), &[("test::wasm::a", "a")]);
+        wasm.extend_from_slice(&other);
+        let wasm = test_append_manifest_section(wasm, &[("test::wasm::b", "b")]);
+
+        let section =
+            section_from_module(wasm, WasmHandlerLimits::default()).expect("the section derives");
+        let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
+        assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
+
+        // The shipped module keeps every other section and carries no manifest records.
+        let mut expected = base;
+        expected.extend_from_slice(&other);
+        assert_eq!(section.module, expected);
+        assert!(
+            manifest_from_module(&section.module)
+                .expect("the stripped module still parses")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn derived_section_must_load() {
+        // The manifest records break no section rule, but the module exports no linear memory,
+        // so every host would refuse it at load. Derivation refuses it at the producer instead.
+        let wasm = test_append_manifest_section(
+            wat::parse_str("(module (func (export \"a\")))").expect("the WAT parses"),
+            &[("test::wasm::a", "a")],
+        );
+
+        // The records themselves parse; only the load rules refuse the module.
+        assert_eq!(manifest_from_module(&wasm).expect("the manifest parses").len(), 1);
+        assert!(matches!(
+            section_from_module(wasm, WasmHandlerLimits::default()),
+            Err(WasmHandlerLoadError::MissingMemoryExport)
+        ));
+    }
+
+    #[test]
+    fn derivation_dry_loads_under_the_given_limits() {
+        // The table declares more elements than the default cap grants, so the default limits
+        // refuse a module that a host with a larger cap accepts. The producer must be able to
+        // build the section for that host.
+        let wasm = test_append_manifest_section(
+            wat::parse_str(
+                "(module (memory (export \"memory\") 1) (table 5000 funcref) (func (export \"a\")))",
+            )
+            .expect("the WAT parses"),
+            &[("test::wasm::a", "a")],
+        );
+
+        assert!(section_from_module(wasm.clone(), WasmHandlerLimits::default()).is_err());
+        let looser = WasmHandlerLimits {
+            max_table_elements: 8192,
+            ..WasmHandlerLimits::default()
+        };
+        section_from_module(wasm, looser).expect("the looser table cap accepts the module");
+    }
+
+    #[test]
+    fn derivation_bounds_the_manifest_records() {
+        // One record more than the manifest cap.
+        let events: Vec<String> =
+            (0..=MAX_HANDLERS).map(|index| format!("test::wasm::h{index}")).collect();
+        let handlers: Vec<(&str, &str)> =
+            events.iter().map(|event| (event.as_str(), "h")).collect();
+        let err = manifest_from_module(&module_with_manifest(&handlers)).unwrap_err();
+        assert!(err.to_string().contains("handlers"), "unexpected error: {err}");
+
+        // A name over the name cap.
+        let long_name = "e".repeat(MAX_NAME_BYTES + 1);
+        let wasm = module_with_manifest(&[(long_name.as_str(), "a")]);
+        let err = manifest_from_module(&wasm).unwrap_err();
+        assert!(err.to_string().contains("cap"), "unexpected error: {err}");
+
+        // A module over the module cap: refused before the section walk.
+        let mut wasm = module_with_manifest(&[("test::wasm::a", "a")]);
+        wasm.resize(MAX_MODULE_BYTES + 1, 0);
+        let err = manifest_from_module(&wasm).unwrap_err();
+        assert!(
+            matches!(err, WasmHandlerLoadError::ModuleTooLarge { max: MAX_MODULE_BYTES, .. }),
+            "unexpected error: {err}"
+        );
+    }
+}
