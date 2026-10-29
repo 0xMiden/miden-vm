@@ -316,6 +316,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
                     // ---- Deferred-root updates (BusId::LogDeferredRoot) ----
                     // Mutually exclusive with block-stack and range-check branches.
+                    // This relation conserves root commitments with multiplicity, not execution
+                    // order. Together with the initial zero and public final root boundaries,
+                    // hash chains end at a cleared root or the public final root.
+                    // Trusted code must prove the exact stack root consumed by each clear;
+                    // obligations outside those roots still require an external proof. A prover
+                    // may clear only a subset, so no addition index or clock is needed here.
                     g.batch(
                         "log_deferred_state",
                         f_log_deferred,

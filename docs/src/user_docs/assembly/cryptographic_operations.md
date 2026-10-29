@@ -70,11 +70,12 @@ These instructions maintain the rolling deferred root committed by the VM proof.
 | Instruction | Stack input | Stack output | Notes |
 | ----------- | ----------- | ------------ | ----- |
 | log_deferred <br /> - *(1 cycle)* | [STMNT, ...] | [ROOT_NEW, ...] | Folds `STMNT` into the rolling deferred root with one raw Eidos compression: `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`. |
-| clear_deferred <br /> - *(1 cycle)* | [ROOT, ...] | [ROOT, ...] | **Unsafe.** Requires the top word `ROOT` to match the active precompile accumulator, then resets the accumulator to the zero word (`TRUE_DIGEST`). Fails unless the current execution context is root (`ctx == 0`). Preserves `ROOT` and the entire operand stack. |
+| clear_deferred <br /> - *(1 cycle)* | [ROOT, ...] | [ROOT, ...] | **Unsafe.** Native execution requires the top word `ROOT` to match the current precompile accumulator, then resets it to the zero word (`TRUE_DIGEST`). The AIR accounts for the supplied root without enforcing update order. Fails unless the current execution context is root (`ctx == 0`). Preserves `ROOT` and the entire operand stack. |
 
 **Use `clear_deferred` only inside a trusted kernel epilogue, after recursive verification of
 the exact `ROOT` supplied on the stack.** It removes outstanding proof obligations without
-verifying them; root context alone does not make this safe. See the
+verifying them; root context alone does not make this safe. Obligations outside the cleared roots
+remain committed by the public final root and still require an external precompile proof. See the
 [kernel-epilogue safety contract](../../design/stack/precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
 
 ### FRI folding
