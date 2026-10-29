@@ -13,6 +13,7 @@
 
 #### Changes
 
+- [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Mixed dense/sparse MAST merging now rejects procedure roots that have neither a full node nor a digest. It reports the new `MastForestError::MissingRootOnMerge` variant, which downstream exhaustive matches must handle.
 - [BREAKING] Default `SparseMastForest` and `ExecutionWitness` readers now reject incorrect full-node hashes. Sparse blocks must consume their declared data sections, and child references must point to preceding nodes. Explicit trusted readers skip hash recomputation. Digests of pruned children and external nodes remain unauthenticated ([#3303](https://github.com/0xMiden/miden-vm/issues/3303)).

@@ -1049,6 +1049,8 @@ pub enum MastForestError {
     MissingNodeOnDenseMerge(MastNodeId),
     #[error("MAST merge requires node data or a digest for procedure root {0:?}")]
     MissingRootOnMerge(MastNodeId),
+    #[error("node {0:?} is not a procedure root in the source MAST forest")]
+    NotAProcedureRoot(MastNodeId),
     #[error("external node digest {0} resolves to conflicting full nodes")]
     ConflictingNodeDigestOnMerge(Word),
     #[error("cyclic dependency encountered while merging node {0:?}")]
