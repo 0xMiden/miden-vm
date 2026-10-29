@@ -24,6 +24,11 @@ required-features = ["arbitrary"]
 harness = false
 
 [[bench]]
+name = "mast_forest_extraction"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
 name = "mast_serialization_size"
 required-features = ["arbitrary"]
 harness = false
