@@ -58,16 +58,35 @@ modules are internal implementation details used by core-library facades and tes
 ## Clearing the accumulator in a kernel epilogue
 
 `clear_deferred` reads `ROOT` from the top word of the operand stack and resets the rolling
-deferred root to `[0, 0, 0, 0]` (`TRUE_DIGEST`) in one cycle. It requires `ROOT` to equal the active
-accumulator and fails outside the root execution context (`ctx == 0`). Its stack effect is
-`[ROOT, ...] -> [ROOT, ...]`: the entire operand stack is preserved.
+deferred root to `[0, 0, 0, 0]` (`TRUE_DIGEST`) in one cycle. Native execution requires `ROOT` to
+equal the current accumulator. The instruction fails outside the root execution context
+(`ctx == 0`). Its stack effect is `[ROOT, ...] -> [ROOT, ...]`: the entire operand stack is
+preserved.
 
 **Unsafe: use this instruction only inside a trusted kernel's epilogue, after a recursive verifier
-has proved the exact final accumulator being cleared.** The epilogue must bind the verifier's
+has proved the exact `ROOT` supplied on the stack.** The epilogue must bind the verifier's
 statement to the same `ROOT` word passed to `clear_deferred` and must not log unverified
-statements between verification and clearing. Clearing removes earlier logged claims from the
-final outstanding precompile obligation; host-side evaluation of those claims is not a substitute
+statements between verification and clearing. Clearing removes the claims committed by its supplied
+root from the final outstanding precompile obligation; host-side evaluation is not a substitute
 for proving them. The instruction itself performs no proof verification.
+
+### What the VM proof guarantees
+
+The AIR accounts for deferred-root transitions through a multiset lookup. Each log consumes its
+previous root and produces the hash-constrained next root; each clear consumes the exact `ROOT`
+on its stack and produces zero. Boundary contributions supply the initial zero root and consume
+the public final root. The lookup does not track an addition count, index, or execution order.
+The AIR does not enforce native execution's chronological check against the current accumulator.
+
+Under the hash and lookup soundness assumptions, every logged obligation is covered by a root
+consumed by a clear or remains committed by the public final root. Trusted code must recursively
+prove every root it clears. Clearing may discharge all logged obligations or only a subset; a
+malicious prover cannot omit the remaining obligations from both the cleared roots and the final
+root. Any obligations remaining in the final root still require an external precompile proof to
+complete the execution proof. Tracking the number or index of additions is unnecessary for this
+guarantee. See the [lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
+
+### Trusted execution and host state
 
 Root context includes both top-level program execution and kernel procedures entered by `syscall`.
 The context check therefore does not enforce kernel-only placement or prior verification; the
@@ -101,7 +120,8 @@ Proving, verification, transport, and resource policy are specified in the
     insertion.
 - `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
   `ROOT_NEW` after the root transition has been constrained.
-- `clear_deferred` stack effect: `[ROOT, ...] -> [ROOT, ...]`; `ROOT` is the active accumulator.
+- `clear_deferred` stack effect: `[ROOT, ...] -> [ROOT, ...]`; native execution requires `ROOT` to
+  match the current accumulator.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 

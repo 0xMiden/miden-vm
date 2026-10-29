@@ -481,9 +481,10 @@ compression cycle.
 ### CLEAR_DEFERRED
 
 The `clear_deferred` operation uses opcode $6$ (`000_0110`) and reads `ROOT` from the top
-operand-stack word, which must equal the active accumulator. It resets the accumulator to
-`TRUE_DIGEST` in one cycle with stack effect `[ROOT, ...] -> [ROOT, ...]`, without helper registers
-or hasher requests.
+operand-stack word. Native execution requires it to equal the current accumulator. It resets the
+accumulator to `TRUE_DIGEST` in one cycle with stack effect `[ROOT, ...] -> [ROOT, ...]`, without
+helper registers or hasher requests. The AIR accounts for the supplied root through the multiset
+relation below, without enforcing chronological accumulator updates.
 
 **Unsafe:** use only in a trusted kernel epilogue after recursively verifying the supplied `ROOT`.
 See the [full safety contract](./precompiles.md#clearing-the-accumulator-in-a-kernel-epilogue).
@@ -499,8 +500,8 @@ preserve the operand stack and context.
 
 ### Deferred-root state
 
-Inside the VM, the deferred root is tracked by the typed `LogDeferredRoot` virtual-table relation:
-each `log_deferred` update removes the previous root before inserting the next one.
+The AIR accounts for deferred roots through the typed `LogDeferredRoot` virtual-table relation:
+each `log_deferred` update removes its previous root and inserts its next root.
 `clear_deferred` removes the supplied stack root and inserts constant zero. Its removed root is
 read directly from the current row's stack:
 
@@ -510,6 +511,7 @@ $$
 
 This binds the removed obligation to the verified stack word. An unconstrained helper could remove
 an unrelated obligation, because this relation authenticates a multiset rather than update order.
+No addition count, index, or clock is included in the root messages.
 
 Let $D(r) = P_{log\_deferred} + \sum_{j=0}^{3}\beta^j r_j$. We denote the messages for
 removing and inserting the root as
@@ -549,6 +551,19 @@ v_{rem,last} = D(\mathsf{ROOT\_FINAL}).
 $$
 
 Each `log_deferred` compression uses the domain-derived `DEFERRED_AND_INIT_CV` and outputs the
-updated root directly; `clear_deferred` replaces it with `TRUE_DIGEST`. Later logging starts a
-new chain from that zero root. The final deferred root is a fixed four-field-element value
-committed by `VmProof`, not a variable-length request transcript.
+updated root directly. Together with the boundary messages, the lookup conserves roots with their
+multiplicities: every logged obligation must belong to a hash chain ending at a cleared root
+or at the public final root, under the hash and lookup soundness assumptions. Trusted code must
+prove the exact root supplied to each clear. The AIR permits clearing all obligations or only a
+subset; any obligations left in the final root still require an external precompile proof.
+
+For example, a malicious trace may clear `B` before a later log constructs
+`B = AND(A, STMNT)`. This differs from native execution, which checks accumulator updates in
+program order. It does not discharge an unproved obligation: the trusted code clearing `B` must
+already have proved `B`, including `STMNT` and the obligations committed by `A`. Any obligations
+outside the cleared roots remain committed by the public final root. Ordering the lookup messages
+is unnecessary for this obligation accounting guarantee.
+
+In native execution, clearing resets the accumulator to `TRUE_DIGEST`, and later logging starts a
+new chain from zero. The final deferred root is a fixed four-field-element value committed by
+`VmProof`, not a variable-length request transcript.
