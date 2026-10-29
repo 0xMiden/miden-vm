@@ -34,6 +34,11 @@ required-features = ["arbitrary"]
 harness = false
 
 [[bench]]
+name = "sparse_mast_call_depth"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
 name = "mast_serialization_size"
 required-features = ["arbitrary"]
 harness = false
