@@ -182,13 +182,15 @@ fn ntru_solve(
 fn gen_poly<R: Rng>(n: usize, rng: &mut R) -> Polynomial<i16> {
     let mu = 0.0;
     let sigma_star = 1.43300980528773;
-    Polynomial {
-        coefficients: (0..4096)
+    // Bind the raw sample buffer in `Zeroizing`: the chunk sums below keep the secret, so the
+    // 4096-entry sampling buffer must be wiped on scope exit instead of dropping unwiped.
+    let samples = Zeroizing::new(
+        (0..4096)
             .map(|_| sampler_z(mu, sigma_star, sigma_star - 0.001, rng))
-            .collect::<Vec<i16>>()
-            .chunks(4096 / n)
-            .map(|ch| ch.iter().sum())
-            .collect(),
+            .collect::<Vec<i16>>(),
+    );
+    Polynomial {
+        coefficients: (*samples).chunks(4096 / n).map(|ch| ch.iter().sum()).collect(),
     }
 }
 
@@ -339,7 +341,10 @@ fn xgcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 /// Asserts that the balanced values of the coefficients of a polynomial are within the interval
 /// [-bound, bound].
 pub(crate) fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16) -> bool {
-    polynomial.to_balanced_values().iter().all(|c| *c <= bound && *c >= -bound)
+    // `to_balanced_values` allocates a full copy of the secret coefficients, so bind that
+    // copy in `Zeroizing` and wipe it once the bound check completes.
+    let balanced = Zeroizing::new(polynomial.to_balanced_values());
+    balanced.iter().all(|c| *c <= bound && *c >= -bound)
 }
 
 /// Asserts that the coefficients of a `BigInt` polynomial are within [-bound, bound].
