@@ -4,7 +4,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_core::mast::{
-    MastForest, MastForestError, MastForestRootMap,
+    MastForest, MastForestError, MastForestMergeSource, MastForestRootMap, SparseMastForest,
     arbitrary::{GenerationMode, MastForestParams},
 };
 use proptest::{
@@ -30,6 +30,49 @@ fn make_forest_set(count: usize, params: MastForestParams) -> Vec<MastForest> {
     (0..count).map(|_| sample_forest(params.clone(), &mut runner)).collect()
 }
 
+fn forest_params(blocks_per_forest: usize) -> MastForestParams {
+    MastForestParams {
+        blocks: blocks_per_forest..=blocks_per_forest,
+        max_joins: blocks_per_forest.min(8),
+        max_splits: blocks_per_forest.min(8),
+        max_loops: blocks_per_forest.min(4),
+        max_calls: blocks_per_forest.min(4),
+        max_syscalls: 0,
+        max_externals: blocks_per_forest.min(2),
+        max_dyns: blocks_per_forest.min(2),
+        mode: GenerationMode::StructureOnly,
+        ..Default::default()
+    }
+}
+
+fn make_sparse_forest_set(forests: &[MastForest]) -> Vec<SparseMastForest> {
+    forests
+        .iter()
+        .map(|forest| {
+            SparseMastForest::from_procedure_roots(forest, forest.procedure_roots())
+                .expect("generated procedure roots must be valid")
+        })
+        .collect()
+}
+
+fn mixed_sources<'forest>(
+    dense: &'forest [MastForest],
+    sparse: &'forest [SparseMastForest],
+) -> Vec<MastForestMergeSource<'forest>> {
+    dense
+        .iter()
+        .zip(sparse)
+        .enumerate()
+        .map(|(index, (dense, sparse))| {
+            if index % 2 == 0 {
+                MastForestMergeSource::from(dense)
+            } else {
+                MastForestMergeSource::from(sparse)
+            }
+        })
+        .collect()
+}
+
 fn bench_merge_varied_sizes(c: &mut Criterion) {
     // Merge 5 forests each time; vary the number of blocks per forest.
     let num_forests = 5usize;
@@ -38,22 +81,9 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("mast_forest_merge/varied_sizes");
 
     for &blocks_per_forest in sizes {
-        // Generator knobs for this input size.
-        let gen_params = MastForestParams {
-            blocks: blocks_per_forest..=blocks_per_forest, // fixed size per forest
-            max_joins: blocks_per_forest.min(8),
-            max_splits: blocks_per_forest.min(8),
-            max_loops: blocks_per_forest.min(4),
-            max_calls: blocks_per_forest.min(4),
-            max_syscalls: 0,
-            max_externals: blocks_per_forest.min(2),
-            max_dyns: blocks_per_forest.min(2),
-            mode: GenerationMode::StructureOnly,
-            ..Default::default()
-        };
-
         // Pre-generate inputs (excluded from timing).
-        let forests: Vec<MastForest> = make_forest_set(num_forests, gen_params);
+        let forests: Vec<MastForest> =
+            make_forest_set(num_forests, forest_params(blocks_per_forest));
 
         // Report throughput as total "elements" processed per merge call.
         // Here we treat one "element" as one block/node.
@@ -76,5 +106,41 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_merge_varied_sizes);
+fn bench_mixed_merge_varied_sizes(c: &mut Criterion) {
+    let num_forests = 5usize;
+    let sizes: &[usize] = &[8, 16, 32, 64, 128, 256];
+    let mut group = c.benchmark_group("mast_forest_merge/mixed_varied_sizes");
+
+    for &blocks_per_forest in sizes {
+        let dense = make_forest_set(num_forests, forest_params(blocks_per_forest));
+        let sparse = make_sparse_forest_set(&dense);
+        let sources = mixed_sources(&dense, &sparse);
+        group.throughput(Throughput::Elements((num_forests * blocks_per_forest) as u64));
+
+        group.bench_with_input(
+            BenchmarkId::new("dense_output", blocks_per_forest),
+            &sources,
+            |b, sources| {
+                b.iter(|| {
+                    let result = MastForest::merge(sources.iter().copied());
+                    black_box(result.unwrap());
+                });
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("sparse_output", blocks_per_forest),
+            &sources,
+            |b, sources| {
+                b.iter(|| {
+                    let result = SparseMastForest::merge(sources.iter().copied());
+                    black_box(result.unwrap());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_merge_varied_sizes, bench_mixed_merge_varied_sizes);
 criterion_main!(benches);
