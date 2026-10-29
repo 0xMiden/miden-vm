@@ -97,6 +97,7 @@ pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitK
 
 mod forest_read;
 pub use forest_read::MastForestRead;
+pub(crate) use forest_read::StoredContentKey;
 
 #[cfg(test)]
 mod tests;

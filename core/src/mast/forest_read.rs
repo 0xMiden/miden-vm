@@ -297,21 +297,43 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
 type FullRootGroups = BTreeMap<Word, BTreeMap<usize, (MastNodeId, usize)>>;
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
-enum StoredContentKey {
+pub(crate) enum StoredContentKey<ChildId> {
     Opaque(Word),
     Block(Word, Vec<u8>),
-    Join(Word, usize, usize),
-    Split(Word, usize, usize),
-    Loop(Word, usize),
-    Call(Word, bool, usize),
+    Join(Word, ChildId, ChildId),
+    Split(Word, ChildId, ChildId),
+    Loop(Word, ChildId),
+    Call(Word, bool, ChildId),
     Dyn(Word, bool),
     External(Word),
+}
+
+impl<ChildId> StoredContentKey<ChildId> {
+    pub(crate) fn from_node(
+        node: &MastNode,
+        mut child_id: impl FnMut(MastNodeId) -> Option<ChildId>,
+    ) -> Option<Self> {
+        let digest = node.digest();
+        Some(match node {
+            MastNode::Block(block) => Self::Block(digest, basic_block_content_key(block)),
+            MastNode::Join(join) => {
+                Self::Join(digest, child_id(join.first())?, child_id(join.second())?)
+            },
+            MastNode::Split(split) => {
+                Self::Split(digest, child_id(split.on_true())?, child_id(split.on_false())?)
+            },
+            MastNode::Loop(loop_node) => Self::Loop(digest, child_id(loop_node.body())?),
+            MastNode::Call(call) => Self::Call(digest, call.is_syscall(), child_id(call.callee())?),
+            MastNode::Dyn(dyn_node) => Self::Dyn(digest, dyn_node.is_dyncall()),
+            MastNode::External(_) => Self::External(digest),
+        })
+    }
 }
 
 struct StoredContentIds<'a, F: MastForestRead + ?Sized> {
     forest: &'a F,
     by_node_id: BTreeMap<MastNodeId, usize>,
-    by_content: BTreeMap<StoredContentKey, usize>,
+    by_content: BTreeMap<StoredContentKey<usize>, usize>,
     visiting: BTreeSet<MastNodeId>,
 }
 
@@ -340,7 +362,7 @@ fn stored_content_id<F: MastForestRead + ?Sized>(
     forest: &F,
     node_id: MastNodeId,
     by_node_id: &mut BTreeMap<MastNodeId, usize>,
-    by_content: &mut BTreeMap<StoredContentKey, usize>,
+    by_content: &mut BTreeMap<StoredContentKey<usize>, usize>,
     visiting: &mut BTreeSet<MastNodeId>,
 ) -> Option<usize> {
     if let Some(&content_id) = by_node_id.get(&node_id) {
@@ -355,34 +377,9 @@ fn stored_content_id<F: MastForestRead + ?Sized>(
             Some(node) => node,
             None => return Some(StoredContentKey::Opaque(forest.get_digest_by_id(node_id)?)),
         };
-        let digest = node.digest();
-        let key = match node {
-            MastNode::Block(block) => {
-                StoredContentKey::Block(digest, basic_block_content_key(block))
-            },
-            MastNode::Join(join) => StoredContentKey::Join(
-                digest,
-                stored_content_id(forest, join.first(), by_node_id, by_content, visiting)?,
-                stored_content_id(forest, join.second(), by_node_id, by_content, visiting)?,
-            ),
-            MastNode::Split(split) => StoredContentKey::Split(
-                digest,
-                stored_content_id(forest, split.on_true(), by_node_id, by_content, visiting)?,
-                stored_content_id(forest, split.on_false(), by_node_id, by_content, visiting)?,
-            ),
-            MastNode::Loop(loop_node) => StoredContentKey::Loop(
-                digest,
-                stored_content_id(forest, loop_node.body(), by_node_id, by_content, visiting)?,
-            ),
-            MastNode::Call(call) => StoredContentKey::Call(
-                digest,
-                call.is_syscall(),
-                stored_content_id(forest, call.callee(), by_node_id, by_content, visiting)?,
-            ),
-            MastNode::Dyn(dyn_node) => StoredContentKey::Dyn(digest, dyn_node.is_dyncall()),
-            MastNode::External(_) => StoredContentKey::External(digest),
-        };
-        Some(key)
+        StoredContentKey::from_node(node, |child_id| {
+            stored_content_id(forest, child_id, by_node_id, by_content, visiting)
+        })
     })();
     visiting.remove(&node_id);
     let key = key?;
