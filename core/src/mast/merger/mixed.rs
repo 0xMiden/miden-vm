@@ -81,27 +81,20 @@ impl ExecutableMastForest for MastForestMergeSource<'_> {
 }
 
 impl MastForestRead for MastForestMergeSource<'_> {
-    type NodeIter<'a>
-        = Box<dyn Iterator<Item = (MastNodeId, &'a MastNode)> + 'a>
-    where
-        Self: 'a;
-    type DigestIter<'a>
-        = Box<dyn Iterator<Item = (MastNodeId, Word)> + 'a>
-    where
-        Self: 'a;
-
-    fn node_entries(&self) -> Self::NodeIter<'_> {
-        match self {
+    fn node_entries(&self) -> impl Iterator<Item = (MastNodeId, &MastNode)> {
+        let entries: Box<dyn Iterator<Item = (MastNodeId, &MastNode)> + '_> = match self {
             Self::Dense(forest) => Box::new(MastForestRead::node_entries(*forest)),
             Self::Sparse(forest) => Box::new(MastForestRead::node_entries(*forest)),
-        }
+        };
+        entries
     }
 
-    fn digest_entries(&self) -> Self::DigestIter<'_> {
-        match self {
+    fn digest_entries(&self) -> impl Iterator<Item = (MastNodeId, Word)> {
+        let entries: Box<dyn Iterator<Item = (MastNodeId, Word)> + '_> = match self {
             Self::Dense(forest) => Box::new(MastForestRead::digest_entries(*forest)),
             Self::Sparse(forest) => Box::new(MastForestRead::digest_entries(*forest)),
-        }
+        };
+        entries
     }
 
     fn procedure_roots(&self) -> &[MastNodeId] {
@@ -417,13 +410,8 @@ impl<'forest> MixedMastForestMerger<'forest> {
         let merged_id = if let Some(&merged_id) = self.full_by_content.get(&content_key) {
             merged_id
         } else {
-            let builder = super::super::build_node_with_remapped_ids(
-                node_id,
-                node.clone(),
-                &self.builder_source,
-                &self.node_maps[forest_idx],
-            )?;
-            let merged_id = self.builder.push_node(builder)?;
+            let merged_id =
+                self.builder.push_node(remapped_node.clone().to_builder(&self.builder_source))?;
             self.nodes.insert(merged_id, remapped_node);
             self.full_by_content.insert(content_key, merged_id);
             merged_id
