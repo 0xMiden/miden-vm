@@ -502,7 +502,12 @@ fn satisfies_ntru_relation(
 
     let lhs = Zeroizing::new(&*f * &*big_g);
     let rhs = Zeroizing::new(&*g * &*big_f);
-    let diff = Zeroizing::new(&*lhs - &*rhs);
+    // Guard the negated polynomial separately: `&lhs - &rhs` is `lhs + &(-rhs)`
+    // in `Polynomial::sub`, and that unary `Neg` result is a plain temporary
+    // that would drop unwiped before `Zeroizing` sees the difference. Negating
+    // into `Zeroizing` first and then adding keeps the -rhs copy covered too.
+    let neg_rhs = Zeroizing::new(-(&*rhs));
+    let diff = Zeroizing::new(&*lhs + &*neg_rhs);
     let determinant = Zeroizing::new(diff.reduce_by_cyclotomic(N));
     *determinant == Polynomial::constant(i64::from(MODULUS))
 }
