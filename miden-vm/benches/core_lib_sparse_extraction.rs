@@ -50,15 +50,17 @@ fn core_lib_sparse_extraction(c: &mut Criterion) {
                 )
             });
         });
-        group.bench_function(BenchmarkId::new("replay_builder", &parameter), |bench| {
-            bench.iter(|| {
-                let mut builder = SparseMastForestBuilder::new(source.clone());
-                for &node_id in black_box(&reachable) {
-                    builder.record_visit(node_id, VisitKind::FullVisit);
-                }
-                black_box(builder.finalize())
+        if root_count == exports.len() {
+            group.bench_function(BenchmarkId::new("replay_builder", &parameter), |bench| {
+                bench.iter(|| {
+                    let mut builder = SparseMastForestBuilder::new(source.clone());
+                    for &node_id in black_box(&reachable) {
+                        builder.record_visit(node_id, VisitKind::FullVisit);
+                    }
+                    black_box(builder.finalize())
+                });
             });
-        });
+        }
     }
     group.finish();
 }
