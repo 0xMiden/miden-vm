@@ -71,7 +71,7 @@ fn make_sparse_forest_set(forests: &[MastForest]) -> Vec<SparseMastForest> {
         .collect()
 }
 
-fn mixed_sources<'forest>(
+fn resolvable_sources<'forest>(
     dense: &'forest [MastForest],
     sparse: &'forest [SparseMastForest],
 ) -> Vec<MastForestMergeSource<'forest>> {
@@ -80,6 +80,24 @@ fn mixed_sources<'forest>(
         .zip(sparse)
         .flat_map(|(dense, sparse)| {
             [MastForestMergeSource::from(dense), MastForestMergeSource::from(sparse)]
+        })
+        .collect()
+}
+
+fn opaque_sources<'forest>(
+    dense: &'forest [MastForest],
+    sparse: &'forest [SparseMastForest],
+) -> Vec<MastForestMergeSource<'forest>> {
+    dense
+        .iter()
+        .zip(sparse)
+        .enumerate()
+        .map(|(index, (dense, sparse))| {
+            if index % 2 == 0 {
+                MastForestMergeSource::from(dense)
+            } else {
+                MastForestMergeSource::from(sparse)
+            }
         })
         .collect()
 }
@@ -125,12 +143,16 @@ fn bench_mixed_merge_varied_sizes(c: &mut Criterion) {
     for &blocks_per_forest in sizes {
         let dense = make_forest_set(num_forests, forest_params(blocks_per_forest));
         let sparse = make_sparse_forest_set(&dense);
-        let sources = mixed_sources(&dense, &sparse);
-        group.throughput(Throughput::Elements((2 * num_forests * blocks_per_forest) as u64));
+        let dense_output_sources = resolvable_sources(&dense, &sparse);
+        let sparse_output_sources = opaque_sources(&dense, &sparse);
+        let (sparse_output, _) =
+            SparseMastForest::merge(sparse_output_sources.iter().copied()).unwrap();
+        assert!(sparse_output.digest_entries().next().is_some());
 
+        group.throughput(Throughput::Elements((2 * num_forests * blocks_per_forest) as u64));
         group.bench_with_input(
             BenchmarkId::new("dense_output", blocks_per_forest),
-            &sources,
+            &dense_output_sources,
             |b, sources| {
                 b.iter(|| {
                     let result = MastForest::merge(sources.iter().copied());
@@ -138,9 +160,11 @@ fn bench_mixed_merge_varied_sizes(c: &mut Criterion) {
                 });
             },
         );
+
+        group.throughput(Throughput::Elements((num_forests * blocks_per_forest) as u64));
         group.bench_with_input(
             BenchmarkId::new("sparse_output", blocks_per_forest),
-            &sources,
+            &sparse_output_sources,
             |b, sources| {
                 b.iter(|| {
                     let result = SparseMastForest::merge(sources.iter().copied());
