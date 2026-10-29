@@ -11,7 +11,7 @@ use crate::{
     mast::{
         DenseMastForestBuilder, ExecutableMastForest, ExternalNodeBuilder, MastForest,
         MastForestError, MastForestRead, MastForestRootMap, MastNode, MastNodeExt, MastNodeId,
-        SparseMastForest,
+        SparseMastForest, StoredContentKey,
     },
 };
 
@@ -123,7 +123,7 @@ pub(crate) struct MixedMastForestMerger<'forest> {
     node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     opaque_by_digest: BTreeMap<Word, MastNodeId>,
-    full_by_content: BTreeMap<MergedContentKey, MastNodeId>,
+    full_by_content: BTreeMap<StoredContentKey<MastNodeId>, MastNodeId>,
     non_external_by_digest: BTreeMap<Word, (usize, MastNodeId)>,
     full_ids_by_digest: BTreeMap<Word, BTreeSet<MastNodeId>>,
     resolved_digests: BTreeSet<Word>,
@@ -151,34 +151,6 @@ enum MergeTask {
         replacement_forest: usize,
         replacement_id: MastNodeId,
     },
-}
-
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
-enum MergedContentKey {
-    Block(Word, Vec<u8>),
-    Join(Word, MastNodeId, MastNodeId),
-    Split(Word, MastNodeId, MastNodeId),
-    Loop(Word, MastNodeId),
-    Call(Word, bool, MastNodeId),
-    Dyn(Word, bool),
-    External(Word),
-}
-
-impl MergedContentKey {
-    fn from_node(node: &MastNode) -> Self {
-        let digest = node.digest();
-        match node {
-            MastNode::Block(block) => {
-                Self::Block(digest, super::super::serialization::basic_block_content_key(block))
-            },
-            MastNode::Join(join) => Self::Join(digest, join.first(), join.second()),
-            MastNode::Split(split) => Self::Split(digest, split.on_true(), split.on_false()),
-            MastNode::Loop(loop_node) => Self::Loop(digest, loop_node.body()),
-            MastNode::Call(call) => Self::Call(digest, call.is_syscall(), call.callee()),
-            MastNode::Dyn(dyn_node) => Self::Dyn(digest, dyn_node.is_dyncall()),
-            MastNode::External(_) => Self::External(digest),
-        }
-    }
 }
 
 impl<'forest> MixedMastForestMerger<'forest> {
@@ -440,7 +412,8 @@ impl<'forest> MixedMastForestMerger<'forest> {
             &self.node_maps[forest_idx],
         )?;
         let remapped_node = builder.build_linked()?;
-        let content_key = MergedContentKey::from_node(&remapped_node);
+        let content_key = StoredContentKey::from_node(&remapped_node, Some)
+            .expect("remapped child IDs are always available");
         let merged_id = if let Some(&merged_id) = self.full_by_content.get(&content_key) {
             merged_id
         } else {
