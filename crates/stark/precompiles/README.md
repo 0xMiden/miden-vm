@@ -14,8 +14,8 @@ Enable `prover` for `prover::prove_precompiles(Vec<PrecompileWitness>, HashFunct
 variants that accept explicit work limits and memory budgets. Witnesses are prepared and admitted
 independently, then combined in a proving session that shares repeated computations.
 Root order and repetitions are preserved, and empty batches or batches above `MAX_PRECOMPILE_ROOTS`
-are rejected. The memory budget is checked after import and before trace allocation; it does not
-bound preparation or session construction.
+are rejected. The memory budget bounds conservative reservations for preparation and session
+construction, then the modelled proving peak before trace allocation.
 
 `verifier::verify_deferred` verifies a serialized STARK against an explicit aggregate root and
 returns authenticated security parameters. The caller enforces execution-root coverage and

@@ -48,11 +48,12 @@ pub fn prove_precompiles(
 
 /// Same as [`prove_precompiles`], but with an explicit memory budget instead of the default.
 ///
-/// Checks the modelled peak prover memory against `max_prover_memory_bytes` before allocating
-/// chiplet traces or entering the STARK pipeline. The budget applies to this single proof using
-/// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check,
-/// so this is not an allocation budget for preparation or Session construction. A capacity error
-/// can be addressed with a smaller batch or a larger memory budget.
+/// Checks conservative capacity estimates before preparing each witness, constructing the Session,
+/// and recording each new node or aggregate fold. Preparation counts repeated witnesses; import
+/// shares cached nodes. The final check uses the actual padded chiplet heights before allocating
+/// traces or entering the STARK pipeline. These estimates are not an allocator quota or a bound on
+/// process RSS, caller-owned inputs, or concurrent proofs. A capacity error can be addressed with
+/// a smaller batch or a larger memory budget. Per-witness verification limits remain independent.
 pub fn prove_precompiles_with_budget(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -104,8 +105,11 @@ pub enum PrecompileProvingError {
     /// The prover memory estimate exceeded the host height range or the byte model's `u64` range.
     #[error("precompile prover memory estimate overflowed")]
     MemoryEstimateOverflow,
-    /// The modelled peak prover memory for the generated chiplet traces exceeds the configured
-    /// budget.
+    /// A preparation, Session recording, or trace-proving memory estimate exceeds the budget.
+    ///
+    /// A preparation or recording rejection reports the running reservation at the rejected step,
+    /// a lower bound on the batch requirement. A trace-proving rejection reports the full modelled
+    /// peak for the recorded Session.
     #[error(
         "estimated precompile prover memory of {estimated_bytes} bytes exceeds the budget of \
          {budget_bytes} bytes"
