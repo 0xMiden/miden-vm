@@ -68,6 +68,8 @@ pub fn enforce_main<AB>(
         builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
     }
     // Clearing the deferred obligation is allowed only in the root memory context.
+    // The application must ensure every route to this opcode settles the exact root first. See
+    // docs/src/design/stack/precompiles.md#rules-for-safe-clearing.
     // The degree-7 opcode selector times ctx has degree 8.
     builder.when(op_flags.clear_deferred()).assert_zero(local.system.ctx);
 

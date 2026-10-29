@@ -86,13 +86,31 @@ root. Any obligations remaining in the final root still require an external prec
 complete the execution proof. Tracking the number or index of additions is unnecessary for this
 guarantee. See the [lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
 
-### Trusted execution and host state
+### Rules for safe clearing
 
-Root context includes both top-level program execution and kernel procedures entered by `syscall`.
-The context check therefore does not enforce kernel-only placement or prior verification; the
-trusted kernel must enforce those requirements. Only the accumulator is reset: registered nodes,
-evaluation caches, and consumed execution work remain in host state. Later logging starts from
-`TRUE_DIGEST`.
+The root-context restriction on `clear_deferred` admits both top-level program code and kernel
+procedures entered by `syscall`. To ensure every clear follows successful settlement, the
+application must enforce these rules:
+
+1. **Authenticate the clearing code.** The accepting verifier uses the application's expected
+   program and kernel (`ProgramInfo`, or the corresponding `ExecutionClaim`). This prevents a
+   prover from substituting a program or kernel that clears without verification.
+2. **Prevent direct clearing by untrusted code.** Run untrusted scripts through `call` or `dyncall`
+   in non-root contexts (`ctx != 0`), where `clear_deferred` is rejected.
+3. **Protect indirect routes to clearing.** Kernel entry points and root-context dynamic dispatch
+   must not let an untrusted caller bypass settlement and reach `clear_deferred` unchecked.
+   Authenticate any dispatch tables used by these paths. The VM's
+   [kernel ROM constraints](../chiplets/kernel_rom.md#chiplets-bus-constraints) already restrict
+   syscall targets to the committed kernel; that kernel must enforce the settlement checks.
+4. **Verify the exact root before each clear.** Trusted settlement code must verify a proof for
+   the same `ROOT` word passed to `clear_deferred`, using the intended recursive PVM verifier.
+   It must enforce the application's proof acceptance policy, including the required security
+   level, before executing the instruction.
+
+### Host state after clearing
+
+Only the accumulator is reset: registered nodes, evaluation caches, and consumed execution work
+remain in host state. Later logging starts from `TRUE_DIGEST`.
 
 ## Responsibilities
 

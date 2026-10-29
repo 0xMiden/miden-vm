@@ -56,8 +56,11 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
 /// # Security
 ///
 /// Only a trusted kernel epilogue should execute this operation, after recursively verifying
-/// the exact root on the stack. The root-context check also accepts top-level code and does not
-/// establish that the caller performed verification.
+/// the exact root on the stack and enforcing the application's proof acceptance policy.
+/// The application must prevent untrusted code from reaching an unchecked clear, directly or
+/// through kernel dispatch. Root context alone does not establish prior settlement.
+/// See the kernel settlement guide's rules for safe clearing:
+/// `docs/src/design/stack/precompiles.md#rules-for-safe-clearing`.
 #[inline(always)]
 pub(super) fn op_clear_deferred<P: Processor>(
     processor: &mut P,
