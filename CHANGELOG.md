@@ -13,6 +13,7 @@
 
 #### Changes
 
+- [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively.
 - [BREAKING] Added VM opcode 6, `clear_deferred`, to reset the accumulator identified by the top stack word in root context, preserving the stack. This unsafe operation requires a trusted kernel epilogue that recursively verifies that exact root before clearing. The VM proof relation and recursive verifier root change.
