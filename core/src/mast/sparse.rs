@@ -522,7 +522,7 @@ mod tests {
     use crate::{
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-            JoinNodeBuilder, MastForestRead, SplitNodeBuilder,
+            JoinNodeBuilder, LoopNodeBuilder, MastForestRead, SplitNodeBuilder,
         },
         operations::Operation,
     };
@@ -591,6 +591,27 @@ mod tests {
         assert!(sparse.nodes().contains_key(&external));
         assert!(sparse.nodes().contains_key(&call));
         assert!(sparse.nodes().contains_key(&dynamic));
+    }
+
+    #[test]
+    fn extraction_follows_loop_bodies_and_their_descendants() {
+        let mut source = MastForest::new();
+        let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let body = JoinNodeBuilder::new([left, right]).add_to_forest(&mut source).unwrap();
+        let root = LoopNodeBuilder::new(body).add_to_forest(&mut source).unwrap();
+        source.make_root(root);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+
+        assert_eq!(sparse.nodes().len(), 4);
+        for node_id in [left, right, body, root] {
+            assert_eq!(sparse.get_node_by_id(node_id), source.get_node_by_id(node_id));
+        }
     }
 
     #[test]
