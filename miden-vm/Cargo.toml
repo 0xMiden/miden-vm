@@ -45,6 +45,10 @@ name = "deserialize_core_lib"
 harness = false
 
 [[bench]]
+name = "core_lib_sparse_extraction"
+harness = false
+
+[[bench]]
 name = "deserialize_core_lib_debug_info"
 harness = false
 
