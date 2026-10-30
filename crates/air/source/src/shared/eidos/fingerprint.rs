@@ -59,8 +59,10 @@
 //! Fix a main witness with at least one nonzero residual vector before sampling `rho`. Acceptance
 //! requires a root of that cycle's nonzero polynomial, so its probability is at most 119 times
 //! the challenge's largest point probability. Choosing one bad cycle suffices: no cycle-count
-//! multiplier is needed. This term is charged alongside the remaining LogUp argument. A union
-//! bound combines the errors, so reusing LogUp's beta does not require independence.
+//! multiplier is needed. For this fixed main trace, either the bus relation is false or a required
+//! identity is nonzero. Acceptance is bounded by the corresponding error in each case, so the
+//! joint bound is their maximum. The ordinary lookup budget covers this degree; sharing beta
+//! does not require independence between the identity checks and LogUp.
 
 use alloc::vec::Vec;
 

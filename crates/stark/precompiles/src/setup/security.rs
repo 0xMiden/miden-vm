@@ -51,12 +51,8 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 =
     miden_air::precompiles::protocol::PROTOCOL.fixed_boundary_lookup_terms;
 
-/// Fixed lookup-equivalent error units charged once per proof.
-pub const FIXED_LOOKUP_ERROR_TERMS: u32 = FIXED_BOUNDARY_LOOKUP_TERMS
-    + miden_stark::security::lookup_error_units(
-        miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT,
-        miden_air_definitions::precompiles::relations::MAX_MESSAGE_WIDTH as u32,
-    );
+/// Number of lookup fractions contributed by the fixed boundary messages.
+pub const FIXED_LOOKUP_ERROR_TERMS: u32 = FIXED_BOUNDARY_LOOKUP_TERMS;
 
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
@@ -94,31 +90,6 @@ mod tests {
     use p3_security::budget::report::{LOOKUP_LABEL, QUERY_LABEL};
 
     use super::{testing::*, *};
-
-    #[test]
-    fn auxiliary_error_budget_does_not_exceed_lookup_only_reference() {
-        // The lookup-only reference has 219 fractions per row and 19 fixed terms.
-        const REFERENCE_FRACTIONS_PER_ROW: u64 = 219;
-        const REFERENCE_FIXED_TERMS: u32 = 19;
-
-        let unit = u64::from(LOOKUP_SHAPE.max_message_width + 2);
-        let extra = u64::from(FIXED_LOOKUP_ERROR_TERMS - REFERENCE_FIXED_TERMS);
-        assert!(
-            unit * extra
-                >= u64::from(miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT)
-        );
-        // Compare the estimator's root-count coefficients before dividing by the sampling support.
-        // A compression needs 32 rows; the fixed reference terms are included on both sides.
-        for log_height in 5..=30 {
-            let rows = 1u64 << log_height;
-            let reference =
-                unit * (REFERENCE_FRACTIONS_PER_ROW * rows + u64::from(REFERENCE_FIXED_TERMS));
-            let with_aux_checks = unit
-                * (u64::from(LOOKUP_SHAPE.fractions_per_row) * rows
-                    + u64::from(FIXED_LOOKUP_ERROR_TERMS));
-            assert!(with_aux_checks <= reference);
-        }
-    }
 
     /// Checks that the production AIR shape matches the current chiplet AIRs. A stale shape can
     /// make the reported security level differ from the level implied by the relation being
@@ -269,7 +240,7 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_073_120, 7_623_992, 7_693_931, 7_826_725, 7_760_447, 6_335_399, 8_257_536],
+                [7_073_161, 7_623_992, 7_693_931, 7_826_725, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (

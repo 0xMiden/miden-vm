@@ -176,7 +176,7 @@ end
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_LOOKUP_ERROR_TERMS` gives the error units charged once per proof.
+#! binds. `FIXED_LOOKUP_ERROR_TERMS` counts the fixed boundary fractions.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,

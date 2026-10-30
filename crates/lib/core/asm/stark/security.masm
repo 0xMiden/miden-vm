@@ -86,7 +86,7 @@ end
 #! # Lookup term
 #!
 #! Let A = (max_message_width + 2) * fractions_per_row, q = ceil(log2(A)), and
-#! R = r_w * FP_ONE + r_f be the Q16 correction for error units charged once per proof. Define
+#! R = r_w * FP_ONE + r_f be the Q16 correction for boundary fractions. Define
 #!
 #!   s = q * FP_ONE - ceil(FP_ONE * log2(A)).
 #!
@@ -103,8 +103,8 @@ end
 #!
 #! The procedure subtracts one when b < r_f. Because b <= s, it cannot overstate the native
 #! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 73 = 1314 gives
-#! b = 39958, while R is at most 5363 (265 fixed/kernel error units at height 6). For PVM,
-#! A = (18 + 2) * 215 = 4300 gives b = 55590 and R <= 172 (25 error units at height 6).
+#! b = 39958, while R is at most 5222 (258 fixed/kernel boundary fractions at height 6). For PVM,
+#! A = (18 + 2) * 215 = 4300 gives b = 55590 and R <= 131 (19 boundary fractions at height 6).
 #! Thus b >= r_f for both deployed shapes throughout the accepted height range.
 #!
 #! The accepted coefficient range is 257..=65536. Each factor is also limited to 65536 so their
@@ -153,10 +153,10 @@ end
 #! descriptor returned by a successful MVM or PVM recursive verifier, without modification. The
 #! procedure is loop-free and has bounded execution cost for every accepted descriptor.
 #!
-#! `num_lookup_boundary_terms` counts error units charged once per proof, in addition to the
-#! per-row fractions. Each unit contributes `(max_message_width + 2) / |S|`, where `S` is the
-#! lookup challenge's sampling support. The caller compares the returned security level with
-#! the threshold required by its application.
+#! `num_lookup_boundary_terms` counts boundary fractions in addition to the per-row fractions.
+#! Each fraction contributes `(max_message_width + 2) / |S|`, where `S` is the lookup challenge's
+#! sampling support. The caller compares the returned security level with the threshold required
+#! by its application.
 #!
 #! Inputs:  [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,

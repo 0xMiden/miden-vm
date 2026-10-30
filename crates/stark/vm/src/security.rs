@@ -113,31 +113,6 @@ mod tests {
 
     use super::{testing::*, *};
 
-    #[test]
-    fn auxiliary_error_budget_does_not_exceed_lookup_only_reference() {
-        // The lookup-only reference has 78 fractions per row and three fixed terms.
-        const REFERENCE_FRACTIONS_PER_ROW: u64 = 78;
-        const REFERENCE_FIXED_TERMS: u32 = 3;
-
-        let unit = u64::from(miden_air::vm::security::LOOKUP_SHAPE.max_message_width + 2);
-        let extra = u64::from(FIXED_LOOKUP_ERROR_TERMS - REFERENCE_FIXED_TERMS);
-        assert!(
-            unit * extra
-                >= u64::from(miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT)
-        );
-        // Compare the estimator's root-count coefficients before dividing by the sampling support.
-        // A compression needs 32 rows; shared kernel terms cancel on both sides.
-        for log_height in 5..=30 {
-            let rows = 1u64 << log_height;
-            let reference =
-                unit * (REFERENCE_FRACTIONS_PER_ROW * rows + u64::from(REFERENCE_FIXED_TERMS));
-            let with_aux_checks = unit
-                * (u64::from(miden_air::vm::security::LOOKUP_SHAPE.fractions_per_row) * rows
-                    + u64::from(FIXED_LOOKUP_ERROR_TERMS));
-            assert!(with_aux_checks <= reference);
-        }
-    }
-
     /// The deployed preset has about 57 proven query bits in LDR, versus about 39 in UDR.
     /// Selecting a regime must use the complete bound, including DEEP column batching.
     #[test]
@@ -595,7 +570,7 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_185_180, 7_649_159, 7_645_438, 7_923_431, 7_760_447, 6_335_399, 8_257_536],
+                [7_185_322, 7_649_159, 7_645_438, 7_923_431, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (

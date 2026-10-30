@@ -33,9 +33,6 @@ pub use algebra::{
 };
 pub use constraints::{enforce_core_footer_rows, enforce_fused_rows};
 pub use fingerprint::{enforce_register_constraints, fill_aux_register};
-
-/// Auxiliary identity error coefficient, independent of trace height.
-pub const AUXILIARY_ERROR_COEFFICIENT: u32 = fingerprint::FINGERPRINT_DEGREE as u32;
 pub use lookup::{
     EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
     emit_narrow_lookup_columns,

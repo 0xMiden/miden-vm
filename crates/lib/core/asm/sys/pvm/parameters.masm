@@ -16,7 +16,7 @@ pub const NUM_COMPOSED_CONSTRAINTS = 813
 pub const MAX_CONSTRAINT_DEGREE = 5
 pub const NUM_DEEP_TERMS = 762
 pub const LOOKUP_FRACTIONS_PER_ROW = 215
-pub const FIXED_LOOKUP_ERROR_TERMS = 25
+pub const FIXED_LOOKUP_ERROR_TERMS = 19
 
 # Bus-domain scale factors: BusId + 1 from the native relation registry.
 pub const UINT_VAL_BUS_SCALE = 11

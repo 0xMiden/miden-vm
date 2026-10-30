@@ -40,8 +40,8 @@ pub mod public_inputs
 # Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 
-# Fixed per-proof error budget, expressed in lookup fraction units.
-const FIXED_LOOKUP_ERROR_TERMS = 10
+# Number of fixed boundary lookup fractions.
+const FIXED_LOOKUP_ERROR_TERMS = 3
 
 # Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
 # shapes before a security descriptor is constructed and keep its fixed-point arithmetic in the

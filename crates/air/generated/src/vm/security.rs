@@ -140,9 +140,5 @@ pub const LOG2_E: u64 = fixed::LOG2_E;
 /// the two log-deferred-root terminals.
 pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
 
-/// Fixed lookup-equivalent error units charged once per proof.
-pub const FIXED_LOOKUP_ERROR_TERMS: u32 = CORE_BOUNDARY_LOOKUP_TERMS
-    + miden_stark::security::lookup_error_units(
-        miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT,
-        LOOKUP_SHAPE.max_message_width,
-    );
+/// Number of lookup fractions contributed by the fixed boundary messages.
+pub const FIXED_LOOKUP_ERROR_TERMS: u32 = CORE_BOUNDARY_LOOKUP_TERMS;
