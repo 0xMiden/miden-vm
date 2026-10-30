@@ -24,6 +24,10 @@ use {
     RELATION_DIGEST_2,
     RELATION_DIGEST_3,
 } from miden::core::sys::vm::parameters
+use {
+    DEFERRED_ROOT_PTR,
+    KERNEL_COMMITMENT_PTR,
+} from miden::core::sys::vm::layout
 use miden::core::mem
 use miden::core::stark::utils
 use miden::core::stark::verifier
@@ -48,12 +52,6 @@ const CORE_BOUNDARY_LOOKUP_TERMS = 3
 # common estimator's supported u32 domain.
 const LOG_HEIGHT_MIN = 6
 const LOG_HEIGHT_MAX = 29
-
-# Offset of K in the P | K | I | O claim encoding.
-const KERNEL_COMMITMENT_OFFSET = 4
-
-# Offset of D in the P | D boundary-input block.
-const DEFERRED_ROOT_OFFSET = 4
 
 # Domain tag for the kernel commitment:
 # (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
@@ -145,7 +143,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc materialize_kernel_witness()
-    padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+    padw mem_loadw_le.KERNEL_COMMITMENT_PTR
     # => [K, ...]
     adv.push_mapvaln
     adv_push
@@ -315,7 +313,7 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     # => [security_descriptor(12), scratch(4)]
 
     swapw.3
-    exec.layout::boundary_inputs_ptr add.DEFERRED_ROOT_OFFSET mem_loadw_le
+    mem_loadw_le.DEFERRED_ROOT_PTR
     swapw.3
     # => [security_descriptor(12), D]
 end

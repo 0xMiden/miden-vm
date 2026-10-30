@@ -20,7 +20,9 @@ use {
 } from miden::core::sys::pvm::parameters
 use miden::core::crypto::hashes::eidos
 use miden::core::stark::deep_queries
-use miden::core::sys::pvm::layout
+use {
+    PREPROCESSED_COM_PTR,
+} from miden::core::sys::pvm::layout
 
 # ERRORS
 # =================================================================================================
@@ -103,7 +105,7 @@ proc process_preprocessed_trace(
 
     movdn.3 movdn.2
     push.0.0
-    exec.layout::preprocessed_com_ptr mem_loadw_le
+    mem_loadw_le.PREPROCESSED_COM_PTR
     #=> [PREPROCESSED_ROOT, full_depth, index, query_ptr]
 
     # Authenticate at the setup-fixed tree depth using the folded natural-order index.
@@ -114,19 +116,17 @@ proc process_preprocessed_trace(
     adv.push_mapval
     #=> [LEAF_VALUE, PREPROCESSED_ROOT, full_depth, index, query_ptr]
 
-    mem_loadw_le.TMP2_PTR
-    swapw
-    #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
-
+    padw mem_loadw_le.TMP2_PTR
     push.PREPROCESSED_LMCS_INIT_CV
-    swapw padw
+    swapdw
+    #=> [LEAF_VALUE, ROOT, CV, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
+    # The leaf and root words are dead; adv_pipe overwrites them as the first block.
     exec.load_preprocessed_trace
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 proc load_preprocessed_trace(
@@ -157,16 +157,15 @@ proc process_main_trace(
     mem_storew_le.TMP3_PTR
     adv.push_mapval
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.MAIN_LMCS_INIT_CV
-    swapw padw
+    movdnw.2
     exec.load_main_trace
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 proc load_main_trace(
@@ -197,16 +196,15 @@ proc process_aux_trace(
     mem_storew_le.TMP3_PTR
     adv.push_mapval
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.AUX_LMCS_INIT_CV
-    swapw padw
+    movdnw.2
     exec.load_aux_trace
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 proc load_aux_trace(
@@ -232,21 +230,21 @@ proc process_quotient_trace(
 ) -> (word, types::HornerState, u32, ptr<word>)
     mem_loadw_le.COMPOSITION_POLY_COM_PTR
 
-    dup.9 movup.9
+    # Prepare [depth, index, ROOT(4), ...] with native stack moves.
+    movup.8 dup.9 swap
     mtree_get
     mem_storew_le.TMP3_PTR
     adv.push_mapval
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.QUOTIENT_LMCS_INIT_CV
-    swapw padw
+    movdnw.2
     exec.load_quotient_trace
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 proc load_quotient_trace(

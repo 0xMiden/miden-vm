@@ -1,10 +1,24 @@
-use {
-    PUBLIC_INPUTS_ADDRESS_PTR,
-} from miden::core::stark::constants
+use {PUBLIC_INPUTS_ADDRESS_PTR} from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
+use {
+    AUX_ALPHA_C0_PTR,
+    AUX_ALPHA_C1_PTR,
+    AUX_BETA_C1_PTR,
+    AUX_RAND_ELEM_PTR,
+    BOUNDARY_INPUTS_DEFERRED_OFFSET,
+    BOUNDARY_INPUTS_PROGRAM_OFFSET,
+    BOUNDARY_INPUTS_PTR,
+    BUS_GAMMA_C1_PTR,
+    BUS_GAMMA_PTR,
+    CLAIM_COMMITMENT_PTR,
+    CLAIM_PTR,
+    C_TOTAL_C1_PTR,
+    C_TOTAL_PTR,
+    NUM_KERNEL_PROCEDURES_PTR,
+} from miden::core::sys::vm::layout
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -74,12 +88,6 @@ const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 
-# Word offsets into the boundary-inputs block at `boundary_inputs_ptr`:
-#   [ program_digest (+0) | deferred_root (+4) ].
-const BOUNDARY_INPUTS_PROGRAM_OFFSET    = 0
-const BOUNDARY_INPUTS_DEFERRED_OFFSET   = 4
-
-
 # CONSTANTS GETTERS
 # =================================================================================================
 
@@ -109,7 +117,7 @@ pub proc process_public_inputs()
     # => [...]
 
     # 2) Absorb [CLAIM_HASH | D].
-    padw exec.layout::claim_commitment_ptr mem_loadw_le
+    padw mem_loadw_le.CLAIM_COMMITMENT_PTR
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
@@ -135,9 +143,9 @@ end
 #! Output: [...]
 pub proc stage_boundary_inputs()
     # program_digest: claim region (+0) -> boundary_inputs (+0).
-    padw exec.layout::claim_ptr mem_loadw_le
+    padw mem_loadw_le.CLAIM_PTR
     # => [P, ...]
-    exec.layout::boundary_inputs_ptr mem_storew_le
+    mem_storew_le.BOUNDARY_INPUTS_PTR
     # => [P, ...]
 
     # deferred_root from advice -> boundary_inputs (+4), loaded over the dead P word.
@@ -165,7 +173,7 @@ proc compute_bus_gamma()
     dup.1 dup.1 ext2mul   # β^8
     dup.1 dup.1 ext2mul   # β^16 = γ
     push.0.0 movup.3 movup.3
-    exec.layout::bus_gamma_ptr mem_storew_le
+    mem_storew_le.BUS_GAMMA_PTR
     dropw
 end
 
@@ -174,8 +182,8 @@ end
 #! Input:  [...]
 #! Output: [β0, β1, ...]
 proc push_beta() -> types::QuadFelt
-    exec.layout::aux_rand_elem_ptr add.1 mem_load
-    exec.layout::aux_rand_elem_ptr mem_load
+    mem_load.AUX_BETA_C1_PTR
+    mem_load.AUX_RAND_ELEM_PTR
 end
 
 #! Computes the bus prefix `α + i·γ` for bus scale factor `i = bus_id + 1`.
@@ -184,13 +192,13 @@ end
 #! Output: [p0, p1, ...]
 proc push_alpha_plus_i_gamma(bus_id_plus_one: u8) -> types::QuadFelt
     dup
-    exec.layout::bus_gamma_ptr add.1 mem_load mul
+    mem_load.BUS_GAMMA_C1_PTR mul
     # => [i·γ1, i, ...]
     swap
-    exec.layout::bus_gamma_ptr mem_load mul
+    mem_load.BUS_GAMMA_PTR mul
     # => [i·γ0, i·γ1, ...]
-    exec.layout::aux_rand_elem_ptr add.3 mem_load
-    exec.layout::aux_rand_elem_ptr add.2 mem_load
+    mem_load.AUX_ALPHA_C1_PTR
+    mem_load.AUX_ALPHA_C0_PTR
     # => [α0, α1, i·γ0, i·γ1, ...]
     ext2add
     # => [p0, p1, ...]
@@ -303,7 +311,7 @@ pub proc compute_outer_logup_correction()
     # acc = 0; build [acc0, acc1, base, N] for the kernel fold.
     push.0.0
     exec.layout::kernel_witness_ptr movdn.2
-    exec.layout::num_kernel_procedures_ptr mem_load movdn.3
+    mem_load.NUM_KERNEL_PROCEDURES_PTR movdn.3
     # => [acc0, acc1, base, N, ...]   (acc = 0)
 
     #    Request a) kernel digests: Σ_i 1 / ((α + γ) + msg(digest_i)).
@@ -331,8 +339,8 @@ pub proc compute_outer_logup_correction()
     # => [acc0, acc1, ...]   (acc = requests − response)
 
     #    Store c_total once.
-    exec.layout::c_total_ptr mem_store
-    exec.layout::c_total_ptr add.1 mem_store
+    mem_store.C_TOTAL_PTR
+    mem_store.C_TOTAL_C1_PTR
     # => [...]
 end
 
@@ -359,22 +367,12 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc load_public_inputs()
-    padw padw padw
-    # => [SCRATCH(12), ...]
-    exec.layout::claim_ptr add.8
-    movdn.12
     mem_load.PUBLIC_INPUTS_ADDRESS_PTR
-    movdn.12
-    # => [SCRATCH(12), pi_ptr, claim_io_ptr, ...]
-
-    # 4 iterations x 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
-    repeat.4
-        exec.public_inputs::load_base_store_extension_double_word_from_mem
-    end
-    # => [SCRATCH'(12), pi_ptr + 64, claim_io_ptr + 32, ...]
-
+    exec.layout::claim_ptr add.8
+    padw padw padw
+    # => [scratch(12), src, dst, ...]
+    repeat.4 exec.public_inputs::copy_base_to_extension_double_word end
     dropw dropw dropw drop drop
-    # => [...]
 end
 
 #! Observe the Miden AIR shape into the Fiat-Shamir transcript.

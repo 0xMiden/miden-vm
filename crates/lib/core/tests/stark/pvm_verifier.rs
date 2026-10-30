@@ -75,6 +75,7 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
         summary.padded_trace_len() <= 1 << 19,
         "the fixed SHA programs must not force Keccak-only recursion past 2^19 rows"
     );
+    super::deep_queries::check_pvm_queries(&test, &proof);
 }
 
 #[test]

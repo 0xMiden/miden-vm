@@ -3,11 +3,12 @@ use {
     CURRENT_TRACE_ROW_ADDRESS_PTR,
     DEEP_ALPHA_ADVICE_PTR,
     DEEP_COMPOSITION_COEFS_PTR,
+    DEEP_POINT_BATCHING_COEF_HI_PTR,
     DOMAIN_OFFSET_PTR,
     FRI_COM_PTR,
     FRI_QUERIES_ADDRESS_PTR,
     HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR,
-    LDE_DOMAIN_INFO_PTR,
+    LDE_DOMAIN_GENERATOR_PTR,
     OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
     OOD_POINT_PTR,
     TMP1_PTR,
@@ -32,24 +33,18 @@ proc compute_denominators(
     index: u32,
     query_ptr: ptr<word>,
 ) -> (types::EvaluationPair, word, felt, u32, ptr<word>)
-    # Compute poe and x.
-    mem_loadw_le.LDE_DOMAIN_INFO_PTR
-    #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
-    movup.2
-    #=> [domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
-    dup.8
-    #=> [index, domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
+    # Discard one scratch slot so the index is at native dup.7 depth.
+    drop dup.7
+    mem_load.LDE_DOMAIN_GENERATOR_PTR swap
+    # => [index, domain_gen, scratch(3), Y(4), index, query_ptr, ...]
     exp.u32
     dup movdn.8
     mem_load.DOMAIN_OFFSET_PTR mul
-    #=> [x, lde_size, depth, 0, Y, poe, index, ...]
+    # => [x, scratch(3), Y(4), poe, index, query_ptr, ...]
 
-    # Get z and gz from memory
-    movdn.3
-    #=> [lde_size, depth, 0, x, Y, poe, index, ...]
-    push.0
+    movdn.3 push.0
     mem_loadw_le.TMP1_PTR
-    #=> [-z0, -z1, -gz0, -gz1, x, Y, poe, index, ...]
+    # => [-z0, -z1, -gz0, -gz1, x, Y(4), poe, index, query_ptr, ...]
 
     # Compute denominators and place poe after Y for word alignment.
     dup.4 add
@@ -78,44 +73,33 @@ proc divide_and_add(
     fixed_evaluations: types::EvaluationPair,
     query_ptr: ptr<word>,
 ) -> (types::QuadFelt, types::DeepQueryCursor, types::EvaluationPair, ptr<word>)
-    swapw
-    #=> [X, Z, Y, W, query_ptr, ...]
-    dupw.3
-    #=> [W, X, Z, Y, query_ptr, ...]
-    #=> [q_z_0, q_z_1, q_gz_0, q_gz_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
-
-    movdn.5 movdn.5
-    #=> [q_gz_0, q_gz_1, q_x_at_alpha_0, q_x_at_alpha_1, q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
-
+    # Form (q_x + q_z) * d_gz, retaining both denominators for their product.
+    movup.7 movup.7
+    dup.13 dup.13
     ext2add
-    #=> [num_gz_0, num_gz_1, q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
-
-    swap movdn.9 movdn.8
-    #=> [q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, num_gz_0, num_gz_1, Y, query_ptr, ...]
-
-    ext2add
-    #=> [num_z_0, num_z_1, Z, num_gz_0, num_gz_1, Y, query_ptr, ...]
-
-    movup.3 movup.3
-    ext2div
-    #=> [res_z_0, res_z_1, gz0_0, gz0_1, num_gz_0, num_gz_1, Y, query_ptr, ...]
-    movdn.5 movdn.5
-    #=> [gz0_0, gz0_1, num_gz_0, num_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
-    ext2div
-    #=> [res_gz_0, res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
-
-    # Multiply res_gz by challenge_points (beta) for point batching.
-    # DEEP formula: Q(X) = res_z + beta * res_gz
-    # beta is stored at DEEP_COMPOSITION_COEFS_PTR (positions 0,1).
-    mem_load.DEEP_COMPOSITION_COEFS_PTR
-    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_load
-    swap
-    #=> [beta0, beta1, res_gz_0, res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
+    dup.5 dup.5
     ext2mul
-    #=> [beta_res_gz_0, beta_res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
+    # => [term_z(2), denominators(4), q_x(2), cursor(4), W(4), query_ptr, ...]
 
+    # Form beta * (q_x + q_gz) * d_z.
+    movup.7 movup.7
+    dup.15 dup.15
     ext2add
-    # => [eval0, eval1, Y, W, query_ptr, ...]
+    mem_load.DEEP_POINT_BATCHING_COEF_HI_PTR
+    mem_load.DEEP_COMPOSITION_COEFS_PTR
+    ext2mul
+    dup.5 dup.5
+    ext2mul
+    ext2add
+    # => [numerator(2), denominators(4), cursor(4), W(4), query_ptr, ...]
+
+    # numerator / (d_z * d_gz) = (q_x + q_z) / d_z + beta * (q_x + q_gz) / d_gz.
+    # In the extension field, d_z * d_gz is nonzero exactly when both denominators are nonzero.
+    # ext2div checks the inverse of that product, rejecting either zero denominator.
+    movdn.5 movdn.5
+    ext2mul
+    ext2div
+    # => [eval0, eval1, cursor(4), W(4), query_ptr, ...]
 end
 
 #! Prepares the stack for the computation of the DEEP composition polynomial FRI queries.

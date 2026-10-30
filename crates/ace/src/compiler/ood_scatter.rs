@@ -6,7 +6,7 @@ use crate::{AceError, EXT_DEGREE};
 
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 const WORD_FELTS: usize = 4;
-// The first word holds the active row pointer; dispatch pairs follow it.
+// The first word holds the active row pointer; word-aligned dispatch records follow it.
 const OOD_SCATTER_SLOTS_OFFSET: usize = 4;
 
 struct ScatterSegment {
@@ -20,9 +20,9 @@ struct ScatterGroup {
     name: &'static str,
     /// Nonempty segments in canonical row order.
     segments: Vec<ScatterSegment>,
-    /// First dispatch slot, or `None` for a group with at most one occupant.
-    /// Dispatched groups have one segment per AIR and one slot per proof position.
-    slot_start: Option<usize>,
+    /// Index among dispatched groups, or `None` for a group with at most one occupant.
+    /// Two consecutive dispatched groups share one record word per proof position.
+    dispatch_index: Option<usize>,
 }
 
 /// Canonical row destinations and proof-order dispatch slots for OOD evaluations.
@@ -75,7 +75,7 @@ impl OodScatterPlan {
 
         let mut groups = Vec::with_capacity(4);
         let mut dst = 0;
-        let mut slots = 0;
+        let mut dispatched_groups = 0;
         for (name, widths) in [("preprocessed", preprocessed), ("main", main), ("aux", aux)] {
             let occupied = widths.iter().filter(|&&width| width != 0).count();
             // Proof positions rank all AIRs. A partially occupied group would need ranks
@@ -88,10 +88,10 @@ impl OodScatterPlan {
                     ),
                 });
             }
-            let slot_start = if occupied > 1 {
-                let start = slots;
-                slots += num_airs;
-                Some(start)
+            let dispatch_index = if occupied > 1 {
+                let index = dispatched_groups;
+                dispatched_groups += 1;
+                Some(index)
             } else {
                 None
             };
@@ -108,7 +108,7 @@ impl OodScatterPlan {
                     segment
                 })
                 .collect();
-            groups.push(ScatterGroup { name, segments, slot_start });
+            groups.push(ScatterGroup { name, segments, dispatch_index });
         }
         groups.push(ScatterGroup {
             name: "quotient",
@@ -116,7 +116,7 @@ impl OodScatterPlan {
                 dst,
                 blocks: quotient_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
             }],
-            slot_start: None,
+            dispatch_index: None,
         });
         let mut lengths: Vec<_> = groups
             .iter()
@@ -134,12 +134,18 @@ impl OodScatterPlan {
 
     /// Number of wire segments whose destinations depend on proof order.
     pub fn dispatched_slots(&self) -> usize {
-        self.groups.iter().filter(|group| group.slot_start.is_some()).count() * self.num_airs
+        self.groups.iter().filter(|group| group.dispatch_index.is_some()).count() * self.num_airs
     }
 
-    /// Table-relative range of destination/digest-pointer pairs, in felts.
+    /// Table-relative range of packed destination/digest-pointer records, in felts.
+    ///
+    /// Each word holds two dispatched groups' pairs for one proof position. Records for the
+    /// first two groups precede those for the next two. An unpaired group uses zero padding
+    /// for its word's second pair; that padding is included in the range.
     pub fn proof_order_pairs(&self) -> Range<usize> {
-        OOD_SCATTER_SLOTS_OFFSET..OOD_SCATTER_SLOTS_OFFSET + 2 * self.dispatched_slots()
+        let groups = self.dispatched_slots() / self.num_airs;
+        OOD_SCATTER_SLOTS_OFFSET
+            ..OOD_SCATTER_SLOTS_OFFSET + WORD_FELTS * self.num_airs * groups.div_ceil(2)
     }
 
     /// Table-relative range of word-aligned procedure digests, in felts.
@@ -165,10 +171,45 @@ impl OodScatterPlan {
 
     /// Renders pipe helpers, the supplied proof-order map pass, table staging, and OOD ingest.
     ///
-    /// The enclosing MASM module must import `constants`, `types`, and its relation's `layout`.
-    /// The layout supplies the scatter-table and proof-order map accessors.
+    /// The enclosing MASM module must import `types` and its relation's `layout`.
+    /// The layout supplies the scatter-table pointer and proof-order map accessors.
     pub fn render(&self, proof_order_maps: &str) -> String {
+        self.render_with_table_base(proof_order_maps, None)
+    }
+
+    /// Renders for a fixed table base, folding record addresses at assembly time.
+    ///
+    /// Uses the same module imports and stack contracts as [`Self::render`]. `table_base` must
+    /// be a MASM constant expression for the aligned u32 address returned by
+    /// `layout::ood_scatter_table_ptr`; table staging and row ingestion must use the same base.
+    pub fn render_with_static_table(&self, proof_order_maps: &str, table_base: &str) -> String {
+        self.render_with_table_base(proof_order_maps, Some(table_base))
+    }
+
+    fn render_with_table_base(&self, proof_order_maps: &str, table_base: Option<&str>) -> String {
         let mut out = String::new();
+        if let Some(base) = table_base {
+            writeln!(out, "const OOD_SCATTER_TABLE_PTR = {base}")
+                .expect("writing to String cannot fail");
+            for (record, offset) in self.proof_order_pairs().step_by(WORD_FELTS).enumerate() {
+                writeln!(
+                    out,
+                    "const OOD_SCATTER_RECORD_{record}_PTR = OOD_SCATTER_TABLE_PTR + {offset}",
+                )
+                .expect("writing to String cannot fail");
+            }
+            out.push('\n');
+        }
+        let row_base_load = if table_base.is_some() {
+            "mem_load.OOD_SCATTER_TABLE_PTR"
+        } else {
+            "exec.layout::ood_scatter_table_ptr mem_load"
+        };
+        let row_base_store = if table_base.is_some() {
+            "mem_store.OOD_SCATTER_TABLE_PTR"
+        } else {
+            "exec.layout::ood_scatter_table_ptr mem_store"
+        };
         for &blocks in &self.lengths {
             writeln!(
                 out,
@@ -212,29 +253,39 @@ pub proc stage_ood_scatter_table()
             .expect("writing to String cannot fail");
         }
         out.push_str("    exec.layout::proof_order_positions_ptr\n    # => [pos_ptr, table]\n");
-        if self.dispatched_slots() != 0 {
+        let dispatched: Vec<_> =
+            self.groups.iter().filter(|group| group.dispatch_index.is_some()).collect();
+        if !dispatched.is_empty() {
             for air in 0..self.num_airs {
                 writeln!(
                     out,
-                    "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
-                    {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]",
+                    "\n    # AIR {air}: address each packed word by its proof position.\n    \
+                    {position} mul.4 dup.2 add\n    # => [base, pos_ptr, table]",
                     position = scatter_position_load(air)
                 )
                 .expect("writing to String cannot fail");
-                for group in &self.groups {
-                    let Some(slot_start) = group.slot_start else { continue };
-                    let segment = &group.segments[air];
-                    let slot = OOD_SCATTER_SLOTS_OFFSET + 2 * slot_start;
+                for (record, groups) in dispatched.chunks(2).enumerate() {
+                    if let Some(second) = groups.get(1) {
+                        let segment = &second.segments[air];
+                        writeln!(
+                            out,
+                            "    dup.2 add.{digest} push.{dst}",
+                            digest = self.digest_offset_for(segment.blocks),
+                            dst = segment.dst,
+                        )
+                        .expect("writing to String cannot fail");
+                    } else {
+                        out.push_str("    push.0.0\n");
+                    }
+                    let first = &groups[0].segments[air];
+                    let slot = OOD_SCATTER_SLOTS_OFFSET + WORD_FELTS * self.num_airs * record;
                     writeln!(
                         out,
-                        "    # {group}: {blocks} blocks at row offset {dst}\n    \
-                        push.{dst} dup.1 add.{slot} mem_store\n    \
-                        dup.2 add.{digest} dup.1 add.{next} mem_store",
-                        group = group.name,
-                        blocks = segment.blocks,
-                        dst = segment.dst,
-                        digest = self.digest_offset_for(segment.blocks),
-                        next = slot + 1,
+                        "    dup.4 add.{digest} push.{dst}\n    \
+                        # => [dst0, pipe0, dst1, pipe1, base, pos_ptr, table]\n    \
+                        dup.4 add.{slot} mem_storew_le dropw",
+                        digest = self.digest_offset_for(first.blocks),
+                        dst = first.dst,
                     )
                     .expect("writing to String cannot fail");
                 }
@@ -260,55 +311,61 @@ pub proc process_row_ood_evaluations(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    dup.12 exec.layout::ood_scatter_table_ptr mem_store
+    dup.12 {row_base_store}
+    # Dispatch records reuse rate slots; every nonempty pipe overwrites both rate words.
+    # Word swaps expose the destination beside the record, preserving CV and Horner state.
 "#,
             row_felts = self.row_felts
         )
         .expect("writing to String cannot fail");
         for group in &self.groups {
             for (position, segment) in group.segments.iter().enumerate() {
-                match group.slot_start {
-                    Some(start) => {
-                        let pair = OOD_SCATTER_SLOTS_OFFSET + 2 * (start + position);
+                match group.dispatch_index {
+                    Some(index) => {
+                        let record = index / 2 * self.num_airs + position;
+                        let record_load = if table_base.is_some() {
+                            format!("mem_loadw_le.OOD_SCATTER_RECORD_{record}_PTR")
+                        } else {
+                            let offset = OOD_SCATTER_SLOTS_OFFSET + WORD_FELTS * record;
+                            format!("exec.layout::ood_scatter_table_ptr add.{offset} mem_loadw_le")
+                        };
                         writeln!(
                             out,
                             r#"    # {group} group, proof position {position}
-    exec.layout::ood_scatter_table_ptr dup add.{pair} mem_load swap mem_load add
-    swap.13 drop
-    exec.layout::ood_scatter_table_ptr add.{digest} mem_load
-    dynexec"#,
+    {record_load}{select}
+    {row_base_load} add
+    swapw swapw.3 swap.4 swapw.3
+    # => [scratch(5), pipe_address, scratch(2), cv(4), ptr, alpha_ptr, acc0, acc1]
+    dup.5 dynexec"#,
                             group = group.name,
-                            digest = pair + 1,
+                            select = if index % 2 == 0 { "" } else { " movup.3 movup.3" },
                         )
                         .expect("writing to String cannot fail");
                     },
                     None => {
                         writeln!(
                             out,
-                            r#"    # {group} group, sole occupant: {blocks} blocks at row offset {dst}
-    exec.layout::ood_scatter_table_ptr mem_load{offset}
-    swap.13 drop
-    exec.pipe_{blocks}"#,
-                            group = group.name,
-                            blocks = segment.blocks,
-                            dst = segment.dst,
-                            offset = if segment.dst == 0 {
-                                String::new()
-                            } else {
-                                format!(" add.{}", segment.dst)
-                            },
+                            "    # {} group, sole occupant: {} blocks at row offset {}",
+                            group.name, segment.blocks, segment.dst,
                         )
                         .expect("writing to String cannot fail");
+                        // Offset zero is the first nonempty segment, so the input pointer is ready.
+                        if segment.dst != 0 {
+                            writeln!(
+                                out,
+                                "    {row_base_load} add.{}\n    swap.13 drop",
+                                segment.dst,
+                            )
+                            .expect("writing to String cannot fail");
+                        }
+                        writeln!(out, "    exec.pipe_{}", segment.blocks)
+                            .expect("writing to String cannot fail");
                     },
                 }
             }
         }
-        writeln!(
-            out,
-            "    exec.layout::ood_scatter_table_ptr mem_load add.{}\n    swap.13 drop\nend",
-            self.row_felts
-        )
-        .expect("writing to String cannot fail");
+        // The nonempty quotient is last in wire and canonical order; its pipe returns the row end.
+        out.push_str("end\n");
         out
     }
 }

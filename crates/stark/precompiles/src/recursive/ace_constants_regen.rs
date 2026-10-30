@@ -122,6 +122,12 @@ struct CircuitShape {
 impl PvmReadLayout {
     /// Derive every READ-region boundary from the circuit's own `InputLayout`.
     fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
+        // The transcript stages beta and alpha with one word store. Field aliases in the
+        // generated layout must describe that same pair of adjacent extension elements.
+        let beta = layout.index(InputKey::AuxRandBeta).ok_or("PVM layout is missing beta")?;
+        if layout.index(InputKey::AuxRandAlpha) != Some(beta + 1) {
+            return Err("PVM lookup challenges must be adjacent in beta, alpha order".into());
+        }
         let boundary_specs = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
             ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
@@ -424,6 +430,7 @@ fn render_pvm_layout(
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
 use miden::core::stark::types
+use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 
 "#
     );
@@ -446,7 +453,15 @@ use miden::core::stark::types
                 | "AUX_BUS_BOUNDARY_PTR"
                 | "AUXILIARY_ACE_INPUTS_PTR"
         ) {
-            writeln!(out, "const {} = {}\n", region.constant, region.ptr)
+            let visibility = if matches!(
+                region.constant,
+                "PUBLIC_INPUTS_PTR" | "AUX_RAND_ELEM_PTR" | "AUX_BUS_BOUNDARY_PTR"
+            ) {
+                "pub "
+            } else {
+                ""
+            };
+            writeln!(out, "{visibility}const {} = {}\n", region.constant, region.ptr)
                 .expect("writing to String cannot fail");
         } else {
             out.push('\n');
@@ -458,34 +473,37 @@ use miden::core::stark::types
 const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
 
 ### 4 felts: {bus_gamma_ptr}..{c_total_ptr}. Stores gamma = beta^18.
-const BUS_GAMMA_PTR = {bus_gamma_ptr}
+pub const BUS_GAMMA_PTR = {bus_gamma_ptr}
 
 ### 4 felts: {c_total_ptr}..{current_trace_row_ptr}. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
-const C_TOTAL_PTR = {c_total_ptr}
+pub const C_TOTAL_PTR = {c_total_ptr}
 
 ### {query_row_felts} felts: {current_trace_row_ptr}..{preprocessed_com_ptr}. Stores one opened query row in commitment-group order.
 const CURRENT_TRACE_ROW_PTR = {current_trace_row_ptr}
 
 ### 4 felts: {preprocessed_com_ptr}..{ood_scatter_table_ptr}. Stores the trusted preprocessed-tree commitment for DEEP openings.
-const PREPROCESSED_COM_PTR = {preprocessed_com_ptr}
+pub const PREPROCESSED_COM_PTR = {preprocessed_com_ptr}
 
 ### {OOD_SCATTER_TABLE_FELTS} felts: {ood_scatter_table_ptr}..{proof_order_positions_ptr}. Out-of-domain ingest scatter table:
 ###
 ###   +0            base address of the out-of-domain row being ingested
-###   +{pair_start:<3}.. +{pair_end:<6}per proof position, in stream order: (row-relative destination, digest address)
+###   +{pair_start:<3}.. +{pair_end:<6}packed main/auxiliary dispatch words, one per proof position
 ###   +{digest_start:<3}.. +{digest_end:<6}`pipe_k` procedure digests reached by `dynexec`, one word each
+###
+### Each record is [main destination, main pipe address, aux destination, aux pipe address].
+### Destinations are row-relative; pipe addresses point to the stored procedure digests.
 ###
 ### The internal offsets and the reserve's sufficiency are owned by the regeneration tool,
 ### which derives them from the chiplet widths and fills `sys/pvm/ood_frames.masm`
 ### accordingly.
-const OOD_SCATTER_TABLE_PTR = {ood_scatter_table_ptr}
+pub const OOD_SCATTER_TABLE_PTR = {ood_scatter_table_ptr}
 
 ### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each
 ### chiplet, in ChipletAir::all() order, within the height-sorted proof order.
 ### {proof_order_liveness}
 ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both
 ### ingest scatters.
-const PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}
+pub const PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}
 
 ### {NUM_CHIPLETS} felts: {proof_order_ids_ptr}..{allocation_end}. `id_by_pos`: the
 ### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;
@@ -498,6 +516,47 @@ const PROOF_ORDER_IDS_PTR = {proof_order_ids_ptr}
         digest_start = scatter_table.pipe_digests.start,
     )
     .expect("writing to String cannot fail");
+
+    out.push_str("\n### Coordinates of the lookup challenges and fixed-boundary state.\n");
+    for (name, base, offset) in [
+        ("AUX_BETA_C1_PTR", "AUX_RAND_ELEM_PTR", 1),
+        ("AUX_ALPHA_C0_PTR", "AUX_RAND_ELEM_PTR", 2),
+        ("AUX_ALPHA_C1_PTR", "AUX_RAND_ELEM_PTR", 3),
+        ("BUS_GAMMA_C1_PTR", "BUS_GAMMA_PTR", 1),
+        ("C_TOTAL_C1_PTR", "C_TOTAL_PTR", 1),
+    ] {
+        writeln!(out, "pub const {name} = {base} + {offset}")
+            .expect("writing to String cannot fail");
+    }
+    out.push_str("\n### Public values occupy consecutive quadratic-extension slots.\n");
+    let public_felts = layout.regions[0].extent;
+    for offset in 1..public_felts {
+        writeln!(
+            out,
+            "pub const PUBLIC_INPUT_{}_C{}_PTR = PUBLIC_INPUTS_PTR + {offset}",
+            offset / 2,
+            offset % 2,
+        )
+        .expect("writing to String cannot fail");
+    }
+    out.push_str("\n### Canonical AIR heights and their positions in proof order.\n");
+    for air in 1..NUM_CHIPLETS {
+        writeln!(
+            out,
+            "pub const CANONICAL_AIR_{air}_LOG_HEIGHT_PTR = LOG_AIR_TRACE_LENGTHS_PTR + {air}\n\
+             pub const AIR_{air}_PROOF_POSITION_PTR = PROOF_ORDER_POSITIONS_PTR + {air}",
+        )
+        .expect("writing to String cannot fail");
+    }
+    out.push_str("\n### Words of the normalized boundary array, two extension values per word.\n");
+    for word in 1..NUM_CHIPLETS / 2 {
+        writeln!(
+            out,
+            "pub const AUX_BOUNDARY_WORD_{word}_PTR = AUX_BUS_BOUNDARY_PTR + {}",
+            word * 4
+        )
+        .expect("writing to String cannot fail");
+    }
 
     for (accessor, constant) in [
         ("public_inputs_ptr", "PUBLIC_INPUTS_PTR"),

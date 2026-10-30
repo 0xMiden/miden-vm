@@ -12,6 +12,32 @@ const ADVICE_LENGTH_PREFIXES: usize = 3; // queries, layers, and remainder
 /// Elements per layer record: the commitment word followed by `[d_size, t_depth, a0, a1]`.
 const LAYER_RECORD_WIDTH: usize = 2 * WORD_SIZE;
 
+/// The precomputed leaf frame must follow the native hash domain and FRI row encoding.
+#[test]
+fn fri_row_hash_frame_matches_native() {
+    use std::sync::Arc;
+
+    use miden_assembly::{ModuleParser, Path, ast::ConstantExpr, debuginfo::DefaultSourceManager};
+    use miden_crypto::hash::eidos::{Eidos, domains::LMCS_LEAF};
+
+    let module = ModuleParser::default()
+        .parse_str(
+            Some(Path::new("miden::core::pcs::fri::frie2f4")),
+            include_str!("../../../asm/pcs/fri/frie2f4.masm"),
+            Arc::new(DefaultSourceManager::default()),
+        )
+        .expect("FRI module parses");
+    let constant = module
+        .constants()
+        .find(|c| c.name().as_str() == "FRI_ROW_HASH_INIT_CV")
+        .expect("FRI row frame is declared");
+    let ConstantExpr::Word(word) = &constant.value else {
+        panic!("FRI row frame must be a word");
+    };
+    let encoded_len = u32::try_from(FOLD_ARITY * EXTENSION_DEGREE).unwrap();
+    assert_eq!(Word::new(word.inner().0), Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+}
+
 const FRI_PREPROCESS_SOURCE: &str = "
     use {FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR} from miden::core::stark::constants
     use {LDE_DOMAIN_GENERATOR_PTR, REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
@@ -139,6 +165,7 @@ struct FriTestData {
     advice_stack: Vec<u64>,
     store: MerkleStore,
     advice_map: BTreeMap<Word, Vec<Felt>>,
+    final_queries: Vec<[Felt; WORD_SIZE]>,
 }
 
 /// Generates a fold-4 FRI proof over a random polynomial of degree less than
@@ -172,23 +199,132 @@ fn build_fri_test(log_poly_degree: u8, log_final_degree: u8) -> FriTestData {
         advice_stack,
         store,
         advice_map: BTreeMap::from_iter(fri.advice_maps),
+        final_queries: fri.final_queries,
     }
 }
 
-#[test]
-fn fri_fold4_ext2_remainder64() {
-    let t = build_fri_test(14, 6);
+#[rstest::rstest]
+#[case::remainder64(14, 6)]
+#[case::remainder128(13, 7)]
+#[case::remainder64_zero_layers(6, 6)]
+#[case::remainder128_zero_layers(7, 7)]
+fn fri_verifier_matches_rust(#[case] log_poly_degree: u8, #[case] log_final_degree: u8) {
+    use std::sync::{Arc, Mutex};
+
+    use miden_core::events::EventName;
+    use miden_processor::ProcessorState;
+
+    let mut t = build_fri_test(log_poly_degree, log_final_degree);
+    let caller: Vec<u64> = (101..116).collect();
+    let stack: Vec<_> =
+        core::iter::once(t.domain_generator).chain(caller.iter().copied()).collect();
+    let advice_sentinel = 12345;
+    t.advice_stack.push(advice_sentinel);
     let test =
-        build_test!(&t.source, &[t.domain_generator], &t.advice_stack, t.store, t.advice_map);
-    test.expect_stack(&[]);
+        build_test!(&t.source, &stack, &t.advice_stack, t.store.clone(), t.advice_map.clone());
+    let (output, _) = test.execute_for_output().expect("FRI proof must verify");
+
+    // The caller values pass through overflow and become observable when verification returns.
+    let mut expected: Vec<_> = caller.into_iter().map(Felt::new_unchecked).collect();
+    expected.push(Felt::ZERO);
+    assert_eq!(output.stack.get_num_elements(16), expected);
+    assert_eq!(output.advice.stack(), [Felt::new_unchecked(advice_sentinel)]);
+    test.check_constraints();
+
+    let source = t.source.replace("use miden::core::pcs::fri::frie2f4", "use test::frie2f4");
+    let module = include_str!("../../../asm/pcs/fri/frie2f4.masm");
+    // Observe [poe_final, index_final, e0, e1] before either remainder check consumes it.
+    let marker = "    sub\n    movup.2 drop";
+    assert_eq!(module.matches(marker).count(), 2, "both remainder paths must be observed");
+    let observed_module =
+        module.replace(marker, &format!("    trace.event(\"test::fri_final_query\")\n{marker}"));
+    for repeat_first in [false, true] {
+        let module = if repeat_first {
+            // Keep advancing the loop cursor, but verify the first query on every iteration.
+            let load = "        movup.4\n        mem_loadw_le";
+            assert_eq!(observed_module.matches(load).count(), 2);
+            observed_module.replace(load,
+                "        movup.4 drop\n        mem_load.FRI_QUERIES_ADDRESS_PTR\n        mem_loadw_le")
+        } else {
+            observed_module.clone()
+        };
+        let actual = Arc::new(Mutex::new(Vec::<[Felt; WORD_SIZE]>::new()));
+        let captured = actual.clone();
+        let test =
+            build_test!(&source, &stack, &t.advice_stack, t.store.clone(), t.advice_map.clone())
+                .with_module("test::frie2f4", module)
+                .with_trace_handler(
+                    EventName::new("test::fri_final_query"),
+                    move |state: &ProcessorState| {
+                        // Two trace-event IDs and two remainder pointers precede the query word.
+                        captured.lock().unwrap().push(state.get_stack_word(4).into());
+                        Ok(())
+                    },
+                );
+        test.execute_for_output().expect("each selected query is valid");
+        let actual = actual.lock().unwrap();
+        assert_eq!(
+            actual.len(),
+            t.final_queries.len(),
+            "every query must reach the remainder check"
+        );
+        if repeat_first {
+            assert!(actual.iter().all(|query| *query == t.final_queries[0]));
+            assert_ne!(
+                *actual, t.final_queries,
+                "the Rust comparison must detect a repeated query"
+            );
+        } else {
+            assert_eq!(*actual, t.final_queries, "final FRI queries differ from Rust");
+        }
+    }
 }
 
-#[test]
-fn fri_fold4_ext2_remainder128() {
-    let t = build_fri_test(13, 7);
-    let test =
-        build_test!(&t.source, &[t.domain_generator], &t.advice_stack, t.store, t.advice_map);
-    test.expect_stack(&[]);
+#[rstest::rstest]
+#[case::remainder64_zero(64, 0, [11, 13])]
+#[case::remainder64_non_u32(64, Felt::ORDER - 1, [8, 8])]
+#[case::remainder128_zero(128, 0, [11, 13])]
+#[case::remainder128_non_u32(128, Felt::ORDER - 1, [8, 8])]
+fn fri_query_evaluates_remainder_without_query_layers(
+    #[case] remainder_size: u32,
+    #[case] point: u64,
+    #[case] expected: [u64; 2],
+) {
+    use crate::helpers::{read_memory_felt, stark_constant};
+
+    const REMAINDER_PTR: u32 = 100_000;
+    // Coefficients are in descending degree order. The last two are (3, 5) and (11, 13),
+    // so evaluation at a base-field point x gives (3x + 11, 5x + 13).
+    let linear_ptr = REMAINDER_PTR + (remainder_size - 2) * EXTENSION_DEGREE as u32;
+    let [e0, e1] = expected;
+    let source = format!(
+        "use {{TMP1_PTR, TMP2_PTR}} from miden::core::stark::constants
+        use miden::core::pcs::fri::frie2f4
+
+        begin
+            push.13.11.5.3 mem_storew_le.{linear_ptr} dropw
+
+            push.94.93.92.91 mem_storew_le.TMP2_PTR dropw
+            push.0.0.TMP2_PTR.{REMAINDER_PTR} mem_storew_le.TMP1_PTR dropw
+            push.{REMAINDER_PTR}.{REMAINDER_PTR}.{e1}.{e0}.0.{point}
+            exec.frie2f4::verify_query_{remainder_size}
+            dropw dropw dropw
+        end"
+    );
+    let caller: Vec<u64> = (101..117).collect();
+    let advice = [12345];
+    let test = build_test!(&source, &caller, &advice);
+    let (output, _) = test.execute_for_output().expect("remainder query must verify");
+    assert_eq!(
+        output.stack.get_num_elements(16),
+        caller.into_iter().map(Felt::new_unchecked).collect::<Vec<_>>()
+    );
+    assert_eq!(output.advice.stack(), advice.map(Felt::new_unchecked));
+    let point_ptr = stark_constant("TMP2_PTR");
+    for (lane, value) in [point, 0, 0, 0].into_iter().enumerate() {
+        assert_eq!(read_memory_felt(&output, point_ptr + lane as u32), Felt::new_unchecked(value));
+    }
+    test.check_constraints();
 }
 
 /// A tampered remainder coefficient must make verification fail: the Horner evaluation of the
@@ -206,11 +342,19 @@ fn fri_fold4_ext2_rejects_tampered_remainder() {
 /// authenticated Merkle leaf.
 #[test]
 fn fri_fold4_ext2_rejects_tampered_leaf() {
-    let mut t = build_fri_test(14, 6);
-    t.advice_map.first_entry().unwrap().get_mut()[0] += Felt::new_unchecked(1);
-    let test =
-        build_test!(&t.source, &[t.domain_generator], &t.advice_stack, t.store, t.advice_map);
-    assert!(test.execute().is_err());
+    let t = build_fri_test(14, 6);
+    for lane in 0..FOLD_ARITY * EXTENSION_DEGREE {
+        let mut advice_map = t.advice_map.clone();
+        advice_map.first_entry().unwrap().get_mut()[lane] += Felt::ONE;
+        let test = build_test!(
+            &t.source,
+            &[t.domain_generator],
+            &t.advice_stack,
+            t.store.clone(),
+            advice_map
+        );
+        expect_assert_error_code_from_msg!(test, "FRI layer leaf hash mismatch");
+    }
 }
 
 fn prepare_advice_stack(depth: usize, fri: &FriResult) -> Vec<u64> {

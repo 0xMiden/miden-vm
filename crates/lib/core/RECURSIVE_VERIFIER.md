@@ -29,8 +29,18 @@ integers and elliptic-curve parameters.
 The `.masm.tpl` files are source inputs. Edit `fixed_boundary.masm.tpl` for shared helpers and
 `fixed_uintval.masm.tpl` or `fixed_ecgroup.masm.tpl` for the instructions applied to each message.
 
-The VM's fixed memory anchors live in `vm/layout.masm`; regeneration checks derived allocations
-against them. The PVM layout is generated as a complete module.
+The VM's fixed memory anchors and named state fields live in `vm/layout.masm`; regeneration checks
+derived allocations against them. The PVM layout, including its field addresses, is generated as a
+complete module. Consumers import field constants for immediate memory instructions, so an address
+change has one owner without adding runtime address arithmetic.
+
+Shared STARK state fields belong in `stark/constants.masm`, including fields used by only one
+module, such as the random-coin buffer coordinates. Relation state fields and the meaning of AIR
+positions belong in the corresponding relation layout. The VM's generated region boundaries remain
+in `vm/parameters.masm`. The shared verifier carries no relation-specific addresses or order.
+
+Generated OOD dispatch-record offsets belong to the OOD renderer, which derives both their writers
+and readers from the same scatter plan. The relation layout owns the buffer allocation.
 
 ## Pinned relation identities
 
@@ -49,21 +59,13 @@ to these values, and the generated MASM embeds them. Two checks guard the pins, 
 An intentional relation change therefore updates the pins first, as its own reviewable edit, then
 regenerates the MASM and updates the verifier roots in `core/src/proof.rs`.
 
-## Assumptions to review
+## Handwritten relation adapters
 
-`vm/public_inputs.masm` defines the VM's bus prefix factors, AIR count, and stack I/O count.
-These must match the native bus identifiers plus one, `MIDEN_AIR_COUNT`, and `NUM_PUBLIC_VALUES`,
-respectively. The constants are maintained manually; `make check-constraints` checks the AIR count.
-
-The module's `compute_bus_gamma` routine is specialized to `gamma = beta^16`. The assertion in
-`crates/air/source/src/vm/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
-requires updating both the routine and the assertion.
-
-Generation requires `MAX_MESSAGE_WIDTH == 18`, matching the PVM gamma addition chain for `beta^18`.
-Update the chain and its guard together if the message width changes. PVM height minima are generated
-from the authored relation protocol. When changing the PVM AIR set, review height loading and fixed-height
-checks in `pvm/mod.masm`, the AIR count in `pvm/public_inputs.masm`, and boundary processing in
-`pvm/aux_trace.masm`; these procedures are not generated from the AIR set.
+The relation wrappers retain handwritten statement encoding, trace-height checks, and lookup-boundary
+processing. When changing the AIR set or canonical order, public-input format, or bus-message
+definitions, review the affected relation's `mod.masm`, `public_inputs.masm`, and `aux_trace.masm`
+alongside the generated files. The VM's handwritten field aliases in `vm/layout.masm` also need
+review when its layout or AIR order changes.
 
 ## Edit and verification loop
 
@@ -98,3 +100,10 @@ cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_
 
 The verifier-root test compares the embedded VM and PVM procedure roots with the current roots
 returned by `Verifier::proof_compatibility()`.
+
+The memory-layout audit checks allocation extents, frame coverage, and disjointness. It resolves
+field aliases through the assembler's constant evaluator and requires each alias to remain inside
+its base allocation. It also checks the full width of immediate scalar and word accesses. Dynamic
+addresses and streaming lengths still require the geometry checks and execution tests above.
+The FRI row-frame test independently compares its precomputed hash initializer with the native
+Eidos domain and FRI row width.

@@ -8,6 +8,39 @@ use miden::core::stark::types
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::fixed_boundary
 use miden::core::sys::pvm::layout
+use {
+    AIR_1_PROOF_POSITION_PTR,
+    AIR_2_PROOF_POSITION_PTR,
+    AIR_3_PROOF_POSITION_PTR,
+    AIR_4_PROOF_POSITION_PTR,
+    AIR_5_PROOF_POSITION_PTR,
+    AIR_6_PROOF_POSITION_PTR,
+    AIR_7_PROOF_POSITION_PTR,
+    AIR_8_PROOF_POSITION_PTR,
+    AIR_9_PROOF_POSITION_PTR,
+    AIR_10_PROOF_POSITION_PTR,
+    AIR_11_PROOF_POSITION_PTR,
+    AUX_BOUNDARY_WORD_1_PTR,
+    AUX_BOUNDARY_WORD_2_PTR,
+    AUX_BOUNDARY_WORD_3_PTR,
+    AUX_BOUNDARY_WORD_4_PTR,
+    AUX_BOUNDARY_WORD_5_PTR,
+    AUX_BUS_BOUNDARY_PTR,
+    CANONICAL_AIR_1_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_2_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_3_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_4_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_5_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_6_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_7_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_8_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_9_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_10_LOG_HEIGHT_PTR,
+    CANONICAL_AIR_11_LOG_HEIGHT_PTR,
+    C_TOTAL_C1_PTR,
+    C_TOTAL_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
+} from miden::core::sys::pvm::layout
 
 # Number of chiplet instances in the relation, each contributing one boundary value.
 # NUM_CHIPLETS = 12
@@ -60,49 +93,49 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc scatter_aux_bus_boundary()
-    exec.layout::proof_order_positions_ptr add.11 mem_load
+    mem_load.AIR_11_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.10 mem_load
+    mem_load.AIR_10_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.9 mem_load
+    mem_load.AIR_9_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.8 mem_load
+    mem_load.AIR_8_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.7 mem_load
+    mem_load.AIR_7_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.6 mem_load
+    mem_load.AIR_6_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.5 mem_load
+    mem_load.AIR_5_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.4 mem_load
+    mem_load.AIR_4_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.3 mem_load
+    mem_load.AIR_3_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.2 mem_load
+    mem_load.AIR_2_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.1 mem_load
+    mem_load.AIR_1_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr mem_load
+    mem_load.PROOF_ORDER_POSITIONS_PTR
     exec.load_boundary_pair
     # => [sigma_prime_0, ..., sigma_prime_11, ...] in canonical instance order
 
-    exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le dropw
+    mem_storew_le.AUX_BUS_BOUNDARY_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_1_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_2_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_3_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_4_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_5_PTR dropw
 end
 
 #! Observes the PVM auxiliary trace commitment and its twelve normalized LogUp values.
@@ -140,24 +173,24 @@ pub proc observe_aux_trace()
     mem_storew_le.AUX_TRACE_COM_PTR
     exec.random_coin::eidos_observe_word
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr mem_storew_le
+    mem_storew_le.AUX_BUS_BOUNDARY_PTR
     exec.random_coin::eidos_observe_word
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_1_PTR
     exec.random_coin::eidos_observe_word
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_2_PTR
     exec.random_coin::eidos_observe_word
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_3_PTR
     exec.random_coin::eidos_observe_word
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_4_PTR
     exec.random_coin::eidos_observe_word
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_5_PTR
     exec.random_coin::eidos_observe_word
 
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
@@ -174,41 +207,41 @@ pub proc observe_aux_trace()
     # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
     mem_load.LOG_AIR_TRACE_LENGTHS_PTR push.0 exec.load_weighted_aux_sum
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_load push.2 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_1_LOG_HEIGHT_PTR push.2 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_load push.4 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_2_LOG_HEIGHT_PTR push.4 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_load push.6 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_3_LOG_HEIGHT_PTR push.6 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_load push.8 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_4_LOG_HEIGHT_PTR push.8 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_load push.10 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_5_LOG_HEIGHT_PTR push.10 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_load push.12 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_6_LOG_HEIGHT_PTR push.12 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_load push.14 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_7_LOG_HEIGHT_PTR push.14 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_load push.16 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_8_LOG_HEIGHT_PTR push.16 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_load push.18 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_9_LOG_HEIGHT_PTR push.18 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.10 mem_load push.20 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_10_LOG_HEIGHT_PTR push.20 exec.load_weighted_aux_sum
     ext2add
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR add.11 mem_load push.22 exec.load_weighted_aux_sum
+    mem_load.CANONICAL_AIR_11_LOG_HEIGHT_PTR push.22 exec.load_weighted_aux_sum
     ext2add
 
-    exec.layout::c_total_ptr add.1 mem_load
-    exec.layout::c_total_ptr mem_load
+    mem_load.C_TOTAL_C1_PTR
+    mem_load.C_TOTAL_PTR
     ext2add
     assertz.err="PVM fixed-boundary mismatch: correction + weighted LogUp sum coord 0"
     assertz.err="PVM fixed-boundary mismatch: correction + weighted LogUp sum coord 1"

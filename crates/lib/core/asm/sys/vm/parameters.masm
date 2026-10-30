@@ -51,7 +51,8 @@ pub const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 pub const ACE_CIRCUIT_STREAM_PTR = 3225420968
 
 # Scatter reserve: 64 felts at 3223323864.
-# +0: row base; +4..19: destination/digest pairs; +20..43: pipe procedure digests.
+# +0: row base; +4..19: packed dispatch records; +20..43: pipe procedure digests.
+# Each record holds [main destination, main pipe address, aux destination, aux pipe address].
 # The two following maps contain 4 felts each.
 pub const PROOF_ORDER_POSITIONS_PTR = 3223323908
 pub const PROOF_ORDER_IDS_PTR = 3223323912

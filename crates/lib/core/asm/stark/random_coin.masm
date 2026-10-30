@@ -21,6 +21,7 @@ use {
     CONSTRAINT_COMPOSITION_COEFS_PTR,
     DEEP_ALPHA_ADVICE_PTR,
     DEEP_COMPOSITION_COEFS_PTR,
+    DEEP_POINT_BATCHING_COEF_HI_PTR,
     DEEP_POW_BITS_PTR,
     DOMAIN_OFFSET_INV_PTR,
     DOMAIN_OFFSET_PTR,
@@ -38,8 +39,12 @@ use {
     QUERY_POW_BITS_PTR,
     RANDOM_COIN_COUNTER_PTR,
     RANDOM_COIN_CV_PTR,
+    RANDOM_COIN_INPUT_BUF_HI_PTR,
     RANDOM_COIN_INPUT_BUF_PTR,
     RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_C1_PTR,
+    RANDOM_COIN_OUTPUT_C2_PTR,
+    RANDOM_COIN_OUTPUT_LAST_PTR,
     RANDOM_COIN_OUTPUT_LENGTH_PTR,
     RANDOM_COIN_OUTPUT_WORD_PTR,
     RELATION_DIGEST_PTR,
@@ -58,6 +63,11 @@ use miden::core::stark::utils
 const MAIN_TRACE_ROOT_LABEL = 1
 const AUX_TRACE_ROOT_LABEL = 2
 const QUOTIENT_ROOT_LABEL = 3
+
+# Added to CV[3] before compressing [counter, 0, ..., 0] to generate another output word.
+# The first word of a sampling phase uses tags 1..8 (1 + pending input count); later words use 9.
+# Matches SQUEEZE_TAG in miden-crypto's hash/eidos/challenger.rs.
+const EIDOS_SQUEEZE_TAG = 9
 
 # Eidos::transcript_init_cv(STARK_TRANSCRIPT), using the registered Miden VM transcript domain.
 const EIDOS_TRANSCRIPT_INIT_CV_0 = 13503953893964383489
@@ -83,8 +93,9 @@ end
 #! Output: [...]
 pub proc eidos_clear_buffer()
     padw mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR
-    push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
-    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    mem_storew_le.RANDOM_COIN_INPUT_BUF_HI_PTR
+    mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    drop drop drop
 end
 
 #! Compress the block stored at `RANDOM_COIN_INPUT_BUF_PTR` into the Eidos chaining value.
@@ -93,12 +104,11 @@ end
 #! Output: [...]
 pub proc eidos_compress_block()
     padw mem_loadw_le.RANDOM_COIN_CV_PTR
-    padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_loadw_le
-    padw mem_loadw_le.RANDOM_COIN_INPUT_BUF_PTR
+    padw mem_loadw_le.RANDOM_COIN_INPUT_BUF_HI_PTR
+    dupw mem_loadw_le.RANDOM_COIN_INPUT_BUF_PTR
     compress
-    swapw.2
-    mem_storew_le.RANDOM_COIN_CV_PTR dropw
     dropw dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR dropw
 end
 
 #! Absorb a fully specified 8-felt Eidos block.
@@ -111,13 +121,12 @@ pub proc eidos_absorb_block(block_lo: word, block_hi: word)
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="eidos_absorb_block: buffer must be empty"
 
-    padw mem_loadw_le.RANDOM_COIN_CV_PTR
-    swapw.2
-    swapw
+    dupw mem_loadw_le.RANDOM_COIN_CV_PTR
+    movdnw.2
+    # => [block_lo(4), block_hi(4), CV(4), ...]
     compress
-    swapw.2
-    mem_storew_le.RANDOM_COIN_CV_PTR dropw
     dropw dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR dropw
     exec.eidos_clear_buffer
     exec.eidos_enter_absorbing
 end
@@ -159,14 +168,20 @@ pub proc eidos_observe_word(value: word)
     if.true
         drop
         mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR dropw
-        padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+        padw mem_storew_le.RANDOM_COIN_INPUT_BUF_HI_PTR dropw
         push.4 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
     else
         dup push.4 eq
         if.true
             drop
-            push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
-            exec.eidos_compress_block
+            # Complete the buffered block with the word already on the stack.
+            padw mem_loadw_le.RANDOM_COIN_CV_PTR
+            swapw
+            padw mem_loadw_le.RANDOM_COIN_INPUT_BUF_PTR
+            # => [buffer_lo(4), word(4), cv(4), ...]
+            compress
+            dropw dropw
+            mem_storew_le.RANDOM_COIN_CV_PTR dropw
             exec.eidos_clear_buffer
         else
             drop
@@ -254,32 +269,33 @@ end
 #! Output: [...]
 pub proc eidos_refill_output_word()
     mem_load.RANDOM_COIN_COUNTER_PTR
-    dup push.0 eq
+    dup eq.0
     if.true
         drop
         mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
         dup push.8 u32lt assert.err="eidos_refill_output_word: buffer_len exceeds block width"
-        push.RANDOM_COIN_CV_PTR add.3 mem_load
-        swap add.1 add
-        push.RANDOM_COIN_CV_PTR add.3 mem_store
-        exec.eidos_compress_block
-        exec.eidos_clear_buffer
+        add.1
+        padw mem_loadw_le.RANDOM_COIN_CV_PTR
+        movup.4 movup.4 add movdn.3
+        padw mem_loadw_le.RANDOM_COIN_INPUT_BUF_HI_PTR
+        dupw mem_loadw_le.RANDOM_COIN_INPUT_BUF_PTR
         push.1 mem_store.RANDOM_COIN_COUNTER_PTR
+        compress dropw padw
     else
         dup add.1 mem_store.RANDOM_COIN_COUNTER_PTR
-        push.0.0.0
-        movup.3
-        mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR
-        drop push.0
-        push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
-        push.RANDOM_COIN_CV_PTR add.3 mem_load
-        push.9 add
-        push.RANDOM_COIN_CV_PTR add.3 mem_store
-        exec.eidos_compress_block
-        exec.eidos_clear_buffer
+        padw mem_loadw_le.RANDOM_COIN_CV_PTR
+        movup.3 add.EIDOS_SQUEEZE_TAG movdn.3
+        movup.4 push.0.0.0 movup.3 padw swapw
+        compress swapw
     end
-
-    padw mem_loadw_le.RANDOM_COIN_CV_PTR
+    # Both branches leave a zero word above the discarded rate word and the new CV.
+    # => [zero(4), scratch(4), cv(4), ...]
+    mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR
+    mem_storew_le.RANDOM_COIN_INPUT_BUF_HI_PTR
+    mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    # => [zero(3), scratch(4), cv(4), ...]
+    drop drop drop dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR
     mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR dropw
     push.4 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
@@ -301,8 +317,8 @@ pub proc eidos_sample_felt() -> felt
     sub.1
     dup mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
-    push.3 swap sub
-    push.RANDOM_COIN_OUTPUT_WORD_PTR add mem_load
+    # The remaining count locates the sampled element relative to the cache's last address.
+    push.RANDOM_COIN_OUTPUT_LAST_PTR swap sub mem_load
 end
 
 #! Sample one quadratic extension element from the Eidos transcript.
@@ -626,8 +642,8 @@ pub proc reseed_with_folding_pow_and_ext(
         u32and
         assertz.err="per-round FRI folding grinding check failed"
         drop
-        push.RANDOM_COIN_OUTPUT_WORD_PTR add.1 mem_load
-        push.RANDOM_COIN_OUTPUT_WORD_PTR add.2 mem_load
+        mem_load.RANDOM_COIN_OUTPUT_C1_PTR
+        mem_load.RANDOM_COIN_OUTPUT_C2_PTR
         swap
     else
         drop
@@ -717,7 +733,7 @@ pub proc generate_deep_composition_random_coefficients()
     # Store [beta0, beta1, alpha0, alpha1] at DEEP_COMPOSITION_COEFS_PTR.
     # (alpha was already stored at positions 2,3 by the mem_storew_le above)
     mem_store.DEEP_COMPOSITION_COEFS_PTR
-    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_store
+    mem_store.DEEP_POINT_BATCHING_COEF_HI_PTR
     #=> [...]
 end
 
@@ -777,10 +793,10 @@ pub proc generate_list_indices()
     #=> [query_ptr, num_queries, ...]
 
     mem_load.LOG_LDE_DOMAIN_SIZE_PTR
-    swap movup.2 swap
-    #=> [query_ptr, num_queries, depth, ...]
+    dup movdn.3
+    #=> [depth, query_ptr, num_queries, depth, ...]
 
-    dup.2 eq.32
+    eq.32
     if.true
         push.0xffffffff
     else

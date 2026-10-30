@@ -238,7 +238,8 @@ pub(crate) fn render_pvm_ood_frames(
     })
     .map_err(|err| err.to_string())?;
 
-    let procedures = plan.render(&proof_order_maps);
+    let procedures =
+        plan.render_with_static_table(&proof_order_maps, "layout::OOD_SCATTER_TABLE_PTR");
 
     let mut out = String::new();
     write!(
@@ -332,17 +333,16 @@ mod tests {
     }
 
     /// A group every chiplet occupies is indexed correctly by proof-order position, and one with a
-    /// single occupant needs no table at all. Anything between the two would address past the
+    /// single occupant needs no dispatch record. Anything between the two would address past the
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
-        // A geometry whose only meaningful axis is the preprocessed occupancy under test: the
-        // uniform main and aux widths keep the `pipe_k` set small enough that the reserve, which
-        // this test is not about, never becomes the reason for a refusal.
+        // A single auxiliary occupant keeps the plan to at most two dispatched groups, so the
+        // fixed reserve fits even when every chiplet occupies the preprocessed group.
         let with_preprocessed = |widths: Vec<usize>| PvmOodGeometry {
             preprocessed: widths,
             main: vec![32; NUM_CHIPLETS],
-            aux: vec![8; NUM_CHIPLETS],
+            aux: [vec![8], vec![0; NUM_CHIPLETS - 1]].concat(),
             quotient: 8,
         };
 
@@ -373,16 +373,28 @@ mod tests {
         let base = live_geometry();
         // Give every chiplet a distinct main and aux width, so the `pipe_k` set grows a word at a
         // time until the digests no longer fit behind the twenty-four dispatch pairs.
-        let geometry = PvmOodGeometry {
+        let distinct_lengths = PvmOodGeometry {
             preprocessed: base.preprocessed.clone(),
             main: (0..NUM_CHIPLETS).map(|i| 32 * (i + 1)).collect(),
             aux: (0..NUM_CHIPLETS).map(|i| 8 * (i + 1)).collect(),
             quotient: base.quotient,
         };
-        let Err(error) = pvm_scatter_plan(&geometry) else {
-            panic!("a plan past the reserve must be refused");
+        // Three dispatched groups need a second word per proof position, even with few digests.
+        let three_groups = PvmOodGeometry {
+            preprocessed: vec![16; NUM_CHIPLETS],
+            main: vec![32; NUM_CHIPLETS],
+            aux: vec![8; NUM_CHIPLETS],
+            quotient: base.quotient,
         };
-        assert!(error.contains("OOD_SCATTER_TABLE_PTR reserves"), "unexpected refusal: {error}");
+        for geometry in [distinct_lengths, three_groups] {
+            let Err(error) = pvm_scatter_plan(&geometry) else {
+                panic!("a plan past the reserve must be refused");
+            };
+            assert!(
+                error.contains("OOD_SCATTER_TABLE_PTR reserves"),
+                "unexpected refusal: {error}"
+            );
+        }
     }
 
     /// The row the hook pipes is the row the circuit reads; a drifted width must fail closed.

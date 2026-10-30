@@ -1,16 +1,23 @@
 use miden_air::vm::config;
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
+use miden_core::{
+    Felt, WORD_SIZE, Word,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
+};
 use miden_stark::{
     StarkConfig,
-    testing::fri_vectors::{
-        DIGEST_WIDTH, EXTENSION_DEGREE, Fold4Ext2TestVectors, FriQuery, fold4_ext2_test_vectors,
+    testing::{
+        FriFold,
+        fri_vectors::{
+            DIGEST_WIDTH, EXTENSION_DEGREE, Fold4Ext2TestVectors, FriQuery, LOG_FOLD_ARITY,
+            fold4_ext2_test_vectors,
+        },
     },
 };
 use miden_utils_testing::crypto::{MerklePath, PartialMerkleTree};
 use miden_vm_stark::setup::config::eidos_config;
 
 pub(super) const BLOWUP_EXP: u8 = 3;
-const NUM_FRI_QUERIES: usize = 32;
+const NUM_DISTINCT_QUERIES: usize = 32;
 const REMAINDER_64_COEFFICIENTS: usize = 64;
 const REMAINDER_128_COEFFICIENTS: usize = 128;
 const SUPPORTED_REMAINDER_SIZES: &[usize] =
@@ -42,6 +49,9 @@ pub(super) struct FriResult {
 
     /// The generator of the initial evaluation domain.
     pub domain_generator: u64,
+
+    /// Folded-domain point, index, and extension value for each input query, in query order.
+    pub final_queries: Vec<[Felt; WORD_SIZE]>,
 }
 
 /// Proves a FRI claim with fold-4 layer folding over the quadratic extension field and repackages
@@ -56,7 +66,7 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
         betas,
         final_poly,
         round_openings,
-        queries,
+        mut queries,
         domain_generator,
     } = {
         // Use the production Eidos components so Merkle nodes match the VM's native hash.
@@ -67,7 +77,7 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
             log_poly_degree,
             BLOWUP_EXP,
             log_final_degree,
-            NUM_FRI_QUERIES,
+            NUM_DISTINCT_QUERIES,
             TEST_SEED,
             |commitment| {
                 let limbs: [u64; DIGEST_WIDTH] = commitment.into();
@@ -76,8 +86,6 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
         )
     };
 
-    // Convert each round's openings into a partial Merkle tree (for the Merkle store) and
-    // `leaf_hash -> leaf_data` advice-map entries.
     assert_eq!(
         round_openings.len(),
         commitments.len(),
@@ -85,6 +93,55 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
     );
     assert_eq!(betas.len(), commitments.len(), "each FRI round must have one folding challenge");
 
+    // FRI sampling permits duplicates. Include a repeated index alongside the distinct queries.
+    queries.push(queries[0]);
+    let folder = FriFold::new(LOG_FOLD_ARITY).unwrap();
+    let generator = Felt::new_unchecked(domain_generator);
+    let log_reduction = log_poly_degree - log_final_degree;
+    let final_generator = generator.exp_power_of_2(log_reduction.into());
+    let final_size = 1u64 << (log_final_degree + BLOWUP_EXP);
+    let final_queries = queries
+        .iter()
+        .map(|query| {
+            let index = query.position & (final_size - 1);
+            // The vector generator verifies every FRI round. Recompute its last fold to expose
+            // the terminal value independently of the remainder polynomial evaluation below.
+            let value = match round_openings.last().zip(betas.last()) {
+                Some((openings, beta)) => {
+                    let opening = openings.iter().find(|o| o.index as u64 == index).unwrap();
+                    let row: Vec<_> = opening
+                        .row
+                        .as_chunks::<EXTENSION_DEGREE>()
+                        .0
+                        .iter()
+                        .map(|pair| QuadFelt::new(pair.map(Felt::new_unchecked)))
+                        .collect();
+                    let last_generator =
+                        generator.exp_power_of_2((log_reduction - LOG_FOLD_ARITY).into());
+                    folder.fold_evals(
+                        &row,
+                        last_generator.exp_u64(index).inverse(),
+                        QuadFelt::new(beta.map(Felt::new_unchecked)),
+                    )
+                },
+                None => QuadFelt::new(query.evaluation.map(Felt::new_unchecked)),
+            };
+            let point = final_generator.exp_u64(index);
+            let remainder_value = final_poly
+                .as_chunks::<EXTENSION_DEGREE>()
+                .0
+                .iter()
+                .fold(QuadFelt::ZERO, |acc, pair| {
+                    acc * point + QuadFelt::new(pair.map(Felt::new_unchecked))
+                });
+            assert_eq!(value, remainder_value, "native fold must match the remainder polynomial");
+            let coefficients = value.as_basis_coefficients_slice();
+            [point, Felt::new_unchecked(index), coefficients[0], coefficients[1]]
+        })
+        .collect();
+
+    // Convert each round's openings into a partial Merkle tree (for the Merkle store) and
+    // `leaf_hash -> leaf_data` advice-map entries.
     let mut partial_trees = Vec::with_capacity(round_openings.len());
     let mut advice_maps = Vec::new();
     for (round, (openings, &commitment)) in round_openings.iter().zip(&commitments).enumerate() {
@@ -128,6 +185,7 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
         commitments,
         remainder,
         domain_generator,
+        final_queries,
     }
 }
 

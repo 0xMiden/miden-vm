@@ -76,6 +76,9 @@ pub const COMPOSITION_POLY_COM_PTR = 3223322648
 ### Address to store the OOD evaluation point `z` and its power `z^N` (`N = trace_len`).
 ### The word stored is `[z^n_0, z^n_1, z_0, z_1]`.
 pub const OOD_POINT_PTR = 3223322652
+### The sampled extension point occupies the high pair of this word.
+pub const OOD_POINT_LO_PTR = OOD_POINT_PTR + 2
+pub const OOD_POINT_HI_PTR = OOD_POINT_PTR + 3
 
 ### Address to store the zero word for hash-state and transcript helpers.
 pub const ZERO_WORD_PTR = 3223322656
@@ -85,11 +88,18 @@ pub const DEEP_ALPHA_ADVICE_PTR = 3223322660
 
 ### Address to store the fixed terms, across all queries, of the DEEP queries.
 pub const OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR = 3223322664
+### Fixed DEEP terms for the next row occupy the high extension pair.
+pub const OOD_NEXT_FIXED_TERM_C0_PTR = OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR + 2
+pub const OOD_NEXT_FIXED_TERM_C1_PTR = OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR + 3
 
 ### Eidos random-coin state: chaining value, cached output word, and 8-felt absorb block.
 pub const RANDOM_COIN_CV_PTR = 3223322668
 pub const RANDOM_COIN_OUTPUT_WORD_PTR = 3223322672
+pub const RANDOM_COIN_OUTPUT_C1_PTR = RANDOM_COIN_OUTPUT_WORD_PTR + 1
+pub const RANDOM_COIN_OUTPUT_C2_PTR = RANDOM_COIN_OUTPUT_WORD_PTR + 2
+pub const RANDOM_COIN_OUTPUT_LAST_PTR = RANDOM_COIN_OUTPUT_WORD_PTR + 3
 pub const RANDOM_COIN_INPUT_BUF_PTR = 3223322676
+pub const RANDOM_COIN_INPUT_BUF_HI_PTR = RANDOM_COIN_INPUT_BUF_PTR + 4
 
 ### Addresses used for storing temporary values
 pub const TMP1_PTR = 3223322684
@@ -103,9 +113,11 @@ pub const FRI_VERIFY_STATE_PTR = 3223322700
 
 ### Address of the composition challenges [alpha0, alpha1, beta0, beta1].
 pub const CONSTRAINT_COMPOSITION_COEFS_PTR = 3223322704
+pub const CONSTRAINT_ALPHA_HI_PTR = CONSTRAINT_COMPOSITION_COEFS_PTR + 1
 
 ### Address to the randomness used in computing the DEEP polynomial
 pub const DEEP_COMPOSITION_COEFS_PTR = 3223322708
+pub const DEEP_POINT_BATCHING_COEF_HI_PTR = DEEP_COMPOSITION_COEFS_PTR + 1
 
 ### Addresses of the digests of dynamically executed procedures
 pub const HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR = 3223322712

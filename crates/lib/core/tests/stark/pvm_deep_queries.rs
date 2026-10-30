@@ -12,7 +12,7 @@ use miden_core::{
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_RATE, domains::LMCS_LEAF};
 
 use super::pvm_layout_const;
-use crate::helpers::{masm_push_word, read_memory_felt};
+use crate::helpers::{masm_push_word, read_memory_felt, stark_constant};
 
 const FULL_DEPTH: u8 = 20;
 const PREPROCESSED_DEPTH: u8 = 19;
@@ -22,9 +22,6 @@ const FOLDED_INDEX: u32 = FULL_INDEX & ((1 << PREPROCESSED_DEPTH) - 1);
 const QUERY_PTR: u32 = 1_000;
 const QUERY_END_PTR: u32 = QUERY_PTR + 4;
 const ALPHA_PTR: u32 = 2_000;
-const MAIN_COM_PTR: u32 = 3_223_322_640;
-const AUX_COM_PTR: u32 = 3_223_322_644;
-const QUOTIENT_COM_PTR: u32 = 3_223_322_648;
 
 const ALPHA: [u64; 2] = [3, 5];
 const DOMAIN_GENERATOR: u64 = 7;
@@ -134,11 +131,11 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
         preprocessed_root = masm_push_word(&preprocessed_root),
         preprocessed_com_ptr = preprocessed_com_ptr,
         main_root = masm_push_word(&main_root),
-        main_com_ptr = MAIN_COM_PTR,
+        main_com_ptr = stark_constant("MAIN_TRACE_COM_PTR"),
         aux_root = masm_push_word(&aux_root),
-        aux_com_ptr = AUX_COM_PTR,
+        aux_com_ptr = stark_constant("AUX_TRACE_COM_PTR"),
         quotient_root = masm_push_word(&quotient_root),
-        quotient_com_ptr = QUOTIENT_COM_PTR,
+        quotient_com_ptr = stark_constant("COMPOSITION_POLY_COM_PTR"),
     )
 }
 

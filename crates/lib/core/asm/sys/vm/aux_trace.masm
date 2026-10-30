@@ -5,6 +5,18 @@ use miden::core::stark::types
 use miden::core::stark::random_coin
 use miden::core::sys::vm::public_inputs
 use miden::core::sys::vm::layout
+use {
+    AIR_1_PROOF_POSITION_PTR,
+    AIR_2_PROOF_POSITION_PTR,
+    AIR_3_PROOF_POSITION_PTR,
+    AUX_BOUNDARY_WORD_1_PTR,
+    C_TOTAL_C1_PTR,
+    C_TOTAL_PTR,
+} from miden::core::sys::vm::layout
+use {
+    AUX_BUS_BOUNDARY_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
+} from miden::core::sys::vm::parameters
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
 #! count `n = 2^log_height`.
@@ -65,21 +77,21 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc scatter_aux_bus_boundary()
-    exec.layout::proof_order_positions_ptr add.3 mem_load
+    mem_load.AIR_3_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.2 mem_load
+    mem_load.AIR_2_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr add.1 mem_load
+    mem_load.AIR_1_PROOF_POSITION_PTR
     exec.load_boundary_pair
 
-    exec.layout::proof_order_positions_ptr mem_load
+    mem_load.PROOF_ORDER_POSITIONS_PTR
     exec.load_boundary_pair
     # => [sigma_prime_0, ..., sigma_prime_3, ...] in canonical instance order
 
-    exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
+    mem_storew_le.AUX_BUS_BOUNDARY_PTR dropw
+    mem_storew_le.AUX_BOUNDARY_WORD_1_PTR dropw
 end
 
 #! Observes the auxiliary trace for the Miden VM AIR.
@@ -105,11 +117,11 @@ pub proc observe_aux_trace()
     exec.random_coin::eidos_observe_word
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr mem_storew_le
+    mem_storew_le.AUX_BUS_BOUNDARY_PTR
     exec.random_coin::eidos_observe_word
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+    mem_storew_le.AUX_BOUNDARY_WORD_1_PTR
     exec.random_coin::eidos_observe_word
 
     # The transcript has now seen the wire order, so the sums may move to the canonical addresses
@@ -131,8 +143,8 @@ pub proc observe_aux_trace()
     movup.2 push.6 exec.load_weighted_aux_sum
     ext2add
 
-    exec.layout::c_total_ptr add.1 mem_load
-    exec.layout::c_total_ptr mem_load
+    mem_load.C_TOTAL_C1_PTR
+    mem_load.C_TOTAL_PTR
     ext2add
     assertz.err="outer-LogUp boundary mismatch: weighted sums coord 0"
     assertz.err="outer-LogUp boundary mismatch: weighted sums coord 1"

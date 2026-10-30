@@ -10,13 +10,8 @@ use miden_core::{
 use miden_precompiles::{CurveId, UintDomain};
 
 use super::pvm_layout_const;
-use crate::helpers::read_memory_felt;
+use crate::helpers::{read_memory_felt, stark_constant};
 
-const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
-const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
-const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
-const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
-const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
 const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
 type LogHeights = [u8; 12];
@@ -337,7 +332,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
             .execute_for_output()
             .unwrap_or_else(|error| panic!("{case}: reference transcript failed: {error}"));
 
-        for addr in RANDOM_COIN_CV_PTR..RANDOM_COIN_CV_PTR + 4 {
+        for addr in stark_constant("RANDOM_COIN_CV_PTR")..stark_constant("RANDOM_COIN_CV_PTR") + 4 {
             assert_eq!(
                 read_memory_felt(&hook_output, addr),
                 read_memory_felt(&reference_output, addr),
@@ -345,9 +340,9 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
             );
         }
         for addr in [
-            RANDOM_COIN_INPUT_LENGTH_PTR,
-            RANDOM_COIN_OUTPUT_LENGTH_PTR,
-            RANDOM_COIN_COUNTER_PTR,
+            stark_constant("RANDOM_COIN_INPUT_LENGTH_PTR"),
+            stark_constant("RANDOM_COIN_OUTPUT_LENGTH_PTR"),
+            stark_constant("RANDOM_COIN_COUNTER_PTR"),
         ] {
             assert_eq!(
                 read_memory_felt(&hook_output, addr),
@@ -414,7 +409,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         }
         for (i, expected) in COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                read_memory_felt(&hook_output, AUX_TRACE_COM_PTR + i as u32),
+                read_memory_felt(&hook_output, stark_constant("AUX_TRACE_COM_PTR") + i as u32),
                 Felt::new_unchecked(expected),
                 "{case}: aux commitment coordinate {i} mismatch"
             );

@@ -15,6 +15,7 @@
 #### Changes
 
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
+- [BREAKING] Reduced cycle counts for recursive VM and PVM verification. Updated both recursive verifier roots.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively.
 - [BREAKING] Added VM opcode 6, `clear_deferred`, to reset the accumulator identified by the top stack word in root context, preserving the stack. This unsafe operation requires a trusted kernel epilogue that recursively verifies that exact root before clearing. The VM proof relation and recursive verifier root change.
@@ -38,6 +39,7 @@
 #### Fixes
 
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
+- Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace.
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
 

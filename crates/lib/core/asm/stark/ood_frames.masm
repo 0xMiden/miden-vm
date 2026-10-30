@@ -3,6 +3,8 @@ use {
     HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
     OOD_EVALUATIONS_ADDRESS_PTR,
     OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
+    OOD_NEXT_FIXED_TERM_C0_PTR,
+    OOD_NEXT_FIXED_TERM_C1_PTR,
     RANDOM_COIN_CV_PTR,
     RANDOM_COIN_INPUT_LENGTH_PTR,
 } from miden::core::stark::constants
@@ -82,9 +84,7 @@ pub proc load_and_horner_eval_ood_frames()
     movup.3 neg
     movup.3 neg
     push.0.0
-    movup.2
-    movup.3
-    swap.1
+    movdn.3 movdn.3
     mem_storew_le.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR
     dropw
     push.0.0
@@ -113,10 +113,10 @@ pub proc load_and_horner_eval_ood_frames()
     drop drop
     # => [acc0, acc1]
     neg
-    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.2 mem_store
+    mem_store.OOD_NEXT_FIXED_TERM_C0_PTR
     # => [acc1]
     neg
-    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.3 mem_store
+    mem_store.OOD_NEXT_FIXED_TERM_C1_PTR
     # => []
 end
 

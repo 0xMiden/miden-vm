@@ -4,15 +4,9 @@ use miden_core::Felt;
 
 use super::pvm_layout_const;
 use crate::{
-    helpers::read_memory_felt,
+    helpers::{read_memory_felt, stark_constant},
     support::security::{LOG_HEIGHT_MAX, PVM_LOG_HEIGHT_MIN},
 };
-
-const LOG_TRACE_LENGTH_PTR: u32 = 3_223_322_634;
-const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3_223_322_744;
-const RELATION_DIGEST_PTR: u32 = 3_223_322_732;
-const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_770;
-const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_771;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
@@ -52,18 +46,21 @@ fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
     assert_eq!(output.stack.get_num_elements(16), &[Felt::ZERO; 16]);
     for (i, expected) in HEIGHTS.into_iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, LOG_AIR_TRACE_LENGTHS_PTR + i as u32),
+            read_memory_felt(&output, stark_constant("LOG_AIR_TRACE_LENGTHS_PTR") + i as u32),
             Felt::new_unchecked(expected),
             "AIR height {i} was not stored in instance order"
         );
     }
-    assert_eq!(read_memory_felt(&output, LOG_TRACE_LENGTH_PTR), Felt::from_u8(16));
     assert_eq!(
-        read_memory_felt(&output, OOD_EVALUATIONS_ADDRESS_PTR),
+        read_memory_felt(&output, stark_constant("LOG_TRACE_LENGTH_PTR")),
+        Felt::from_u8(16)
+    );
+    assert_eq!(
+        read_memory_felt(&output, stark_constant("OOD_EVALUATIONS_ADDRESS_PTR")),
         Felt::from_u32(pvm_layout_const("PREPROCESSED_CURRENT_PTR"))
     );
     assert_eq!(
-        read_memory_felt(&output, CURRENT_TRACE_ROW_ADDRESS_PTR),
+        read_memory_felt(&output, stark_constant("CURRENT_TRACE_ROW_ADDRESS_PTR")),
         Felt::from_u32(pvm_layout_const("CURRENT_TRACE_ROW_PTR"))
     );
 
@@ -82,7 +79,7 @@ fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
 
     for (i, expected) in pvm_word("RELATION_DIGEST").into_iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, RELATION_DIGEST_PTR + i as u32),
+            read_memory_felt(&output, stark_constant("RELATION_DIGEST_PTR") + i as u32),
             Felt::new_unchecked(expected)
         );
     }

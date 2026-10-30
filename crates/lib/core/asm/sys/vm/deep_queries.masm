@@ -164,30 +164,25 @@ proc process_preprocessed_segment
     adv.push_mapval
     #=> [LEAF_VALUE, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    mem_loadw_le.TMP2_PTR
-    swapw
-    #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
-
-    # Load the aligned preprocessed leaf.
+    padw mem_loadw_le.TMP2_PTR
     push.PREPROCESSED_LMCS_INIT_CV
-    swapw
-    padw
-    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    swapdw
+    #=> [LEAF_VALUE, ROOT, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    # The leaf and root words are dead; adv_pipe overwrites them as the first block.
 
     exec.load_preprocessed_segment
-    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    #=> [B0, B1, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 #! Loads the portion of the query associated to the preprocessed trace segment.
 #!
-#! Inputs:  [ZERO, LEAF, CV, ptr]
-#! Outputs: [CV, ZERO, DIGEST, ptr]
+#! Inputs:  [BLOCK(8), CV, ptr_x, ptr_alpha_inv, acc0, acc1]
+#! Outputs: [LAST_BLOCK(8), DIGEST, ptr_x', ptr_alpha_inv, acc0', acc1']
 proc load_preprocessed_segment
     repeat.PREPROCESSED_ROW_DOUBLE_WORDS
         adv_pipe
@@ -201,10 +196,13 @@ end
 
 #! Handles the logic for processing the main segment of the execution trace.
 #!
-#! Inputs: [Y, query_ptr]
+#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_main_segment_execution_trace(
     scratch: word,
+    evaluation: types::HornerState,
+    depth: u8,
+    index: u32,
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load main trace commitment and get leaf.
@@ -216,26 +214,25 @@ proc process_main_segment_execution_trace(
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.MAIN_LMCS_INIT_CV
-    swapw padw
-    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    movdnw.2
+    #=> [LEAF, ROOT, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the aligned main leaf.
     exec.load_main_segment_execution_trace
-    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    #=> [B0, B1, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
-    dropw
 end
 
 #! Loads the portion of the query associated to the main segment of the execution trace.
 #!
-#! Inputs:  [ZERO, LEAF, CV, ptr]
-#! Outputs: [CV, ZERO, DIGEST, ptr]
+#! Inputs:  [BLOCK(8), CV, ptr_x, ptr_alpha_inv, acc0, acc1]
+#! Outputs: [LAST_BLOCK(8), DIGEST, ptr_x', ptr_alpha_inv, acc0', acc1']
 proc load_main_segment_execution_trace(
     state: types::EidosState,
     evaluation: types::HornerState,
@@ -272,27 +269,26 @@ proc process_aux_segment_execution_trace(
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.AUX_LMCS_INIT_CV
-    swapw padw
-    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    movdnw.2
+    #=> [LEAF, ROOT, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the aligned aux leaf.
     exec.load_aux_segment_execution_trace
-    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    #=> [B0, B1, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
-    dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 end
 
 #! Loads the portion of the query associated to the auxiliary segment of the execution trace.
 #!
-#! Inputs:  [ZERO, LEAF, CV, ptr]
-#! Outputs: [CV, ZERO, DIGEST, ptr]
+#! Inputs:  [BLOCK(8), CV, ptr_x, ptr_alpha_inv, acc0, acc1]
+#! Outputs: [LAST_BLOCK(8), DIGEST, ptr_x', ptr_alpha_inv, acc0', acc1']
 proc load_aux_segment_execution_trace(
     state: types::EidosState,
     evaluation: types::HornerState,
@@ -322,24 +318,23 @@ proc process_constraints_composition_poly_trace(
     mem_loadw_le.COMPOSITION_POLY_COM_PTR
     #=> [R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Get the leaf against the commitment
-    dup.9 movup.9
+    # Prepare [depth, index, R(4), ...] with native stack moves, then open the leaf.
+    movup.8 dup.9 swap
     mtree_get
     mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
-    dropw
+    # Reuse the leaf and root as scratch; the first adv_pipe overwrites both words.
     push.QUOTIENT_LMCS_INIT_CV
-    swapw padw
+    movdnw.2
     exec.load_constraints_composition_polys_trace
-    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
+    #=> [B0, B1, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
-    swapw.2
-    padw
+    # Compare with the authenticated leaf, leaving the second block word as scratch Y.
     mem_loadw_le.TMP3_PTR
+    movupw.2
     assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
-    dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
     # Re-order the stack
@@ -351,8 +346,8 @@ end
 
 #! Loads the portion of the query associated to the constraints composition polynomials trace.
 #!
-#! Inputs:  [ZERO, LEAF, CV, ptr]
-#! Outputs: [CV, ZERO, DIGEST, ptr]
+#! Inputs:  [BLOCK(8), CV, ptr_x, ptr_alpha_inv, acc0, acc1]
+#! Outputs: [LAST_BLOCK(8), DIGEST, ptr_x', ptr_alpha_inv, acc0', acc1']
 proc load_constraints_composition_polys_trace(
     state: types::EidosState,
     evaluation: types::HornerState,

@@ -1,5 +1,14 @@
 use miden::core::stark::types
-use miden::core::sys::pvm::layout
+use {
+    AUX_ALPHA_C0_PTR,
+    AUX_ALPHA_C1_PTR,
+    AUX_BETA_C1_PTR,
+    AUX_RAND_ELEM_PTR,
+    BUS_GAMMA_C1_PTR,
+    BUS_GAMMA_PTR,
+    C_TOTAL_C1_PTR,
+    C_TOTAL_PTR,
+} from miden::core::sys::pvm::layout
 use {UINT_VAL_BUS_SCALE, EC_GROUP_BUS_SCALE} from miden::core::sys::pvm::parameters
 
 #! An address in the PVM fixed environment, carried as a 32-bit bus-message value.
@@ -39,7 +48,7 @@ proc compute_bus_gamma()
     dup.1 dup.1 ext2mul   # beta^16
     ext2mul                # beta^18
     push.0.0 movup.3 movup.3
-    exec.layout::bus_gamma_ptr mem_storew_le
+    mem_storew_le.BUS_GAMMA_PTR
     dropw
 end
 
@@ -48,8 +57,8 @@ end
 #! Input:  [...]
 #! Output: [beta0, beta1, ...]
 proc load_beta() -> types::QuadFelt
-    exec.layout::aux_rand_elem_ptr add.1 mem_load
-    exec.layout::aux_rand_elem_ptr mem_load
+    mem_load.AUX_BETA_C1_PTR
+    mem_load.AUX_RAND_ELEM_PTR
 end
 
 #! Loads alpha from `[beta0, beta1, alpha0, alpha1]`.
@@ -57,8 +66,8 @@ end
 #! Input:  [...]
 #! Output: [alpha0, alpha1, ...]
 proc load_alpha() -> types::QuadFelt
-    exec.layout::aux_rand_elem_ptr add.3 mem_load
-    exec.layout::aux_rand_elem_ptr add.2 mem_load
+    mem_load.AUX_ALPHA_C1_PTR
+    mem_load.AUX_ALPHA_C0_PTR
 end
 
 #! Loads gamma from its relation-local scratch word.
@@ -66,8 +75,8 @@ end
 #! Input:  [...]
 #! Output: [gamma0, gamma1, ...]
 proc load_gamma() -> types::QuadFelt
-    exec.layout::bus_gamma_ptr add.1 mem_load
-    exec.layout::bus_gamma_ptr mem_load
+    mem_load.BUS_GAMMA_C1_PTR
+    mem_load.BUS_GAMMA_PTR
 end
 
 #! Horner-folds a UintVal payload `(ptr, bound_ptr, c0, ..., c7)`.
@@ -167,7 +176,7 @@ pub proc compute_fixed_boundary_correction()
 
 {{ecgroup_messages}}
 
-    exec.layout::c_total_ptr mem_store
-    exec.layout::c_total_ptr add.1 mem_store
+    mem_store.C_TOTAL_PTR
+    mem_store.C_TOTAL_C1_PTR
     drop drop
 end

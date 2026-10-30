@@ -7,7 +7,6 @@ use {
     REMAINDER_POLY_SIZE_PTR,
     TMP1_PTR,
     TMP2_PTR,
-    TMP3_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::crypto::hashes::eidos
@@ -66,26 +65,18 @@ pub proc verify_query_layer(
     movup.5             # [t_depth, f_pos, C, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     mtree_get           # [V, C, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     adv.push_mapval
-    swapw
-    # => [C, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
-
-    # Hash the opened row with the Eidos LMCS initial chaining value. Keep the row on
-    # the stack: unlike a sponge permutation, Eidos compression preserves its block.
-    dropw
+    # Reuse the root word for the first half of the opened row. The row stays on the stack
+    # through hashing and folding; it does not need a memory copy.
+    swapw adv_loadw
+    padw adv_loadw
+    # => [ROW_HI, ROW_LO, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     push.FRI_ROW_HASH_INIT_CV
-    # => [CV, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
-    push.TMP3_PTR
-    movdn.4
-    # => [CV, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
-    padw padw
-    adv_pipe
+    swapw.2
+    # => [row(8), CV, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     exec.eidos::compress
-    # => [v0, ..., v7, DIGEST, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
 
-    # Assert that the opened row hashes to the committed leaf, preserving the row for folding.
-    movup.12 drop
-    movupw.2
-    movupw.3
+    # Compression preserves the opened row. Compare its digest with the authenticated leaf.
+    swapdw
     assert_eqw.err=FRI_LAYER_LEAF_DIGEST_MISMATCH
     # => [v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     fri_ext2fold4
@@ -140,13 +131,16 @@ pub proc verify_query_64(
     while.true
         exec.verify_query_layer
     end
-    # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, rem_ptr, poe_final, f_pos, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
 
-    movup.2
-    push.0.0.0 movup.3 mem_storew_le.TMP2_PTR dropw
-    # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
-
-    push.0 mem_loadw_le.TMP1_PTR
+    # The repeated remainder pointers subtract to zero, including with no query layers.
+    # Discard f_pos and reuse these slots for the Horner evaluation point.
+    sub
+    movup.2 drop
+    push.0.0 movup.3
+    # => [poe_final, 0, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
+    mem_storew_le.TMP2_PTR
+    mem_loadw_le.TMP1_PTR
     # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
@@ -200,13 +194,16 @@ pub proc verify_query_128(
     while.true
         exec.verify_query_layer
     end
-    # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, rem_ptr, poe_final, f_pos, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
 
-    movup.2
-    push.0.0.0 movup.3 mem_storew_le.TMP2_PTR dropw
-    # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
-
-    push.0 mem_loadw_le.TMP1_PTR
+    # The repeated remainder pointers subtract to zero, including with no query layers.
+    # Discard f_pos and reuse these slots for the Horner evaluation point.
+    sub
+    movup.2 drop
+    push.0.0 movup.3
+    # => [poe_final, 0, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
+    mem_storew_le.TMP2_PTR
+    mem_loadw_le.TMP1_PTR
     # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
