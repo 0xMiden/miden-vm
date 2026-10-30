@@ -139,7 +139,7 @@ impl VerifyCmd {
         );
 
         println!(
-            "Verification complete in {} ms. Security level: {}",
+            "Verification complete in {} ms. Minimum per-STARK security level: {}",
             now.elapsed().as_millis(),
             format_security_level(security_level)
         );

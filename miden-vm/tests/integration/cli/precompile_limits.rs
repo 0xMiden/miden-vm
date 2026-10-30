@@ -264,7 +264,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
             "Outstanding precompile root: {}",
             deferred.vm().precompile_root
         )))
-        .stdout(predicate::str::contains("Security level:").not());
+        .stdout(predicate::str::contains("Minimum per-STARK security level:").not());
     verify_command(dir.path(), &program)
         .args(["--max-precompile-elements", &elements.to_string()])
         .assert()
@@ -288,7 +288,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
             .assert()
             .code(0)
             .stdout(predicate::str::contains("Proof status: complete"))
-            .stdout(predicate::str::contains("Security level:"))
+            .stdout(predicate::str::contains("Minimum per-STARK security level:"))
             .stdout(predicate::str::contains("bits proven"))
             .stdout(predicate::str::contains("validated natively").not());
     }
