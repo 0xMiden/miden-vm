@@ -262,7 +262,6 @@ fn write_fused_g_row<T, R>(
 
         write_first_half_slots(row, g, d, a_new, recorder);
         write_second_half_slots(row, g, b, c_new, step.second_rotation, recorder);
-        row.set_u64(g_msg_word_col(g), msg as u64);
         row.set_u64(g_k3_col(g), k3);
         row.set_u64(G_K2_BASE_COL + g, k2);
 
@@ -370,11 +369,6 @@ where
 }
 
 fn write_footer_message_group<T: TraceRow>(row: &mut T, footer: usize, block: [u32; 16]) {
-    for word_slot in 0..F_MSG_WORD_SLOTS {
-        let msg_idx = footer_message_word_index(footer, word_slot);
-        row.set_u64(footer_msg_word_col(word_slot), block[msg_idx] as u64);
-    }
-
     for limb in 0..F_RANGE_SLOTS {
         let msg_idx = footer_range_limb_word_index(footer, limb);
         let word = block[msg_idx];
@@ -413,6 +407,12 @@ fn write_footer_canonicality<T: TraceRow>(
     let witness = witnesses[footer * 3 + 2];
     row.set_u64(F_C_CANON_INV_COL, witness.inv);
     row.set_u64(F_C_CANON_Z_COL, witness.z);
+}
+
+/// Writes all eight footer CV encodings, including the B-byte corrections before the A corrections.
+/// The caller must reserve every `F_CV_STORAGE_COLS` coordinate on this footer row.
+pub fn write_full_felt_footer_cv(row: &mut EidosCompressionFeltRow, h: [u32; 8]) {
+    write_footer_cv_coordinates(row, FOOTER_ROWS - 1, h);
 }
 
 fn write_footer_cv_coordinates<T: TraceRow>(row: &mut T, footer: usize, h: [u32; 8]) {

@@ -28,7 +28,7 @@ fn row_period_is_32_with_28_fused_g_rows_and_4_footer_rows() {
 }
 
 #[test]
-fn fused_g_row_uses_exactly_108_columns() {
+fn fused_g_row_uses_exactly_104_columns() {
     let mut used = [false; NUM_COLS];
 
     mark_range(&mut used, G_AC_BYTE_SLOT_BASE_COL..G_BD_ROT_SLOT_BASE_COL);
@@ -41,7 +41,6 @@ fn fused_g_row_uses_exactly_108_columns() {
             }
         }
     }
-    mark_range(&mut used, G_MSG_WORD_BASE_COL..G_MSG_WORD_BASE_COL + NUM_G);
     mark_col(&mut used, G_COMPRESSION_CYCLE_ID_COL);
     mark_range(&mut used, G_K3_BASE_COL..G_K3_BASE_COL + NUM_G);
     mark_range(&mut used, G_K2_BASE_COL..G_K2_BASE_COL + NUM_G);
@@ -50,13 +49,11 @@ fn fused_g_row_uses_exactly_108_columns() {
     assert_eq!(g_ac_byte_slot_col(3, 3, 2), 47);
     assert_eq!(g_bd_rot_slot_col(3, 3, 1), 94);
     assert_eq!(g_bd_rot_result_col(3, 3), None);
-    assert_eq!(g_msg_word_col(0), 95);
-    assert_eq!(g_msg_word_col(3), 98);
-    assert_eq!(G_COMPRESSION_CYCLE_ID_COL, 99);
+    assert_eq!(G_COMPRESSION_CYCLE_ID_COL, 95);
 }
 
 #[test]
-fn footer_overlay_fits_108_columns_without_collisions() {
+fn footer_overlay_fits_104_columns_without_collisions() {
     assert_eq!(F_RANGE_NARROW_SLOTS, [22, 23, 24, 25, 26, 17, 28, 29]);
     assert_eq!(footer_range_slot_col(5, 0), 51);
     assert_eq!(footer_range_slot_col(0, 0), 66);
@@ -70,9 +67,6 @@ fn footer_overlay_fits_108_columns_without_collisions() {
             for field in 0..BYTE_SLOT_WIDTH {
                 mark_col(&mut used, footer_range_slot_col(limb, field));
             }
-        }
-        for word in 0..F_MSG_WORD_SLOTS {
-            mark_col(&mut used, footer_msg_word_col(word));
         }
         mark_col(&mut used, F_COMPRESSION_CYCLE_ID_COL);
         for idx in 0..4 {
@@ -99,7 +93,7 @@ fn footer_overlay_fits_108_columns_without_collisions() {
         mark_range(&mut used, F_R_CANON_Z_BASE_COL..F_R_CANON_Z_BASE_COL + 2);
         mark_col(&mut used, F_C_CANON_Z_COL);
 
-        let expected = if footer == 0 { 107 } else { 106 };
+        let expected = if footer == 0 { 103 } else { 102 };
         assert_eq!(used.into_iter().filter(|&live| live).count(), expected, "footer {footer}");
     }
 }

@@ -10,7 +10,7 @@ use {
 } from miden::core::stark::constants
 use miden::core::stark::types
 use {
-    FIXED_BOUNDARY_LOOKUP_TERMS,
+    FIXED_LOOKUP_ERROR_TERMS,
     LOOKUP_FRACTIONS_PER_ROW,
     MAX_CONSTRAINT_DEGREE,
     MAX_MESSAGE_WIDTH,
@@ -176,8 +176,7 @@ end
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages
-#! included by the native AIR.
+#! binds. `FIXED_LOOKUP_ERROR_TERMS` gives the error units charged once per proof.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
@@ -186,7 +185,7 @@ end
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
-    push.FIXED_BOUNDARY_LOOKUP_TERMS
+    push.FIXED_LOOKUP_ERROR_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
     push.MAX_CONSTRAINT_DEGREE

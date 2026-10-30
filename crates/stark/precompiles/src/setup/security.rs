@@ -51,6 +51,13 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 =
     miden_air::precompiles::protocol::PROTOCOL.fixed_boundary_lookup_terms;
 
+/// Fixed lookup-equivalent error units charged once per proof.
+pub const FIXED_LOOKUP_ERROR_TERMS: u32 = FIXED_BOUNDARY_LOOKUP_TERMS
+    + miden_stark::security::lookup_error_units(
+        miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT,
+        miden_air_definitions::precompiles::relations::MAX_MESSAGE_WIDTH as u32,
+    );
+
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification, and
@@ -72,7 +79,7 @@ pub fn proof_security_parameters(
         hash_fn,
         air_shape: air_shape_for(alignment),
         num_ood_points: NUM_OOD_POINTS,
-        num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
+        num_lookup_boundary_terms: FIXED_LOOKUP_ERROR_TERMS,
     }
 }
 
@@ -87,6 +94,31 @@ mod tests {
     use p3_security::budget::report::{LOOKUP_LABEL, QUERY_LABEL};
 
     use super::{testing::*, *};
+
+    #[test]
+    fn auxiliary_error_budget_does_not_exceed_lookup_only_reference() {
+        // The lookup-only reference has 219 fractions per row and 19 fixed terms.
+        const REFERENCE_FRACTIONS_PER_ROW: u64 = 219;
+        const REFERENCE_FIXED_TERMS: u32 = 19;
+
+        let unit = u64::from(LOOKUP_SHAPE.max_message_width + 2);
+        let extra = u64::from(FIXED_LOOKUP_ERROR_TERMS - REFERENCE_FIXED_TERMS);
+        assert!(
+            unit * extra
+                >= u64::from(miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT)
+        );
+        // Compare the estimator's root-count coefficients before dividing by the sampling support.
+        // A compression needs 32 rows; the fixed reference terms are included on both sides.
+        for log_height in 5..=30 {
+            let rows = 1u64 << log_height;
+            let reference =
+                unit * (REFERENCE_FRACTIONS_PER_ROW * rows + u64::from(REFERENCE_FIXED_TERMS));
+            let with_aux_checks = unit
+                * (u64::from(LOOKUP_SHAPE.fractions_per_row) * rows
+                    + u64::from(FIXED_LOOKUP_ERROR_TERMS));
+            assert!(with_aux_checks <= reference);
+        }
+    }
 
     /// Checks that the production AIR shape matches the current chiplet AIRs. A stale shape can
     /// make the reported security level differ from the level implied by the relation being
@@ -105,10 +137,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_464_765;
-        const COMPOSITION_TERM_FP: u64 = 7_622_492;
+        const LOOKUP_BASE_FP: u64 = 7_466_508;
+        const COMPOSITION_TERM_FP: u64 = 7_623_992;
         const OOD_BASE_FP: u64 = 8_073_553;
-        const DEEP_BASE_FP: u64 = 7_629_129;
+        const DEEP_BASE_FP: u64 = 7_630_117;
         const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -145,7 +177,7 @@ mod tests {
         );
         assert_eq!(
             metadata.num_deep_terms(1),
-            741,
+            734,
             "unexpected Blake3 (alignment 1) DEEP term count"
         );
         assert_eq!(
@@ -237,32 +269,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_071_420, 7_622_492, 7_693_931, 7_825_737, 7_760_447, 6_335_399, 8_257_536],
+                [7_073_120, 7_623_992, 7_693_931, 7_826_725, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_416_188, 7_622_492, 7_039_549, 7_170_377, 7_105_087, 6_335_399, 8_257_536],
+                [6_417_931, 7_623_992, 7_039_549, 7_171_365, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_219_580, 7_622_492, 6_842_942, 6_973_769, 6_908_479, 6_335_399, 8_257_536],
+                [6_221_323, 7_623_992, 6_842_942, 6_974_757, 6_908_479, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_154_044, 7_622_492, 6_777_406, 6_908_233, 6_842_943, 6_335_399, 8_257_536],
+                [6_155_787, 7_623_992, 6_777_406, 6_909_221, 6_842_943, 6_335_399, 8_257_536],
                 93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_891_900, 7_622_492, 6_515_262, 6_646_089, 6_580_799, 6_335_399, 8_257_536],
+                [5_893_643, 7_623_992, 6_515_262, 6_647_077, 6_580_799, 6_335_399, 8_257_536],
                 89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_416_188, 7_622_492, 7_039_549, 6_383_945, 6_842_943, 1_353_667, 8_257_536],
+                [6_417_931, 7_623_992, 7_039_549, 6_384_933, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];

@@ -11,7 +11,9 @@ use super::{
         write_pvm_footer_output,
     },
 };
-use crate::shared::eidos::{layout::FOOTER_START, testing::write_core_felt_footer_rows};
+use crate::shared::eidos::{
+    layout::FOOTER_START, testing::write_core_felt_footer_rows, trace::write_full_felt_footer_cv,
+};
 
 /// Materialized 32-row compression trace block and its final working state.
 pub struct EidosCompressionFeltTraceBlock {
@@ -64,4 +66,5 @@ pub fn rewrite_felt_footer_for_test(
         &mut NoopByteLookupRecorder,
         &mut write_footer_interface,
     );
+    write_full_felt_footer_cv(&mut rows[FOOTER_START + 2], h);
 }

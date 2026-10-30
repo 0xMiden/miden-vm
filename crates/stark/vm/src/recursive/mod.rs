@@ -434,7 +434,7 @@ mod tests {
 
     /// Pins the complete packaged advice from a fixed, independently verified VM proof.
     #[test]
-    fn packaged_advice_matches_pre_extraction_bytes() {
+    fn packaged_advice_matches_current_fixture() {
         use miden_core::serde::{Deserializable, Serializable};
         use miden_crypto::hash::blake::Blake3_256;
 
@@ -475,8 +475,8 @@ mod tests {
         assert_eq!(
             digest,
             [
-                64, 70, 184, 218, 212, 109, 150, 180, 81, 241, 9, 30, 165, 30, 99, 0, 217, 199,
-                125, 94, 53, 49, 15, 43, 171, 24, 37, 8, 51, 53, 14, 87
+                57, 97, 42, 174, 7, 183, 16, 95, 250, 83, 242, 238, 69, 173, 33, 104, 123, 221,
+                131, 21, 4, 100, 41, 102, 129, 66, 129, 231, 6, 208, 28, 65
             ],
         );
     }

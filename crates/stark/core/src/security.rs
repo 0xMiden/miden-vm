@@ -47,7 +47,9 @@ pub struct ProofSecurityParameters {
     pub air_shape: AirShape,
     /// Number of out-of-domain points opened per committed column.
     pub num_ood_points: u32,
-    /// Lookup fractions consumed once per proof in addition to the per-row fractions.
+    /// Lookup-equivalent error terms charged once per proof.
+    /// Each term contributes `(max_message_width + 2) / |S|`, where `S` is the lookup challenge's
+    /// sampling support.
     pub num_lookup_boundary_terms: u32,
 }
 
@@ -328,4 +330,12 @@ impl LowDegreeTest for FriCandidate {
     fn conjectured_error(&self, shape: &p3_security::InstanceShape) -> ErrorBits {
         p3_security::fri::conjectured_error(&self.fri, shape)
     }
+}
+
+/// Converts an error coefficient to whole lookup-error units.
+///
+/// Each unit is charged `(max_message_width + 2) / |S|`, where `S` is the auxiliary challenge's
+/// sampling support. Rounding up covers the full `error_coefficient / |S|` bound.
+pub const fn lookup_error_units(error_coefficient: u32, max_message_width: u32) -> u32 {
+    (error_coefficient as u64).div_ceil(max_message_width as u64 + 2) as u32
 }

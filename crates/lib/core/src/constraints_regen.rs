@@ -943,7 +943,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
-    let max_boundary_terms = u64::from(miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS)
+    let max_boundary_terms = u64::from(miden_air::vm::security::FIXED_LOOKUP_ERROR_TERMS)
         + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
     if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
         return Err("the MVM composed-constraint count exceeds the estimator envelope".into());
@@ -1014,9 +1014,9 @@ pub fn security_masm_matches_air() -> Result<(), String> {
                 .expect("the MVM uses DEEP composition") as u64,
         ),
         (
-            "CORE_BOUNDARY_LOOKUP_TERMS",
+            "FIXED_LOOKUP_ERROR_TERMS",
             wrapper_source,
-            miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
+            miden_air::vm::security::FIXED_LOOKUP_ERROR_TERMS as u64,
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",

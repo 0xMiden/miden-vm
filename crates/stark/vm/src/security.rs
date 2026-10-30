@@ -1,5 +1,5 @@
 //! Security reports for authenticated VM proofs.
-use miden_air::vm::security::{AIR_SHAPE, CORE_BOUNDARY_LOOKUP_TERMS, RAW_WIDTHS};
+use miden_air::vm::security::{AIR_SHAPE, FIXED_LOOKUP_ERROR_TERMS, RAW_WIDTHS};
 #[cfg(test)]
 use miden_air::vm::security::{
     BITS_PER_QUERY, COLLISION_RESISTANCE, COMPOSITION_TERM, DEEP_BASE, FIXED_POINT_FRACTIONAL_BITS,
@@ -99,7 +99,7 @@ fn mvm_security_parameters_from_protocol(
             ..AIR_SHAPE
         },
         num_ood_points: NUM_OOD_POINTS,
-        num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+        num_lookup_boundary_terms: FIXED_LOOKUP_ERROR_TERMS + num_kernel_procedures,
     }
 }
 
@@ -112,6 +112,31 @@ mod tests {
     use p3_security::{ErrorBits, fixed};
 
     use super::{testing::*, *};
+
+    #[test]
+    fn auxiliary_error_budget_does_not_exceed_lookup_only_reference() {
+        // The lookup-only reference has 78 fractions per row and three fixed terms.
+        const REFERENCE_FRACTIONS_PER_ROW: u64 = 78;
+        const REFERENCE_FIXED_TERMS: u32 = 3;
+
+        let unit = u64::from(miden_air::vm::security::LOOKUP_SHAPE.max_message_width + 2);
+        let extra = u64::from(FIXED_LOOKUP_ERROR_TERMS - REFERENCE_FIXED_TERMS);
+        assert!(
+            unit * extra
+                >= u64::from(miden_air_definitions::shared::eidos::AUXILIARY_ERROR_COEFFICIENT)
+        );
+        // Compare the estimator's root-count coefficients before dividing by the sampling support.
+        // A compression needs 32 rows; shared kernel terms cancel on both sides.
+        for log_height in 5..=30 {
+            let rows = 1u64 << log_height;
+            let reference =
+                unit * (REFERENCE_FRACTIONS_PER_ROW * rows + u64::from(REFERENCE_FIXED_TERMS));
+            let with_aux_checks = unit
+                * (u64::from(miden_air::vm::security::LOOKUP_SHAPE.fractions_per_row) * rows
+                    + u64::from(FIXED_LOOKUP_ERROR_TERMS));
+            assert!(with_aux_checks <= reference);
+        }
+    }
 
     /// The deployed preset has about 57 proven query bits in LDR, versus about 39 in UDR.
     /// Selecting a regime must use the complete bound, including DEEP column batching.
@@ -257,7 +282,7 @@ mod tests {
             COMMITMENT_ALIGNMENT,
             HashFunction::Eidos,
         );
-        parameters.protocol_params.num_queries = 65;
+        parameters.protocol_params.num_queries = 66;
         parameters.protocol_params.query_pow_bits = 0;
         parameters.protocol_params.deep_pow_bits = 31;
         parameters.protocol_params.folding_pow_bits = 31;
@@ -472,8 +497,8 @@ mod tests {
     #[test]
     fn num_deep_terms_matches_the_pinned_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 274, "unexpected Blake3 (alignment 1) DEEP term count");
-        assert_eq!(num_deep_terms(8), 282, "unexpected algebraic (alignment 8) DEEP term count");
+        assert_eq!(num_deep_terms(1), 268, "unexpected Blake3 (alignment 1) DEEP term count");
+        assert_eq!(num_deep_terms(8), 274, "unexpected algebraic (alignment 8) DEEP term count");
         assert_eq!(num_deep_terms(17), 359, "unexpected Keccak (alignment 17) DEEP term count");
     }
 
@@ -535,10 +560,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_572_335;
-        const COMPOSITION_TERM_FP: u64 = 7_647_953;
+        const LOOKUP_BASE_FP: u64 = 7_578_599;
+        const COMPOSITION_TERM_FP: u64 = 7_649_159;
         const OOD_BASE_FP: u64 = 8_030_818;
-        const DEEP_BASE_FP: u64 = 7_724_102;
+        const DEEP_BASE_FP: u64 = 7_726_823;
         const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -570,32 +595,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_179_062, 7_647_953, 7_645_438, 7_920_710, 7_760_447, 6_335_399, 8_257_536],
+                [7_185_180, 7_649_159, 7_645_438, 7_923_431, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_261_614, 7_647_953, 6_729_109, 7_003_206, 6_842_943, 6_335_399, 8_257_536],
+                [6_267_878, 7_649_159, 6_729_109, 7_005_927, 6_842_943, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_065_006, 7_647_953, 6_532_501, 6_806_598, 6_646_335, 6_335_399, 8_257_536],
+                [6_071_270, 7_649_159, 6_532_501, 6_809_319, 6_646_335, 6_335_399, 8_257_536],
                 92,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_671_790, 7_647_953, 6_139_285, 6_413_382, 6_253_119, 6_335_399, 8_257_536],
+                [5_678_054, 7_649_159, 6_139_285, 6_416_103, 6_253_119, 6_335_399, 8_257_536],
                 86,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_261_614, 7_647_953, 6_729_109, 6_216_774, 6_580_799, 1_353_667, 8_257_536],
+                [6_267_878, 7_649_159, 6_729_109, 6_219_495, 6_580_799, 1_353_667, 8_257_536],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_671_790, 7_647_953, 6_139_285, 7_658_566, 8_022_591, 8_257_536, 8_257_536],
+                [5_678_054, 7_649_159, 6_139_285, 7_661_287, 8_022_591, 8_257_536, 8_257_536],
                 86,
             ),
         ];

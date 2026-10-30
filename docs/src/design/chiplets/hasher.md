@@ -111,21 +111,20 @@ internal computation provider connected by lookup arguments.
 
 ## Eidos compression AIR
 
-The MVM's `EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row
-block per physical compression:
+The MVM's `EidosCompressionAir` uses 104 main columns and 19 auxiliary columns. Each physical
+compression occupies one 32-row block:
 
 | Rows  | Role                                                                                                               |
 |-------|--------------------------------------------------------------------------------------------------------------------|
 | 0–27  | Seven Eidos compression rounds, represented as 28 fused G-function rows                                            |
 | 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
 
-Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
-each footer row. The fused rows prove u32 additions, XOR witnesses, and rotations. Their input
-`a` and `c` words are reconstructed from the output words and constrained carry witnesses, then
-anchored to the initial state or preceding fused row. Footer rows reconstruct the original block
-and chaining word, perform feed-forward XOR, enforce canonical field encodings, and expose the result.
-The eight raw chaining-value words cross the cycle in one atomic, cycle-tagged internal relation;
-the sixteen message words remain independently cycle-tagged.
+Periodic selectors identify the G-function phase, diagonal steps, and each footer row. The fused
+rows prove u32 additions, XOR witnesses, and rotations. Their `c` inputs are reconstructed from
+the output words and constrained carries, then anchored to the initial state or preceding fused
+row. Consistency checks bind the rounds to the message schedule and initial chaining value.
+Footer rows reconstruct the original block and chaining word, perform feed-forward XOR, enforce
+canonical field encodings, and expose the result.
 
 The compression AIR has two external interfaces:
 
@@ -144,15 +143,10 @@ Every 32-row block carries a canonical `compression_cycle_id`:
 - the ID is constant throughout the block;
 - it increments exactly once between blocks, including padding blocks.
 
-The ID occupies one shared main column throughout the 32-row block rather than being duplicated in
-every message tuple. All internal message-word and chaining-value LogUp relations include the
-physical ID. The chaining-value relation carries `(cycle_id, h[0], ..., h[7])` atomically, while
-each message-word relation carries the cycle ID directly.
+The ID occupies one shared main column throughout the block.
 
-This binding is security-critical. Without it, internal inputs from two valid compression cycles
-could be swapped and still cancel as anonymous multisets. With it, every internal witness is tied
-to one physical cycle, while the footer-3 compression-link relation ties that cycle's complete
-`(block, cv_in, cv_out)` tuple to the controller.
+The footer-3 compression-link relation binds the cycle's complete `(block, cv_in, cv_out)` tuple
+to the controller.
 
 ## Byte lookups and the And8 AIR
 
@@ -194,10 +188,10 @@ The shared `v_wiring` column links each non-padding controller row to
 contributes the same tuple with the fixed Eidos two-to-one chaining value. Footer row 3 of the
 matching physical compression receives the tuple with its provider multiplicity.
 
-### Internal Eidos compression buses
+### Eidos byte and range buses
 
-Cycle-tagged relations connect fused computation rows to footer reconstruction for the message and
-input chaining value. Separate byte-table relations prove XOR, rotation, and range witnesses.
+Typed byte-table and range-check relations prove the compression's XOR, rotation, and range
+witnesses.
 
 ### Merkle sibling table {#sibling-table-constraints}
 

@@ -1,9 +1,9 @@
-//! Column layout for the 32-row x 108-column Eidos compression AIR.
+//! Column layout for the 32-row x 104-column Eidos compression AIR.
 
 /// Number of main-trace columns in the Eidos compression AIR.
-pub const NUM_COLS: usize = 108;
+pub const NUM_COLS: usize = 104;
 /// Number of auxiliary columns used by the shared narrow lookup core.
-pub const NARROW_AUX_COLS: usize = 18;
+pub const NARROW_AUX_COLS: usize = 16;
 
 pub const ROUNDS: usize = 7;
 pub const FUSED_G_ROWS_PER_ROUND: usize = 4;
@@ -24,10 +24,9 @@ pub const G_BD_ROT_SLOT_BASE_COL: usize = 48;
 /// from the next row's four B inputs and the other fifteen rotation results.
 pub const MISSING_ROTATION_G: usize = NUM_G - 1;
 pub const MISSING_ROTATION_BYTE: usize = BYTES_PER_WORD - 1;
-pub const G_MSG_WORD_BASE_COL: usize = 95;
-pub const G_COMPRESSION_CYCLE_ID_COL: usize = 99;
-pub const G_K3_BASE_COL: usize = 100;
-pub const G_K2_BASE_COL: usize = 104;
+pub const G_COMPRESSION_CYCLE_ID_COL: usize = 95;
+pub const G_K3_BASE_COL: usize = 96;
+pub const G_K2_BASE_COL: usize = 100;
 
 // --- Footer-overlay layout -------------------------------------------------
 
@@ -48,14 +47,13 @@ pub const F_RANGE_SLOTS: usize = 8;
 /// Logical narrow slots used by the eight footer range checks.
 ///
 /// Slot 27 is left inactive on footers so every B-word byte group retains a free field-zero
-/// coordinate for the atomic full-CV relation. Slot 17 carries the corresponding range
+/// coordinate for the footer CV representation. Slot 17 carries the corresponding range
 /// interaction.
 pub const F_RANGE_NARROW_SLOTS: [usize; F_RANGE_SLOTS] = [22, 23, 24, 25, 26, 17, 28, 29];
 
-/// Storage coordinates used to make the cycle-tagged full-CV message linear on both the first
-/// fused row and the footer rows. The first four are the fused k2 carries. The final four are one
-/// byte coordinate from each fused B input word.
-pub const F_CV_STORAGE_COLS: [usize; 8] = [104, 105, 106, 107, 54, 60, 81, 90];
+/// Correction coordinates for the linear footer CV expressions. They reuse the fused k2 carry
+/// cells and one byte coordinate from each fused B input word.
+pub const F_CV_STORAGE_COLS: [usize; 8] = [100, 101, 102, 103, 54, 60, 81, 90];
 pub const F_CV_B_STORAGE_BYTES: [usize; NUM_G] = [2, 0, 3, 2];
 
 /// Four physical footer cells reserved for wrapper-defined output or interface values.
@@ -64,7 +62,7 @@ pub const F_OUTPUT_BASE_COL: usize = 55;
 /// Row-dependent footer cells for carried `R` values followed by the future-working-state queue.
 /// Inactive full-CV coordinates are reused until their corresponding CV words become live.
 pub const F_FOOTER_DATA_COLS: [[usize; 12]; FOOTER_ROWS] = [
-    [59, 65, 82, 83, 91, 92, 93, 94, 106, 107, 54, 60],
+    [59, 65, 82, 83, 91, 92, 93, 94, 102, 103, 54, 60],
     [59, 65, 82, 83, 91, 92, 93, 94, 54, 60, 0, 0],
     [59, 65, 82, 83, 91, 92, 93, 94, 0, 0, 0, 0],
     [59, 65, 82, 83, 91, 92, 0, 0, 0, 0, 0, 0],
@@ -75,7 +73,7 @@ pub const F_FUTURE_W_WORD_INDICES: [usize; F_FUTURE_W_COLS] =
 
 pub const F_R_CANON_INV_BASE_COL: usize = 61;
 pub const F_C_CANON_INV_COL: usize = 63;
-/// Physical compression-cycle identifier, shared by every message interaction in a row.
+/// Physical compression-cycle identifier, constant throughout each 32-row cycle.
 pub const F_COMPRESSION_CYCLE_ID_COL: usize = G_COMPRESSION_CYCLE_ID_COL;
 /// Footer fields overlaid on the globally ternary-constrained k3 columns.
 pub const F_R_CANON_Z_BASE_COL: usize = G_K3_BASE_COL + 1;
@@ -135,20 +133,12 @@ pub const fn g_bd_rot_result_col(g: usize, byte: usize) -> Option<usize> {
     }
 }
 
-pub const fn g_msg_word_col(g: usize) -> usize {
-    G_MSG_WORD_BASE_COL + g
-}
-
 pub const fn g_k3_col(g: usize) -> usize {
     G_K3_BASE_COL + g
 }
 
 pub const fn footer_xor_slot_col(slot: usize, field: usize) -> usize {
     byte_slot_base(F_XOR_SLOT_BASE_COL, slot) + field
-}
-
-pub const fn footer_msg_word_col(word: usize) -> usize {
-    g_msg_word_col(word)
 }
 
 pub const fn footer_range_slot_col(limb: usize, field: usize) -> usize {
@@ -209,6 +199,7 @@ pub const fn footer_output_col(idx: usize) -> usize {
 
 const _: () = assert!(BLOCK_PERIOD == 32);
 const _: () = assert!(
-    G_BD_ROT_SLOT_BASE_COL + NUM_G * BYTES_PER_WORD * BYTE_SLOT_WIDTH - 1 == G_MSG_WORD_BASE_COL
+    G_BD_ROT_SLOT_BASE_COL + NUM_G * BYTES_PER_WORD * BYTE_SLOT_WIDTH - 1
+        == G_COMPRESSION_CYCLE_ID_COL
 );
 const _: () = assert!(G_K2_BASE_COL + NUM_G == NUM_COLS);

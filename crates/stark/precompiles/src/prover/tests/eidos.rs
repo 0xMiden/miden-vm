@@ -21,9 +21,10 @@ use crate::prover::{
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_EIDOS_COMPRESSION_END, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION,
-        COL_OUT_MULTIPLICITY, EidosBlockMsg, EidosCompressionAir, EidosDigest, EidosInitMsg,
-        EidosOutMsg, INTERNAL_CV_BUS_ID, NUM_AUX_COLS, NUM_MAIN_COLS,
+        COL_CHAIN_HEAD_ID, COL_EIDOS_COMPRESSION_END, COL_HAS_SUCCESSOR, COL_IN_MULTIPLICITY,
+        COL_INITIAL_MULTIPLICITY, COL_IS_CONTINUATION, COL_OUT_MULTIPLICITY, EidosBlockMsg,
+        EidosCompressionAir, EidosDigest, EidosInitMsg, EidosOutMsg, INTERNAL_CV_BUS_ID,
+        NUM_AUX_COLS, NUM_MAIN_COLS,
         compression::{
             layout::{
                 BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTE_SLOT_WIDTH, BYTES_PER_WORD,
@@ -36,7 +37,7 @@ use crate::prover::{
                 EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,
                 rewrite_felt_footer_for_test,
             },
-            trace::set_footer_output_multiplicity,
+            trace::{set_cycle_metadata as write_cycle_metadata, set_footer_multiplicity},
         },
         trace::{
             EidosRequires,
@@ -45,8 +46,9 @@ use crate::prover::{
     },
 };
 
-const NUM_INTERFACE_AUX_COLS: usize = 2;
-const INTERFACE_AUX_BEGIN: usize = NUM_AUX_COLS - NUM_INTERFACE_AUX_COLS;
+const NUM_INTERFACE_AUX_COLS: usize = 3;
+const NUM_LOOKUP_COLS: usize = NUM_AUX_COLS - 1;
+const INTERFACE_AUX_BEGIN: usize = NUM_LOOKUP_COLS - NUM_INTERFACE_AUX_COLS;
 
 fn block(a: u32) -> ([Felt; 4], [Felt; 4]) {
     (
@@ -108,20 +110,17 @@ fn two_cycle_matrix(
 }
 
 fn parent_matrix_from_core(trace: &RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
-    let mut values =
-        Vec::with_capacity(trace.values.len() / NUM_EIDOS_COMPRESSION_COLS * NUM_MAIN_COLS);
-    for (row_idx, row) in
-        trace.values.as_chunks::<NUM_EIDOS_COMPRESSION_COLS>().0.iter().enumerate()
+    let mut result = trace.clone();
+    for rows in result
+        .values
+        .as_chunks_mut::<{ EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS }>()
+        .0
+        .iter_mut()
     {
-        values.extend_from_slice(row);
-        let mut metadata = [Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS];
-        let cycle = row_idx / EIDOS_COMPRESSION_CYCLE_LEN;
-        let cycle_start = cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_EIDOS_COMPRESSION_COLS;
-        metadata[COL_CHAIN_HEAD_ID - NUM_EIDOS_COMPRESSION_COLS] =
-            trace.values[cycle_start + F_COMPRESSION_CYCLE_ID_COL];
-        values.extend(metadata);
+        let head = rows[F_COMPRESSION_CYCLE_ID_COL];
+        write_cycle_metadata(rows, Felt::ZERO, Felt::ZERO, Felt::ZERO, Felt::ZERO, head);
     }
-    RowMajorMatrix::new(values, NUM_MAIN_COLS)
+    result
 }
 
 fn set_cycle_metadata(
@@ -130,20 +129,18 @@ fn set_cycle_metadata(
     in_mult: Felt,
     out_mult: Felt,
     is_continuation: Felt,
+    has_successor: Felt,
     chain_head_id: Felt,
 ) {
-    let rows = cycle * EIDOS_COMPRESSION_CYCLE_LEN..(cycle + 1) * EIDOS_COMPRESSION_CYCLE_LEN;
-    for row in rows {
-        trace.values[row * NUM_MAIN_COLS + COL_IN_MULTIPLICITY] = in_mult;
-        if row % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
-            set_footer_output_multiplicity(
-                &mut trace.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS],
-                out_mult,
-            );
-        }
-        trace.values[row * NUM_MAIN_COLS + COL_IS_CONTINUATION] = is_continuation;
-        trace.values[row * NUM_MAIN_COLS + COL_CHAIN_HEAD_ID] = chain_head_id;
-    }
+    let stride = EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS;
+    write_cycle_metadata(
+        &mut trace.values[cycle * stride..(cycle + 1) * stride],
+        in_mult,
+        out_mult,
+        is_continuation,
+        has_successor,
+        chain_head_id,
+    );
 }
 
 fn cycle_digest(trace: &RowMajorMatrix<Felt>, cycle: usize) -> [Felt; 4] {
@@ -165,6 +162,21 @@ fn eidos_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
     let fractions =
         build_lookup_fractions(&air, trace, None, &air.periodic_columns(), &lookup_challenges());
     lookup_balance(fractions.fractions())
+}
+
+fn continuation_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
+    let air = EidosCompressionAir;
+    let fractions =
+        build_lookup_fractions(&air, trace, None, &air.periodic_columns(), &lookup_challenges());
+    let mut offset = 0;
+    let mut links = Vec::new();
+    for (slot, &count) in fractions.counts().iter().enumerate() {
+        if slot % NUM_LOOKUP_COLS == INTERFACE_AUX_BEGIN + 2 {
+            links.extend_from_slice(&fractions.fractions()[offset..offset + count]);
+        }
+        offset += count;
+    }
+    lookup_balance(&links)
 }
 
 fn lookup_balance(fractions: &[(Felt, QuadFelt)]) -> HashMap<QuadFelt, Felt> {
@@ -287,12 +299,13 @@ fn eidos_interface_messages_bind_their_ids_and_payloads() {
 #[test]
 fn air_layout_matches_32_row_eidos_compression_spec() {
     assert_eq!(EIDOS_COMPRESSION_CYCLE_LEN, 32);
-    assert_eq!(COL_EIDOS_COMPRESSION_END, 108);
-    assert_eq!(COL_IN_MULTIPLICITY, 108);
+    assert_eq!(COL_EIDOS_COMPRESSION_END, 104);
+    assert_eq!(COL_IN_MULTIPLICITY, 94);
+    assert_eq!(COL_INITIAL_MULTIPLICITY, 64);
     assert_eq!(COL_OUT_MULTIPLICITY, 64);
-    assert_eq!(COL_IS_CONTINUATION, 109);
-    assert_eq!(COL_CHAIN_HEAD_ID, 110);
-    assert_eq!(NUM_MAIN_COLS, 111);
+    assert_eq!(COL_IS_CONTINUATION, 96);
+    assert_eq!(COL_CHAIN_HEAD_ID, 93);
+    assert_eq!(NUM_MAIN_COLS, 104);
     assert_eq!(NUM_AUX_COLS, 20);
 
     let layout =
@@ -303,13 +316,13 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, 1);
-    assert_eq!(layout.num_periodic_columns, 14);
+    assert_eq!(layout.num_periodic_columns, 10);
     assert_eq!(
         <EidosCompressionAir as BaseAir<Felt>>::periodic_columns(&EidosCompressionAir)
             .iter()
             .map(Vec::len)
             .collect::<Vec<_>>(),
-        vec![EIDOS_COMPRESSION_CYCLE_LEN; 14],
+        vec![EIDOS_COMPRESSION_CYCLE_LEN; 10],
     );
 }
 
@@ -327,8 +340,8 @@ fn lookup_degree_annotations_match_the_unified_layout() {
             preprocessed_width: 0,
             trace_width: NUM_MAIN_COLS,
             num_public_values: 0,
-            num_periodic_columns: 14,
-            permutation_width: NUM_AUX_COLS,
+            num_periodic_columns: 10,
+            permutation_width: NUM_LOOKUP_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,
             num_permutation_values: 1,
         })
@@ -336,7 +349,7 @@ fn lookup_degree_annotations_match_the_unified_layout() {
 }
 
 #[test]
-fn lookup_interaction_liveness_matches_the_packed_twenty_column_design() {
+fn lookup_interaction_liveness_matches_the_nineteen_lookup_columns() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(DEFERRED_AND_FRAME, [block(10)]);
     requires.require_digest(output.digest);
@@ -349,12 +362,12 @@ fn lookup_interaction_liveness_matches_the_packed_twenty_column_design() {
         &EidosCompressionAir.periodic_columns(),
         &lookup_challenges(),
     );
-    let mut expected_shape = [2; NUM_AUX_COLS];
-    expected_shape[INTERFACE_AUX_BEGIN..].copy_from_slice(&[2, 1]);
+    let mut expected_shape = [2; NUM_LOOKUP_COLS];
+    expected_shape[INTERFACE_AUX_BEGIN..].copy_from_slice(&[1, 1, 1]);
     assert_eq!(fractions.shape(), &expected_shape);
 
     for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        let actual = &fractions.counts()[row * NUM_AUX_COLS..(row + 1) * NUM_AUX_COLS];
+        let actual = &fractions.counts()[row * NUM_LOOKUP_COLS..(row + 1) * NUM_LOOKUP_COLS];
         let core = &actual[..INTERFACE_AUX_BEGIN];
         if row < FOOTER_START {
             assert_eq!(core, &[2; INTERFACE_AUX_BEGIN], "fused row {row}");
@@ -364,15 +377,15 @@ fn lookup_interaction_liveness_matches_the_packed_twenty_column_design() {
             expected[11..13].fill(2);
             expected[13] = 1;
             expected[14] = 2;
-            expected[16..INTERFACE_AUX_BEGIN].fill(2);
+
             assert_eq!(core, &expected, "footer row {row}");
-            assert_eq!(core.iter().sum::<usize>(), 29);
+            assert_eq!(core.iter().sum::<usize>(), 25);
         }
 
         let expected = match row {
-            0 => [1, 1],
-            31 => [2, 1],
-            _ => [0, 0],
+            30 => [0, 1, 0],
+            31 => [1, 1, 0],
+            _ => [0, 0, 0],
         };
         assert_eq!(&actual[INTERFACE_AUX_BEGIN..], &expected, "interface row {row}");
     }
@@ -417,7 +430,8 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     // Six real compressions occupy six full 32-row cycles, padded to eight cycles.
     assert_eq!(compression.values.len() / NUM_MAIN_COLS, 8 * 32);
     let row = |cycle: usize, c: usize| {
-        compression.values[cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS + c]
+        let phase = if c == COL_IS_CONTINUATION { 30 } else { 31 };
+        compression.values[(cycle * EIDOS_COMPRESSION_CYCLE_LEN + phase) * NUM_MAIN_COLS + c]
     };
     assert_eq!(row(0, COL_IS_CONTINUATION), Felt::ZERO);
     assert_eq!(row(1, COL_IS_CONTINUATION), Felt::ZERO);
@@ -462,16 +476,14 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     assert_eq!(footer_digest(3), chunks.digest.as_array());
     assert_eq!(footer_digest(5), msm.digest.as_array());
 
-    for cycle in 0..6 {
-        let first = cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS;
-        for row in 1..EIDOS_COMPRESSION_CYCLE_LEN {
-            let current = first + row * NUM_MAIN_COLS;
-            assert_eq!(
-                &compression.values[current + COL_IN_MULTIPLICITY..current + NUM_MAIN_COLS],
-                &compression.values[first + COL_IN_MULTIPLICITY..first + NUM_MAIN_COLS],
-                "PVM metadata changed within physical Eidos compression cycle {cycle} at row {row}",
-            );
-        }
+    for (cycle, outgoing) in [0, 1, 1, 0, 1, 0, 0, 0].into_iter().enumerate() {
+        let footer2 = (cycle * EIDOS_COMPRESSION_CYCLE_LEN + 30) * NUM_MAIN_COLS;
+        let footer3 = footer2 + NUM_MAIN_COLS;
+        assert_eq!(
+            compression.values[footer2 + COL_INITIAL_MULTIPLICITY],
+            compression.values[footer3 + COL_IN_MULTIPLICITY]
+        );
+        assert_eq!(compression.values[footer3 + COL_HAS_SUCCESSOR], Felt::from_u8(outgoing));
     }
 }
 
@@ -486,7 +498,8 @@ fn distinct_generic_absorptions_use_consecutive_physical_cycles() {
 
     let compression = generate_trace(requires);
     let row = |cycle: usize, col: usize| {
-        compression.values[cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS + col]
+        let phase = if col == COL_IS_CONTINUATION { 30 } else { 31 };
+        compression.values[(cycle * EIDOS_COMPRESSION_CYCLE_LEN + phase) * NUM_MAIN_COLS + col]
     };
 
     assert_eq!(row(0, F_COMPRESSION_CYCLE_ID_COL), Felt::ZERO);
@@ -499,44 +512,29 @@ fn distinct_generic_absorptions_use_consecutive_physical_cycles() {
 }
 
 #[test]
-fn physical_cycle_id_rejects_two_cycle_cv_swap() {
+#[should_panic(expected = "constraint not satisfied")]
+fn fingerprint_rejects_two_cycle_cv_swap() {
     let block_a = core::array::from_fn(|i| 10 + i as u32);
     let block_b = core::array::from_fn(|i| 100 + i as u32);
     let cv_a = core::array::from_fn(|i| 1_000 + i as u32);
     let cv_b = core::array::from_fn(|i| 2_000 + i as u32);
 
-    // Each computation consumes the other cycle's CV while its footer advertises the CV assigned
-    // to this physical cycle. The physical cycle ID must prevent that cross-cycle substitution.
+    // Each computation consumes the other cycle's CV while its footer advertises its own.
+    // Per-cycle consistency checks prevent cancellation between those cycles.
     let mut forged_a = generate_felt_trace_block_with_cycle_id(block_a, cv_b, 0);
     let mut forged_b = generate_felt_trace_block_with_cycle_id(block_b, cv_a, 1);
     rewrite_felt_footer_for_test(&mut forged_a.rows, block_a, cv_a, forged_a.final_v, 0);
     rewrite_felt_footer_for_test(&mut forged_b.rows, block_b, cv_b, forged_b.final_v, 1);
 
     let forged_core = two_cycle_matrix(&forged_a, &forged_b);
-    // Every core polynomial constraint still holds. Rejection comes specifically from the
-    // cycle-tagged atomic CV relation in the unified PVM lookup argument.
+    // The AIR rejects the substituted CV even when no external input is consumed.
     let forged = parent_matrix_from_core(&forged_core);
     crate::prover::tests::check_local(EidosCompressionAir, &forged);
-    let challenges = lookup_challenges();
-    let report = eidos_balance(&forged);
-    for (cycle_id, consumed, advertised) in [(0u64, cv_b, cv_a), (1, cv_a, cv_b)] {
-        let encode = |cv: [u32; 8]| {
-            let fields: [Felt; 9] = core::array::from_fn(|idx| {
-                if idx == 0 {
-                    Felt::new_unchecked(cycle_id)
-                } else {
-                    Felt::from(cv[idx - 1])
-                }
-            });
-            challenges.encode(INTERNAL_CV_BUS_ID, fields)
-        };
-        assert_eq!(net_multiplicity(&report, encode(consumed)), -Felt::ONE);
-        assert_eq!(net_multiplicity(&report, encode(advertised)), Felt::ONE);
-    }
 }
 
 #[test]
-fn physical_cycle_id_rejects_two_cycle_message_swap() {
+#[should_panic(expected = "constraint not satisfied")]
+fn fingerprint_rejects_two_cycle_message_swap() {
     let block_a = core::array::from_fn(|i| 10 + i as u32);
     let block_b = core::array::from_fn(|i| 100 + i as u32);
     let cv_a = core::array::from_fn(|i| 1_000 + i as u32);
@@ -551,25 +549,6 @@ fn physical_cycle_id_rejects_two_cycle_message_swap() {
 
     let forged = parent_matrix_from_core(&two_cycle_matrix(&forged_a, &forged_b));
     crate::prover::tests::check_local(EidosCompressionAir, &forged);
-    let challenges = lookup_challenges();
-    let report = eidos_balance(&forged);
-    let seven = Felt::from_u8(7);
-    for (cycle_id, consumed, advertised) in [(0u64, block_b, block_a), (1, block_a, block_b)] {
-        for word_index in 0..16 {
-            let encode = |block: [u32; 16]| {
-                challenges.encode(
-                    BusId::EidosWord as usize,
-                    [
-                        Felt::from_usize(word_index),
-                        Felt::from(block[word_index]),
-                        Felt::new_unchecked(cycle_id),
-                    ],
-                )
-            };
-            assert_eq!(net_multiplicity(&report, encode(consumed)), seven);
-            assert_eq!(net_multiplicity(&report, encode(advertised)), -seven);
-        }
-    }
 }
 
 #[test]
@@ -597,7 +576,7 @@ fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
     // Adjusting it by `-2^56 * (wrong_h - valid_h)` keeps every base constraint satisfied.
     let digest_delta = -Felt::from_u64(1 << 56) * (wrong_h - valid_h);
     row[footer_digest_col(3)] += digest_delta;
-    // Digest coordinate 3 overlays byte 3 of the first C word. Preserve the atomic CV value by
+    // Digest coordinate 3 overlays byte 3 of the first C word. Preserve the footer CV value by
     // compensating its 2^24 byte weight through that word's 2^32 footer-storage coordinate.
     row[F_CV_STORAGE_COLS[0]] -= digest_delta / Felt::from_u16(1 << 8);
 
@@ -746,8 +725,11 @@ fn interning_reuses_logical_span_and_tallies_multiplicity() {
 
     let compression = generate_trace(requires);
     for (index, row) in compression.values.as_chunks::<NUM_MAIN_COLS>().0.iter().enumerate() {
-        assert_eq!(row[COL_IN_MULTIPLICITY], Felt::from_u8(2));
+        if index % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 2 {
+            assert_eq!(row[COL_INITIAL_MULTIPLICITY], Felt::from_u8(2));
+        }
         if index % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
+            assert_eq!(row[COL_IN_MULTIPLICITY], Felt::from_u8(2));
             assert_eq!(row[COL_OUT_MULTIPLICITY], Felt::from_u8(3));
         }
     }
@@ -771,14 +753,15 @@ fn output_only_physical_chain_unbalances_its_owner_messages() {
         "the valid one-cycle session must balance",
     );
     let mut output_only = mains[1].clone();
-    for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        let offset = row * NUM_MAIN_COLS;
-        assert_eq!(output_only.values[offset + COL_IN_MULTIPLICITY], Felt::ONE);
-        if row == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
-            assert_eq!(output_only.values[offset + COL_OUT_MULTIPLICITY], Felt::ONE);
-        }
-        output_only.values[offset + COL_IN_MULTIPLICITY] = Felt::ZERO;
-    }
+    set_cycle_metadata(
+        &mut output_only,
+        0,
+        Felt::ZERO,
+        Felt::ONE,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    );
 
     // Multiplicities are intentionally bus-bound rather than locally equated. The controller
     // alone therefore permits an output-only cycle, while the full owner/controller composition
@@ -809,31 +792,91 @@ fn output_only_physical_chain_unbalances_its_owner_messages() {
 }
 
 #[test]
-#[should_panic(expected = "constraint not satisfied")]
-fn continuation_flag_cannot_activate_a_padding_cycle() {
+fn link_flags_are_boolean_on_both_footer_rows() {
+    let mut requires = EidosRequires::new();
+    requires.require_absorption(DEFERRED_AND_FRAME, [block(10)]);
+    let compression = generate_trace(requires);
+    for (incoming, outgoing) in [
+        (Felt::from_u8(2), Felt::ZERO),
+        (Felt::ZERO, Felt::from_u8(2)),
+        (-Felt::ONE, Felt::ZERO),
+        (Felt::ZERO, -Felt::ONE),
+    ] {
+        let mut forged = compression.clone();
+        set_cycle_metadata(&mut forged, 0, Felt::ZERO, Felt::ZERO, incoming, outgoing, Felt::ZERO);
+        crate::prover::tests::assert_local_rejects(EidosCompressionAir, &forged);
+    }
+}
+
+#[test]
+fn continuation_requires_both_unit_weight_endpoints() {
+    let mut requires = EidosRequires::new();
+    requires.require_absorption(deferred_chunks_frame(2), [block(10), block(20)]);
+    let compression = generate_trace(requires);
+    assert!(continuation_balance(&compression).is_empty());
+    for (outgoing, incoming) in [(0, 1), (1, 0)] {
+        let mut forged = compression.clone();
+        set_cycle_metadata(
+            &mut forged,
+            0,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::from_u8(outgoing),
+            Felt::ZERO,
+        );
+        set_cycle_metadata(
+            &mut forged,
+            1,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::from_u8(incoming),
+            Felt::ZERO,
+            Felt::from_u8(1 - incoming),
+        );
+        crate::prover::tests::check_local(EidosCompressionAir, &forged);
+        assert_eq!(continuation_balance(&forged).len(), 1);
+    }
+}
+
+#[test]
+fn continuation_link_rejects_padding_with_the_wrong_cv() {
     let mut requires = EidosRequires::new();
     let and = requires.require_absorption(DEFERRED_AND_FRAME, [block(1)]);
     let chunks = requires.require_absorption(deferred_chunks_frame(2), [block(10), block(20)]);
     requires.require_digest(and.digest);
     requires.require_digest(chunks.digest);
     let mut compression = generate_trace(requires);
-    // Three real cycles round to four. Turning the padding cycle into a continuation fails because
-    // its raw CV is not the preceding cycle's output.
-    for row in 3 * EIDOS_COMPRESSION_CYCLE_LEN..4 * EIDOS_COMPRESSION_CYCLE_LEN {
-        compression.values[row * NUM_MAIN_COLS + COL_IS_CONTINUATION] = Felt::ONE;
-    }
+    assert!(continuation_balance(&compression).is_empty());
+    // Keep both flags and head IDs consistent. The padding cycle has zero caller multiplicities,
+    // but the unit-weight link still detects its CV mismatch with the preceding compression.
+    set_cycle_metadata(&mut compression, 2, Felt::ONE, Felt::ONE, Felt::ONE, Felt::ONE, Felt::ONE);
+    set_cycle_metadata(
+        &mut compression,
+        3,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ONE,
+        Felt::ZERO,
+        Felt::ONE,
+    );
     crate::prover::tests::check_local(EidosCompressionAir, &compression);
+    assert_eq!(continuation_balance(&compression).len(), 2);
 }
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn interface_metadata_must_be_constant_within_a_compression_cycle() {
+fn input_multiplicity_must_match_between_footers() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(DEFERRED_AND_FRAME, [block(10)]);
     requires.require_digest(output.digest);
     let mut compression = generate_trace(requires);
 
-    compression.values[NUM_MAIN_COLS + COL_IN_MULTIPLICITY] += Felt::ONE;
+    let start = 30 * NUM_MAIN_COLS;
+    set_footer_multiplicity(
+        &mut compression.values[start..start + NUM_MAIN_COLS],
+        Felt::from_u8(2),
+    );
     crate::prover::tests::check_local(EidosCompressionAir, &compression);
 }
 
@@ -845,28 +888,42 @@ fn fresh_cycle_must_name_its_physical_id_as_chain_head() {
     requires.require_digest(output.digest);
     let mut compression = generate_trace(requires);
 
-    for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        compression.values[row * NUM_MAIN_COLS + COL_CHAIN_HEAD_ID] = Felt::from_u8(7);
-    }
+    set_cycle_metadata(
+        &mut compression,
+        0,
+        Felt::ONE,
+        Felt::ONE,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::from_u8(7),
+    );
     crate::prover::tests::check_local(EidosCompressionAir, &compression);
 }
 
 #[test]
-#[should_panic(expected = "constraint not satisfied")]
-fn chain_cannot_wrap_from_the_last_cycle_to_the_first() {
+fn chain_links_close_at_both_physical_boundaries() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(DEFERRED_AND_FRAME, [block(10)]);
     requires.require_digest(output.digest);
-    let mut compression = generate_trace(requires);
-
-    for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        compression.values[row * NUM_MAIN_COLS + COL_IS_CONTINUATION] = Felt::ONE;
+    let compression = generate_trace(requires);
+    assert!(continuation_balance(&compression).is_empty());
+    for (incoming, outgoing) in [(1, 0), (0, 1), (1, 1)] {
+        let mut forged = compression.clone();
+        set_cycle_metadata(
+            &mut forged,
+            0,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::from_u8(incoming),
+            Felt::from_u8(outgoing),
+            Felt::ZERO,
+        );
+        crate::prover::tests::check_local(EidosCompressionAir, &forged);
+        assert!(!continuation_balance(&forged).is_empty());
     }
-    crate::prover::tests::check_local(EidosCompressionAir, &compression);
 }
 
 #[test]
-#[should_panic(expected = "constraint not satisfied")]
 fn continuation_cannot_relabel_a_terminal_output_as_a_fresh_chain() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(deferred_chunks_frame(2), [block(10), block(20)]);
@@ -876,10 +933,10 @@ fn continuation_cannot_relabel_a_terminal_output_as_a_fresh_chain() {
     // The terminal compression is physical cycle 1, but it belongs to the chain headed at cycle
     // 0. Relabelling it as a one-cycle chain would let callers splice valid native computations if
     // the continuation constraint did not bind the head across the edge.
-    for row in EIDOS_COMPRESSION_CYCLE_LEN..2 * EIDOS_COMPRESSION_CYCLE_LEN {
-        compression.values[row * NUM_MAIN_COLS + COL_CHAIN_HEAD_ID] = Felt::ONE;
-    }
+    assert!(continuation_balance(&compression).is_empty());
+    set_cycle_metadata(&mut compression, 1, Felt::ONE, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ONE);
     crate::prover::tests::check_local(EidosCompressionAir, &compression);
+    assert_eq!(continuation_balance(&compression).len(), 2);
 }
 
 #[test]
@@ -902,8 +959,10 @@ fn splitting_a_valid_chain_changes_its_boundary_relations() {
     // locally valid fresh chain. Splitting the chain must nevertheless change the output relation
     // from span (0, 1) to span (1, 1).
     let mut split = compression;
-    set_cycle_metadata(&mut split, 1, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ONE);
+    set_cycle_metadata(&mut split, 0, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ZERO);
+    set_cycle_metadata(&mut split, 1, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ONE);
     crate::prover::tests::check_local(EidosCompressionAir, &split);
+    assert!(continuation_balance(&split).is_empty());
     let split_report = eidos_balance(&split);
     assert_eq!(net_multiplicity(&split_report, original_output), Felt::ZERO);
     assert_eq!(
@@ -931,8 +990,8 @@ fn joining_valid_fresh_cycles_changes_their_boundary_relations() {
     });
     let second = generate_felt_trace_block_with_cycle_id(block_b, unpack_felts(&first_digest), 1);
     let mut separate = parent_matrix_from_core(&two_cycle_matrix(&first, &second));
-    set_cycle_metadata(&mut separate, 0, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO);
-    set_cycle_metadata(&mut separate, 1, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ONE);
+    set_cycle_metadata(&mut separate, 0, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ZERO);
+    set_cycle_metadata(&mut separate, 1, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ONE);
     crate::prover::tests::check_local(EidosCompressionAir, &separate);
 
     let second_digest = cycle_digest(&separate, 1);
@@ -949,8 +1008,10 @@ fn joining_valid_fresh_cycles_changes_their_boundary_relations() {
     // two cycles is therefore locally valid, but its terminal relation must name span (0, 1), not
     // the original one-cycle span (1, 1).
     let mut joined = separate;
-    set_cycle_metadata(&mut joined, 1, Felt::ONE, Felt::ONE, Felt::ONE, Felt::ZERO);
+    set_cycle_metadata(&mut joined, 0, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ONE, Felt::ZERO);
+    set_cycle_metadata(&mut joined, 1, Felt::ONE, Felt::ONE, Felt::ONE, Felt::ZERO, Felt::ZERO);
     crate::prover::tests::check_local(EidosCompressionAir, &joined);
+    assert!(continuation_balance(&joined).is_empty());
     let joined_report = eidos_balance(&joined);
     assert_eq!(net_multiplicity(&joined_report, separate_output), Felt::ZERO);
     assert_eq!(
@@ -983,12 +1044,12 @@ fn block_init_and_output_relations_fire_at_the_expected_chain_boundaries() {
 
     let counts = |cycle: usize, row: usize, col: usize| {
         let row = cycle * EIDOS_COMPRESSION_CYCLE_LEN + row;
-        fractions.counts()[row * NUM_AUX_COLS + INTERFACE_AUX_BEGIN + col]
+        fractions.counts()[row * NUM_LOOKUP_COLS + INTERFACE_AUX_BEGIN + col]
     };
-    assert_eq!([counts(0, 0, 0), counts(0, 0, 1)], [1, 1]);
-    assert_eq!([counts(1, 0, 0), counts(1, 0, 1)], [1, 0]);
-    assert_eq!([counts(0, 31, 0), counts(0, 31, 1)], [2, 0]);
-    assert_eq!([counts(1, 31, 0), counts(1, 31, 1)], [2, 1]);
+    assert_eq!([counts(0, 30, 0), counts(0, 30, 1), counts(0, 30, 2)], [0, 1, 0]);
+    assert_eq!([counts(1, 30, 0), counts(1, 30, 1), counts(1, 30, 2)], [0, 0, 1]);
+    assert_eq!([counts(0, 31, 0), counts(0, 31, 1), counts(0, 31, 2)], [1, 0, 1]);
+    assert_eq!([counts(1, 31, 0), counts(1, 31, 1), counts(1, 31, 2)], [1, 1, 0]);
 }
 
 #[test]
@@ -1005,8 +1066,7 @@ fn native_eidos_compression_core_witness_is_not_a_free_bridge_input() {
 }
 
 #[test]
-#[should_panic(expected = "constraint not satisfied")]
-fn physical_eidos_compression_cycles_must_carry_the_previous_chaining_word() {
+fn continuation_lookup_binds_previous_digest_even_with_zero_input_multiplicity() {
     let second_block = block(11);
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(deferred_chunks_frame(2), [block(1), second_block]);
@@ -1014,7 +1074,7 @@ fn physical_eidos_compression_cycles_must_carry_the_previous_chaining_word() {
     let mut compression = generate_trace(requires);
 
     // Replace the second compression with a separately valid native Eidos compression cycle using a
-    // forged input CV, and keep its cycle-constant PVM metadata self-consistent. The only
+    // forged input CV, and keep its footer metadata self-consistent. The only
     // broken fact is the physical carry from cycle 0's Eidos compression output into cycle 1's
     // Eidos compression input.
     let first_footer = EIDOS_COMPRESSION_CYCLE_LEN - 1;
@@ -1039,5 +1099,55 @@ fn physical_eidos_compression_cycles_must_carry_the_previous_chaining_word() {
             .copy_from_slice(&forged.rows[row]);
     }
 
+    set_cycle_metadata(
+        &mut compression,
+        1,
+        Felt::ONE,
+        Felt::ONE,
+        Felt::ONE,
+        Felt::ZERO,
+        Felt::ZERO,
+    );
     crate::prover::tests::check_local(EidosCompressionAir, &compression);
+    // Set the continuation's caller multiplicity to zero. Its internal CV link must still
+    // consume exactly once and cannot be disabled by the external request count.
+    set_cycle_metadata(
+        &mut compression,
+        1,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ONE,
+        Felt::ZERO,
+        Felt::ZERO,
+    );
+    crate::prover::tests::check_local(EidosCompressionAir, &compression);
+    let balance = eidos_balance(&compression);
+    let encode = |cv: [Felt; 4]| {
+        lookup_challenges()
+            .encode(INTERNAL_CV_BUS_ID, [Felt::ONE, Felt::ZERO, cv[0], cv[1], cv[2], cv[3]])
+    };
+    assert_eq!(net_multiplicity(&balance, encode(cycle_digest(&compression, 0))), Felt::ONE);
+    assert_eq!(net_multiplicity(&balance, encode(forged_cv)), -Felt::ONE);
+}
+
+#[test]
+fn initial_cv_lookup_footer_binds_its_two_additional_words() {
+    use miden_air_definitions::shared::eidos::{footer_cv_word, trace::write_full_felt_footer_cv};
+    let mut requires = EidosRequires::new();
+    let output = requires.require_absorption(DEFERRED_AND_FRAME, [block(1)]);
+    requires.require_digest(output.digest);
+    let original = generate_trace(requires);
+    for word in 6..8 {
+        let mut forged = original.clone();
+        let start = (EIDOS_COMPRESSION_CYCLE_LEN - 2) * NUM_MAIN_COLS;
+        let mut row: [Felt; NUM_EIDOS_COMPRESSION_COLS] =
+            forged.values[start..start + NUM_EIDOS_COMPRESSION_COLS].try_into().unwrap();
+        let mut cv =
+            core::array::from_fn(|i| footer_cv_word(|col| row[col], i).as_canonical_u64() as u32);
+        cv[word] ^= 1;
+        // Re-encode all eight words so the six shared prefix bindings remain satisfied.
+        write_full_felt_footer_cv(&mut row, cv);
+        forged.values[start..start + NUM_EIDOS_COMPRESSION_COLS].copy_from_slice(&row);
+        crate::prover::tests::assert_local_rejects(EidosCompressionAir, &forged);
+    }
 }

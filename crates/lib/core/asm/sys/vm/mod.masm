@@ -40,8 +40,8 @@ pub mod public_inputs
 # Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 
-# One block-hash seed and two deferred-root terms, consumed in public_inputs.masm.
-const CORE_BOUNDARY_LOOKUP_TERMS = 3
+# Fixed per-proof error budget, expressed in lookup fraction units.
+const FIXED_LOOKUP_ERROR_TERMS = 10
 
 # Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
 # shapes before a security descriptor is constructed and keep its fixed-point arithmetic in the
@@ -177,10 +177,10 @@ end
 #! Builds the common security descriptor from the four transcript-bound proof parameters returned
 #! by the generic STARK verifier and the MVM relation data.
 #!
-#! The AIR shape and per-row lookup count are fixed by this relation. The one-time lookup boundary
-#! count is `CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures`; the latter was derived from the
-#! kernel witness and authenticated against the claim's kernel commitment before proof
-#! verification.
+#! The AIR shape and per-row lookup count are fixed by this relation. The per-proof lookup error
+#! budget adds one term per kernel procedure to `FIXED_LOOKUP_ERROR_TERMS`. The procedure count
+#! is derived from the kernel witness and authenticated against the claim's kernel commitment
+#! before proof verification.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
@@ -190,7 +190,7 @@ proc build_security_descriptor(parameters: types::StackProofParameters) -> types
     mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     exec.layout::num_kernel_procedures_ptr mem_load
-    add.CORE_BOUNDARY_LOOKUP_TERMS
+    add.FIXED_LOOKUP_ERROR_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
     push.MAX_CONSTRAINT_DEGREE
