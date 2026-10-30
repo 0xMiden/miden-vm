@@ -163,18 +163,33 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
 
             Ok(version)
         } else if let Some((start, end)) = ranges.bounding_range() {
-            let range = (start.cloned(), end.cloned());
-            let version = versions.range(range).rev().find_map(|(semver, record)| {
-                if filter.matches(record.version()) && ranges.contains(semver) {
-                    Some(record.version().clone())
-                } else {
-                    None
-                }
-            });
+            let bounds = (start.cloned(), end.cloned());
+            let version = versions
+                .range(bounds)
+                .rev()
+                .find_map(|(_, record)| {
+                    if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
+                        Some(record.version().clone())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    // `BTreeMap` bounds include build metadata, while `VersionSet` follows SemVer
+                    // precedence. Fall back to the latter when the bounded lookup misses an
+                    // equivalent version.
+                    versions.values().rev().find_map(|record| {
+                        if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
+                            Some(record.version().clone())
+                        } else {
+                            None
+                        }
+                    })
+                });
             Ok(version)
         } else {
-            let version = versions.iter().rev().find_map(|(semver, record)| {
-                if filter.matches(record.version()) && ranges.contains(semver) {
+            let version = versions.values().rev().find_map(|record| {
+                if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
                     Some(record.version().clone())
                 } else {
                     None
@@ -626,6 +641,27 @@ mod tests {
     }
 
     #[test]
+    fn resolver_matches_registered_build_metadata_by_semver_precedence() {
+        let digest = Eidos::hash(b"b");
+        let index = InMemoryPackageRegistry::from_iter([
+            (
+                "a",
+                vec![(
+                    "0.1.0".parse().unwrap(),
+                    vec![("b", exact_requirement("1.0.0+second", digest))],
+                )],
+            ),
+            ("b", vec![(Version::new("1.0.0+first".parse().unwrap(), digest), vec![])]),
+        ]);
+
+        let resolver = PackageResolver::for_package("a", "0.1.0".parse().unwrap(), &index);
+        let selected = resolver.resolve().expect("failed to resolve");
+        let expected = select(&[("a", "0.1.0"), ("b", &format!("1.0.0+first@{digest}"))]);
+
+        assert_selected(&selected, &expected);
+    }
+
+    #[test]
     fn resolver_exact_requirement_ignores_newer_versions_with_same_digest() {
         let b_digest = Eidos::hash(b"b");
         let index = InMemoryPackageRegistry::from_iter([
@@ -677,6 +713,35 @@ mod tests {
                 package,
                 version,
             } if package == dep_id && version == "1.0.0".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_versions_that_only_differ_in_build_metadata() {
+        let mut index = InMemoryPackageRegistry::default();
+        let package = PackageId::from("dep");
+
+        index
+            .insert(
+                package.clone(),
+                "1.0.0+first".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect("first semantic version should register");
+        let error = index
+            .insert(
+                package.clone(),
+                "1.0.0+second".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect_err("build metadata must not define another canonical semantic version");
+
+        assert!(matches!(
+            error,
+            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: duplicate,
+                version,
+            } if duplicate == package && version == "1.0.0+second".parse().unwrap()
         ));
     }
 

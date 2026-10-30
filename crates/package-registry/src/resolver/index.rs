@@ -72,18 +72,14 @@ impl InMemoryPackageRegistry {
             },
             Entry::Occupied(mut entry) => {
                 let versions = entry.get_mut();
-                match versions.entry(semver.clone()) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(record);
-                        Ok(())
-                    },
-                    Entry::Occupied(_) => {
-                        let package = entry.key().clone();
-                        Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
-                            package,
-                            version: semver,
-                        })
-                    },
+                if versions.keys().any(|existing| existing.cmp_precedence(&semver).is_eq()) {
+                    Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
+                        package: entry.key().clone(),
+                        version: semver,
+                    })
+                } else {
+                    versions.insert(semver, record);
+                    Ok(())
                 }
             },
         }
