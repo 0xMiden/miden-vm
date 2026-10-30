@@ -1,5 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 
+use miden_air::precompiles::{ChipletMultiAir, policy::precompile_pcs_params};
 use miden_core::{
     Felt,
     deferred::{
@@ -7,19 +8,22 @@ use miden_core::{
         PrecompileLimitError, PrecompileWitness, PrecompileWitnessEntry, PreparationError,
         PreparedWitness, TRUE_DIGEST, WorkLimit, fold_deferred_root,
     },
+    field::QuadFelt,
 };
 use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
 use miden_precompiles::{
     CURVE_WORK, CurveId, CurvePrecompile, HASH_WORK, Keccak256Precompile, MSM_WORK, UINT_WORK,
     UintDomain, UintPrecompile,
 };
+use miden_stark::memory;
 use proptest::prelude::*;
 
 use crate::{
     prover::{
         HashFunction, PrecompileProvingError, SessionInputError, WitnessLocation,
-        deferred::session::{
-            import_witnesses, import_witnesses_with_roots, session_from_witnesses,
+        deferred::{
+            capacity::{self, IMPORT_BYTES_PER_NODE, SESSION_BYTES},
+            session::{import_witnesses, import_witnesses_with_roots, session_from_witnesses},
         },
         hash::keccak::sponge::trace::keccak_oracle,
     },
@@ -558,6 +562,7 @@ fn preparation_and_root_binding_precede_semantic_import() {
         vec![false_witness, valid],
         &limits,
         Some(&[false_claim, TRUE_DIGEST]),
+        crate::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
     )
     .err()
     .unwrap();
@@ -565,6 +570,293 @@ fn preparation_and_root_binding_precede_semantic_import() {
         error,
         PrecompileProvingError::Input(SessionInputError::RootMismatch { witness: 1, .. })
     ));
+}
+
+#[test]
+fn capacity_is_checked_before_preparing_a_witness() {
+    // This nonempty witness would fail preparation. A zero capacity must reject it before
+    // preparation allocates the hydrated graph, index map, and traversal scratch.
+    let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+        frame: miden_core::deferred::DEFERRED_AND_FRAME,
+        lhs: 1,
+        rhs: 0,
+    }])
+    .unwrap();
+    let error =
+        crate::prover::prove_precompiles_with_budget(vec![witness], HashFunction::Blake3_256, 0)
+            .unwrap_err();
+    assert!(matches!(error, PrecompileProvingError::MemoryBudgetExceeded { .. }), "{error}");
+}
+
+/// Returns the running reservation reported by an early capacity rejection.
+fn reserved_at_rejection(error: PrecompileProvingError) -> u64 {
+    match error {
+        PrecompileProvingError::MemoryBudgetExceeded { estimated_bytes, .. } => estimated_bytes,
+        error => panic!("expected a capacity rejection, got {error}"),
+    }
+}
+
+/// Preparation, Session creation, and every node's fixed recording allowance, excluding
+/// variable hash and MSM demand.
+fn fixed_import_bytes(witness: &PrecompileWitness) -> u64 {
+    capacity::preparation_bytes(witness).unwrap()
+        + SESSION_BYTES
+        + witness.entries().len() as u64 * IMPORT_BYTES_PER_NODE
+}
+
+#[test]
+fn preparation_capacity_counts_repeated_inputs_before_a_later_invalid_witness() {
+    let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+        frame: miden_core::deferred::DEFERRED_AND_FRAME,
+        lhs: 0,
+        rhs: 0,
+    }])
+    .unwrap();
+    // Every repetition is prepared and retained, so a budget for two copies must reject the
+    // third before the invalid final witness is reached.
+    let prepared = capacity::preparation_bytes(&witness).unwrap();
+    let mut witnesses = vec![witness; MAX_PRECOMPILE_ROOTS - 1];
+    witnesses.push(PrecompileWitness::from_entries(vec![]).unwrap());
+    let error = crate::prover::prove_precompiles_with_budget(
+        witnesses,
+        HashFunction::Blake3_256,
+        2 * prepared,
+    )
+    .unwrap_err();
+    assert_eq!(reserved_at_rejection(error), 3 * prepared);
+}
+
+#[test]
+fn import_capacity_is_checked_before_semantic_evaluation() {
+    let mut fixture = WitnessFixture::new();
+    let one = uint(&mut fixture, UintDomain::U256, 1);
+    let two = uint(&mut fixture, UintDomain::U256, 2);
+    let false_claim = uint_eq(&mut fixture, one, two);
+    let witness = fixture.open(false_claim);
+    // Both values fit. Recording the false equality must be rejected before evaluating it.
+    let budget = fixed_import_bytes(&witness) - IMPORT_BYTES_PER_NODE;
+    let error = crate::prover::prove_precompiles_with_budget(
+        vec![witness],
+        HashFunction::Blake3_256,
+        budget,
+    )
+    .unwrap_err();
+    assert_eq!(reserved_at_rejection(error), budget + IMPORT_BYTES_PER_NODE);
+}
+
+#[test]
+fn import_capacity_reserves_hash_expansion_before_evaluation() {
+    let mut fixture = WitnessFixture::new();
+    let input = fixture.register(Node::chunks_from_bytes(&vec![0; 64 * 1024])).unwrap();
+    let expected = fixture.register(Node::chunks_from_bytes(&[0; 32])).unwrap();
+    let claim = fixture
+        .register(Keccak256Precompile::assert_node(64 * 1024, input, expected))
+        .unwrap();
+    let witness = fixture.open(claim);
+    // Every fixed allowance fits, but recording this hash's input would exceed the budget. It
+    // must be rejected before evaluating the deliberately false assertion and retaining its
+    // round states.
+    let budget = fixed_import_bytes(&witness);
+    let error = crate::prover::prove_precompiles_with_budget(
+        vec![witness],
+        HashFunction::Blake3_256,
+        budget,
+    )
+    .unwrap_err();
+    assert!(reserved_at_rejection(error) > budget);
+}
+
+#[test]
+fn import_capacity_reserves_msm_expansion_before_evaluation() {
+    let mut fixture = WitnessFixture::new();
+    let generator = fixture.register(CurvePrecompile::generator_node(CurveId::Secp256k1)).unwrap();
+    // A base-field scalar passes preparation, but is invalid for MSM import. Capacity must be
+    // reserved before lowering a potentially large pair list, including repeated terms.
+    let scalar = uint(&mut fixture, UintDomain::K1Base, 1);
+    let msm = fixture
+        .register(
+            Node::try_pair_list(CurvePrecompile::msm_frame(32), vec![(generator, scalar); 32])
+                .unwrap(),
+        )
+        .unwrap();
+    let witness = fixture.open(msm);
+    let budget = fixed_import_bytes(&witness);
+    let error = crate::prover::prove_precompiles_with_budget(
+        vec![witness],
+        HashFunction::Blake3_256,
+        budget,
+    )
+    .unwrap_err();
+    assert!(reserved_at_rejection(error) > budget);
+}
+
+#[test]
+fn preparation_errors_still_precede_import_capacity_errors() {
+    let mut fixture = WitnessFixture::new();
+    let one = uint(&mut fixture, UintDomain::U256, 1);
+    let two = uint(&mut fixture, UintDomain::U256, 2);
+    let false_claim = uint_eq(&mut fixture, one, two);
+    let limits = miden_precompiles::default_verification_precompile_limits();
+    // Each budget admits exactly the prepared graphs, but cannot reserve a Session. A later
+    // preparation/root-binding failure must still be reported before attempting import.
+    let prepared = |witnesses: &[PrecompileWitness]| -> u64 {
+        witnesses
+            .iter()
+            .map(|witness| capacity::preparation_bytes(witness).unwrap())
+            .sum()
+    };
+    let witnesses =
+        vec![fixture.open(false_claim), PrecompileWitness::from_entries(vec![]).unwrap()];
+    let budget = prepared(&witnesses);
+    let error = crate::prover::deferred::session::prove(
+        witnesses,
+        HashFunction::Blake3_256,
+        &limits,
+        None,
+        budget,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        PrecompileProvingError::Input(SessionInputError::Preparation { witness: 1, .. })
+    ));
+    let witnesses = vec![fixture.open(false_claim), fixture.open(false_claim)];
+    let budget = prepared(&witnesses);
+    let error = crate::prover::deferred::session::prove(
+        witnesses,
+        HashFunction::Blake3_256,
+        &limits,
+        Some(&[false_claim, TRUE_DIGEST]),
+        budget,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        PrecompileProvingError::Input(SessionInputError::RootMismatch { witness: 1, .. })
+    ));
+}
+
+#[test]
+fn import_capacity_accumulates_across_independent_witnesses() {
+    let mut fixture = WitnessFixture::new();
+    let witnesses: Vec<_> = [1, 2]
+        .map(|value| {
+            let value = uint(&mut fixture, UintDomain::U256, value);
+            let claim = uint_eq(&mut fixture, value, value);
+            fixture.open(claim)
+        })
+        .into();
+    let limits = miden_precompiles::default_verification_precompile_limits();
+    // Each witness records two unshared nodes. The budget fits both prepared graphs and one
+    // witness's nodes, so the second witness's nodes must add to the first witness's reservation.
+    let prepared: u64 = witnesses
+        .iter()
+        .map(|witness| capacity::preparation_bytes(witness).unwrap())
+        .sum();
+    let budget = prepared + SESSION_BYTES + 2 * IMPORT_BYTES_PER_NODE;
+    for witness in &witnesses {
+        import_witnesses_with_roots(vec![witness.clone()], &limits, None, budget).unwrap();
+    }
+    let error = import_witnesses_with_roots(witnesses, &limits, None, budget).err().unwrap();
+    assert_eq!(reserved_at_rejection(error), budget + IMPORT_BYTES_PER_NODE);
+}
+
+#[test]
+fn import_capacity_reuses_shared_nodes_but_charges_aggregate_folds() {
+    let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+        frame: miden_core::deferred::DEFERRED_AND_FRAME,
+        lhs: 0,
+        rhs: 0,
+    }])
+    .unwrap();
+    let limits = miden_precompiles::default_verification_precompile_limits();
+    // Every repetition is prepared, but its AND node is recorded once. Each later root records
+    // an aggregate fold, so the batch needs one node allowance per witness.
+    let roots = MAX_PRECOMPILE_ROOTS as u64;
+    let required = SESSION_BYTES
+        + roots * (capacity::preparation_bytes(&witness).unwrap() + IMPORT_BYTES_PER_NODE);
+    let witnesses = vec![witness; MAX_PRECOMPILE_ROOTS];
+    let imported = import_witnesses_with_roots(witnesses.clone(), &limits, None, required).unwrap();
+    assert_eq!(imported.roots().len(), MAX_PRECOMPILE_ROOTS);
+    imported.finish().check();
+    let error = import_witnesses_with_roots(witnesses, &limits, None, required - 1)
+        .err()
+        .unwrap();
+    assert_eq!(reserved_at_rejection(error), required);
+}
+
+#[test]
+fn import_reservations_fit_the_trace_estimate_of_admitted_batches() {
+    // Reservations overestimate Session allocation, but must not reject an admitted batch whose
+    // modelled proving peak fits the same budget. These batches use the densest admitted uint
+    // lowering and the 32-term joint MSM ladder, whose trace cost per reserved byte is lowest.
+    let limits = miden_precompiles::default_verification_precompile_limits();
+    let uint_chain = |start: u32| {
+        let mut fixture = WitnessFixture::new();
+        let step = uint(&mut fixture, UintDomain::U256, start + 1);
+        let mut acc = uint(&mut fixture, UintDomain::U256, start);
+        // Two values, these multiplications, and the final equality use the whole uint limit.
+        for _ in 0..4_093 {
+            acc = fixture
+                .register(
+                    Node::join(UintPrecompile::op_frame(UintPrecompile::MUL_OP_ID), acc, step)
+                        .unwrap(),
+                )
+                .unwrap();
+        }
+        let claim = uint_eq(&mut fixture, acc, acc);
+        fixture.open(claim)
+    };
+    let msms = |witness: u8| {
+        let curve = CurveId::Ed25519;
+        let mut fixture = WitnessFixture::new();
+        let add = CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID);
+        let eq = CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID);
+        let generator = fixture.register(CurvePrecompile::generator_node(curve)).unwrap();
+        // Distinct bases per witness keep wNAF tables and ladders unshared across the batch.
+        let mut base = generator;
+        let mut bases = Vec::new();
+        for _ in 0..32 * (usize::from(witness) + 1) {
+            base = fixture.register(Node::join(add, base, generator).unwrap()).unwrap();
+            bases.push(base);
+        }
+        // Eight full-width MSMs use the whole per-witness MSM term limit.
+        for msm in 0..8u8 {
+            let pairs: Vec<_> = bases[bases.len() - 32..]
+                .iter()
+                .zip(0u8..)
+                .map(|(&base, term)| {
+                    let mut limbs = keccak_oracle(&[witness, msm, term]).to_u32s();
+                    limbs[7] &= 0x0fff_ffff;
+                    let scalar = fixture
+                        .register(UintPrecompile::value_node(curve.scalar_domain(), limbs))
+                        .unwrap();
+                    (base, scalar)
+                })
+                .collect();
+            let msm = fixture
+                .register(Node::try_pair_list(CurvePrecompile::msm_frame(32), pairs).unwrap())
+                .unwrap();
+            let claim = fixture.register(Node::join(eq, msm, msm).unwrap()).unwrap();
+            fixture.log_statement(claim).unwrap();
+        }
+        fixture.witness()
+    };
+    let batches: [Vec<PrecompileWitness>; 2] =
+        [(0..4).map(|w| uint_chain(10 * w + 7)).collect(), (0..4).map(msms).collect()];
+    for witnesses in batches {
+        let heights = import_witnesses_with_roots(witnesses.clone(), &limits, None, u64::MAX)
+            .unwrap()
+            .trace_heights()
+            .unwrap();
+        let peak = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+            &ChipletMultiAir::new(),
+            &heights,
+            &precompile_pcs_params(),
+        )
+        .unwrap();
+        import_witnesses_with_roots(witnesses, &limits, None, peak).unwrap();
+    }
 }
 
 #[test]
