@@ -463,6 +463,10 @@ bench: ## Benchmarks either a specific bench or all; accepts 'benchmark=' to sel
 # Fuzzing targets
 # ============================================================
 
+.PHONY: fuzz-sparse-mast-forest
+fuzz-sparse-mast-forest: fuzz-seeds ## Run bounded sparse MAST replay fuzzing
+	@$(FUZZ_CARGO) fuzz run sparse_mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(FUZZ_ARGS)
+
 .PHONY: fuzz-mast-forest
 fuzz-mast-forest: fuzz-seeds ## Run fuzzing for MastForest deserialization
 	@$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz
@@ -486,6 +490,7 @@ fuzz-execution-proof: fuzz-seeds ## Run bounded ExecutionProof deserialization f
 .PHONY: fuzz-all
 fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	FAILED=0; \
+	$(FUZZ_CARGO) fuzz run sparse_mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run mast_forest_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run mast_forest_validate --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \

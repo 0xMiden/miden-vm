@@ -182,6 +182,21 @@ impl BasicBlockDataDecoder<'_> {
         &self,
         ops_offset: NodeDataOffset,
     ) -> Result<Vec<crate::mast::OpBatch>, DeserializationError> {
+        self.decode_operations_inner(ops_offset, false)
+    }
+
+    /// Decodes one block occupying the entire data slice and rejects an unused suffix.
+    pub(super) fn decode_operations_exact(
+        &self,
+    ) -> Result<Vec<crate::mast::OpBatch>, DeserializationError> {
+        self.decode_operations_inner(0, true)
+    }
+
+    fn decode_operations_inner(
+        &self,
+        ops_offset: NodeDataOffset,
+        require_end: bool,
+    ) -> Result<Vec<crate::mast::OpBatch>, DeserializationError> {
         use crate::Felt;
 
         let offset = ops_offset as usize;
@@ -312,6 +327,12 @@ impl BasicBlockDataDecoder<'_> {
                 global_op_offset,
                 operations.len()
             )));
+        }
+
+        if require_end && ops_data_reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after basic block data".into(),
+            ));
         }
 
         Ok(op_batches)

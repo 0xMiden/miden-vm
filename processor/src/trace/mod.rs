@@ -1,4 +1,4 @@
-use alloc::format;
+use alloc::{format, string::ToString};
 
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
@@ -100,7 +100,7 @@ impl ExecutionWitness {
     /// Decodes one execution witness from a potentially adversarial byte slice.
     ///
     /// The reader applies an input-proportional limit to byte consumption and collection
-    /// preallocation, then rejects trailing bytes. These checks establish safe transport syntax.
+    /// preallocation, checks available sparse node hashes, and rejects trailing bytes.
     /// They do not prove that the sparse MAST replay is a subset of a particular source forest
     /// because the witness wire does not carry such a proof.
     ///
@@ -128,7 +128,7 @@ impl ExecutionWitness {
     pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        <Self as Deserializable>::read_from(&mut reader)
+        Self::read_from_inner(&mut reader)
     }
 }
 
@@ -157,6 +157,22 @@ impl Serializable for ExecutionWitness {
 
 impl Deserializable for ExecutionWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let witness = Self::read_from_inner(source)?;
+        for forest in &witness.vm.trace.mast_forest_store {
+            forest
+                .validate()
+                .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+        }
+        Ok(witness)
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
+    }
+}
+
+impl ExecutionWitness {
+    fn read_from_inner<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let version = u8::read_from(source)?;
         if version != EXECUTION_WITNESS_WIRE_VERSION {
             return Err(DeserializationError::InvalidValue(format!(
@@ -191,10 +207,6 @@ impl Deserializable for ExecutionWitness {
             },
         };
         Ok(Self { vm, precompile })
-    }
-
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        ExecutionWitness::read_from_bytes(bytes)
     }
 }
 
@@ -391,6 +403,39 @@ mod wire_tests {
             ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok(),
             "the explicit trusted reader should preserve the old permissive behavior"
         );
+    }
+
+    #[test]
+    fn witness_reader_checks_sparse_hashes_and_preserves_trusted_path() {
+        use miden_core::{Word, mast::SparseMastForest, serde::ByteReader};
+
+        let mut witness = execution_witness("begin push.1 drop end");
+        let forest = &mut witness.vm.trace.mast_forest_store[0];
+        let mut sparse_bytes = forest.to_bytes();
+        let mut reader = std::io::Cursor::new(sparse_bytes.as_slice());
+        let root_count = reader.read_usize().unwrap();
+        for _ in 0..root_count {
+            reader.read_u32().unwrap();
+        }
+        assert!(reader.read_usize().unwrap() > 0);
+        reader.read_u32().unwrap();
+        reader.read_u8().unwrap();
+        let hash_offset = reader.position() as usize;
+        sparse_bytes[hash_offset..hash_offset + Word::SERIALIZED_SIZE]
+            .copy_from_slice(&Word::default().to_bytes());
+        *forest = alloc::sync::Arc::new(
+            SparseMastForest::read_from_bytes_trusted(&sparse_bytes).unwrap(),
+        );
+
+        let bytes = witness.to_bytes();
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_err());
+        assert!(
+            <ExecutionWitness as super::Deserializable>::read_from(&mut std::io::Cursor::new(
+                &bytes
+            ),)
+            .is_err()
+        );
+        assert!(ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok());
     }
 
     #[test]
