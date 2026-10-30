@@ -29,6 +29,7 @@ use {
     FRI_FOLD_ARITY,
     FRI_QUERIES_ADDRESS_PTR,
     LDE_DOMAIN_INFO_PTR,
+    LDE_DOMAIN_SIZE_PTR,
     LOG_BLOWUP_FACTOR,
     LOG_FINAL_DEGREE,
     LOG_LDE_DOMAIN_SIZE_PTR,
@@ -741,16 +742,39 @@ end
 # OOD POINT GENERATION
 # =============================================================================================
 
-#! Generate the OOD challenge point `z = (z0, z1)` and compute `z^N` where N is
-#! the trace length. The resulting word `[(z_0, z_1)^N, z0, z1]` is stored in the
-#! global memory address `OOD_POINT_PTR` reserved for it.
+#! Sample a nonzero OOD point outside the trace subgroup and LDE coset, retrying rejected
+#! candidates in transcript order. Store `[z^N_0, z^N_1, z0, z1]` at `OOD_POINT_PTR`, where
+#! N is the trace length.
 #!
-#! Input: [X, ...]
+#! Requires the domain parameters set by `init_seed`, with a positive log trace length.
+#!
+#! Input: [...]
 #! Output: [...]
-#! Note: The top word on the stack is consumed by this procedure.
 pub proc generate_z_zN()
-    # Sample z and load log trace length N
     exec.sample_ext
+    # => [z0, z1, ...]
+
+    # Only base-field candidates can be zero or lie in either excluded domain.
+    dup.1 eq.0
+    while.true
+        dup mem_load.TRACE_LENGTH_PTR exp.u32 eq.1
+        dup.1 eq.0 or
+        # => [z0 == 0 or z0^N == 1, z0, 0, ...]
+
+        # LDE membership is (z0 / shift)^lde_size == 1. Size 2^32 needs 33 exponent bits.
+        dup.1 mem_load.DOMAIN_OFFSET_INV_PTR mul
+        mem_load.LDE_DOMAIN_SIZE_PTR exp.u33 eq.1 or
+        if.true
+            drop drop
+            exec.sample_ext
+            dup.1 eq.0
+        else
+            # A base-field point outside both domains is a valid OOD candidate.
+            push.0
+        end
+        # => [check_base_field_candidate, z0, z1, ...]
+    end
+
     mem_load.LOG_TRACE_LENGTH_PTR
     # => [log(trace_len), z_0, z_1, ...]
 
@@ -764,8 +788,8 @@ pub proc generate_z_zN()
         dup.1 dup.1 ext2mul
         # => [(z_0, z_1)^n, i, z_0, z_1, ...]
 
-        dup.2 sub.1 swap.3 push.1 neq
-        # => [b, (z_0, z_1)^n, i-1, z_0, z_1, ...]
+        movup.2 sub.1 dup movdn.3 neq.0
+        # => [i-1 != 0, (z_0, z_1)^n, i-1, z_0, z_1, ...]
     end
 
     movup.2 drop

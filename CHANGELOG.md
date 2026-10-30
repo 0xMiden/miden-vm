@@ -39,6 +39,8 @@
 #### Fixes
 
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
+- [BREAKING] Matched recursive VM and PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript. Updated both recursive verifier roots.
+
 - Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace.
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).

@@ -15,6 +15,7 @@ use miden_stark::{
     testing::{
         Coset, canonical_domain, fri_final_poly_degree, fri_num_rounds, sample_ood_point_and_next,
     },
+    transcript::Channel,
 };
 use miden_vm_stark::setup::config::eidos_config;
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
@@ -22,7 +23,9 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
-use crate::helpers::{masm_push_word, read_memory_felt, read_memory_word, stark_constant};
+use crate::helpers::{
+    masm_push_word, masm_store_felts, read_memory_felt, read_memory_word, stark_constant,
+};
 
 type Challenger = EidosChallenger;
 
@@ -76,14 +79,11 @@ const RANDOM_COIN_IMPORTS: &str = "
 ";
 
 fn assert_random_coin_state(output: &ExecutionOutput, challenger: &Challenger, context: &str) {
-    let cv = stark_constant("RANDOM_COIN_CV_PTR");
-    for (i, expected) in challenger.cv().iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(output, cv + i as u32),
-            *expected,
-            "{context}: chaining value element {i}"
-        );
-    }
+    assert_eq!(
+        read_memory_word(output, stark_constant("RANDOM_COIN_CV_PTR")),
+        challenger.cv(),
+        "{context}: chaining value"
+    );
 }
 
 /// All persistent challenger cells, using the compiled verifier's memory layout.
@@ -403,6 +403,121 @@ fn sampling_clears_the_absorb_buffer_and_matches_rust() {
 
 // OUT-OF-DOMAIN POINT
 // ================================================================================================
+
+/// Supplies controlled cached samples, then continues the real challenger at its next refill.
+struct CachedOutputChannel<'a> {
+    cached: std::slice::Iter<'a, Felt>,
+    challenger: Challenger,
+    samples: usize,
+}
+
+impl Channel for CachedOutputChannel<'_> {
+    type F = Felt;
+    type Commitment = [Felt; 4];
+    type Challenger = Challenger;
+
+    fn sample(&mut self) -> Felt {
+        self.samples += 1;
+        self.cached.next().copied().unwrap_or_else(|| self.challenger.sample_felt())
+    }
+
+    fn sample_bits(&mut self, _: usize) -> usize {
+        unreachable!("the OOD sampler only draws field elements")
+    }
+}
+
+#[rstest]
+#[case::minimum_height(MIN_TRACE_LEN.ilog2() as u8)]
+#[case::setup_height(16)]
+#[case::maximum_height(Felt::TWO_ADICITY as u8 - config::pcs_params().log_blowup())]
+fn ood_rejection_matches_rust_and_preserves_the_transcript(#[case] log_height: u8) {
+    let domain = canonical_domain::<Felt>(log_height, config::pcs_params().log_blowup());
+    // Eidos samples are below 2^63. Pick nontrivial domain points within that support.
+    let in_subgroup = (1..domain.trace_height())
+        .map(|i| domain.trace_subgroup().point_at(i as u64))
+        .find(|x| x.as_canonical_u64() < 1 << 63 && *x != Felt::ONE)
+        .expect("the trace subgroup has a supported nontrivial point");
+    let in_lde = (0..domain.lde_height())
+        .map(|i| domain.lde_coset().point_at(i as u64))
+        .find(|x| x.as_canonical_u64() < 1 << 63)
+        .expect("the LDE coset has a supported point");
+    let allowed_base = (2..100)
+        .map(Felt::from_u32)
+        .find(|x| !domain.trace_subgroup().contains(*x) && !domain.lde_coset().contains(*x))
+        .expect("a base-field point outside both domains exists");
+    let [zero, one, a, b] = [0, 1, 7, 11].map(Felt::from_u32);
+    let initial_cv = [19, 20, 21, 22].map(Felt::from_u32);
+    let caller: [u64; 16] = core::array::from_fn(|i| 101 + i as u64);
+    let state = store_random_coin(&initial_cv, 4);
+    let lookahead = (0..4)
+        .map(|i| format!("exec.random_coin::sample_felt mem_store.{}\n", SAMPLES_PTR + i))
+        .collect::<String>();
+    let cases: &[(&str, &[Felt], usize)] = &[
+        ("zero", &[zero, zero, a, b], 4),
+        ("trace subgroup", &[in_subgroup, zero, a, b], 4),
+        ("LDE coset", &[in_lde, zero, a, b], 4),
+        ("allowed base-field point", &[allowed_base, zero, a, b], 2),
+        ("non-base-field point", &[zero, one, a, b], 2),
+        ("two rejections then refill", &[zero, zero, in_subgroup, zero], 6),
+        ("rejection then split candidate", &[zero, zero, a], 4),
+    ];
+    for &(case, cached, expected_samples) in cases {
+        let cached_len = cached.len();
+        let mut channel = CachedOutputChannel {
+            cached: cached.iter(),
+            challenger: challenger_with(initial_cv, 4),
+            samples: 0,
+        };
+        let z: QuadFelt = domain.sample_ood_point(&mut channel);
+        assert_eq!(channel.samples, expected_samples, "{case}: fixture must exercise its branch");
+        let next = Word::new(core::array::from_fn(|_| channel.sample()));
+
+        let cached_stores = masm_store_felts(
+            cached,
+            stark_constant("RANDOM_COIN_OUTPUT_WORD_PTR") + 4 - cached_len as u32,
+        );
+        let source = init_seed_source(
+            &[Felt::ZERO; 4],
+            log_height,
+            "use {RANDOM_COIN_CV_PTR, RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR}
+                from miden::core::stark::constants",
+            &format!(
+                "{state}
+                {cached_stores}
+                push.{cached_len} mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+                exec.random_coin::generate_z_zN
+                {lookahead}",
+            ),
+        );
+        let test = build_test!(&source, &caller);
+        let (output, _) = test.execute_for_output().unwrap_or_else(|err| {
+            panic!("{case} at height 2^{log_height}: OOD sampling failed: {err}")
+        });
+        let z_n = z.exp_power_of_2(log_height as usize);
+        let expected: Vec<Felt> =
+            [z_n.as_basis_coefficients_slice(), z.as_basis_coefficients_slice()].concat();
+        assert_eq!(
+            read_memory_word(&output, stark_constant("OOD_POINT_PTR")).as_elements(),
+            expected,
+            "{case}: stored [z^N, z] differs from Rust"
+        );
+        assert_eq!(read_memory_word(&output, SAMPLES_PTR), next, "{case}: following samples");
+        assert_eq!(output.stack.get_num_elements(16), caller.map(Felt::new_unchecked), "{case}");
+        assert_random_coin_state(&output, &channel.challenger, case);
+        let refill_samples = channel.samples - cached_len;
+        for (name, expected) in [
+            ("RANDOM_COIN_OUTPUT_LENGTH_PTR", (4 - refill_samples % 4) % 4),
+            ("RANDOM_COIN_COUNTER_PTR", 1 + refill_samples.div_ceil(4)),
+        ] {
+            assert_eq!(
+                read_memory_felt(&output, stark_constant(name)),
+                Felt::from_usize(expected),
+                "{case}: {name}"
+            );
+        }
+        test.check_constraints();
+    }
+}
 
 #[test]
 fn ood_point_matches_the_rust_sampler_at_every_supported_height() {

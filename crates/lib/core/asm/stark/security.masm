@@ -130,7 +130,8 @@ end
 #! - out-of-domain: log_blowup = 3 permits at most eight quotient chunks, and both verifiers reject
 #!   AIRs of degree greater than nine. With local and next openings, the DEEP-ALI identity degree
 #!   is at most max(9 * (H + 1) + H - 1, 9 * H + 1) <= 11 * H for H = 2^height >= 64.
-#!   OOD sampling rejects base-field points, costing one Q16 unit in the native bound. Since
+#!   OOD sampling rejects zero and points in the trace subgroup or LDE coset. These are base-field
+#!   points; conditioning on acceptance costs at most one Q16 unit in the native bound. Since
 #!   ceil(FP_ONE * log2(11)) + 1 < 4 * FP_ONE, the term still exceeds 122 - height;
 #! - FRI folding: FRI_FOLDING_BASE_BITS - height + folding_pow >= 120 - height;
 #! - composition: composed <= 8192 gives at least 126 - log2(8192) = 113 bits;
@@ -142,16 +143,18 @@ end
 #!
 #! # Contract
 #!
-#! Every descriptor field is checked before it is used or discarded. The lower bounds on height
-#! and the lookup coefficient support the proof that the other terms cannot determine the result.
+#! The input must be the unmodified descriptor returned by a successful MVM or PVM recursive
+#! verifier. This is not a general-purpose estimator for caller-assembled parameters.
+#!
+#! Every descriptor field is checked against the estimator envelope before it is used or discarded.
+#! The lower bounds on height and the lookup coefficient support the proof that the other terms
+#! cannot determine the result.
 #! The upper bounds on height, coefficient, and boundary terms keep the arithmetic in range, and
 #! the explicit `base >= 1` check validates the lookup subtraction after applying the correction.
-#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. An
-#! unsupported input traps instead of returning a security level.
+#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. The procedure
+#! traps for descriptors outside this envelope instead of returning a security level.
 #!
-#! This is not a general-purpose estimator for caller-assembled parameters. Its input must be the
-#! descriptor returned by a successful MVM or PVM recursive verifier, without modification. The
-#! procedure is loop-free and has bounded execution cost for every accepted descriptor.
+#! The procedure is loop-free and has bounded execution cost for every accepted descriptor.
 #!
 #! The meaning of `num_lookup_boundary_terms` is the same for both relations even though its source
 #! differs. The MVM adds the kernel-procedure count to three fixed core-boundary terms. The PVM
@@ -166,8 +169,8 @@ end
 #!
 #! Invocation: exec
 pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDescriptor) -> u32
-    # Assert the validity envelope documented above. Each comparison also range-checks its
-    # operand as a u32. Inputs not used by query, lookup, or DEEP are consumed after validation.
+    # Check the estimator envelope for the u32 fields supplied by a successful MVM or PVM
+    # verifier. These comparisons do not establish the u32 ranges themselves.
     # Lifted STARK has no grinding step before lookup-challenge sampling.
     assertz.err="lookup grinding must be zero"
     dup eq.0 assertz.err="num_composed_constraints must be positive"
