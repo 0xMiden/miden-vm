@@ -12,7 +12,8 @@ The resulting proofs are therefore recursion-friendly: they can be efficiently v
 
 The VM executes the [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1) program on an Apple M4 Pro with one Rayon worker.
 The rows measure chains of 2, 8, 32, and 128 Blake3 calls, with VM cycles padded to a power of two.
-The default proof parameters target 96-bit conjectured security.
+The default proof parameters target 96-bit conjectured security; their proven security is about
+57 bits.
 See the [Eidos security and usage guide](design/eidos-security.md).
 
 | Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |

@@ -947,3 +947,157 @@ fn synthetic_query_grid_matches_native_exhaustively() {
         (9, 0, POW_BITS_MAX + 1),
     );
 }
+
+/// The public root getter and the in-VM procedure reference must identify the same estimator.
+#[test]
+fn proven_security_estimator_root_matches_procref() {
+    use miden_core::Felt;
+    use miden_processor::ContextId;
+
+    let source = "
+        begin
+            procref.::miden::core::stark::security::compute_proven_security_level
+            mem_storew_le.0 dropw
+        end
+    ";
+    let expected: [u64; 4] = miden_core_lib::proven_security_estimator_root().into();
+    let (output, _) = build_test!(source, &[])
+        .execute_for_output()
+        .expect("the proven estimator procref must execute");
+    let actual = core::array::from_fn(|address| {
+        output
+            .memory
+            .read_element(ContextId::root(), Felt::from_u32(address as u32))
+            .expect("the procref word was stored")
+            .as_canonical_u64()
+    });
+    assert_eq!(expected, actual);
+    assert_ne!(
+        miden_core_lib::proven_security_estimator_root(),
+        miden_core_lib::conjectured_security_estimator_root(),
+    );
+}
+
+#[test]
+fn proven_security_estimator_rejects_invalid_descriptors() {
+    let source = "
+        use miden::core::stark::security
+        begin exec.security::compute_proven_security_level end
+    ";
+    let baseline = vm_security_descriptor(27, 17, 12, 4, 20, 0);
+    for (field, invalid) in [
+        (0, 1),
+        (1, 0),
+        (1, 8193),
+        (2, 10),
+        (3, 0),
+        (3, 8193),
+        (4, 65535),
+        (5, 4097),
+        (6, 65537),
+        (7, 5),
+        (7, 30),
+        (8, 151),
+        (9, 32),
+        (10, 32),
+        (11, 32),
+    ] {
+        let mut descriptor = baseline;
+        descriptor[field] = invalid;
+        assert!(
+            build_test!(source, &descriptor).execute_for_output().is_err(),
+            "invalid descriptor field {field}={invalid} must trap"
+        );
+    }
+    for field in 0..12 {
+        let mut descriptor = baseline;
+        descriptor[field] = 1 << 32;
+        assert!(
+            build_test!(source, &descriptor).execute_for_output().is_err(),
+            "non-u32 descriptor field {field} must trap"
+        );
+    }
+}
+
+/// Bound the cost of automatic regime selection and preserve the caller's live stack and memory.
+#[test]
+fn proven_security_estimator_cycles_and_caller_state() {
+    use miden_core::Felt;
+    use miden_processor::ContextId;
+
+    let caller_values = [91001, 91002, 91003, 91004];
+    for (queries, query_pow, deep_pow, folding_pow, height) in [
+        (27, 17, 12, 4, 20),
+        (150, 31, 0, 0, 29),
+        (27, 17, 12, 4, 6),
+        (150, 31, 31, 31, 29),
+    ] {
+        let mut inputs =
+            vm_security_descriptor(queries, query_pow, deep_pow, folding_pow, height, 255).to_vec();
+        inputs.extend(caller_values);
+        for estimator in ["compute_conjectured_security_level", "compute_proven_security_level"] {
+            let source = format!(
+                "
+                use miden::core::stark::security
+                begin
+                    push.123456 mem_store.1024
+                    clk mem_store.0
+                    exec.security::{estimator}
+                    clk mem_store.1
+                end
+            "
+            );
+            let (output, _) = build_test!(source.as_str(), &inputs)
+                .execute_for_output()
+                .expect("the security estimator must execute");
+            let actual: Vec<u64> =
+                output.stack.get_num_elements(5).iter().map(Felt::as_canonical_u64).collect();
+            assert_eq!(&actual[1..], &caller_values);
+            let read = |address| {
+                output
+                    .memory
+                    .read_element(ContextId::root(), Felt::from_u32(address))
+                    .expect("the caller wrote this memory cell")
+                    .as_canonical_u64()
+            };
+            assert_eq!(read(1024), 123456);
+            let cycles = read(1) - read(0);
+            // Includes clock overhead. These descriptors take the UDR or M-endpoint shortcut;
+            // the proven matrix bounds the full search.
+            assert!(cycles < 1_600, "{estimator} consumed {cycles} cycles");
+            println!(
+                "{estimator}: h={height}, queries={queries}, pow=({query_pow},{deep_pow},{folding_pow}), level={}, cycles={cycles}",
+                actual[0]
+            );
+        }
+    }
+}
+
+/// Hardcoded MASM coefficients must be revisited when either recursive protocol changes.
+#[test]
+fn proven_estimator_protocol_assumptions_match_both_verifiers() {
+    let vm = miden_vm_stark::security::proof_security_parameters(
+        &miden_air::vm::config::pcs_params(),
+        20,
+        0,
+        vm_metadata::COMMITMENT_ALIGNMENT,
+        miden_core::proof::HashFunction::Eidos,
+    );
+    let pvm = miden_precompiles_stark::setup::security::proof_security_parameters(
+        &miden_air::precompiles::policy::precompile_pcs_params(),
+        20,
+        vm_metadata::COMMITMENT_ALIGNMENT,
+        miden_core::proof::HashFunction::Eidos,
+    );
+    for parameters in [vm, pvm] {
+        assert_eq!(parameters.protocol_params.log_blowup, 3);
+        assert_eq!(parameters.protocol_params.log_folding_arity, 2);
+        assert_eq!(parameters.log_final_degree, 7);
+        assert_eq!(parameters.num_ood_points, 2);
+        assert_eq!(parameters.air_shape.max_combo, 2);
+        assert!(parameters.air_shape.num_quotient_chunks <= 8);
+        assert_eq!(parameters.protocol_params.ood_pow_bits, 0);
+    }
+    assert_eq!(miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS >> 16, 126);
+    assert_eq!(p3_security::proximity::LDR_M_CAP, 1000);
+}
