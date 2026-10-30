@@ -74,6 +74,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      - uses: ./.github/actions/setup-protoc
       - name: Clippy
         run: |
           rustup update --no-self-update stable
@@ -103,6 +104,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      - uses: ./.github/actions/setup-protoc
       - name: Build docs
         run: |
           rustup +stable update --no-self-update

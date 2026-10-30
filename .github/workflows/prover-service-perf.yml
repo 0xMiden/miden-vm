@@ -1,0 +1,51 @@
+name: prover service performance
+
+on:
+  # Remove path filters when making this check required: skipped workflows leave checks pending.
+  pull_request:
+    paths-ignore: ['**/*.md']
+  push:
+    branches: [next]
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-protoc
+      - name: Check comparison logic
+        run: make test-prover-service-perf
+      - name: Compare native and service proving
+        env:
+          PROVER_PERF_RESULTS: ${{ runner.temp }}/prover-service-perf
+        run: make bench-prover-service
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: cat "${RUNNER_TEMP}/prover-service-perf"/run-*/summary.md >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: prover-service-perf
+          path: ${{ runner.temp }}/prover-service-perf
+          if-no-files-found: warn
+          retention-days: 7
