@@ -1013,7 +1013,7 @@ fn build_group(
             Some(other) => Some(probe_stand_in(layouts[*other as usize])),
             None => completed.get(&name).cloned(),
         })?;
-        layouts[slot] = Some(layout_of(&probe));
+        layouts[slot] = Some(layout_of(&probe)?);
     }
 
     // Materialize the open bodies, taking layout metadata from each definition's probe.
@@ -1127,16 +1127,20 @@ fn probe_stand_in(layout: Option<TypeLayout>) -> Type {
     Type::from(StructType::new_with_repr(TypeRepr::Align(layout.min_alignment), [element]))
 }
 
-fn layout_of(ty: &Type) -> TypeLayout {
-    TypeLayout {
-        size_in_bytes: u32::try_from(ty.size_in_bytes())
-            .expect("invalid type: size is larger than 2^32 bytes"),
+fn layout_of(ty: &Type) -> Result<TypeLayout, RecursiveTypeError> {
+    Ok(TypeLayout {
+        size_in_bytes: ty
+            .checked_size_in_bytes()
+            .and_then(|size| u32::try_from(size).ok())
+            .ok_or_else(|| {
+                RecursiveTypeError::InvalidDefinition("type size exceeds u32::MAX bytes".into())
+            })?,
         min_alignment: NonZeroU16::new(
             u16::try_from(ty.min_alignment()).expect("invalid type: alignment is out of range"),
         )
         .expect("invalid type: alignment must be non-zero"),
         is_zst: ty.is_zst(),
-    }
+    })
 }
 
 /// Order the slots so that every slot appears after the slots it unguardedly depends on, or
@@ -1385,7 +1389,11 @@ impl AggregateTemplate {
                         ty: close_template_inner(&field.ty, resolve)?,
                     });
                 }
-                Ok(Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields)))
+                StructType::try_from_parts(ty.name.clone(), ty.repr, fields)
+                    .map(Type::from)
+                    .map_err(|err| {
+                        RecursiveTypeError::InvalidDefinition(alloc::format!("{err}").into())
+                    })
             },
             Self::Enum(ty) => {
                 let mut variants = SmallVec::<[Variant; 4]>::new();
@@ -1446,7 +1454,11 @@ fn close_template_inner(
                     ty: close_template_inner(&field.ty, resolve)?,
                 });
             }
-            Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields))
+            StructType::try_from_parts(ty.name.clone(), ty.repr, fields)
+                .map(Type::from)
+                .map_err(|err| {
+                    RecursiveTypeError::InvalidDefinition(alloc::format!("{err}").into())
+                })?
         },
         TypeTemplate::Enum(ty) => {
             let mut variants = SmallVec::<[Variant; 4]>::new();
@@ -2481,5 +2493,86 @@ mod tests {
         let built = builder.build().expect("a group at the cap should build");
         assert_eq!(built.len(), count);
         assert_eq!(built.get("T000").unwrap().size_in_bytes(), 4);
+    }
+
+    /// `[felt; 2^29]` is exactly 2^31 bytes, so two of them sum to 2^32 -- one past `u32::MAX`.
+    fn half_of_u32_range() -> TypeTemplate {
+        TypeTemplate::array(TypeTemplate::from(Type::Felt), 1 << 29)
+    }
+
+    /// `[felt; 2^30]` is 2^32 bytes on its own, which no struct size can hold.
+    fn past_u32_range() -> TypeTemplate {
+        TypeTemplate::array(TypeTemplate::from(Type::Felt), 1 << 30)
+    }
+
+    #[test]
+    fn layout_of_sizes_a_large_type_in_bytes() {
+        // 2^29 bytes is 2^32 bits: sizing through bits overflows a 32-bit `usize` (such as on
+        // wasm32), although the type fits in u32::MAX bytes.
+        let ty = Type::from(ArrayType::new(Type::U8, 1 << 29));
+        assert_eq!(layout_of(&ty).unwrap().size_in_bytes(), 1 << 29);
+    }
+
+    #[test]
+    fn closing_a_struct_with_a_field_larger_than_u32_max_is_an_error() {
+        let template = TypeTemplate::struct_type(
+            TypeRepr::Default,
+            [FieldTemplate::from(("a", past_u32_range()))],
+        );
+
+        assert!(matches!(
+            close_template(&template, |_| None),
+            Err(RecursiveTypeError::InvalidDefinition(_))
+        ));
+    }
+
+    #[test]
+    fn closing_a_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        let template = TypeTemplate::struct_type(
+            TypeRepr::Default,
+            [
+                FieldTemplate::from(("a", half_of_u32_range())),
+                FieldTemplate::from(("b", half_of_u32_range())),
+            ],
+        );
+
+        assert!(matches!(
+            close_template(&template, |_| None),
+            Err(RecursiveTypeError::InvalidDefinition(_))
+        ));
+    }
+
+    #[test]
+    fn building_a_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "T",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [("a", half_of_u32_range()), ("b", half_of_u32_range())],
+            ),
+        );
+
+        assert!(matches!(builder.build(), Err(RecursiveTypeError::InvalidDefinition(_))));
+    }
+
+    #[test]
+    fn building_a_recursive_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        // The recursion goes through a pointer, so this takes the recursive-group layout path
+        // rather than closing a plain struct template.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("a", half_of_u32_range()),
+                    ("b", half_of_u32_range()),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+
+        assert!(matches!(builder.build(), Err(RecursiveTypeError::InvalidDefinition(_))));
     }
 }
