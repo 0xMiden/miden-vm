@@ -7,7 +7,9 @@
 //! not part of any artifact contract. Backends that feed digest-visible interning
 //! (the ACE `DagBuilder`) define their own traversal order over this graph.
 
-use std::collections::{HashMap, hash_map::Entry};
+use alloc::vec::Vec;
+
+use hashbrown::{HashMap, hash_map::Entry};
 
 /// Graph node identifier; assigned densely in first-encounter (= topological) order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

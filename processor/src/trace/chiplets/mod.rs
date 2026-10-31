@@ -314,8 +314,11 @@ impl Chiplets {
             &[1, 2, 3],
         );
 
+        #[cfg(feature = "std")]
         let mut and8_counts = Vec::new();
+        #[cfg(feature = "std")]
         let mut bitwise_and8_counts = Vec::new();
+        #[cfg(feature = "std")]
         rayon::scope(|s| {
             let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
@@ -338,6 +341,17 @@ impl Chiplets {
                 fill_padding_rows(padding_band, padding_start);
             });
         });
+
+        #[cfg(not(feature = "std"))]
+        let (mut and8_counts, bitwise_and8_counts) = {
+            let and8_counts = hasher.fill_trace(&mut hasher_fragment, eidos_compression_trace);
+            let bitwise_and8_counts = bitwise.fill_trace(&mut bitwise_fragment);
+            memory.fill_trace(&mut memory_fragment);
+            ace.fill_trace(&mut ace_fragment);
+            kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            fill_padding_rows(padding_band, padding_start);
+            (and8_counts, bitwise_and8_counts)
+        };
 
         for (count, bitwise_count) in and8_counts.iter_mut().zip(bitwise_and8_counts) {
             *count += bitwise_count;

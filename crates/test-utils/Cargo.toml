@@ -18,9 +18,13 @@ default = ["std"]
 arbitrary = ["dep:proptest", "miden-assembly/testing", "miden-core/testing"]
 std = [
     "miden-air-definitions/std",
+    "dep:env_logger",
+    "dep:pretty_assertions",
+    "dep:test-case",
     "miden-assembly/std",
     "miden-core/std",
     "miden-processor/std",
+    "miden-processor/testing",
     "miden-prover/std",
     "miden-verifier/std",
     "proptest?/std",
@@ -34,17 +38,12 @@ miden-assembly.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
-miden-processor = { workspace = true, features = ["testing"] }
+miden-processor.workspace = true
 miden-prover.workspace = true
 miden-verifier.workspace = true
 proptest = { workspace = true, optional = true }
-test-case = "3.2"
-
-[target.'cfg(target_family = "wasm")'.dependencies]
-pretty_assertions = { workspace = true, default-features = false, features = [
-    "alloc",
-] }
+test-case = { version = "3.2", optional = true }
+pretty_assertions = { workspace = true, features = ["std"], optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-env_logger.workspace = true
-pretty_assertions = { workspace = true, features = ["std"] }
+env_logger = { workspace = true, optional = true }

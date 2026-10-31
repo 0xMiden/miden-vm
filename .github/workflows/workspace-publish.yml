@@ -261,6 +261,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Check isolated no-std libraries before publication
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32v1-none
+          RUSTFLAGS="-D warnings" make check-no-std
       - uses: ./.github/actions/workspace-release
         if: needs.package-version-gate.outputs.packages != '[]'
         with:

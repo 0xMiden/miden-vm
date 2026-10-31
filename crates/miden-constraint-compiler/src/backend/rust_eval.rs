@@ -31,7 +31,13 @@
 //! [`emit_optimized_module`] additionally specializes single-use arithmetic
 //! regions, preserving global CSE at shared nodes and all assertion metadata.
 
-use std::fmt::Write as _;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::fmt::Write as _;
 
 mod plan;
 
