@@ -401,7 +401,7 @@ impl Linker {
                     self.callgraph.get_or_insert_node(gid);
                     symbols.push(Symbol::new(
                         item.name().clone(),
-                        item.visibility,
+                        item.visibility(),
                         LinkStatus::Unlinked,
                         SymbolItem::Constant(item),
                     ));
@@ -1374,6 +1374,28 @@ mod tests {
 
         assert!(result.is_ok(), "module capacity exhaustion must not panic");
         assert!(matches!(result.unwrap(), Err(LinkerError::TooManyModules)));
+    }
+
+    #[test]
+    fn programmatically_constructed_typed_constant_links() {
+        let context = TestContext::default();
+        let mut linker = Linker::new(context.source_manager());
+        let mut module = Module::new(ast::ModuleKind::Library, Path::new("::test"));
+        let constant = ast::ConstantDecl::new_with_ty(
+            SourceSpan::UNKNOWN,
+            Visibility::Private,
+            Ident::new("N").expect("valid identifier"),
+            ast::ConstantExpr::Int(Span::unknown(42_u8.into())),
+            ast::TypeExpr::Primitive(Span::unknown(types::Type::U8)),
+        );
+        module.define_constant(constant.clone()).expect("constant should be defined");
+
+        let module_index = linker.link_module(&mut module).expect("typed constant should link");
+        assert_eq!(linker.modules().len(), 1);
+        assert!(matches!(
+            linker[module_index].symbols().next().map(Symbol::item),
+            Some(SymbolItem::Constant(linked)) if linked == &constant
+        ));
     }
 
     #[test]

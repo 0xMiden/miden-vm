@@ -94,7 +94,7 @@ pub trait Visit<T = ()> {
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
         visit_procedure(self, procedure)
     }
-    fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
+    fn visit_constant(&mut self, constant: &ConstantDecl) -> ControlFlow<T> {
         visit_constant(self, constant)
     }
     fn visit_constant_expr(&mut self, expr: &ConstantExpr) -> ControlFlow<T> {
@@ -188,7 +188,7 @@ where
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
         (**self).visit_procedure(procedure)
     }
-    fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
+    fn visit_constant(&mut self, constant: &ConstantDecl) -> ControlFlow<T> {
         (**self).visit_constant(constant)
     }
     fn visit_constant_expr(&mut self, expr: &ConstantExpr) -> ControlFlow<T> {
@@ -309,11 +309,14 @@ where
 }
 
 #[inline(always)]
-pub fn visit_constant<V, T>(visitor: &mut V, constant: &Constant) -> ControlFlow<T>
+pub fn visit_constant<V, T>(visitor: &mut V, constant: &ConstantDecl) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
-    visitor.visit_constant_expr(&constant.value)
+    if let Some(ty) = constant.ty() {
+        visitor.visit_type_expr(ty)?;
+    }
+    visitor.visit_constant_expr(constant.value())
 }
 
 pub fn visit_constant_expr<V, T>(visitor: &mut V, expr: &ConstantExpr) -> ControlFlow<T>
@@ -661,7 +664,7 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
         visit_mut_procedure(self, procedure)
     }
-    fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
+    fn visit_mut_constant(&mut self, constant: &mut ConstantDecl) -> ControlFlow<T> {
         visit_mut_constant(self, constant)
     }
     fn visit_mut_constant_expr(&mut self, expr: &mut ConstantExpr) -> ControlFlow<T> {
@@ -755,7 +758,7 @@ where
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
         (**self).visit_mut_procedure(procedure)
     }
-    fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
+    fn visit_mut_constant(&mut self, constant: &mut ConstantDecl) -> ControlFlow<T> {
         (**self).visit_mut_constant(constant)
     }
     fn visit_mut_constant_expr(&mut self, expr: &mut ConstantExpr) -> ControlFlow<T> {
@@ -876,11 +879,14 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_constant<V, T>(visitor: &mut V, constant: &mut Constant) -> ControlFlow<T>
+pub fn visit_mut_constant<V, T>(visitor: &mut V, constant: &mut ConstantDecl) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
-    visitor.visit_mut_constant_expr(&mut constant.value)
+    if let Some(ty) = constant.ty_mut() {
+        visitor.visit_mut_type_expr(ty)?;
+    }
+    visitor.visit_mut_constant_expr(constant.value_mut())
 }
 
 pub fn visit_mut_constant_expr<V, T>(visitor: &mut V, expr: &mut ConstantExpr) -> ControlFlow<T>
