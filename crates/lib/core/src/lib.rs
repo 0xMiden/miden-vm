@@ -173,6 +173,18 @@ impl CoreLibrary {
             .expect("the conjectured security estimator is exported from the core library")
     }
 
+    /// Returns the MAST root of the common recursive proven security estimator.
+    ///
+    /// Like the conjectured estimator, it encodes no acceptance threshold and does not
+    /// authenticate caller-assembled descriptors.
+    pub fn proven_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::stark::security::compute_proven_security_level",
+            )
+            .expect("the proven security estimator is exported from the core library")
+    }
+
     /// Returns the default event handlers required by the core library.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
@@ -222,6 +234,11 @@ impl Default for CoreLibrary {
 /// Returns the MAST root of the common recursive conjectured security estimator.
 pub fn conjectured_security_estimator_root() -> Word {
     CoreLibrary::default().conjectured_security_estimator_root()
+}
+
+/// Returns the MAST root of the common recursive proven security estimator.
+pub fn proven_security_estimator_root() -> Word {
+    CoreLibrary::default().proven_security_estimator_root()
 }
 
 // TESTS

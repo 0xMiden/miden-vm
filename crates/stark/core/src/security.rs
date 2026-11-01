@@ -5,12 +5,16 @@ use miden_core::{
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     proof::HashFunction,
 };
+/// Proven soundness breakdown in the unique- and list-decoding regimes.
+pub use p3_security::SecurityReport as ProvenSecurityReport;
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
 use p3_security::{
+    ErrorBits, GrindingSites, LowDegreeTest, StarkAirParams,
     budget::report::{COLLISION_LABEL, LOOKUP_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
     fixed,
+    fri::FriRegime,
 };
 
 use crate::pcs::PcsParams;
@@ -176,5 +180,152 @@ impl ProofSecurityParameters {
     /// Returns the conjectured security level for the verified proof.
     pub fn conjectured_security_level(&self) -> u32 {
         self.conjectured_security_report().security_level()
+    }
+
+    /// Computes proven round-by-round security bounds in both decoding regimes.
+    ///
+    /// Plonky3 selects the list-decoding proximity parameter from the complete bound, including
+    /// DEEP column batching, and the report keeps both regimes with their binding terms. Like the
+    /// conjectured estimate, it assumes parameters returned by successful verification and keeps
+    /// the hash and Fiat-Shamir assumptions.
+    ///
+    /// The Eidos sampling support is rounded down to 125 bits, which also covers rejecting
+    /// base-field OOD points. Lookup challenges follow the main-trace commitment, so each
+    /// list-decoding candidate is composed with the lookup term charged its own list size.
+    pub fn proven_security_report(&self) -> ProvenSecurityReport {
+        use p3_security::{
+            proximity::{list_size_ldr_m, list_size_udr},
+            stark::proven_security_report,
+        };
+
+        let ProvenInputs { fri, air, shape, grinding, lookup_bits } = self.proven_inputs();
+        let lookup = |list_size: f64| {
+            // `from_prob(L)` carries `-log2(L)` bits, so this subtracts the list-size loss.
+            let bits = lookup_bits + ErrorBits::from_prob(list_size).bits();
+            [p3_security::SecurityTerm::new(
+                LOOKUP_LABEL,
+                ErrorBits::from_log2(bits.max(0.0)),
+            )]
+        };
+
+        let unique = FriCandidate { fri, ldr: None };
+        let udr =
+            proven_security_report(&unique, &air, &shape, &lookup(list_size_udr()), &grinding).udr;
+        let ldr = p3_security::fri::ldr_candidates(&fri, &air, &shape)
+            .into_iter()
+            .filter_map(|candidate| {
+                let list_size = list_size_ldr_m(fri.log_blowup, candidate.0);
+                let ldt = FriCandidate { fri, ldr: Some(candidate) };
+                proven_security_report(&ldt, &air, &shape, &lookup(list_size), &grinding).ldr
+            })
+            .max_by(|a, b| a.security_bits().total_cmp(&b.security_bits()));
+        ProvenSecurityReport { udr, ldr }
+    }
+
+    /// Returns the stronger proven security bound, in whole bits rounded down.
+    pub fn proven_security_level(&self) -> u32 {
+        self.proven_security_report().security_bits() as u32
+    }
+
+    /// Plonky3 inputs shared by both proven regimes.
+    fn proven_inputs(&self) -> ProvenInputs {
+        let params = &self.protocol_params;
+        let log_height = self.instance_shape.log_max_height as usize;
+        let log_blowup = params.log_blowup as usize;
+        let log_arity = params.log_folding_arity as usize;
+        let num_rounds =
+            log_height.saturating_sub(self.log_final_degree as usize).div_ceil(log_arity);
+        let fri = FriRegime {
+            log_blowup,
+            num_queries: params.num_queries as usize,
+            // Lifted FRI rounds up the number of fixed-arity folds. Use the actual final LDE
+            // size so Plonky3's floor division counts that last fold, including partial rounds.
+            log_final_poly_len: (log_height + log_blowup).saturating_sub(num_rounds * log_arity),
+            max_log_arity: if num_rounds == 0 { 0 } else { log_arity },
+            commit_pow_bits: params.folding_pow_bits as usize,
+            query_pow_bits: params.query_pow_bits as usize,
+        };
+        let sampling_bits = match self.hash_fn {
+            HashFunction::Eidos => fixed::to_bits(EIDOS_CHALLENGE_SAMPLE_BITS) - 1,
+            _ => fixed::to_bits(self.instance_shape.field_bits),
+        };
+        let shape = p3_security::InstanceShape {
+            log_trace_length: log_height,
+            modulus_bits: sampling_bits as usize,
+            collision_resistance: self.instance_shape.collision_resistance as usize,
+            // The stored count includes both column- and opening-point-batching slots. It
+            // conservatively bounds the sum of the two independent challenges' curve degrees.
+            num_batched_functions: self.air_shape.num_deep_terms.unwrap_or(1) as usize,
+        };
+        let air = StarkAirParams {
+            num_constraints: self.air_shape.num_composed_constraints as usize,
+            max_constraint_degree: self.air_shape.max_constraint_degree as usize,
+            num_quotient_chunks: self.air_shape.num_quotient_chunks as usize,
+            max_combo: self.air_shape.max_combo.max(self.num_ood_points) as usize,
+        };
+        // This lookup term is a Schwartz-Zippel bound and does not use the proximity conjecture.
+        let lookup = self
+            .conjectured_security_report()
+            .terms()
+            .iter()
+            .find(|term| term.label == LOOKUP_LABEL)
+            .copied()
+            .expect("the round budget includes the lookup term");
+        let grinding = GrindingSites {
+            out_of_domain: params.ood_pow_bits as usize,
+            batch_combination: params.deep_pow_bits as usize,
+            ..GrindingSites::NONE
+        };
+        ProvenInputs {
+            fri,
+            air,
+            shape,
+            grinding,
+            lookup_bits: lookup.bits as f64 / fixed::ONE as f64,
+        }
+    }
+}
+
+/// Plonky3 inputs for [`ProofSecurityParameters::proven_security_report`].
+struct ProvenInputs {
+    fri: FriRegime,
+    air: StarkAirParams,
+    shape: p3_security::InstanceShape,
+    grinding: GrindingSites,
+    /// Lookup round before any list-size loss, in bits.
+    lookup_bits: f64,
+}
+
+/// FRI restricted to unique decoding or to one list-decoding candidate, so that
+/// [`ProofSecurityParameters::proven_security_report`] can charge each candidate's list size.
+#[derive(Clone, Copy)]
+struct FriCandidate {
+    fri: FriRegime,
+    ldr: Option<(usize, ErrorBits)>,
+}
+
+impl LowDegreeTest for FriCandidate {
+    fn log_blowup(&self) -> usize {
+        self.fri.log_blowup
+    }
+
+    fn proven_error_udr(
+        &self,
+        air: &StarkAirParams,
+        shape: &p3_security::InstanceShape,
+    ) -> ErrorBits {
+        p3_security::fri::proven_error_udr(&self.fri, air, shape)
+    }
+
+    fn best_ldr(
+        &self,
+        _air: &StarkAirParams,
+        _shape: &p3_security::InstanceShape,
+    ) -> Option<(usize, ErrorBits)> {
+        self.ldr
+    }
+
+    fn conjectured_error(&self, shape: &p3_security::InstanceShape) -> ErrorBits {
+        p3_security::fri::conjectured_error(&self.fri, shape)
     }
 }

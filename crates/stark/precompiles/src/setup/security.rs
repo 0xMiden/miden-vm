@@ -1,4 +1,4 @@
-//! Conjectured security level computation for the precompile chiplet stack.
+//! Conjectured and proven security bounds for the precompile chiplet stack.
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
 //! Both statements use the round-budget formulas in [`miden_stark::security`] and the same
@@ -17,7 +17,7 @@ pub use miden_stark::{
     pcs::PcsParams,
     security::{
         AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        SecurityReport, SecurityTerm,
+        ProvenSecurityReport, SecurityReport, SecurityTerm,
     },
 };
 
@@ -169,6 +169,34 @@ mod tests {
         );
         assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
+    }
+
+    /// PVM estimates must account for the chiplet stack's larger column batch, even when the
+    /// deployed query count gives it the same final level as the MVM.
+    #[test]
+    fn proven_security_uses_the_precompile_air_shape() {
+        let pcs_params = precompile_pcs_params();
+        let pvm =
+            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, HashFunction::Eidos);
+        let mvm = ProofSecurityParameters {
+            air_shape: miden_air::vm::security::AIR_SHAPE,
+            num_lookup_boundary_terms: miden_air::vm::security::CORE_BOUNDARY_LOOKUP_TERMS,
+            ..pvm
+        };
+        let pvm_report: ProvenSecurityReport = pvm.proven_security_report();
+        let mvm_report = mvm.proven_security_report();
+        let batch_bits = |report: &ProvenSecurityReport| {
+            report
+                .udr
+                .terms()
+                .iter()
+                .find(|term| term.label == "batch-combination")
+                .unwrap()
+                .bits
+                .bits()
+        };
+        assert!(batch_bits(&pvm_report) < batch_bits(&mvm_report));
+        assert_eq!(pvm.proven_security_level(), 57);
     }
 
     /// The deployed preset's computed security level, per trace height, with the round that

@@ -38,6 +38,7 @@ mod pvm_wrapper;
 mod random_coin;
 mod security;
 mod security_math;
+mod security_proven;
 mod verifier_stack;
 mod vm_scatter_bench;
 mod vm_sigma_scatter;
@@ -707,7 +708,7 @@ pub(crate) const COPY_ADVICE_TO_MEM: &str = "
 /// `proof_request_key(verifier_root, claim_commitment)`, verify it, compute its security level, and
 /// enforce the consumer's threshold. `vm::verify_proof` contains neither the estimator nor the
 /// policy.
-fn request_consumer_source() -> String {
+fn request_consumer_source(bound: &str, target: u32) -> String {
     format!(
         "
         use miden::core::sys
@@ -738,9 +739,9 @@ fn request_consumer_source() -> String {
             # => [security_descriptor(12), D]
 
             # 4) Compute the security level and enforce the consumer's threshold.
-            exec.security::compute_conjectured_security_level
-            # => [conjectured_level, D]
-            u32lt.96 assertz.err=\"proof security level is below the accepted target\"
+            exec.security::compute_{bound}_security_level
+            # => [level, D]
+            u32lt.{target} assertz.err=\"proof security level is below the accepted target\"
             # => [D]
             exec.sys::truncate_stack
         end
@@ -757,7 +758,7 @@ fn request_flow_binds_proof_to_claim() {
 
     let intended = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
 
-    let source = request_consumer_source();
+    let source = request_consumer_source("conjectured", 96);
     let entry = |proof_stream: &[u64]| -> (Word, Vec<Felt>) {
         let felts: Vec<Felt> = proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
         (proof_request_key(vm_verify_proof_root(), intended.claim_commitment), felts)
@@ -767,14 +768,19 @@ fn request_flow_binds_proof_to_claim() {
     let (k, v) = entry(&intended.proof_stream);
     let mut advice_map = intended.advice_map.clone();
     advice_map.push((k, v));
-    let ok = build_test!(
-        source.as_str(),
-        &[],
-        &intended.claim_advice,
-        intended.store.clone(),
-        advice_map
-    );
-    ok.execute_for_output().expect("the matching proof must verify");
+    // Both estimators consume the same authenticated descriptor without disturbing the
+    // deferred obligation. The proven threshold reflects the weaker proven query bound.
+    for consumer in [&source, &request_consumer_source("proven", 56)] {
+        let ok = build_test!(
+            consumer.as_str(),
+            &[],
+            &intended.claim_advice,
+            intended.store.clone(),
+            advice_map.clone()
+        );
+        ok.execute_for_output()
+            .expect("the matching proof must satisfy either security policy");
+    }
 
     // Substitution: a different claim's proof under the same key fails against the consumer's
     // claim — the advice provider cannot pass off another proof. The intended claim's own

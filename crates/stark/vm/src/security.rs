@@ -21,7 +21,7 @@ pub use miden_stark::{
     pcs::PcsParams,
     security::{
         AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        SecurityReport, SecurityTerm,
+        ProvenSecurityReport, SecurityReport, SecurityTerm,
     },
 };
 #[cfg(test)]
@@ -109,7 +109,267 @@ pub mod testing;
 
 #[cfg(test)]
 mod tests {
+    use p3_security::{ErrorBits, fixed};
+
     use super::{testing::*, *};
+
+    /// The deployed preset has about 57 proven query bits in LDR, versus about 39 in UDR.
+    /// Selecting a regime must use the complete bound, including DEEP column batching.
+    #[test]
+    fn proven_security_selects_the_stronger_complete_regime() {
+        let mut parameters = proof_security_parameters(
+            &config::pcs_params(),
+            20,
+            0,
+            COMMITMENT_ALIGNMENT,
+            HashFunction::Eidos,
+        );
+        let report = parameters.proven_security_report();
+        let ldr = report.ldr.as_ref().unwrap();
+        assert!(ldr.security_bits() > report.udr.security_bits());
+        assert_eq!(report.security_bits(), ldr.security_bits());
+        assert_eq!(parameters.proven_security_level(), 57);
+        assert!(parameters.proven_security_level() < parameters.conjectured_security_level());
+
+        // With many queries and no DEEP grinding, the LDR batching loss makes UDR stronger.
+        parameters.instance_shape.log_max_height = 29;
+        parameters.protocol_params.num_queries = 150;
+        parameters.protocol_params.query_pow_bits = 31;
+        parameters.protocol_params.deep_pow_bits = 0;
+        parameters.protocol_params.folding_pow_bits = 0;
+        let report = parameters.proven_security_report();
+        assert!(report.udr.security_bits() > report.ldr.as_ref().unwrap().security_bits());
+        assert_eq!(report.security_bits(), report.udr.security_bits());
+        assert_eq!(report.udr.binding().label, "batch-combination");
+        assert_eq!(parameters.proven_security_level(), report.security_bits() as u32);
+    }
+
+    /// OOD rejection must fit within the whole-bit sampling support given to Plonky3, and the
+    /// commitment collision bound must still cap the complete report independently.
+    #[test]
+    fn proven_security_respects_the_challenger_and_collision_bound() {
+        for (hash_fn, expected_bits) in
+            [(HashFunction::Eidos, 115.0), (HashFunction::Blake3_256, 117.0)]
+        {
+            let mut parameters = proof_security_parameters(
+                &config::pcs_params(),
+                20,
+                0,
+                COMMITMENT_ALIGNMENT,
+                hash_fn,
+            );
+            parameters.air_shape.num_composed_constraints = 1024;
+            let report = parameters.proven_security_report();
+            let composition =
+                report.udr.terms().iter().find(|term| term.label == "air-composition").unwrap();
+            assert_eq!(composition.bits.bits(), expected_bits);
+
+            // Isolate the collision cap from the lookup boundary correction, which is applied
+            // after capping in the existing round budget and can lower an exact integer level.
+            parameters.num_lookup_boundary_terms = 0;
+            parameters.instance_shape.collision_resistance = 20;
+            assert_eq!(parameters.proven_security_level(), 20);
+        }
+    }
+
+    /// A single fold must be charged even when the height-to-final-degree gap is smaller than
+    /// the configured log arity. At the final degree itself there is no folding challenge.
+    #[test]
+    fn proven_security_counts_partial_and_absent_folding_rounds() {
+        let mut parameters = proof_security_parameters(
+            &config::pcs_params(),
+            8,
+            0,
+            COMMITMENT_ALIGNMENT,
+            HashFunction::Eidos,
+        );
+        parameters.protocol_params.num_queries = 150;
+        parameters.protocol_params.query_pow_bits = 31;
+        parameters.protocol_params.folding_pow_bits = 0;
+        let ldt_bits = |report: &ProvenSecurityReport| {
+            report
+                .udr
+                .terms()
+                .iter()
+                .find(|term| term.label == "low-degree-test")
+                .unwrap()
+                .bits
+                .bits()
+        };
+        let expected_folding = 125.0 - (3.0 * (2048.0 + 1.0_f64)).log2();
+        assert!((ldt_bits(&parameters.proven_security_report()) - expected_folding).abs() < 1e-10);
+
+        parameters.log_final_degree = 8;
+        let alpha = (1.0 + (256.0 + 2.0) / 2048.0_f64) / 2.0;
+        let expected_query = 31.0 - 150.0 * alpha.log2();
+        assert!((ldt_bits(&parameters.proven_security_report()) - expected_query).abs() < 1e-10);
+    }
+
+    /// Both regimes include the lookup term with the kernel's boundary fractions, and list
+    /// decoding charges it the selected candidate's list size.
+    #[test]
+    fn proven_security_includes_lookup_boundary_terms_in_both_regimes() {
+        use p3_security::{Regime, proximity::list_size_ldr_m};
+
+        let mut parameters = proof_security_parameters(
+            &config::pcs_params(),
+            20,
+            255,
+            COMMITMENT_ALIGNMENT,
+            HashFunction::Eidos,
+        );
+        parameters.protocol_params.num_queries = 150;
+        parameters.protocol_params.query_pow_bits = 31;
+        parameters.protocol_params.deep_pow_bits = 31;
+        parameters.protocol_params.folding_pow_bits = 31;
+        let expected = parameters
+            .conjectured_security_report()
+            .terms()
+            .iter()
+            .find(|term| term.label == LOOKUP_LABEL)
+            .unwrap()
+            .bits as f64
+            / fixed::ONE as f64;
+        let report = parameters.proven_security_report();
+        let ldr = report.ldr.as_ref().unwrap();
+        let Regime::ListDecoding { m } = ldr.regime else {
+            panic!("the LDR report must name its proximity parameter");
+        };
+        let list_loss = (list_size_ldr_m(3, m)).log2();
+        for (regime, expected) in [(&report.udr, expected), (ldr, expected - list_loss)] {
+            let lookup = regime.terms().iter().find(|term| term.label == LOOKUP_LABEL).unwrap();
+            assert!((lookup.bits.bits() - expected).abs() < 1e-12);
+            assert_eq!(regime.binding().label, LOOKUP_LABEL);
+        }
+        parameters.num_lookup_boundary_terms = 0;
+        let without_boundary = parameters.proven_security_report();
+        assert!(without_boundary.udr.security_bits() > report.udr.security_bits());
+    }
+
+    /// Where the lookup round binds in list decoding, charging its list size moves the proximity
+    /// parameter and lowers the level that Plonky3's unscaled composition reports.
+    #[test]
+    fn proven_security_charges_the_list_size_to_the_lookup_round() {
+        let mut parameters = proof_security_parameters(
+            &config::pcs_params(),
+            20,
+            0,
+            COMMITMENT_ALIGNMENT,
+            HashFunction::Eidos,
+        );
+        parameters.protocol_params.num_queries = 65;
+        parameters.protocol_params.query_pow_bits = 0;
+        parameters.protocol_params.deep_pow_bits = 31;
+        parameters.protocol_params.folding_pow_bits = 31;
+        let (unscaled, _) = plonky3_proven_report(&parameters);
+        let report = parameters.proven_security_report();
+        assert_eq!(unscaled.security_bits() as u32, 95);
+        assert_eq!(unscaled.ldr.as_ref().unwrap().binding().label, LOOKUP_LABEL);
+        assert_eq!(parameters.proven_security_level(), 91);
+        assert!(report.security_bits() < unscaled.security_bits());
+    }
+
+    /// Where the lookup round cannot bind, the per-candidate composition must reproduce
+    /// Plonky3's own report: the same regimes, proximity parameter, and every other term.
+    #[test]
+    fn proven_security_matches_plonky3_where_the_lookup_round_does_not_bind() {
+        for log_max_height in [6, 8, 20, 29] {
+            let parameters = proof_security_parameters(
+                &config::pcs_params(),
+                log_max_height,
+                0,
+                COMMITMENT_ALIGNMENT,
+                HashFunction::Eidos,
+            );
+            let (expected, lookup_bits) = plonky3_proven_report(&parameters);
+            let report = parameters.proven_security_report();
+            assert_eq!(report.security_bits(), expected.security_bits());
+            let regimes = [(&report.udr, &expected.udr)]
+                .into_iter()
+                .chain(report.ldr.as_ref().zip(expected.ldr.as_ref()));
+            assert_eq!(report.ldr.is_some(), expected.ldr.is_some());
+            for (actual, expected) in regimes {
+                assert_eq!(actual.regime, expected.regime);
+                assert_ne!(actual.binding().label, LOOKUP_LABEL);
+                for (actual, expected) in actual.terms().iter().zip(expected.terms()) {
+                    assert_eq!(actual.label, expected.label);
+                    if actual.label == LOOKUP_LABEL {
+                        assert!(actual.bits.bits() <= lookup_bits);
+                    } else {
+                        assert_eq!(actual.bits, expected.bits);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Plonky3's composition with the lookup term applied unchanged in both regimes, and that
+    /// term's bits.
+    fn plonky3_proven_report(parameters: &ProofSecurityParameters) -> (ProvenSecurityReport, f64) {
+        use p3_security::{GrindingSites, StarkAirParams, fri::FriRegime};
+
+        let params = &parameters.protocol_params;
+        let log_height = parameters.instance_shape.log_max_height as usize;
+        let log_arity = params.log_folding_arity as usize;
+        let num_rounds = log_height
+            .saturating_sub(parameters.log_final_degree as usize)
+            .div_ceil(log_arity);
+        let fri = FriRegime {
+            log_blowup: params.log_blowup as usize,
+            num_queries: params.num_queries as usize,
+            log_final_poly_len: (log_height + params.log_blowup as usize)
+                .saturating_sub(num_rounds * log_arity),
+            max_log_arity: if num_rounds == 0 { 0 } else { log_arity },
+            commit_pow_bits: params.folding_pow_bits as usize,
+            query_pow_bits: params.query_pow_bits as usize,
+        };
+        let air = StarkAirParams {
+            num_constraints: parameters.air_shape.num_composed_constraints as usize,
+            max_constraint_degree: parameters.air_shape.max_constraint_degree as usize,
+            num_quotient_chunks: parameters.air_shape.num_quotient_chunks as usize,
+            max_combo: parameters.air_shape.max_combo.max(parameters.num_ood_points) as usize,
+        };
+        let shape = p3_security::InstanceShape {
+            log_trace_length: log_height,
+            modulus_bits: 125,
+            collision_resistance: parameters.instance_shape.collision_resistance as usize,
+            num_batched_functions: parameters.air_shape.num_deep_terms.unwrap_or(1) as usize,
+        };
+        let lookup_bits = parameters
+            .conjectured_security_report()
+            .terms()
+            .iter()
+            .find(|term| term.label == LOOKUP_LABEL)
+            .unwrap()
+            .bits as f64
+            / fixed::ONE as f64;
+        let lookup =
+            [p3_security::SecurityTerm::new(LOOKUP_LABEL, ErrorBits::from_log2(lookup_bits))];
+        let grinding = GrindingSites {
+            out_of_domain: params.ood_pow_bits as usize,
+            batch_combination: params.deep_pow_bits as usize,
+            ..GrindingSites::NONE
+        };
+        let report =
+            p3_security::stark::proven_security_report(&fri, &air, &shape, &lookup, &grinding);
+        (report, lookup_bits)
+    }
+
+    /// A trace too short to admit a list-decoding proximity parameter still has a UDR report.
+    #[test]
+    fn proven_security_falls_back_to_unique_decoding() {
+        let parameters = proof_security_parameters(
+            &config::pcs_params(),
+            1,
+            0,
+            COMMITMENT_ALIGNMENT,
+            HashFunction::Eidos,
+        );
+        let report = parameters.proven_security_report();
+        assert!(report.ldr.is_none());
+        assert_eq!(report.security_bits(), report.udr.security_bits());
+        assert!(parameters.proven_security_level() > 0);
+    }
 
     /// Power-of-two error coefficients make the root-counting bounds exact without using the
     /// estimator's logarithm implementation. The collision cap must be applied after sampling.

@@ -238,7 +238,8 @@ end
 #! and AIR heights. Successful verification authenticates the root. The returned descriptor
 #! combines those transcript-bound parameters and the maximum AIR height with relation-shape
 #! constants compiled into this verifier. The caller passes all twelve elements unchanged to
-#! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
+#! `stark::security::compute_conjectured_security_level` or
+#! `stark::security::compute_proven_security_level`, then applies its own acceptance policy.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this
 #! procedure.
