@@ -13,6 +13,7 @@
 
 #### Changes
 
+- [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#XXXX](https://github.com/0xMiden/miden-vm/pull/XXXX)).
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Reduced the PVM's aligned width from 912 to 768 columns. Verification uses precomputed table commitments to avoid rebuilding preprocessed tables. PVM proofs and recursive verifier roots change ([#4068](https://github.com/0xMiden/miden-vm/pull/4068)).
 - [BREAKING] Added `miden-vm-stark` for VM relation proving, verification, setup, security, and recursive advice. `miden-prover` still builds complete and deferred proofs, and `miden-verifier` still verifies execution proofs. Both crates no longer re-export the APIs that moved into the new STARK crates. Replaced `miden-precompiles-prover` and `miden-precompiles-verifier` with `miden-precompiles-stark`. Moved `VmTrace` to `miden_air_definitions::vm`. `miden_processor::trace::build_trace` now requires a `ProvingBudget`, and constraint checking moved to `miden_vm_stark::debug::check_constraints` ([#4079](https://github.com/0xMiden/miden-vm/pull/4079)).

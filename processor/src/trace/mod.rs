@@ -30,7 +30,9 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air_definitions::vm::{ChipletsLengths, TraceLenSummary, VmTrace, trace::RowIndex};
+pub use miden_air_definitions::vm::{
+    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
+};
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace};
 // Re-exported for the streaming trace-build path

@@ -172,6 +172,27 @@ impl VmTrace {
 // TRACE LENGTH SUMMARY
 // ================================================================================================
 
+/// Error returned by [`TraceLenSummary::new`] when the padded AIR heights are inconsistent.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
+pub enum TraceLenSummaryError {
+    /// The padded height of an AIR is zero.
+    #[error("padded height of the {air} AIR is zero")]
+    ZeroHeight {
+        /// Name of the AIR with the invalid height.
+        air: &'static str,
+    },
+    /// The padded height of an AIR is smaller than its number of unpadded rows.
+    #[error("padded height {padded_height} of the {air} AIR is below its {rows} unpadded rows")]
+    HeightBelowRows {
+        /// Name of the AIR with the invalid height.
+        air: &'static str,
+        /// The rejected padded height.
+        padded_height: usize,
+        /// The unpadded row count that the padded height must cover.
+        rows: usize,
+    },
+}
+
 /// Row counts for the AIR segments produced by trace generation.
 ///
 /// Dynamic AIRs store their unpadded row counts. Use the `*_height()` accessors for their padded
@@ -189,20 +210,40 @@ pub struct TraceLenSummary {
 impl TraceLenSummary {
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
     /// [`crate::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a padded height is zero or smaller than the unpadded row count of its
+    /// AIR. These checks keep [`Self::padding_percentage`] from underflowing or dividing by zero.
     pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
         eidos_compression_rows: usize,
         byte_pair_lookup_rows: usize,
         padded_heights: [usize; MIDEN_AIR_COUNT],
-    ) -> Self {
-        TraceLenSummary {
+    ) -> Result<Self, TraceLenSummaryError> {
+        let unpadded_rows: [(&'static str, usize); MIDEN_AIR_COUNT] = [
+            ("Core", core_rows),
+            ("Chiplets", chiplets.trace_len()),
+            ("Eidos compression", eidos_compression_rows),
+            ("byte-pair lookup", byte_pair_lookup_rows),
+        ];
+        for ((air, rows), padded_height) in unpadded_rows.into_iter().zip(padded_heights) {
+            if padded_height == 0 {
+                return Err(TraceLenSummaryError::ZeroHeight { air });
+            }
+            if padded_height < rows {
+                return Err(TraceLenSummaryError::HeightBelowRows { air, padded_height, rows });
+            }
+        }
+
+        Ok(TraceLenSummary {
             core_rows,
             chiplets,
             eidos_compression_rows,
             byte_pair_lookup_rows,
             padded_heights,
-        }
+        })
     }
 
     /// Returns the unpadded core AIR rows (system + decoder + stack).
@@ -273,6 +314,9 @@ impl TraceLenSummary {
     }
 
     /// Returns the percent (0 - 100) of rows added by padding.
+    ///
+    /// This cannot underflow or divide by zero: [`Self::new`] guarantees that every padded height
+    /// is nonzero and covers the unpadded rows of its AIR.
     pub fn padding_percentage(&self) -> usize {
         (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
     }
@@ -363,7 +407,8 @@ mod tests {
                 (3 * EIDOS_COMPRESSION_CYCLE_LEN).next_power_of_two().max(MIN_TRACE_LEN),
                 MIN_TRACE_LEN,
             ],
-        );
+        )
+        .expect("valid padded heights");
 
         assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.eidos_compression_count(), 3);
@@ -378,7 +423,8 @@ mod tests {
             3 * EIDOS_COMPRESSION_CYCLE_LEN,
             1 << 16,
             heights,
-        );
+        )
+        .expect("valid padded heights");
 
         assert_eq!(summary.core_rows(), 17);
         // ChipletsLengths adds the mandatory connector-padding row.
@@ -390,5 +436,53 @@ mod tests {
         assert_eq!(summary.chiplets_height(), heights[1]);
         assert_eq!(summary.eidos_compression_height(), heights[2]);
         assert_eq!(summary.padded_trace_len(), 1 << 16);
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_zero_padded_height() {
+        for air in 0..MIDEN_AIR_COUNT {
+            let mut heights = [MIN_TRACE_LEN; MIDEN_AIR_COUNT];
+            heights[air] = 0;
+            let result = TraceLenSummary::new(0, ChipletsLengths::default(), 0, 0, heights);
+            assert!(
+                matches!(result, Err(TraceLenSummaryError::ZeroHeight { .. })),
+                "AIR {air}: {result:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_padded_height_below_rows() {
+        let rows = 2 * MIN_TRACE_LEN;
+        let result = TraceLenSummary::new(
+            rows,
+            ChipletsLengths::default(),
+            0,
+            0,
+            [MIN_TRACE_LEN; MIDEN_AIR_COUNT],
+        );
+
+        assert_eq!(
+            result,
+            Err(TraceLenSummaryError::HeightBelowRows {
+                air: "Core",
+                padded_height: MIN_TRACE_LEN,
+                rows,
+            })
+        );
+    }
+
+    #[test]
+    fn trace_len_summary_padding_percentage_for_valid_heights() {
+        let heights = [MIN_TRACE_LEN; MIDEN_AIR_COUNT];
+
+        let half_full =
+            TraceLenSummary::new(MIN_TRACE_LEN / 2, ChipletsLengths::default(), 0, 0, heights)
+                .expect("valid padded heights");
+        assert_eq!(half_full.padding_percentage(), 50);
+
+        let full = TraceLenSummary::new(MIN_TRACE_LEN, ChipletsLengths::default(), 0, 0, heights)
+            .expect("valid padded heights");
+        assert_eq!(full.padding_percentage(), 0);
     }
 }
