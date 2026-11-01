@@ -183,7 +183,7 @@ impl NodeIndex {
         debug_assert!(depth < self.depth);
         let delta = self.depth.saturating_sub(depth);
         self.depth = self.depth.saturating_sub(delta);
-        self.position >>= delta as u32;
+        self.position = self.position.checked_shr(delta as u32).unwrap_or(0);
     }
 
     // ITERATORS
@@ -421,5 +421,12 @@ mod tests {
 
         // depth 63, position 0: scalar = 2^63
         assert_eq!(NodeIndex::make(63, 0).to_scalar_index().unwrap(), 1u64 << 63);
+    }
+
+    #[test]
+    fn test_move_up_to_root_from_depth_64() {
+        let mut index = NodeIndex::new(64, 0).unwrap();
+        index.move_up_to(0);
+        assert_eq!(index, NodeIndex::root());
     }
 }

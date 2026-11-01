@@ -31,6 +31,7 @@
 
 #### Fixes
 
+- Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
 ## v1.0.0-rc.0 (2026-10-21)
