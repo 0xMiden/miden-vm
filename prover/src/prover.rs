@@ -172,8 +172,9 @@ impl Prover {
     ///
     /// The configured logical limits apply independently to each witness before session creation.
     /// The batch may exceed those totals collectively; root count and prover memory remain
-    /// independent batch-wide ceilings. Memory is checked after import and before trace allocation;
-    /// it does not bound allocations during preparation or session construction.
+    /// independent batch-wide ceilings. Conservative memory reservations are checked before
+    /// preparing each witness and recording each new Session node, and the modelled proving peak is
+    /// checked before trace allocation.
     pub fn prove_precompiles(
         &self,
         witnesses: Vec<PrecompileWitness>,

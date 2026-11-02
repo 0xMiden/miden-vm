@@ -288,15 +288,22 @@ invalid. `PrecompileProvingError::BatchTooLarge { witnesses, max }` reports the 
 replacing the former `SessionInputError::Limit` path. Per-witness work-limit errors remain under
 `SessionInputError::Preparation`.
 
+The same memory budget bounds conservative reservations taken before allocation. Each witness
+reserves its retained prepared graph and preparation scratch from its wire shape before preparation,
+so repeated witnesses are charged again. Session creation reserves its eager tables. Each newly
+recorded node reserves its records, scaled by declared hash bytes or MSM terms, and each aggregate
+fold reserves its own records. Nodes shared with an earlier witness reuse their records and reserve
+nothing. Reservations are retained until import finishes. A preparation reservation for one witness
+precedes that witness's preparation, admission, and root-binding checks, and those of later
+witnesses. Every preparation and root-binding check precedes Session reservations.
+
 After every input has been evaluated and recorded, the prover estimates the completed Session's
 peak proving memory, including aggregation overhead. It checks this estimate before allocating
-chiplet traces or starting the STARK pipeline. `MemoryBudgetExceeded` and `MemoryEstimateOverflow`
-are outer capacity errors, not failures attributed to a witness. The caller can choose a smaller
-batch or larger memory budget. This check does not bound preparation or Session-building allocations.
-A preparation/import capacity guard is separate follow-up work: it must account for retained graphs
-and lowering-dependent state before allocation. Default calibration alone does not supply this
-guard. Backend trace-height/estimate overflow remains a capacity failure, separate from witness
-admission.
+chiplet traces or starting the STARK pipeline. The trace estimate does not add the import
+reservations. `MemoryBudgetExceeded` and `MemoryEstimateOverflow` are outer capacity errors, not
+failures attributed to a witness. An early rejection reports the running reservation, a lower bound
+on the batch requirement. The caller can choose a smaller batch or larger memory budget. Backend
+trace-height/estimate overflow remains a capacity failure, separate from witness admission.
 These are library safety and admission bounds, not whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde
