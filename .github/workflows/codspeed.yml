@@ -51,7 +51,7 @@ jobs:
           echo /usr/local/cargo/bin >> "${GITHUB_PATH}"
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: codspeed-vm
 
@@ -141,7 +141,7 @@ jobs:
           test -x target/codspeed/walltime/${{ matrix.package }}/${{ matrix.bench }}
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: walltime
           run: cargo codspeed run --measurement-mode walltime -p ${{ matrix.package }} --bench ${{ matrix.bench }}
@@ -167,7 +167,7 @@ jobs:
           rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install cargo-codspeed
         run: cargo install cargo-codspeed --version 4.6.0 --locked
@@ -176,7 +176,7 @@ jobs:
         run: cargo codspeed build --locked --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: walltime
           run: cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
