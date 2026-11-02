@@ -2239,6 +2239,7 @@ dependencies = [
 name = "miden-constraint-compiler"
 version = "1.0.0-rc.1"
 dependencies = [
+ "hashbrown 0.17.1",
  "miden-core",
  "miden-crypto",
  "miden-stark",
@@ -2643,6 +2644,7 @@ dependencies = [
  "miden-utils-diagnostics",
  "miden-utils-indexing",
  "miden-vm-stark",
+ "p3-maybe-rayon",
  "paste",
  "pretty_assertions",
  "proptest",

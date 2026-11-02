@@ -20,7 +20,7 @@ use miden_core::{
     utils::Idx,
 };
 use miden_stark::memory::ProvingBudget;
-use rayon::prelude::*;
+use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 
 use super::{
@@ -250,7 +250,7 @@ fn build_trace_inner(
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = rayon::join(
+    let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = join(
         || chiplets.into_traces(chiplets_height, eidos_compression_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
@@ -647,7 +647,7 @@ fn initialize_chiplets(
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
-    let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = rayon::join(
+    let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = join(
         || match prebuilt_hasher {
             Some(hasher) => Ok(hasher),
             None => build_hasher_chiplet(
@@ -663,13 +663,13 @@ fn initialize_chiplets(
             }),
         },
         || {
-            rayon::join(
+            join(
                 || build_bitwise_chiplet(bitwise, max_trace_len),
                 || {
-                    rayon::join(
+                    join(
                         || build_memory_chiplet(memory_writes, core_trace_contexts, max_trace_len),
                         || {
-                            rayon::join(
+                            join(
                                 || build_ace_chiplet(ace_replay, max_trace_len),
                                 || build_kernel_rom_chiplet(kernel, kernel_replay, max_trace_len),
                             )

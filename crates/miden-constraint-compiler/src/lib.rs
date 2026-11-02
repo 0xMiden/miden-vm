@@ -21,6 +21,12 @@
 //! Backend output is never trusted by inspection: each backend is validated
 //! against the hand-written source by oracles living with its consumers.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+#[cfg(all(not(feature = "std"), any(test, feature = "testing")))]
+extern crate std;
+
 pub mod backend;
 pub mod ir;
 

@@ -11,7 +11,7 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-std = ["miden-core/std", "miden-precompiles/std"]
+std = ["miden-core/std", "miden-precompiles/std", "dep:tempfile"]
 
 [lib]
 bench = false
@@ -25,4 +25,4 @@ required-features = ["std"]
 [dependencies]
 miden-core.workspace = true
 miden-precompiles.workspace = true
-tempfile = { workspace = true, features = ["getrandom"] }
+tempfile = { workspace = true, optional = true, features = ["getrandom"] }
