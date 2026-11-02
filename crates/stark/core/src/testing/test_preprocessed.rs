@@ -10,7 +10,7 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, Field, PackedValue, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
@@ -567,6 +567,8 @@ struct CountedAir {
     materializations: Arc<AtomicUsize>,
     aux_calls: Arc<AtomicUsize>,
     borrowed_address: Arc<AtomicUsize>,
+    preparations: Arc<AtomicUsize>,
+    prepared_evaluations: Arc<AtomicUsize>,
 }
 
 impl BaseAir<Felt> for CountedAir {
@@ -624,10 +626,28 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         self.inner.eval(builder)
     }
+
+    fn precompute_challenge_terms<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        challenges: &[E],
+    ) -> Vec<E> {
+        self.preparations.fetch_add(1, Ordering::Relaxed);
+        vec![challenges[0].square()]
+    }
+
+    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        terms: &[AB::ExprEF],
+    ) {
+        assert_eq!(terms.len(), 1);
+        self.prepared_evaluations.fetch_add(1, Ordering::Relaxed);
+        self.inner.eval(builder);
+    }
 }
 
 #[test]
-fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
+fn prover_reuses_setup_and_prepares_terms_once_per_air() {
     // Include a missing table and different heights in an instance order unlike proof order.
     let airs: Vec<_> = [
         MixedAir::Constant(ConstantAir),
@@ -640,6 +660,8 @@ fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
         materializations: Arc::new(AtomicUsize::new(0)),
         aux_calls: Arc::new(AtomicUsize::new(0)),
         borrowed_address: Arc::new(AtomicUsize::new(0)),
+        preparations: Arc::new(AtomicUsize::new(0)),
+        prepared_evaluations: Arc::new(AtomicUsize::new(0)),
     })
     .collect();
     let make_statement = || {
@@ -668,8 +690,16 @@ fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
             );
         }
     }
-    for air in airs {
+    for (air, height) in airs.iter().zip([8usize, 4, 2]) {
         assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "generate only during setup");
         assert_eq!(air.aux_calls.load(Ordering::Relaxed), 2, "both proofs build auxiliary traces");
+        assert_eq!(air.preparations.load(Ordering::Relaxed), 2, "prepare once per AIR per proof");
+        let quotient_rows = height << crate::log_quotient_degree(air);
+        let packed_rows = quotient_rows.div_ceil(<Felt as Field>::Packing::WIDTH);
+        assert_eq!(
+            air.prepared_evaluations.load(Ordering::Relaxed),
+            2 * packed_rows,
+            "every packed row must use the prepared evaluator",
+        );
     }
 }
