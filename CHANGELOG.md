@@ -6,6 +6,10 @@
 
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the core MASM package at 0.36.3 ([#4100](https://github.com/0xMiden/miden-vm/pull/4100)).
 
+#### Fixes
+
+- Made `PartialSmt::add_path` atomic: a path with an invalid depth or a conflicting root now returns an error without changing the tree ([#3996](https://github.com/0xMiden/miden-vm/issues/3996)).
+
 ## v0.36.3 (2026-10-27)
 
 #### Fixes
