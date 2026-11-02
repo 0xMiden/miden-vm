@@ -220,8 +220,8 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
     let expected_root = Node::and(TRUE_DIGEST, first_root).digest();
     assert_eq!(vm_witness.precompile_root, expected_root);
     assert!(precompile_witness.is_some());
-    let trace = build_trace(vm_witness).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.stack_outputs().get_word(0), Some(expected_root));
     assert_eq!(trace.precompile_root(), expected_root);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
