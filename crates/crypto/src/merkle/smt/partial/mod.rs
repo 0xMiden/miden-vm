@@ -500,7 +500,10 @@ impl PartialSmt {
         path: &SparseMerklePath,
     ) -> Result<(PathNodes, Word), MerkleError> {
         if path.depth() != SMT_DEPTH {
-            return Err(MerkleError::InvalidPathLength(path.depth() as usize));
+            return Err(MerkleError::InvalidNodeIndexDepth {
+                expected: SMT_DEPTH,
+                provided: path.depth(),
+            });
         }
 
         let mut current_index = leaf.index().index;
