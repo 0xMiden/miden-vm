@@ -83,8 +83,10 @@ consumed by a clear or remains committed by the public final root. Trusted code 
 prove every root it clears. Clearing may discharge all logged obligations or only a subset; a
 malicious prover cannot omit the remaining obligations from both the cleared roots and the final
 root. Any obligations remaining in the final root still require an external precompile proof to
-complete the execution proof. Tracking the number or index of additions is unnecessary for this
-guarantee. See the [lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
+complete the execution proof. To establish that all obligations were settled inside the execution,
+the accepting verifier must require the authenticated final root to equal `TRUE_DIGEST`. Tracking
+the number or index of additions is unnecessary for this guarantee. See the
+[lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
 
 ### Rules for safe clearing
 
@@ -103,9 +105,9 @@ application must enforce these rules:
    [kernel ROM constraints](../chiplets/kernel_rom.md#chiplets-bus-constraints) already restrict
    syscall targets to the committed kernel; that kernel must enforce the settlement checks.
 4. **Verify the exact root before each clear.** Trusted settlement code must verify a proof for
-   the same `ROOT` word passed to `clear_deferred`, using the intended recursive PVM verifier.
-   It must enforce the application's proof acceptance policy, including the required security
-   level, before executing the instruction.
+   the same `ROOT` word passed to `clear_deferred`, whether returned by `log_deferred` or supplied
+   through advice. It must use the intended recursive PVM verifier and enforce the application's
+   proof acceptance policy, including the required security level, before executing the instruction.
 
 ### Host state after clearing
 

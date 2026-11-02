@@ -407,7 +407,7 @@ Instructions for maintaining the rolling deferred root committed by the VM proof
 
 | Instruction | Stack Input | Stack Output | Cycles | Notes |
 | ----------- | ----------- | ------------ | ------ | ----- |
-| `log_deferred` | `[STMNT, ...]` | `[ROOT_NEW, ...]` | 1 | Folds `STMNT` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`; precompile support code normally wraps this low-level opcode. |
+| `log_deferred` | `[STMNT, ...]` | `[ROOT_NEW, ...]` | 1 | Folds `STMNT` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`; precompile support code normally wraps this low-level opcode. `ROOT_NEW` does not establish a chronological accumulator prefix; see the [ordering contract](../../design/stack/crypto_ops.md#log_deferred). |
 | `clear_deferred` | `[ROOT, ...]` | `[ROOT, ...]` | 1 | **Unsafe.** Native execution requires the top word `ROOT` to match the current precompile accumulator, then resets it to `[0, 0, 0, 0]` (`TRUE_DIGEST`). The AIR accounts for the supplied root without enforcing update order. Fails outside root context (`ctx == 0`); preserves `ROOT` and the entire operand stack. |
 
 **Call `clear_deferred` only inside a trusted kernel epilogue, after a recursive verifier has

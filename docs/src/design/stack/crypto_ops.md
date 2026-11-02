@@ -427,6 +427,12 @@ After:   [ROOT_NEW, ...]
 The top word is replaced with `ROOT_NEW`; the remaining stack is preserved. Wrappers usually drop
 `ROOT_NEW` after the opcode.
 
+The AIR binds `ROOT_NEW` to this invocation's compression, but intentionally does not bind
+accumulator-chain order to instruction order. Even without clearing, the last `log_deferred`
+output need not equal the public final root. Programs must not use returned intermediate roots as
+evidence of execution order. The [deferred-root lookup](#deferred-root-state) accounts for all
+logged obligations through the public final root and roots consumed by `clear_deferred`.
+
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
 - $h_1, h_2, h_3, h_4$: Previous deferred root `ROOT_PREV`
