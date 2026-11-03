@@ -68,6 +68,8 @@ const QUOTIENT_ROOT_LABEL = 3
 # Added to CV[3] before compressing [counter, 0, ..., 0] to generate another output word.
 # The first word of a sampling phase uses tags 1..8 (1 + pending input count); later words use 9.
 # Matches SQUEEZE_TAG in miden-crypto's hash/eidos/challenger.rs.
+# The fused reseed_with_folding_pow_and_ext applies the first-word tag and updates the sampling
+# state directly; keep it consistent with eidos_refill_output_word.
 const EIDOS_SQUEEZE_TAG = 9
 
 # Eidos::transcript_init_cv(STARK_TRANSCRIPT), using the registered Miden VM transcript domain.
@@ -617,6 +619,7 @@ pub proc reseed_with_folding_pow_and_ext(
         swapw
 
         padw mem_loadw_le.RANDOM_COIN_CV_PTR
+        # First-sample tag = 1 + 5 pending felts (the commitment word and PoW witness).
         movup.3 add.6 movdn.3
         swapw.2
         swapw
