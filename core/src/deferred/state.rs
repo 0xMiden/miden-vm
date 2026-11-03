@@ -563,10 +563,10 @@ mod tests {
         assert!(matches!(
             state.register(node),
             Err(PrecompileError::Limit(PrecompileLimitError::Count {
-                class: FIXTURE_WORK,
+                class,
                 actual: 2,
                 max: 1,
-            }))
+            })) if class == FIXTURE_WORK
         ));
     }
 
@@ -601,10 +601,10 @@ mod tests {
         assert!(matches!(
             error,
             PrecompileError::Limit(PrecompileLimitError::Count {
-                class: FIXTURE_WORK,
+                class,
                 actual: 1,
                 max: 0,
-            })
+            }) if class == FIXTURE_WORK
         ));
         assert!(matches!(
             state.register(node).unwrap_err().root(),
