@@ -297,7 +297,7 @@ fn partial_smt_add_path_invalid_depth_is_atomic() {
     let mut partial = PartialSmt::new(leaf.hash());
     let before = partial.clone();
     let err = partial.add_path(leaf, SparseMerklePath::default()).unwrap_err();
-    assert_matches!(err, MerkleError::InvalidNodeIndexDepth { expected: SMT_DEPTH, provided: 0 });
+    assert_matches!(err, MerkleError::InvalidPathDepth { expected: SMT_DEPTH, actual: 0 });
     assert_eq!(partial, before);
 
     // A path that stops one level below the root must also be rejected before mutation.
@@ -310,7 +310,7 @@ fn partial_smt_add_path_invalid_depth_is_atomic() {
     let mut partial = PartialSmt::new(full.root());
     let before = partial.clone();
     let err = partial.add_path(proof.leaf().clone(), short_path).unwrap_err();
-    assert_matches!(err, MerkleError::InvalidNodeIndexDepth { expected: SMT_DEPTH, provided: 63 });
+    assert_matches!(err, MerkleError::InvalidPathDepth { expected: SMT_DEPTH, actual: 63 });
     assert_eq!(partial, before);
 }
 

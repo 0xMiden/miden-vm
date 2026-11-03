@@ -500,9 +500,9 @@ impl PartialSmt {
         path: &SparseMerklePath,
     ) -> Result<(PathNodes, Word), MerkleError> {
         if path.depth() != SMT_DEPTH {
-            return Err(MerkleError::InvalidNodeIndexDepth {
+            return Err(MerkleError::InvalidPathDepth {
                 expected: SMT_DEPTH,
-                provided: path.depth(),
+                actual: path.depth(),
             });
         }
 
