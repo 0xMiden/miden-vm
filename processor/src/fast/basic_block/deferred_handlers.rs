@@ -125,6 +125,15 @@ pub(super) fn handle_deferred_register(
     Ok(())
 }
 
+/// Pushes the current accumulator commitment as advice without evaluating or changing it.
+pub(super) fn handle_deferred_root_to_stack(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let root = processor.deferred_state().root();
+    processor.advice.push_stack_word(&root)?;
+    Ok(())
+}
+
 /// Handles deferred-node evaluation and returns the canonical frame and payload as advice.
 ///
 /// The digest must already be registered in
@@ -335,6 +344,31 @@ mod tests {
     use miden_precompiles::Keccak256Precompile;
 
     use super::*;
+
+    #[test]
+    fn push_deferred_root_preserves_state_on_advice_budget_failure() {
+        use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
+
+        use crate::{ExecutionOptions, advice::AdviceError};
+
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let root = processor.deferred_state_mut().log_statement(TRUE_DIGEST).unwrap();
+        processor.advice.push_stack(Felt::ONE).unwrap();
+        let budget = (MerkleStore::default().num_internal_nodes() * 3 + 1) * WORD_SIZE * 8;
+        processor = processor
+            .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
+            .unwrap();
+        let advice = processor.advice.clone();
+        let stack = processor.stack().to_vec();
+
+        assert!(matches!(
+            handle_deferred_root_to_stack(&mut processor),
+            Err(SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+        ));
+        assert_eq!(processor.advice, advice);
+        assert_eq!(processor.stack(), stack);
+        assert_eq!(processor.deferred_state().root(), root);
+    }
 
     #[test]
     fn export_witness_rejects_invalid_roots_even_with_existing_entries() {

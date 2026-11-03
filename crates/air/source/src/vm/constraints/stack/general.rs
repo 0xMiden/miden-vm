@@ -162,10 +162,8 @@ mod tests {
     }
 
     #[test]
-    fn unused_opcode_6_preserves_top_stack_value() {
-        const UNUSED_DEGREE_7_NO_SHIFT_OPCODE: usize = 6;
-
-        let local = generate_test_row(UNUSED_DEGREE_7_NO_SHIFT_OPCODE);
+    fn clear_deferred_preserves_top_stack_value() {
+        let local = generate_test_row(opcodes::CLEARDEFERRED.into());
         let mut next = generate_test_row(0);
 
         let evaluations = eval_stack_general(&local, &next);
@@ -175,7 +173,7 @@ mod tests {
         let evaluations = eval_stack_general(&local, &next);
         assert!(
             evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-            "unused opcode 6 must preserve s0 like a complete no-shift alias"
+            "CLEARDEFERRED must preserve the top stack value"
         );
     }
 }

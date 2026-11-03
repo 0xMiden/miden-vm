@@ -113,9 +113,10 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Deferred root used for recording `log_deferred` calls.
+    /// Rolling precompile accumulator shared by `log_deferred` and `clear_deferred`.
     /// - Initially [ZERO; 4] (`TRUE_DIGEST`)
     /// - Updated with each deferred statement logged by `log_deferred`
+    /// - Reset to `TRUE_DIGEST` by `clear_deferred` in the root context
     pub deferred_root: Word,
 }
 
