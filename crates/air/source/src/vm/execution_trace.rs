@@ -315,10 +315,14 @@ impl TraceLenSummary {
 
     /// Returns the percent (0 - 100) of rows added by padding.
     ///
-    /// This cannot underflow or divide by zero: [`Self::new`] guarantees that every padded height
-    /// is nonzero and covers the unpadded rows of its AIR.
+    /// This cannot underflow, overflow, or divide by zero: [`Self::new`] guarantees that every
+    /// padded height is nonzero and covers the unpadded rows of its AIR.
     pub fn padding_percentage(&self) -> usize {
-        (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
+        // Widen to `u128` so that `(padded - rows) * 100` cannot overflow for very large heights.
+        // The result is at most 100, so it always fits back into `usize`.
+        let padded = self.padded_trace_len() as u128;
+        let unpadded = self.trace_len() as u128;
+        ((padded - unpadded) * 100 / padded) as usize
     }
 }
 
@@ -484,5 +488,16 @@ mod tests {
         let full = TraceLenSummary::new(MIN_TRACE_LEN, ChipletsLengths::default(), 0, 0, heights)
             .expect("valid padded heights");
         assert_eq!(full.padding_percentage(), 0);
+    }
+
+    #[test]
+    fn trace_len_summary_padding_percentage_does_not_overflow_for_huge_heights() {
+        let heights = [1usize << (usize::BITS - 1); MIDEN_AIR_COUNT];
+        let summary = TraceLenSummary::new(0, ChipletsLengths::default(), 0, 0, heights)
+            .expect("valid padded heights");
+
+        // The default chiplets contribute one connector-padding row, so almost all rows are
+        // padding. The percentage is rounded down.
+        assert_eq!(summary.padding_percentage(), 99);
     }
 }
