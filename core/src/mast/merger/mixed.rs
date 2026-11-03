@@ -118,6 +118,7 @@ pub(crate) struct MixedMastForestMerger<'forest> {
     opaque_by_digest: BTreeMap<Word, MastNodeId>,
     full_by_content: BTreeMap<StoredContentKey<MastNodeId>, MastNodeId>,
     non_external_by_digest: BTreeMap<Word, (usize, MastNodeId)>,
+    external_by_digest: BTreeMap<Word, (usize, MastNodeId)>,
     full_ids_by_digest: BTreeMap<Word, BTreeSet<MastNodeId>>,
     resolved_digests: BTreeSet<Word>,
     visiting: BTreeSet<(usize, MastNodeId)>,
@@ -199,12 +200,15 @@ impl<'forest> MixedMastForestMerger<'forest> {
     fn new(forests: Vec<MastForestMergeSource<'forest>>) -> Result<Self, MastForestError> {
         let mut advice_map = AdviceMap::default();
         let mut non_external_by_digest = BTreeMap::new();
+        let mut external_by_digest = BTreeMap::new();
         for (forest_idx, forest) in forests.iter().enumerate() {
             advice_map
                 .merge(forest.advice_map())
                 .map_err(|((key, _), _)| MastForestError::AdviceMapKeyCollisionOnMerge(key))?;
             for (node_id, node) in forest.node_entries() {
-                if !node.is_external() {
+                if node.is_external() {
+                    external_by_digest.insert(node.digest(), (forest_idx, node_id));
+                } else {
                     non_external_by_digest.insert(node.digest(), (forest_idx, node_id));
                 }
             }
@@ -223,6 +227,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
             opaque_by_digest: BTreeMap::new(),
             full_by_content: BTreeMap::new(),
             non_external_by_digest,
+            external_by_digest,
             full_ids_by_digest: BTreeMap::new(),
             resolved_digests: BTreeSet::new(),
             visiting: BTreeSet::new(),
@@ -235,7 +240,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
             let entries = self.forests[forest_idx].digest_entries().collect::<Vec<_>>();
             for (node_id, digest) in entries {
                 digest_entries.push((forest_idx, node_id, digest));
-                if self.non_external_by_digest.contains_key(&digest) {
+                if self.digest_replacement(&digest).is_some() {
                     continue;
                 }
                 let merged_id = if let Some(&merged_id) = self.opaque_by_digest.get(&digest) {
@@ -251,7 +256,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
         }
 
         for (forest_idx, node_id, digest) in digest_entries {
-            if self.non_external_by_digest.contains_key(&digest) {
+            if self.digest_replacement(&digest).is_some() {
                 self.merge_tasks(vec![MergeTask::EnterDigest { forest_idx, node_id, digest }])?;
             }
         }
@@ -272,6 +277,13 @@ impl<'forest> MixedMastForestMerger<'forest> {
             }
         }
         Ok(())
+    }
+
+    fn digest_replacement(&self, digest: &Word) -> Option<(usize, MastNodeId)> {
+        self.non_external_by_digest
+            .get(digest)
+            .or_else(|| self.external_by_digest.get(digest))
+            .copied()
     }
 
     fn merge_full_node(
@@ -359,9 +371,8 @@ impl<'forest> MixedMastForestMerger<'forest> {
                     if !self.visiting.insert((forest_idx, node_id)) {
                         return Err(MastForestError::CyclicDependencyOnMerge(node_id));
                     }
-                    let &(replacement_forest, replacement_id) = self
-                        .non_external_by_digest
-                        .get(&digest)
+                    let (replacement_forest, replacement_id) = self
+                        .digest_replacement(&digest)
                         .expect("resolved digest tasks must have a full replacement");
                     self.resolved_digests.insert(digest);
                     tasks.push(MergeTask::FinishReplacement {
