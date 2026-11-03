@@ -118,7 +118,8 @@ impl Deserializable for TraceReplay {
 
         let mut mast_forest_store = Vec::with_capacity(store_len);
         for _ in 0..store_len {
-            mast_forest_store.push(Arc::new(SparseMastForest::read_from(source)?));
+            // The witness reader applies hash validation unless its trusted path is selected.
+            mast_forest_store.push(Arc::new(SparseMastForest::read_from_trusted(source)?));
         }
 
         let context = Self {

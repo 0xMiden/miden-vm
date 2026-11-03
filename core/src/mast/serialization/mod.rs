@@ -125,6 +125,12 @@ use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, basic_block_data_len};
 
+pub(super) fn basic_block_content_key(basic_block: &crate::mast::BasicBlockNode) -> Vec<u8> {
+    let mut builder = BasicBlockDataBuilder::new();
+    builder.encode_basic_block(basic_block);
+    builder.finalize()
+}
+
 #[cfg(test)]
 mod seed_gen;
 
