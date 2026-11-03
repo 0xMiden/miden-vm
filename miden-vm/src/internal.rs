@@ -801,7 +801,7 @@ mod tests {
         let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
         let message = format!("{err:?}");
         assert!(message.contains("size limit of 67108864 bytes"), "{message}");
-        assert!(message.contains(&file.path().display().to_string()), "{message}");
+        assert!(err.to_string().contains(&file.path().display().to_string()), "{message}");
 
         // The exact limit reaches the JSON parser, which rejects the sparse file's zero bytes.
         file.as_file().set_len(InputFile::MAX_FILE_SIZE as u64).unwrap();
