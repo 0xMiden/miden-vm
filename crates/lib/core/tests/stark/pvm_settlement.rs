@@ -28,11 +28,12 @@ use miden_verifier::Verifier;
 use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 use crate::{
-    helpers::masm_push_word,
+    helpers::{decode_exported_witness, masm_push_word},
     support::ecdsa::{EcdsaFixture, valid_fixture},
 };
 
 mod batch;
+mod clearing;
 
 #[tokio::test(flavor = "current_thread")]
 async fn mixed_signatures_deferred_obligation_is_settled_end_to_end() {
@@ -91,6 +92,36 @@ fn prove_signature_execution(
     ed25519_key: Option<&Ed25519SigningKey>,
     stack_inputs: StackInputs,
 ) -> (ExecutionProof, ExecutionClaim, PrecompileWitness) {
+    let (program, advice_inputs) = signature_execution_inputs(core_lib, fixture, ed25519_key, "");
+    let mut host = DefaultHost::default()
+        .with_library(core_lib)
+        .expect("core library must load into the host");
+    let witness =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .expect("signature advice must fit provider limits")
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("signature execution must produce a proving witness");
+    let claim = witness.claim();
+    // The core library's recursive verifiers accept Eidos proofs.
+    let proof = Prover::new()
+        .with_hash_fn(HashFunction::Eidos)
+        .prove(witness)
+        .expect("signature execution must produce a deferred MVM proof");
+    let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
+        panic!("signature execution must retain deferred precompile work")
+    };
+    let precompile_witness = precompile.clone();
+
+    (proof, claim, precompile_witness)
+}
+
+/// Shares the signature workload and its advice with tests that settle its live accumulator.
+fn signature_execution_inputs(
+    core_lib: &CoreLibrary,
+    fixture: EcdsaFixture,
+    ed25519_key: Option<&Ed25519SigningKey>,
+    epilogue: &str,
+) -> (miden_processor::Program, AdviceInputs) {
     let ed25519_verify = ed25519_key
         .map(|key| {
             let commitment = eddsa_25519_sha512::public_key_commitment(&key.public_key());
@@ -109,6 +140,7 @@ fn prove_signature_execution(
             {}
             exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::verify
             {ed25519_verify}
+            {epilogue}
         end
         ",
         masm_push_word(&fixture.message),
@@ -120,34 +152,12 @@ fn prove_signature_execution(
         .assemble_program("signature_deferred_settlement", source)
         .expect("signature settlement fixture must assemble")
         .unwrap_program();
-    let mut host = DefaultHost::default()
-        .with_library(core_lib)
-        .expect("core library must load into the host");
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(fixture.advice);
     if let Some(key) = ed25519_key {
         advice_stack.append_elements(eddsa_25519_sha512::sign(key, fixture.message));
     }
-    let witness = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default().with_stack(advice_stack),
-        ExecutionOptions::default(),
-    )
-    .expect("signature advice must fit provider limits")
-    .execute_for_proving_sync(&program, &mut host)
-    .expect("signature execution must produce a proving witness");
-    let claim = witness.claim();
-    // The core library's recursive verifiers accept Eidos proofs.
-    let proof = Prover::new()
-        .with_hash_fn(HashFunction::Eidos)
-        .prove(witness)
-        .expect("signature execution must produce a deferred MVM proof");
-    let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
-        panic!("signature execution must retain deferred precompile work")
-    };
-    let precompile_witness = precompile.clone();
-
-    (proof, claim, precompile_witness)
+    (program, AdviceInputs::default().with_stack(advice_stack))
 }
 
 struct SettlementResult {
@@ -173,7 +183,8 @@ async fn run_settlement_in_masm(
     let stack_inputs = StackInputs::new(claim_commitment.as_elements())
         .expect("claim commitment must fit the stack");
     let program = assemble_settlement_program(core_lib);
-    let mut host = PvmSettlementHost::new(core_lib, vec![precompile_witness]);
+    let mut host =
+        PvmSettlementHost::new(core_lib, SettlementWitnesses::Supplied(vec![precompile_witness]));
 
     let output =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
@@ -204,40 +215,32 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
         .unwrap_program()
 }
 
-/// Generates a PVM proof from its witness when `pvm::request_proof` emits an event.
+enum SettlementWitnesses {
+    Supplied(Vec<PrecompileWitness>),
+    Exported,
+}
+
+/// Generates a PVM proof from supplied or live exported witnesses when MASM requests it.
 struct PvmSettlementHost {
     inner: DefaultHost,
     event_name: EventName,
     expected_verifier_root: Word,
-    available_root: Word,
-    precompile_witnesses: Vec<PrecompileWitness>,
+    witnesses: SettlementWitnesses,
+    requested_root: Option<Word>,
     precompile_proof: Option<PrecompileProof>,
 }
 
 impl PvmSettlementHost {
-    fn new(core_lib: &CoreLibrary, precompile_witnesses: Vec<PrecompileWitness>) -> Self {
+    fn new(core_lib: &CoreLibrary, witnesses: SettlementWitnesses) -> Self {
         let inner = DefaultHost::default()
             .with_library(core_lib)
             .expect("core library must load into the settlement host");
-        let registry = Arc::new(miden_precompiles::registry());
-        let limits = miden_precompiles::default_verification_precompile_limits();
-        let available_root = precompile_witnesses
-            .iter()
-            .map(|witness| {
-                witness
-                    .clone()
-                    .prepare(Arc::clone(&registry), &limits)
-                    .expect("execution-produced witness must prepare")
-                    .root()
-            })
-            .reduce(fold_deferred_root)
-            .expect("settlement requires at least one witness");
         Self {
             inner,
             event_name: PVM_PROOF_REQUEST_EVENT_NAME,
             expected_verifier_root: core_lib.pvm_recursive_verifier_root(),
-            available_root,
-            precompile_witnesses,
+            witnesses,
+            requested_root: None,
             precompile_proof: None,
         }
     }
@@ -290,10 +293,33 @@ impl Host for PvmSettlementHost {
                 }
                 .into());
             }
-            if requested_root != self.available_root {
+            let witnesses = match &self.witnesses {
+                SettlementWitnesses::Supplied(witnesses) => witnesses.clone(),
+                SettlementWitnesses::Exported => {
+                    let value =
+                        process.advice_provider().map().get(&requested_root).expect(
+                            "the live witness must be exported before requesting its proof",
+                        );
+                    vec![decode_exported_witness(value)]
+                },
+            };
+            let registry = Arc::new(miden_precompiles::registry());
+            let limits = miden_precompiles::default_verification_precompile_limits();
+            let available_root = witnesses
+                .iter()
+                .map(|witness| {
+                    witness
+                        .clone()
+                        .prepare(Arc::clone(&registry), &limits)
+                        .expect("execution-produced witness must prepare")
+                        .root()
+                })
+                .reduce(fold_deferred_root)
+                .expect("settlement requires at least one witness");
+            if requested_root != available_root {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: self.available_root,
+                    available: available_root,
                 }
                 .into());
             }
@@ -302,18 +328,18 @@ impl Host for PvmSettlementHost {
             if process.advice_provider().map().get(&proof_key).is_some() {
                 return Err(SettlementEventError::PackageAlreadyLoaded.into());
             }
+            self.requested_root = Some(requested_root);
 
             // This host yields once, then proves locally. A host using a remote prover could
             // await its response here.
             tokio::task::yield_now().await;
             let precompile_proof = Prover::new()
                 .with_hash_fn(HashFunction::Eidos)
-                .prove_precompiles(self.precompile_witnesses.clone())
+                .prove_precompiles(witnesses)
                 .map_err(SettlementEventError::Proving)?;
             // Package the proof under the request key. MASM fetches it when request_proof returns.
-            let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &precompile_proof)
+            let advice = pvm_proof_advice(verifier_root, &precompile_proof)
                 .map_err(SettlementEventError::Advice)?;
-            let (advice, _) = package.into_parts();
             let (_, advice_map, store) = advice.into_parts();
             let merkle_nodes = store.inner_nodes();
             self.precompile_proof = Some(precompile_proof);
@@ -324,6 +350,15 @@ impl Host for PvmSettlementHost {
             ])
         }
     }
+}
+
+/// Builds map-backed verifier advice under the proof's own verifier/root request key.
+fn pvm_proof_advice(
+    verifier_root: Word,
+    proof: &PrecompileProof,
+) -> Result<AdviceInputs, PvmRecursiveVerifierInputsError> {
+    PvmRecursiveVerifierInputs::for_request(verifier_root, proof)
+        .map(|package| package.into_parts().0)
 }
 
 #[derive(Debug, thiserror::Error)]
