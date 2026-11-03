@@ -410,8 +410,8 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     let mut corrupted_hash = build_expected_hash(data);
     corrupted_hash[0] += Felt::ONE; // corrupt the expected hash
     let advice_stack = advice_stack_from_hash_and_data(corrupted_hash.into(), data);
-    let res = build_test!(three_words, operand_stack, advice_stack).execute();
-    assert!(res.is_err());
+    let test = build_test!(three_words, operand_stack, advice_stack);
+    expect_assert_error_code_from_msg!(test, "pipe_preimage_to_memory: COMMITMENT does not match");
 }
 
 #[test]
