@@ -308,10 +308,19 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             exec.public_inputs::process_public_inputs
 
             padw adv_loadw push.{aux_rand_elem_ptr} mem_storew_le dropw
+            {caller_setup}
             exec.public_inputs::compute_outer_logup_correction
+            mem_store.2000 mem_store.2001
+            {caller_check}
         end
         ",
         aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR"),
+        caller_setup = (1..=24).map(|i| format!("push.{i}")).collect::<Vec<_>>().join(" "),
+        caller_check = (1..=24)
+            .rev()
+            .map(|i| format!("push.{i} assert_eq"))
+            .collect::<Vec<_>>()
+            .join(" "),
     );
 
     let test = build_test!(source.as_str(), &initial_stack, &advice_stack);
@@ -319,7 +328,6 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
     let read_elem = |addr| read_memory_felt(&output, addr).as_canonical_u64();
     let boundary_inputs_ptr = vm_layout_const("BOUNDARY_INPUTS_PTR");
-    let c_total_ptr = vm_layout_const("C_TOTAL_PTR");
     let pi_ptr = read_elem(stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")) as u32;
 
     // The boundary-inputs block contains the program digest and deferred root.
@@ -378,13 +386,16 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
 
     assert_eq!(
-        read_elem(c_total_ptr),
+        read_elem(2000),
         expected[0].as_canonical_u64(),
         "c_total coord 0 mismatch (nk={num_kernel_procedures})"
     );
     assert_eq!(
-        read_elem(c_total_ptr + 1),
+        read_elem(2001),
         expected[1].as_canonical_u64(),
         "c_total coord 1 mismatch (nk={num_kernel_procedures})"
     );
+    if num_kernel_procedures == KernelDescriptor::MAX_NUM_PROCEDURES {
+        test.check_constraints();
+    }
 }

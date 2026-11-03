@@ -16,8 +16,6 @@ use {
     BOUNDARY_INPUTS_PTR,
     BUS_GAMMA_C1_PTR,
     BUS_GAMMA_PTR,
-    C_TOTAL_C1_PTR,
-    C_TOTAL_PTR,
     CLAIM_COMMITMENT_PTR,
     CLAIM_PTR,
     NUM_KERNEL_PROCEDURES_PTR,
@@ -41,8 +39,8 @@ use {
 #   anchor             -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   AUX_RAND_ELEM_PTR (sampled
 #                                                                     from the transcript in step II)
 #
-# The outer-LogUp boundary correction accumulated at `C_TOTAL_PTR` is the signed sum of one
-# inverted bus term per boundary interaction:
+# The outer-LogUp boundary correction is the signed sum of one inverted bus term per boundary
+# interaction:
 #
 #     c_total = Σ_i 1 / d(KernelRomInit,           kernel_digest_i)   (request,  +1)
 #             +     1 / d(BlockHashTable,           program_digest)   (request,  +1)
@@ -282,18 +280,18 @@ proc fold_boundary_word_inv_term(bus_id_plus_one: u8, offset: u8) -> types::Quad
     # => [inv_term0, inv_term1, ...]
 end
 
-#! Computes the outer-LogUp boundary correction `c_total` and stores it at `C_TOTAL_PTR`
-#! (step II). Requires the aux randomness to have been sampled into `AUX_RAND_ELEM_PTR` by
-#! `generate_aux_randomness` first.
+#! Returns the outer-LogUp boundary correction `c_total`. Requires auxiliary randomness sampled
+#! into `AUX_RAND_ELEM_PTR` by `generate_aux_randomness` and the authenticated statement staged.
 #!
 #! Derives `γ = β^16`, then folds the request/response terms over the verifier-owned kernel digests
 #! at `KERNEL_WITNESS_PTR` (count at `NUM_KERNEL_PROCEDURES_PTR`), plus the program digest and
 #! deferred root in the boundary-inputs block. Mirrors the module banner's `c_total` definition
 #! and `MidenMultiAir::eval_external`.
+#! Preserves caller stack elements and transcript state; fails on a zero message denominator.
 #!
 #! Input:  [...]
-#! Output: [...]
-pub proc compute_outer_logup_correction()
+#! Output: [c_total0, c_total1, ...]
+pub proc compute_outer_logup_correction() -> types::QuadFelt
     # γ = β^16 into BUS_GAMMA_PTR.
     exec.compute_bus_gamma
     # => [...]
@@ -327,11 +325,6 @@ pub proc compute_outer_logup_correction()
     neg swap neg swap
     ext2add
     # => [acc0, acc1, ...]   (acc = requests − response)
-
-    #    Store c_total once.
-    mem_store.C_TOTAL_PTR
-    mem_store.C_TOTAL_C1_PTR
-    # => [...]
 end
 
 #! Observes `[CLAIM_HASH | D]` through the FS stream, mirroring `MidenMultiAir::observe` after the

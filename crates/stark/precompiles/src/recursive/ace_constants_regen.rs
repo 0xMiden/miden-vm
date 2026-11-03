@@ -18,8 +18,8 @@ use std::{
 use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout,
     compiler::{
-        LayoutKind, MasmConstraintsEvalConfig, MasmMemoryExtents, MasmMemoryLayout,
-        render_masm_constraints_eval,
+        LayoutKind, MasmAuxTraceConfig, MasmConstraintsEvalConfig, MasmMemoryExtents,
+        MasmMemoryLayout, render_masm_aux_trace, render_masm_constraints_eval,
     },
 };
 use miden_air::precompiles::NUM_CHIPLETS;
@@ -45,6 +45,7 @@ const PVM_PARAMETERS_PATH: &str = "../../lib/core/asm/sys/pvm/parameters.masm";
 const PVM_FIXED_BOUNDARY_PATH: &str = "../../lib/core/asm/sys/pvm/fixed_boundary.masm";
 const PVM_LAYOUT_PATH: &str = "../../lib/core/asm/sys/pvm/layout.masm";
 const PVM_OOD_FRAMES_PATH: &str = "../../lib/core/asm/sys/pvm/ood_frames.masm";
+const PVM_AUX_TRACE_PATH: &str = "../../lib/core/asm/sys/pvm/aux_trace.masm";
 
 const STARK_CONSTANTS_PATH: &str = "../../lib/core/asm/stark/constants.masm";
 
@@ -81,8 +82,10 @@ struct GeneratedArtifacts {
     parameters_masm: String,
     /// Fixed-environment catalogue expanded into the assembly reduction templates.
     fixed_boundary_masm: String,
-    /// Generated PVM constraint evaluator, rendered from the same circuit metadata.
+    /// Generated PVM constraint evaluator for the captured ACE circuit.
     constraints_eval_masm: String,
+    /// Generated PVM LogUp stage, specialized to the chiplet count.
+    aux_trace_masm: String,
 }
 
 #[derive(Clone, Debug)]
@@ -200,8 +203,8 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         &read_masm_file(STARK_CONSTANTS_PATH)?,
         input_layout,
         MasmMemoryExtents {
-            // One word each for the LogUp separator and fixed-environment correction.
-            state_felts: 2 * WORD_SIZE,
+            // One scratch word for the LogUp bus separator.
+            state_felts: WORD_SIZE,
             stream_felts: circuit.stream_len,
             query_row_felts: geometry.query_row_felts(),
             scatter_felts: pvm_scatter_plan(&geometry)?.table_felts(),
@@ -259,6 +262,14 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         parameters_masm,
         fixed_boundary_masm: crate::recursive::fixed_boundary_codegen::render_fixed_boundary()?,
         constraints_eval_masm,
+        aux_trace_masm: render_masm_aux_trace(&MasmAuxTraceConfig {
+            generated_by: GENERATED_BY,
+            boundary_module: "miden::core::sys::pvm::layout",
+            correction_module: "miden::core::sys::pvm::fixed_boundary",
+            correction_procedure: "compute_fixed_boundary_correction",
+            num_airs: NUM_CHIPLETS,
+        })
+        .map_err(|err| err.to_string())?,
     })
 }
 
@@ -280,13 +291,8 @@ use miden::core::stark::types
 pub const BUS_GAMMA_PTR = {state_start}
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
 
-### Fixed-environment LogUp correction [c0, c1, 0, 0].
-pub const C_TOTAL_PTR = {correction_ptr}
-pub const C_TOTAL_C1_PTR = C_TOTAL_PTR + 1
-
 "#,
         state_start = memory.relation_state_start(),
-        correction_ptr = memory.relation_state_start() + WORD_SIZE,
     );
 
     for region in layout.regions.iter().filter(|region| region.constant != "AUX_RAND_ELEM_PTR") {
@@ -337,11 +343,11 @@ const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
         .expect("writing to String cannot fail");
     }
     out.push_str("\n### Words of the normalized boundary array, two extension values per word.\n");
-    for word in 1..NUM_CHIPLETS / 2 {
+    for word in 1..NUM_CHIPLETS * EXT_DEGREE / WORD_SIZE {
         writeln!(
             out,
             "pub const AUX_BOUNDARY_WORD_{word}_PTR = AUX_BUS_BOUNDARY_PTR + {}",
-            word * 4
+            word * WORD_SIZE
         )
         .expect("writing to String cannot fail");
     }
@@ -508,6 +514,7 @@ fn pinned_identity_matches(artifacts: &GeneratedArtifacts) -> Result<(), String>
 fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
     for (path, rendered) in [
         (PVM_LAYOUT_PATH, &artifacts.layout_masm),
+        (PVM_AUX_TRACE_PATH, &artifacts.aux_trace_masm),
         (PVM_PARAMETERS_PATH, &artifacts.parameters_masm),
         (PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm),
         (PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm),
@@ -523,6 +530,7 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
 
 fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
+    write_generated_file(PVM_AUX_TRACE_PATH, &artifacts.aux_trace_masm)?;
     write_generated_file(PVM_PARAMETERS_PATH, &artifacts.parameters_masm)?;
     write_generated_file(PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm)?;
     write_generated_file(PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;

@@ -3,6 +3,7 @@
 //! This module owns the generic compilation pipeline. Encoded circuit data, input layouts,
 //! and proof-order encodings remain available from the crate root for runtime consumers.
 
+mod aux_trace;
 mod circuit;
 mod dag;
 mod encode;
@@ -30,6 +31,7 @@ mod unit_tests;
 pub use dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 
 pub use self::{
+    aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace},
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},

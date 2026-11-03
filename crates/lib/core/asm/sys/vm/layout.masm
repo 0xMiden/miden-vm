@@ -23,35 +23,28 @@ const AND8_LOG_HEIGHT_PTR = LOG_AIR_TRACE_LENGTHS_PTR + 3
 pub const BUS_GAMMA_PTR = 3223323136
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
 
-### Statement-derived LogUp boundary correction [c0, c1, 0, 0].
-pub const C_TOTAL_PTR = 3223323140
-pub const C_TOTAL_C1_PTR = C_TOTAL_PTR + 1
-
 ### Number of kernel procedures in the authenticated witness.
-pub const NUM_KERNEL_PROCEDURES_PTR = 3223323144
+pub const NUM_KERNEL_PROCEDURES_PTR = 3223323140
 
-### Word-alignment padding before the claim commitment: 3 felts at 3223323145..3223323148.
+### Word-alignment padding before the claim commitment: 3 felts at 3223323141..3223323144.
 
 ### Caller-provided claim commitment. The verifier checks the advice-supplied preimage against it.
-pub const CLAIM_COMMITMENT_PTR = 3223323148
+pub const CLAIM_COMMITMENT_PTR = 3223323144
 
 ### Verifier-owned claim preimage (40 felts: P | K | I | O). The stack I/O values are also
 ### copied into ACE public inputs; the claim itself remains outside the ACE READ vector.
-pub const CLAIM_PTR = 3223323152
+pub const CLAIM_PTR = 3223323148
 ### Kernel commitment in the P | K | I | O claim encoding.
 pub const KERNEL_COMMITMENT_PTR = CLAIM_PTR + 4
 
 ### Boundary block [program_digest | deferred_root].
-pub const BOUNDARY_INPUTS_PTR = 3223323192
+pub const BOUNDARY_INPUTS_PTR = 3223323188
 pub const BOUNDARY_INPUTS_PROGRAM_OFFSET = 0
 pub const BOUNDARY_INPUTS_DEFERRED_OFFSET = 4
 pub const DEFERRED_ROOT_PTR = BOUNDARY_INPUTS_PTR + BOUNDARY_INPUTS_DEFERRED_OFFSET
 
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
-const KERNEL_WITNESS_PTR = 3223323200
-
-### Second word of the four normalized, extension-field LogUp boundary values.
-pub const AUX_BOUNDARY_WORD_1_PTR = AUX_BUS_BOUNDARY_PTR + 4
+const KERNEL_WITNESS_PTR = 3223323196
 
 pub proc set_core_trace_length_log(height: u8)
     mem_store.LOG_AIR_TRACE_LENGTHS_PTR

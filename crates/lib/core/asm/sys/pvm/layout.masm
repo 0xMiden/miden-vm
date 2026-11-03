@@ -11,10 +11,6 @@ use miden::core::stark::types
 pub const BUS_GAMMA_PTR = 3223323136
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
 
-### Fixed-environment LogUp correction [c0, c1, 0, 0].
-pub const C_TOTAL_PTR = 3223323140
-pub const C_TOTAL_C1_PTR = C_TOTAL_PTR + 1
-
 ### PUBLIC_INPUTS_PTR: 8 felts at 3225419768..3225419776.
 pub const PUBLIC_INPUTS_PTR = 3225419768
 

@@ -8,9 +8,9 @@ use std::{fmt::Write as _, fs, io, println};
 use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit,
     compiler::{
-        CapturedAir, CompiledRelation, LayoutKind, MasmConstraintsEvalConfig, MasmMemoryExtents,
-        MasmMemoryLayout, OodScatterPlan, RelationGeometry, render_masm_constraints_eval,
-        render_proof_order_maps,
+        CapturedAir, CompiledRelation, LayoutKind, MasmAuxTraceConfig, MasmConstraintsEvalConfig,
+        MasmMemoryExtents, MasmMemoryLayout, OodScatterPlan, RelationGeometry,
+        render_masm_aux_trace, render_masm_constraints_eval, render_proof_order_maps,
     },
 };
 use miden_air::vm::{
@@ -35,6 +35,7 @@ const VM_WRAPPER_PATH: &str = "asm/sys/vm/mod.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
 const VM_OOD_FRAMES_PATH: &str = "asm/sys/vm/ood_frames.masm";
+const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
 const VM_PARAMETERS_PATH: &str = "asm/sys/vm/parameters.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
@@ -130,6 +131,14 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         max_periodic_cycle_len_log(relation.geometry())?,
     )?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
+    let vm_aux_trace = render_masm_aux_trace(&MasmAuxTraceConfig {
+        generated_by: "make regenerate-constraints",
+        boundary_module: "miden::core::sys::vm::parameters",
+        correction_module: "miden::core::sys::vm::public_inputs",
+        correction_procedure: "compute_outer_logup_correction",
+        num_airs: MIDEN_AIR_COUNT,
+    })
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
     // The setup commitment is a trusted verifier input pinned in `miden_air::vm::config`, whose
     // tests rebuild it from the authored setup trace.
@@ -147,6 +156,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         relation_digest,
         constraints_eval,
         vm_ood_frames,
+        vm_aux_trace,
         vm_parameters,
     })
 }
@@ -511,6 +521,15 @@ fn render_vm_parameters(
         })?;
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
+    output.push_str("\n# Words of the normalized boundary array, two extension values per word.\n");
+    for word in 1..MIDEN_AIR_COUNT * EXT_DEGREE / WORD_SIZE {
+        writeln!(
+            output,
+            "pub const AUX_BOUNDARY_WORD_{word}_PTR = AUX_BUS_BOUNDARY_PTR + {}",
+            word * WORD_SIZE
+        )
+        .unwrap();
+    }
     Ok(output)
 }
 
@@ -577,12 +596,13 @@ fn format_sum(parts: &[usize]) -> String {
 fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
+    write_file(VM_AUX_TRACE_PATH, &artifact.vm_aux_trace)?;
     write_file(VM_PARAMETERS_PATH, &artifact.vm_parameters)?;
     println!(
         "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
-    println!("wrote VM recursive-verifier parameters and OOD-frame geometry");
+    println!("wrote VM recursive-verifier parameters, LogUp stage and OOD-frame geometry");
     Ok(())
 }
 
@@ -698,7 +718,7 @@ pub fn public_inputs_masm_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-/// Checks generated memory boundaries and OOD routing against the AIR geometry.
+/// Checks generated memory boundaries, LogUp staging and OOD routing against the AIR geometry.
 pub fn vm_geometry_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     vm_geometry_matches_artifact(&artifact)
@@ -706,6 +726,7 @@ pub fn vm_geometry_matches_air() -> Result<(), String> {
 
 fn vm_geometry_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
     for (path, expected) in [
+        (VM_AUX_TRACE_PATH, artifact.vm_aux_trace.as_str()),
         (VM_OOD_FRAMES_PATH, artifact.vm_ood_frames.as_str()),
         (VM_PARAMETERS_PATH, artifact.vm_parameters.as_str()),
     ] {
@@ -912,6 +933,7 @@ struct ComputedArtifacts {
     relation_digest: [Felt; 4],
     constraints_eval: String,
     vm_ood_frames: String,
+    vm_aux_trace: String,
     vm_parameters: String,
 }
 

@@ -8,7 +8,7 @@ use {
     AUX_RAND_ELEM_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
-use {BUS_GAMMA_C1_PTR, BUS_GAMMA_PTR, C_TOTAL_C1_PTR, C_TOTAL_PTR} from miden::core::sys::pvm::layout
+use {BUS_GAMMA_C1_PTR, BUS_GAMMA_PTR} from miden::core::sys::pvm::layout
 
 use {UINT_VAL_BUS_SCALE, EC_GROUP_BUS_SCALE} from miden::core::sys::pvm::parameters
 
@@ -154,13 +154,13 @@ end
 
 #! Sums the inverses of the compressed fixed-environment UintVal and EcGroup bus messages.
 #!
-#! Reads beta and alpha from the relation's auxiliary-randomness region, stores beta^18 in
-#! BUS_GAMMA_PTR, and stores the sum in C_TOTAL_PTR. All caller stack elements are preserved.
+#! Reads beta and alpha from the shared auxiliary-randomness region, stores beta^18 in
+#! BUS_GAMMA_PTR, and returns the sum. Preserves caller stack elements and transcript state.
 #! Fails if an encoded message denominator is zero.
 #!
 #! Input:  [...]
-#! Output: [...]
-pub proc compute_fixed_boundary_correction()
+#! Output: [correction0, correction1, ...]
+pub proc compute_fixed_boundary_correction() -> types::QuadFelt
     exec.compute_bus_gamma
     exec.load_beta
     push.0.0
@@ -296,7 +296,6 @@ pub proc compute_fixed_boundary_correction()
     push.EC_GROUP_BUS_SCALE exec.compute_bus_prefix ext2add ext2inv
     movup.5 movup.5 ext2add
 
-    mem_store.C_TOTAL_PTR
-    mem_store.C_TOTAL_C1_PTR
-    drop drop
+    # => [correction0, correction1, beta0, beta1, ...]
+    movup.2 drop movup.2 drop
 end

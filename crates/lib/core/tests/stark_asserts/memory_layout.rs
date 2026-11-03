@@ -116,7 +116,6 @@ use RegionExtent::{Fixed, Until};
 /// Derived pointers are checked separately against the allocation they reference.
 const RELATION_REGIONS: &[(&str, &str, i64, RegionExtent)] = &[
     ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
-    ("pvm/layout.masm", "C_TOTAL_PTR", 0, Fixed(4)),
     ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, Until("AUX_RAND_ELEM_PTR")),
     ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, Until("MAIN_CURRENT_PTR")),
     ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, Until("AUX_CURRENT_PTR")),
@@ -140,7 +139,6 @@ const RELATION_REGIONS: &[(&str, &str, i64, RegionExtent)] = &[
         Fixed(miden_air::precompiles::protocol::PVM_CIRCUIT_SHAPE.2 as u64),
     ),
     ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
-    ("vm/layout.masm", "C_TOTAL_PTR", 0, Fixed(4)),
     ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
     (
         "vm/layout.masm",
@@ -809,7 +807,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     }
 
     assert_tiled_frame(&canonical_generic_regions, "stark", GENERIC_FRAME_START, state_start);
-    for (owner, last_field) in [("vm", "KERNEL_WITNESS_PTR"), ("pvm", "C_TOTAL_PTR")] {
+    for (owner, last_field) in [("vm", "KERNEL_WITNESS_PTR"), ("pvm", "BUS_GAMMA_PTR")] {
         let last = relation_regions
             .iter()
             .find(|r| namespace(&r.source) == owner && r.name == last_field)

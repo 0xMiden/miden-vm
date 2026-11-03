@@ -15,6 +15,7 @@
 #### Changes
 
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
+- [BREAKING] Generate VM/PVM auxiliary LogUp verification from shared code. Boundary-correction procedures return their extension value on the stack; their scratch constants and `vm::aux_trace::push_canonical_log_heights` are removed. The VM boundary-word alias moves to `vm::parameters`. Updated both recursive verifier roots.
 - [BREAKING] Shared the VM/PVM recursive verifier's memory anchors and layout checks. ACE public-input addresses are generated from the compiled layout. Shared constants move to `stark::constants`; redundant layout accessors, metadata and public-input address helpers are removed. Both verifier roots change.
 - [BREAKING] Reduced cycle counts for recursive VM and PVM verification. Updated both recursive verifier roots.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).

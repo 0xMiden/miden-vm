@@ -373,13 +373,9 @@ mod tests {
         );
     }
 
-    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
-    /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
+    /// Every chiplet supplies one extension-field boundary value at its canonical READ slot.
     #[test]
-    fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
-        const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/aux_trace.masm");
-
+    fn pvm_aux_boundaries_match_the_canonical_read_layout() {
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
             .map(miden_stark::air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
@@ -389,12 +385,6 @@ mod tests {
             alloc::vec![1; NUM_CHIPLETS],
             "the PVM aux hook boundary shape drifted"
         );
-        assert_eq!(
-            derived.iter().sum::<usize>(),
-            2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every normalized LogUp value exactly once"
-        );
-
         // The scatter permutes the region the circuit reads, so it must be exactly one slot per
         // exposed value.
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");

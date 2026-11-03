@@ -17,8 +17,6 @@ const SIGMA_FELTS: u32 = 2;
 const SENTINELS: [u64; 4] = [7_001, 7_002, 7_003, 7_004];
 /// Word-aligned harness cell the sentinels are written back to.
 const SENTINEL_PTR: u32 = 1_000;
-/// Word-aligned harness cell the pushed log heights are written back to.
-const HEIGHTS_PTR: u32 = 1_004;
 
 // ORACLES
 // ================================================================================================
@@ -111,8 +109,6 @@ begin
     exec.aux_trace::scatter_aux_bus_boundary
 
     push.{SENTINEL_PTR} mem_storew_le dropw
-    exec.aux_trace::push_canonical_log_heights
-    push.{HEIGHTS_PTR} mem_storew_le dropw
 end",
         s0 = SENTINELS[0],
         s1 = SENTINELS[1],
@@ -136,14 +132,6 @@ fn run(heights: &[u64]) -> Vec<u64> {
             read_memory_felt(&output, SENTINEL_PTR + i as u32),
             Felt::new_unchecked(*sentinel),
             "the absorb/scatter sequence disturbed operand-stack slot {i} for heights {heights:?}"
-        );
-    }
-
-    for (air, &height) in heights.iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(&output, HEIGHTS_PTR + air as u32).as_canonical_u64(),
-            height,
-            "canonical height for AIR {air}"
         );
     }
 

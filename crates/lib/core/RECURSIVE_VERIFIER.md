@@ -25,6 +25,7 @@ integers and elliptic-curve parameters.
 | What changes | Where to edit | MASM output |
 |---|---|---|
 | VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
+| VM/PVM auxiliary LogUp verification | `crates/ace/src/compiler/{aux_trace.rs,templates/aux_trace.masm}` | `vm/aux_trace.masm`, `pvm/aux_trace.masm` |
 | Shared memory anchors and capacity checks | `crates/lib/core/asm/stark/constants.masm`; `crates/ace/src/compiler/masm_memory.rs` | `vm/parameters.masm`, `pvm/layout.masm` |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/stark/precompiles/src/recursive/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
@@ -99,15 +100,19 @@ to these values, and the generated MASM embeds them. Two checks guard the pins, 
 An intentional relation change therefore updates the pins first, as its own reviewable edit, then
 regenerates the MASM and updates the verifier roots in `core/src/proof.rs`.
 
-## Handwritten relation adapters
+## Relation-specific behavior
 
-The relation wrappers retain statement encoding, trace-height checks, and lookup-boundary
-processing.
+The relation adapters define statement encoding, trace-height checks, and external LogUp
+boundary corrections. The shared generated stage samples lookup challenges, absorbs the
+auxiliary commitment and normalized sums in proof order, places the sums in canonical AIR order,
+and weights each by its trace length. It requires the weighted sum and the relation's boundary
+correction to add to zero.
 
 When changing the AIR set or canonical order, public-input format, or bus-message definitions,
-review the affected relation's `mod.masm`, `public_inputs.masm`, and `aux_trace.masm`
-alongside the generated files. The VM's handwritten field aliases in `vm/layout.masm` also need
-review when its statement layout changes.
+review the relation's `mod.masm` and `public_inputs.masm` alongside the generated files. For PVM
+boundary interactions, review the fixed-environment catalogue and templates listed above.
+The VM's handwritten field aliases in `vm/layout.masm` also need review when its statement layout
+changes.
 
 - The proof-order renderer supports `miden_ace::MAX_ORDER_AIRS` AIRs: twelve, because `12!` fits
   in a `u32` permutation tag and `13!` does not. The shared arrays reserve sixteen entries;

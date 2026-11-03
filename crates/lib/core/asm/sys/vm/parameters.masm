@@ -50,3 +50,6 @@ pub const PUBLIC_INPUTS_PTR = 3225419712
 pub const AUX_BUS_BOUNDARY_PTR = 3225420904
 pub const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 pub const ACE_CIRCUIT_STREAM_PTR = 3225420968
+
+# Words of the normalized boundary array, two extension values per word.
+pub const AUX_BOUNDARY_WORD_1_PTR = AUX_BUS_BOUNDARY_PTR + 4
