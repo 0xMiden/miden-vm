@@ -94,6 +94,8 @@ For example, a new change to the AIR crate might have the following message: `fe
 - Add one [`CHANGELOG.md`](./CHANGELOG.md) entry for user-facing changes. The
   entry should describe the Miden change, whether it affects VM crates, crypto
   crates, or both. Trivial changes can use the `no changelog` label.
+- Core library MASM assertions that can fail on caller input should carry a
+  procedure-specific `.err` message instead of a bare assertion.
 
 - [Rustfmt](https://github.com/rust-lang/rustfmt) and [Clippy](https://github.com/rust-lang/rust-clippy) linting is included in CI pipeline. Anyways it's preferable to run linting locally before push:
     ```

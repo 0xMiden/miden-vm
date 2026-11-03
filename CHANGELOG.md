@@ -9,6 +9,7 @@
 #### Fixes
 
 - [BREAKING] Made `PartialSmt::add_path` atomic so errors leave the tree unchanged. Paths shorter than 64 levels now return `MerkleError::InvalidPathLength(64)` ([#4123](https://github.com/0xMiden/miden-vm/pull/4123)).
+- Added an explicit error message to `mem::pipe_preimage_to_memory` when the computed commitment does not match the supplied commitment ([#4096](https://github.com/0xMiden/miden-vm/issues/4096)).
 
 ## v0.36.3 (2026-10-27)
 

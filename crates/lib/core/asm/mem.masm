@@ -328,7 +328,7 @@ pub proc pipe_preimage_to_memory(
   # => [HASH, COMMITMENT, write_ptr', ...]
 
   # Check the COMMITMENT (10 cycles)
-  assert_eqw
+  assert_eqw.err="pipe_preimage_to_memory: COMMITMENT does not match"
   # => [write_ptr', ...]
 end
 
