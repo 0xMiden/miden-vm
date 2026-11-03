@@ -10,7 +10,7 @@ use miden_utils_indexing::{Idx, IndexedVecError};
 
 use super::{
     DebugErrorMessage, DebugInfo, DebugLoc, DebugLocIdx, DebugSourceNodeId, FunctionInfo,
-    FxHashMap, SourceNode, SourceNodeIdMarker,
+    FxHashMap, FxHashSet, SourceNode, SourceNodeIdMarker,
     types::{
         DebugFileIdx, DebugFileInfo, DebugFunctionIdx, DebugStringIdx, DebugTypeIdx, DebugTypeInfo,
     },
@@ -41,6 +41,12 @@ pub type PackageDebugInfoBuilder = DebugInfoBuilder<MastNodeId, DebugSourceNodeI
 pub struct DebugInfoBuilder<Exec: Idx, Src: Idx> {
     /// Provides uniquing of values stored in the strings table of the underlying `DebugInfo`
     string_indices: FxHashMap<Arc<str>, DebugStringIdx>,
+    /// Provides uniquing of files stored in the files table of the underlying `DebugInfo`
+    file_indices: FxHashMap<DebugFileInfo, DebugFileIdx>,
+    /// Maps a path string to the first file in the files table that uses it
+    file_indices_by_path: FxHashMap<DebugStringIdx, DebugFileIdx>,
+    /// The error codes recorded in the error messages table of the underlying `DebugInfo`
+    error_codes: FxHashSet<u64>,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
     location_indices: FxHashMap<DebugLoc, DebugLocIdx>,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
@@ -71,6 +77,9 @@ impl<Exec: Idx, Src: Idx> Default for DebugInfoBuilder<Exec, Src> {
     fn default() -> Self {
         Self {
             string_indices: Default::default(),
+            file_indices: Default::default(),
+            file_indices_by_path: Default::default(),
+            error_codes: Default::default(),
             location_indices: Default::default(),
             type_indices: Default::default(),
             reserved_recursive_types: Default::default(),
@@ -83,6 +92,9 @@ impl<Exec: Idx + Clone, Src: Idx + Clone> Clone for DebugInfoBuilder<Exec, Src> 
     fn clone(&self) -> Self {
         Self {
             string_indices: self.string_indices.clone(),
+            file_indices: self.file_indices.clone(),
+            file_indices_by_path: self.file_indices_by_path.clone(),
+            error_codes: self.error_codes.clone(),
             location_indices: self.location_indices.clone(),
             type_indices: self.type_indices.clone(),
             reserved_recursive_types: self.reserved_recursive_types.clone(),
@@ -162,6 +174,14 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
                 entry.insert(idx);
             }
         }
+        let mut file_indices = FxHashMap::default();
+        let mut file_indices_by_path = FxHashMap::default();
+        for (i, file) in debug_info.files().iter().enumerate() {
+            let idx = DebugFileIdx::from(i as u32);
+            file_indices.entry(*file).or_insert(idx);
+            file_indices_by_path.entry(file.path_idx).or_insert(idx);
+        }
+        let error_codes = debug_info.error_messages().iter().map(|msg| msg.err_code).collect();
         let mut location_indices = FxHashMap::default();
         for (i, loc) in debug_info.locations().iter().enumerate() {
             if let Entry::Vacant(entry) = location_indices.entry(*loc) {
@@ -178,6 +198,9 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
         }
         Self {
             string_indices,
+            file_indices,
+            file_indices_by_path,
+            error_codes,
             location_indices,
             type_indices,
             reserved_recursive_types: Default::default(),
@@ -250,11 +273,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     }
 
     pub fn get_file_index_by_path_index(&self, path_idx: DebugStringIdx) -> Option<DebugFileIdx> {
-        self.debug_info
-            .files
-            .iter()
-            .position(|file| file.path_idx == path_idx)
-            .map(|pos| DebugFileIdx::from(pos as u32))
+        self.file_indices_by_path.get(&path_idx).copied()
     }
 
     /// Adds a file to the file table under `uri`, with an optional checksum, and returns its index.
@@ -275,10 +294,13 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             self.debug_info.strings.get(file.path_idx).is_some(),
             "invalid path string index"
         );
-        if let Some(idx) = self.debug_info.files.iter().position(|existing| existing == &file) {
-            return DebugFileIdx::from(idx as u32);
+        if let Some(idx) = self.file_indices.get(&file).copied() {
+            return idx;
         }
-        self.debug_info.files.push(file).expect("too many files")
+        let idx = self.debug_info.files.push(file).expect("too many files");
+        self.file_indices.insert(file, idx);
+        self.file_indices_by_path.entry(file.path_idx).or_insert(idx);
+        idx
     }
 }
 
@@ -410,7 +432,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     ///
     /// Returns `true` if `err_code` was not previously registered, otherwise `false`
     pub fn add_error_message(&mut self, err_code: u64, message: Arc<str>) -> bool {
-        if !self.debug_info.error_messages.iter().any(|msg| msg.err_code == err_code) {
+        if self.error_codes.insert(err_code) {
             let message = self.add_string(message);
             self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
             true
@@ -429,7 +451,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             self.debug_info.get_string(message).is_some(),
             "invalid string index for message"
         );
-        if !self.debug_info.error_messages.iter().any(|msg| msg.err_code == err_code) {
+        if self.error_codes.insert(err_code) {
             self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
         }
     }
@@ -953,5 +975,53 @@ mod tests {
             builder.get_function_index_by_path(Path::new("::module::shared")),
             Some(linked_function_idx),
         );
+    }
+
+    fn checksum(i: u32) -> [u8; 32] {
+        let mut checksum = [0u8; 32];
+        checksum[..4].copy_from_slice(&i.to_le_bytes());
+        checksum
+    }
+
+    #[test]
+    fn builder_from_debug_info_reuses_file_and_error_rows() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let path = builder.add_string("a.masm");
+        let message = builder.add_string("message");
+        let first = builder.add_file_info(DebugFileInfo::new(path).with_checksum(checksum(1)));
+        let second = builder.add_file_info(DebugFileInfo::new(path).with_checksum(checksum(2)));
+        builder.add_error_message_with_index(7, message);
+
+        let mut builder = PackageDebugInfoBuilder::from(builder.build());
+        assert_eq!(
+            builder.add_file_info(DebugFileInfo::new(path).with_checksum(checksum(2))),
+            second
+        );
+        assert_eq!(builder.get_file_index_by_path_index(path), Some(first));
+        assert!(!builder.add_error_message(7, Arc::from("other")));
+        assert!(builder.add_error_message(8, Arc::from("other")));
+        assert_eq!(builder.debug_info().files().len(), 2);
+        assert_eq!(builder.debug_info().error_messages().len(), 2);
+    }
+
+    #[test]
+    fn merge_of_large_file_and_error_tables_reuses_rows() {
+        const ROWS: u32 = 20_000;
+
+        let mut source = PackageDebugInfoBuilder::default();
+        let path = source.add_string("a.masm");
+        let message = source.add_string("message");
+        for i in 0..ROWS {
+            source.add_file_info(DebugFileInfo::new(path).with_checksum(checksum(i)));
+            source.add_error_message_with_index(u64::from(i), message);
+        }
+        let source = source.build();
+
+        let mut target = PackageDebugInfoBuilder::default();
+        source.merge_tables_into(&mut target).unwrap();
+        source.merge_tables_into(&mut target).unwrap();
+
+        assert_eq!(target.debug_info().files().len(), ROWS as usize);
+        assert_eq!(target.debug_info().error_messages().len(), ROWS as usize);
     }
 }
