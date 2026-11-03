@@ -47,6 +47,9 @@ pub struct DebugInfoBuilder<Exec: Idx, Src: Idx> {
     file_indices_by_path: FxHashMap<DebugStringIdx, DebugFileIdx>,
     /// The error codes recorded in the error messages table of the underlying `DebugInfo`
     error_codes: FxHashSet<u64>,
+    /// Set when the underlying `DebugInfo` was handed out mutably, which means the string, file
+    /// and error code indices may no longer match its tables
+    indices_stale: bool,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
     location_indices: FxHashMap<DebugLoc, DebugLocIdx>,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
@@ -80,6 +83,7 @@ impl<Exec: Idx, Src: Idx> Default for DebugInfoBuilder<Exec, Src> {
             file_indices: Default::default(),
             file_indices_by_path: Default::default(),
             error_codes: Default::default(),
+            indices_stale: false,
             location_indices: Default::default(),
             type_indices: Default::default(),
             reserved_recursive_types: Default::default(),
@@ -95,6 +99,7 @@ impl<Exec: Idx + Clone, Src: Idx + Clone> Clone for DebugInfoBuilder<Exec, Src> 
             file_indices: self.file_indices.clone(),
             file_indices_by_path: self.file_indices_by_path.clone(),
             error_codes: self.error_codes.clone(),
+            indices_stale: self.indices_stale,
             location_indices: self.location_indices.clone(),
             type_indices: self.type_indices.clone(),
             reserved_recursive_types: self.reserved_recursive_types.clone(),
@@ -167,21 +172,6 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
     fn from(debug_info: Box<DebugInfo<Exec, Src>>) -> Self {
         use hashbrown::hash_map::Entry;
 
-        let mut string_indices = FxHashMap::default();
-        for (i, string) in debug_info.strings().iter().enumerate() {
-            if let Entry::Vacant(entry) = string_indices.entry(string.clone()) {
-                let idx = DebugStringIdx::from(i as u32);
-                entry.insert(idx);
-            }
-        }
-        let mut file_indices = FxHashMap::default();
-        let mut file_indices_by_path = FxHashMap::default();
-        for (i, file) in debug_info.files().iter().enumerate() {
-            let idx = DebugFileIdx::from(i as u32);
-            file_indices.entry(*file).or_insert(idx);
-            file_indices_by_path.entry(file.path_idx).or_insert(idx);
-        }
-        let error_codes = debug_info.error_messages().iter().map(|msg| msg.err_code).collect();
         let mut location_indices = FxHashMap::default();
         for (i, loc) in debug_info.locations().iter().enumerate() {
             if let Entry::Vacant(entry) = location_indices.entry(*loc) {
@@ -196,16 +186,14 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
                 entry.insert(idx);
             }
         }
-        Self {
-            string_indices,
-            file_indices,
-            file_indices_by_path,
-            error_codes,
+        let mut builder = Self {
             location_indices,
             type_indices,
-            reserved_recursive_types: Default::default(),
             debug_info,
-        }
+            ..Default::default()
+        };
+        builder.rebuild_indices();
+        builder
     }
 }
 
@@ -229,8 +217,46 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     }
 
     /// Get a mutable reference to the current state of the `DebugInfo` being built
+    ///
+    /// The string, file and error code indices are rebuilt before the builder next uses them, so
+    /// changes made through the returned reference (e.g. [DebugInfo::trim_file_paths]) are
+    /// respected.
     pub fn debug_info_mut(&mut self) -> &mut DebugInfo<Exec, Src> {
+        self.indices_stale = true;
         &mut self.debug_info
+    }
+
+    /// Like [Self::debug_info_mut], but without invalidating the indices.
+    ///
+    /// Callers must not modify the strings, files or error messages tables through it.
+    pub(super) fn debug_info_mut_unindexed(&mut self) -> &mut DebugInfo<Exec, Src> {
+        &mut self.debug_info
+    }
+
+    /// Rebuilds the string, file and error code indices if [Self::debug_info_mut] was called
+    /// since they were last built
+    fn sync_indices(&mut self) {
+        if self.indices_stale {
+            self.rebuild_indices();
+        }
+    }
+
+    fn rebuild_indices(&mut self) {
+        self.string_indices.clear();
+        for (i, string) in self.debug_info.strings.iter().enumerate() {
+            self.string_indices
+                .entry(string.clone())
+                .or_insert_with(|| DebugStringIdx::from(i as u32));
+        }
+        self.file_indices.clear();
+        self.file_indices_by_path.clear();
+        for (i, file) in self.debug_info.files.iter().enumerate() {
+            let idx = DebugFileIdx::from(i as u32);
+            self.file_indices.entry(*file).or_insert(idx);
+            self.file_indices_by_path.entry(file.path_idx).or_insert(idx);
+        }
+        self.error_codes = self.debug_info.error_messages.iter().map(|msg| msg.err_code).collect();
+        self.indices_stale = false;
     }
 }
 
@@ -245,6 +271,14 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
     /// Gets the [DebugStringIdx] for a string, if it is already interned by the builder
     pub fn get_string_index(&self, s: &str) -> Option<DebugStringIdx> {
+        if self.indices_stale {
+            return self
+                .debug_info
+                .strings
+                .iter()
+                .position(|string| string.as_ref() == s)
+                .map(|pos| DebugStringIdx::from(pos as u32));
+        }
         self.string_indices.get(s).copied()
     }
 
@@ -252,6 +286,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     ///
     /// Strings are uniqued/interned - so adding the same string twice will return the same index
     pub fn add_string(&mut self, s: impl Into<Arc<str>>) -> DebugStringIdx {
+        self.sync_indices();
         let s = s.into();
         if let Some(exists) = self.string_indices.get(&s).copied() {
             return exists;
@@ -273,6 +308,14 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     }
 
     pub fn get_file_index_by_path_index(&self, path_idx: DebugStringIdx) -> Option<DebugFileIdx> {
+        if self.indices_stale {
+            return self
+                .debug_info
+                .files
+                .iter()
+                .position(|file| file.path_idx == path_idx)
+                .map(|pos| DebugFileIdx::from(pos as u32));
+        }
         self.file_indices_by_path.get(&path_idx).copied()
     }
 
@@ -290,6 +333,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
     /// Adds a file to the file table and returns its index.
     pub fn add_file_info(&mut self, file: DebugFileInfo) -> DebugFileIdx {
+        self.sync_indices();
         assert!(
             self.debug_info.strings.get(file.path_idx).is_some(),
             "invalid path string index"
@@ -432,6 +476,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     ///
     /// Returns `true` if `err_code` was not previously registered, otherwise `false`
     pub fn add_error_message(&mut self, err_code: u64, message: Arc<str>) -> bool {
+        self.sync_indices();
         if self.error_codes.insert(err_code) {
             let message = self.add_string(message);
             self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
@@ -451,6 +496,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             self.debug_info.get_string(message).is_some(),
             "invalid string index for message"
         );
+        self.sync_indices();
         if self.error_codes.insert(err_code) {
             self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
         }
@@ -1002,6 +1048,26 @@ mod tests {
         assert!(builder.add_error_message(8, Arc::from("other")));
         assert_eq!(builder.debug_info().files().len(), 2);
         assert_eq!(builder.debug_info().error_messages().len(), 2);
+    }
+
+    #[test]
+    fn builder_indices_follow_trimmed_file_paths() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let original = builder.add_file(Uri::new("/work/a.masm"), None);
+        let trimmed_path = builder.add_string("a.masm");
+
+        builder
+            .debug_info_mut()
+            .trim_file_paths(|path| path.strip_prefix("/work/").map(Arc::from));
+        assert_eq!(builder.get_file_index_by_path_index(trimmed_path), Some(original));
+
+        // The original file row now points at the trimmed path, so re-adding the original file
+        // must append a new row instead of returning the trimmed one.
+        let readded = builder.add_file(Uri::new("/work/a.masm"), None);
+        assert_ne!(readded, original);
+        assert_eq!(builder.debug_info().files().len(), 2);
+        assert_eq!(builder.add_file(Uri::new("a.masm"), None), original);
+        assert_eq!(builder.get_file_index_by_path_index(trimmed_path), Some(original));
     }
 
     #[test]
