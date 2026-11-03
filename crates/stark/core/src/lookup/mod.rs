@@ -85,8 +85,10 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// `bus_id as usize`.
     fn num_bus_ids(&self) -> usize;
 
-    /// Evaluate the lookup argument, describing its interactions through
-    /// the builder's closure API.
+    /// Emit per-row lookup interactions through the builder's closure API.
+    ///
+    /// Constraint and prover adapters consume these same declarations. Arithmetic constraints
+    /// belong to the enclosing [`LiftedAir`](crate::air::LiftedAir) evaluation.
     fn eval(&self, builder: &mut LB);
 
     /// Emit once-per-proof boundary interactions that don't come from any main-trace row.
