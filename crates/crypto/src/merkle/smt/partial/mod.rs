@@ -20,8 +20,8 @@ mod tests;
 
 pub use serialization::UniqueNodes;
 
-/// Hashes of the child nodes on a path from a leaf to the root, ordered leaf-to-root.
-type PathNodes = [Word; SMT_DEPTH as usize];
+/// Complete inner nodes on a path from a leaf to the root, ordered leaf-to-root.
+type PathNodes = [InnerNode; SMT_DEPTH as usize];
 
 /// A partial version of an [`super::Smt`].
 ///
@@ -102,7 +102,7 @@ impl PartialSmt {
         let (path, leaf) = first_proof.into_parts();
         let (path_nodes, path_root) = Self::compute_path_nodes(&leaf, &path)?;
         let mut partial_smt = Self::new(path_root);
-        partial_smt.commit_path(leaf, path, &path_nodes);
+        partial_smt.commit_path(leaf, &path_nodes);
 
         for proof in proofs {
             partial_smt.add_proof(proof)?;
@@ -299,7 +299,7 @@ impl PartialSmt {
             });
         }
 
-        self.commit_path(leaf, path, &path_nodes);
+        self.commit_path(leaf, &path_nodes);
         Ok(())
     }
 
@@ -490,30 +490,24 @@ impl PartialSmt {
     // PRIVATE HELPERS
     // --------------------------------------------------------------------------------------------
 
-    /// Computes the node hashes and the root that `leaf` and `path` imply, without mutating
-    /// `self`.
+    /// Computes the complete inner nodes and the root that `leaf` and `path` imply, without
+    /// mutating `self`.
     ///
-    /// Returns the hashes of the child nodes on the path, ordered leaf-to-root, and the resulting
-    /// root. The path must have exactly [`SMT_DEPTH`] nodes.
+    /// Returns the inner nodes on the path, ordered leaf-to-root, and the resulting root. The path
+    /// must have exactly [`SMT_DEPTH`] nodes.
     fn compute_path_nodes(
         leaf: &SmtLeaf,
         path: &SparseMerklePath,
     ) -> Result<(PathNodes, Word), MerkleError> {
         if path.depth() != SMT_DEPTH {
-            return Err(MerkleError::InvalidPathDepth {
-                expected: SMT_DEPTH,
-                actual: path.depth(),
-            });
+            return Err(MerkleError::InvalidPathLength(SMT_DEPTH as usize));
         }
 
         let mut current_index = leaf.index().index;
         let mut node_hash = leaf.hash();
-        let mut path_nodes: PathNodes = [EMPTY_WORD; SMT_DEPTH as usize];
+        let mut path_nodes: PathNodes = core::array::from_fn(|_| InnerNode::default());
 
         for (path_node, sibling_hash) in path_nodes.iter_mut().zip(path.iter()) {
-            // Store the hash of the node on the path before combining it with its sibling.
-            *path_node = node_hash;
-
             // Find the index of the sibling node and compute whether it is a left or right child.
             let is_sibling_right = current_index.sibling().is_position_odd();
 
@@ -522,20 +516,20 @@ impl PartialSmt {
 
             // Construct the new parent node from the child that was updated and the sibling from
             // the merkle path.
-            let new_parent_node = if is_sibling_right {
+            *path_node = if is_sibling_right {
                 InnerNode { left: node_hash, right: sibling_hash }
             } else {
                 InnerNode { left: sibling_hash, right: node_hash }
             };
 
-            node_hash = new_parent_node.hash();
+            node_hash = path_node.hash();
         }
 
         Ok((path_nodes, node_hash))
     }
 
-    /// Writes a leaf and its precomputed path nodes into the tree. Cannot fail.
-    fn commit_path(&mut self, leaf: SmtLeaf, path: SparseMerklePath, path_nodes: &PathNodes) {
+    /// Writes a leaf and its precomputed inner nodes into the tree. Cannot fail.
+    fn commit_path(&mut self, leaf: SmtLeaf, path_nodes: &PathNodes) {
         let mut current_index = leaf.index().index;
 
         let prev_entries = self
@@ -554,21 +548,12 @@ impl PartialSmt {
         // Guaranteed not to over/underflow. All variables are <= MAX_LEAF_ENTRIES and result > 0.
         self.num_entries = self.num_entries + current_entries - prev_entries;
 
-        for (&node_hash, sibling_hash) in path_nodes.iter().zip(path.iter()) {
-            // Find the index of the sibling node and compute whether it is a left or right child.
-            let is_sibling_right = current_index.sibling().is_position_odd();
-
-            // Move the index up so it points to the parent of the current index and the sibling.
+        for path_node in path_nodes.iter() {
+            // Move the index up so it points to the parent of the current index.
             current_index.move_up();
 
-            // Rebuild the parent node from the stored child hash and the sibling from the path.
-            let path_node = if is_sibling_right {
-                InnerNode { left: node_hash, right: sibling_hash }
-            } else {
-                InnerNode { left: sibling_hash, right: node_hash }
-            };
-
-            self.insert_inner_node(current_index, path_node);
+            // Insert the precomputed parent node without rebuilding it from the path.
+            self.insert_inner_node(current_index, path_node.clone());
         }
     }
 
