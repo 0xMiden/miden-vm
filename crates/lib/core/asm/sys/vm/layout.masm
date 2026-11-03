@@ -1,14 +1,7 @@
 use {LOG_AIR_TRACE_LENGTHS_PTR} from miden::core::stark::constants
-use miden::core::stark::types
-use {
-    ACE_CIRCUIT_STREAM_PTR,
-    AND8_LOOKUP_LOG_HEIGHT,
-    AUXILIARY_ACE_INPUTS_PTR,
-    AUX_BUS_BOUNDARY_PTR,
-    PUBLIC_INPUTS_PTR,
-} from miden::core::sys::vm::parameters
+use {AND8_LOOKUP_LOG_HEIGHT} from miden::core::sys::vm::parameters
 
-### Statement storage and ACE input boundaries for the Miden VM verifier.
+### Statement storage and AIR-height access for the Miden VM verifier.
 ###
 ### The shared STARK layout owns protocol state and per-AIR scratch. This module owns the
 ### authenticated claim, boundary statement, kernel witness and LogUp scratch. Its height accessors
@@ -45,7 +38,7 @@ pub const BOUNDARY_INPUTS_DEFERRED_OFFSET = 4
 pub const DEFERRED_ROOT_PTR = BOUNDARY_INPUTS_PTR + BOUNDARY_INPUTS_DEFERRED_OFFSET
 
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
-const KERNEL_WITNESS_PTR = 3223323196
+pub const KERNEL_WITNESS_PTR = 3223323196
 
 pub proc set_core_trace_length_log(height: u8)
     mem_store.LOG_AIR_TRACE_LENGTHS_PTR
@@ -75,43 +68,4 @@ end
 pub proc init_and8_lookup_trace_length_log()
     push.AND8_LOOKUP_LOG_HEIGHT
     mem_store.AND8_LOG_HEIGHT_PTR
-end
-
-#! Start of the ACE READ vector, whose public-input prefix contains the stack inputs and outputs.
-pub proc public_inputs_ptr() -> types::Address
-    push.PUBLIC_INPUTS_PTR
-end
-
-### Normalized LogUp finals, one extension element per AIR in canonical instance order.
-pub proc aux_bus_boundary_ptr() -> types::Address
-    push.AUX_BUS_BOUNDARY_PTR
-end
-
-### Fixed STARK variables, per-AIR selectors, and fold coefficients in ACE input order.
-pub proc auxiliary_ace_inputs_ptr() -> types::Address
-    push.AUXILIARY_ACE_INPUTS_PTR
-end
-
-pub proc ace_circuit_stream_ptr() -> types::Address
-    push.ACE_CIRCUIT_STREAM_PTR
-end
-
-pub proc boundary_inputs_ptr() -> types::Address
-    push.BOUNDARY_INPUTS_PTR
-end
-
-pub proc claim_commitment_ptr() -> ptr<types::Digest>
-    push.CLAIM_COMMITMENT_PTR
-end
-
-pub proc claim_ptr() -> types::Address
-    push.CLAIM_PTR
-end
-
-pub proc num_kernel_procedures_ptr() -> types::Address
-    push.NUM_KERNEL_PROCEDURES_PTR
-end
-
-pub proc kernel_witness_ptr() -> types::Address
-    push.KERNEL_WITNESS_PTR
 end

@@ -5,8 +5,6 @@
 ### Its internal boundaries follow the PVM circuit's InputLayout; each input occupies two
 ### base-field felts. The major memory anchors are defined in `stark/constants.masm`.
 
-use miden::core::stark::types
-
 ### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^18.
 pub const BUS_GAMMA_PTR = 3223323136
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
@@ -34,10 +32,10 @@ pub const PUBLIC_INPUTS_PTR = 3225419768
 pub const AUX_BUS_BOUNDARY_PTR = 3225422856
 
 ### AUXILIARY_ACE_INPUTS_PTR: 120 felts at 3225422880..3225423000.
-const AUXILIARY_ACE_INPUTS_PTR = 3225422880
+pub const AUXILIARY_ACE_INPUTS_PTR = 3225422880
 
 ### 14584 felts: 3225423000..3225437584.
-const ACE_CIRCUIT_STREAM_PTR = 3225423000
+pub const ACE_CIRCUIT_STREAM_PTR = 3225423000
 
 ### Public values occupy consecutive quadratic-extension slots.
 pub const PUBLIC_INPUT_0_C1_PTR = PUBLIC_INPUTS_PTR + 1
@@ -54,19 +52,3 @@ pub const AUX_BOUNDARY_WORD_2_PTR = AUX_BUS_BOUNDARY_PTR + 8
 pub const AUX_BOUNDARY_WORD_3_PTR = AUX_BUS_BOUNDARY_PTR + 12
 pub const AUX_BOUNDARY_WORD_4_PTR = AUX_BUS_BOUNDARY_PTR + 16
 pub const AUX_BOUNDARY_WORD_5_PTR = AUX_BUS_BOUNDARY_PTR + 20
-
-pub proc public_inputs_ptr() -> types::Address
-    push.PUBLIC_INPUTS_PTR
-end
-
-pub proc aux_bus_boundary_ptr() -> types::Address
-    push.AUX_BUS_BOUNDARY_PTR
-end
-
-pub proc auxiliary_ace_inputs_ptr() -> types::Address
-    push.AUXILIARY_ACE_INPUTS_PTR
-end
-
-pub proc ace_circuit_stream_ptr() -> types::Address
-    push.ACE_CIRCUIT_STREAM_PTR
-end

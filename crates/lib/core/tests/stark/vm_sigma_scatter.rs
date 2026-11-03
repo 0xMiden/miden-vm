@@ -89,7 +89,7 @@ fn source(heights: &[u64]) -> String {
     format!(
         "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::vm::aux_trace
-use miden::core::sys::vm::layout
+use {{AUX_BUS_BOUNDARY_PTR}} from miden::core::sys::vm::parameters
 use miden::core::sys::vm::ood_frames
 
 begin
@@ -99,11 +99,11 @@ begin
     push.{s3}.{s2}.{s1}.{s0}
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr mem_storew_le
+    push.AUX_BUS_BOUNDARY_PTR mem_storew_le
     dropw
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+    push.AUX_BUS_BOUNDARY_PTR add.4 mem_storew_le
     dropw
 
     exec.aux_trace::scatter_aux_bus_boundary

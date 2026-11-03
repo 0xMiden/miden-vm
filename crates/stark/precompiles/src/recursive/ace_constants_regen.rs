@@ -291,8 +291,6 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> String {
 ### Its internal boundaries follow the PVM circuit's InputLayout; each input occupies two
 ### base-field felts. The major memory anchors are defined in `stark/constants.masm`.
 
-use miden::core::stark::types
-
 ### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^18.
 pub const BUS_GAMMA_PTR = {state_start}
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
@@ -315,13 +313,7 @@ pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
             region.constant,
             "PUBLIC_INPUTS_PTR" | "AUX_BUS_BOUNDARY_PTR" | "AUXILIARY_ACE_INPUTS_PTR"
         ) {
-            let visibility =
-                if matches!(region.constant, "PUBLIC_INPUTS_PTR" | "AUX_BUS_BOUNDARY_PTR") {
-                    "pub "
-                } else {
-                    ""
-                };
-            writeln!(out, "{visibility}const {} = {}\n", region.constant, region.ptr)
+            writeln!(out, "pub const {} = {}\n", region.constant, region.ptr)
                 .expect("writing to String cannot fail");
         } else {
             out.push('\n');
@@ -330,7 +322,7 @@ pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
     write!(
         out,
         r#"### {stream_len} felts: {stream_ptr}..{stream_end}.
-const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
+pub const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
 
 "#,
         stream_ptr = memory.stream_start(),
@@ -356,16 +348,6 @@ const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
             word * WORD_SIZE
         )
         .expect("writing to String cannot fail");
-    }
-
-    for (accessor, constant) in [
-        ("public_inputs_ptr", "PUBLIC_INPUTS_PTR"),
-        ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR"),
-        ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR"),
-        ("ace_circuit_stream_ptr", "ACE_CIRCUIT_STREAM_PTR"),
-    ] {
-        writeln!(out, "\npub proc {accessor}() -> types::Address\n    push.{constant}\nend")
-            .expect("writing to String cannot fail");
     }
 
     out

@@ -626,7 +626,7 @@ fn render_constraints_eval_file(
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
-        layout_module: "miden::core::sys::vm::layout",
+        layout_module: "miden::core::sys::vm::parameters",
         num_inputs: circuit.num_inputs,
         num_eval_gates: circuit.num_eval_gates,
         stream_len: circuit.stream_len,

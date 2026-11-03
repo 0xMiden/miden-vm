@@ -74,12 +74,13 @@ The generators read the anchors as decimal literals; preserve that syntax when m
 
 Both generators check the compiled geometry against the ACE input layout through
 `RelationGeometry::validate_masm_layout`. The ACE input vector begins with the public inputs,
-and its starting address is derived from that layout. `layout::public_inputs_ptr` returns this
-address, which the generated constraint evaluator passes to `eval_circuit`.
+and its starting address is derived from that layout. The generated constraint evaluator passes
+`PUBLIC_INPUTS_PTR` to `eval_circuit`.
 
 Boundaries inside the contiguous ACE vector depend on relation geometry and are generated in
-`vm/parameters.masm` and `pvm/layout.masm`. Shared fields are imported as constants; relation
-accessors expose private ACE boundaries and statement fields.
+`vm/parameters.masm` and `pvm/layout.masm`. MASM modules import address constants from the layout
+that owns them. The shared evaluator generator selects the relation's constant module at
+generation time; the evaluation algorithm is common to both relations.
 
 The OOD renderer derives dispatch-record offsets and their readers and writers from one scatter
 plan. The shared layout owns the buffer allocation; the relation generator checks the plan fits.

@@ -13,8 +13,8 @@ use crate::AceError;
 pub struct MasmConstraintsEvalConfig<'a> {
     /// Command responsible for regenerating the artifact, shown in its header.
     pub generated_by: &'a str,
-    /// Relation-local module exposing `public_inputs_ptr`, `auxiliary_ace_inputs_ptr`, and
-    /// `ace_circuit_stream_ptr` as constant-address accessors.
+    /// Module exporting this relation's `PUBLIC_INPUTS_PTR`, `AUXILIARY_ACE_INPUTS_PTR`, and
+    /// `ACE_CIRCUIT_STREAM_PTR` constants.
     pub layout_module: &'a str,
     /// Number of READ variables in the encoded ACE circuit.
     pub num_inputs: usize,
@@ -26,7 +26,7 @@ pub struct MasmConstraintsEvalConfig<'a> {
     pub max_cycle_len_log: u32,
     /// Number of AIR instances in the relation.
     pub num_airs: usize,
-    /// Felt offset of AIR 0's fold coefficient from `auxiliary_ace_inputs_ptr`.
+    /// Felt offset of AIR 0's fold coefficient from `AUXILIARY_ACE_INPUTS_PTR`.
     /// AIR k's slot is `2k` felts further, in canonical AIR order.
     pub fold_coefficient_offset: usize,
     /// Relation-local inputs for reconstructing the quotient from its chunks.
@@ -76,7 +76,7 @@ fn render_fold_coefficient_staging(coefficient_offset: usize, num_airs: usize) -
          #! Outputs: []\n\
          proc stage_air_fold_coefficients\n    \
          push.PROOF_ORDER_IDS_PTR\n    \
-         exec.layout::auxiliary_ace_inputs_ptr add.{offset}\n    \
+         push.AUXILIARY_ACE_INPUTS_PTR add.{offset}\n    \
          padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR drop drop\n    \
          push.0.1\n    \
          # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]\n    # Each step copies its coefficient and destination before storing c0 then c1.\n\
@@ -123,7 +123,11 @@ pub fn render_masm_constraints_eval(
             "    PROOF_ORDER_IDS_PTR,\n",
             "}} from miden::core::stark::constants\n",
             "use miden::core::stark::constraints_eval_inputs\n",
-            "use {layout_module}\n\n",
+            "use {{\n",
+            "    ACE_CIRCUIT_STREAM_PTR,\n",
+            "    AUXILIARY_ACE_INPUTS_PTR,\n",
+            "    PUBLIC_INPUTS_PTR,\n",
+            "}} from {layout_module}\n\n",
             "# CONSTANTS\n",
             "# =================================================================================================\n\n",
             "# Number of READ variables (inputs + constants) for the constraint evaluation circuit.\n",
@@ -167,7 +171,7 @@ pub fn render_masm_constraints_eval(
             "    push.QUOTIENT_SHIFT_RATIO\n",
             "    push.QUOTIENT_FIRST_SHIFT\n",
             "    push.QUOTIENT_FIRST_WEIGHT\n",
-            "    exec.layout::auxiliary_ace_inputs_ptr\n",
+            "    push.AUXILIARY_ACE_INPUTS_PTR\n",
             "    push.LOG_AIR_TRACE_LENGTHS_PTR\n",
             "    push.NUM_AIRS\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
@@ -176,7 +180,7 @@ pub fn render_masm_constraints_eval(
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
-            "    exec.layout::public_inputs_ptr\n",
+            "    push.PUBLIC_INPUTS_PTR\n",
             "    eval_circuit\n",
             "    drop drop drop\n",
             "end\n\n",
@@ -189,7 +193,7 @@ pub fn render_masm_constraints_eval(
             "    push.ACE_CIRCUIT_DIGEST_3.ACE_CIRCUIT_DIGEST_2.ACE_CIRCUIT_DIGEST_1.ACE_CIRCUIT_DIGEST_0\n",
             "    # => [ACE_CIRCUIT_DIGEST]\n",
             "    adv.push_mapval\n",
-            "    exec.layout::ace_circuit_stream_ptr\n",
+            "    push.ACE_CIRCUIT_STREAM_PTR\n",
             "    push.ACE_STREAM_INIT_CV_3.ACE_STREAM_INIT_CV_2.ACE_STREAM_INIT_CV_1.ACE_STREAM_INIT_CV_0\n",
             "    padw padw\n",
             "    # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]\n",

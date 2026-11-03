@@ -266,7 +266,9 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         use miden::core::sys::vm::claim
         use miden::core::sys::vm::constraints_eval
         use miden::core::sys::vm::deep_queries
-        use miden::core::sys::vm::layout
+        use {{
+            CLAIM_COMMITMENT_PTR, CLAIM_PTR, KERNEL_WITNESS_PTR, NUM_KERNEL_PROCEDURES_PTR
+        }} from miden::core::sys::vm::layout
         use miden::core::sys::vm::ood_frames
         use miden::core::sys::vm::public_inputs
         use miden::core::sys::vm::aux_trace
@@ -277,7 +279,7 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         const MAX_NUM_KERNEL_PROCEDURES = 255
         # Mirrors the private `vm::materialize_kernel_witness`; any drift fails the control below.
         proc materialize_kernel_witness
-            padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+            padw push.CLAIM_PTR add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
             adv.push_mapvaln
             adv_push
             u32assert.err=\"kernel witness length must fit in a u32\"
@@ -286,8 +288,8 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             div.FELTS_PER_KERNEL_DIGEST
             dup u32lte.MAX_NUM_KERNEL_PROCEDURES
             assert.err=\"number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES\"
-            dup exec.layout::num_kernel_procedures_ptr mem_store
-            exec.layout::kernel_witness_ptr swap
+            dup push.NUM_KERNEL_PROCEDURES_PTR mem_store
+            push.KERNEL_WITNESS_PTR swap
             push.KERNEL_DOMAIN_TAG
             exec.mem::pipe_words_to_memory_in_domain
             movup.4 drop
@@ -295,8 +297,8 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         end
 
         begin
-            exec.layout::claim_commitment_ptr mem_storew_le
-            exec.layout::claim_ptr exec.claim::materialize_claim
+            push.CLAIM_COMMITMENT_PTR mem_storew_le
+            push.CLAIM_PTR exec.claim::materialize_claim
 
             exec.utils::load_security_params
             exec.materialize_kernel_witness

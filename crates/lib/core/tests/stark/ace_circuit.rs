@@ -69,7 +69,7 @@ fn quotient_recomposition_constants_match_derivation() {
 #[test]
 fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
     const STAGING_PROC: &str = "stage_air_fold_coefficients";
-    const OFFSET_SITE: &str = "exec.layout::auxiliary_ace_inputs_ptr add.";
+    const OFFSET_SITE: &str = "push.AUXILIARY_ACE_INPUTS_PTR add.";
     /// Base felts per staged coefficient (one quadratic-extension element).
     const COEFFICIENT_STRIDE: u32 = 2;
 

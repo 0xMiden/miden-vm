@@ -17,6 +17,7 @@ use {
     BUS_GAMMA_PTR,
     CLAIM_COMMITMENT_PTR,
     CLAIM_PTR,
+    KERNEL_WITNESS_PTR,
     NUM_KERNEL_PROCEDURES_PTR,
 } from miden::core::sys::vm::layout
 
@@ -30,13 +31,9 @@ use {
 #
 # Memory layout populated (low -> high addresses):
 #
-#   boundary_inputs_ptr --> [ program_digest (4 felts) ]
-#                           [ deferred_root  (4 felts) ]
-#
-#   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
-#
-#   anchor             -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   AUX_RAND_ELEM_PTR (sampled
-#                                                                     from the transcript in step II)
+#   BOUNDARY_INPUTS_PTR --> [ program_digest (4 felts) | deferred_root (4 felts) ]
+#   PUBLIC_INPUTS_PTR   --> [ stack inputs and outputs (32 extension slots) ]
+#   AUX_RAND_ELEM_PTR   --> [ beta0, beta1, alpha0, alpha1 ] (sampled in step II)
 #
 # The outer-LogUp boundary correction is the signed sum of one inverted bus term per boundary
 # interaction:
@@ -65,7 +62,7 @@ use {
 # LogUp boundary without being separately absorbed.
 #
 # Data sources:
-#   - claim region: verifier memory at `claim_ptr`, populated from advice and authenticated against
+#   - claim region: verifier memory at `CLAIM_PTR`, populated from advice and authenticated against
 #     the caller-provided claim commitment before any fields are used.
 #   - kernel digests: verifier memory at `KERNEL_WITNESS_PTR`, N word-aligned digests.
 #     `vm::verify_proof` fetches them from the advice map and asserts they hash to
@@ -133,7 +130,7 @@ pub proc stage_boundary_inputs()
 
     # deferred_root from advice -> boundary_inputs (+4), loaded over the dead P word.
     adv_loadw
-    exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
+    push.BOUNDARY_INPUTS_PTR add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
 end
 
@@ -244,7 +241,7 @@ proc fold_kernel_digests_into_acc(
     # => [acc0, acc1, ...]
 end
 
-#! Reads the canonical word `[d0, d1, d2, d3]` at `boundary_inputs_ptr + offset` (written in step I)
+#! Reads the canonical word `[d0, d1, d2, d3]` at `BOUNDARY_INPUTS_PTR + offset` (written in step I)
 #! and computes the inverted bus term
 #!     inv_term = 1 / ((α + i·γ) + msg(d))
 #! where `i = bus_id_plus_one` and `msg(d) = Σ_{j<4} d_j·β^j`. The caller adds (request) or
@@ -255,7 +252,7 @@ end
 proc fold_boundary_word_inv_term(bus_id_plus_one: u8, offset: u8) -> types::QuadFelt
     padw
     # => [0, 0, 0, 0, bus_id, offset, ...]
-    exec.layout::boundary_inputs_ptr
+    push.BOUNDARY_INPUTS_PTR
     dup.6 add
     # => [target, 0, 0, 0, 0, bus_id, offset, ...]
     mem_loadw_le
@@ -293,7 +290,7 @@ pub proc compute_outer_logup_correction() -> types::QuadFelt
 
     # acc = 0; build [acc0, acc1, base, N] for the kernel fold.
     push.0.0
-    exec.layout::kernel_witness_ptr movdn.2
+    push.KERNEL_WITNESS_PTR movdn.2
     mem_load.NUM_KERNEL_PROCEDURES_PTR movdn.3
     # => [acc0, acc1, base, N, ...]   (acc = 0)
 
@@ -331,7 +328,7 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     exec.random_coin::eidos_observe_word
 
     # D from the boundary-inputs window.
-    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
+    padw push.BOUNDARY_INPUTS_PTR add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
     exec.random_coin::eidos_observe_word
     # => [...]
 end
@@ -346,7 +343,7 @@ end
 #! Output: [...]
 proc load_public_inputs()
     push.PUBLIC_INPUTS_PTR
-    exec.layout::claim_ptr add.8
+    push.CLAIM_PTR add.8
     padw padw padw
     # => [scratch(12), src, dst, ...]
     repeat.4 exec.public_inputs::copy_base_to_extension_double_word end

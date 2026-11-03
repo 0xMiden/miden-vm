@@ -6,7 +6,11 @@ use {
     PROOF_ORDER_IDS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::constraints_eval_inputs
-use miden::core::sys::pvm::layout
+use {
+    ACE_CIRCUIT_STREAM_PTR,
+    AUXILIARY_ACE_INPUTS_PTR,
+    PUBLIC_INPUTS_PTR,
+} from miden::core::sys::pvm::layout
 
 # CONSTANTS
 # =================================================================================================
@@ -63,7 +67,7 @@ pub proc execute_constraint_evaluation_check()
     push.QUOTIENT_SHIFT_RATIO
     push.QUOTIENT_FIRST_SHIFT
     push.QUOTIENT_FIRST_WEIGHT
-    exec.layout::auxiliary_ace_inputs_ptr
+    push.AUXILIARY_ACE_INPUTS_PTR
     push.LOG_AIR_TRACE_LENGTHS_PTR
     push.NUM_AIRS
     push.MAX_CYCLE_LEN_LOG
@@ -75,7 +79,7 @@ pub proc execute_constraint_evaluation_check()
 
     push.NUM_EVAL_GATES_CIRCUIT
     push.NUM_INPUTS_CIRCUIT
-    exec.layout::public_inputs_ptr
+    push.PUBLIC_INPUTS_PTR
     eval_circuit
     drop drop drop
 end
@@ -89,7 +93,7 @@ proc load_and_authenticate_ace_circuit
     push.ACE_CIRCUIT_DIGEST_3.ACE_CIRCUIT_DIGEST_2.ACE_CIRCUIT_DIGEST_1.ACE_CIRCUIT_DIGEST_0
     # => [ACE_CIRCUIT_DIGEST]
     adv.push_mapval
-    exec.layout::ace_circuit_stream_ptr
+    push.ACE_CIRCUIT_STREAM_PTR
     push.ACE_STREAM_INIT_CV_3.ACE_STREAM_INIT_CV_2.ACE_STREAM_INIT_CV_1.ACE_STREAM_INIT_CV_0
     padw padw
     # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]
@@ -118,7 +122,7 @@ end
 #! Outputs: []
 proc stage_air_fold_coefficients
     push.PROOF_ORDER_IDS_PTR
-    exec.layout::auxiliary_ace_inputs_ptr add.92
+    push.AUXILIARY_ACE_INPUTS_PTR add.92
     padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR drop drop
     push.0.1
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]

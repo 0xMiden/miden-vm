@@ -21,8 +21,12 @@ use {
     RELATION_DIGEST_3,
 } from miden::core::sys::vm::parameters
 use {
+    CLAIM_COMMITMENT_PTR,
+    CLAIM_PTR,
     DEFERRED_ROOT_PTR,
     KERNEL_COMMITMENT_PTR,
+    KERNEL_WITNESS_PTR,
+    NUM_KERNEL_PROCEDURES_PTR,
 } from miden::core::sys::vm::layout
 use miden::core::mem
 use miden::core::stark::utils
@@ -143,10 +147,10 @@ proc materialize_kernel_witness()
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.layout::num_kernel_procedures_ptr mem_store
+    dup mem_store.NUM_KERNEL_PROCEDURES_PTR
     # => [num_kernel_procedures, K, ...]
 
-    exec.layout::kernel_witness_ptr swap
+    push.KERNEL_WITNESS_PTR swap
     push.KERNEL_DOMAIN_TAG
     exec.mem::pipe_words_to_memory_in_domain
     # => [K', end_ptr, K, ...]
@@ -173,7 +177,7 @@ end
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
-    exec.layout::num_kernel_procedures_ptr mem_load
+    mem_load.NUM_KERNEL_PROCEDURES_PTR
     add.CORE_BOUNDARY_LOOKUP_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
@@ -210,9 +214,9 @@ end
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
 #!
-#! The verifier fetches the kernel digest list from the advice map under K, copies it to
-#! `layout::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
-#! claim commitment and checks the kernel-ROM boundary against this list.
+#! The verifier fetches the kernel digest list from the advice map under K, stores it in verifier
+#! memory, and checks that it hashes to K. It binds the transcript to the claim commitment and
+#! checks the kernel-ROM boundary against this list.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
 #! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
@@ -253,10 +257,10 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
-    exec.layout::claim_commitment_ptr mem_storew_le
+    mem_storew_le.CLAIM_COMMITMENT_PTR
     # => [CLAIM_COMMITMENT, pad(12)]
 
-    exec.layout::claim_ptr exec.claim::materialize_claim
+    push.CLAIM_PTR exec.claim::materialize_claim
     # => [scratch(16)]
 
     # --- Prepare MVM verifier state --------------------------------------------------------------

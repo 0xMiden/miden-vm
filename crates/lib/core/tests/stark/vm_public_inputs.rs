@@ -66,7 +66,7 @@ fn public_input_transcript_matches_rust_challenger() {
             QUERY_POW_BITS_PTR
         }} from miden::core::stark::constants
         use miden::core::stark::random_coin
-        use miden::core::sys::vm::layout
+        use {{CLAIM_COMMITMENT_PTR, CLAIM_PTR}} from miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
 
         {COPY_ADVICE_TO_MEM}
@@ -79,9 +79,9 @@ fn public_input_transcript_matches_rust_challenger() {
             exec.vm::load_air_context
 
             # Stage the claim region and commitment the way `vm::verify_proof` leaves them.
-            push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr exec.copy_advice_to_mem
+            push.{NUM_CLAIM_ELEMENTS} push.CLAIM_PTR exec.copy_advice_to_mem
             push.{ch3}.{ch2}.{ch1}.{ch0}
-            exec.layout::claim_commitment_ptr mem_storew_le dropw
+            push.CLAIM_COMMITMENT_PTR mem_storew_le dropw
             exec.public_inputs::stage_boundary_inputs
 
             exec.random_coin::init_seed
@@ -276,6 +276,9 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
         use miden::core::stark::random_coin
         use {{LOG_TRACE_LENGTH_PTR, RELATION_DIGEST_PTR}} from miden::core::stark::constants
         use miden::core::sys::vm::layout
+        use {{
+            CLAIM_COMMITMENT_PTR, CLAIM_PTR, KERNEL_WITNESS_PTR, NUM_KERNEL_PROCEDURES_PTR
+        }} from miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
 
         {COPY_ADVICE_TO_MEM}
@@ -285,14 +288,14 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
             # Copy kernel digests (4·num_kernel_procedures felts) from advice into the witness
             # region. Build [dst=KERNEL_WITNESS_PTR, count=4N].
-            dup mul.4 exec.layout::kernel_witness_ptr
+            dup mul.4 push.KERNEL_WITNESS_PTR
             exec.copy_advice_to_mem
 
             # Copy the full claim encoding P | K | I | O into verifier-owned memory.
-            push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr
+            push.{NUM_CLAIM_ELEMENTS} push.CLAIM_PTR
             exec.copy_advice_to_mem
 
-            exec.layout::num_kernel_procedures_ptr mem_store
+            push.NUM_KERNEL_PROCEDURES_PTR mem_store
             exec.public_inputs::stage_boundary_inputs
 
             push.10 exec.layout::set_core_trace_length_log
@@ -302,7 +305,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             push.16 mem_store.LOG_TRACE_LENGTH_PTR
             push.4.3.2.1 mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
-            exec.layout::claim_commitment_ptr mem_storew_le dropw
+            push.CLAIM_COMMITMENT_PTR mem_storew_le dropw
 
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs

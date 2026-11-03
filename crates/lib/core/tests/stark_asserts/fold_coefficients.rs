@@ -19,9 +19,19 @@ const FOLD_STACK_SENTINELS: [u64; 4] = [8_001, 8_002, 8_003, 8_004];
 const FOLD_STACK_SENTINEL_PTR: u32 = 1_100;
 
 /// Exposes the generated evaluator's private staging procedure in a test module.
-/// Its body is unchanged, and its layout accessors resolve to the production relation.
+/// Its body is unchanged, and its address constant comes from the production relation.
 fn production_fold_staging_module(relation: &str, evaluator_source: &str) -> String {
     const HEADER: &str = "proc stage_air_fold_coefficients";
+    let constants_module = evaluator_source
+        .split("use {")
+        .find_map(|import| {
+            let (names, module) = import.split_once("} from ")?;
+            names
+                .split(',')
+                .any(|name| name.trim() == "AUXILIARY_ACE_INPUTS_PTR")
+                .then(|| module.lines().next().expect("import has a module").trim())
+        })
+        .expect("the evaluator imports AUXILIARY_ACE_INPUTS_PTR");
     let start = evaluator_source
         .find(HEADER)
         .unwrap_or_else(|| panic!("{relation}: the evaluator declares no fold staging"));
@@ -30,7 +40,8 @@ fn production_fold_staging_module(relation: &str, evaluator_source: &str) -> Str
     format!(
         "use {{
             CONSTRAINT_COMPOSITION_COEFS_PTR, PROOF_ORDER_IDS_PTR
-        }} from miden::core::stark::constants\nuse miden::core::sys::{relation}::layout\n\n\
+        }} from miden::core::stark::constants\n\
+         use {{AUXILIARY_ACE_INPUTS_PTR}} from {constants_module}\n\n\
          pub {HEADER}{}\n",
         &body[..end]
     )

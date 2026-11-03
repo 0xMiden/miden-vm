@@ -40,8 +40,8 @@ fn stage_statement_and_shape() -> String {
         r#"
         # Both words must be overwritten, including every high extension coordinate.
         push.99.98.97.96
-        exec.layout::public_inputs_ptr mem_storew_le
-        exec.layout::public_inputs_ptr add.4 mem_storew_le dropw
+        push.PUBLIC_INPUTS_PTR mem_storew_le
+        push.PUBLIC_INPUTS_PTR add.4 mem_storew_le dropw
 
         {root}
         exec.public_inputs::stage_public_root
@@ -65,7 +65,7 @@ fn transcript_source() -> String {
             RELATION_DIGEST_PTR
         }} from miden::core::stark::constants
         use miden::core::stark::random_coin
-        use miden::core::sys::pvm::layout
+        use {{PUBLIC_INPUTS_PTR}} from miden::core::sys::pvm::layout
         use miden::core::sys::pvm::public_inputs
 
         begin
