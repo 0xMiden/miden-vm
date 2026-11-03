@@ -136,6 +136,7 @@ pub(crate) struct State {
     admission: Arc<Semaphore>,
     ingress: Arc<Semaphore>,
     health_ingress: Arc<Semaphore>,
+    health_watch_ingress: Arc<Semaphore>,
     worker: Arc<Mutex<()>>,
     // Serializes only shutdown and dispatch; never held while proving or awaiting.
     dispatch: DispatchMutex<()>,
@@ -158,6 +159,7 @@ impl State {
             admission: Arc::new(Semaphore::new(config.capacity().get())),
             ingress: Arc::new(Semaphore::new(config.capacity().get())),
             health_ingress: Arc::new(Semaphore::new(config.capacity().get())),
+            health_watch_ingress: Arc::new(Semaphore::new(config.capacity().get())),
             config,
             prover,
             worker: Arc::new(Mutex::new(())),
@@ -197,6 +199,10 @@ impl State {
 
     pub fn health_ingress_semaphore(&self) -> Arc<Semaphore> {
         Arc::clone(&self.health_ingress)
+    }
+
+    pub fn health_watch_ingress_semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.health_watch_ingress)
     }
 
     fn prove<P: InputPolicy>(&self, bytes: &[u8]) -> Result<ProveResponse, Status> {

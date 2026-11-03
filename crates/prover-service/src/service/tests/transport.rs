@@ -346,10 +346,10 @@ async fn complete_unary_messages_wait_for_eof_and_reject_delayed_trailing_bytes(
             let body = StreamBody::new(tokio_stream::wrappers::ReceiverStream::new(receiver));
             let mut response =
                 tokio::spawn(sender.send_request(request_to(running.address, path, body)));
-            let allowance = if path == PROVE_PATH {
-                &running.service.state.ingress
-            } else {
-                &running.service.state.health_ingress
+            let allowance = match path {
+                PROVE_PATH => &running.service.state.ingress,
+                "/grpc.health.v1.Health/Watch" => &running.service.state.health_watch_ingress,
+                _ => &running.service.state.health_ingress,
             };
             available(allowance, 0).await;
             // Keep the first complete message on the wire while EOF is withheld.
@@ -670,9 +670,19 @@ async fn incomplete_health_bodies_are_bounded_and_have_deadlines() {
             StreamBody::new(tokio_stream::wrappers::ReceiverStream::new(body_receiver)),
         ));
         let response = tokio::spawn(response);
-        available(&running.service.state.health_ingress, 0).await;
+        let is_watch = path == "/grpc.health.v1.Health/Watch";
+        let allowance = if is_watch {
+            &running.service.state.health_watch_ingress
+        } else {
+            &running.service.state.health_ingress
+        };
+        available(allowance, 0).await;
         let mut health = health_client(running.address).await;
-        let error = health.check(HealthCheckRequest { service: "".into() }).await.unwrap_err();
+        let error = if is_watch {
+            health.watch(HealthCheckRequest { service: "".into() }).await.unwrap_err()
+        } else {
+            health.check(HealthCheckRequest { service: "".into() }).await.unwrap_err()
+        };
         assert_eq!(error.code(), Code::ResourceExhausted);
         assert_eq!(code(error), ErrorCode::QueueFull);
         assert_eq!(
@@ -690,7 +700,7 @@ async fn incomplete_health_bodies_are_bounded_and_have_deadlines() {
         let error = Status::from_header_map(response.headers()).unwrap();
         assert_eq!(error.code(), Code::DeadlineExceeded);
         assert_eq!(code(error), ErrorCode::DeadlineExceeded);
-        available(&running.service.state.health_ingress, 1).await;
+        available(allowance, 1).await;
         assert_eq!(
             health
                 .check(HealthCheckRequest { service: "".into() })
@@ -726,10 +736,10 @@ async fn shutdown_interrupts_incomplete_bodies_without_peer_cooperation() {
             StreamBody::new(tokio_stream::wrappers::ReceiverStream::new(body_receiver)),
         ));
         let response = tokio::spawn(response);
-        let allowance = if path == PROVE_PATH {
-            &running.service.state.ingress
-        } else {
-            &running.service.state.health_ingress
+        let allowance = match path {
+            PROVE_PATH => &running.service.state.ingress,
+            "/grpc.health.v1.Health/Watch" => &running.service.state.health_watch_ingress,
+            _ => &running.service.state.health_ingress,
         };
         available(allowance, 0).await;
         running.service.state.begin_shutdown();
@@ -918,7 +928,7 @@ async fn stalled_response_retains_capacity_and_expires_without_shutdown() {
 }
 
 #[tokio::test]
-async fn idle_health_watch_survives_response_deadline_and_releases_capacity() {
+async fn idle_health_watch_is_bounded_and_leaves_checks_available() {
     let config = ServerConfig::new(8 << 20, 8 << 20, Duration::from_millis(100), 1, 1).unwrap();
     let mut service = ProvingService::new(config);
     fake(&mut service, Arc::new(|_| Ok(vec![1])));
@@ -932,15 +942,11 @@ async fn idle_health_watch_survives_response_deadline_and_releases_capacity() {
     assert_eq!(watch.message().await.unwrap().unwrap().status(), ServingStatus::Serving);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(timeout(Duration::from_millis(25), watch.message()).await.is_err());
-    assert_eq!(running.service.state.health_ingress.available_permits(), 0);
+    assert_eq!(running.service.state.health_watch_ingress.available_permits(), 0);
     assert_eq!(
-        code(health.check(HealthCheckRequest { service: String::new() }).await.unwrap_err()),
+        code(health.watch(HealthCheckRequest { service: String::new() }).await.unwrap_err()),
         ErrorCode::QueueFull
     );
-    let mut client = running.client().await;
-    assert_eq!(client.prove(request(bytes())).await.unwrap().into_inner().execution_proof, [1]);
-    drop(watch);
-    available(&running.service.state.health_ingress, 1).await;
     assert_eq!(
         health
             .check(HealthCheckRequest { service: String::new() })
@@ -950,5 +956,16 @@ async fn idle_health_watch_survives_response_deadline_and_releases_capacity() {
             .status(),
         ServingStatus::Serving
     );
+    let mut client = running.client().await;
+    assert_eq!(client.prove(request(bytes())).await.unwrap().into_inner().execution_proof, [1]);
+    drop(watch);
+    available(&running.service.state.health_watch_ingress, 1).await;
+    let mut watch = health
+        .watch(HealthCheckRequest { service: String::new() })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(watch.message().await.unwrap().unwrap().status(), ServingStatus::Serving);
+    drop(watch);
     running.stop().await;
 }

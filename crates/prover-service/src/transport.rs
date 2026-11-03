@@ -346,7 +346,11 @@ where
     fn call(&mut self, mut request: http::Request<Body>) -> Self::Future {
         let inner = self.inner.clone();
         let state = Arc::clone(&self.state);
-        let ingress = Arc::clone(&self.ingress);
+        let ingress = if request.uri().path() == "/grpc.health.v1.Health/Watch" {
+            state.health_watch_ingress_semaphore()
+        } else {
+            Arc::clone(&self.ingress)
+        };
         let timeout = state.config.request_timeout();
         let message_limit = self.message_limit;
         Box::pin(async move {

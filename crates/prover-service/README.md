@@ -75,13 +75,13 @@ cached preprocessing. Precompile preparation happens before the precompile
 prover's memory check. Witness decoding and transport buffers also consume memory.
 The service bounds concurrent proof ingress before protobuf decoding and retains
 that allowance through response delivery, including bytes buffered by HTTP/2.
-It applies separate witness-field and response-proof limits. Health has its own
-allowance equal to capacity, with 1 KiB message limits. Health watches occupy a
-health slot until closed, and proof traffic cannot consume those slots. These
-controls do not impose a total
-RSS ceiling or an open-connection limit. Apply deployment limits when a hard
-process bound is required. Running two instances permits two active proofs and
-requires memory for both instances.
+It applies separate witness-field and response-proof limits. Health `Check` and
+`Watch` calls have separate allowances equal to capacity, with 1 KiB message
+limits. Watches retain their slots until their streams and buffered responses are
+released, without consuming slots for checks or proof traffic. These controls do
+not impose a total RSS ceiling or an open-connection limit. Apply deployment
+limits when a hard process bound is required. Running two instances permits two
+active proofs and requires memory for both instances.
 
 The request timeout covers request decoding, queue wait, and waiting for a proof
 response. A started synchronous proof cannot be interrupted. Its worker and
