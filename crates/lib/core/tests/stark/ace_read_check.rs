@@ -41,7 +41,7 @@ pub(super) fn assert_proof_stream_read_sections(
     let ood_felts = usize::try_from(aux_bus_boundary_ptr - ood_evaluations_ptr)
         .expect("OOD frame size fits usize");
 
-    let public_ptr = read(stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")).as_canonical_u64() as u32;
+    let public_ptr = vm_layout_const("PUBLIC_INPUTS_PTR");
     for i in 0..32 {
         assert_eq!(
             read(public_ptr + 2 * i as u32),
@@ -164,7 +164,7 @@ fn ace_read_pointers_match_masm_layout() {
 /// Each pair of consecutive base felts forms one extension field element.
 /// The returned vector has `layout.total_inputs` entries.
 fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<QuadFelt> {
-    let pi_ptr = read(stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")).as_canonical_u64() as u32;
+    let pi_ptr = vm_layout_const("PUBLIC_INPUTS_PTR");
     let aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR");
 
     assert!(

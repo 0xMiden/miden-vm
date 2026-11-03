@@ -93,10 +93,7 @@ pub const DOMAIN_OFFSET_INV_PTR = 3223322636
 ### Address storing the trace-domain generator.
 pub const TRACE_DOMAIN_GENERATOR_PTR = 3223322637
 
-### Address storing a pointer to the public inputs.
-pub const PUBLIC_INPUTS_ADDRESS_PTR = 3223322638
-
-### Word-alignment padding before commitments: 1 felt at 3223322639..3223322640.
+### Word-alignment padding before commitments: 2 felts at 3223322638..3223322640.
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 pub const MAIN_TRACE_COM_PTR = 3223322640

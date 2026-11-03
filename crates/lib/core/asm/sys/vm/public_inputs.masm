@@ -3,7 +3,6 @@ use {
     AUX_ALPHA_C1_PTR,
     AUX_BETA_C1_PTR,
     AUX_RAND_ELEM_PTR,
-    PUBLIC_INPUTS_ADDRESS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::public_inputs
@@ -100,21 +99,17 @@ const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 #! Input:  [...]
 #! Output: [...]
 pub proc process_public_inputs()
-    # 1) Store the ACE public-input pointer.
-    push.PUBLIC_INPUTS_PTR mem_store.PUBLIC_INPUTS_ADDRESS_PTR
-    # => [...]
-
-    # 2) Absorb [CLAIM_HASH | D].
+    # Absorb [CLAIM_HASH | D].
     padw mem_loadw_le.CLAIM_COMMITMENT_PTR
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
 
-    # 3) Copy stack I/O into ACE READ. CLAIM_HASH already binds these values.
+    # Copy stack I/O into ACE READ. CLAIM_HASH already binds these values.
     exec.load_public_inputs
     # => [...]
 
-    # 4) Observe the AIR count and per-AIR log heights.
+    # Observe the AIR count and per-AIR log heights.
     exec.observe_miden_air_shape
     # => [...]
 end
@@ -341,8 +336,8 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     # => [...]
 end
 
-#! Loads the claim region's stack i/o (at `claim_ptr + 8`) and stores it at `pi_ptr` as
-#! extension field elements (each base felt at offset `2*i`, zero in the high coordinate).
+#! Copies the claim's stack inputs and outputs from `CLAIM_PTR + 8` to `PUBLIC_INPUTS_PTR`.
+#! Each base value occupies an extension-field slot: the value followed by a zero coordinate.
 #!
 #! The values are public inputs for the constraint checks only; they are NOT absorbed into the
 #! FS transcript (the transcript binds them via CLAIM_HASH).
@@ -350,7 +345,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc load_public_inputs()
-    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
+    push.PUBLIC_INPUTS_PTR
     exec.layout::claim_ptr add.8
     padw padw padw
     # => [scratch(12), src, dst, ...]

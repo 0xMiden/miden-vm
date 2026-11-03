@@ -328,7 +328,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
     let read_elem = |addr| read_memory_felt(&output, addr).as_canonical_u64();
     let boundary_inputs_ptr = vm_layout_const("BOUNDARY_INPUTS_PTR");
-    let pi_ptr = read_elem(stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")) as u32;
+    let pi_ptr = vm_layout_const("PUBLIC_INPUTS_PTR");
 
     // The boundary-inputs block contains the program digest and deferred root.
     for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {

@@ -1,6 +1,5 @@
 use {
     LOG_AIR_TRACE_LENGTHS_PTR,
-    PUBLIC_INPUTS_ADDRESS_PTR,
     RANDOM_COIN_INPUT_LENGTH_PTR,
     RANDOM_COIN_OUTPUT_LENGTH_PTR,
 } from miden::core::stark::constants
@@ -59,9 +58,6 @@ end
 pub proc process_public_inputs()
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.4 assert_eq.err="PVM process_public_inputs: preprocessed commitment is not buffered"
-
-    # Publish the dense ACE READ public-input start through the generic verifier cell.
-    push.PUBLIC_INPUTS_PTR mem_store.PUBLIC_INPUTS_ADDRESS_PTR
 
     # Observe consecutive words of the statement-and-shape stream through the streaming API.
     mem_load.PUBLIC_INPUT_2_C0_PTR

@@ -73,8 +73,9 @@ including the backward FRI query reservation and the OOD dispatch table's limit 
 The generators read the anchors as decimal literals; preserve that syntax when moving an anchor.
 
 Both generators check the compiled geometry against the ACE input layout through
-`RelationGeometry::validate_masm_layout`. The public-input prefix and its address come from that
-layout; each adapter publishes the generated address for the generic constraint evaluator.
+`RelationGeometry::validate_masm_layout`. The ACE input vector begins with the public inputs,
+and its starting address is derived from that layout. `layout::public_inputs_ptr` returns this
+address, which the generated constraint evaluator passes to `eval_circuit`.
 
 Boundaries inside the contiguous ACE vector depend on relation geometry and are generated in
 `vm/parameters.masm` and `pvm/layout.masm`. Shared fields are imported as constants; relation

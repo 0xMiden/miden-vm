@@ -13,8 +13,8 @@ use crate::AceError;
 pub struct MasmConstraintsEvalConfig<'a> {
     /// Command responsible for regenerating the artifact, shown in its header.
     pub generated_by: &'a str,
-    /// Relation-local module exposing `auxiliary_ace_inputs_ptr` and
-    /// `ace_circuit_stream_ptr`.
+    /// Relation-local module exposing `public_inputs_ptr`, `auxiliary_ace_inputs_ptr`, and
+    /// `ace_circuit_stream_ptr` as constant-address accessors.
     pub layout_module: &'a str,
     /// Number of READ variables in the encoded ACE circuit.
     pub num_inputs: usize,
@@ -120,7 +120,6 @@ pub fn render_masm_constraints_eval(
             "use {{\n",
             "    CONSTRAINT_COMPOSITION_COEFS_PTR,\n",
             "    LOG_AIR_TRACE_LENGTHS_PTR,\n",
-            "    PUBLIC_INPUTS_ADDRESS_PTR,\n",
             "    PROOF_ORDER_IDS_PTR,\n",
             "}} from miden::core::stark::constants\n",
             "use miden::core::stark::constraints_eval_inputs\n",
@@ -177,7 +176,7 @@ pub fn render_masm_constraints_eval(
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
-            "    mem_load.PUBLIC_INPUTS_ADDRESS_PTR\n",
+            "    exec.layout::public_inputs_ptr\n",
             "    eval_circuit\n",
             "    drop drop drop\n",
             "end\n\n",

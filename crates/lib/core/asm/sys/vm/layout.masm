@@ -5,6 +5,7 @@ use {
     AND8_LOOKUP_LOG_HEIGHT,
     AUXILIARY_ACE_INPUTS_PTR,
     AUX_BUS_BOUNDARY_PTR,
+    PUBLIC_INPUTS_PTR,
 } from miden::core::sys::vm::parameters
 
 ### Statement storage and ACE input boundaries for the Miden VM verifier.
@@ -74,6 +75,11 @@ end
 pub proc init_and8_lookup_trace_length_log()
     push.AND8_LOOKUP_LOG_HEIGHT
     mem_store.AND8_LOG_HEIGHT_PTR
+end
+
+#! Start of the ACE READ vector, whose public-input prefix contains the stack inputs and outputs.
+pub proc public_inputs_ptr() -> types::Address
+    push.PUBLIC_INPUTS_PTR
 end
 
 ### Normalized LogUp finals, one extension element per AIR in canonical instance order.

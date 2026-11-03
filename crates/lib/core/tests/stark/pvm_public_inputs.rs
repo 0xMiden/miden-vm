@@ -145,10 +145,6 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
         Felt::from_u8(3)
     );
 
-    assert_eq!(
-        read_memory_felt(&output, stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")),
-        Felt::from_u32(public_inputs_ptr)
-    );
     for (i, expected) in ROOT.into_iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, public_inputs_ptr + 2 * i as u32),
