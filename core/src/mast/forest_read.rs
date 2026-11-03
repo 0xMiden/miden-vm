@@ -216,58 +216,79 @@ impl<'a, C: MastForestRead + ?Sized, S: MastForestRead + ?Sized> ContentMatcher<
         })
     }
 
-    fn entries_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
-        if self.candidate.get_node_by_id(candidate_id).is_some() {
-            self.source.get_node_by_id(source_id).is_some()
-                && self.full_nodes_match(candidate_id, source_id)
-        } else if let Some(digest) = self.candidate.get_digest_by_id(candidate_id) {
-            self.source.get_digest_by_id(source_id) == Some(digest)
-        } else {
-            false
-        }
-    }
-
     fn full_nodes_match(&mut self, candidate_id: MastNodeId, source_id: MastNodeId) -> bool {
-        let pair = (candidate_id, source_id);
-        if self.matching_pairs.contains(&pair) {
+        if self.matching_pairs.contains(&(candidate_id, source_id)) {
             return true;
         }
-
-        let Some(candidate) = self.candidate.get_node_by_id(candidate_id) else {
-            return false;
-        };
-        let Some(source) = self.source.get_node_by_id(source_id) else {
-            return false;
-        };
-        if candidate.digest() != source.digest() {
+        if self.candidate.get_node_by_id(candidate_id).is_none()
+            || self.source.get_node_by_id(source_id).is_none()
+        {
             return false;
         }
 
-        let matches = match (candidate, source) {
-            (MastNode::Block(left), MastNode::Block(right)) => left == right,
-            (MastNode::Dyn(left), MastNode::Dyn(right)) => left == right,
-            (MastNode::External(left), MastNode::External(right)) => left == right,
-            (MastNode::Join(left), MastNode::Join(right)) => {
-                self.entries_match(left.first(), right.first())
-                    && self.entries_match(left.second(), right.second())
-            },
-            (MastNode::Split(left), MastNode::Split(right)) => {
-                self.entries_match(left.on_true(), right.on_true())
-                    && self.entries_match(left.on_false(), right.on_false())
-            },
-            (MastNode::Loop(left), MastNode::Loop(right)) => {
-                self.entries_match(left.body(), right.body())
-            },
-            (MastNode::Call(left), MastNode::Call(right)) => {
-                left.is_syscall() == right.is_syscall()
-                    && self.entries_match(left.callee(), right.callee())
-            },
-            _ => false,
-        };
-        if matches {
-            self.matching_pairs.insert(pair);
+        let mut pending = vec![(candidate_id, source_id, false)];
+        let mut visiting = BTreeSet::new();
+        while let Some((candidate_id, source_id, children_visited)) = pending.pop() {
+            let pair = (candidate_id, source_id);
+            if self.matching_pairs.contains(&pair) {
+                continue;
+            }
+            if children_visited {
+                visiting.remove(&pair);
+                self.matching_pairs.insert(pair);
+                continue;
+            }
+
+            let Some(candidate) = self.candidate.get_node_by_id(candidate_id) else {
+                if self
+                    .candidate
+                    .get_digest_by_id(candidate_id)
+                    .is_some_and(|digest| self.source.get_digest_by_id(source_id) == Some(digest))
+                {
+                    continue;
+                }
+                return false;
+            };
+            let Some(source) = self.source.get_node_by_id(source_id) else {
+                return false;
+            };
+            if candidate.digest() != source.digest() || !visiting.insert(pair) {
+                return false;
+            }
+
+            // Cache a parent only after all of its ordered children have matched.
+            pending.push((candidate_id, source_id, true));
+            let matches = match (candidate, source) {
+                (MastNode::Block(left), MastNode::Block(right)) => left == right,
+                (MastNode::Dyn(left), MastNode::Dyn(right)) => left == right,
+                (MastNode::External(left), MastNode::External(right)) => left == right,
+                (MastNode::Join(left), MastNode::Join(right)) => {
+                    pending.push((left.second(), right.second(), false));
+                    pending.push((left.first(), right.first(), false));
+                    true
+                },
+                (MastNode::Split(left), MastNode::Split(right)) => {
+                    pending.push((left.on_false(), right.on_false(), false));
+                    pending.push((left.on_true(), right.on_true(), false));
+                    true
+                },
+                (MastNode::Loop(left), MastNode::Loop(right)) => {
+                    pending.push((left.body(), right.body(), false));
+                    true
+                },
+                (MastNode::Call(left), MastNode::Call(right))
+                    if left.is_syscall() == right.is_syscall() =>
+                {
+                    pending.push((left.callee(), right.callee(), false));
+                    true
+                },
+                _ => false,
+            };
+            if !matches {
+                return false;
+            }
         }
-        matches
+        true
     }
 }
 
@@ -311,7 +332,6 @@ struct StoredContentIds<'a, F: MastForestRead + ?Sized> {
     forest: &'a F,
     by_node_id: BTreeMap<MastNodeId, usize>,
     by_content: BTreeMap<StoredContentKey<usize>, usize>,
-    visiting: BTreeSet<MastNodeId>,
 }
 
 impl<'a, F: MastForestRead + ?Sized> StoredContentIds<'a, F> {
@@ -320,7 +340,6 @@ impl<'a, F: MastForestRead + ?Sized> StoredContentIds<'a, F> {
             forest,
             by_node_id: BTreeMap::new(),
             by_content: BTreeMap::new(),
-            visiting: BTreeSet::new(),
         }
     }
 
@@ -328,25 +347,36 @@ impl<'a, F: MastForestRead + ?Sized> StoredContentIds<'a, F> {
         if let Some(&content_id) = self.by_node_id.get(&node_id) {
             return Some(content_id);
         }
-        if !self.visiting.insert(node_id) {
-            return None;
-        }
+        let mut pending = vec![(node_id, false)];
+        let mut visiting = BTreeSet::new();
+        while let Some((current_id, children_visited)) = pending.pop() {
+            if self.by_node_id.contains_key(&current_id) {
+                continue;
+            }
+            if !children_visited {
+                if !visiting.insert(current_id) {
+                    return None;
+                }
+                pending.push((current_id, true));
+                if let Some(node) = self.forest.get_node_by_id(current_id) {
+                    node.for_each_child(|child_id| pending.push((child_id, false)));
+                }
+                continue;
+            }
 
-        let forest = self.forest;
-        let key = (|| {
-            let node = match forest.get_node_by_id(node_id) {
-                Some(node) => node,
-                None => return Some(StoredContentKey::Opaque(forest.get_digest_by_id(node_id)?)),
+            let key = match self.forest.get_node_by_id(current_id) {
+                Some(node) => StoredContentKey::from_node(node, |child_id| {
+                    self.by_node_id.get(&child_id).copied()
+                })?,
+                None => StoredContentKey::Opaque(self.forest.get_digest_by_id(current_id)?),
             };
-            StoredContentKey::from_node(node, |child_id| self.get(child_id))
-        })();
-        self.visiting.remove(&node_id);
-        let key = key?;
+            visiting.remove(&current_id);
 
-        let next_content_id = self.by_content.len();
-        let content_id = *self.by_content.entry(key).or_insert(next_content_id);
-        self.by_node_id.insert(node_id, content_id);
-        Some(content_id)
+            let next_content_id = self.by_content.len();
+            let content_id = *self.by_content.entry(key).or_insert(next_content_id);
+            self.by_node_id.insert(current_id, content_id);
+        }
+        self.by_node_id.get(&node_id).copied()
     }
 }
 
@@ -673,6 +703,31 @@ mod tests {
                 .unwrap();
         assert_eq!(full[full_id].digest(), different_error_code[different_id].digest());
         assert!(!full.is_content_subset_of(&different_error_code));
+    }
+
+    #[test]
+    fn content_comparison_uses_an_explicit_stack_for_deep_graphs() {
+        const DEPTH: usize = 16_384;
+        let make_forest = |ops| {
+            let mut forest = MastForest::new();
+            let leaf = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut forest).unwrap();
+            let mut root = leaf;
+            for _ in 0..DEPTH {
+                root = JoinNodeBuilder::new([root, leaf]).add_to_forest(&mut forest).unwrap();
+            }
+            forest.make_root(root);
+            (forest, root)
+        };
+        let (candidate, root) = make_forest(vec![Operation::Add]);
+        let source = candidate.clone();
+        let (different, different_root) = make_forest(vec![Operation::Add, Operation::Noop]);
+        assert_eq!(candidate[root].digest(), different[different_root].digest());
+
+        assert!(candidate.is_content_subset_of(&source));
+        assert!(ContentMatcher::new(&candidate, &source).full_nodes_match(root, root));
+        assert!(
+            !ContentMatcher::new(&candidate, &different).full_nodes_match(root, different_root)
+        );
     }
 
     #[test]
