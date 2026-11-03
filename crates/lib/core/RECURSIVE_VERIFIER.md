@@ -24,7 +24,7 @@ integers and elliptic-curve parameters.
 
 | What changes | Where to edit | MASM output |
 |---|---|---|
-| VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
+| VM/PVM DEEP query computation | `crates/ace/src/compiler/deep_queries.rs` and its `templates/deep_queries.masm`, `templates/deep_query_row.masm` | `vm/deep_queries.masm`, `pvm/deep_queries.masm` |
 | VM/PVM auxiliary LogUp verification | `crates/ace/src/compiler/{aux_trace.rs,templates/aux_trace.masm}` | `vm/aux_trace.masm`, `pvm/aux_trace.masm` |
 | Shared memory anchors and capacity checks | `crates/lib/core/asm/stark/constants.masm`; `crates/ace/src/compiler/masm_memory.rs` | `vm/parameters.masm`, `pvm/layout.masm` |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
@@ -107,6 +107,12 @@ boundary corrections. The shared generated stage samples lookup challenges, abso
 auxiliary commitment and normalized sums in proof order, places the sums in canonical AIR order,
 and weights each by its trace length. It requires the weighted sum and the relation's boundary
 correction to add to zero.
+
+The DEEP query driver selects each commitment and opening index in protocol order. One row-reader
+template supplies the streaming hash, Horner reduction, and leaf-digest check for every group.
+Each relation supplies compile-time block counts, leaf-hash initializers, and preprocessed-tree
+parameters through its generated `parameters.masm`. The generators require every group to contain
+a positive whole number of eight-felt blocks.
 
 When changing the AIR set or canonical order, public-input format, or bus-message definitions,
 review the relation's `mod.masm` and `public_inputs.masm` alongside the generated files. For PVM

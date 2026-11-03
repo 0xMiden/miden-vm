@@ -3,6 +3,7 @@ use miden_core::{
     field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
     proof::{MAX_STARK_PROOF_BYTES, PrecompileProof},
 };
+use miden_crypto::hash::eidos::BLOCK_LEN as EIDOS_RATE;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
@@ -147,6 +148,33 @@ pub(super) fn check_vm_queries(source: &str) {
         data.advice_map
     );
     assert_stored_queries(&test, &expected);
+}
+
+#[test]
+fn vm_deep_queries_reject_tampered_rows() {
+    let honest = super::generate_recursive_verifier_data(
+        super::EXAMPLE_FIB_SMALL,
+        super::fib_stack_inputs(),
+        None,
+    );
+    for (blocks, message) in [
+        ("MAIN_ROW_DOUBLE_WORDS", "main query leaf hash mismatch"),
+        ("AUX_ROW_DOUBLE_WORDS", "aux query leaf hash mismatch"),
+        ("QUOTIENT_ROW_DOUBLE_WORDS", "quotient query leaf hash mismatch"),
+    ] {
+        let width = usize::try_from(super::vm_layout_const(blocks)).unwrap() * EIDOS_RATE;
+        let mut data = honest.clone();
+        // These groups have distinct row lengths in this fixture's advice map.
+        let (_, row) = data
+            .advice_map
+            .iter_mut()
+            .find(|(_, values)| values.len() == width)
+            .expect("an opened query row of the group's width");
+        row[0] += Felt::ONE;
+        let test = super::verifier_test(data);
+        // A later FRI failure must not substitute for authenticating this opening.
+        expect_assert_error_code_from_msg!(test, message);
+    }
 }
 
 pub(super) fn check_pvm_queries(test: &miden_utils_testing::Test, proof: &PrecompileProof) {

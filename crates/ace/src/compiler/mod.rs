@@ -6,6 +6,7 @@
 mod aux_trace;
 mod circuit;
 mod dag;
+mod deep_queries;
 mod encode;
 mod masm;
 mod masm_memory;
@@ -34,6 +35,7 @@ pub use self::{
     aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace},
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
+    deep_queries::render_masm_deep_queries,
     masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
     masm_memory::{MasmMemoryExtents, MasmMemoryLayout},
     ood_scatter::OodScatterPlan,

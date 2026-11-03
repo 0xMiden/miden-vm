@@ -46,6 +46,25 @@ fn row(width: usize, offset: u32) -> Vec<Felt> {
         .collect()
 }
 
+fn query_rows() -> [Vec<Felt>; 4] {
+    [
+        ("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR", 100),
+        ("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR", 200),
+        ("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR", 300),
+        ("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR", 400),
+    ]
+    .map(|(start, end, offset)| row(commitment_width(start, end), offset))
+}
+
+fn query_fixture(rows: &[Vec<Felt>; 4]) -> (String, MerkleStore) {
+    let mut store = MerkleStore::new();
+    let preprocessed_root = add_path(&mut store, &rows[0], FOLDED_INDEX, PREPROCESSED_DEPTH, 1_000);
+    let main_root = add_path(&mut store, &rows[1], FULL_INDEX, FULL_DEPTH, 2_000);
+    let aux_root = add_path(&mut store, &rows[2], FULL_INDEX, FULL_DEPTH, 3_000);
+    let quotient_root = add_path(&mut store, &rows[3], FULL_INDEX, FULL_DEPTH, 4_000);
+    (source(preprocessed_root, main_root, aux_root, quotient_root), store)
+}
+
 fn add_path(
     store: &mut MerkleStore,
     row: &[Felt],
@@ -152,12 +171,8 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
 #[test]
 fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group() {
     let result_row_ptr = stark_constant("CURRENT_TRACE_ROW_PTR");
-    let widths = [
-        commitment_width("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR"),
-        commitment_width("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR"),
-        commitment_width("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR"),
-        commitment_width("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"),
-    ];
+    let rows = query_rows();
+    let widths = rows.each_ref().map(Vec::len);
     let next_widths = [
         commitment_width("PREPROCESSED_NEXT_PTR", "MAIN_NEXT_PTR"),
         commitment_width("MAIN_NEXT_PTR", "AUX_NEXT_PTR"),
@@ -166,33 +181,13 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
     ];
     assert_eq!(widths, next_widths, "current and next PVM OOD rows must have equal geometry");
 
-    let [preprocessed_width, main_width, aux_width, quotient_width] = widths;
-    let preprocessed = row(preprocessed_width, 100);
-    let main = row(main_width, 200);
-    let aux = row(aux_width, 300);
-    let quotient = row(quotient_width, 400);
-
-    let mut store = MerkleStore::new();
-    let preprocessed_root =
-        add_path(&mut store, &preprocessed, FOLDED_INDEX, PREPROCESSED_DEPTH, 1_000);
-    let main_root = add_path(&mut store, &main, FULL_INDEX, FULL_DEPTH, 2_000);
-    let aux_root = add_path(&mut store, &aux, FULL_INDEX, FULL_DEPTH, 3_000);
-    let quotient_root = add_path(&mut store, &quotient, FULL_INDEX, FULL_DEPTH, 4_000);
-
-    let advice_map = [
-        (lmcs_leaf(&preprocessed), preprocessed.clone()),
-        (lmcs_leaf(&main), main.clone()),
-        (lmcs_leaf(&aux), aux.clone()),
-        (lmcs_leaf(&quotient), quotient.clone()),
-    ];
-
-    let program = source(preprocessed_root, main_root, aux_root, quotient_root);
+    let (program, store) = query_fixture(&rows);
+    let advice_map = rows.each_ref().map(|row| (lmcs_leaf(row), row.clone()));
     let (output, _) = build_test!(&program, &[], &[], store, advice_map)
         .execute_for_output()
         .expect("PVM DEEP-query hook must execute");
 
-    let opened_row: Vec<Felt> =
-        preprocessed.into_iter().chain(main).chain(aux).chain(quotient).collect();
+    let opened_row: Vec<Felt> = rows.into_iter().flatten().collect();
     let row_end = result_row_ptr + u32::try_from(opened_row.len()).unwrap();
     for address in [result_row_ptr - 1, row_end] {
         assert_eq!(
@@ -222,4 +217,25 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 1), Felt::from_u32(FULL_INDEX));
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 2), expected_eval[0]);
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 3), expected_eval[1]);
+}
+
+#[test]
+fn pvm_deep_query_hook_rejects_tampered_rows() {
+    let rows = query_rows();
+    let (program, store) = query_fixture(&rows);
+    for (group, message) in [
+        "preprocessed query leaf hash mismatch",
+        "main query leaf hash mismatch",
+        "aux query leaf hash mismatch",
+        "quotient query leaf hash mismatch",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // Keep the authenticated leaf digest as the key; forge only the advised row.
+        let mut advice_map = rows.each_ref().map(|row| (lmcs_leaf(row), row.clone()));
+        advice_map[group].1[0] += Felt::ONE;
+        let test = build_test!(&program, &[], &[], store.clone(), advice_map);
+        expect_assert_error_code_from_msg!(test, message);
+    }
 }

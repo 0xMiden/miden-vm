@@ -1,12 +1,10 @@
 //! Regeneration tool for the PVM recursive-verifier MASM artifacts.
 //!
-//! One order-invariant circuit serves every proof ordering, so the tool compiles that circuit from
-//! the captured chiplet AIRs and emits the memory layout, the out-of-domain ingest hook, and the
-//! constraint evaluator from the same relation geometry. Both modes first compare the circuit
-//! digest, relation digest, and circuit shape against the identity pinned in
+//! One circuit serves every proof ordering. The tool compiles it from the captured chiplet AIRs
+//! and emits the memory layout, parameters, and verifier hooks. Both modes first compare the
+//! circuit digest, relation digest, and circuit shape against the identity pinned in
 //! `miden_air::precompiles::protocol`; generation never accepts a new identity. `--check` then
-//! byte-compares every rendered file against its checked-in copy. The relation wrapper and query
-//! loaders import generated parameters; their procedure bodies are not regeneration inputs.
+//! byte-compares every rendered file against its checked-in copy.
 
 use std::{
     fmt::Write as _,
@@ -20,6 +18,7 @@ use miden_ace::{
     compiler::{
         LayoutKind, MasmAuxTraceConfig, MasmConstraintsEvalConfig, MasmMemoryExtents,
         MasmMemoryLayout, render_masm_aux_trace, render_masm_constraints_eval,
+        render_masm_deep_queries,
     },
 };
 use miden_air::precompiles::NUM_CHIPLETS;
@@ -46,6 +45,7 @@ const PVM_FIXED_BOUNDARY_PATH: &str = "../../lib/core/asm/sys/pvm/fixed_boundary
 const PVM_LAYOUT_PATH: &str = "../../lib/core/asm/sys/pvm/layout.masm";
 const PVM_OOD_FRAMES_PATH: &str = "../../lib/core/asm/sys/pvm/ood_frames.masm";
 const PVM_AUX_TRACE_PATH: &str = "../../lib/core/asm/sys/pvm/aux_trace.masm";
+const PVM_DEEP_QUERIES_PATH: &str = "../../lib/core/asm/sys/pvm/deep_queries.masm";
 
 const STARK_CONSTANTS_PATH: &str = "../../lib/core/asm/stark/constants.masm";
 
@@ -86,6 +86,8 @@ struct GeneratedArtifacts {
     constraints_eval_masm: String,
     /// Generated PVM LogUp stage, specialized to the chiplet count.
     aux_trace_masm: String,
+    /// Generated PVM DEEP query reader, specialized to the commitment-group widths.
+    deep_queries_masm: String,
 }
 
 #[derive(Clone, Debug)]
@@ -270,6 +272,10 @@ fn compute() -> Result<GeneratedArtifacts, String> {
             num_airs: NUM_CHIPLETS,
         })
         .map_err(|err| err.to_string())?,
+        deep_queries_masm: render_masm_deep_queries(
+            "make regenerate-pvm-constants",
+            "miden::core::sys::pvm::parameters",
+        ),
     })
 }
 
@@ -515,6 +521,7 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
     for (path, rendered) in [
         (PVM_LAYOUT_PATH, &artifacts.layout_masm),
         (PVM_AUX_TRACE_PATH, &artifacts.aux_trace_masm),
+        (PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm),
         (PVM_PARAMETERS_PATH, &artifacts.parameters_masm),
         (PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm),
         (PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm),
@@ -531,6 +538,7 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
 fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
     write_generated_file(PVM_AUX_TRACE_PATH, &artifacts.aux_trace_masm)?;
+    write_generated_file(PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm)?;
     write_generated_file(PVM_PARAMETERS_PATH, &artifacts.parameters_masm)?;
     write_generated_file(PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm)?;
     write_generated_file(PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;

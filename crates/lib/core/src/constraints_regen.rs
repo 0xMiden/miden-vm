@@ -10,7 +10,8 @@ use miden_ace::{
     compiler::{
         CapturedAir, CompiledRelation, LayoutKind, MasmAuxTraceConfig, MasmConstraintsEvalConfig,
         MasmMemoryExtents, MasmMemoryLayout, OodScatterPlan, RelationGeometry,
-        render_masm_aux_trace, render_masm_constraints_eval, render_proof_order_maps,
+        render_masm_aux_trace, render_masm_constraints_eval, render_masm_deep_queries,
+        render_proof_order_maps,
     },
 };
 use miden_air::vm::{
@@ -36,6 +37,7 @@ const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
 const VM_OOD_FRAMES_PATH: &str = "asm/sys/vm/ood_frames.masm";
 const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
+const VM_DEEP_QUERIES_PATH: &str = "asm/sys/vm/deep_queries.masm";
 const VM_PARAMETERS_PATH: &str = "asm/sys/vm/parameters.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
@@ -157,6 +159,10 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         constraints_eval,
         vm_ood_frames,
         vm_aux_trace,
+        vm_deep_queries: render_masm_deep_queries(
+            "make regenerate-constraints",
+            "miden::core::sys::vm::parameters",
+        ),
         vm_parameters,
     })
 }
@@ -385,7 +391,7 @@ fn render_vm_parameters(
     .unwrap();
     writeln!(output, "pub const AND8_LOOKUP_LOG_HEIGHT = {and8_log_height}").unwrap();
     writeln!(output, "pub const PREPROCESSED_TREE_DEPTH = {tree_depth}").unwrap();
-    writeln!(output, "pub const AND8_LDE_INDEX_MASK = {index_mask}").unwrap();
+    writeln!(output, "pub const PREPROCESSED_INDEX_MASK = {index_mask}").unwrap();
 
     let air_names = AIRS.iter().map(|air| air.name()).collect::<Vec<_>>().join(", ");
     writeln!(output, "\n# Per-AIR widths in canonical order: {air_names}.").unwrap();
@@ -597,12 +603,13 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
     write_file(VM_AUX_TRACE_PATH, &artifact.vm_aux_trace)?;
+    write_file(VM_DEEP_QUERIES_PATH, &artifact.vm_deep_queries)?;
     write_file(VM_PARAMETERS_PATH, &artifact.vm_parameters)?;
     println!(
         "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
-    println!("wrote VM recursive-verifier parameters, LogUp stage and OOD-frame geometry");
+    println!("wrote VM recursive-verifier parameters, LogUp stage, DEEP queries and OOD frames");
     Ok(())
 }
 
@@ -718,7 +725,7 @@ pub fn public_inputs_masm_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-/// Checks generated memory boundaries, LogUp staging and OOD routing against the AIR geometry.
+/// Checks generated parameters and verifier hooks against the AIR geometry.
 pub fn vm_geometry_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     vm_geometry_matches_artifact(&artifact)
@@ -727,12 +734,13 @@ pub fn vm_geometry_matches_air() -> Result<(), String> {
 fn vm_geometry_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
     for (path, expected) in [
         (VM_AUX_TRACE_PATH, artifact.vm_aux_trace.as_str()),
+        (VM_DEEP_QUERIES_PATH, artifact.vm_deep_queries.as_str()),
         (VM_OOD_FRAMES_PATH, artifact.vm_ood_frames.as_str()),
         (VM_PARAMETERS_PATH, artifact.vm_parameters.as_str()),
     ] {
         let actual = read_file(path).map_err(|e| e.to_string())?;
         if actual != expected {
-            return Err(format!("{path} has stale AIR-width geometry"));
+            return Err(format!("{path} is stale; run `make regenerate-constraints`"));
         }
     }
 
@@ -934,6 +942,7 @@ struct ComputedArtifacts {
     constraints_eval: String,
     vm_ood_frames: String,
     vm_aux_trace: String,
+    vm_deep_queries: String,
     vm_parameters: String,
 }
 

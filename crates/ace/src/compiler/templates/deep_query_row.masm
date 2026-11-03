@@ -1,0 +1,21 @@
+#! Streams and hashes one row of base-field coordinates, extending the Horner reduction.
+#! Requires the row values on advice and the authenticated leaf digest from `open_row` in TMP3.
+#! The caller supplies this group's LMCS initializer in `state`; the first advice load overwrites
+#! the two scratch words. The generator requires a positive block count.
+#!
+#! Inputs:  [block_scratch(8), cv(4), row_ptr, alpha_ptr, acc0, acc1, ...]
+#! Outputs: [scratch(4), row_ptr', alpha_ptr, acc0', acc1', ...]
+proc read_{{group}}_row(
+    state: types::EidosState,
+    evaluation: types::HornerState,
+) -> (word, types::HornerState)
+    repeat.{{GROUP}}_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_base
+        exec.eidos::compress
+    end
+
+    mem_loadw_le.TMP3_PTR
+    movupw.2
+    assert_eqw.err={{GROUP}}_LEAF_VALUE_MISMATCH
+end
