@@ -118,6 +118,15 @@ network connections. Listener failures return an error after proof work is joine
 
 ## Client
 
+The default `server` feature enables proving and the service binaries. Disable it
+to use the generated client without the prover or CLI dependencies. Building the
+client still requires `protoc`.
+
+```toml
+[dependencies]
+miden-prover-service = { version = "1.0.0-rc.1", default-features = false }
+```
+
 The generated `protocol::prover_service_client::ProverServiceClient` works with
 either service type. The service accepts protocol version 1 with `ExecutionWitness`
 wire version 2 and returns `ExecutionProof` format 2. These version numbers are

@@ -1,5 +1,7 @@
 use std::{
+    fmt,
     future::Future,
+    marker::PhantomData,
     sync::{Arc, Mutex as DispatchMutex},
 };
 
@@ -13,12 +15,117 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    InputPolicy, PROTOCOL_VERSION, ProvingService, ServerConfig,
+    PROTOCOL_VERSION, ServerConfig,
     failure::{prover_error, status},
     protocol::{
         ErrorCode, ProveRequest, ProveResponse, prover_service_server::ProverService as Rpc,
     },
 };
+
+mod sealed {
+    use miden_core::serde::DeserializationError;
+    use miden_processor::ExecutionWitness;
+
+    pub trait Sealed {
+        fn read(bytes: &[u8]) -> Result<ExecutionWitness, DeserializationError>;
+    }
+}
+
+/// A service input policy implemented only by [`Untrusted`] and [`Trusted`].
+pub trait InputPolicy: sealed::Sealed + Send + Sync + 'static {}
+
+/// A service that uses the bounded reader for externally supplied witness bytes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Untrusted;
+
+/// A service that accepts witness bytes retained inside a trusted proving system.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Trusted;
+
+impl sealed::Sealed for Untrusted {
+    fn read(bytes: &[u8]) -> Result<ExecutionWitness, miden_core::serde::DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
+    }
+}
+impl sealed::Sealed for Trusted {
+    fn read(bytes: &[u8]) -> Result<ExecutionWitness, miden_core::serde::DeserializationError> {
+        ExecutionWitness::read_from_bytes_trusted(bytes)
+    }
+}
+impl InputPolicy for Untrusted {}
+impl InputPolicy for Trusted {}
+
+/// A proving service whose input policy is fixed by its type.
+///
+/// Each instance owns immutable resource configuration. Cloning an instance retains
+/// its input policy and shares its worker, admission capacity, and shutdown state.
+pub struct ProvingService<P: InputPolicy = Untrusted> {
+    pub(crate) state: Arc<State>,
+    policy: PhantomData<P>,
+}
+
+impl<P: InputPolicy> Clone for ProvingService<P> {
+    fn clone(&self) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl ProvingService<Untrusted> {
+    /// Creates the default service for externally supplied witness bytes.
+    pub fn new(config: ServerConfig) -> Self {
+        Self {
+            state: Arc::new(State::new(config)),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl ProvingService<Trusted> {
+    /// Creates a service for witness bytes from trusted producers.
+    pub fn new_trusted(config: ServerConfig) -> Self {
+        Self {
+            state: Arc::new(State::new(config)),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl<P: InputPolicy> ProvingService<P> {
+    /// Returns the resource settings shared by this instance and its clones.
+    pub fn config(&self) -> &ServerConfig {
+        &self.state.config
+    }
+
+    /// Stops admission and queued jobs, then waits for any running proof to exit.
+    ///
+    /// Synchronous proving cannot be interrupted. A disconnected or timed-out job
+    /// retains its worker and admission slot until the blocking operation exits.
+    ///
+    /// # Cancel safety
+    ///
+    /// Shutdown is requested when this future is first polled. Dropping it before
+    /// then has no effect. Once polled, admission remains closed and queued jobs
+    /// remain cancelled even if this future is dropped. Active proof jobs continue.
+    /// Call `shutdown().await` again on this instance or a clone to finish joining
+    /// them. Also retain and await the serving future to finish graceful health
+    /// and connection cleanup.
+    pub async fn shutdown(&self) {
+        self.state.begin_shutdown();
+        self.state.tasks.wait().await;
+    }
+}
+
+impl<P: InputPolicy> fmt::Debug for ProvingService<P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProvingService")
+            .field("config", self.config())
+            .finish_non_exhaustive()
+    }
+}
 
 #[cfg(test)]
 type TestProver = Arc<dyn Fn(ExecutionWitness) -> Result<Vec<u8>, Status> + Send + Sync>;
