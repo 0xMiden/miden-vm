@@ -127,8 +127,9 @@ pub(crate) trait StackInterface {
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
     ///
-    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
-    /// word.
+    /// That is, for `start_idx=0` the top element of the stack will be at the first position in
+    /// the word, `Word[0]`. This is the reverse of the slice returned by [`Self::top()`], which
+    /// keeps the top of the stack at its last index.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -137,8 +138,8 @@ pub(crate) trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
-    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
+    /// - `get_word(0)` returns `[a, b, c, d]`,
+    /// - `get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
     ///
     /// Word\[0\] corresponds to the top of stack.
