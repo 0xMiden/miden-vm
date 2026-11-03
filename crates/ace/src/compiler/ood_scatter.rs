@@ -155,7 +155,7 @@ impl OodScatterPlan {
     }
 
     /// Table space used by the row pointer, dispatch pairs and procedure digests, in felts.
-    /// Relation-specific proof-order maps may follow this region or live elsewhere.
+    /// The proof-order maps occupy separate shared arrays.
     pub fn table_felts(&self) -> usize {
         self.pipe_digests().end
     }
@@ -169,47 +169,21 @@ impl OodScatterPlan {
         self.pipe_digests().start + WORD_FELTS * index
     }
 
-    /// Renders pipe helpers, the supplied proof-order map pass, table staging, and OOD ingest.
+    /// Renders pipe helpers, the supplied proof-order pass, table staging, and OOD ingest.
     ///
-    /// The enclosing MASM module must import `types` and its relation's `layout`.
-    /// The layout supplies the scatter-table pointer and proof-order map accessors.
+    /// The enclosing module imports `types`, `OOD_SCATTER_TABLE_PTR` and
+    /// `PROOF_ORDER_POSITIONS_PTR` from the shared STARK modules. The generator must check
+    /// [`Self::table_felts`] against the shared scatter reservation before emitting the module.
     pub fn render(&self, proof_order_maps: &str) -> String {
-        self.render_with_table_base(proof_order_maps, None)
-    }
-
-    /// Renders for a fixed table base, folding record addresses at assembly time.
-    ///
-    /// Uses the same module imports and stack contracts as [`Self::render`]. `table_base` must
-    /// be a MASM constant expression for the aligned u32 address returned by
-    /// `layout::ood_scatter_table_ptr`; table staging and row ingestion must use the same base.
-    pub fn render_with_static_table(&self, proof_order_maps: &str, table_base: &str) -> String {
-        self.render_with_table_base(proof_order_maps, Some(table_base))
-    }
-
-    fn render_with_table_base(&self, proof_order_maps: &str, table_base: Option<&str>) -> String {
         let mut out = String::new();
-        if let Some(base) = table_base {
-            writeln!(out, "const OOD_SCATTER_TABLE_PTR = {base}")
-                .expect("writing to String cannot fail");
-            for (record, offset) in self.proof_order_pairs().step_by(WORD_FELTS).enumerate() {
-                writeln!(
-                    out,
-                    "const OOD_SCATTER_RECORD_{record}_PTR = OOD_SCATTER_TABLE_PTR + {offset}",
-                )
-                .expect("writing to String cannot fail");
-            }
-            out.push('\n');
+        for (record, offset) in self.proof_order_pairs().step_by(WORD_FELTS).enumerate() {
+            writeln!(
+                out,
+                "const OOD_SCATTER_RECORD_{record}_PTR = OOD_SCATTER_TABLE_PTR + {offset}",
+            )
+            .expect("writing to String cannot fail");
         }
-        let row_base_load = if table_base.is_some() {
-            "mem_load.OOD_SCATTER_TABLE_PTR"
-        } else {
-            "exec.layout::ood_scatter_table_ptr mem_load"
-        };
-        let row_base_store = if table_base.is_some() {
-            "mem_store.OOD_SCATTER_TABLE_PTR"
-        } else {
-            "exec.layout::ood_scatter_table_ptr mem_store"
-        };
+        out.push('\n');
         for &blocks in &self.lengths {
             writeln!(
                 out,
@@ -240,7 +214,7 @@ end
 #! Outputs: []
 #! Invocation: exec
 pub proc stage_ood_scatter_table()
-    exec.layout::ood_scatter_table_ptr
+    push.OOD_SCATTER_TABLE_PTR
     # => [table]
 "#,
         );
@@ -252,7 +226,7 @@ pub proc stage_ood_scatter_table()
             )
             .expect("writing to String cannot fail");
         }
-        out.push_str("    exec.layout::proof_order_positions_ptr\n    # => [pos_ptr, table]\n");
+        out.push_str("    push.PROOF_ORDER_POSITIONS_PTR\n    # => [pos_ptr, table]\n");
         let dispatched: Vec<_> =
             self.groups.iter().filter(|group| group.dispatch_index.is_some()).collect();
         if !dispatched.is_empty() {
@@ -311,7 +285,7 @@ pub proc process_row_ood_evaluations(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    dup.12 {row_base_store}
+    dup.12 mem_store.OOD_SCATTER_TABLE_PTR
     # Dispatch records reuse rate slots; every nonempty pipe overwrites both rate words.
     # Word swaps expose the destination beside the record, preserving CV and Horner state.
 "#,
@@ -323,17 +297,12 @@ pub proc process_row_ood_evaluations(
                 match group.dispatch_index {
                     Some(index) => {
                         let record = index / 2 * self.num_airs + position;
-                        let record_load = if table_base.is_some() {
-                            format!("mem_loadw_le.OOD_SCATTER_RECORD_{record}_PTR")
-                        } else {
-                            let offset = OOD_SCATTER_SLOTS_OFFSET + WORD_FELTS * record;
-                            format!("exec.layout::ood_scatter_table_ptr add.{offset} mem_loadw_le")
-                        };
+                        let record_load = format!("mem_loadw_le.OOD_SCATTER_RECORD_{record}_PTR");
                         writeln!(
                             out,
                             r#"    # {group} group, proof position {position}
     {record_load}{select}
-    {row_base_load} add
+    mem_load.OOD_SCATTER_TABLE_PTR add
     swapw swapw.3 swap.4 swapw.3
     # => [scratch(5), pipe_address, scratch(2), cv(4), ptr, alpha_ptr, acc0, acc1]
     dup.5 dynexec"#,
@@ -353,7 +322,7 @@ pub proc process_row_ood_evaluations(
                         if segment.dst != 0 {
                             writeln!(
                                 out,
-                                "    {row_base_load} add.{}\n    swap.13 drop",
+                                "    mem_load.OOD_SCATTER_TABLE_PTR add.{}\n    swap.13 drop",
                                 segment.dst,
                             )
                             .expect("writing to String cannot fail");

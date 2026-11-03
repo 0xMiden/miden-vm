@@ -4,6 +4,7 @@ use {
     CONSTRAINT_COMPOSITION_COEFS_PTR,
     LOG_AIR_TRACE_LENGTHS_PTR,
     PUBLIC_INPUTS_ADDRESS_PTR,
+    PROOF_ORDER_IDS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::constraints_eval_inputs
 use miden::core::sys::vm::layout
@@ -117,7 +118,7 @@ end
 #! Inputs:  []
 #! Outputs: []
 proc stage_air_fold_coefficients
-    exec.layout::proof_order_ids_ptr
+    push.PROOF_ORDER_IDS_PTR
     exec.layout::auxiliary_ace_inputs_ptr add.44
     padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR drop drop
     push.0.1

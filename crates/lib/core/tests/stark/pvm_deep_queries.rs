@@ -22,6 +22,7 @@ const FOLDED_INDEX: u32 = FULL_INDEX & ((1 << PREPROCESSED_DEPTH) - 1);
 const QUERY_PTR: u32 = 1_000;
 const QUERY_END_PTR: u32 = QUERY_PTR + 4;
 const ALPHA_PTR: u32 = 2_000;
+const ROW_SENTINEL: u32 = 123_456;
 
 const ALPHA: [u64; 2] = [3, 5];
 const DOMAIN_GENERATOR: u64 = 7;
@@ -77,8 +78,11 @@ fn lmcs_leaf(row: &[Felt]) -> Word {
 }
 
 fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_root: Word) -> String {
-    let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
-    let preprocessed_com_ptr = pvm_layout_const("PREPROCESSED_COM_PTR");
+    let result_row_ptr = stark_constant("CURRENT_TRACE_ROW_PTR");
+    let row_width =
+        u32::try_from(commitment_width("PREPROCESSED_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"))
+            .unwrap();
+    let preprocessed_com_ptr = stark_constant("PREPROCESSED_TRACE_COM_PTR");
     format!(
         r#"
         use {{
@@ -87,6 +91,10 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
         use miden::core::sys::pvm::deep_queries
 
         begin
+            # Detect writes outside the query-row buffer.
+            push.{ROW_SENTINEL} mem_store.{row_before}
+            push.{ROW_SENTINEL} mem_store.{row_after}
+
             # Query word: [natural index, full tree depth, natural index, 0].
             push.0.{index}.{depth}.{index} push.{query_ptr} mem_storew_le dropw
 
@@ -126,6 +134,8 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
         alpha1 = ALPHA[1],
         alpha_ptr = ALPHA_PTR,
         result_row_ptr = result_row_ptr,
+        row_before = result_row_ptr - 1,
+        row_after = result_row_ptr + row_width,
         domain_generator = DOMAIN_GENERATOR,
         lde_size = 1u32 << FULL_DEPTH,
         preprocessed_root = masm_push_word(&preprocessed_root),
@@ -141,7 +151,7 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
 
 #[test]
 fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group() {
-    let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
+    let result_row_ptr = stark_constant("CURRENT_TRACE_ROW_PTR");
     let widths = [
         commitment_width("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR"),
         commitment_width("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR"),
@@ -183,14 +193,14 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
 
     let opened_row: Vec<Felt> =
         preprocessed.into_iter().chain(main).chain(aux).chain(quotient).collect();
-    let scratch_row_width = pvm_layout_const("PREPROCESSED_COM_PTR")
-        .checked_sub(result_row_ptr)
-        .expect("PVM query scratch precedes the preprocessed commitment");
-    assert_eq!(
-        opened_row.len(),
-        usize::try_from(scratch_row_width).expect("PVM query scratch extent fits in usize"),
-        "OOD commitment-group widths must match the independently allocated query scratch row"
-    );
+    let row_end = result_row_ptr + u32::try_from(opened_row.len()).unwrap();
+    for address in [result_row_ptr - 1, row_end] {
+        assert_eq!(
+            read_memory_felt(&output, address),
+            Felt::from_u32(ROW_SENTINEL),
+            "query-row boundary at {address} was overwritten"
+        );
+    }
     for (i, expected) in opened_row.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, result_row_ptr + i as u32),

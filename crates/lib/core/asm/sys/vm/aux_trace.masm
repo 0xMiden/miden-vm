@@ -1,22 +1,18 @@
 use {
     AUX_TRACE_COM_PTR,
+    PROOF_ORDER_POSITIONS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::random_coin
 use miden::core::sys::vm::public_inputs
 use miden::core::sys::vm::layout
-use {
-    AIR_1_PROOF_POSITION_PTR,
-    AIR_2_PROOF_POSITION_PTR,
-    AIR_3_PROOF_POSITION_PTR,
-    AUX_BOUNDARY_WORD_1_PTR,
-    C_TOTAL_C1_PTR,
-    C_TOTAL_PTR,
-} from miden::core::sys::vm::layout
-use {
-    AUX_BUS_BOUNDARY_PTR,
-    PROOF_ORDER_POSITIONS_PTR,
-} from miden::core::sys::vm::parameters
+use {AUX_BOUNDARY_WORD_1_PTR, C_TOTAL_C1_PTR, C_TOTAL_PTR} from miden::core::sys::vm::layout
+use {AND8_LOOKUP_LOG_HEIGHT, AUX_BUS_BOUNDARY_PTR} from miden::core::sys::vm::parameters
+
+# Immediate addresses for the relation's live AIR indices.
+const AIR_1_PROOF_POSITION_PTR = PROOF_ORDER_POSITIONS_PTR + 1
+const AIR_2_PROOF_POSITION_PTR = PROOF_ORDER_POSITIONS_PTR + 2
+const AIR_3_PROOF_POSITION_PTR = PROOF_ORDER_POSITIONS_PTR + 3
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
 #! count `n = 2^log_height`.
@@ -46,7 +42,7 @@ end
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, log_3, ...]
 pub proc push_canonical_log_heights() -> (u8, u8, u8, u8)
-    exec.layout::get_and8_lookup_trace_length_log
+    push.AND8_LOOKUP_LOG_HEIGHT
     exec.layout::get_eidos_compression_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     exec.layout::get_core_trace_length_log

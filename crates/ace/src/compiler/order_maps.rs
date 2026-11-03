@@ -19,25 +19,6 @@ use crate::{
     compiler::proof_order::{PROOF_ORDER_KEY_STRIDE, sorting_network},
 };
 
-/// Relation-specific inputs to [`render_proof_order_maps`].
-#[derive(Clone, Debug)]
-pub struct ProofOrderMapsConfig<'a> {
-    /// Number of AIR instances; the pass sorts exactly this many keys.
-    pub num_airs: usize,
-    /// MASM leaving the base of the per-AIR log-height cells on the stack.
-    pub heights_ptr: &'a str,
-    /// MASM leaving the `pos_by_id` table base on the stack.
-    pub pos_by_id_ptr: &'a str,
-    /// MASM leaving the `id_by_pos` table base on the stack.
-    pub id_by_pos_ptr: &'a str,
-    /// Read the heights with one `mem_loadw_le` instead of one `mem_load` per AIR. Only used for
-    /// four AIRs (one word), and only valid when the height cells are word-aligned.
-    pub word_load_heights: bool,
-    /// Write `id_by_pos` with one `mem_storew_le` per four proof positions instead of one
-    /// `mem_store` each. Only valid when the `id_by_pos` table is word-aligned.
-    pub word_store_ids: bool,
-}
-
 /// Tracks the operand stack while the pass is rendered, so every `dup.n`/`movup.n` index is
 /// computed from the layout rather than written by hand.
 struct Stack {
@@ -218,18 +199,14 @@ impl Stack {
 /// writes exactly `num_airs` cells into each table. It must run after the heights have been
 /// bounded: the packed keys assume every height is a validated `u32` below
 /// `2^32 / PROOF_ORDER_KEY_STRIDE`.
-pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<String, AceError> {
-    let num_airs = config.num_airs;
+///
+/// The enclosing module imports the shared `LOG_AIR_TRACE_LENGTHS_PTR`,
+/// `PROOF_ORDER_POSITIONS_PTR` and `PROOF_ORDER_IDS_PTR` constants. Their arrays must be
+/// word-aligned and contain at least `num_airs` cells.
+pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
     if !(2..=MAX_ORDER_AIRS).contains(&num_airs) {
         return Err(AceError::InvalidInputLayout {
             message: format!("proof-order maps need 2..={MAX_ORDER_AIRS} AIRs, got {num_airs}"),
-        });
-    }
-    if config.word_load_heights && num_airs != 4 {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "word-loading proof-order heights requires exactly four AIRs, got {num_airs}"
-            ),
         });
     }
     let network = sorting_network(num_airs);
@@ -246,8 +223,8 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
     let num_pointers = 2;
     let pointers_beneath = num_airs + num_pointers <= 8;
     let push_pointers = |stack: &mut Stack| {
-        stack.push_via(config.id_by_pos_ptr, "ids_ptr");
-        stack.push_via(config.pos_by_id_ptr, "pos_ptr");
+        stack.push_via("push.PROOF_ORDER_IDS_PTR", "ids_ptr");
+        stack.push_via("push.PROOF_ORDER_POSITIONS_PTR", "pos_ptr");
     };
     if pointers_beneath {
         push_pointers(&mut stack);
@@ -258,11 +235,11 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
 
     // Keys: AIR i's key is `stride * height_i + i`, laid out so that AIR 0's key ends on top and
     // index `i` of the stack holds AIR `i`.
-    if config.word_load_heights && num_airs == 4 {
+    if num_airs == 4 {
         // One word read leaves the four heights in memory order, AIR 0 on top; each key is formed
         // on top and rotated beneath the others, which restores that order once all four are done.
         stack.padw();
-        stack.push_via(config.heights_ptr, "heights_ptr");
+        stack.push_via("push.LOG_AIR_TRACE_LENGTHS_PTR", "heights_ptr");
         stack.mem_loadw_le(["h0", "h1", "h2", "h3"]);
         for air in 0..4 {
             stack.emit(&format!("mul.{stride}"));
@@ -274,7 +251,7 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
         }
     } else {
         // Built from the highest index down, one height read each.
-        stack.push_via(config.heights_ptr, "heights_ptr");
+        stack.push_via("push.LOG_AIR_TRACE_LENGTHS_PTR", "heights_ptr");
         for air in (0..num_airs).rev() {
             stack.dup_named("heights_ptr", "h");
             if air > 0 {
@@ -333,8 +310,8 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
     // Unpacking order: with word-batched `id_by_pos` stores, each full group of four positions
     // keeps its ids on the stack until `mem_storew_le` writes them, which needs the group's lowest
     // id on top. Each complete group is therefore visited from its highest position down. The
-    // remainder (and every position without batching) is stored one id at a time.
-    let batched_groups = if config.word_store_ids { num_airs / 4 } else { 0 };
+    // remaining positions are stored one id at a time.
+    let batched_groups = num_airs / 4;
     let mut order: Vec<usize> = Vec::with_capacity(num_airs);
     for group in 0..batched_groups {
         order.extend((4 * group..4 * group + 4).rev());
@@ -430,20 +407,9 @@ fn describe(stack: &Stack) -> String {
 mod tests {
     use super::*;
 
-    fn config() -> ProofOrderMapsConfig<'static> {
-        ProofOrderMapsConfig {
-            num_airs: 4,
-            heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
-            pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
-            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-            word_load_heights: true,
-            word_store_ids: true,
-        }
-    }
-
     #[test]
     fn renders_one_comparator_line_per_network_entry() {
-        let masm = render_proof_order_maps(&config()).expect("renders");
+        let masm = render_proof_order_maps(4).expect("renders");
         assert_eq!(masm.matches("u32lt cswap").count(), sorting_network(4).len());
         assert_eq!(masm.matches("u32and.15").count(), 4);
         assert!(masm.starts_with("#! Derives the height-sorted proof order"));
@@ -452,21 +418,8 @@ mod tests {
 
     #[test]
     fn accepts_the_maximum_and_rejects_unsupported_air_counts() {
-        let mut maximum = config();
-        maximum.num_airs = MAX_ORDER_AIRS;
-        maximum.word_load_heights = false;
-        maximum.word_store_ids = true;
-        render_proof_order_maps(&maximum).expect("the maximum supported AIR count must render");
-
-        let mut too_few = config();
-        too_few.num_airs = 1;
-        assert!(render_proof_order_maps(&too_few).is_err());
-        let mut too_many = config();
-        too_many.num_airs = MAX_ORDER_AIRS + 1;
-        assert!(render_proof_order_maps(&too_many).is_err());
-
-        let mut invalid_word_load = config();
-        invalid_word_load.num_airs = 8;
-        assert!(render_proof_order_maps(&invalid_word_load).is_err());
+        render_proof_order_maps(MAX_ORDER_AIRS).expect("the maximum AIR count must render");
+        assert!(render_proof_order_maps(1).is_err());
+        assert!(render_proof_order_maps(MAX_ORDER_AIRS + 1).is_err());
     }
 }

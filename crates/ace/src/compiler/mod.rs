@@ -7,6 +7,7 @@ mod circuit;
 mod dag;
 mod encode;
 mod masm;
+mod masm_memory;
 mod ood_scatter;
 mod order_maps;
 mod pipeline;
@@ -31,9 +32,10 @@ pub use dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir
 pub use self::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    masm_memory::{MasmMemoryExtents, MasmMemoryLayout},
     ood_scatter::OodScatterPlan,
-    order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
+    order_maps::render_proof_order_maps,
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit,

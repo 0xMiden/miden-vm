@@ -17,7 +17,7 @@
 #!   RANDOM_COIN_OUTPUT_LENGTH_PTR  - felts left in the output cache, 0..4
 
 use {
-    AUX_RAND_ELEM_ADDRESS_PTR,
+    AUX_RAND_ELEM_PTR,
     CONSTRAINT_COMPOSITION_COEFS_PTR,
     DEEP_ALPHA_ADVICE_PTR,
     DEEP_COMPOSITION_COEFS_PTR,
@@ -668,8 +668,8 @@ end
 # =============================================================================================
 
 #! Draws alpha and beta for the LogUp multiset hash
-#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` and stores them at the address held in
-#! `constants::AUX_RAND_ELEM_ADDRESS_PTR`.
+#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` and stores them at
+#! `constants::AUX_RAND_ELEM_PTR`.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -681,7 +681,7 @@ pub proc generate_aux_randomness()
     exec.sample_ext
     # => [beta0, beta1, alpha0, alpha1, ...]
 
-    mem_load.AUX_RAND_ELEM_ADDRESS_PTR mem_storew_le
+    mem_storew_le.AUX_RAND_ELEM_PTR
     dropw
     #=> [...]
 end

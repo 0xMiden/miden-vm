@@ -74,8 +74,7 @@ fn transcript_source() -> String {
             {relation}
             mem_storew_le.RELATION_DIGEST_PTR dropw
             {preprocessed}
-            dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
-            exec.layout::preprocessed_com_ptr mem_storew_le dropw
+            mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
 
             push.{num_queries} mem_store.NUM_QUERIES_PTR
             push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
@@ -109,7 +108,7 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
     let relation_digest = pvm_word("RELATION_DIGEST");
     let preprocessed_commitment = pvm_word("PREPROCESSED_COMMITMENT");
     let public_inputs_ptr = pvm_layout_const("PUBLIC_INPUTS_PTR");
-    let preprocessed_com_ptr = pvm_layout_const("PREPROCESSED_COM_PTR");
+    let preprocessed_com_ptr = stark_constant("PREPROCESSED_TRACE_COM_PTR");
     let config = eidos_config(params, relation_digest.map(Felt::new_unchecked));
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);

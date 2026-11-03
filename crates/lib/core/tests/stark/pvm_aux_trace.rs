@@ -49,14 +49,6 @@ fn random_coin_setup_masm() -> String {
     )
 }
 
-fn direct_random_coin_setup_masm() -> String {
-    format!(
-        "{}\npush.{} mem_store.AUX_RAND_ELEM_ADDRESS_PTR",
-        random_coin_setup_masm(),
-        pvm_layout_const("AUX_RAND_ELEM_PTR")
-    )
-}
-
 fn setup_masm(log_heights: &LogHeights) -> String {
     let mut heights = String::new();
     for (index, &height) in log_heights.iter().enumerate() {
@@ -74,7 +66,7 @@ fn setup_masm(log_heights: &LogHeights) -> String {
         {random_coin_setup}
         {heights}
         "#,
-        random_coin_setup = direct_random_coin_setup_masm(),
+        random_coin_setup = random_coin_setup_masm(),
     )
 }
 
@@ -82,7 +74,7 @@ fn sampler_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
             RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
             RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
         }} from miden::core::stark::constants
@@ -101,7 +93,7 @@ fn hook_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
             RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
             RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
         }} from miden::core::stark::constants
@@ -123,7 +115,7 @@ fn reference_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
             RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
             RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
         }} from miden::core::stark::constants
@@ -167,7 +159,7 @@ fn sampled_challenges(log_heights: &LogHeights) -> (QuadFelt, QuadFelt) {
     let (output, _) = build_test!(&sampler_source(log_heights), &[])
         .execute_for_output()
         .expect("challenge sampler must execute");
-    let aux_rand_elem_ptr = pvm_layout_const("AUX_RAND_ELEM_PTR");
+    let aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR");
     let beta = QuadFelt::new([
         read_memory_felt(&output, aux_rand_elem_ptr),
         read_memory_felt(&output, aux_rand_elem_ptr + 1),
@@ -421,7 +413,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
     let mut source = String::from(
         "use miden::core::sys::pvm::fixed_boundary\n\
-         use miden::core::sys::pvm::layout\n\
+         use {AUX_RAND_ELEM_PTR} from miden::core::stark::constants\n\
          begin\n",
     );
     // Keep caller values in both the addressable stack window and the overflow table.
@@ -429,7 +421,7 @@ fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
         writeln!(source, "push.{value}").unwrap();
     }
     source.push_str(
-        "push.13.11.19.17 exec.layout::aux_rand_elem_ptr mem_storew_le dropw\n\
+        "push.13.11.19.17 push.AUX_RAND_ELEM_PTR mem_storew_le dropw\n\
          exec.fixed_boundary::compute_fixed_boundary_correction\n",
     );
     for value in (1..=24).rev() {
@@ -445,7 +437,7 @@ fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
     for (coord, value) in coordinates.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, pvm_layout_const("C_TOTAL_PTR") + coord as u32),
-            *value,
+            *value
         );
     }
 }

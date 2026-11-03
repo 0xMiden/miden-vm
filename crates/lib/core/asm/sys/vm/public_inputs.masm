@@ -1,22 +1,25 @@
-use {PUBLIC_INPUTS_ADDRESS_PTR} from miden::core::stark::constants
-use miden::core::stark::types
-use miden::core::stark::public_inputs
-use miden::core::stark::random_coin
-use miden::core::sys::vm::layout
 use {
     AUX_ALPHA_C0_PTR,
     AUX_ALPHA_C1_PTR,
     AUX_BETA_C1_PTR,
     AUX_RAND_ELEM_PTR,
+    PUBLIC_INPUTS_ADDRESS_PTR,
+} from miden::core::stark::constants
+use miden::core::stark::types
+use miden::core::stark::public_inputs
+use miden::core::stark::random_coin
+use miden::core::sys::vm::layout
+use {AND8_LOOKUP_LOG_HEIGHT, PUBLIC_INPUTS_PTR} from miden::core::sys::vm::parameters
+use {
     BOUNDARY_INPUTS_DEFERRED_OFFSET,
     BOUNDARY_INPUTS_PROGRAM_OFFSET,
     BOUNDARY_INPUTS_PTR,
     BUS_GAMMA_C1_PTR,
     BUS_GAMMA_PTR,
-    CLAIM_COMMITMENT_PTR,
-    CLAIM_PTR,
     C_TOTAL_C1_PTR,
     C_TOTAL_PTR,
+    CLAIM_COMMITMENT_PTR,
+    CLAIM_PTR,
     NUM_KERNEL_PROCEDURES_PTR,
 } from miden::core::sys::vm::layout
 
@@ -76,10 +79,6 @@ use {
 # CONSTANTS
 # =================================================================================================
 
-# ACE public inputs: 16 stack inputs + 16 stack outputs.
-
-const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
-
 # Number of AIR instances in the Miden VM statement.
 const NUM_MIDEN_AIRS = 4
 
@@ -87,13 +86,6 @@ const NUM_MIDEN_AIRS = 4
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
-
-# CONSTANTS GETTERS
-# =================================================================================================
-
-pub proc get_num_fixed_len_public_inputs() -> u8
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS
-end
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -111,9 +103,7 @@ end
 #! Output: [...]
 pub proc process_public_inputs()
     # 1) Store the ACE public-input pointer.
-    exec.get_num_fixed_len_public_inputs
-    exec.layout::aux_rand_elem_ptr
-    exec.public_inputs::compute_and_store_public_inputs_address
+    push.PUBLIC_INPUTS_PTR mem_store.PUBLIC_INPUTS_ADDRESS_PTR
     # => [...]
 
     # 2) Absorb [CLAIM_HASH | D].
@@ -387,5 +377,5 @@ proc observe_miden_air_shape()
     exec.layout::get_core_trace_length_log exec.random_coin::observe_felt
     exec.layout::get_chiplets_trace_length_log exec.random_coin::observe_felt
     exec.layout::get_eidos_compression_trace_length_log exec.random_coin::observe_felt
-    exec.layout::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
+    push.AND8_LOOKUP_LOG_HEIGHT exec.random_coin::observe_felt
 end

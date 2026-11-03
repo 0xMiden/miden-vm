@@ -7,6 +7,7 @@ use {
     HOOK_PROCESS_PUBLIC_INPUTS_PTR,
     HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
     NUM_QUERIES_PTR,
+    NUM_QUERIES_MAX,
     QUERY_POW_BITS_PTR,
     ROOT_UNITY,
 } from miden::core::stark::constants
@@ -15,7 +16,6 @@ use miden::core::stark::types
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
 # also define the domain over which its returned descriptor may be passed to the common estimator.
 const NUM_QUERIES_MIN = 7
-const NUM_QUERIES_MAX = 150
 const POW_BITS_MAX = 31
 
 #! Loads the proof's security parameters from advice into the generic verifier context.

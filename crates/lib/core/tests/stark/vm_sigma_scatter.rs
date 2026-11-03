@@ -4,10 +4,10 @@
 //! The harness stages these pairs, calls `scatter_aux_bus_boundary`, and checks canonical
 //! memory placement and stack preservation. Transcript observation is outside this harness.
 
-use miden_air::vm::MIDEN_AIR_COUNT;
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir};
 use miden_core::Felt;
 
-use super::vm_layout_const;
+use super::{AND8_LOOKUP_LOG_HEIGHT, vm_layout_const};
 use crate::helpers::read_memory_felt;
 
 /// Each AIR contributes one extension-field boundary value, so two base felts.
@@ -34,10 +34,16 @@ fn proof_order(heights: &[u64]) -> Vec<usize> {
 }
 
 /// Log heights that place canonical AIR `order[p]` at proof position `p`.
+/// Anchor And8 at its setup height and place the variable-height AIRs around it.
 pub(super) fn heights_for_order(order: &[usize]) -> Vec<u64> {
+    let and8_position = order
+        .iter()
+        .position(|&air| air == MidenAir::AND8_LOOKUP.instance_index())
+        .expect("the VM proof order includes And8");
+    let min_height = u64::from(AND8_LOOKUP_LOG_HEIGHT) - and8_position as u64;
     let mut heights = vec![0u64; order.len()];
     for (position, &air) in order.iter().enumerate() {
-        heights[air] = 10 + position as u64;
+        heights[air] = min_height + position as u64;
     }
     heights
 }
@@ -200,7 +206,11 @@ fn the_scatter_moves_every_boundary_value_to_its_canonical_air() {
 #[test]
 fn tied_heights_scatter_to_the_instance_order() {
     let wire = wire_values();
-    for heights in [vec![18u64; MIDEN_AIR_COUNT], vec![9u64, 9, 21, 9]] {
+    let fixed_height = u64::from(AND8_LOOKUP_LOG_HEIGHT);
+    for heights in [
+        vec![fixed_height; MIDEN_AIR_COUNT],
+        vec![fixed_height, fixed_height, fixed_height + 3, fixed_height],
+    ] {
         let order = proof_order(&heights);
         let mut expected = vec![u64::MAX; wire.len()];
         for (position, &air) in order.iter().enumerate() {

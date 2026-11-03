@@ -1,9 +1,5 @@
 use {
-    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
-    AUX_RAND_ELEM_ADDRESS_PTR,
-    CURRENT_TRACE_ROW_ADDRESS_PTR,
     LOG_TRACE_LENGTH_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR,
     PREPROCESSED_TRACE_COM_PTR,
     RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
@@ -70,8 +66,7 @@ const MAX_NUM_KERNEL_PROCEDURES = 255
 #!
 #! The And8 lookup height is fixed verifier setup.
 #!
-#! Writes the trace shape, proof-order routing, relation commitments, and fixed OOD/query-row
-#! addresses to verifier memory.
+#! Writes the trace shape, proof-order routing, and relation commitments to verifier memory.
 pub proc load_air_context()
     adv_push
     exec.assert_shape_log
@@ -85,15 +80,14 @@ pub proc load_air_context()
     exec.assert_shape_log
     exec.layout::set_eidos_compression_trace_length_log
 
-    push.AND8_LOOKUP_LOG_HEIGHT
-    exec.layout::set_and8_lookup_trace_length_log
+    exec.layout::init_and8_lookup_trace_length_log
 
     exec.layout::get_core_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     u32max
     exec.layout::get_eidos_compression_trace_length_log
     u32max
-    exec.layout::get_and8_lookup_trace_length_log
+    push.AND8_LOOKUP_LOG_HEIGHT
     u32max
     mem_store.LOG_TRACE_LENGTH_PTR
 
@@ -106,14 +100,6 @@ pub proc load_air_context()
 
     exec.store_relation_digest
     exec.store_and8_preprocessed_trace_commitment
-    exec.layout::ood_evaluations_ptr
-    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
-    exec.layout::current_trace_row_ptr
-    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
-    exec.layout::auxiliary_ace_inputs_ptr
-    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
-    exec.layout::aux_rand_elem_ptr
-    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 proc assert_shape_log(height: felt) -> u8

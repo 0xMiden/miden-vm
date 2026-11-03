@@ -2,8 +2,9 @@
 # =================================================================================================
 
 # Naming: a name ending in `_PTR` is the memory address of the datum it names, and one ending in
-# `_ADDRESS_PTR` is the address of a cell holding an address written at runtime. Other names are
-# plain values.
+# `_ADDRESS_PTR` is the address of a cell holding an address written at runtime. Region anchors
+# end in `_START`; other names are plain values.
+# See crates/lib/core/RECURSIVE_VERIFIER.md for layout ownership and maintenance rules.
 
 # General constants
 pub const ROOT_UNITY = 1753635133440165772
@@ -15,12 +16,41 @@ pub const LOG_BLOWUP_FACTOR = 3
 pub const LOG_FINAL_DEGREE = 7
 pub const FRI_FOLD_ARITY = 4
 
+# Maximum accepted query count, also bounding the backward FRI query allocation.
+pub const NUM_QUERIES_MAX = 150
+
 # MEMORY POINTERS
 # =================================================================================================
 
+## Each verifier invocation uses this layout in its own execution context. Relation-specific
+## state follows the generic frame. The contiguous ACE READ vector and circuit stream fit before
+## the query-row buffer, which ends before FRI_COM_PTR - 4 * NUM_QUERIES_MAX.
+## Generators check the relation's actual extents against these bounds.
+## Generation reads RELATION_STATE_START, AUX_RAND_ELEM_PTR, OOD_EVALUATIONS_PTR,
+## CURRENT_TRACE_ROW_PTR, OOD_SCATTER_TABLE_PTR, FRI_COM_PTR and NUM_QUERIES_MAX as decimal
+## u32 literals. Keep those declarations literal.
+pub const RELATION_STATE_START = 3223323136
+
+### Lookup challenges [beta0, beta1, alpha0, alpha1], followed by one alignment word.
+### Public ACE inputs occupy the preceding slots; each public value uses two felts.
+pub const AUX_RAND_ELEM_PTR = 3225419776
+pub const AUX_BETA_C1_PTR = AUX_RAND_ELEM_PTR + 1
+pub const AUX_ALPHA_C0_PTR = AUX_RAND_ELEM_PTR + 2
+pub const AUX_ALPHA_C1_PTR = AUX_RAND_ELEM_PTR + 3
+
+### First OOD row in the contiguous ACE READ vector, after the aligned challenge block.
+### Relation generators derive subsequent boundaries from their compiled InputLayout.
+### The complete READ order is specified in crates/ace/src/layout/mod.rs. Current-row openings
+### precede next-row openings, each in preprocessed/main/auxiliary/quotient order. Boundary values,
+### per-AIR selectors (first, last, transition), and fold coefficients use canonical AIR order.
+pub const OOD_EVALUATIONS_PTR = 3225419784
+
+### Scratch row for authenticated DEEP query openings. Each relation supplies its row width.
+pub const CURRENT_TRACE_ROW_PTR = 3238002688
+
 ## General
-## The generic frame occupies the half-open range 3223322624..3223322776. Relation-owned
-## storage begins at the next address.
+## The generic frame reserves 512 felts at 3223322624..3223323136. Each verifier uses this
+## frame together with its relation's allocations in the same execution context.
 
 ### Addresses to store the LDE domain parameters
 ### The info word layout is [lde_size, log(lde_size), lde_g, 0]; log(lde_size) is also the depth
@@ -66,7 +96,7 @@ pub const TRACE_DOMAIN_GENERATOR_PTR = 3223322637
 ### Address storing a pointer to the public inputs.
 pub const PUBLIC_INPUTS_ADDRESS_PTR = 3223322638
 
-### GENERIC_RESERVED_CELL_PTR: 1 felts at 3223322639..3223322640.
+### Word-alignment padding before commitments: 1 felt at 3223322639..3223322640.
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 pub const MAIN_TRACE_COM_PTR = 3223322640
@@ -128,20 +158,15 @@ pub const HOOK_OBSERVE_AUX_TRACE_PTR = 3223322728
 
 ### Relation metadata for this verifier instance.
 pub const RELATION_DIGEST_PTR = 3223322732
-### GENERIC_RESERVED_WORD_PTR: 4 felts at 3223322736..3223322740.
+### Unused after the relation digest: 4 felts at 3223322736..3223322740.
 pub const PREPROCESSED_TRACE_COM_PTR = 3223322740
 
-### Shared per-AIR log-height scratch. Generic consumers take the base and count as
-### arguments; each relation owns the meaning of its offsets. The shared proof-order
-### map rendering supports at most 12 AIRs, while 16 cells leave aligned headroom.
+### Per-AIR log-height scratch, with sixteen scalar cells. Each relation assigns meaning to
+### its AIR indices. The proof-order renderer supports the count bound in
+### miden_ace::MAX_ORDER_AIRS (u32 permutation tags).
 pub const LOG_AIR_TRACE_LENGTHS_PTR = 3223322744
-pub const LOG_AIR_TRACE_LENGTHS_CAPACITY = 16
 
-### Addresses to store parameters needed for calls to the ACE chiplet.
-pub const NUM_FIXED_LENGTH_PUBLIC_INPUTS_PTR = 3223322760
-pub const NUM_ACE_INPUTS_PTR = 3223322761
-pub const NUM_ACE_GATES_PTR = 3223322762
-pub const LOG_MAX_CYCLE_LENGTH_PTR = 3223322763
+### Unused after AIR heights: 4 felts at 3223322760..3223322764.
 
 ### Addresses to store proof-of-work bit counts.
 ### query_pow_bits: PoW before query index sampling (PCS_PARAMS.query_pow_bits)
@@ -158,49 +183,28 @@ pub const RANDOM_COIN_INPUT_LENGTH_PTR = 3223322767
 pub const RANDOM_COIN_OUTPUT_LENGTH_PTR = 3223322768
 pub const RANDOM_COIN_COUNTER_PTR = 3223322769
 
-### Address storing the relation-local start of the OOD evaluation rows.
-pub const OOD_EVALUATIONS_ADDRESS_PTR = 3223322770
+### Unused before proof-order maps: 10 felts at 3223322770..3223322780.
 
-### Address storing the relation-local query-row buffer.
-pub const CURRENT_TRACE_ROW_ADDRESS_PTR = 3223322771
+### Proof-order maps, with sixteen scalar cells each.
+### The positions map sends canonical AIR ids to proof positions; the ids map is its inverse.
+### The generated proof-order pass fills the live entries from validated AIR heights.
+pub const PROOF_ORDER_POSITIONS_PTR = 3223322780
+pub const PROOF_ORDER_IDS_PTR = 3223322796
 
-### Address storing the relation-local ACE stark-vars region.
-pub const AUXILIARY_ACE_INPUTS_ADDRESS_PTR = 3223322772
-
-### Address storing the relation-local auxiliary-randomness word.
-pub const AUX_RAND_ELEM_ADDRESS_PTR = 3223322773
-
-### GENERIC_ALIGNMENT_PADDING_PTR: 2 felts at 3223322774..3223322776.
+### OOD dispatch storage: row pointer, packed destination/pipe pairs, then pipe-procedure digests.
+### Occupies the rest of the generic frame, up to RELATION_STATE_START. Each generator checks
+### its scatter plan fits this reservation, independently of the relation's AIR count.
+pub const OOD_SCATTER_TABLE_PTR = 3223322812
 
 ## FRI
 ##
-##       (FRI_COM_PTR - 600)     ---|
-##              .
-##              .                   | <- FRI queries
-##              .
-##         FRI_COM_PTR           ---|
-##              .
-##              .                   | <- FRI layer commitments and folding challenges
-##              .
-##       (FRI_COM_PTR + 256)     ---|
-##              .
-##              .                   | <- Remainder polynomial
-##              .
-##       (FRI_COM_PTR + 512-1)   ---|
+## Query records occupy four felts each and grow backward from FRI_COM_PTR, down to
+## FRI_COM_PTR - 4 * NUM_QUERIES_MAX. Layer records and the remainder grow forward.
 ##
-## For each FRI layer, we need 8 memory slots, one for storing the FRI layer commitment and one for
-## storing the word [a0, a1, log2(lde_size), lde_size] where a := (a0, a1) is the folding randomness
-## and lde_size is the size of the LDE domain of the corresponding FRI layer.
-## Since we are using a folding factor of 4 and the maximal degree of the remainder polynomial
-## that we allow is 127, an upper limit of 32 FRI layers is ample and the number of memory slots
-## we thus allocate for this is 256. Moreover, we allocate an additional 256 slots for the remainder
-## polynomial which is expected to be laid out right after the FRI commitments.
-##
-## Starts at address 4294912800. The memory region grows backward and forward
-## and is of variable length in both directions.
-## As described above, the size in the backward direction is determined by the number of FRI layers i.e.,
-## the number of FRI oracles. The size in the forward direction is determined by the size of the FRI
-## remainder polynomial.
+## Each layer uses eight felts: a commitment word and a word holding its folding challenge and
+## domain parameters. The 512-felt forward reservation allows up to 32 layer records plus 128
+## quadratic-extension remainder coefficients. The remainder starts immediately after the last
+## layer record; REMAINDER_POLY_ADDRESS_PTR stores its address.
 pub const FRI_COM_PTR = 4294912800
 
 # HELPER

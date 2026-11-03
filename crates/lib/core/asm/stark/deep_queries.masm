@@ -1,6 +1,6 @@
 use miden::core::stark::types
 use {
-    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_PTR,
     DEEP_ALPHA_ADVICE_PTR,
     DEEP_COMPOSITION_COEFS_PTR,
     DEEP_POINT_BATCHING_COEF_HI_PTR,
@@ -138,10 +138,10 @@ pub proc prepare_stack_deep_queries_computation() -> (
     dup.5
     # => [query_ptr, query_end_ptr, W, query_ptr, ...]
 
-    # Store the relation-local query-row pointer, alpha pointer, and a fresh accumulator (0, 0).
+    # Store the shared query-row pointer, alpha pointer, and a fresh accumulator (0, 0).
     push.0.0
     push.DEEP_ALPHA_ADVICE_PTR
-    mem_load.CURRENT_TRACE_ROW_ADDRESS_PTR
+    push.CURRENT_TRACE_ROW_PTR
     mem_storew_le.TMP2_PTR
 
     # Compute the negations of z and gz where z is the OOD point

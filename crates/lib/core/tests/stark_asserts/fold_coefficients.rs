@@ -29,7 +29,7 @@ fn production_fold_staging_module(relation: &str, evaluator_source: &str) -> Str
     let end = body.find("\nend").expect("the fold staging procedure ends") + "\nend".len();
     format!(
         "use {{
-            CONSTRAINT_COMPOSITION_COEFS_PTR, LOG_AIR_TRACE_LENGTHS_PTR
+            CONSTRAINT_COMPOSITION_COEFS_PTR, PROOF_ORDER_IDS_PTR
         }} from miden::core::stark::constants\nuse miden::core::sys::{relation}::layout\n\n\
          pub {HEADER}{}\n",
         &body[..end]

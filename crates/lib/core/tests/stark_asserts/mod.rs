@@ -6,7 +6,6 @@ use rstest::rstest;
 
 use crate::{
     helpers::{read_memory_felt, stark_constant},
-    stark::vm_layout_const,
     support::security::{
         LOG_HEIGHT_MAX, MVM_LOG_HEIGHT_MIN, NUM_QUERIES_MAX, NUM_QUERIES_MIN, POW_BITS_MAX,
     },
@@ -93,14 +92,6 @@ fn load_air_context_stores_shape_and_max_height() {
         assert_eq!(read_memory(&output, heights_ptr + offset as u32), expected, "AIR {offset}");
     }
     assert_eq!(read_memory(&output, stark_constant("LOG_TRACE_LENGTH_PTR")), 16);
-    assert_eq!(
-        read_memory(&output, stark_constant("OOD_EVALUATIONS_ADDRESS_PTR")),
-        u64::from(vm_layout_const("OOD_EVALUATIONS_PTR"))
-    );
-    assert_eq!(
-        read_memory(&output, stark_constant("CURRENT_TRACE_ROW_ADDRESS_PTR")),
-        u64::from(vm_layout_const("CURRENT_TRACE_ROW_PTR"))
-    );
 }
 
 #[test]
@@ -219,18 +210,19 @@ fn check_pow_invalid_has_message() {
 
 /// Proof ordering and selector setup read the height array in canonical AIR order.
 #[test]
-fn relation_height_setters_write_the_generic_array_in_order() {
+fn relation_height_initialization_writes_the_generic_array_in_order() {
     let source = "use miden::core::sys::vm::layout
      begin
          push.11 exec.layout::set_core_trace_length_log
          push.22 exec.layout::set_chiplets_trace_length_log
          push.33 exec.layout::set_eidos_compression_trace_length_log
-         push.44 exec.layout::set_and8_lookup_trace_length_log
+         exec.layout::init_and8_lookup_trace_length_log
      end";
-    let (output, _) =
-        build_test!(source, &[]).execute_for_output().expect("setters should execute");
+    let (output, _) = build_test!(source, &[])
+        .execute_for_output()
+        .expect("height initialization should execute");
     let heights_ptr = stark_constant("LOG_AIR_TRACE_LENGTHS_PTR");
-    for (offset, expected) in [11, 22, 33, 44].into_iter().enumerate() {
+    for (offset, expected) in [11, 22, 33, 16].into_iter().enumerate() {
         assert_eq!(read_memory(&output, heights_ptr + offset as u32), expected, "AIR {offset}");
     }
 }

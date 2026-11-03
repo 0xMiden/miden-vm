@@ -246,10 +246,11 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
     let source = |swap_destinations: bool| {
         let routing_mutation = if swap_destinations {
             format!(
-                "exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_load\n            \
-                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_load\n            \
-                 exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_store\n            \
-                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_store"
+                "push.{scatter_table} add.{core_aux_destination} mem_load\n            \
+                 push.{scatter_table} add.{chiplets_aux_destination} mem_load\n            \
+                 push.{scatter_table} add.{core_aux_destination} mem_store\n            \
+                 push.{scatter_table} add.{chiplets_aux_destination} mem_store",
+                scatter_table = crate::helpers::stark_constant("OOD_SCATTER_TABLE_PTR"),
             )
         } else {
             String::new()

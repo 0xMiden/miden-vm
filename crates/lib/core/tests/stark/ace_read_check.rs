@@ -36,7 +36,7 @@ pub(super) fn assert_proof_stream_read_sections(
     const AUX_VALUES_OFFSET: usize = 19;
     const QUOTIENT_COMMIT_OFFSET: usize = 27;
     const OOD_OFFSET: usize = 33;
-    let ood_evaluations_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let ood_evaluations_ptr = stark_constant("OOD_EVALUATIONS_PTR");
     let aux_bus_boundary_ptr = vm_layout_const("AUX_BUS_BOUNDARY_PTR");
     let ood_felts = usize::try_from(aux_bus_boundary_ptr - ood_evaluations_ptr)
         .expect("OOD frame size fits usize");
@@ -113,8 +113,8 @@ fn staged_log_heights(read: &impl Fn(u32) -> Felt) -> Vec<u64> {
 
 #[test]
 fn ace_read_pointers_match_masm_layout() {
-    let aux_rand_elem_ptr = vm_layout_const("AUX_RAND_ELEM_PTR");
-    let ood_evaluations_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR");
+    let ood_evaluations_ptr = stark_constant("OOD_EVALUATIONS_PTR");
     let aux_bus_boundary_ptr = vm_layout_const("AUX_BUS_BOUNDARY_PTR");
     let auxiliary_ace_inputs_ptr = vm_layout_const("AUXILIARY_ACE_INPUTS_PTR");
     let ace_circuit_stream_ptr = vm_layout_const("ACE_CIRCUIT_STREAM_PTR");
@@ -133,6 +133,12 @@ fn ace_read_pointers_match_masm_layout() {
     let aux_bus = layout.index(InputKey::AuxBusBoundary(0)).expect("aux bus boundary");
     let stark_vars = layout.index(InputKey::Alpha).expect("stark vars");
 
+    assert_eq!(layout.counts.num_public, miden_air::vm::NUM_PUBLIC_VALUES);
+    assert_eq!(
+        vm_layout_const("PUBLIC_INPUTS_PTR"),
+        aux_rand_elem_ptr - 2 * beta as u32,
+        "generated public-input prefix must match the native ACE layout",
+    );
     assert_eq!(alpha, beta + 1);
     assert_eq!(ood_evaluations_ptr - aux_rand_elem_ptr, 2 * (preprocessed_curr - beta) as u32);
     assert_eq!(
@@ -159,7 +165,7 @@ fn ace_read_pointers_match_masm_layout() {
 /// The returned vector has `layout.total_inputs` entries.
 fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<QuadFelt> {
     let pi_ptr = read(stark_constant("PUBLIC_INPUTS_ADDRESS_PTR")).as_canonical_u64() as u32;
-    let aux_rand_elem_ptr = vm_layout_const("AUX_RAND_ELEM_PTR");
+    let aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR");
 
     assert!(
         pi_ptr < aux_rand_elem_ptr,
@@ -184,8 +190,8 @@ fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<
 fn extract_order(read: &impl Fn(u32) -> Felt) -> Vec<usize> {
     let order = proof_order(&staged_log_heights(read));
 
-    let positions_ptr = vm_layout_const("PROOF_ORDER_POSITIONS_PTR");
-    let ids_ptr = vm_layout_const("PROOF_ORDER_IDS_PTR");
+    let positions_ptr = stark_constant("PROOF_ORDER_POSITIONS_PTR");
+    let ids_ptr = stark_constant("PROOF_ORDER_IDS_PTR");
     for (position, &id) in order.iter().enumerate() {
         assert_eq!(
             read(positions_ptr + id as u32).as_canonical_u64(),

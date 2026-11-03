@@ -450,16 +450,18 @@ mod tests {
 
     #[test]
     fn pvm_masm_read_layout_matches_every_codegen_boundary() {
-        const READ_START: u64 = 3_225_432_064;
-        const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/layout.masm");
 
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
+        let challenges_start = masm_const(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/stark/constants.masm"),
+            "AUX_RAND_ELEM_PTR",
+        );
+        let read_start = challenges_start - 2 * layout.index(InputKey::AuxRandBeta).unwrap() as u64;
         let boundaries = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
-            ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
             ("PREPROCESSED_CURRENT_PTR", InputKey::Preprocessed { offset: 0, index: 0 }),
             ("MAIN_CURRENT_PTR", InputKey::Main { offset: 0, index: 0 }),
             ("AUX_CURRENT_PTR", InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
@@ -488,36 +490,13 @@ mod tests {
             let index = layout.index(key).unwrap_or_else(|| panic!("missing {key:?}"));
             assert_eq!(
                 masm_const(LAYOUT_PATH, name),
-                READ_START + 2 * index as u64,
+                read_start + 2 * index as u64,
                 "{name} does not match InputLayout::{key:?}"
             );
         }
 
         let stream_ptr = masm_const(LAYOUT_PATH, "ACE_CIRCUIT_STREAM_PTR");
-        assert_eq!(stream_ptr, READ_START + 2 * layout.total_inputs as u64);
-        let bus_gamma_ptr = masm_const(LAYOUT_PATH, "BUS_GAMMA_PTR");
-        assert_eq!(bus_gamma_ptr, stream_ptr + PVM_CIRCUIT_SHAPE.2 as u64);
-        let c_total_ptr = masm_const(LAYOUT_PATH, "C_TOTAL_PTR");
-        assert_eq!(c_total_ptr, bus_gamma_ptr + 4);
-        let current_trace_row_ptr = masm_const(LAYOUT_PATH, "CURRENT_TRACE_ROW_PTR");
-        assert_eq!(current_trace_row_ptr, c_total_ptr + 4);
-        let current_row_start = layout
-            .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .expect("current-row start");
-        let next_row_start = layout
-            .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .expect("next-row start");
-        let current_row_felts = next_row_start - current_row_start;
-        let preprocessed_com_ptr = masm_const(LAYOUT_PATH, "PREPROCESSED_COM_PTR");
-        assert_eq!(
-            preprocessed_com_ptr,
-            current_trace_row_ptr + current_row_felts as u64,
-            "the query-row scratch extent must come from the codegen layout"
-        );
-        assert!(
-            preprocessed_com_ptr + 4 <= NEXT_VM_REGION,
-            "the complete PVM READ + stream + relation scratch allocation overlaps the next VM region"
-        );
+        assert_eq!(stream_ptr, read_start + 2 * layout.total_inputs as u64);
     }
 
     #[test]

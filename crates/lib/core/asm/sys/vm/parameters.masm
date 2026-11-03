@@ -17,8 +17,9 @@ pub const MAX_CONSTRAINT_DEGREE = 9
 pub const NUM_DEEP_TERMS = 282
 pub const LOOKUP_FRACTIONS_PER_ROW = 78
 
-# Fixed And8 setup height and its PCS-expanded query-index mask.
+# Fixed And8 setup height and its PCS-expanded tree depth and index mask.
 pub const AND8_LOOKUP_LOG_HEIGHT = 16
+pub const PREPROCESSED_TREE_DEPTH = 19
 pub const AND8_LDE_INDEX_MASK = 524287
 
 # Per-AIR widths in canonical order: Core, Chiplets, EidosCompression, And8Lookup.
@@ -45,14 +46,7 @@ pub const QUOTIENT_LMCS_INIT_CV = [13503953893947607809, 11912009168875159568, 1
 #   10 shared STARK slots; 12 selectors for 4 AIRs;
 #   4 fold coefficients; 2 alignment slots.
 #   Total: 28 slots (56 base felts).
-pub const OOD_EVALUATIONS_PTR = 3225419784
+pub const PUBLIC_INPUTS_PTR = 3225419712
 pub const AUX_BUS_BOUNDARY_PTR = 3225420904
 pub const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 pub const ACE_CIRCUIT_STREAM_PTR = 3225420968
-
-# Scatter reserve: 64 felts at 3223323864.
-# +0: row base; +4..19: packed dispatch records; +20..43: pipe procedure digests.
-# Each record holds [main destination, main pipe address, aux destination, aux pipe address].
-# The two following maps contain 4 felts each.
-pub const PROOF_ORDER_POSITIONS_PTR = 3223323908
-pub const PROOF_ORDER_IDS_PTR = 3223323912

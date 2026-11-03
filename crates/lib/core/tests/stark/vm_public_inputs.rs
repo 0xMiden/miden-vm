@@ -298,7 +298,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             push.10 exec.layout::set_core_trace_length_log
             push.10 exec.layout::set_chiplets_trace_length_log
             push.10 exec.layout::set_eidos_compression_trace_length_log
-            push.16 exec.layout::set_and8_lookup_trace_length_log
+            exec.layout::init_and8_lookup_trace_length_log
             push.16 mem_store.LOG_TRACE_LENGTH_PTR
             push.4.3.2.1 mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
@@ -307,10 +307,11 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
 
-            padw adv_loadw exec.layout::aux_rand_elem_ptr mem_storew_le dropw
+            padw adv_loadw push.{aux_rand_elem_ptr} mem_storew_le dropw
             exec.public_inputs::compute_outer_logup_correction
         end
-        "
+        ",
+        aux_rand_elem_ptr = stark_constant("AUX_RAND_ELEM_PTR"),
     );
 
     let test = build_test!(source.as_str(), &initial_stack, &advice_stack);

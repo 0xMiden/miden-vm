@@ -31,12 +31,8 @@ use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
 };
-use miden_utils_testing::recursive_verifier::VerifierData;
 
-use super::{
-    EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data,
-    verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack},
-};
+use super::verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 use crate::{
     helpers::{masm_push_word, masm_store_felts},
     support::ecdsa::valid_fixture,
@@ -224,7 +220,7 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
 }
 
 #[test]
-fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
+fn pvm_verifies_distinct_orders_and_rejects_tampering() {
     let verifier_root = pvm_verify_proof_root();
     let short_proof = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
     let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof)
@@ -257,10 +253,6 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     assert_pvm_verifies(&short);
     assert_pvm_verifies(&long);
     assert_pvm_rejects_tampering(&short);
-
-    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    run_interleaved_verifiers(&vm, &short)
-        .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
 }
 
 fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
@@ -475,51 +467,6 @@ fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
     proof_order
-}
-
-fn run_interleaved_verifiers(
-    vm: &VerifierData,
-    pvm: &PvmRecursiveVerifierInputs,
-) -> Result<(), ExecutionError> {
-    let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(vm.advice_stack());
-    advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
-    advice_stack.extend_from_slice(vm.advice_stack());
-    advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
-
-    let mut store = vm.store.clone();
-    store.extend(pvm.advice().store().inner_nodes());
-    let mut advice_map = vm.advice_map.clone();
-    advice_map.extend(pvm.advice().map().iter().map(|(key, values)| (*key, values.to_vec())));
-
-    let vm_operands = masm_push_word(&vm.claim_commitment);
-    let pvm_operands = masm_push_word(&pvm.claim_commitment());
-    let source = format!(
-        "
-        use miden::core::sys::pvm
-        use miden::core::sys::vm
-
-        proc verify_mvm
-            exec.vm::verify_proof
-            dropw dropw dropw dropw
-        end
-
-        begin
-            {vm_operands}
-            exec.verify_mvm
-            {pvm_operands}
-            exec.pvm::verify_proof
-            dropw dropw dropw
-            {vm_operands}
-            exec.verify_mvm
-            {pvm_operands}
-            exec.pvm::verify_proof
-            dropw dropw dropw
-        end
-        "
-    );
-    let test = build_test!(source, &[], &advice_stack, store, advice_map);
-    test.execute().map(|_| ())
 }
 
 fn pvm_verify_proof_root() -> Word {

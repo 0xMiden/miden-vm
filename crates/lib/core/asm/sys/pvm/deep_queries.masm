@@ -2,6 +2,7 @@ use {
     AUX_TRACE_COM_PTR,
     COMPOSITION_POLY_COM_PTR,
     MAIN_TRACE_COM_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
     TMP2_PTR,
     TMP3_PTR,
 } from miden::core::stark::constants
@@ -20,9 +21,6 @@ use {
 } from miden::core::sys::pvm::parameters
 use miden::core::crypto::hashes::eidos
 use miden::core::stark::deep_queries
-use {
-    PREPROCESSED_COM_PTR,
-} from miden::core::sys::pvm::layout
 
 # ERRORS
 # =================================================================================================
@@ -105,7 +103,7 @@ proc process_preprocessed_trace(
 
     movdn.3 movdn.2
     push.0.0
-    mem_loadw_le.PREPROCESSED_COM_PTR
+    mem_loadw_le.PREPROCESSED_TRACE_COM_PTR
     #=> [PREPROCESSED_ROOT, full_depth, index, query_ptr]
 
     # Authenticate at the setup-fixed tree depth using the folded natural-order index.

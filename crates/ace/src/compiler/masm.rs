@@ -26,23 +26,13 @@ pub struct MasmConstraintsEvalConfig<'a> {
     pub max_cycle_len_log: u32,
     /// Number of AIR instances in the relation.
     pub num_airs: usize,
-    /// Stages one fold coefficient per AIR at its canonical READ slot.
-    pub fold_coefficients: FoldCoefficientStaging<'a>,
+    /// Felt offset of AIR 0's fold coefficient from `auxiliary_ace_inputs_ptr`.
+    /// AIR k's slot is `2k` felts further, in canonical AIR order.
+    pub fold_coefficient_offset: usize,
     /// Relation-local inputs for reconstructing the quotient from its chunks.
     pub quotient_inputs: QuotientRecompositionInputs<Felt>,
     /// Eidos digest of the circuit-stream the relation accepts.
     pub circuit_digest: Word,
-}
-
-/// Where the generated evaluator finds the proof order and the coefficient slots.
-#[derive(Clone, Debug)]
-pub struct FoldCoefficientStaging<'a> {
-    /// MASM leaving the `id_by_pos` table base on the stack (instance index at each proof
-    /// position, as materialized by the relation's proof-order pass).
-    pub id_by_pos_ptr: &'a str,
-    /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`; AIR `k`'s
-    /// slot is `2k` felts further.
-    pub coefficient_offset: usize,
 }
 
 /// Renders the fold-coefficient staging procedure of a relation's evaluator. It is private to the
@@ -53,10 +43,7 @@ pub struct FoldCoefficientStaging<'a> {
 /// `id_by_pos` from the last proof position to the first produces every power with one
 /// multiplication between consecutive positions, each written to the slot of the AIR at that
 /// position.
-fn render_fold_coefficient_staging(
-    staging: &FoldCoefficientStaging<'_>,
-    num_airs: usize,
-) -> String {
+fn render_fold_coefficient_staging(coefficient_offset: usize, num_airs: usize) -> String {
     let mut steps = Vec::with_capacity(num_airs);
     for position in (0..num_airs).rev() {
         let load = if position == 0 {
@@ -88,7 +75,7 @@ fn render_fold_coefficient_staging(
          #! Inputs:  []\n\
          #! Outputs: []\n\
          proc stage_air_fold_coefficients\n    \
-         {ids_ptr}\n    \
+         push.PROOF_ORDER_IDS_PTR\n    \
          exec.layout::auxiliary_ace_inputs_ptr add.{offset}\n    \
          padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR drop drop\n    \
          push.0.1\n    \
@@ -96,8 +83,7 @@ fn render_fold_coefficient_staging(
          {steps}\n    \
          drop drop drop drop drop drop\n\
          end\n",
-        ids_ptr = staging.id_by_pos_ptr,
-        offset = staging.coefficient_offset,
+        offset = coefficient_offset,
         steps = steps.join("\n"),
     )
 }
@@ -125,7 +111,7 @@ pub fn render_masm_constraints_eval(
     let circuit_digest = config.circuit_digest;
     let quotient = config.quotient_inputs;
     let fold_coefficient_proc =
-        render_fold_coefficient_staging(&config.fold_coefficients, config.num_airs);
+        render_fold_coefficient_staging(config.fold_coefficient_offset, config.num_airs);
 
     Ok(format!(
         concat!(
@@ -135,6 +121,7 @@ pub fn render_masm_constraints_eval(
             "    CONSTRAINT_COMPOSITION_COEFS_PTR,\n",
             "    LOG_AIR_TRACE_LENGTHS_PTR,\n",
             "    PUBLIC_INPUTS_ADDRESS_PTR,\n",
+            "    PROOF_ORDER_IDS_PTR,\n",
             "}} from miden::core::stark::constants\n",
             "use miden::core::stark::constraints_eval_inputs\n",
             "use {layout_module}\n\n",
@@ -246,7 +233,7 @@ mod tests {
     use miden_core::Felt;
     use miden_stark::QuotientRecompositionInputs;
 
-    use super::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval};
+    use super::{MasmConstraintsEvalConfig, render_masm_constraints_eval};
 
     fn config() -> MasmConstraintsEvalConfig<'static> {
         MasmConstraintsEvalConfig {
@@ -257,10 +244,7 @@ mod tests {
             stream_len: 64,
             max_cycle_len_log: 5,
             num_airs: 4,
-            fold_coefficients: FoldCoefficientStaging {
-                id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-                coefficient_offset: 44,
-            },
+            fold_coefficient_offset: 44,
             quotient_inputs: QuotientRecompositionInputs {
                 shift_ratio: Felt::new_unchecked(2),
                 first_shift: Felt::new_unchecked(3),

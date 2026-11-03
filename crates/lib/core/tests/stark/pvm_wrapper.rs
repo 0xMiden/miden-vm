@@ -2,7 +2,6 @@
 
 use miden_core::Felt;
 
-use super::pvm_layout_const;
 use crate::{
     helpers::{read_memory_felt, stark_constant},
     support::security::{LOG_HEIGHT_MAX, PVM_LOG_HEIGHT_MIN},
@@ -55,20 +54,12 @@ fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
         read_memory_felt(&output, stark_constant("LOG_TRACE_LENGTH_PTR")),
         Felt::from_u8(16)
     );
-    assert_eq!(
-        read_memory_felt(&output, stark_constant("OOD_EVALUATIONS_ADDRESS_PTR")),
-        Felt::from_u32(pvm_layout_const("PREPROCESSED_CURRENT_PTR"))
-    );
-    assert_eq!(
-        read_memory_felt(&output, stark_constant("CURRENT_TRACE_ROW_ADDRESS_PTR")),
-        Felt::from_u32(pvm_layout_const("CURRENT_TRACE_ROW_PTR"))
-    );
 
     // Both ingest scatters address the proof stream through this table, so a wrapper that staged
     // it wrongly would route one chiplet's data onto another chiplet's wires.
     let mut proof_order: Vec<usize> = (0..HEIGHTS.len()).collect();
     proof_order.sort_by_key(|&i| (HEIGHTS[i], i));
-    let positions_ptr = pvm_layout_const("PROOF_ORDER_POSITIONS_PTR");
+    let positions_ptr = stark_constant("PROOF_ORDER_POSITIONS_PTR");
     for (position, air) in proof_order.iter().copied().enumerate() {
         assert_eq!(
             read_memory_felt(&output, positions_ptr + air as u32),

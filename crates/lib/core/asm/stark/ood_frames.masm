@@ -1,7 +1,7 @@
 use {
     DEEP_ALPHA_ADVICE_PTR,
     HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR,
+    OOD_EVALUATIONS_PTR,
     OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
     OOD_NEXT_FIXED_TERM_C0_PTR,
     OOD_NEXT_FIXED_TERM_C1_PTR,
@@ -61,7 +61,7 @@ pub proc load_and_horner_eval_ood_frames()
     ###    region to which we save the OOD.
     push.0.0
     push.DEEP_ALPHA_ADVICE_PTR
-    mem_load.OOD_EVALUATIONS_ADDRESS_PTR
+    push.OOD_EVALUATIONS_PTR
     # => [ood_evaluations_ptr, deep_alpha_advice_ptr, 0, 0]
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
