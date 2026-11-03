@@ -3,6 +3,7 @@
 use std::array;
 
 use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, config};
+use miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH;
 use miden_core::{
     Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -354,7 +355,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     //             + 1 / (α + 3γ)
     //             − 1 / ((α + 3γ) + msg(deferred_root))
     //
-    // with γ = β^16 and msg(w) = Σ w_i·β^i.
+    // with γ = β^MIDEN_MAX_MESSAGE_WIDTH and msg(w) = Σ w_i·β^i.
     let beta = QuadFelt::new([
         Felt::new_unchecked(auxiliary_rand_values[0]),
         Felt::new_unchecked(auxiliary_rand_values[1]),
@@ -363,7 +364,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
         Felt::new_unchecked(auxiliary_rand_values[2]),
         Felt::new_unchecked(auxiliary_rand_values[3]),
     ]);
-    let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    let gamma = (0..MIDEN_MAX_MESSAGE_WIDTH).fold(QuadFelt::ONE, |acc, _| acc * beta);
     let msg = |felts: &[u64]| -> QuadFelt {
         felts
             .iter()

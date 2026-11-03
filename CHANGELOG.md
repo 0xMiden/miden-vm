@@ -15,6 +15,7 @@
 #### Changes
 
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
+- Generate recursive VM/PVM LogUp separator powers from the native maximum message widths.
 - [BREAKING] Replace fixed-address accessors in recursive VM/PVM layouts with direct constants.
 - [BREAKING] Use compile-time public-input addresses in the recursive VM/PVM verifiers. Updated both verifier roots.
 - Generate VM/PVM DEEP query readers from shared templates with compile-time relation parameters.

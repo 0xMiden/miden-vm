@@ -291,7 +291,7 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> String {
 ### Its internal boundaries follow the PVM circuit's InputLayout; each input occupies two
 ### base-field felts. The major memory anchors are defined in `stark/constants.masm`.
 
-### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^18.
+### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^MAX_MESSAGE_WIDTH.
 pub const BUS_GAMMA_PTR = {state_start}
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
 

@@ -333,6 +333,42 @@ fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
 }
 
 #[test]
+fn generated_extension_power_matches_rust_and_preserves_caller_values() {
+    use miden_ace::compiler::render_masm_ext2_power;
+
+    // Cover both relation widths, identity cases, and reuse of the retained base across bits.
+    for exponent in [0, 1, 2, 3, 5, 16, 18, 31, 32, 0x8000_0000, 0xaaaa_aaaa, u32::MAX] {
+        for base in [QuadFelt::ZERO, QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)])] {
+            let power = render_masm_ext2_power(exponent);
+            let mut source = format!(
+                "use miden::core::stark::types\n\
+                 proc power(base: types::QuadFelt) -> types::QuadFelt\n{power}\nend\nbegin\n"
+            );
+            for value in 1..=24 {
+                writeln!(source, "push.{value}").unwrap();
+            }
+            let coordinates: &[Felt] = base.as_basis_coefficients_slice();
+            writeln!(source, "push.{}.{}", coordinates[1], coordinates[0]).unwrap();
+            source.push_str("exec.power\n");
+            let expected = base.exp_u64(u64::from(exponent));
+            let coordinates: &[Felt] = expected.as_basis_coefficients_slice();
+            for coordinate in coordinates {
+                writeln!(source, "push.{coordinate} assert_eq").unwrap();
+            }
+            for value in (1..=24).rev() {
+                writeln!(source, "push.{value} assert_eq").unwrap();
+            }
+            source.push_str("end");
+            let test = build_test!(&source);
+            test.expect_stack(&[0; 16]);
+            if exponent == u32::MAX && base != QuadFelt::ZERO {
+                test.check_constraints();
+            }
+        }
+    }
+}
+
+#[test]
 fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
     let log_heights = EIDOS_PRECEDES_ORDINARY_HEIGHTS;
     let (_, alpha, beta) = sampled_challenges();

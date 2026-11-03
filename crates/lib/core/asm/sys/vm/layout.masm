@@ -13,7 +13,7 @@ const CHIPLETS_LOG_HEIGHT_PTR = LOG_AIR_TRACE_LENGTHS_PTR + 1
 const EIDOS_LOG_HEIGHT_PTR = LOG_AIR_TRACE_LENGTHS_PTR + 2
 const AND8_LOG_HEIGHT_PTR = LOG_AIR_TRACE_LENGTHS_PTR + 3
 
-### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^16.
+### LogUp bus separator [gamma0, gamma1, 0, 0], where gamma = beta^MAX_MESSAGE_WIDTH.
 pub const BUS_GAMMA_PTR = 3223323136
 pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
 

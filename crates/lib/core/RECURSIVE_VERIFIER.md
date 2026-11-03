@@ -26,6 +26,7 @@ integers and elliptic-curve parameters.
 |---|---|---|
 | VM/PVM DEEP query computation | `crates/ace/src/compiler/deep_queries.rs` and its `templates/deep_queries.masm`, `templates/deep_query_row.masm` | `vm/deep_queries.masm`, `pvm/deep_queries.masm` |
 | VM/PVM auxiliary LogUp verification | `crates/ace/src/compiler/{aux_trace.rs,templates/aux_trace.masm}` | `vm/aux_trace.masm`, `pvm/aux_trace.masm` |
+| LogUp separator powers | Native maximum message widths; `render_masm_ext2_power` in `crates/ace/src/compiler/aux_trace.rs` | `vm/parameters.masm`, `pvm/fixed_boundary.masm` |
 | Shared memory anchors and capacity checks | `crates/lib/core/asm/stark/constants.masm`; `crates/ace/src/compiler/masm_memory.rs` | `vm/parameters.masm`, `pvm/layout.masm` |
 | VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
 | PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/stark/precompiles/src/recursive/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |

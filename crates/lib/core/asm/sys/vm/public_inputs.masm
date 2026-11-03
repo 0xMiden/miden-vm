@@ -8,6 +8,7 @@ use miden::core::stark::types
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
+use miden::core::sys::vm::parameters
 use {AND8_LOOKUP_LOG_HEIGHT, PUBLIC_INPUTS_PTR} from miden::core::sys::vm::parameters
 use {
     BOUNDARY_INPUTS_DEFERRED_OFFSET,
@@ -76,7 +77,7 @@ use {
 # Number of AIR instances in the Miden VM statement.
 const NUM_MIDEN_AIRS = 4
 
-# Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
+# Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ`.
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
@@ -140,18 +141,13 @@ end
 #! Computes `γ = β^MAX_MESSAGE_WIDTH` for per-bus domain separation and stores it at
 #! BUS_GAMMA_PTR as `[γ0, γ1, 0, 0]`.
 #!
-#! The four squarings below reach `β^16`; `MAX_MESSAGE_WIDTH` is hardcoded as 16 here, guarded
-#! by the `MIDEN_MAX_MESSAGE_WIDTH` tripwire in `crates/air/source/src/vm/constraints/lookup/messages.rs`.
-#!
 #! Input:  [...]
 #! Output: [...]
 proc compute_bus_gamma()
     exec.push_beta
     # => [β0, β1, ...]
-    dup.1 dup.1 ext2mul   # β^2
-    dup.1 dup.1 ext2mul   # β^4
-    dup.1 dup.1 ext2mul   # β^8
-    dup.1 dup.1 ext2mul   # β^16 = γ
+    exec.parameters::derive_logup_separator
+    # => [γ0, γ1, ...]
     push.0.0 movup.3 movup.3
     mem_storew_le.BUS_GAMMA_PTR
     dropw
@@ -275,16 +271,15 @@ end
 #! Returns the outer-LogUp boundary correction `c_total`. Requires auxiliary randomness sampled
 #! into `AUX_RAND_ELEM_PTR` by `generate_aux_randomness` and the authenticated statement staged.
 #!
-#! Derives `γ = β^16`, then folds the request/response terms over the verifier-owned kernel digests
-#! at `KERNEL_WITNESS_PTR` (count at `NUM_KERNEL_PROCEDURES_PTR`), plus the program digest and
-#! deferred root in the boundary-inputs block. Mirrors the module banner's `c_total` definition
+#! Derives the bus separator, then folds the request/response terms over the verifier-owned kernel
+#! digests at `KERNEL_WITNESS_PTR` (count at `NUM_KERNEL_PROCEDURES_PTR`), plus the program digest
+#! and deferred root in the boundary-inputs block. Mirrors the module banner's `c_total` definition
 #! and `MidenMultiAir::eval_external`.
 #! Preserves caller stack elements and transcript state; fails on a zero message denominator.
 #!
 #! Input:  [...]
 #! Output: [c_total0, c_total1, ...]
 pub proc compute_outer_logup_correction() -> types::QuadFelt
-    # γ = β^16 into BUS_GAMMA_PTR.
     exec.compute_bus_gamma
     # => [...]
 

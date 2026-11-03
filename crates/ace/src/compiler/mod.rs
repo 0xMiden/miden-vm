@@ -32,7 +32,7 @@ mod unit_tests;
 pub use dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 
 pub use self::{
-    aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace},
+    aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace, render_masm_ext2_power},
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     deep_queries::render_masm_deep_queries,

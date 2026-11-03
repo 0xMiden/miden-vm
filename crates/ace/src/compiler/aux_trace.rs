@@ -3,7 +3,7 @@
 //! The AIR count determines the absorption, scatter and weighting code. The relation supplies
 //! the procedure that computes its external boundary correction.
 
-use std::{fmt::Write as _, format, string::String};
+use std::{fmt::Write as _, format, string::String, vec::Vec};
 
 use miden_core::WORD_SIZE;
 use miden_crypto::hash::eidos::BLOCK_LEN;
@@ -126,4 +126,39 @@ pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> Result<String, 
         .replace("{{scatter}}", scatter.trim_end())
         .replace("{{observe}}", observe.trim_end())
         .replace("{{weighted}}", weighted.trim_end()))
+}
+
+/// Emits fixed exponentiation: `[x0, x1, ...]` becomes `[(x^exponent)0, (x^exponent)1, ...]`,
+/// preserving every caller value. Exponent zero returns the extension-field identity, including
+/// for a zero base. The emitted instructions use no advice, memory, or runtime loop.
+///
+/// Powers of two need only squarings. Otherwise the odd part uses a retained base, consumed by
+/// the final multiplication. The returned instruction lines have no indentation.
+pub fn render_masm_ext2_power(exponent: u32) -> String {
+    if exponent == 0 {
+        return "drop drop push.0.1".into();
+    }
+    if exponent == 1 {
+        // MASM requires a nonempty procedure body even for the identity operation.
+        return "nop".into();
+    }
+    let mut operations = Vec::new();
+    let squarings = exponent.trailing_zeros();
+    operations.extend(core::iter::repeat_n("dup.1 dup.1 ext2mul", squarings as usize));
+    let odd_part = exponent >> squarings;
+    if odd_part > 1 {
+        operations.push("dup.1 dup.1");
+        // Keep the base below the accumulator while processing the remaining exponent bits.
+        // The last bit is one, so its multiplication consumes the retained base.
+        for bit in (0..odd_part.ilog2()).rev() {
+            operations.push("dup.1 dup.1 ext2mul");
+            if (odd_part >> bit) & 1 != 0 {
+                if bit > 0 {
+                    operations.push("dup.3 dup.3");
+                }
+                operations.push("ext2mul");
+            }
+        }
+    }
+    operations.join("\n")
 }

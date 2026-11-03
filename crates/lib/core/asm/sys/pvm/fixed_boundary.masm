@@ -35,19 +35,20 @@ type EcGroupPayload = struct {
 
 #! Computes gamma = beta^18 for the PVM fixed-message domain prefix.
 #!
-#! Four squarings produce beta^16; the retained beta^2 supplies the remaining factor. The result
-#! is stored as `[gamma0, gamma1, 0, 0]`.
+#! The exponent comes from the native relation's maximum message width. The result is stored
+#! as `[gamma0, gamma1, 0, 0]`.
 #!
 #! Input:  [...]
 #! Output: [...]
 proc compute_bus_gamma()
     exec.load_beta
-    dup.1 dup.1 ext2mul   # beta^2
-    dup.1 dup.1           # retain beta^2
-    dup.1 dup.1 ext2mul   # beta^4, beta^2
-    dup.1 dup.1 ext2mul   # beta^8
-    dup.1 dup.1 ext2mul   # beta^16
-    ext2mul                # beta^18
+    dup.1 dup.1 ext2mul
+    dup.1 dup.1
+    dup.1 dup.1 ext2mul
+    dup.1 dup.1 ext2mul
+    dup.1 dup.1 ext2mul
+    ext2mul
+    # => [gamma0, gamma1, ...]
     push.0.0 movup.3 movup.3
     mem_storew_le.BUS_GAMMA_PTR
     dropw
@@ -154,8 +155,8 @@ end
 
 #! Sums the inverses of the compressed fixed-environment UintVal and EcGroup bus messages.
 #!
-#! Reads beta and alpha from the shared auxiliary-randomness region, stores beta^18 in
-#! BUS_GAMMA_PTR, and returns the sum. Preserves caller stack elements and transcript state.
+#! Reads beta and alpha from the shared auxiliary-randomness region, stores the bus separator
+#! in BUS_GAMMA_PTR, and returns the sum. Preserves caller stack elements and transcript state.
 #! Fails if an encoded message denominator is zero.
 #!
 #! Input:  [...]
