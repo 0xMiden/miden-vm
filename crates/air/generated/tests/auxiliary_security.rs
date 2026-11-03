@@ -9,7 +9,10 @@
 //! which identities enforce its arithmetic.
 
 use miden_air::vm::security;
-use miden_air_definitions::{compiler::vm::derive_air_shape, vm::AIRS};
+use miden_air_definitions::{
+    compiler::vm::derive_air_shape,
+    vm::{AIRS, MidenAir},
+};
 use miden_constraint_compiler::ir::{GraphBuilder, auxiliary, capture_into, capture_into_with};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
@@ -40,6 +43,11 @@ fn auxiliary_identities_fit_the_lookup_budget() {
             &air.periodic_columns(),
         )
         .unwrap_or_else(|error| panic!("{air:?}: {error}"));
+        let expected_degree = match air {
+            MidenAir::EidosCompression => 119,
+            MidenAir::Core | MidenAir::Chiplets | MidenAir::And8Lookup => 0,
+        };
+        assert_eq!(degree, expected_degree, "{air:?}: auxiliary challenge degree changed");
         assert!(
             degree as u64 <= lookup_coefficient,
             "{air:?}: degree coefficient {degree} exceeds lookup coefficient {lookup_coefficient}"

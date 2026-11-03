@@ -151,7 +151,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
         }
 
         enforce_interface_constraints(builder);
-        enforce_inactive_block_aux(builder, INTERFACE_AUX_BEGIN);
+        enforce_inactive_block_aux(builder);
         crate::shared::eidos::enforce_register_constraints(builder, AUX_REGISTER_COL);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
@@ -237,7 +237,6 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         enforce_interface_constraints(builder);
-        enforce_inactive_block_aux(builder, 0);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -248,14 +247,14 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
 // PVM INTERFACE
 // ================================================================================================
 
-// The block denominator can vanish even at zero multiplicity. The two selected columns
-// have denominator one outside their active rows and are pinned by their lookup equations.
-fn enforce_inactive_block_aux<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, offset: usize) {
+// The composed AIR's block denominator can vanish even at zero multiplicity. The two selected
+// columns have denominator one outside their active rows and are pinned by their lookup equations.
+fn enforce_inactive_block_aux<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let periodic: Vec<AB::Expr> = builder.periodic_values().iter().map(|&v| v.into()).collect();
     let selectors = EidosCompressionSelectors::new(&periodic, 0);
     let inactive = AB::Expr::ONE - selectors.is_footer_row(3);
     let aux = builder.permutation();
-    let value: AB::ExprEF = aux.current_slice()[offset].into();
+    let value: AB::ExprEF = aux.current_slice()[INTERFACE_AUX_BEGIN].into();
     builder.assert_zero_ext(value * inactive);
 }
 
@@ -499,6 +498,10 @@ mod tests {
     use super::{
         ContinuationCvMsg, EidosBlockMsg, EidosCompressionAir, EidosCompressionInterfaceAir,
         EidosInitMsg, EidosOutMsg, INTERFACE_AUX_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, PVM_AUX_COLS,
+        compression::{
+            layout::BLOCK_PERIOD, testing::generate_felt_trace_block_with_cycle_id,
+            trace::set_cycle_metadata,
+        },
         get_periodic_column_values,
     };
     use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
@@ -509,8 +512,11 @@ mod tests {
         randomness: Vec<QuadFelt>,
         permutation_values: Vec<QuadFelt>,
         periodic_values: Vec<Felt>,
+        base_evaluations: Vec<Felt>,
         extension_evaluations: Vec<QuadFelt>,
         preprocessed_window: RowWindow<'static, Felt>,
+        is_first_row: Felt,
+        is_last_row: Felt,
     }
 
     impl AirBuilder for InterfaceConstraintEvalBuilder {
@@ -531,23 +537,25 @@ mod tests {
         }
 
         fn is_first_row(&self) -> Self::Expr {
-            Felt::ZERO
+            self.is_first_row
         }
 
         fn is_last_row(&self) -> Self::Expr {
-            Felt::ZERO
+            self.is_last_row
         }
 
         fn is_transition(&self) -> Self::Expr {
-            Felt::ONE
+            Felt::ONE - self.is_last_row
         }
 
         fn is_transition_window(&self, size: usize) -> Self::Expr {
             assert_eq!(size, 2, "PVM Eidos interface tests use two-row transition windows");
-            Felt::ONE
+            self.is_transition()
         }
 
-        fn assert_zero<I: Into<Self::Expr>>(&mut self, _value: I) {}
+        fn assert_zero<I: Into<Self::Expr>>(&mut self, value: I) {
+            self.base_evaluations.push(value.into());
+        }
 
         fn public_values(&self) -> &[Self::PublicVar] {
             &[]
@@ -596,8 +604,48 @@ mod tests {
                 .iter()
                 .map(|column| column[row])
                 .collect(),
+            base_evaluations: Vec::new(),
             extension_evaluations: Vec::new(),
             preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+            is_first_row: Felt::from_bool(row == 0),
+            is_last_row: Felt::from_bool(row == BLOCK_PERIOD - 1),
+        }
+    }
+
+    #[test]
+    fn standalone_interface_accepts_nonzero_multiplicities() {
+        let air = EidosCompressionInterfaceAir;
+        let mut rows = generate_felt_trace_block_with_cycle_id([3; 16], [5; 8], 0).rows;
+        set_cycle_metadata(
+            rows.as_flattened_mut(),
+            Felt::ONE,
+            Felt::ONE,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::ZERO,
+        );
+        let main = RowMajorMatrix::new(rows.as_flattened().to_vec(), NUM_MAIN_COLS);
+        let challenges =
+            [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
+        let (aux, sums) = air.build_aux_trace(&main, &[], &[], &challenges);
+        assert_ne!(sums[0], QuadFelt::ZERO);
+
+        for row in 0..BLOCK_PERIOD {
+            let next = (row + 1) % BLOCK_PERIOD;
+            let mut builder = builder(row, PVM_AUX_COLS);
+            builder.main.values = [rows[row], rows[next]].as_flattened().to_vec();
+            builder.aux.values[..PVM_AUX_COLS]
+                .copy_from_slice(&aux.values[row * PVM_AUX_COLS..(row + 1) * PVM_AUX_COLS]);
+            builder.aux.values[PVM_AUX_COLS..]
+                .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
+            builder.randomness = challenges.to_vec();
+            builder.permutation_values = sums.clone();
+            LiftedAir::eval(&air, &mut builder);
+            assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
+            assert!(
+                builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),
+                "row {row}"
+            );
         }
     }
 

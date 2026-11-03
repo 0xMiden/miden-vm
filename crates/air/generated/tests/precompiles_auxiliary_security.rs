@@ -51,21 +51,22 @@ fn auxiliary_identities_fit_the_lookup_budget() {
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
     for air in ChipletAir::all() {
         // Exhaustive dispatch requires each new chiplet to supply its ordinary lookup capture.
-        let degree = match air {
-            ChipletAir::ChunkNodeSponge => degree(&ChunkNodeSpongeAir),
-            ChipletAir::EidosCompression => degree(&EidosCompressionAir),
-            ChipletAir::KeccakRound => degree(&KeccakRoundAir),
-            ChipletAir::BytePairLut => degree(&BytePairLutAir),
-            ChipletAir::TranscriptEval => degree(&TranscriptEvalAir),
-            ChipletAir::UintStoreMul => degree(&UintStoreMulAir),
-            ChipletAir::UintAdd => degree(&UintAddAir),
-            ChipletAir::EcPointStoreGroups => degree(&EcPointStoreGroupsAir),
-            ChipletAir::EcGroupAdd => degree(&EcGroupAddAir),
-            ChipletAir::EcMsm => degree(&EcMsmAir),
-            ChipletAir::Sha512 => degree(&Sha512Air),
-            ChipletAir::Sha256 => degree(&Sha256Air),
-        }
-        .unwrap_or_else(|error| panic!("{air:?}: {error}"));
+        let (degree, expected_degree) = match air {
+            ChipletAir::ChunkNodeSponge => (degree(&ChunkNodeSpongeAir), 0),
+            ChipletAir::EidosCompression => (degree(&EidosCompressionAir), 119),
+            ChipletAir::KeccakRound => (degree(&KeccakRoundAir), 0),
+            ChipletAir::BytePairLut => (degree(&BytePairLutAir), 0),
+            ChipletAir::TranscriptEval => (degree(&TranscriptEvalAir), 0),
+            ChipletAir::UintStoreMul => (degree(&UintStoreMulAir), 31),
+            ChipletAir::UintAdd => (degree(&UintAddAir), 7),
+            ChipletAir::EcPointStoreGroups => (degree(&EcPointStoreGroupsAir), 0),
+            ChipletAir::EcGroupAdd => (degree(&EcGroupAddAir), 0),
+            ChipletAir::EcMsm => (degree(&EcMsmAir), 0),
+            ChipletAir::Sha512 => (degree(&Sha512Air), 0),
+            ChipletAir::Sha256 => (degree(&Sha256Air), 0),
+        };
+        let degree = degree.unwrap_or_else(|error| panic!("{air:?}: {error}"));
+        assert_eq!(degree, expected_degree, "{air:?}: auxiliary challenge degree changed");
         assert!(
             degree as u64 <= lookup_coefficient,
             "{air:?}: degree coefficient {degree} exceeds lookup coefficient {lookup_coefficient}"
