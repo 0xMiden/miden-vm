@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 // See ../README.md for scope and rationale. Remove these when patches are released.
 const exceptions = {
-  "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm": {
-    package: "braces",
-    version: "3.0.3",
-    expires: "2026-11-03",
+  "https://github.com/advisories/GHSA-g3hv-75wg-m249": {
+    package: "minimatch",
+    version: "3.1.5",
+    expires: "2026-12-03",
   },
 };
 
@@ -34,7 +34,7 @@ export function checkAudit(report, lock, today = new Date().toISOString().slice(
       }
       const exception = exceptions[cause.url];
       if (!exception || name !== exception.package || cause.name !== name ||
-          cause.severity !== "high" || today >= exception.expires ||
+          cause.severity !== "moderate" || today >= exception.expires ||
           finding.fixAvailable !== false || !finding.nodes?.length ||
           !finding.nodes.every((node) => lock.packages?.[node]?.version === exception.version)) {
         throw new Error(`Unaccepted advisory for ${name}: ${cause.url}. Check locked versions, patches, and exception expiry.`);
@@ -66,7 +66,7 @@ function main() {
   const report = JSON.parse(result.stdout);
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const count = checkAudit(report, lock);
-  console.log(`Docs audit passed with ${count} findings covered by the braces exception, expiring 2026-11-03.`);
+  console.log(`Docs audit passed with ${count} findings covered by the minimatch exception, expiring 2026-12-03.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
