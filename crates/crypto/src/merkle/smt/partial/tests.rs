@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     vec::Vec,
 };
 
@@ -297,6 +298,7 @@ fn partial_smt_add_path_invalid_depth_is_atomic() {
     let mut partial = PartialSmt::new(leaf.hash());
     let before = partial.clone();
     let err = partial.add_path(leaf, SparseMerklePath::default()).unwrap_err();
+    assert_eq!(err.to_string(), "provided merkle path depth 0 does not match expected depth 64");
     assert_matches!(err, MerkleError::InvalidPathDepth { expected: SMT_DEPTH, actual: 0 });
     assert_eq!(partial, before);
 
@@ -310,6 +312,10 @@ fn partial_smt_add_path_invalid_depth_is_atomic() {
     let mut partial = PartialSmt::new(full.root());
     let before = partial.clone();
     let err = partial.add_path(proof.leaf().clone(), short_path).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "provided merkle path depth 63 does not match expected depth 64"
+    );
     assert_matches!(err, MerkleError::InvalidPathDepth { expected: SMT_DEPTH, actual: 63 });
     assert_eq!(partial, before);
 }
