@@ -657,6 +657,73 @@ fn dense_merge_accepts_a_fully_available_sparse_forest() {
 }
 
 #[test]
+fn dense_mixed_merge_prunes_unreachable_nodes_like_dense_only_merge() {
+    let mut source = MastForest::new();
+    let root = block_foo().add_to_forest(&mut source).unwrap();
+    let orphan = block_bar().add_to_forest(&mut source).unwrap();
+    source.make_root(root);
+    let empty = SparseMastForest::from_procedure_roots(&source, &[]).unwrap();
+    let (expected, _) = MastForest::merge([&source]).unwrap();
+    let dense = MastForestMergeSource::from(&source);
+    let sparse = MastForestMergeSource::from(&empty);
+
+    for (source_index, sources) in [(0, [dense, sparse]), (1, [sparse, dense])] {
+        let (merged, mappings) = MastForest::merge(sources).unwrap();
+        assert_eq!(merged, expected);
+        assert!(mappings.map_root(source_index, &root).is_some());
+        assert_eq!(mappings.map_node(source_index, &orphan), None);
+    }
+}
+
+#[test]
+fn dense_mixed_merge_discards_unreachable_full_and_opaque_sparse_entries() {
+    let mut source = MastForest::new();
+    let root = block_foo().add_to_forest(&mut source).unwrap();
+    let opaque = block_bar().add_to_forest(&mut source).unwrap();
+    let orphan = block_qux().add_to_forest(&mut source).unwrap();
+    source.make_root(root);
+    let mut builder = SparseMastForestBuilder::new(Arc::new(source));
+    builder.record_visit(root, VisitKind::FullVisit);
+    builder.record_visit(opaque, VisitKind::DigestOnly);
+    builder.record_visit(orphan, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    let (dense, mappings) = MastForest::merge([&sparse]).unwrap();
+    assert_eq!(dense.num_nodes(), 1);
+    assert!(mappings.map_root(0, &root).is_some());
+    assert_eq!(mappings.map_node(0, &opaque), None);
+    assert_eq!(mappings.map_node(0, &orphan), None);
+
+    let (merged_sparse, mappings) = SparseMastForest::merge([&sparse]).unwrap();
+    assert_eq!(merged_sparse.nodes().len(), 2);
+    assert_eq!(merged_sparse.digest_entries().len(), 1);
+    assert!(mappings.map_node(0, &opaque).is_some());
+    assert!(mappings.map_node(0, &orphan).is_some());
+}
+
+#[test]
+fn dense_mixed_merge_keeps_unexported_external_replacements() {
+    let mut implementation = MastForest::new();
+    let block = block_foo().add_to_forest(&mut implementation).unwrap();
+    let mut source = MastForest::new();
+    let root = ExternalNodeBuilder::new(implementation[block].digest())
+        .add_to_forest(&mut source)
+        .unwrap();
+    source.make_root(root);
+    let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+    let sources = [
+        MastForestMergeSource::from(&sparse),
+        MastForestMergeSource::from(&implementation),
+    ];
+
+    let (merged, mappings) = MastForest::merge(sources).unwrap();
+    let merged_root = mappings.map_root(0, &root).unwrap();
+    assert_eq!(Some(merged_root), mappings.map_node(1, &block));
+    assert_eq!(merged[merged_root], implementation[block]);
+    assert_eq!(merged.num_nodes(), 1);
+}
+
+#[test]
 fn dense_merge_rejects_an_opaque_sparse_entry() {
     let mut source = MastForest::new();
     let block = block_foo().add_to_forest(&mut source).unwrap();

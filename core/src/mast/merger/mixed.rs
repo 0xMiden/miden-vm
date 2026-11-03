@@ -152,12 +152,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
         forests: Vec<MastForestMergeSource<'forest>>,
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let mut merger = Self::new(forests)?;
-        merger.merge_entries()?;
         merger.merge_roots()?;
-
-        if let Some((&node_id, _)) = merger.digests.iter().next() {
-            return Err(MastForestError::MissingNodeOnDenseMerge(node_id));
-        }
 
         let Self {
             builder,
@@ -271,11 +266,6 @@ impl<'forest> MixedMastForestMerger<'forest> {
             }
         }
 
-        for digest in &self.resolved_digests {
-            if self.full_ids_by_digest.get(digest).is_some_and(|values| values.len() > 1) {
-                return Err(MastForestError::ConflictingNodeDigestOnMerge(*digest));
-            }
-        }
         Ok(())
     }
 
@@ -373,7 +363,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
                     }
                     let (replacement_forest, replacement_id) = self
                         .digest_replacement(&digest)
-                        .expect("resolved digest tasks must have a full replacement");
+                        .ok_or(MastForestError::MissingNodeOnDenseMerge(node_id))?;
                     self.resolved_digests.insert(digest);
                     tasks.push(MergeTask::FinishReplacement {
                         forest_idx,
@@ -439,16 +429,28 @@ impl<'forest> MixedMastForestMerger<'forest> {
         for forest_idx in 0..self.forests.len() {
             let roots = self.forests[forest_idx].procedure_roots().to_vec();
             for root in roots {
-                let merged_root = if let Some(&merged_id) = self.node_maps[forest_idx].get(&root) {
-                    merged_id
-                } else {
-                    return Err(MastForestError::MissingRootOnMerge(root));
-                };
+                if !self.node_maps[forest_idx].contains_key(&root) {
+                    let forest = self.forests[forest_idx];
+                    let task = if forest.get_node_by_id(root).is_some() {
+                        MergeTask::EnterFull { forest_idx, node_id: root }
+                    } else if let Some(digest) = forest.get_digest_by_id(root) {
+                        MergeTask::EnterDigest { forest_idx, node_id: root, digest }
+                    } else {
+                        return Err(MastForestError::MissingRootOnMerge(root));
+                    };
+                    self.merge_tasks(vec![task])?;
+                }
+                let merged_root = self.node_maps[forest_idx][&root];
                 self.root_maps[forest_idx].insert(root, merged_root);
                 if !self.roots.contains(&merged_root) {
                     self.roots.push(merged_root);
                     self.builder.mark_root(merged_root);
                 }
+            }
+        }
+        for digest in &self.resolved_digests {
+            if self.full_ids_by_digest.get(digest).is_some_and(|values| values.len() > 1) {
+                return Err(MastForestError::ConflictingNodeDigestOnMerge(*digest));
             }
         }
         Ok(())
