@@ -1,9 +1,9 @@
 //! Rendering of the recursive verifier's proof-order pass.
 //!
 //! A lifted STARK commits its AIR traces in ascending `(log height, instance index)` order. The
-//! verifier needs that permutation in three places — the out-of-domain scatter table, the
-//! auxiliary-boundary placement, and the fold coefficients — so it derives it exactly once from
-//! the transcript-bound heights and materializes two inverse maps:
+//! verifier derives that permutation once from the transcript-bound heights for out-of-domain
+//! scatter, auxiliary-boundary placement, selectors, and fold coefficients. It stores two inverse
+//! maps:
 //!
 //! - `id_by_pos[position]`: the instance index committed at each proof position;
 //! - `pos_by_id[index]`: each instance's proof position.

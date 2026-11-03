@@ -168,6 +168,7 @@ pub fn render_masm_constraints_eval(
             "#! Inputs:  []\n",
             "#! Outputs: []\n",
             "pub proc execute_constraint_evaluation_check()\n",
+            "    push.PROOF_ORDER_IDS_PTR\n",
             "    push.QUOTIENT_SHIFT_RATIO\n",
             "    push.QUOTIENT_FIRST_SHIFT\n",
             "    push.QUOTIENT_FIRST_WEIGHT\n",

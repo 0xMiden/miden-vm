@@ -88,7 +88,7 @@ pub proc load_air_context()
     mem_store.LOG_TRACE_LENGTH_PTR
 
     # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
-    # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
+    # ingest scatters use pos_by_id; selector setup and fold-coefficient staging use id_by_pos.
     exec.ood_frames::stage_proof_order_maps
 
     # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.

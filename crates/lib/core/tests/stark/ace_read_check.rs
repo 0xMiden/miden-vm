@@ -482,6 +482,7 @@ fn base_to_extension_copy_preserves_values_and_caller(
 #[case::full_trace_cycle(true)]
 fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_trace_cycle: bool) {
     const HEIGHTS_PTR: u32 = 100_000;
+    const ORDER_PTR: u32 = 101_000;
     const STARK_VARS_PTR: u32 = 100_100;
     const FIRST_SELECTOR_OFFSET: u32 = 20;
     const SELECTOR_STRIDE: u32 = 6;
@@ -491,11 +492,24 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
     let z = QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]);
     let quotient = quotient_recomposition_inputs::<Felt>(log_blowup, log_blowup).unwrap();
 
-    // Include the minimum domain, the fixed byte-pair domain, and the largest supported domain.
-    // Each batch includes a zero lift and every smaller supported height in descending order.
-    for max_log in [6, 16, max_log_height] {
+    // Include empty and single-AIR inputs, all supported heights, and ties. Mixed canonical order
+    // checks both incremental lifting and placement; the full-trace cycle needs no squaring.
+    let height_sets = [
+        vec![],
+        vec![6],
+        vec![6, 6],
+        (1..=16).rev().chain([1, 16]).collect(),
+        (1..=max_log_height).rev().chain([1, max_log_height]).collect(),
+    ];
+    let caller: [u64; 16] = core::array::from_fn(|i| 501 + i as u64);
+    for mut heights in height_sets {
+        let max_log = heights.iter().copied().max().unwrap_or(6);
         let cycle_log = if full_trace_cycle { max_log } else { 5 };
-        let heights: Vec<_> = (6..=max_log).rev().collect();
+        if !heights.is_empty() {
+            heights.rotate_left(1);
+        }
+        let mut order: Vec<_> = (0..heights.len()).collect();
+        order.sort_by_key(|&id| (heights[id], id));
         let domain = canonical_domain::<Felt>(max_log, log_blowup);
         let z_n = z.exp_power_of_2(max_log as usize);
         let ood: Vec<_> = z_n
@@ -514,6 +528,10 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
                 push.{generator} mem_store.TRACE_DOMAIN_GENERATOR_PTR
                 {ood_stores}
                 {height_stores}
+                {order_stores}
+                push.123 mem_store.{before_output}
+                push.456 mem_store.{after_output}
+                push.{ORDER_PTR}
                 push.{ratio}.{shift}.{weight}.{STARK_VARS_PTR}.{HEIGHTS_PTR}.{num_airs}.{cycle_log}
                 exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
             end
@@ -524,12 +542,19 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
                 &heights.iter().copied().map(Felt::from_u8).collect::<Vec<_>>(),
                 HEIGHTS_PTR,
             ),
+            order_stores = masm_store_felts(
+                &order.iter().copied().map(Felt::from_usize).collect::<Vec<_>>(),
+                ORDER_PTR,
+            ),
             ratio = quotient.shift_ratio,
             shift = quotient.first_shift,
             weight = quotient.first_weight,
             num_airs = heights.len(),
+            before_output = STARK_VARS_PTR - 1,
+            after_output =
+                STARK_VARS_PTR + FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * heights.len() as u32,
         );
-        let (program, ..) = build_test!(source, &[]).compile().unwrap();
+        let (program, ..) = build_test!(source, &caller).compile().unwrap();
         let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
         // A zero squaring count must skip the loop instead of underflowing its counter.
         let options = ExecutionOptions::new(
@@ -538,11 +563,24 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
         .unwrap();
-        let output = FastProcessor::new(StackInputs::default())
+        let output = FastProcessor::new(StackInputs::try_from_ints(caller).unwrap())
             .with_options(options)
             .unwrap()
             .execute_sync(&program, &mut host)
             .unwrap();
+        assert_eq!(output.stack.get_num_elements(16), caller.map(Felt::new_unchecked));
+        assert_eq!(read_memory_felt(&output, STARK_VARS_PTR - 1), Felt::from_u32(123));
+        assert_eq!(
+            read_memory_felt(
+                &output,
+                STARK_VARS_PTR + FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * heights.len() as u32,
+            ),
+            Felt::from_u32(456),
+        );
+        for (i, (&height, &id)) in heights.iter().zip(&order).enumerate() {
+            assert_eq!(read_memory_felt(&output, HEIGHTS_PTR + i as u32), Felt::from_u8(height));
+            assert_eq!(read_memory_felt(&output, ORDER_PTR + i as u32), Felt::from_usize(id));
+        }
         let z_k = QuadFelt::new([
             read_memory_felt(&output, STARK_VARS_PTR + 4),
             read_memory_felt(&output, STARK_VARS_PTR + 5),

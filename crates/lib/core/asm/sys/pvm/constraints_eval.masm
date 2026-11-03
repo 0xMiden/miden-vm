@@ -64,6 +64,7 @@ const ERR_CIRCUIT_DIGEST_MISMATCH = "ACE circuit stream does not match the compi
 #! Inputs:  []
 #! Outputs: []
 pub proc execute_constraint_evaluation_check()
+    push.PROOF_ORDER_IDS_PTR
     push.QUOTIENT_SHIFT_RATIO
     push.QUOTIENT_FIRST_SHIFT
     push.QUOTIENT_FIRST_WEIGHT

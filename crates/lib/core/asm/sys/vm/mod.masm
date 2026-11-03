@@ -97,8 +97,8 @@ pub proc load_air_context()
 
     # Derive the height-sorted proof order once from the heights stored above, then route each
     # AIR's canonical out-of-domain destination to its proof-order stream position. The heights are
-    # unchanged from here on, so both run once per proof; the auxiliary-boundary placement and the
-    # fold-coefficient staging reuse the same maps.
+    # unchanged from here on, so both run once per proof; auxiliary-boundary placement, selector
+    # setup, and fold-coefficient staging reuse the same maps.
     exec.ood_frames::stage_proof_order_maps
     exec.ood_frames::stage_ood_scatter_table
 
