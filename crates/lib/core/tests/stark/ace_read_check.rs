@@ -563,7 +563,7 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
         .unwrap();
-        let output = FastProcessor::new(StackInputs::try_from_ints(caller).unwrap())
+        let output = FastProcessor::new(StackInputs::from(caller.map(Felt::new_unchecked)))
             .with_options(options)
             .unwrap()
             .execute_sync(&program, &mut host)
