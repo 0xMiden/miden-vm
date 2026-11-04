@@ -14,9 +14,9 @@
 
 #### Changes
 
-- [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change.
-- [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer.
-- [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS`.
+- [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS` ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively.
@@ -40,8 +40,8 @@
 
 #### Fixes
 
-- [BREAKING] Matched recursive VM/PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript.
-- Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace.
+- [BREAKING] Matched recursive VM/PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
