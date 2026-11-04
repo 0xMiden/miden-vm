@@ -809,7 +809,12 @@ fn render_signature_lines(
             .map(|item| trim_outer_whitespace_tokens(&item))
             .filter(|item| !item.is_empty())
             .collect::<Vec<_>>();
-        let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
+        // Measured without a trailing comma, like the one-line signature above: the wrapped
+        // layout below drops it, so keeping it here would flip the layout between passes.
+        let result = render_token_sequence_with_style(
+            &without_trailing_commas(&result_tokens),
+            SpacingStyle::TypeBodyItem,
+        );
         if items.len() <= 1
             && !result_has_comments
             && line_length(&closing) + 4 + line_length(&result) <= config.max_line_length()
@@ -2101,6 +2106,20 @@ end
         let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent");
         assert_eq!(formatted, "proc foo(a: felt, b: felt) -> felt\n    nop\nend\n");
+    }
+
+    #[test]
+    fn wrapped_single_result_ignores_its_trailing_comma() {
+        let config = Config {
+            max_line_length: Some(11),
+            ..Config::default()
+        };
+        let source = "proc long_name() -> (felt,)\n    nop\nend\n";
+
+        let formatted = format_syntax(&config, &parse_text(source).syntax());
+        let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
+        assert_eq!(reformatted, formatted, "formatter was not idempotent");
+        assert_eq!(formatted, "proc long_name(\n) -> (felt)\n    nop\nend\n");
     }
 
     #[test]
