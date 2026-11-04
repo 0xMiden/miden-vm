@@ -11,13 +11,14 @@ use {
 use miden::core::stark::types
 use miden::core::crypto::hashes::eidos
 use miden::core::pcs::fri::helper
+use {REMAINDER_HALF_COEFFICIENTS} from miden::core::pcs::fri::helper
 
 # Initial CV for the Eidos LMCS leaf hasher over one opened FRI row (8 Felts).
 const FRI_ROW_HASH_INIT_CV = [13503953893947607809, 11912009168875159560, 11170449401267093504, 6620516959492505600]
 const FRI_LAYER_LEAF_DIGEST_MISMATCH = "FRI layer leaf hash mismatch"
 
-#! Checks that, for a query with index p at layer i, the folding procedure to create layer (i + 1)
-#! was performed correctly. This also advances layer_ptr by 8 to point to the next query layer.
+#! Authenticates one opened FRI row, checks the incoming value against its selected element,
+#! and folds the row to the next layer with fri_ext2fold4. Advances layer_ptr by eight felts.
 #!
 #! Input:  [layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
@@ -93,23 +94,22 @@ pub proc verify_query_layer(
     # => [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 end
 
-#! Verifies one FRI query.
-#!
-#! This procedure is specialized to the case when the remainder polynomial, used in the final check,
-#! is expected to have degree less than 64.
-#! This procedure is exactly the same as `verify_query_128` except for the remainder polynomial check,
-#! thus any change to one procedure will imply an equivalent change to the other one.
+# In the following stack diagrams, N = REMAINDER_MAX_COEFFICIENTS.
+# Keep verify_query_half and verify_query_max in sync; only their remainder evaluators differ.
+
+#! Verifies a query through all FRI layers, then checks it against a remainder containing
+#! REMAINDER_MAX_COEFFICIENTS / 2 extension coefficients.
 #!
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
-#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 ignored elements)
+#! Output: [scratch(12), ...]
 #!
-#! - poe is g^p for the current FRI layer.
-#! - p is a query index at the first layer.
-#! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
-#! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
-#!   layer.
-#! - rem_ptr is the memory address of the remainder polynomial.
-pub proc verify_query_64(
+#! Here poe = g^p for the initial domain generator g, and (e0, e1) is the initial-layer value at p.
+#! Word-aligned layer records occupy [layer_ptr, rem_ptr) in eight-felt steps; equal pointers mean
+#! no layers. The remainder at rem_ptr contains extension coefficients in descending degree order.
+#!
+#! TMP1_PTR must hold [rem_ptr, TMP2_PTR, 0, 0]. TMP2_PTR is overwritten with the evaluation
+#! point. Neither scratch word may overlap the remainder.
+pub proc verify_query_half(
     query: types::FriQuery,
     layer_ptr: types::Address,
     rem_ptr: types::Address,
@@ -125,7 +125,8 @@ pub proc verify_query_64(
     dup
     movup.3
     neq
-    # => [?, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
+    # => [layer_ptr != rem_ptr, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr,
+    #     scratch(8), ...]
 
     # verify correctness of layer folding
     while.true
@@ -141,38 +142,23 @@ pub proc verify_query_64(
     # => [poe_final, 0, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
     mem_storew_le.TMP2_PTR
     mem_loadw_le.TMP1_PTR
-    # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, TMP2_PTR, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
 
     swapw swapdw
-    # => [x, x, x, x, x, x, x, x, ne0, ne1, rem_ptr, rem_ptr, P, ...]
+    # => [scratch(8), ne0, ne1, rem_ptr, rem_ptr, rem_ptr, TMP2_PTR, 0, 0, ...]
 
     exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1_half
-    # => [x, x, x, x, x, x, x, x, ne0, ne1, rem_ptr, rem_ptr, P, ...]
+    # => [coeffs(8), ne0, ne1, rem_ptr, rem_ptr, rem_ptr+N, TMP2_PTR, r0, r1, ...]
 
     swapdw
-    # => [ne0, ne1, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
+    # => [ne0, ne1, rem_ptr, rem_ptr, rem_ptr+N, TMP2_PTR, r0, r1, coeffs(8), ...]
     movup.6 assert_eq
     movup.5 assert_eq
-    # => [X, x, x, x, x, x, x, x, x, ...]
+    # => [scratch(12), ...]
 end
 
-#! Verifies one FRI query.
-#!
-#! This procedure is specialized to the case when the remainder polynomial, used in the final check,
-#! is expected to have degree less than 128.
-#! This procedure is exactly the same as `verify_query_64` except for the remainder polynomial check,
-#! thus any change to one procedure will imply an equivalent change to the other one.
-#!
-#! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
-#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 ignored elements)
-#!
-#! - poe is g^p for the current FRI layer.
-#! - p is a query index at the first layer.
-#! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
-#! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
-#!   layer.
-#! - rem_ptr is the memory address of the remainder polynomial.
-pub proc verify_query_128(
+#! Uses `verify_query_half`'s contract with the maximum-length remainder.
+pub proc verify_query_max(
     query: types::FriQuery,
     layer_ptr: types::Address,
     rem_ptr: types::Address,
@@ -188,7 +174,8 @@ pub proc verify_query_128(
     dup
     movup.3
     neq
-    # => [?, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
+    # => [layer_ptr != rem_ptr, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr,
+    #     scratch(8), ...]
 
     # verify correctness of layer folding
     while.true
@@ -204,51 +191,28 @@ pub proc verify_query_128(
     # => [poe_final, 0, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
     mem_storew_le.TMP2_PTR
     mem_loadw_le.TMP1_PTR
-    # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, TMP2_PTR, 0, 0, ne0, ne1, rem_ptr, rem_ptr, scratch(8), ...]
 
     swapw swapdw
-    # => [x, x, x, x, x, x, x, x, ne0, ne1, rem_ptr, rem_ptr, P, ...]
+    # => [scratch(8), ne0, ne1, rem_ptr, rem_ptr, rem_ptr, TMP2_PTR, 0, 0, ...]
 
     exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1
-    # => [x, x, x, x, x, x, x, x, ne0, ne1, rem_ptr, rem_ptr, P, ...]
+    # => [coeffs(8), ne0, ne1, rem_ptr, rem_ptr, rem_ptr+2*N, TMP2_PTR, r0, r1, ...]
     swapdw
-    # => [ne0, ne1, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
+    # => [ne0, ne1, rem_ptr, rem_ptr, rem_ptr+2*N, TMP2_PTR, r0, r1, coeffs(8), ...]
     movup.6 assert_eq
     movup.5 assert_eq
-    # => [X, x, x, x, x, x, x, x, x, ...]
+    # => [scratch(12), ...]
 end
 
 
-#! Verifies a FRI proof where the proof was generated over the quadratic extension of the base
-#! field and layer folding was performed using folding factor 4 when the degree of the remainder
-#! polynomial is less than 64.
-#! This procedure is exactly the same as `verify_128` except for the remainder polynomial check,
-#! thus any change to one procedure will imply an equivalent change to the other one.
+# Keep verify_half and verify_max in sync; only their query verifiers differ.
+
+#! Verifies every query with the half-sized remainder, using `verify`'s memory contract.
 #!
 #! Input:  [query_ptr, layer_ptr, rem_ptr, g, ...]
 #! Output: [...]
-#!
-#! - query_ptr is a pointer to a list of tuples of the form (poe, p, e0, e1) where poe is equal
-#!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
-#!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
-#! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
-#!   layer_ptr + 4 points to the first [d_size, t_depth, alpha0, alpha1] where d_size is the size
-#!   of initial domain divided by 4, t_depth is the depth of the Merkle tree commitment to the
-#!   first layer and (alpha0, alpha1) is the first challenge used in folding the first layer.
-#!   Both t_depth and d_size are expected to be smaller than 2^32. Otherwise, the result of
-#!   this procedure is undefined.
-#! - rem_ptr is a pointer to the first tuple of two consecutive degree 2 extension field
-#!   elements making up the remainder polynomial. This procedure is specialized to the case when
-#!   the degree of the latter is less than 64.
-#!
-#! The memory referenced above is used contiguously, as follows:
-#!
-#!   [query_ptr ... layer_ptr ... rem_ptr ...]
-#!
-#! This means for example that:
-#! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
-#! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
-proc verify_64(
+proc verify_half(
     query_ptr: types::Address,
     layer_ptr: types::Address,
     rem_ptr: types::Address,
@@ -258,10 +222,10 @@ proc verify_64(
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     mem_storew_le.FRI_VERIFY_STATE_PTR
 
-    # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     dup
     dup.2
     neq
+    # => [query_ptr != layer_ptr, query_ptr, layer_ptr, rem_ptr, g, ...]
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
@@ -277,7 +241,7 @@ proc verify_64(
         # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
 
         # Verify query p.
-        exec.verify_query_64
+        exec.verify_query_half
 
         # Prepare for the next query.
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
@@ -291,43 +255,15 @@ proc verify_64(
         dup.5
         dup.5
         neq
-        # => [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+        # => [query_ptr + 4 != layer_ptr, scratch(4), query_ptr + 4, layer_ptr, rem_ptr, g, ...]
     end
     # => [x, x, x, x, x, x, x, x, ...]
 
     dropw dropw
 end
 
-#! Verifies a FRI proof where the proof was generated over the quadratic extension of the base
-#! field and layer folding was performed using folding factor 4 when the degree of the remainder
-#! polynomial is less than 128.
-#! This procedure is exactly the same as `verify_64` except for the remainder polynomial check,
-#! thus any change to one procedure will imply an equivalent change to the other one.
-#!
-#! Input:  [query_ptr, layer_ptr, rem_ptr, g, ...]
-#! Output: [...]
-#!
-#! - query_ptr is a pointer to a list of tuples of the form (poe, p, e0, e1) where poe is equal
-#!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
-#!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
-#! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
-#!   layer_ptr + 4 points to the first [d_size, t_depth, alpha0, alpha1] where d_size is the size
-#!   of initial domain divided by 4, t_depth is the depth of the Merkle tree commitment to the
-#!   first layer and (alpha0, alpha1) is the first challenge used in folding the first layer.
-#!   Both t_depth and d_size are expected to be smaller than 2^32. Otherwise, the result of
-#!   this procedure is undefined.
-#! - rem_ptr is a pointer to the first tuple of two consecutive degree 2 extension field
-#!   elements making up the remainder polynomial. This procedure is specialized to the case when
-#!   the degree of the latter is less than 128.
-#!
-#! The memory referenced above is used contiguously, as follows:
-#!
-#!   [query_ptr ... layer_ptr ... rem_ptr ...]
-#!
-#! This means for example that:
-#! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
-#! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
-proc verify_128(
+#! Uses `verify_half`'s memory and stack contract with the maximum-length remainder.
+proc verify_max(
     query_ptr: types::Address,
     layer_ptr: types::Address,
     rem_ptr: types::Address,
@@ -337,10 +273,10 @@ proc verify_128(
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     mem_storew_le.FRI_VERIFY_STATE_PTR
 
-    # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     dup
     dup.2
     neq
+    # => [query_ptr != layer_ptr, query_ptr, layer_ptr, rem_ptr, g, ...]
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
@@ -356,7 +292,7 @@ proc verify_128(
         # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
 
         # Verify query p.
-        exec.verify_query_128
+        exec.verify_query_max
 
         # Prepare for the next query.
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
@@ -370,7 +306,7 @@ proc verify_128(
         dup.5
         dup.5
         neq
-        # => [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+        # => [query_ptr + 4 != layer_ptr, scratch(4), query_ptr + 4, layer_ptr, rem_ptr, g, ...]
     end
     # => [x, x, x, x, x, x, x, x, ...]
 
@@ -379,6 +315,16 @@ end
 
 #! Verifies a FRI proof where the proof was generated over the quadratic extension of the base
 #! field and layer folding was performed using folding factor 4.
+#!
+#! Query records [g^p, p, e0, e1] occupy a nonempty word-aligned range from the address stored
+#! in FRI_QUERIES_ADDRESS_PTR to FRI_COM_PTR. Here g is the initial LDE domain generator.
+#! Eight-felt layer records follow, ending at the address stored in REMAINDER_POLY_ADDRESS_PTR;
+#! each stored domain size and tree depth must fit u32. The remainder contains descending-degree
+#! extension coefficients. REMAINDER_POLY_SIZE_PTR must hold REMAINDER_MAX_COEFFICIENTS or half
+#! that count, matching the stored coefficients.
+#!
+#! Initializes TMP1_PTR for Horner evaluation and overwrites FRI_VERIFY_STATE_PTR and TMP2_PTR.
+#! These scratch words must not overlap the query, layer or coefficient regions.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -399,13 +345,13 @@ pub proc verify()
     dup dup.2 u32assert2 u32lt assert.err="fri query region must be non-empty"
 
     mem_load.REMAINDER_POLY_SIZE_PTR
-    exec.helper::get_fri_remainder_poly_max_degree_plus_1_half
+    push.REMAINDER_HALF_COEFFICIENTS
     eq
 
     if.true
-        exec.verify_64
+        exec.verify_half
     else
-        exec.verify_128
+        exec.verify_max
     end
     # => [...]
 end

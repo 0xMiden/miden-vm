@@ -538,6 +538,14 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         })
         .collect();
     let generic_path = base.join("stark/constants.masm");
+    let fri_capacity: u64 = std::fs::read_to_string(&generic_path)
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("# FRI_FORWARD_REGION_SIZE = "))
+        .expect("FRI workspace capacity must be declared for code generation")
+        .parse()
+        .unwrap();
+    assert_eq!(fri_capacity, FRI_FORWARD_REGION_SIZE, "FRI allocation and codegen limit differ");
     let (generic_declarations, generic_accesses) = declarations(&generic_path, &exports);
     assert!(!generic_declarations.is_empty(), "the generic layer must declare addresses");
     let mut accesses = vec![("stark/constants.masm".to_string(), generic_accesses)];

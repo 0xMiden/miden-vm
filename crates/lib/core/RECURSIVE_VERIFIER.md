@@ -35,6 +35,13 @@ integers and elliptic-curve parameters.
 | OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
 | Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
 
+`make regenerate-constraints` also writes shared FRI constants to `asm/pcs/fri/parameters.masm`
+from the native VM/PVM presets. It requires folding factor four and a common remainder bound,
+and checks that layers and coefficients fit the forward workspace in `stark/constants.masm`.
+Remainder sizes and streaming counts are independent of LDE blowup.
+The complete recursive verifier uses blowup eight, fixed by `LOG_BLOWUP_FACTOR` in
+`stark/constants.masm`.
+
 The `.masm.tpl` files are source inputs. Edit `fixed_boundary.masm.tpl` for shared helpers and
 `fixed_uintval.masm.tpl` or `fixed_ecgroup.masm.tpl` for the instructions applied to each message.
 

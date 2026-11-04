@@ -16,12 +16,7 @@ use miden_stark::{
 use miden_utils_testing::crypto::{MerklePath, PartialMerkleTree};
 use miden_vm_stark::setup::config::eidos_config;
 
-pub(super) const BLOWUP_EXP: u8 = 3;
 const NUM_DISTINCT_QUERIES: usize = 32;
-const REMAINDER_64_COEFFICIENTS: usize = 64;
-const REMAINDER_128_COEFFICIENTS: usize = 128;
-const SUPPORTED_REMAINDER_SIZES: &[usize] =
-    &[REMAINDER_64_COEFFICIENTS, REMAINDER_128_COEFFICIENTS];
 const TEST_SEED: u64 = 42;
 
 const _: () = assert!(DIGEST_WIDTH == WORD_SIZE);
@@ -58,9 +53,8 @@ pub(super) struct FriResult {
 /// the proof into the non-deterministic inputs needed to verify it inside the Miden VM.
 ///
 /// The proof is generated over a random polynomial of degree less than `2^log_poly_degree` and
-/// folds down to a remainder polynomial of exactly `2^log_final_degree` extension-field
-/// coefficients.
-pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree: u8) -> FriResult {
+/// uses the native maximum remainder bound to choose the number of folding rounds.
+pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_blowup: u8) -> FriResult {
     let Fold4Ext2TestVectors {
         commitments,
         betas,
@@ -75,8 +69,8 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
             stark_config.lmcs(),
             &stark_config.challenger(),
             log_poly_degree,
-            BLOWUP_EXP,
-            log_final_degree,
+            log_blowup,
+            config::pcs_params().log_final_degree(),
             NUM_DISTINCT_QUERIES,
             TEST_SEED,
             |commitment| {
@@ -97,9 +91,10 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
     queries.push(queries[0]);
     let folder = FriFold::new(LOG_FOLD_ARITY).unwrap();
     let generator = Felt::new_unchecked(domain_generator);
-    let log_reduction = log_poly_degree - log_final_degree;
+    let remainder_coefficients = final_poly.len() / EXTENSION_DEGREE;
+    let log_reduction = log_poly_degree - remainder_coefficients.ilog2() as u8;
     let final_generator = generator.exp_power_of_2(log_reduction.into());
-    let final_size = 1u64 << (log_final_degree + BLOWUP_EXP);
+    let final_size = (remainder_coefficients as u64) << log_blowup;
     let final_queries = queries
         .iter()
         .map(|query| {
@@ -163,17 +158,17 @@ pub(super) fn fri_prove_verify_fold4_ext2(log_poly_degree: u8, log_final_degree:
         partial_trees.push(tree);
     }
 
-    // The MASM evaluators stream a fixed 64 or 128 extension coefficients, so only these two
-    // remainder sizes are meaningful.
+    // The MASM evaluators stream the configured maximum or half that many coefficients.
     let remainder = final_poly;
     assert!(
         remainder.len().is_multiple_of(EXTENSION_DEGREE),
         "remainder must contain complete extension-field coefficients"
     );
     let remainder_coefficients = remainder.len() / EXTENSION_DEGREE;
+    let max_coefficients = 1 << config::pcs_params().log_final_degree();
     assert!(
-        SUPPORTED_REMAINDER_SIZES.contains(&remainder_coefficients),
-        "remainder must encode 64 or 128 quadratic-extension coefficients"
+        [max_coefficients / 2, max_coefficients].contains(&remainder_coefficients),
+        "remainder must match one of the two MASM specializations"
     );
 
     FriResult {

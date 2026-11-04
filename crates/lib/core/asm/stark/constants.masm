@@ -12,9 +12,7 @@ pub const ROOT_UNITY = 1753635133440165772
 # Log2 of the blowup factor: the LDE domain is 8 times the trace length.
 pub const LOG_BLOWUP_FACTOR = 3
 
-# FRI parameters (hardcoded; future versions may make these configurable)
-pub const LOG_FINAL_DEGREE = 7
-pub const FRI_FOLD_ARITY = 4
+pub use {LOG_FINAL_DEGREE, FRI_FOLD_ARITY} from miden::core::pcs::fri::parameters
 
 # Maximum accepted query count, also bounding the backward FRI query allocation.
 pub const NUM_QUERIES_MAX = 150
@@ -29,6 +27,7 @@ pub const NUM_QUERIES_MAX = 150
 ## Generation reads RELATION_STATE_START, AUX_RAND_ELEM_PTR, OOD_EVALUATIONS_PTR,
 ## CURRENT_TRACE_ROW_PTR, OOD_SCATTER_TABLE_PTR, FRI_COM_PTR and NUM_QUERIES_MAX as decimal
 ## u32 literals. Keep those declarations literal.
+## The FRI generator also reads the decimal FRI_FORWARD_REGION_SIZE comment.
 pub const RELATION_STATE_START = 3223323136
 
 ### Lookup challenges [beta0, beta1, alpha0, alpha1], followed by one alignment word.
@@ -202,6 +201,7 @@ pub const OOD_SCATTER_TABLE_PTR = 3223322812
 ## domain parameters. The 512-felt forward reservation allows up to 32 layer records plus 128
 ## quadratic-extension remainder coefficients. The remainder starts immediately after the last
 ## layer record; REMAINDER_POLY_ADDRESS_PTR stores its address.
+# FRI_FORWARD_REGION_SIZE = 512
 pub const FRI_COM_PTR = 4294912800
 
 # HELPER
