@@ -175,6 +175,9 @@ impl VmTrace {
 /// Error returned by [`TraceLenSummary::new`] when the padded AIR heights are inconsistent.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
 pub enum TraceLenSummaryError {
+    /// The chiplet row counts add up to more than `usize::MAX`.
+    #[error("the chiplet row counts add up to more than usize::MAX")]
+    ChipletsRowsOverflow,
     /// The padded height of an AIR is zero.
     #[error("padded height of the {air} AIR is zero")]
     ZeroHeight {
@@ -213,8 +216,9 @@ impl TraceLenSummary {
     ///
     /// # Errors
     ///
-    /// Returns an error if a padded height is zero or smaller than the unpadded row count of its
-    /// AIR. These checks keep [`Self::padding_percentage`] from underflowing or dividing by zero.
+    /// Returns an error if the chiplet row counts overflow `usize`, or if a padded height is zero
+    /// or smaller than the unpadded row count of its AIR. These checks keep
+    /// [`Self::padding_percentage`] from underflowing or dividing by zero.
     pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
@@ -222,9 +226,11 @@ impl TraceLenSummary {
         byte_pair_lookup_rows: usize,
         padded_heights: [usize; MIDEN_AIR_COUNT],
     ) -> Result<Self, TraceLenSummaryError> {
+        let chiplets_rows =
+            chiplets.checked_trace_len().ok_or(TraceLenSummaryError::ChipletsRowsOverflow)?;
         let unpadded_rows: [(&'static str, usize); MIDEN_AIR_COUNT] = [
             ("Core", core_rows),
-            ("Chiplets", chiplets.trace_len()),
+            ("Chiplets", chiplets_rows),
             ("Eidos compression", eidos_compression_rows),
             ("byte-pair lookup", byte_pair_lookup_rows),
         ];
@@ -392,6 +398,16 @@ impl ChipletsLengths {
             + self.kernel_rom_len()
             + 1
     }
+
+    /// Same as [`Self::trace_len`], but returns `None` instead of overflowing.
+    pub fn checked_trace_len(&self) -> Option<usize> {
+        self.hash_chiplet_len()
+            .checked_add(self.bitwise_chiplet_len())?
+            .checked_add(self.memory_chiplet_len())?
+            .checked_add(self.ace_chiplet_len())?
+            .checked_add(self.kernel_rom_len())?
+            .checked_add(1)
+    }
 }
 
 #[cfg(test)]
@@ -499,5 +515,18 @@ mod tests {
         // The default chiplets contribute one connector-padding row, so almost all rows are
         // padding. The percentage is rounded down.
         assert_eq!(summary.padding_percentage(), 99);
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_chiplets_row_count_overflow() {
+        for chiplets in [
+            // The mandatory padding row overflows.
+            ChipletsLengths::from_parts(usize::MAX, 0, 0, 0, 0),
+            // The sum of the chiplets overflows.
+            ChipletsLengths::from_parts(usize::MAX, 1, 0, 0, 0),
+        ] {
+            let result = TraceLenSummary::new(0, chiplets, 0, 0, [MIN_TRACE_LEN; MIDEN_AIR_COUNT]);
+            assert_eq!(result, Err(TraceLenSummaryError::ChipletsRowsOverflow));
+        }
     }
 }
