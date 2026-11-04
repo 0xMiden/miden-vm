@@ -5,17 +5,6 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::*;
 
-/// The key [EnumType::new] compares variants by: [Type::aligned_size_in_bytes], computed in
-/// `u64` so that adding the alignment padding cannot overflow on a 32-bit target.
-#[inline]
-fn aligned_size_key(ty: &Type) -> u64 {
-    match ty.checked_size_in_bytes() {
-        Some(0) => 0,
-        Some(size) => size as u64 + ty.min_alignment() as u64,
-        None => u64::MAX,
-    }
-}
-
 /// The error type returned when attempting to construct an invalid [EnumType]
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidEnumTypeError {
@@ -188,11 +177,12 @@ impl EnumType {
             }
         }
 
-        // Compute the offsets of each variant, and keep the largest variant's aligned size (the
-        // comparison key) and the size and alignment of its tagged layout, which become the
-        // enum's. A later variant replaces it only if strictly larger, so the first one wins ties.
+        // Compute the offsets of each variant. The enum must hold every variant's tagged layout,
+        // so its size and alignment are the largest of those layouts' sizes and alignments, taken
+        // independently: the variant that reaches furthest need not be the most aligned one.
         let mut offsets: SmallVec<[_; 4]> = smallvec![0u32; variants.len()];
-        let mut largest = None::<(u64, usize, usize)>;
+        let mut size = discriminant.size_in_bytes();
+        let mut align = discriminant.min_alignment();
         for (i, variant) in variants.iter().enumerate() {
             if let Some(value_ty) = variant.value.as_ref() {
                 let layout = StructType::try_from_parts(
@@ -201,25 +191,24 @@ impl EnumType {
                     [discriminant.clone(), value_ty.clone()],
                 )?;
                 offsets[i] = layout.fields()[1].offset;
-                let key = aligned_size_key(value_ty);
-                if largest.is_none_or(|(largest_key, ..)| key > largest_key) {
-                    largest = Some((key, layout.size(), layout.min_alignment()));
-                }
+                size = size.max(layout.size());
+                align = align.max(layout.min_alignment());
             }
         }
 
-        // The enum takes the size and alignment of its largest variant's layout
-        let (size, align) = match largest {
-            Some((_, size, align)) => (size, align),
-            None => (discriminant.size_in_bytes(), discriminant.min_alignment()),
-        };
+        // Pad the size to the alignment, as a struct's size is, so that it is also the stride of
+        // an array of this enum.
+        let size = u32::try_from(size)
+            .ok()
+            .and_then(|size| size.checked_next_multiple_of(align as u32))
+            .ok_or(InvalidEnumTypeError::SizeOverflow)?;
 
         Ok(Self {
             name,
             discriminant,
             variants,
             offsets,
-            size: size as u32,
+            size,
             align: align as u32,
         })
     }
@@ -616,31 +605,28 @@ mod tests {
     }
 
     #[test]
-    fn enum_type_keeps_the_first_of_equally_large_variants() {
-        // `[u8; 7]` and `u32` have the same aligned size (8 bytes), but their tagged layouts
-        // differ in alignment, so the enum's alignment shows which variant was kept.
-        let bytes = || Type::from(ArrayType::new(Type::U8, 7));
-        let first_bytes = EnumType::new(
-            "T".into(),
-            Type::U8,
-            [
-                Variant::new("A".into(), bytes(), None),
-                Variant::new("B".into(), Type::U32, None),
-            ],
-        )
-        .unwrap();
-        assert_eq!((first_bytes.size_in_bytes(), first_bytes.min_alignment()), (8, 1));
+    fn enum_type_holds_every_variant_in_either_order() {
+        let check = |tag: Type, a: Type, b: Type, expected: (usize, usize)| {
+            for (first, second) in [(&a, &b), (&b, &a)] {
+                let variants = [
+                    Variant::new("A".into(), first.clone(), None),
+                    Variant::new("B".into(), second.clone(), None),
+                ];
+                let ty = EnumType::new("T".into(), tag.clone(), variants).unwrap();
+                assert_eq!((ty.size_in_bytes(), ty.min_alignment()), expected);
+            }
+        };
+        let bytes = |n| Type::from(ArrayType::new(Type::U8, n));
 
-        let first_u32 = EnumType::new(
-            "T".into(),
-            Type::U8,
-            [
-                Variant::new("A".into(), Type::U32, None),
-                Variant::new("B".into(), bytes(), None),
-            ],
-        )
-        .unwrap();
-        assert_eq!((first_u32.size_in_bytes(), first_u32.min_alignment()), (8, 4));
+        // With a `u32` tag, `[u8; 5]` reaches byte 9 (12 once padded) while `u32` ends at byte 8,
+        // although `u32` is the larger payload.
+        check(Type::U32, bytes(5), Type::U32, (12, 4));
+        // With a `u8` tag, `[u8; 7]` and `u32` both end at byte 8, but only `u32` needs
+        // alignment 4.
+        check(Type::U8, bytes(7), Type::U32, (8, 4));
+        // `[u8; 9]` reaches byte 10 at alignment 1 and `u32` sets alignment 4, so the size pads
+        // to 12, the stride of an array of this enum.
+        check(Type::U8, bytes(9), Type::U32, (12, 4));
     }
 
     #[test]
