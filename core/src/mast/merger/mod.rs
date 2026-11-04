@@ -1,5 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
+mod mixed;
+pub use mixed::MastForestMergeSource;
+pub(crate) use mixed::MixedMastForestMerger;
+
 use crate::{
     Word,
     mast::{
@@ -270,6 +274,13 @@ pub struct MastForestRootMap {
 }
 
 impl MastForestRootMap {
+    pub(super) fn from_maps(
+        node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
+        root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
+    ) -> Self {
+        Self { node_maps, root_maps }
+    }
+
     fn from_node_id_map(
         id_map: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
         forests: Vec<&MastForest>,

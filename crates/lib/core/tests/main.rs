@@ -260,6 +260,7 @@ fn verifier_signatures_match_operand_stack_layout() {
     for (path, inputs, outputs) in [
         ("::miden::core::stark::verifier::verify", 20, 4),
         ("::miden::core::stark::security::compute_conjectured_security_level", 12, 1),
+        ("::miden::core::stark::security::compute_proven_security_level", 12, 1),
         ("::miden::core::sys::vm::verify_proof", 4, 16),
         ("::miden::core::sys::pvm::verify_proof", 4, 12),
     ] {

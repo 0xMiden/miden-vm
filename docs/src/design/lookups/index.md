@@ -40,7 +40,8 @@ Miden VM uses the following virtual-table relations, all enforced by LogUp:
     - [Block hash table](../decoder/index.md#block-hash-table)
     - [Op group table](../decoder/index.md#op-group-table)
 - Core:
-    - [Deferred-root state](../stack/crypto_ops.md#log_deferred)
+    - [Deferred-root state](../stack/crypto_ops.md#deferred-root-state), shared by `log_deferred`
+      and `clear_deferred`.
 - Chiplets:
     - [Hash chiplet sibling table](../chiplets/hasher.md#sibling-table-constraints)
 

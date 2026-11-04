@@ -31,7 +31,8 @@ modules are internal implementation details used by core-library facades and tes
   native evaluation or recording import. `Prover::prove_precompiles` imports an owned batch directly
   into one Session to validate and prove the assertions.
 - **Deferred root** — A single digest public value. Each logged statement appends
-  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
+  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. The
+  unsafe `clear_deferred` operation resets it to `TRUE_DIGEST` (the zero word).
 
 ## Lifecycle overview
 
@@ -54,10 +55,69 @@ modules are internal implementation details used by core-library facades and tes
    `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
    deferred state records the corresponding `AND` node.
 
+## Clearing the accumulator in a kernel epilogue
+
+`clear_deferred` reads `ROOT` from the top word of the operand stack and resets the rolling
+deferred root to `[0, 0, 0, 0]` (`TRUE_DIGEST`) in one cycle. Native execution requires `ROOT` to
+equal the current accumulator. The instruction fails outside the root execution context
+(`ctx == 0`). Its stack effect is `[ROOT, ...] -> [ROOT, ...]`: the entire operand stack is
+preserved.
+
+**Unsafe: use this instruction only inside a trusted kernel's epilogue, after a recursive verifier
+has proved the exact `ROOT` supplied on the stack.** The epilogue must bind the verifier's
+statement to the same `ROOT` word passed to `clear_deferred` and must not log unverified
+statements between verification and clearing. Clearing removes the claims committed by its supplied
+root from the final outstanding precompile obligation; host-side evaluation is not a substitute
+for proving them. The instruction itself performs no proof verification.
+
+### What the VM proof guarantees
+
+The AIR accounts for deferred-root transitions through a multiset lookup. Each log consumes its
+previous root and produces the hash-constrained next root; each clear consumes the exact `ROOT`
+on its stack and produces zero. Boundary contributions supply the initial zero root and consume
+the public final root. The lookup does not track an addition count, index, or execution order.
+The AIR does not enforce native execution's chronological check against the current accumulator.
+
+Under the hash and lookup soundness assumptions, every logged obligation is covered by a root
+consumed by a clear or remains committed by the public final root. Trusted code must recursively
+prove every root it clears. Clearing may discharge all logged obligations or only a subset; a
+malicious prover cannot omit the remaining obligations from both the cleared roots and the final
+root. Any obligations remaining in the final root still require an external precompile proof to
+complete the execution proof. To establish that all obligations were settled inside the execution,
+the accepting verifier must require the authenticated final root to equal `TRUE_DIGEST`. Tracking
+the number or index of additions is unnecessary for this guarantee. See the
+[lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
+
+### Rules for safe clearing
+
+The root-context restriction on `clear_deferred` admits both top-level program code and kernel
+procedures entered by `syscall`. To ensure every clear follows successful settlement, the
+application must enforce these rules:
+
+1. **Authenticate the clearing code.** The accepting verifier uses the application's expected
+   program and kernel (`ProgramInfo`, or the corresponding `ExecutionClaim`). This prevents a
+   prover from substituting a program or kernel that clears without verification.
+2. **Prevent direct clearing by untrusted code.** Run untrusted scripts through `call` or `dyncall`
+   in non-root contexts (`ctx != 0`), where `clear_deferred` is rejected.
+3. **Protect indirect routes to clearing.** Kernel entry points and root-context dynamic dispatch
+   must not let an untrusted caller bypass settlement and reach `clear_deferred` unchecked.
+   Authenticate any dispatch tables used by these paths. The VM's
+   [kernel ROM constraints](../chiplets/kernel_rom.md#chiplets-bus-constraints) already restrict
+   syscall targets to the committed kernel; that kernel must enforce the settlement checks.
+4. **Verify the exact root before each clear.** Trusted settlement code must verify a proof for
+   the same `ROOT` word passed to `clear_deferred`, whether returned by `log_deferred` or supplied
+   through advice. It must use the intended recursive PVM verifier and enforce the application's
+   proof acceptance policy, including the required security level, before executing the instruction.
+
+### Host state after clearing
+
+Only the accumulator is reset: registered nodes, evaluation caches, and consumed execution work
+remain in host state. Later logging starts from `TRUE_DIGEST`.
+
 ## Responsibilities
 
-- **VM** — Executes deferred advice events and `log_deferred`, maintains the rolling deferred
-  root, and exposes the final root as a public value.
+- **VM** — Executes deferred advice events, `log_deferred`, and `clear_deferred`, maintains the
+  rolling deferred root, and exposes the final root as a public value.
 - **Host / advice provider** — Maintains `DeferredState`, runs trusted precompile implementations,
   and supplies evaluation advice when wrappers request it.
 - **MASM wrapper** — Registers concrete deferred nodes and computes node and statement digests
@@ -80,6 +140,8 @@ Proving, verification, transport, and resource policy are specified in the
     insertion.
 - `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
   `ROOT_NEW` after the root transition has been constrained.
+- `clear_deferred` stack effect: `[ROOT, ...] -> [ROOT, ...]`; native execution requires `ROOT` to
+  match the current accumulator.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 
@@ -94,6 +156,6 @@ Proving, verification, transport, and resource policy are specified in the
 ## Related reading
 
 - [Deferred computation](../deferred/index.md) – deferred DAG, wire, and proof lifecycle.
-- [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack
-  behaviour and opcode semantics.
+- [Precompile accumulator instructions](../../user_docs/assembly/instruction_reference.md#precompile-accumulator) –
+  `log_deferred`, `clear_deferred`, and the clearing safety contract.
 - `PrecompileWitness` implementation (`core/src/deferred/wire.rs`) – portable canonical opening.

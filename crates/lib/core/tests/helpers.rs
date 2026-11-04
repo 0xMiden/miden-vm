@@ -109,26 +109,31 @@ pub fn assert_exported_manual_root(
     assert_manual_graph(output, root)
 }
 
+/// Decodes a witness value stored in the advice map by `adv.export_deferred_witness`.
+pub fn decode_exported_witness(value: &[Felt]) -> miden_core::deferred::PrecompileWitness {
+    use miden_core::{
+        deferred::PrecompileWitness, serde::Deserializable, utils::packed_u32_elements_to_bytes,
+    };
+
+    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
+    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
+    bytes.truncate(byte_len);
+    PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode")
+}
+
 fn assert_manual_graph(
     output: &ExecutionOutput,
     root: Word,
 ) -> miden_core::deferred::PrecompileWitness {
     use std::sync::Arc;
 
-    use miden_core::{
-        deferred::{PrecompileWitness, TRUE_DIGEST},
-        serde::Deserializable,
-        utils::packed_u32_elements_to_bytes,
-    };
+    use miden_core::deferred::TRUE_DIGEST;
 
     assert_eq!(output.precompile_root(), TRUE_DIGEST, "manual calls must not log");
     assert!(output.precompile_witness.is_none());
     assert!(output.advice.stack().is_empty());
     let value = output.advice.get_mapped_values(&root).expect("root must be exported");
-    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
-    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
-    bytes.truncate(byte_len);
-    let witness = PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode");
+    let witness = decode_exported_witness(value);
     assert_eq!(
         witness
             .clone()

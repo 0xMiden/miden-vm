@@ -6,21 +6,21 @@ function fixture() {
   const vulnerabilities = {};
   const packages = {};
   for (const [name, version, id] of [
-    ["braces", "3.0.3", "GHSA-vfj7-8cjw-p6xm"],
+    ["minimatch", "3.1.5", "GHSA-g3hv-75wg-m249"],
   ]) {
     vulnerabilities[name] = {
-      via: [{ name, url: `https://github.com/advisories/${id}`, severity: "high" }],
+      via: [{ name, url: `https://github.com/advisories/${id}`, severity: "moderate" }],
       nodes: [`node_modules/${name}`],
       fixAvailable: false,
     };
     packages[`node_modules/${name}`] = { version };
   }
-  vulnerabilities.parent = { via: ["braces"] };
+  vulnerabilities.parent = { via: ["minimatch"] };
   vulnerabilities.grandparent = { via: ["parent"] };
   return [{ auditReportVersion: 2, vulnerabilities }, { packages }];
 }
 
-const today = "2026-10-03";
+const today = "2026-11-03";
 
 test("accepts only reviewed advisories and their transitive findings", () => {
   const [report, lock] = fixture();
@@ -32,7 +32,7 @@ test("accepts only reviewed advisories and their transitive findings", () => {
 
 test("rejects a new advisory on an excepted package", () => {
   const [report, lock] = fixture();
-  report.vulnerabilities.braces.via.push({ name: "braces", url: "https://github.com/advisories/GHSA-new" });
+  report.vulnerabilities.minimatch.via.push({ name: "minimatch", url: "https://github.com/advisories/GHSA-new" });
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
 
@@ -68,22 +68,22 @@ test("rejects the removed http-cache-semantics exception", () => {
 });
 
 test("rejects changed and missing locked versions, including nested copies", () => {
-  for (const version of ["3.0.2", undefined]) {
+  for (const version of ["3.1.4", undefined]) {
     const [report, lock] = fixture();
-    report.vulnerabilities.braces.nodes.push("node_modules/parent/node_modules/braces");
-    lock.packages["node_modules/parent/node_modules/braces"] = { version };
+    report.vulnerabilities.minimatch.nodes.push("node_modules/parent/node_modules/minimatch");
+    lock.packages["node_modules/parent/node_modules/minimatch"] = { version };
     assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
   }
 });
 
 test("rejects expired exceptions, available fixes, and increased severity", () => {
   const [report, lock] = fixture();
-  assert.throws(() => checkAudit(report, lock, "2026-11-03"), /Unaccepted/);
-  assert.throws(() => checkAudit(report, lock, "2026-11-04"), /Unaccepted/);
-  report.vulnerabilities.braces.fixAvailable = true;
+  assert.throws(() => checkAudit(report, lock, "2026-12-03"), /Unaccepted/);
+  assert.throws(() => checkAudit(report, lock, "2026-12-04"), /Unaccepted/);
+  report.vulnerabilities.minimatch.fixAvailable = true;
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
-  report.vulnerabilities.braces.fixAvailable = false;
-  report.vulnerabilities.braces.via[0].severity = "critical";
+  report.vulnerabilities.minimatch.fixAvailable = false;
+  report.vulnerabilities.minimatch.via[0].severity = "high";
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
 
@@ -92,4 +92,19 @@ test("rejects npm errors and unexpected report formats", () => {
   for (const report of [{ error: { code: "E503" } }, {}, { auditReportVersion: 1, vulnerabilities: {} }]) {
     assert.throws(() => checkAudit(report, lock, today), /valid version 2 report/);
   }
+});
+
+test("rejects the withdrawn braces exception", () => {
+  const report = {
+    auditReportVersion: 2,
+    vulnerabilities: {
+      braces: {
+        via: [{ name: "braces", url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm", severity: "high" }],
+        nodes: ["node_modules/braces"],
+        fixAvailable: false,
+      },
+    },
+  };
+  const lock = { packages: { "node_modules/braces": { version: "3.0.3" } } };
+  assert.throws(() => checkAudit(report, lock, "2026-10-03"), /Unaccepted/);
 });

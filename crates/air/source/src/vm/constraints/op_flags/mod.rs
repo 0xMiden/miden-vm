@@ -333,8 +333,8 @@ where
             op7(opcodes::NOOP),
             // +COMPRESS     — preserves the 8-felt block and updates only the CV
             op5(opcodes::COMPRESS),
-            // +(opcode 6)    — unused opcode slot; preserve the full visible stack
-            deg7[6].clone(),
+            // +CLEARDEFERRED — clears the deferred root without changing the stack
+            op7(opcodes::CLEARDEFERRED),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
             op6(opcodes::U32ASSERT2),
             // +MPVERIFY     — verifies Merkle path in place
@@ -365,10 +365,10 @@ where
         // +LOOP — control flow: begins loop body without consuming a stack item.
         + op5(opcodes::LOOP);
 
-        // +opcodes[0..8] –NOOP –opcode6 — unary ops that modify only s0 (EQZ, NEG, INV, INCR,
-        // NOT, MLOAD). Opcode 6 is included at depth 0 above.
-        let no_shift_depth1 =
-            deg7[0..8].iter().cloned().sum::<E>() - op7(opcodes::NOOP) - deg7[6].clone();
+        // Exclude NOOP and CLEARDEFERRED: they already preserve s0 in no_shift_depth0.
+        let no_shift_depth1 = deg7[0..8].iter().cloned().sum::<E>()
+            - op7(opcodes::NOOP)
+            - op7(opcodes::CLEARDEFERRED);
 
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
@@ -794,6 +794,8 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         incr => opcodes::INCR,
         /// Operation Flag of NOT operation.
         not => opcodes::NOT,
+        /// Operation Flag of CLEARDEFERRED operation. Degree: 7.
+        clear_deferred => opcodes::CLEARDEFERRED,
         /// Operation Flag of SWAP operation.
         swap => opcodes::SWAP,
         /// Operation Flag of CALLER operation.

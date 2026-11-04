@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    deferred::Digest,
+    deferred::{DeferredError, Digest, PrecompileError, TRUE_DIGEST},
     field::PrimeField64,
     mast::SparseMastForest,
     program::{KernelDescriptor, MIN_STACK_DEPTH},
@@ -287,6 +287,19 @@ impl SystemInterface for ReplayProcessor {
         expected_new_root: Word,
     ) -> Result<(), OperationError> {
         self.system.deferred_root = expected_new_root;
+        Ok(())
+    }
+
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
+        let actual = self.system.deferred_root;
+        if actual != expected_previous_root {
+            return Err(PrecompileError::from(DeferredError::InvalidDeferredRootReset {
+                expected: expected_previous_root,
+                actual,
+            })
+            .into());
+        }
+        self.system.deferred_root = TRUE_DIGEST;
         Ok(())
     }
 
@@ -574,5 +587,23 @@ mod tests {
         processor.set_word(start_idx, &word);
 
         assert_eq!(processor.get_word(start_idx), word);
+    }
+
+    #[test]
+    fn native_clear_deferred_checks_expected_previous_root() {
+        let mut processor = build_replay_processor();
+        let root = Word::new([1, 2, 3, 4].map(Felt::from_u32));
+        processor.system.deferred_root = root;
+
+        // Exercise the independent replay check without the opcode's context check.
+        assert!(matches!(
+            processor.clear_deferred(TRUE_DIGEST),
+            Err(OperationError::Deferred(PrecompileError::Other(
+                DeferredError::InvalidDeferredRootReset { expected, actual }
+            ))) if expected == TRUE_DIGEST && actual == root
+        ));
+        assert_eq!(processor.system.deferred_root, root);
+        processor.clear_deferred(root).unwrap();
+        assert_eq!(processor.system.deferred_root, TRUE_DIGEST);
     }
 }

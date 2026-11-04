@@ -28,7 +28,7 @@ use miden_core::{
 };
 #[cfg(test)]
 use miden_stark::air::Statement;
-pub use miden_stark::security::{ProofSecurityParameters, SecurityReport};
+pub use miden_stark::security::{ProofSecurityParameters, ProvenSecurityReport, SecurityReport};
 #[cfg(test)]
 use miden_vm_stark::setup::config::eidos_config;
 
@@ -122,8 +122,9 @@ impl Verifier {
     ///
     /// The outcome reports the authenticated security parameters of the components actually
     /// verified and any precompile root that remains outstanding. Callers can use
-    /// [`ProofSecurityParameters::conjectured_security_level`] to estimate each verified proof's
-    /// conjectured security level. If configured, the minimum security level is enforced for each
+    /// [`ProofSecurityParameters::conjectured_security_level`] or
+    /// [`ProofSecurityParameters::proven_security_level`] to estimate each verified proof's
+    /// security level. If configured, the minimum conjectured security level is enforced for each
     /// verified STARK, before evaluating a deferred witness in the VM's case.
     ///
     /// # Errors

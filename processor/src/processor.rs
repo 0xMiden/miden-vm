@@ -83,6 +83,12 @@ pub(crate) trait SystemInterface {
         expected_new_root: Word,
     ) -> Result<(), OperationError>;
 
+    /// Clears the deferred root only if it matches `expected_previous_root`.
+    ///
+    /// The operation must check the root context before calling this method. A mismatch leaves
+    /// the deferred state unchanged.
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError>;
+
     // CALL STATE
     // --------------------------------------------------------------------------------------------
 
