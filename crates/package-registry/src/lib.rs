@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::{
-    DependencyResolutionError, InMemoryPackageRegistry, PackagePriority, PackageResolver,
-    VersionSet,
+    DependencyResolutionError, InMemoryPackageRegistry, InMemoryPackageStoreError, PackagePriority,
+    PackageResolver, VersionSet,
 };
 pub use self::{
     version::{InvalidVersionError, SemVerError, Version},
@@ -100,8 +100,21 @@ impl PackageRecord {
 ///
 /// Each semantic version maps to at most one canonical published artifact. The exact artifact
 /// identity, including content digest, is stored in the corresponding [`PackageRecord`]. Build
-/// metadata does not define a distinct canonical semantic version.
+/// metadata does not define a distinct canonical semantic version, so map keys must omit it.
 pub type PackageVersions = BTreeMap<SemVer, PackageRecord>;
+
+fn canonical_semver_key(version: &SemVer) -> SemVer {
+    let mut canonical = version.clone();
+    canonical.build = semver::BuildMetadata::EMPTY;
+    canonical
+}
+
+fn get_by_canonical_semver<'a>(
+    versions: &'a PackageVersions,
+    version: &SemVer,
+) -> Option<&'a PackageRecord> {
+    versions.get(&canonical_semver_key(version))
+}
 
 /// A read-only package registry interface used for querying package metadata and versions.
 pub trait PackageRegistry {
@@ -125,7 +138,7 @@ pub trait PackageRegistry {
 
     /// Return the metadata for `package` at `version`, if present.
     fn get_by_version(&self, package: &PackageId, version: &Version) -> Option<&PackageRecord> {
-        let record = self.available_versions(package)?.get(&version.version)?;
+        let record = get_by_canonical_semver(self.available_versions(package)?, &version.version)?;
         match version.digest.as_ref() {
             Some(_) if record.version() == version => Some(record),
             Some(_) => None,
@@ -135,7 +148,7 @@ pub trait PackageRegistry {
 
     /// Return the canonical metadata for `package` at the given semantic version.
     fn get_by_semver(&self, package: &PackageId, version: &SemVer) -> Option<&PackageRecord> {
-        self.available_versions(package)?.get(version)
+        get_by_canonical_semver(self.available_versions(package)?, version)
     }
 
     /// Return the exact metadata for `package` at the given fully-qualified version.

@@ -5,7 +5,7 @@ use miden_mast_package::Package as MastPackage;
 
 use crate::{
     PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,
-    PackageStore, PackageVersions, SemVer, Version, VersionRequirement,
+    PackageStore, PackageVersions, SemVer, Version, VersionRequirement, canonical_semver_key,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -28,8 +28,20 @@ pub struct InMemoryPackageRegistry {
 
 impl InMemoryPackageRegistry {
     /// Construct a registry from an existing package map.
-    pub fn from_packages(packages: BTreeMap<PackageId, PackageVersions>) -> Self {
-        Self { packages, artifacts: BTreeMap::default() }
+    ///
+    /// Records are reinserted under build-free canonical semantic-version keys. Returns an error
+    /// if the map contains multiple records for the same canonical semantic version.
+    pub fn from_packages(
+        packages: BTreeMap<PackageId, PackageVersions>,
+    ) -> Result<Self, InMemoryPackageStoreError> {
+        let mut registry = Self::default();
+        for (package, versions) in packages {
+            registry.packages.entry(package.clone()).or_default();
+            for record in versions.into_values() {
+                registry.insert_record(package.clone(), record)?;
+            }
+        }
+        Ok(registry)
     }
 
     /// Insert a new entry for `name` and `version`, creating a record from `dependencies`.
@@ -63,7 +75,8 @@ impl InMemoryPackageRegistry {
         use alloc::collections::btree_map::Entry;
 
         let name = name.into();
-        let semver = record.semantic_version().clone();
+        let display_semver = record.semantic_version().clone();
+        let semver = canonical_semver_key(&display_semver);
         match self.packages.entry(name) {
             Entry::Vacant(entry) => {
                 let versions = BTreeMap::from_iter([(semver, record)]);
@@ -71,11 +84,12 @@ impl InMemoryPackageRegistry {
                 Ok(())
             },
             Entry::Occupied(mut entry) => {
+                let package = entry.key().clone();
                 let versions = entry.get_mut();
                 if versions.keys().any(|existing| existing.cmp_precedence(&semver).is_eq()) {
                     Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
-                        package: entry.key().clone(),
-                        version: semver,
+                        package,
+                        version: display_semver,
                     })
                 } else {
                     versions.insert(semver, record);

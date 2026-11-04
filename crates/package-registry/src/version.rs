@@ -1,4 +1,4 @@
-use core::{borrow::Borrow, fmt, str::FromStr};
+use core::{fmt, str::FromStr};
 
 pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer};
 use miden_core::Word;
@@ -162,13 +162,6 @@ impl From<(SemVer, Word)> for Version {
     fn from(version: (SemVer, Word)) -> Self {
         let (version, word) = version;
         Self { version, digest: Some(word) }
-    }
-}
-
-impl Borrow<SemVer> for Version {
-    #[inline(always)]
-    fn borrow(&self) -> &SemVer {
-        &self.version
     }
 }
 

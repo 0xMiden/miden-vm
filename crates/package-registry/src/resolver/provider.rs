@@ -164,28 +164,13 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
             Ok(version)
         } else if let Some((start, end)) = ranges.bounding_range() {
             let bounds = (start.cloned(), end.cloned());
-            let version = versions
-                .range(bounds)
-                .rev()
-                .find_map(|(_, record)| {
-                    if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
-                        Some(record.version().clone())
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| {
-                    // `BTreeMap` bounds include build metadata, while `VersionSet` follows SemVer
-                    // precedence. Fall back to the latter when the bounded lookup misses an
-                    // equivalent version.
-                    versions.values().rev().find_map(|record| {
-                        if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
-                            Some(record.version().clone())
-                        } else {
-                            None
-                        }
-                    })
-                });
+            let version = versions.range(bounds).rev().find_map(|(_, record)| {
+                if <VersionSet as pubgrub::VersionSet>::contains(range, record.version()) {
+                    Some(record.version().clone())
+                } else {
+                    None
+                }
+            });
             Ok(version)
         } else {
             let version = versions.values().rev().find_map(|record| {
@@ -308,13 +293,13 @@ impl<R: PackageRegistry + ?Sized> From<pubgrub::PubGrubError<PackageResolver<'_,
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{collections::BTreeMap, vec};
 
     use miden_core::{Word, crypto::hash::Eidos};
     use pubgrub::SelectedDependencies;
 
     use super::*;
-    use crate::{VersionReq, VersionRequirement};
+    use crate::{PackageVersions, VersionReq, VersionRequirement};
 
     fn any() -> VersionRequirement {
         VersionRequirement::from(VersionReq::STAR)
@@ -743,6 +728,110 @@ mod tests {
                 version,
             } if duplicate == package && version == "1.0.0+second".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn registry_lookup_uses_canonical_semver_key() {
+        let mut index = InMemoryPackageRegistry::default();
+        let package = PackageId::from("dep");
+
+        index
+            .insert(
+                package.clone(),
+                "1.0.0+first".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect("package should register");
+
+        let equivalent = "1.0.0+second".parse::<Version>().unwrap();
+        let record = index
+            .get_by_version(&package, &equivalent)
+            .expect("metadata-equivalent version should resolve to the canonical record");
+
+        assert_eq!(record.semantic_version(), &"1.0.0+first".parse().unwrap());
+        assert!(index.get_by_semver(&package, &"1.0.0+second".parse().unwrap()).is_some());
+        assert!(
+            index
+                .available_versions(&package)
+                .expect("package should be registered")
+                .contains_key(&"1.0.0".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn registry_supports_noncanonical_imported_keys() {
+        let package = PackageId::from("dep");
+        let registered = "1.0.0+first".parse::<Version>().unwrap();
+        let record =
+            PackageRecord::new(registered.clone(), None::<(PackageId, VersionRequirement)>);
+        let packages = BTreeMap::from_iter([(
+            package.clone(),
+            BTreeMap::from_iter([(registered.version.clone(), record)]),
+        )]);
+        let mut index = InMemoryPackageRegistry::from_packages(packages)
+            .expect("single imported canonical version should be valid");
+        let equivalent = "1.0.0+second".parse::<Version>().unwrap();
+
+        assert!(index.get_by_version(&package, &equivalent).is_some());
+        assert!(
+            index
+                .available_versions(&package)
+                .expect("package should be imported")
+                .contains_key(&"1.0.0".parse().unwrap())
+        );
+        assert!(matches!(
+            index.insert(package.clone(), equivalent, None::<(PackageId, VersionRequirement)>),
+            Err(index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: duplicate,
+                ..
+            }) if duplicate == package
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_canonical_versions_on_import() {
+        let package = PackageId::from("dep");
+        let first = "1.0.0+first".parse::<Version>().unwrap();
+        let second = "1.0.0+second".parse::<Version>().unwrap();
+        let versions = BTreeMap::from_iter([
+            (
+                first.version.clone(),
+                PackageRecord::new(first, None::<(PackageId, VersionRequirement)>),
+            ),
+            (
+                second.version.clone(),
+                PackageRecord::new(second, None::<(PackageId, VersionRequirement)>),
+            ),
+        ]);
+
+        let error = match InMemoryPackageRegistry::from_packages(BTreeMap::from_iter([(
+            package.clone(),
+            versions,
+        )])) {
+            Ok(_) => panic!("metadata-only variants must not survive import"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: duplicate,
+                ..
+            } if duplicate == package
+        ));
+    }
+
+    #[test]
+    fn registry_import_preserves_empty_package_entries() {
+        let package = PackageId::from("dep");
+        let index = InMemoryPackageRegistry::from_packages(BTreeMap::from_iter([(
+            package.clone(),
+            PackageVersions::new(),
+        )]))
+        .expect("empty package entry should be valid");
+
+        assert!(index.available_versions(&package).is_some_and(BTreeMap::is_empty));
+        assert!(!index.is_available(&package));
     }
 
     #[test]

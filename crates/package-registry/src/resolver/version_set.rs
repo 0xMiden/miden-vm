@@ -5,12 +5,7 @@ use pubgrub::VersionSet as _;
 use smallvec::{SmallVec, smallvec};
 
 use super::pubgrub_compat::SemverPubgrub;
-use crate::{SemVer, Version, VersionReq, VersionRequirement, semver::BuildMetadata};
-
-fn without_build_metadata(mut version: SemVer) -> SemVer {
-    version.build = BuildMetadata::EMPTY;
-    version
-}
+use crate::{SemVer, Version, VersionReq, VersionRequirement, canonical_semver_key};
 
 /// This type is an implementation detail of the dependency resolver provided by
 /// [`super::InMemoryPackageRegistry`].
@@ -96,9 +91,8 @@ impl VersionSet {
 
         for version in versions {
             if version.digest.as_ref() == Some(&digest) {
-                range = range.union(&SemverPubgrub::singleton(without_build_metadata(
-                    version.version.clone(),
-                )));
+                range =
+                    range.union(&SemverPubgrub::singleton(canonical_semver_key(&version.version)));
                 matched = true;
             }
         }
@@ -130,7 +124,7 @@ impl From<Word> for VersionSet {
 impl From<SemVer> for VersionSet {
     fn from(value: SemVer) -> Self {
         Self {
-            range: SemverPubgrub::singleton(without_build_metadata(value)),
+            range: SemverPubgrub::singleton(canonical_semver_key(&value)),
             digests: smallvec![],
         }
     }
@@ -140,7 +134,7 @@ impl From<Version> for VersionSet {
     fn from(value: Version) -> Self {
         let Version { version, digest } = value;
         Self {
-            range: SemverPubgrub::singleton(without_build_metadata(version)),
+            range: SemverPubgrub::singleton(canonical_semver_key(&version)),
             digests: SmallVec::from_iter(digest),
         }
     }
@@ -251,7 +245,7 @@ impl pubgrub::VersionSet for VersionSet {
     }
 
     fn contains(&self, v: &Self::V) -> bool {
-        let version = without_build_metadata(v.version.clone());
+        let version = canonical_semver_key(&v.version);
         if self.digests.is_empty() {
             self.range.contains(&version)
         } else if let Some(digest) = v.digest.as_ref() {
