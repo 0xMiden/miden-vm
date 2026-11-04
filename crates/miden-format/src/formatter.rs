@@ -1168,21 +1168,12 @@ fn render_braced_type_body(
 
 /// Returns the indices of the opening and closing brace of a braced type body, if the braces
 /// enclose the body's last significant token and nothing but the header precedes them.
+///
+/// The header may contain balanced groups, such as `@align(16)` or `@packed(4)`, but the brace
+/// must not be inside one of them.
 fn braced_body_bounds(tokens: &[SyntaxToken]) -> Option<(usize, usize)> {
     let open_index = tokens.iter().position(|token| token.kind() == SyntaxKind::LBrace)?;
-    if has_comment_tokens(&tokens[..open_index])
-        || tokens[..open_index].iter().any(|token| {
-            matches!(
-                token.kind(),
-                SyntaxKind::LParen
-                    | SyntaxKind::LBracket
-                    | SyntaxKind::LAngle
-                    | SyntaxKind::RParen
-                    | SyntaxKind::RBracket
-                    | SyntaxKind::RAngle
-            )
-        })
-    {
+    if has_comment_tokens(&tokens[..open_index]) || !groups_are_balanced(&tokens[..open_index]) {
         return None;
     }
 
@@ -1195,6 +1186,24 @@ fn braced_body_bounds(tokens: &[SyntaxToken]) -> Option<(usize, usize)> {
                 || matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
         })
         .then_some((open_index, close_index))
+}
+
+/// Returns whether every parenthesis, bracket and angle bracket in `tokens` is closed, in order.
+fn groups_are_balanced(tokens: &[SyntaxToken]) -> bool {
+    let mut depth = 0usize;
+    for token in tokens {
+        match token.kind() {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LAngle => depth += 1,
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RAngle => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next;
+            },
+            _ => (),
+        }
+    }
+    depth == 0
 }
 
 /// Renders significant tokens ending in a braced group as `head { item, item }`.
@@ -1282,6 +1291,8 @@ fn render_expanded_braced_body(
                         // complete, so the comment stays on its own line below it.
                         TypeBodyItem::flush(&mut finished, &mut lines, item_indent, config);
                         mem::take(&mut item).push_to(&mut lines, item_indent, config);
+                        same_line = false;
+                        can_attach = false;
                     }
 
                     if let Some(finished) = finished.as_mut() {
@@ -1423,7 +1434,8 @@ fn render_type_body_item(
         indent_string(indent),
         render_token_sequence_with_style(&significant, SpacingStyle::TypeBodyItem)
     );
-    let fits = line_length(&inline) < config.max_line_length();
+    // The caller appends a comma and then the first trailing comment, if any.
+    let fits = line_length(&inline) + 1 + comment_width <= config.max_line_length();
 
     if outer_group_indices(&significant, SyntaxKind::LBrace, SyntaxKind::RBrace).is_some() {
         let has_line_breaks = tokens.iter().any(|token| token.kind() == SyntaxKind::Newline);
@@ -1457,8 +1469,6 @@ fn render_type_body_item(
     if fits {
         return vec![inline];
     }
-    // The caller appends a comma, so prefer splitting a delimited group even when the item alone
-    // would fit exactly.
     render_token_lines_with_style(&significant, indent, true, SpacingStyle::TypeBodyItem, config)
 }
 
@@ -2834,6 +2844,67 @@ type Outer = struct {
         extra_field: felt,
         additional_field: felt,
     },
+}
+"
+        );
+    }
+
+    #[test]
+    fn wraps_long_struct_bodies_after_representation_attributes() {
+        let source = "\
+type Point = struct @align(16) { first_coordinate_value: u128, second_coordinate_value: u128, third: felt }
+type Packed = struct @packed(4) { first_coordinate_value: u128, second_coordinate_value: u128, third: felt }
+";
+        let formatted =
+            assert_format_idempotent(source, "struct bodies with representation attributes");
+        assert_eq!(
+            formatted,
+            "\
+type Point = struct @align(16) {
+    first_coordinate_value: u128,
+    second_coordinate_value: u128,
+    third: felt,
+}
+type Packed = struct @packed(4) {
+    first_coordinate_value: u128,
+    second_coordinate_value: u128,
+    third: felt,
+}
+"
+        );
+    }
+
+    #[test]
+    fn near_limit_fields_count_their_comma_and_trailing_comment() {
+        let config = Config::default();
+        let max_line_length = config.max_line_length();
+        // `    tuple_field: (...)` is padded so that the field alone is a few columns short of the
+        // limit, but not once the comma and the trailing comment are added.
+        let padding = max_line_length - "    tuple_field: (u128, u128, )".len() - 4;
+        let types = vec!["u8"; padding / 4].join(", ");
+        let source = format!(
+            "type T = struct {{\n    tuple_field: (u128, u128, {types}), # note\n    b: felt,\n}}\n"
+        );
+        let formatted = assert_format_idempotent(&source, "near-limit commented field");
+        assert_within_line_limit(&formatted);
+        assert!(formatted.contains(", # note\n"), "{formatted}");
+    }
+
+    #[test]
+    fn keeps_a_standalone_comment_after_the_first_field_on_its_own_line() {
+        let source = "\
+type T = struct { a: felt
+    # about the fields below
+}
+";
+        let formatted =
+            assert_format_idempotent(source, "standalone comment after the first field");
+        assert_eq!(
+            formatted,
+            "\
+type T = struct {
+    a: felt,
+    # about the fields below
 }
 "
         );
