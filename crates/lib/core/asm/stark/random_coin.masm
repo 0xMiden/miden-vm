@@ -12,9 +12,9 @@
 #!   RANDOM_COIN_CV_PTR             - 4-felt chaining value
 #!   RANDOM_COIN_OUTPUT_WORD_PTR    - 4-felt output cache
 #!   RANDOM_COIN_INPUT_BUF_PTR      - 8-felt absorb block
-#!   RANDOM_COIN_INPUT_LENGTH_PTR   - position in the absorb block, 0..8
+#!   RANDOM_COIN_INPUT_LENGTH_PTR   - pending felts, 0..=7 after observing or sampling
 #!   RANDOM_COIN_COUNTER_PTR        - 0 = absorbing; otherwise next counter-mode block index
-#!   RANDOM_COIN_OUTPUT_LENGTH_PTR  - felts left in the output cache, 0..4
+#!   RANDOM_COIN_OUTPUT_LENGTH_PTR  - felts left in the output cache, 0..=4
 
 use {
     AUX_RAND_ELEM_PTR,
@@ -118,7 +118,7 @@ end
 #!
 #! The absorb buffer must be empty.
 #!
-#! Input: [block_lo, block_hi, ...]
+#! Input: [block_lo(4), block_hi(4), ...]
 #! Output: [...]
 pub proc eidos_absorb_block(block_lo: word, block_hi: word)
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
@@ -334,7 +334,8 @@ pub proc eidos_sample_ext() -> types::QuadFelt
     swap
 end
 
-#! Sample bits from the Eidos transcript.
+#! Sample 0..=31 low bits from one Eidos field sample.
+#! Even a zero-bit request consumes a field sample. Requests above 31 bits fail.
 #!
 #! Input: [bits, ...]
 #! Output: [value, ...]
@@ -352,6 +353,7 @@ pub proc eidos_sample_bits(bits: u8) -> u32
 end
 
 #! Return the next full Eidos output word.
+#! Requires an empty output cache; fails rather than discarding unread cached elements.
 #!
 #! Input: [...]
 #! Output: [word, ...]
@@ -379,7 +381,7 @@ pub proc sample_ext() -> types::QuadFelt
     exec.eidos_sample_ext
 end
 
-#! Sample a number of bits from the transcript.
+#! Sample 0..=31 low bits from one Eidos field sample, consuming it even for a zero-bit request.
 #!
 #! Input: [bits, ...]
 #! Output: [value, ...]
@@ -515,7 +517,7 @@ pub proc init_seed()
     movdn.3
     #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
-    # Save `[0, lde_g, log(lde_size), lde_size]`
+    # Store `[lde_size, log(lde_size), lde_g, 0]` in increasing address order.
     mem_storew_le.LDE_DOMAIN_INFO_PTR
     #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
@@ -708,10 +710,11 @@ pub proc generate_constraint_composition_coefficients()
     mem_storew_le dropw
 end
 
-#! Draw deep composition polynomial random coefficient and save it at `DEEP_COMPOSITION_COEFS_PTR`.
+#! Draw the column- and point-batching challenges for the DEEP polynomial.
 #!
-#! As this random challenge has already been used non-deterministically in prior computations, we
-#! also check that the generated challenge matches the non-deterministically provided one.
+#! The column challenge must equal the advised challenge used to fold the OOD rows. Stores
+#! `[beta0, beta1, alpha0, alpha1]` at `DEEP_COMPOSITION_COEFS_PTR`, where alpha batches columns
+#! and beta weights the next-row quotient.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -784,19 +787,19 @@ pub proc generate_z_zN()
     dup.2 dup.2
     # => [z_0, z_1, log(trace_len), z_0, z_1, ...]
 
-    # Compute z^N using the fact that z^N = z^(2^log(N))
-    # Loop starts with `i=log(trace_len)`
+    # Start with acc = z and square it log2(N) times. The positive loop count is established
+    # by the relation's trace-height bounds before init_seed.
     push.1
     while.true
         dup.1 dup.1 ext2mul
-        # => [(z_0, z_1)^n, i, z_0, z_1, ...]
+        # => [acc_squared(2), i, z0, z1, ...]
 
         movup.2 sub.1 dup movdn.3 neq.0
-        # => [i-1 != 0, (z_0, z_1)^n, i-1, z_0, z_1, ...]
+        # => [i-1 != 0, acc_squared(2), i-1, z0, z1, ...]
     end
 
     movup.2 drop
-    # => [(z_0, z_1)^n, z_0, z_1, ...]
+    # => [zN0, zN1, z0, z1, ...]
 
     # Store z and z^N
     mem_storew_le.OOD_POINT_PTR
@@ -807,8 +810,8 @@ end
 # INDEX GENERATION
 # =============================================================================================
 
-#! Generate a list of `num_queries` number of random indices in the range
-#! [0, lde_size) and store it in memory starting from `query_ptr`.
+#! Draw the configured number of indices in [0, lde_size), preserving their order and repeats.
+#! Store the four-felt records starting at the address held in `FRI_QUERIES_ADDRESS_PTR`.
 #! The list is stored as `(index, depth, index, 0)` where `index` is the sampled domain-order
 #! index and `depth` is `log(lde_domain_size)`, which is needed when computing the DEEP queries.
 #!

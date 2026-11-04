@@ -21,7 +21,7 @@ const NUM_INPUTS_CIRCUIT = 734
 # Number of evaluation gates in the constraint evaluation circuit
 const NUM_EVAL_GATES_CIRCUIT = 6796
 
-# Max cycle length for periodic columns
+# Log2 of the longest periodic-column cycle.
 const MAX_CYCLE_LEN_LOG = 5
 
 # Number of AIR instances in the relation.
@@ -59,10 +59,15 @@ const ERR_CIRCUIT_DIGEST_MISMATCH = "ACE circuit stream does not match the compi
 # CONSTRAINT EVALUATION CHECKER
 # =================================================================================================
 
-#! Executes the constraints evaluation check.
+#! Prepares selector and fold-coefficient inputs, authenticates the ACE circuit, and
+#! checks that the circuit evaluates to zero.
 #!
-#! Inputs:  []
-#! Outputs: []
+#! Requires bounded AIR heights, a complete height-sorted proof-order map, and the
+#! relation's public, lookup-boundary, and OOD values in ACE READ order. The transcript
+#! must have stored the OOD point and constraint-composition challenges.
+#!
+#! Inputs:  [...]
+#! Outputs: [...]
 pub proc execute_constraint_evaluation_check()
     push.PROOF_ORDER_IDS_PTR
     push.QUOTIENT_SHIFT_RATIO
@@ -87,40 +92,38 @@ end
 
 #! Loads the ACE circuit from the advice map and pins it to the compiled-in digest.
 #!
-#! The stream is one adv_pipe-aligned segment hashed in a single pass. Its digest is both
-#! the advice-map key the stream is fetched under and the value the hash must reproduce,
-#! so a stream that is not the accepted circuit fails here rather than mis-evaluating.
+#! Fetches the stream under its expected digest, writes it at `ACE_CIRCUIT_STREAM_PTR`,
+#! and checks the digest computed from those same blocks.
 proc load_and_authenticate_ace_circuit
     push.ACE_CIRCUIT_DIGEST_3.ACE_CIRCUIT_DIGEST_2.ACE_CIRCUIT_DIGEST_1.ACE_CIRCUIT_DIGEST_0
-    # => [ACE_CIRCUIT_DIGEST]
+    # => [ACE_CIRCUIT_DIGEST(4), ...]
     adv.push_mapval
     push.ACE_CIRCUIT_STREAM_PTR
     push.ACE_STREAM_INIT_CV_3.ACE_STREAM_INIT_CV_2.ACE_STREAM_INIT_CV_1.ACE_STREAM_INIT_CV_0
     padw padw
-    # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]
+    # => [zero(8), CV(4), ptr, ACE_CIRCUIT_DIGEST(4), ...]
     repeat.ACE_STREAM_BLOCKS
         adv_pipe
         exec.eidos::compress
     end
     exec.eidos::digest
-    # => [STREAM_DIGEST, ptr, ACE_CIRCUIT_DIGEST]
+    # => [STREAM_DIGEST(4), end_ptr, ACE_CIRCUIT_DIGEST(4), ...]
     movup.4 drop
-    # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]
+    # => [STREAM_DIGEST(4), ACE_CIRCUIT_DIGEST(4), ...]
     assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH
 end
 
 #! Stages AIR k's multi-AIR fold coefficient `beta^(NUM_AIRS - 1 - pos_k)` in its READ slot.
 #!
-#! The native verifier folds the per-AIR roots as a Horner chain over the height-sorted proof
+#! The native verifier folds the per-AIR constraint evaluations in height-sorted proof
 #! order, so the AIR opened last carries `beta^0` and the one opened first
 #! `beta^(NUM_AIRS - 1)`. Walking `id_by_pos` from the last proof position to the first
 #! produces every power with one multiplication between consecutive positions; each is written
-#! to the slot of whichever AIR sits at that position. `beta` is sampled after the auxiliary
-#! trace, so this runs after `set_up_auxiliary_inputs_ace`, and the proof-order pass
-#! must already have filled `id_by_pos`.
+#! to that AIR's slot. The proof-order pass must have filled `id_by_pos`, and the transcript
+#! must have sampled `beta` into `CONSTRAINT_COMPOSITION_COEFS_PTR`.
 #!
-#! Inputs:  []
-#! Outputs: []
+#! Inputs:  [...]
+#! Outputs: [...]
 proc stage_air_fold_coefficients
     push.PROOF_ORDER_IDS_PTR
     push.AUXILIARY_ACE_INPUTS_PTR add.44

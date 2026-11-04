@@ -30,8 +30,9 @@ const CLAIM_INIT_CV = [13503953893964382465, 11912009168875159592, 1117044940126
 #! Fetches a claim preimage from the advice map, copies it into memory, and checks its commitment.
 #!
 #! The advice-map value under CLAIM_COMMITMENT must be the canonical 40-felt claim encoding.
+#! claim_ptr must be word-aligned and cover 40 writable cells.
 #!
-#! Inputs:  [claim_ptr, CLAIM_COMMITMENT, ...]
+#! Inputs:  [claim_ptr, CLAIM_COMMITMENT(4), ...]
 #! Outputs: [...]
 pub proc materialize_claim(claim_ptr: types::Address, commitment: types::Digest)
     # Use CLAIM_COMMITMENT as the advice-map key while preserving claim_ptr.
@@ -42,15 +43,15 @@ pub proc materialize_claim(claim_ptr: types::Address, commitment: types::Digest)
     movup.4
 
     dup add.NUM_CLAIM_ELEMENTS swap
-    # => [claim_ptr, end_ptr, CLAIM_COMMITMENT, ...]
+    # => [claim_ptr, end_ptr, CLAIM_COMMITMENT(4), ...]
 
     push.CLAIM_INIT_CV
     padw padw
-    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV, claim_ptr, end_ptr, CLAIM_COMMITMENT, ...]
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV(4), claim_ptr, end_ptr, CLAIM_COMMITMENT(4), ...]
 
     exec.mem::pipe_double_words_to_memory
     exec.eidos::digest
-    # => [DIGEST, end_ptr, CLAIM_COMMITMENT, ...]
+    # => [DIGEST(4), end_ptr, CLAIM_COMMITMENT(4), ...]
 
     movup.4 movdn.8
     assert_eqw.err="claim preimage commitment does not match"
@@ -64,7 +65,7 @@ end
 #! statement. The procedure verifies nothing.
 #!
 #! Inputs:  [claim_ptr, ...]
-#! Outputs: [CLAIM_HASH, ...]
+#! Outputs: [CLAIM_HASH(4), ...]
 #!
 #! Where:
 #! - claim_ptr is the word-aligned address of the claim region.
@@ -76,8 +77,8 @@ pub proc claim_commitment(claim_ptr: types::Address) -> types::Digest
 
     push.CLAIM_INIT_CV
     padw padw
-    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV, claim_ptr, end_ptr, remainder=0, ...]
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV(4), claim_ptr, end_ptr, remainder=0, ...]
 
     exec.eidos::hash_elements_with_state
-    # => [CLAIM_HASH, ...]
+    # => [CLAIM_HASH(4), ...]
 end

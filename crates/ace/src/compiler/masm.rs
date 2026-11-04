@@ -38,8 +38,8 @@ pub struct MasmConstraintsEvalConfig<'a> {
 /// Renders the fold-coefficient staging procedure of a relation's evaluator. It is private to the
 /// evaluator module: the only production caller is `execute_constraint_evaluation_check`.
 ///
-/// The native verifier folds the per-AIR constraint roots as a Horner chain over proof order, so
-/// the AIR opened last carries `beta^0` and the one opened first `beta^(num_airs - 1)`. Walking
+/// The native verifier folds the per-AIR constraint evaluations as a Horner chain over proof order,
+/// so the AIR opened last carries `beta^0` and the one opened first `beta^(num_airs - 1)`. Walking
 /// `id_by_pos` from the last proof position to the first produces every power with one
 /// multiplication between consecutive positions, each written to the slot of the AIR at that
 /// position.
@@ -64,16 +64,15 @@ fn render_fold_coefficient_staging(coefficient_offset: usize, num_airs: usize) -
     format!(
         "#! Stages AIR k's multi-AIR fold coefficient `beta^(NUM_AIRS - 1 - pos_k)` in its READ slot.\n\
          #!\n\
-         #! The native verifier folds the per-AIR roots as a Horner chain over the height-sorted proof\n\
+         #! The native verifier folds the per-AIR constraint evaluations in height-sorted proof\n\
          #! order, so the AIR opened last carries `beta^0` and the one opened first\n\
          #! `beta^(NUM_AIRS - 1)`. Walking `id_by_pos` from the last proof position to the first\n\
          #! produces every power with one multiplication between consecutive positions; each is written\n\
-         #! to the slot of whichever AIR sits at that position. `beta` is sampled after the auxiliary\n\
-         #! trace, so this runs after `set_up_auxiliary_inputs_ace`, and the proof-order pass\n\
-         #! must already have filled `id_by_pos`.\n\
+         #! to that AIR's slot. The proof-order pass must have filled `id_by_pos`, and the transcript\n\
+         #! must have sampled `beta` into `CONSTRAINT_COMPOSITION_COEFS_PTR`.\n\
          #!\n\
-         #! Inputs:  []\n\
-         #! Outputs: []\n\
+         #! Inputs:  [...]\n\
+         #! Outputs: [...]\n\
          proc stage_air_fold_coefficients\n    \
          push.PROOF_ORDER_IDS_PTR\n    \
          push.AUXILIARY_ACE_INPUTS_PTR add.{offset}\n    \
@@ -134,7 +133,7 @@ pub fn render_masm_constraints_eval(
             "const NUM_INPUTS_CIRCUIT = {num_inputs}\n\n",
             "# Number of evaluation gates in the constraint evaluation circuit\n",
             "const NUM_EVAL_GATES_CIRCUIT = {num_eval_gates}\n\n",
-            "# Max cycle length for periodic columns\n",
+            "# Log2 of the longest periodic-column cycle.\n",
             "const MAX_CYCLE_LEN_LOG = {max_cycle_len_log}\n\n",
             "# Number of AIR instances in the relation.\n",
             "const NUM_AIRS = {num_airs}\n\n",
@@ -163,10 +162,15 @@ pub fn render_masm_constraints_eval(
             "const ERR_CIRCUIT_DIGEST_MISMATCH = \"ACE circuit stream does not match the compiled-in circuit digest\"\n\n",
             "# CONSTRAINT EVALUATION CHECKER\n",
             "# =================================================================================================\n\n",
-            "#! Executes the constraints evaluation check.\n",
+            "#! Prepares selector and fold-coefficient inputs, authenticates the ACE circuit, and\n",
+            "#! checks that the circuit evaluates to zero.\n",
             "#!\n",
-            "#! Inputs:  []\n",
-            "#! Outputs: []\n",
+            "#! Requires bounded AIR heights, a complete height-sorted proof-order map, and the\n",
+            "#! relation's public, lookup-boundary, and OOD values in ACE READ order. The transcript\n",
+            "#! must have stored the OOD point and constraint-composition challenges.\n",
+            "#!\n",
+            "#! Inputs:  [...]\n",
+            "#! Outputs: [...]\n",
             "pub proc execute_constraint_evaluation_check()\n",
             "    push.PROOF_ORDER_IDS_PTR\n",
             "    push.QUOTIENT_SHIFT_RATIO\n",
@@ -187,25 +191,24 @@ pub fn render_masm_constraints_eval(
             "end\n\n",
             "#! Loads the ACE circuit from the advice map and pins it to the compiled-in digest.\n",
             "#!\n",
-            "#! The stream is one adv_pipe-aligned segment hashed in a single pass. Its digest is both\n",
-            "#! the advice-map key the stream is fetched under and the value the hash must reproduce,\n",
-            "#! so a stream that is not the accepted circuit fails here rather than mis-evaluating.\n",
+            "#! Fetches the stream under its expected digest, writes it at `ACE_CIRCUIT_STREAM_PTR`,\n",
+            "#! and checks the digest computed from those same blocks.\n",
             "proc load_and_authenticate_ace_circuit\n",
             "    push.ACE_CIRCUIT_DIGEST_3.ACE_CIRCUIT_DIGEST_2.ACE_CIRCUIT_DIGEST_1.ACE_CIRCUIT_DIGEST_0\n",
-            "    # => [ACE_CIRCUIT_DIGEST]\n",
+            "    # => [ACE_CIRCUIT_DIGEST(4), ...]\n",
             "    adv.push_mapval\n",
             "    push.ACE_CIRCUIT_STREAM_PTR\n",
             "    push.ACE_STREAM_INIT_CV_3.ACE_STREAM_INIT_CV_2.ACE_STREAM_INIT_CV_1.ACE_STREAM_INIT_CV_0\n",
             "    padw padw\n",
-            "    # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]\n",
+            "    # => [zero(8), CV(4), ptr, ACE_CIRCUIT_DIGEST(4), ...]\n",
             "    repeat.ACE_STREAM_BLOCKS\n",
             "        adv_pipe\n",
             "        exec.eidos::compress\n",
             "    end\n",
             "    exec.eidos::digest\n",
-            "    # => [STREAM_DIGEST, ptr, ACE_CIRCUIT_DIGEST]\n",
+            "    # => [STREAM_DIGEST(4), end_ptr, ACE_CIRCUIT_DIGEST(4), ...]\n",
             "    movup.4 drop\n",
-            "    # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]\n",
+            "    # => [STREAM_DIGEST(4), ACE_CIRCUIT_DIGEST(4), ...]\n",
             "    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH\n",
             "end\n",
             "\n{fold_coefficient_proc}",

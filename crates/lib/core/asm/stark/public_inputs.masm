@@ -27,10 +27,10 @@ end
 #!
 #! Both pointers must be word-aligned. The source and destination ranges must be disjoint from
 #! one another and from the words at `TMP1_PTR`, `TMP2_PTR`, and `ZERO_WORD_PTR`.
-#! The first two words are overwritten as scratch; the zero word must contain four zeros.
+#! Overwrites the words at `TMP1_PTR` and `TMP2_PTR`; `ZERO_WORD_PTR` must contain four zeros.
 #!
-#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, dst, src, ...]
-#! Outputs: [A0, A1, CV, dst + 16, src + 8, ...]
+#! Inputs:  [block(8), CV(4), dst, src, ...]
+#! Outputs: [A0(4), A1(4), CV(4), dst + 16, src + 8, ...]
 #!
 #! A0 and A1 are the original base-element words from memory, in increasing address order.
 #!
@@ -46,12 +46,12 @@ pub proc load_base_store_extension_double_word_from_mem(
 
     swapw
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a0, a1, a2, a3, CV, dst, src + 4, ...]
+    # => [0, 0, 0, 0, a0, a1, a2, a3, CV(4), dst, src + 4, ...]
     movdn.7
     movdn.5
     movdn.3
     swap
-    # => [a0, 0, a1, 0, a2, 0, a3, 0, CV, dst, src + 4, ...]
+    # => [a0, 0, a1, 0, a2, 0, a3, 0, CV(4), dst, src + 4, ...]
 
     dup.12
     mem_storew_le
@@ -60,7 +60,7 @@ pub proc load_base_store_extension_double_word_from_mem(
     mem_storew_le.TMP2_PTR
     movup.13 add.4 movdn.13
     swapw
-    # => [a2, 0, a3, 0, a4, a5, a6, a7, CV, dst, src + 8, ...]
+    # => [a2, 0, a3, 0, a4, a5, a6, a7, CV(4), dst, src + 8, ...]
 
     dup.12 add.4
     mem_storew_le
@@ -70,7 +70,7 @@ pub proc load_base_store_extension_double_word_from_mem(
     movdn.5
     movdn.3
     swap
-    # => [a4, 0, a5, 0, a6, 0, a7, 0, CV, dst, src + 8, ...]
+    # => [a4, 0, a5, 0, a6, 0, a7, 0, CV(4), dst, src + 8, ...]
 
     dup.12
     add.8
@@ -83,7 +83,7 @@ pub proc load_base_store_extension_double_word_from_mem(
     add.12
     mem_storew_le
     mem_loadw_le.TMP1_PTR
-    # => [a0, a1, a2, a3, a4, a5, a6, a7, CV, dst + 16, src + 8, ...]
+    # => [a0, a1, a2, a3, a4, a5, a6, a7, CV(4), dst + 16, src + 8, ...]
 end
 
 #! Copies 8 base-field elements from `src` to 8 extension-field slots at `dst`.

@@ -187,7 +187,7 @@ impl OodScatterPlan {
         for &blocks in &self.lengths {
             writeln!(
                 out,
-                r#"#! Absorbs {blocks} advice blocks at the destination supplied by the caller.
+                r#"#! Stores, Horner-folds, and absorbs {blocks} advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + {felts}, alpha_ptr, acc0', acc1']
@@ -209,6 +209,8 @@ end
 #! Stages canonical destinations and pipe-procedure addresses by proof position.
 #!
 #! Must run after `stage_proof_order_maps` and before ingesting the first OOD row.
+#! Each record packs up to two groups' (row-relative destination, pipe-digest address) pairs.
+#! An unused second pair is zero.
 #!
 #! Inputs:  []
 #! Outputs: []

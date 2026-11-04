@@ -56,8 +56,8 @@ use miden::core::stark::utils
 #! before evaluating constraints; this procedure evaluates constraints first. Constraint evaluation
 #! does not change the Fiat-Shamir transcript, so the order of challenges is the same.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4]
-#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#! Inputs:  [D0(4), D1(4), D2(4), D3(4), D4(4), ...]
+#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
 
     #==============================================================================================
@@ -86,7 +86,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # sampling auxiliary randomness.
     padw adv_loadw
     mem_storew_le.MAIN_TRACE_COM_PTR
-    # => [main_trace_commitment, ...]
+    # => [main_trace_commitment(4), ...]
     exec.random_coin::observe_word_and_flush_buffer
     # => [...]
 
@@ -113,11 +113,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     #          and generate the Out-of-Domain (OOD) challenge z
     #==============================================================================================
 
-    # Reseed with constraint composition polynomial commitment.
-    #
-    # SAFETY: reseed_direct requires input_len=0 (see SAFETY note above for rationale).
-    # Guaranteed here because generate_constraint_composition_coefficients only samples
-    # (decrements output_len) and never observes (input_len stays 0).
+    # Bind the constraint-composition commitment before drawing the OOD point.
     padw adv_loadw
     mem_storew_le.COMPOSITION_POLY_COM_PTR
     exec.random_coin::reseed_direct
@@ -125,9 +121,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # => [...]
 
     #==============================================================================================
-    #       V) Read the OOD frames for the main trace, auxiliary trace and the trace of evaluations
-    #           of H over the LDE domain. This also computes some values needed for the computation
-    #           of the DEEP queries.
+    #       V) Read and fold the preprocessed, main, auxiliary and quotient OOD evaluations.
     #==============================================================================================
 
     exec.ood_frames::load_and_horner_eval_ood_frames

@@ -43,15 +43,9 @@ const SELECTOR_STRIDE = 6
 #! base is relation-local rather than a shared constant.
 #! The output region must be disjoint from both input arrays and the shared domain state.
 #!
-#! The three quotient recomposition inputs are relation-supplied, and they do NOT all
-#! derive from the same quantity:
-#!   `quot_shift_ratio` (f)  the primitive D-th root of unity, D = the quotient arity
-#!   `quot_first_weight`     1 / (D * s0^(D-1)) — a function of BOTH D and s0
-#!   `quot_first_shift` (s0) shift^N — a PCS-configuration value (LDE shift and blowup),
-#!                           independent of D
-#! When a relation's arity and blowup factor coincide, a value derived from either quantity
-#! is numerically identical; a relation whose arity differs from its blowup needs different
-#! values, which is why these cannot stay shared constants.
+#! For quotient arity D and maximum trace length N, the relation supplies
+#! quot_first_shift = s0 = shift^N, quot_shift_ratio (a primitive D-th root of unity), and
+#! quot_first_weight = 1 / (D * s0^(D-1)). D and the LDE blowup are separate protocol parameters.
 #!
 #! Input:  [max_cycle_len_log, num_airs, heights_ptr, stark_vars_ptr, quot_first_weight,
 #!          quot_first_shift, quot_shift_ratio, proof_order_ids_ptr, ...]

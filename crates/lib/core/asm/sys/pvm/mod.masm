@@ -221,10 +221,10 @@ end
 #!
 #! The deferred root is the relation's four public base-field values, supplied by the caller as the
 #! obligation being settled. The advice stream provides the proof data, four security parameters,
-#! and AIR heights. Successful verification authenticates the root. The returned descriptor
-#! combines those transcript-bound parameters and the maximum AIR height with relation-shape
-#! constants compiled into this verifier. The caller passes all twelve elements unchanged to
-#! `stark::security::compute_conjectured_security_level` or
+#! and AIR heights. The proof must satisfy the PVM relation with that root as its public input.
+#! The returned descriptor combines those transcript-bound parameters and the maximum AIR height
+#! with relation-shape constants compiled into this verifier. The caller passes all twelve elements
+#! unchanged to `stark::security::compute_conjectured_security_level` or
 #! `stark::security::compute_proven_security_level`, then applies its own acceptance policy.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this
@@ -243,7 +243,7 @@ end
 #! Verification runs in an isolated execution context, preserving caller memory and stack elements
 #! below D.
 #!
-#! Inputs:  [D, ...]
+#! Inputs:  [D(4), ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
@@ -252,9 +252,9 @@ end
 pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     # Reserve the callee's 16-element argument/result window above the caller's live stack.
     padw padw padw
-    # => [pad(12), D, ...]
+    # => [pad(12), D(4), ...]
     swapw.3
-    # => [D, pad(12), ...]
+    # => [D(4), pad(12), ...]
 
     call.verify_proof_inner
     # => [security_descriptor(12), scratch(4), ...]
@@ -268,7 +268,7 @@ end
 
 #! Verifies a PVM proof against the supplied deferred root.
 #!
-#! Inputs:  [D, pad(12)]
+#! Inputs:  [D(4), pad(12)]
 #! Outputs: [security_descriptor(12), scratch(4)]
 #!
 #! Invocation: call
@@ -276,7 +276,7 @@ proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDes
     # --- Prepare PVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
-    # => [D, pad(12)]
+    # => [D(4), pad(12)]
 
     # Consuming D leaves scratch at the VM's minimum stack depth of 16.
     exec.public_inputs::stage_public_root
@@ -293,7 +293,7 @@ proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDes
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4, scratch(16)]
+    # => [D0(4), D1(4), D2(4), D3(4), D4(4), scratch(16)]
 
     exec.verifier::verify
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]

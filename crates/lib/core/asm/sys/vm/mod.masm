@@ -209,7 +209,8 @@ end
 #! procedure.
 #!
 #! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
-#! lookup grinding, 6..=29 for every AIR log trace height, and 0..=255 kernel procedures.
+#! lookup grinding, 6..=29 for non-fixed AIR log heights, and 0..=255 kernel procedures.
+#! The And8 lookup height is fixed at 16.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
@@ -224,10 +225,11 @@ end
 #! Verification runs in an isolated execution context, preserving caller memory and stack elements
 #! below the claim commitment.
 #!
-#! Inputs:  [CLAIM_COMMITMENT, ...]
+#! Inputs:  [CLAIM_COMMITMENT(4), ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
-#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits,
+#!           D(4), ...]
 #!
 #! Where:
 #! - CLAIM_COMMITMENT is supplied by the caller and binds the advice-supplied claim preimage.
@@ -239,18 +241,18 @@ end
 pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
     # Reserve the callee's 16-element argument/result window above the caller's live stack.
     padw padw padw
-    # => [pad(12), CLAIM_COMMITMENT, ...]
+    # => [pad(12), CLAIM_COMMITMENT(4), ...]
     swapw.3
-    # => [CLAIM_COMMITMENT, pad(12), ...]
+    # => [CLAIM_COMMITMENT(4), pad(12), ...]
 
     call.verify_proof_inner
-    # => [security_descriptor(12), D, ...]
+    # => [security_descriptor(12), D(4), ...]
 end
 
 #! Verifies a Miden VM execution proof against the supplied claim commitment.
 #!
-#! Inputs:  [CLAIM_COMMITMENT, pad(12)]
-#! Outputs: [security_descriptor(12), D]
+#! Inputs:  [CLAIM_COMMITMENT(4), pad(12)]
+#! Outputs: [security_descriptor(12), D(4)]
 #!
 #! Invocation: call
 proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
@@ -258,7 +260,7 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
     mem_storew_le.CLAIM_COMMITMENT_PTR
-    # => [CLAIM_COMMITMENT, pad(12)]
+    # => [CLAIM_COMMITMENT(4), pad(12)]
 
     push.CLAIM_PTR exec.claim::materialize_claim
     # => [scratch(16)]
@@ -285,7 +287,7 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4, scratch(16)]
+    # => [D0(4), D1(4), D2(4), D3(4), D4(4), scratch(16)]
 
     exec.verifier::verify
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]
@@ -305,5 +307,5 @@ proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurit
     swapw.3
     mem_loadw_le.DEFERRED_ROOT_PTR
     swapw.3
-    # => [security_descriptor(12), D]
+    # => [security_descriptor(12), D(4)]
 end

@@ -53,14 +53,13 @@ use {
 # Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
 # is accumulated as `requests − response`.
 #
-# Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
-#   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
-# where CLAIM_HASH is the caller-provided execution-claim commitment, authenticated against
-# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs.
-# `init_seed` folds RELATION_DIGEST into the initial transcript chaining word, so the state after
-# this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
-# The raw stack i/o and kernel digests remain public values for the constraint checks and the
-# LogUp boundary without being separately absorbed.
+# The statement appends CLAIM_HASH followed by the deferred root (eight felts total) to the
+# buffered Fiat-Shamir stream. The generic verifier has already bound the relation digest,
+# protocol parameters and trusted preprocessed commitment. The latter leaves four buffered
+# felts, so the statement spans compression blocks. The AIR count and canonical heights follow.
+# CLAIM_HASH binds the authenticated claim's program digest, kernel commitment and stack I/O;
+# raw stack values and kernel digests are used by the constraint checks without a separate
+# transcript observation.
 #
 # Data sources:
 #   - claim region: verifier memory at `CLAIM_PTR`, populated from advice and authenticated against
@@ -91,7 +90,7 @@ const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 #!
 #! Precondition:  the transcript buffer contains the trusted preprocessed-trace commitment
 #!                observed by `init_seed`.
-#! Postcondition: the transcript input buffer holds the AIR-shape values. The generic verifier
+#! Postcondition: the transcript buffer holds the final AIR height (one felt). The generic verifier
 #!                observes the main-trace commitment next and flushes before sampling.
 #!
 #! Input:  [...]
@@ -99,7 +98,7 @@ const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 pub proc process_public_inputs()
     # Absorb [CLAIM_HASH | D].
     padw mem_loadw_le.CLAIM_COMMITMENT_PTR
-    # => [CLAIM_HASH, ...]
+    # => [CLAIM_HASH(4), ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
 
@@ -117,17 +116,17 @@ end
 #! Precondition: the claim region is populated and authenticated.
 #!
 #! Writes:
-#! - +0: program_digest from the claim
-#! - +4: deferred_root from advice
+#! - BOUNDARY_INPUTS_PTR + 0: program_digest from the authenticated claim;
+#! - BOUNDARY_INPUTS_PTR + 4: deferred_root from advice, to be bound by the proof.
 #!
 #! Input:  [...]
 #! Output: [...]
 pub proc stage_boundary_inputs()
     # program_digest: claim region (+0) -> boundary_inputs (+0).
     padw mem_loadw_le.CLAIM_PTR
-    # => [P, ...]
+    # => [P(4), ...]
     mem_storew_le.BOUNDARY_INPUTS_PTR
-    # => [P, ...]
+    # => [P(4), ...]
 
     # deferred_root from advice -> boundary_inputs (+4), loaded over the dead P word.
     adv_loadw
@@ -317,7 +316,7 @@ end
 #! Observes `[CLAIM_HASH | D]` through the FS stream, mirroring `MidenMultiAir::observe` after the
 #! framework-bound preprocessed commitment. `D` is read from the boundary-inputs window.
 #!
-#! Input:  [CLAIM_HASH, ...]
+#! Input:  [CLAIM_HASH(4), ...]
 #! Output: [...]
 proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     exec.random_coin::eidos_observe_word

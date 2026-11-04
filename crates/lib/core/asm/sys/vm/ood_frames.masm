@@ -22,7 +22,7 @@ const OOD_SCATTER_RECORD_1_PTR = OOD_SCATTER_TABLE_PTR + 8
 const OOD_SCATTER_RECORD_2_PTR = OOD_SCATTER_TABLE_PTR + 12
 const OOD_SCATTER_RECORD_3_PTR = OOD_SCATTER_TABLE_PTR + 16
 
-#! Absorbs 2 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 2 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 16, alpha_ptr, acc0', acc1']
@@ -34,7 +34,7 @@ proc pipe_2
     end
 end
 
-#! Absorbs 4 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 4 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 32, alpha_ptr, acc0', acc1']
@@ -46,7 +46,7 @@ proc pipe_4
     end
 end
 
-#! Absorbs 6 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 6 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 48, alpha_ptr, acc0', acc1']
@@ -58,7 +58,7 @@ proc pipe_6
     end
 end
 
-#! Absorbs 10 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 10 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 80, alpha_ptr, acc0', acc1']
@@ -70,7 +70,7 @@ proc pipe_10
     end
 end
 
-#! Absorbs 12 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 12 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 96, alpha_ptr, acc0', acc1']
@@ -82,7 +82,7 @@ proc pipe_12
     end
 end
 
-#! Absorbs 28 advice blocks at the destination supplied by the caller.
+#! Stores, Horner-folds, and absorbs 28 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + 224, alpha_ptr, acc0', acc1']
@@ -107,10 +107,10 @@ end
 #! Outputs: []
 #! Invocation: exec
 pub proc stage_proof_order_maps()
-    # => [pos_ptr, ids_ptr]
     push.PROOF_ORDER_IDS_PTR push.PROOF_ORDER_POSITIONS_PTR
-    # keys: [k0, k1, k2, k3, pos_ptr, ids_ptr]
+    # => [pos_ptr, ids_ptr]
     padw push.LOG_AIR_TRACE_LENGTHS_PTR mem_loadw_le mul.16 movdn.3 mul.16 add.1 movdn.3 mul.16 add.2 movdn.3 mul.16 add.3 movdn.3
+    # keys: [k0, k1, k2, k3, pos_ptr, ids_ptr]
     # 5 compare-exchanges; each leaves the smaller key at the lower index.
     movup.2 swap dup.1 dup.1 u32lt cswap swap movdn.2    # (0, 2)
     movup.3 movup.2 dup.1 dup.1 u32lt cswap movdn.2 movdn.3    # (1, 3)
@@ -128,6 +128,8 @@ end
 #! Stages canonical destinations and pipe-procedure addresses by proof position.
 #!
 #! Must run after `stage_proof_order_maps` and before ingesting the first OOD row.
+#! Each record packs up to two groups' (row-relative destination, pipe-digest address) pairs.
+#! An unused second pair is zero.
 #!
 #! Inputs:  []
 #! Outputs: []

@@ -228,8 +228,8 @@ pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
     };
     if pointers_beneath {
         push_pointers(&mut stack);
-        lines.push(format!("    # => [{}]", describe(&stack)));
         lines.push(stack.line(4));
+        lines.push(format!("    # => [{}]", describe(&stack)));
         stack.ops.clear();
     }
 
@@ -268,8 +268,8 @@ pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
         stack.movup(heights_index);
         stack.drop();
     }
-    lines.push(format!("    # keys: [{}]", describe(&stack)));
     lines.push(stack.line(4));
+    lines.push(format!("    # keys: [{}]", describe(&stack)));
     stack.ops.clear();
 
     // Fixed comparator network over stack indices 0..num_airs; the pointers below are untouched.
@@ -302,8 +302,8 @@ pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
 
     if !pointers_beneath {
         push_pointers(&mut stack);
-        lines.push(format!("    # => [{}]", describe(&stack)));
         lines.push(stack.line(4));
+        lines.push(format!("    # => [{}]", describe(&stack)));
         stack.ops.clear();
     }
 
