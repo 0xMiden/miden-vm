@@ -70,6 +70,7 @@ pub struct LookupOpFlags<E> {
     u32div: E,
 
     // -- Degree-7 individual ops ----------------------------------------------------------------
+    clear_deferred: E,
     mload: E,
     mstore: E,
     mloadw: E,
@@ -126,14 +127,15 @@ where
 
         // -- Degree-7 subset --------------------------------------------------------------
         // deg-7 flag(op) = b654[op >> 4] * b321[(op >> 1) & 7] * bits[0][op & 1].
-        // All six bus-consumed deg-7 opcodes have b6=0, so we only need b654[0] (b5=0,b4=0)
-        // for MLOAD and b654[2] (b5=1,b4=0) for the rest.
+        // All bus-consumed deg-7 opcodes have b6=0, so we only need b654[0] (b5=0,b4=0)
+        // for CLEARDEFERRED/MLOAD and b654[2] (b5=1,b4=0) for the rest.
         let b654_0 = bits[6][0].clone() * bits[5][0].clone() * bits[4][0].clone();
         let b654_2 = bits[6][0].clone() * bits[5][1].clone() * bits[4][0].clone();
         let deg7 = |b654: &E, op: u8| -> E {
             let op = op as usize;
             b654.clone() * b321[(op >> 1) & 7].clone() * bits[0][op & 1].clone()
         };
+        let clear_deferred = deg7(&b654_0, opcodes::CLEARDEFERRED);
         let mload = deg7(&b654_0, opcodes::MLOAD);
         let u32and = deg7(&b654_2, opcodes::U32AND);
         let u32xor = deg7(&b654_2, opcodes::U32XOR);
@@ -240,6 +242,7 @@ where
             hornerbase,
             hornerext,
             u32div,
+            clear_deferred,
             mload,
             mstore,
             mloadw,
@@ -307,6 +310,7 @@ impl LookupOpFlags<Felt> {
             opcodes::SYSCALL => f.syscall = Felt::ONE,
             opcodes::MRUPDATE => f.mrupdate = Felt::ONE,
             opcodes::CRYPTOSTREAM => f.cryptostream = Felt::ONE,
+            opcodes::CLEARDEFERRED => f.clear_deferred = Felt::ONE,
             opcodes::MLOAD => f.mload = Felt::ONE,
             opcodes::MSTORE => f.mstore = Felt::ONE,
             opcodes::MLOADW => f.mloadw = Felt::ONE,
@@ -385,6 +389,7 @@ impl LookupOpFlags<Felt> {
             hornerbase: Felt::ZERO,
             hornerext: Felt::ZERO,
             u32div: Felt::ZERO,
+            clear_deferred: Felt::ZERO,
             mload: Felt::ZERO,
             mstore: Felt::ZERO,
             mloadw: Felt::ZERO,
@@ -449,6 +454,7 @@ impl LookupOpFlags<Felt> {
             hornerbase,
             hornerext,
             u32div,
+            clear_deferred,
             mload,
             mstore,
             mloadw,
@@ -528,6 +534,7 @@ accessors!(
     // Degree-6 individual ops
     u32div,
     // Degree-7 individual ops
+    clear_deferred,
     mload,
     mstore,
     mloadw,
@@ -844,6 +851,7 @@ mod tests {
             hornerbase,
             hornerext,
             u32div,
+            clear_deferred,
             mload,
             mstore,
             mloadw,

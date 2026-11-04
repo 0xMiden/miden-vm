@@ -23,7 +23,7 @@ struct Multiplicities {
 /// Number of unique `(a, b)` byte pairs the LUT can hold:
 /// `256 × 256 = 2^16`. `BytePairLutRequires` allocates a flat
 /// multiplicity slot per pair.
-const NUM_BYTE_PAIRS: usize = 1 << 16;
+pub(crate) const NUM_BYTE_PAIRS: usize = 1 << 16;
 
 /// Map `(a, b)` → flat index in [0, [`NUM_BYTE_PAIRS`]). High byte is
 /// `a`, low byte is `b`, so iterating in index order yields the rows

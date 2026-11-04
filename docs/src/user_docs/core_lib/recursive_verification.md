@@ -164,21 +164,38 @@ with Eidos under `DEFERRED_AND_FRAME`, matching `miden_core::deferred::fold_defe
 
 ### Proving the combined work
 
-Collect the singleton witnesses carried by `PrecompileStatus::Deferred` in claim order, including
-repeats. Pass this nonempty vector directly to the prover:
+Before executing the batcher, collect the singleton witnesses carried by
+`PrecompileStatus::Deferred` in claim order, including repeats. Prove this nonempty vector and
+merge its packaged verifier advice into the batch inputs:
 
 ```rust
 let pvm_proof = prover.prove_precompiles(witnesses)?;
+let package = PvmRecursiveVerifierInputs::for_request(
+    core_lib.pvm_recursive_verifier_root(),
+    &pvm_proof,
+)?;
+let (pvm_advice, _) = package.into_parts();
+batch_advice.extend(pvm_advice);
 ```
 
 The prover imports and evaluates the witnesses, folds their roots into `D`, and proves the
-combined work. On the request for `D`, return the packaged advice for this proof.
+combined work. The batcher independently computes `D` from the verified MVM proofs and fetches
+the prepared proof through its request key:
+
+```masm
+# => [D, ...]
+dupw procref.pvm::verify_proof exec.sys::build_proof_request_key
+adv.push_mapval dropw
+# => [D, ...]; the proof stream is staged for pvm::verify_proof.
+```
+
+Batch execution uses a regular host; it does not request proof generation through an event.
 
 The resulting `PrecompileProof` contains one STARK proof for `roots = [A, B, A]`. Its `aggregate_root()`
 recomputes `D` from the metadata. The batcher verifies the PVM proof against `D`, which it computed
 from the deferred roots returned by the MVM verifiers, and checks the proof's security level.
 
-If all roots are TRUE, skip precompile proving and requesting a PVM proof.
+If all roots are TRUE, skip precompile proving and loading a PVM proof.
 
 ### Proving the batcher
 

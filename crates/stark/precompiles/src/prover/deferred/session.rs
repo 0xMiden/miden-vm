@@ -25,6 +25,7 @@ use miden_precompiles::{
 };
 use miden_stark::memory;
 
+use super::capacity::{self, MemoryBudget};
 use crate::prover::{
     PrecompileProvingError,
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
@@ -110,6 +111,10 @@ impl WitnessSession {
     pub(crate) fn msm_expr_count(&self) -> usize {
         self.session.msm_expr_count()
     }
+
+    pub(crate) fn trace_heights(&self) -> Option<[usize; crate::prover::session::NUM_CHIPLETS]> {
+        self.session.trace_heights()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -140,6 +145,7 @@ struct Cached {
 }
 
 struct WitnessImporter {
+    memory_budget: MemoryBudget,
     session: Session,
     cache: BTreeMap<Digest, Cached>,
     wnaf_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
@@ -165,7 +171,12 @@ pub(crate) fn prove(
 ) -> Result<crate::prover::PrecompileProof, PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
-        import_witnesses_with_roots(witnesses, verification_limits, expected_roots)?
+        import_witnesses_with_roots(
+            witnesses,
+            verification_limits,
+            expected_roots,
+            max_prover_memory_bytes,
+        )?
     };
     let heights = imported
         .session
@@ -222,7 +233,12 @@ pub mod testing {
         witnesses: alloc::vec::Vec<PrecompileWitness>,
         limits: &PrecompileLimits,
     ) -> Result<PreparedSession, PrecompileProvingError> {
-        let imported = import_witnesses_with_roots(witnesses, limits, None)?;
+        let imported = import_witnesses_with_roots(
+            witnesses,
+            limits,
+            None,
+            DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+        )?;
         let heights = imported
             .session
             .trace_heights()
@@ -278,13 +294,19 @@ pub(crate) fn import_witnesses(
     witnesses: Vec<PrecompileWitness>,
     verification_limits: &PrecompileLimits,
 ) -> Result<WitnessSession, PrecompileProvingError> {
-    import_witnesses_with_roots(witnesses, verification_limits, None)
+    import_witnesses_with_roots(
+        witnesses,
+        verification_limits,
+        None,
+        crate::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+    )
 }
 
 pub(crate) fn import_witnesses_with_roots(
     witnesses: Vec<PrecompileWitness>,
     verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
+    max_prover_memory_bytes: u64,
 ) -> Result<WitnessSession, PrecompileProvingError> {
     if witnesses.is_empty() {
         return Err(SessionInputError::Empty.into());
@@ -305,11 +327,13 @@ pub(crate) fn import_witnesses_with_roots(
 
     // Consume and admit every input independently, including repetitions. Root binding also
     // precedes Session creation: a late cheap rejection must win over any semantic import error.
+    let mut memory_budget = MemoryBudget::new(max_prover_memory_bytes);
     let registry = Arc::new(miden_precompiles::registry());
     let prepared = witnesses
         .into_iter()
         .enumerate()
         .map(|(witness, input)| {
+            memory_budget.reserve(capacity::preparation_bytes(&input))?;
             let prepared = input
                 .prepare(Arc::clone(&registry), verification_limits)
                 .map_err(|source| SessionInputError::Preparation { witness, source })?;
@@ -317,14 +341,17 @@ pub(crate) fn import_witnesses_with_roots(
                 let expected = roots[witness];
                 let actual = prepared.root();
                 if actual != expected {
-                    return Err(SessionInputError::RootMismatch { witness, expected, actual });
+                    return Err(
+                        SessionInputError::RootMismatch { witness, expected, actual }.into()
+                    );
                 }
             }
             Ok(prepared)
         })
-        .collect::<Result<Vec<_>, SessionInputError>>()?;
+        .collect::<Result<Vec<_>, PrecompileProvingError>>()?;
 
-    let mut importer = WitnessImporter::new();
+    memory_budget.reserve(Some(capacity::SESSION_BYTES))?;
+    let mut importer = WitnessImporter::new(memory_budget);
     for witness in prepared {
         importer = importer.import(witness)?;
     }
@@ -332,8 +359,9 @@ pub(crate) fn import_witnesses_with_roots(
 }
 
 impl WitnessImporter {
-    fn new() -> Self {
+    fn new(memory_budget: MemoryBudget) -> Self {
         Self {
+            memory_budget,
             session: Session::new(),
             cache: BTreeMap::new(),
             wnaf_tables: BTreeMap::new(),
@@ -345,7 +373,7 @@ impl WitnessImporter {
     }
 
     /// Evaluate and record together. An error consumes and drops the partially mutated Session.
-    fn import(mut self, witness: PreparedWitness) -> Result<Self, SessionInputError> {
+    fn import(mut self, witness: PreparedWitness) -> Result<Self, PrecompileProvingError> {
         let witness_index = self.roots.len();
         let root = witness.root();
         for (entry_index, prepared) in witness.into_nodes().enumerate() {
@@ -356,11 +384,14 @@ impl WitnessImporter {
             let digest = prepared.digest();
             if let Some(previous) = self.cache.get(&digest) {
                 if previous.definition.node() != prepared.node() {
-                    return Err(self.invalid("conflicting definition for a shared commitment"));
+                    return Err(self
+                        .invalid("conflicting definition for a shared commitment")
+                        .into());
                 }
                 // Reuse the computation; later operand uses still create their own bindings.
                 continue;
             }
+            self.memory_budget.reserve(capacity::import_bytes(&prepared))?;
             let value = self.entry(&prepared)?;
             let hash = match value {
                 Imported::True | Imported::Chunks => None,
@@ -375,14 +406,17 @@ impl WitnessImporter {
         }
         self.location = WitnessLocation::Root { witness: witness_index };
         let Imported::Truth(claim) = self.get(root) else {
-            return Err(self.invalid("root is not a true assertion"));
+            return Err(self.invalid("root is not a true assertion").into());
         };
         if !self.session.is_recorded_truth(claim) {
-            return Err(self.invalid("bare external assertion cannot be a precompile root"));
+            return Err(self.invalid("bare external assertion cannot be a precompile root").into());
         }
         self.aggregate = Some(match self.aggregate {
             None => claim,
-            Some(previous) => self.session.assert_and(previous, claim),
+            Some(previous) => {
+                self.memory_budget.reserve(Some(capacity::IMPORT_BYTES_PER_NODE))?;
+                self.session.assert_and(previous, claim)
+            },
         });
         self.roots.push(root);
         Ok(self)

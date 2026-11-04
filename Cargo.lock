@@ -792,9 +792,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0379da47d0de730b2f7900e3f2d9c3b5efc21b46875282305300b4851f03e70"
+checksum = "1cade51e6e6e30e7ea2cd9599fa5d5d5f48255a6b221bbd0cab1cf32f3c23c65"
 dependencies = [
  "anyhow",
  "cc",
@@ -810,9 +810,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65f64942456bd4514b06ba4c72623bf197931d05d3d1db61b8a0c6289b30b2c7"
+checksum = "b5d1640d31b122c8d754939c6ae4040709a9602f289d11e43075476a21285020"
 dependencies = [
  "clap",
  "codspeed",
@@ -823,9 +823,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat-walltime"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e86691354129085562c025293f9e8b35bf9054813bb9981be3a96aa8490c07d1"
+checksum = "2a83eed387b8f84aad4cb29607758bec3ab3f53b1734af934ddae7fee626d8ce"
 dependencies = [
  "anes",
  "cast",
@@ -4683,7 +4683,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",

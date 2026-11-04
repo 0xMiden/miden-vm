@@ -168,6 +168,13 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
+        self.deferred_state
+            .clear_deferred(expected_previous_root)
+            .map_err(OperationError::from)
+    }
+
+    #[inline(always)]
     fn set_caller_hash(&mut self, caller_hash: Word) {
         self.caller_hash = caller_hash;
     }

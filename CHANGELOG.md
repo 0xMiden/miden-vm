@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
@@ -14,7 +15,12 @@
 #### Changes
 
 - [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#4113](https://github.com/0xMiden/miden-vm/pull/4113)).
+- [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
+- [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively.
+- [BREAKING] Added VM opcode 6, `clear_deferred`, to reset the accumulator identified by the top stack word in root context, preserving the stack. This unsafe operation requires a trusted kernel epilogue that recursively verifies that exact root before clearing. The VM proof relation and recursive verifier root change.
+- [BREAKING] Mixed dense/sparse MAST merging now rejects procedure roots that have neither a full node nor a digest. It reports the new `MastForestError::MissingRootOnMerge` variant, which downstream exhaustive matches must handle.
+- [BREAKING] Default `SparseMastForest` and `ExecutionWitness` readers now reject incorrect full-node hashes. Sparse blocks must consume their declared data sections, and child references must point to preceding nodes. Explicit trusted readers skip hash recomputation. Digests of pruned children and external nodes remain unauthenticated ([#3303](https://github.com/0xMiden/miden-vm/issues/3303)).
 - [BREAKING] Reduced the PVM's aligned width from 912 to 768 columns. Verification uses precomputed table commitments to avoid rebuilding preprocessed tables. PVM proofs and recursive verifier roots change ([#4068](https://github.com/0xMiden/miden-vm/pull/4068)).
 - [BREAKING] Added `miden-vm-stark` for VM relation proving, verification, setup, security, and recursive advice. `miden-prover` still builds complete and deferred proofs, and `miden-verifier` still verifies execution proofs. Both crates no longer re-export the APIs that moved into the new STARK crates. Replaced `miden-precompiles-prover` and `miden-precompiles-verifier` with `miden-precompiles-stark`. Moved `VmTrace` to `miden_air_definitions::vm`. `miden_processor::trace::build_trace` now requires a `ProvingBudget`, and constraint checking moved to `miden_vm_stark::debug::check_constraints` ([#4079](https://github.com/0xMiden/miden-vm/pull/4079)).
 - [BREAKING] Replaced `miden-lifted-air` and `miden-lifted-stark` with `miden-stark`. The `miden-stark` crate also contains the transcript code from `miden-stark-transcript`. Replaced `miden-ace-codegen` with `miden-ace` for ACE runtime types and optional compilation. Moved `miden-stateful-hasher` into `miden_crypto::hash::stateful`. Use `miden_air_definitions::{vm, precompiles}` for authored AIRs and `miden_air::{vm, precompiles}` for production adapters ([#4078](https://github.com/0xMiden/miden-vm/pull/4078)).
@@ -32,7 +38,9 @@
 
 #### Fixes
 
+- Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
+- The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
 
 ## v1.0.0-rc.0 (2026-10-21)
 
