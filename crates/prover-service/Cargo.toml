@@ -74,7 +74,7 @@ tracing = { workspace = true, features = ["std"], optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [build-dependencies]
-tonic-prost-build = "0.14"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
 
 [dev-dependencies]
 codspeed-criterion-compat.workspace = true
