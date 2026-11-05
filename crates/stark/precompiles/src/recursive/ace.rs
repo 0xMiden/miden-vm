@@ -679,7 +679,7 @@ mod tests {
             "the PVM lookup coefficient exceeds the estimator envelope"
         );
         assert!(
-            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS)
+            u64::from(pvm_security::FIXED_LOOKUP_ERROR_TERMS)
                 <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_BOUNDARY_TERMS"),
             "the PVM boundary-term count exceeds the estimator envelope"
         );
@@ -742,9 +742,9 @@ mod tests {
                 u64::from(pvm_security::testing::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
-                "FIXED_BOUNDARY_LOOKUP_TERMS",
+                "FIXED_LOOKUP_ERROR_TERMS",
                 PVM_PARAMETERS_PATH,
-                u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+                u64::from(pvm_security::FIXED_LOOKUP_ERROR_TERMS),
             ),
         ] {
             assert_eq!(

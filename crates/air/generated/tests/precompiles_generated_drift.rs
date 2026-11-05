@@ -12,7 +12,10 @@
 use miden_air::precompiles::ChipletAir;
 use miden_constraint_compiler::{
     ir::{Graph, capture, capture_into},
-    testing::{assert_concrete_evaluation, constraint_degrees, eval_graph},
+    testing::{
+        assert_concrete_evaluation, assert_prepared_evaluator_dispatch, constraint_degrees,
+        eval_graph,
+    },
 };
 use miden_core::{Felt, field::QuadFelt};
 
@@ -107,5 +110,12 @@ fn generated_degrees_match_handwritten() {
             <ChipletAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
             ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.definition())
         );
+    }
+}
+
+#[test]
+fn generated_evaluators_use_prepared_terms() {
+    for air in ChipletAir::all() {
+        assert_prepared_evaluator_dispatch(&air);
     }
 }
