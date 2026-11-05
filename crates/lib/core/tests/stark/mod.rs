@@ -666,7 +666,7 @@ fn run_recursive_verifier(data: &VerifierData) -> Vec<usize> {
         u64::from(security::AIR_SHAPE.max_constraint_degree),
         u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
         u64::from(security::LOOKUP_SHAPE.max_message_width),
-        u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures as u64,
+        u64::from(security::FIXED_LOOKUP_ERROR_TERMS) + num_kernel_procedures as u64,
         u64::from(security::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         params.num_queries() as u64,

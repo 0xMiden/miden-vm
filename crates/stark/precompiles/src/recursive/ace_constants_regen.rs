@@ -406,7 +406,10 @@ fn render_pvm_parameters(
             u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
         ),
         ("LOOKUP_FRACTIONS_PER_ROW", u64::from(lookup_shape.fractions_per_row)),
-        ("FIXED_BOUNDARY_LOOKUP_TERMS", u64::from(metadata.fixed_boundary_lookup_terms)),
+        (
+            "FIXED_LOOKUP_ERROR_TERMS",
+            u64::from(crate::setup::security::FIXED_LOOKUP_ERROR_TERMS),
+        ),
     ] {
         writeln!(output, "pub const {name} = {value}").unwrap();
     }

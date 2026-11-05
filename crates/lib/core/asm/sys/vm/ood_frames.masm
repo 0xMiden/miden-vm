@@ -12,10 +12,10 @@ use miden::core::stark::types
 
 # Per-row OOD layout uses LMCS alignment 8:
 #   preprocessed: 0 + 0 + 0 + 8 = 8 scalar evaluations
-#   main:         48 + 24 + 112 + 8 = 192 scalar evaluations
+#   main:         48 + 24 + 104 + 8 = 184 scalar evaluations
 #   aux:          8 + 8 + 40 + 8 = 64 scalar evaluations
 #   quotient:     16 scalar evaluations
-# The advice stream supplies 560 base felts, read as 70 `adv_pipe` blocks.
+# The advice stream supplies 544 base felts, read as 68 `adv_pipe` blocks.
 
 const OOD_SCATTER_RECORD_0_PTR = OOD_SCATTER_TABLE_PTR + 4
 const OOD_SCATTER_RECORD_1_PTR = OOD_SCATTER_TABLE_PTR + 8
@@ -82,12 +82,12 @@ proc pipe_12
     end
 end
 
-#! Stores, Horner-folds, and absorbs 28 advice blocks at the caller's destination.
+#! Stores, Horner-folds, and absorbs 26 advice blocks at the caller's destination.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [rate'(8), cv'(4), ptr + 224, alpha_ptr, acc0', acc1']
-proc pipe_28
-    repeat.28
+#! Outputs: [rate'(8), cv'(4), ptr + 208, alpha_ptr, acc0', acc1']
+proc pipe_26
+    repeat.26
         adv_pipe
         horner_eval_ext
         compress
@@ -142,14 +142,14 @@ pub proc stage_ood_scatter_table()
     procref.pipe_6 dup.4 add.28 mem_storew_le dropw
     procref.pipe_10 dup.4 add.32 mem_storew_le dropw
     procref.pipe_12 dup.4 add.36 mem_storew_le dropw
-    procref.pipe_28 dup.4 add.40 mem_storew_le dropw
+    procref.pipe_26 dup.4 add.40 mem_storew_le dropw
     push.PROOF_ORDER_POSITIONS_PTR
     # => [pos_ptr, table]
 
     # AIR 0: address each packed word by its proof position.
     dup mem_load mul.4 dup.2 add
     # => [base, pos_ptr, table]
-    dup.2 add.20 push.400
+    dup.2 add.20 push.384
     dup.4 add.36 push.16
     # => [dst0, pipe0, dst1, pipe1, base, pos_ptr, table]
     dup.4 add.4 mem_storew_le dropw
@@ -158,7 +158,7 @@ pub proc stage_ood_scatter_table()
     # AIR 1: address each packed word by its proof position.
     dup add.1 mem_load mul.4 dup.2 add
     # => [base, pos_ptr, table]
-    dup.2 add.20 push.416
+    dup.2 add.20 push.400
     dup.4 add.28 push.112
     # => [dst0, pipe0, dst1, pipe1, base, pos_ptr, table]
     dup.4 add.4 mem_storew_le dropw
@@ -167,7 +167,7 @@ pub proc stage_ood_scatter_table()
     # AIR 2: address each packed word by its proof position.
     dup add.2 mem_load mul.4 dup.2 add
     # => [base, pos_ptr, table]
-    dup.2 add.32 push.432
+    dup.2 add.32 push.416
     dup.4 add.40 push.160
     # => [dst0, pipe0, dst1, pipe1, base, pos_ptr, table]
     dup.4 add.4 mem_storew_le dropw
@@ -176,8 +176,8 @@ pub proc stage_ood_scatter_table()
     # AIR 3: address each packed word by its proof position.
     dup add.3 mem_load mul.4 dup.2 add
     # => [base, pos_ptr, table]
-    dup.2 add.20 push.512
-    dup.4 add.20 push.384
+    dup.2 add.20 push.496
+    dup.4 add.20 push.368
     # => [dst0, pipe0, dst1, pipe1, base, pos_ptr, table]
     dup.4 add.4 mem_storew_le dropw
     drop
@@ -192,7 +192,7 @@ end
 #! absorbed block. Call `stage_ood_scatter_table` before ingesting the first row.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [rate'(8), cv'(4), ptr + 560, alpha_ptr, acc0', acc1']
+#! Outputs: [rate'(8), cv'(4), ptr + 544, alpha_ptr, acc0', acc1']
 #! Invocation: exec
 pub proc process_row_ood_evaluations(
     state: types::EidosState,
@@ -251,8 +251,8 @@ pub proc process_row_ood_evaluations(
     swapw swapw.3 swap.4 swapw.3
     # => [scratch(5), pipe_address, scratch(2), cv(4), ptr, alpha_ptr, acc0, acc1]
     dup.5 dynexec
-    # quotient group, sole occupant: 4 blocks at row offset 528
-    mem_load.OOD_SCATTER_TABLE_PTR add.528
+    # quotient group, sole occupant: 4 blocks at row offset 512
+    mem_load.OOD_SCATTER_TABLE_PTR add.512
     swap.13 drop
     exec.pipe_4
 end

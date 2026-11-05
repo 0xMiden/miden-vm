@@ -19,8 +19,8 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     air::{
-        AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder, ProverStatement,
-        RowWindow, debug::assert_multi_air_valid,
+        AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder,
+        ProverStatement, RowWindow, debug::assert_multi_air_valid,
     },
     order::TraceOrder,
 };
@@ -58,6 +58,10 @@ where
 /// Base-field constraints are checked before auxiliary-trace construction, whose builders may
 /// assume valid selectors. The full constraint check then uses the constructed auxiliary traces.
 /// Each AIR sees its own public-input slice from the [`ProverStatement`].
+///
+/// Uses [`LiftedAir::eval_with_challenge_terms`] and
+/// [`LiftedAir::build_aux_trace_with_preprocessed`], matching the prover's entry points. Each
+/// preprocessed trace is shared by the auxiliary builder and both constraint-checking passes.
 ///
 /// Derives auxiliary-trace challenges from the supplied challenger using only
 /// statement-owned data plus the instance count and log trace heights. This is
@@ -101,6 +105,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
 
     let mut aux_traces = Vec::with_capacity(airs.len());
     let mut aux_values_per_air = Vec::with_capacity(airs.len());
+    let preprocessed: Vec<_> = airs.iter().map(BaseAir::preprocessed_trace).collect();
     for (i, (air, main)) in airs.iter().zip(traces.iter()).enumerate() {
         let num_randomness = air.num_randomness();
         // Auxiliary builders may assume selectors are boolean. Check base-field constraints
@@ -108,14 +113,20 @@ pub fn check_constraints<F, EF, MA, Ch>(
         check_single_trace(
             air,
             main,
+            preprocessed[i].as_ref(),
             None,
             &vec![EF::ZERO; air.num_aux_values()],
             &air_inputs[i],
             &challenges,
             i,
         );
-        let (aux_trace, aux_values) =
-            air.build_aux_trace(main, &air_inputs[i], aux_inputs, &challenges[..num_randomness]);
+        let (aux_trace, aux_values) = air.build_aux_trace_with_preprocessed(
+            main,
+            preprocessed[i].as_ref(),
+            &air_inputs[i],
+            aux_inputs,
+            &challenges[..num_randomness],
+        );
         aux_traces.push(aux_trace);
         aux_values_per_air.push(aux_values);
     }
@@ -148,7 +159,16 @@ pub fn check_constraints<F, EF, MA, Ch>(
             aux_trace.height()
         );
 
-        check_single_trace(air, main, Some(aux_trace), aux_values, &air_inputs[i], &challenges, i);
+        check_single_trace(
+            air,
+            main,
+            preprocessed[i].as_ref(),
+            Some(aux_trace),
+            aux_values,
+            &air_inputs[i],
+            &challenges,
+            i,
+        );
     }
 }
 
@@ -158,6 +178,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
 fn check_single_trace<F, EF, A>(
     air: &A,
     main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
     aux_trace: Option<&RowMajorMatrix<EF>>,
     aux_values: &[EF],
     public_values: &[F],
@@ -170,11 +191,8 @@ fn check_single_trace<F, EF, A>(
 {
     let height = main.height();
 
-    // Preprocessed matrix comes straight off the AIR (debug-only; this
-    // re-materialises `BaseAir::preprocessed_trace`). Its height must match the main
-    // trace; width is checked per row by `check_builder_shape`.
-    let preprocessed = air.preprocessed_trace();
-    if let Some(preproc) = &preprocessed {
+    // Setup height must match the main trace; row-window validation checks its width.
+    if let Some(preproc) = preprocessed {
         assert_eq!(
             preproc.height(),
             height,
@@ -185,6 +203,8 @@ fn check_single_trace<F, EF, A>(
 
     let periodic_matrix = air.periodic_columns_matrix();
     let dummy_aux_row = vec![EF::ZERO; air.aux_width()];
+    let challenges = &challenges[..air.num_randomness()];
+    let challenge_terms = air.precompute_challenge_terms::<F, EF>(challenges);
     for row in 0..height {
         let next_row = (row + 1) % height;
 
@@ -201,8 +221,8 @@ fn check_single_trace<F, EF, A>(
         let periodic_values: &[F] = periodic_row.as_deref().unwrap_or(&[]);
 
         // Preprocessed rows (empty window when the AIR declares none).
-        let preprocessed_current = preprocessed.as_ref().map(|m| m.row_slice(row).unwrap());
-        let preprocessed_next = preprocessed.as_ref().map(|m| m.row_slice(next_row).unwrap());
+        let preprocessed_current = preprocessed.map(|m| m.row_slice(row).unwrap());
+        let preprocessed_next = preprocessed.map(|m| m.row_slice(next_row).unwrap());
 
         let mut builder = DebugConstraintBuilder {
             main: RowWindow::from_two_rows(&main_current, &main_next),
@@ -214,7 +234,7 @@ fn check_single_trace<F, EF, A>(
                 aux_current.as_deref().unwrap_or(&dummy_aux_row),
                 aux_next.as_deref().unwrap_or(&dummy_aux_row),
             ),
-            randomness: &challenges[..air.num_randomness()],
+            randomness: challenges,
             public_values,
             periodic_values,
             permutation_values: aux_values,
@@ -229,7 +249,7 @@ fn check_single_trace<F, EF, A>(
         #[cfg(debug_assertions)]
         crate::air::debug::check_builder_shape(air, &builder);
 
-        air.eval(&mut builder);
+        air.eval_with_challenge_terms(&mut builder, &challenge_terms);
     }
 }
 

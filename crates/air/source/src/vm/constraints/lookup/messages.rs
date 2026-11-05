@@ -46,6 +46,7 @@ pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
 /// the bus is cast to `usize` and indexes into
 /// [`Challenges::bus_prefix`](miden_stark::lookup::Challenges) to obtain the additive base
 /// `bus_prefix[bus] = alpha + (bus + 1) * gamma`.
+/// Numeric IDs are sparse; unassigned values have no lookup relation.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
@@ -60,8 +61,6 @@ pub enum BusId {
     // --- In-circuit buses ---
     KernelRomCall = 3,
     HasherLinearHashInit = 4,
-    /// Reserved hasher bus id. One-row controller rows use `HasherReturnHash`.
-    ReservedHasherBus5 = 5,
     HasherAbsorption = 6,
     HasherReturnHash = 7,
     HasherMerkleVerifyInit = 8,
@@ -88,22 +87,14 @@ pub enum BusId {
     AceWiring = 22,
     /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
     HasherCompressionLink = 23,
-    /// Eidos compression internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
-    EidosCompressionInputCv = 24,
     /// Byte-pair lookup table: canonical `[a, b, a xor b]` for byte-sized operands.
     And8Lookup = 25,
-    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
-    ReservedEidosCompressionBus26 = 26,
     /// Normalized Eidos rot12 contribution for byte position 1: `[a, b, value]`.
     EidosCompressionRot12Pos1 = 27,
-    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
-    ReservedEidosCompressionBus28 = 28,
     /// Normalized Eidos rot12 contribution for byte position 3: `[a, b, value]`.
     EidosCompressionRot12Pos3 = 29,
     /// Normalized Eidos rot7 contribution for byte position 0: `[a, b, value]`.
     EidosCompressionRot7Pos0 = 30,
-    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
-    ReservedEidosCompressionBus31 = 31,
     /// Normalized Eidos rot7 contribution for byte position 2: `[a, b, value]`.
     EidosCompressionRot7Pos2 = 32,
     /// Normalized Eidos rot7 contribution for byte position 3: `[a, b, value]`.
@@ -111,8 +102,6 @@ pub enum BusId {
     /// Eidos compression internal chaining-value pair bus:
     /// `[4 * compression_cycle_id + pair_index, word_even, word_odd]`.
     EidosCompressionInputWord = 34,
-    /// Eidos compression internal message-word bus: `[word_index, word, compression_cycle_id]`.
-    EidosCompressionMessageWord = 35,
     /// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
     AeadStreamRequest = 36,
     /// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
@@ -122,23 +111,19 @@ pub enum BusId {
 }
 
 impl BusId {
-    /// Number of bus-prefix slots through the highest assigned discriminant. Reserved slots remain
-    /// part of this prefix layout.
+    /// Number of bus-prefix slots: one greater than the highest assigned ID, including gaps.
     pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
 }
 
-// Per-variant discriminant locks. `BusId::COUNT` records only the high watermark; a reorder below
-// it would silently swap which `bus_prefix[i]` each variant resolves to, breaking domain separation
-// across every emitter and consumer. These asserts pin every assigned and reserved ID.
+// Pin each relation's numeric tag. `BusId::COUNT` alone cannot detect a changed assignment.
 //
 // If a new bus is added: append it after the current tail and add a matching assert for the new
-// variant. Renumbering existing entries is a protocol change and requires regenerated bindings.
+// variant. Renumbering requires matching updates to emitters, consumers, and verifier artifacts.
 const _: () = assert!(BusId::KernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
 const _: () = assert!(BusId::LogDeferredRoot as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
 const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
-const _: () = assert!(BusId::ReservedHasherBus5 as usize == 5);
 const _: () = assert!(BusId::HasherAbsorption as usize == 6);
 const _: () = assert!(BusId::HasherReturnHash as usize == 7);
 const _: () = assert!(BusId::HasherMerkleVerifyInit as usize == 8);
@@ -157,18 +142,13 @@ const _: () = assert!(BusId::SiblingTable as usize == 20);
 const _: () = assert!(BusId::RangeCheck as usize == 21);
 const _: () = assert!(BusId::AceWiring as usize == 22);
 const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
-const _: () = assert!(BusId::EidosCompressionInputCv as usize == 24);
 const _: () = assert!(BusId::And8Lookup as usize == 25);
-const _: () = assert!(BusId::ReservedEidosCompressionBus26 as usize == 26);
 const _: () = assert!(BusId::EidosCompressionRot12Pos1 as usize == 27);
-const _: () = assert!(BusId::ReservedEidosCompressionBus28 as usize == 28);
 const _: () = assert!(BusId::EidosCompressionRot12Pos3 as usize == 29);
 const _: () = assert!(BusId::EidosCompressionRot7Pos0 as usize == 30);
-const _: () = assert!(BusId::ReservedEidosCompressionBus31 as usize == 31);
 const _: () = assert!(BusId::EidosCompressionRot7Pos2 as usize == 32);
 const _: () = assert!(BusId::EidosCompressionRot7Pos3 as usize == 33);
 const _: () = assert!(BusId::EidosCompressionInputWord as usize == 34);
-const _: () = assert!(BusId::EidosCompressionMessageWord as usize == 35);
 const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
 const _: () = assert!(BusId::AeadEidosCompressionInput as usize == 37);
 const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);

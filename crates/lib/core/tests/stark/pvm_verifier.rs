@@ -433,7 +433,7 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         u64::from(air_shape.max_constraint_degree),
         u64::from(air_shape.num_deep_terms.unwrap()),
         u64::from(security::testing::LOOKUP_SHAPE.max_message_width),
-        u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
+        u64::from(security::FIXED_LOOKUP_ERROR_TERMS),
         u64::from(security::testing::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         stream[0].as_canonical_u64(),

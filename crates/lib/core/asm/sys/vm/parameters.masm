@@ -3,10 +3,10 @@
 use miden::core::stark::types
 
 # Protocol commitments under the native Eidos configuration.
-pub const RELATION_DIGEST_0 = 7856671528189646221
-pub const RELATION_DIGEST_1 = 2458781204466877327
-pub const RELATION_DIGEST_2 = 1097061327429211191
-pub const RELATION_DIGEST_3 = 3384814590852465759
+pub const RELATION_DIGEST_0 = 1331497269159970256
+pub const RELATION_DIGEST_1 = 240954741357997259
+pub const RELATION_DIGEST_2 = 4612879556763689704
+pub const RELATION_DIGEST_3 = 7869603685601907482
 pub const AND8_PREPROCESSED_TRACE_COM_0 = 1070440981155119101
 pub const AND8_PREPROCESSED_TRACE_COM_1 = 2022626773377316756
 pub const AND8_PREPROCESSED_TRACE_COM_2 = 6941685244114430330
@@ -14,10 +14,10 @@ pub const AND8_PREPROCESSED_TRACE_COM_3 = 5172579525468662096
 
 # Security descriptor from miden_air::vm::security.
 pub const MAX_MESSAGE_WIDTH = 16
-pub const NUM_COMPOSED_CONSTRAINTS = 632
+pub const NUM_COMPOSED_CONSTRAINTS = 624
 pub const MAX_CONSTRAINT_DEGREE = 9
-pub const NUM_DEEP_TERMS = 282
-pub const LOOKUP_FRACTIONS_PER_ROW = 78
+pub const NUM_DEEP_TERMS = 274
+pub const LOOKUP_FRACTIONS_PER_ROW = 73
 
 # Fixed And8 setup height and its PCS-expanded tree depth and index mask.
 pub const AND8_LOOKUP_LOG_HEIGHT = 16
@@ -26,15 +26,15 @@ pub const PREPROCESSED_INDEX_MASK = 524287
 
 # Per-AIR widths in canonical order: Core, Chiplets, EidosCompression, And8Lookup.
 # Preprocessed: 0 + 0 + 0 + 5 raw columns -> 0 + 0 + 0 + 8 aligned base felts = 8.
-# Main: 48 + 24 + 112 + 8 = 192 aligned base felts.
+# Main: 48 + 24 + 104 + 8 = 184 aligned base felts.
 # Auxiliary coordinates: 8 + 8 + 40 + 8 = 64 aligned base felts.
 
 # Query-row blocks and LMCS leaf frames, in commitment-group order.
 # Each block contains eight base felts.
 pub const PREPROCESSED_ROW_DOUBLE_WORDS = 1
 pub const PREPROCESSED_LMCS_INIT_CV = [13503953893947607809, 11912009168875159560, 11170449401267093504, 6620516959492505600]
-pub const MAIN_ROW_DOUBLE_WORDS = 24
-pub const MAIN_LMCS_INIT_CV = [13503953893947607809, 11912009168875159744, 11170449401267093504, 6620516959492505600]
+pub const MAIN_ROW_DOUBLE_WORDS = 23
+pub const MAIN_LMCS_INIT_CV = [13503953893947607809, 11912009168875159736, 11170449401267093504, 6620516959492505600]
 pub const AUX_ROW_DOUBLE_WORDS = 8
 pub const AUX_LMCS_INIT_CV = [13503953893947607809, 11912009168875159616, 11170449401267093504, 6620516959492505600]
 pub const QUOTIENT_ROW_DOUBLE_WORDS = 2
@@ -42,16 +42,16 @@ pub const QUOTIENT_LMCS_INIT_CV = [13503953893947607809, 11912009168875159568, 1
 
 # VM ACE READ addresses derived from InputLayout.
 # Stack I/O: 32 public values in 64 base-field cells immediately before AUX_RAND_ELEM_PTR.
-# OOD frame: 1120 base felts; each current/next row has 280 scalar evaluations.
-# Query scratch row: 8 preprocessed + 192 main + 64 auxiliary + 16 quotient felts.
+# OOD frame: 1088 base felts; each current/next row has 272 scalar evaluations.
+# Query scratch row: 8 preprocessed + 184 main + 64 auxiliary + 16 quotient felts.
 # Auxiliary ACE inputs, in memory order (one slot = 2 base felts):
 #   10 shared STARK slots; 12 selectors for 4 AIRs;
 #   4 fold coefficients; 2 alignment slots.
 #   Total: 28 slots (56 base felts).
 pub const PUBLIC_INPUTS_PTR = 3225419712
-pub const AUX_BUS_BOUNDARY_PTR = 3225420904
-pub const AUXILIARY_ACE_INPUTS_PTR = 3225420912
-pub const ACE_CIRCUIT_STREAM_PTR = 3225420968
+pub const AUX_BUS_BOUNDARY_PTR = 3225420872
+pub const AUXILIARY_ACE_INPUTS_PTR = 3225420880
+pub const ACE_CIRCUIT_STREAM_PTR = 3225420936
 
 # Words of the normalized boundary array, two extension values per word.
 pub const AUX_BOUNDARY_WORD_1_PTR = AUX_BUS_BOUNDARY_PTR + 4

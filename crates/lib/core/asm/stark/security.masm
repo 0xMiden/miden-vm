@@ -86,7 +86,7 @@ end
 #! # Lookup term
 #!
 #! Let A = (max_message_width + 2) * fractions_per_row, q = ceil(log2(A)), and
-#! R = r_w * FP_ONE + r_f be the Q16 correction for one-time boundary fractions. Define
+#! R = r_w * FP_ONE + r_f be the Q16 correction for boundary fractions. Define
 #!
 #!   s = q * FP_ONE - ceil(FP_ONE * log2(A)).
 #!
@@ -102,11 +102,10 @@ end
 #!   b = t1 + floor(t1 * g / (2 * P)) <= s.
 #!
 #! The procedure subtracts one when b < r_f. Because b <= s, it cannot overstate the native
-#! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 78 = 1404 gives
-#! b = 34405, while R is at most 4887 (258 boundary terms at height 6). For PVM,
-#! A = (18 + 2) * 219 = 4380 gives b = 54232, while R is at most 129 (19 boundary terms
-#! at height 6). Hence b >= r_f for both deployed shapes, so this decision is exact throughout
-#! their ranges.
+#! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 73 = 1314 gives
+#! b = 39958, while R is at most 5222 (258 fixed/kernel boundary fractions at height 6). For PVM,
+#! A = (18 + 2) * 215 = 4300 gives b = 55590 and R <= 131 (19 boundary fractions at height 6).
+#! Thus b >= r_f for both deployed shapes throughout the accepted height range.
 #!
 #! The accepted coefficient range is 257..=65536. Each factor is also limited to 65536 so their
 #! product cannot wrap. At widths 16 and 18, the upper bound permits 3640 and 3276 fractions per
@@ -157,11 +156,10 @@ end
 #!
 #! The procedure is loop-free and has bounded execution cost for every accepted descriptor.
 #!
-#! The meaning of `num_lookup_boundary_terms` is the same for both relations even though its source
-#! differs. The MVM adds the kernel-procedure count to three fixed core-boundary terms. The PVM
-#! uses the number of fixed `UintVal` and `EcGroup` messages added at its verifier boundary. The
-#! estimator needs only the resulting count. It does not enforce an acceptance policy; the caller
-#! compares the returned level with the threshold required by its application.
+#! `num_lookup_boundary_terms` counts boundary fractions in addition to the per-row fractions.
+#! Each fraction contributes `(max_message_width + 2) / |S|`, where `S` is the lookup challenge's
+#! sampling support. The caller compares the returned security level with the threshold required
+#! by its application.
 #!
 #! Inputs:  [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,

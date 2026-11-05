@@ -26,7 +26,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use p3_air::BaseAir;
 use p3_challenger::CanObserve;
-use p3_field::{ExtensionField, Field};
+use p3_field::{Algebra, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::{
@@ -131,6 +131,33 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 
     /// Evaluate all AIR constraints using the provided builder.
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB);
+
+    /// Compute expressions that depend only on the auxiliary-trace challenges.
+    ///
+    /// `challenges` contains [`num_randomness`](Self::num_randomness) values for this AIR, in the
+    /// order used by `builder.permutation_randomness()`.
+    /// The prover calls this once per AIR evaluation batch and shares the results across rows.
+    /// `B` and `E` represent the base and extension expression types, respectively. The default
+    /// returns no terms and requires no preparation.
+    fn precompute_challenge_terms<B: Algebra<F>, E: Algebra<B>>(
+        &self,
+        _challenges: &[E],
+    ) -> Vec<E> {
+        Vec::new()
+    }
+
+    /// Evaluate constraints using terms prepared for this AIR and these challenges.
+    ///
+    /// `terms` must come from [`Self::precompute_challenge_terms`] for the same AIR configuration
+    /// and `builder.permutation_randomness()`. An override must emit the same constraints, in the
+    /// same order, as [`Self::eval`]. The default delegates to `eval`.
+    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = F>>(
+        &self,
+        builder: &mut AB,
+        _terms: &[AB::ExprEF],
+    ) {
+        self.eval(builder);
+    }
 
     /// Symbolic constraint degree multiples, split into base-field and
     /// extension-field maxima (see [`ConstraintDegrees`]).
