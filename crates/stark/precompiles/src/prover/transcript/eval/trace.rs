@@ -5,8 +5,7 @@
 //! claim — issued for a binding a downstream chip provides
 //! ([`issue_keccak`](TranscriptEvalRequires::issue_keccak) for the Keccak chip's
 //! `Binding(H_keccak, True)`), as a `ZERO_HASH` leaf
-//! ([`zero`](TranscriptEvalRequires::zero)), for an explicit uint pin
-//! claim, or by the `Is` predicate. A `UintNode` stands for a
+//! ([`zero`](TranscriptEvalRequires::zero)), or by the `Is` predicate. A `UintNode` stands for a
 //! `Binding(hash, Uint, ptr, bound_ptr)` value — a transient uint leaf
 //! or an arithmetic op's result — consumed any number of times by
 //! further ops. [`record_and`](TranscriptEvalRequires::record_and) folds
@@ -40,8 +39,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     Felt,
-    deferred::{DEFERRED_AND_FRAME, Digest, EidosFrame, fold_deferred_root},
-    program::domain::PvmUintPinClaimDomain,
+    deferred::{DEFERRED_AND_FRAME, Digest, fold_deferred_root},
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -64,11 +62,10 @@ use crate::prover::{
             COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
             COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
             COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
-            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED,
-            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
-            COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT,
-            COL_PIN_CLAIM_BOUND_PTR, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END,
-            COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS,
+            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_SUB,
+            COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN,
+            COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PTR,
+            COL_RHS_BEGIN, COL_RHS_END, COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -180,16 +177,13 @@ enum NodeKind {
     Zero,
     /// AND node folding two children's bindings into the node hash.
     And { lhs: EidosDigest, rhs: EidosDigest },
-    /// Uint leaf / explicit pin claim — hashes the complete 8×32-bit value carried by one
-    /// `UintVal` message. Runtime leaves use the uint VALUE frame
-    /// `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]` and bind
-    /// `Binding(hash, Uint, ptr, bound_ptr)`. Explicit pin claims use
-    /// `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
-    /// `Binding(hash, True)`.
+    /// Uint leaf: hashes the complete 8x32-bit value carried by one
+    /// `UintVal` message under the uint VALUE frame
+    /// `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]` and binds
+    /// `Binding(hash, Uint, ptr, bound_ptr)`.
     UintLeaf {
         ptr: u32,
         bound_ptr: u32,
-        is_pinned: bool,
         lo: [Felt; DIGEST_WIDTH],
         hi: [Felt; DIGEST_WIDTH],
     },
@@ -372,37 +366,31 @@ impl TranscriptEvalRequires {
         out
     }
 
-    /// Records a uint value row under the runtime VALUE frame or explicit pin-claim frame.
+    /// Records a uint value row under its VALUE frame.
     /// Returns the node ID and its Eidos digest.
     fn push_uint_leaf(
         &mut self,
         ptr: UintPtr,
         bound_ptr: UintPtr,
-        is_pinned: bool,
         value: [u32; 8],
         eidos: &mut EidosRequires,
     ) -> (u32, EidosDigest) {
         let lo: [Felt; DIGEST_WIDTH] = core::array::from_fn(|i| Felt::from(value[i]));
         let hi: [Felt; DIGEST_WIDTH] =
             core::array::from_fn(|i| Felt::from(value[DIGEST_WIDTH + i]));
-        let frame = if is_pinned {
-            EidosFrame::for_domain(PvmUintPinClaimDomain, [bound_ptr.addr(), ptr.addr(), 0])
-        } else {
-            let domain =
-                UintDomain::from_bound_ptr(bound_ptr.addr()).expect("known uint bound pointer");
-            UintPrecompile::value_frame(domain)
-        };
+        let domain =
+            UintDomain::from_bound_ptr(bound_ptr.addr()).expect("known uint bound pointer");
+        let frame = UintPrecompile::value_frame(domain);
         let absorption = eidos.require_one_shot(frame, lo, hi);
         let _ = eidos.require_digest(absorption.digest);
         let hash = absorption.digest;
-        let id = self.new_claim(if is_pinned { ClaimKind::Truthy } else { ClaimKind::Value });
+        let id = self.new_claim(ClaimKind::Value);
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, absorption_id: absorption.head() }),
             kind: NodeKind::UintLeaf {
                 ptr: ptr.addr(),
                 bound_ptr: bound_ptr.addr(),
-                is_pinned,
                 lo,
                 hi,
             },
@@ -430,7 +418,7 @@ impl TranscriptEvalRequires {
             return node;
         }
         store.require_uintval(ptr);
-        let (id, hash) = self.push_uint_leaf(ptr, bound_ptr, false, value, eidos);
+        let (id, hash) = self.push_uint_leaf(ptr, bound_ptr, value, eidos);
         let node = UintNode { id, hash, ptr, bound_ptr };
         self.uint_dedup.insert(UintKey::Leaf(ptr), node);
         node
@@ -952,25 +940,6 @@ impl TranscriptEvalRequires {
         Truthy { id, hash }
     }
 
-    /// Record an explicit uint pin claim binding `value` to `Binding(hash, True)`.
-    ///
-    /// The frame is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the row
-    /// consumes the complete `UintVal` message at `ptr`. The returned handle is foldable into the
-    /// initial/root transcript exactly like any [`Truthy`].
-    #[cfg(test)]
-    pub fn pin_uint(
-        &mut self,
-        ptr: UintPtr,
-        bound_ptr: UintPtr,
-        value: [u32; 8],
-        store: &mut UintStoreRequires,
-        eidos: &mut EidosRequires,
-    ) -> Truthy {
-        store.require_uintval(ptr);
-        let (id, hash) = self.push_uint_leaf(ptr, bound_ptr, true, value, eidos);
-        Truthy { id, hash }
-    }
-
     fn new_claim(&mut self, kind: ClaimKind) -> u32 {
         let id = u32::try_from(self.claims.len()).expect("too many transcript claims");
         self.claims.push(Claim { kind, consumers: 0 });
@@ -1184,21 +1153,13 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             write_children(&mut row, lhs, rhs);
             row[COL_IS_AND] = Felt::ONE;
         },
-        NodeKind::UintLeaf { ptr, bound_ptr, is_pinned, lo, hi } => {
+        NodeKind::UintLeaf { ptr, bound_ptr, lo, hi } => {
             row[COL_LHS_BEGIN..COL_LHS_END].copy_from_slice(lo);
             row[COL_RHS_BEGIN..COL_RHS_END].copy_from_slice(hi);
             row[COL_IS_UINT_LEAF] = Felt::ONE;
-            row[COL_IS_PINNED] = Felt::from(*is_pinned as u8);
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
-            if *is_pinned {
-                // Explicit pin claim: `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`.
-                row[COL_PIN_CLAIM_BOUND_PTR] = Felt::from(*bound_ptr);
-                row[COL_PIN_CLAIM_PIN_PTR] = Felt::from(*ptr);
-            } else {
-                // Runtime VM uint VALUE: `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`.
-                row[COL_UINT_VALUE_BOUND_PTR] = Felt::from(*bound_ptr);
-            }
+            row[COL_UINT_VALUE_BOUND_PTR] = Felt::from(*bound_ptr);
         },
         NodeKind::UintOp {
             op,
