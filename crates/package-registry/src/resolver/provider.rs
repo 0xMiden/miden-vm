@@ -761,18 +761,23 @@ mod tests {
     #[test]
     fn registry_supports_noncanonical_imported_keys() {
         let package = PackageId::from("dep");
-        let registered = "1.0.0+first".parse::<Version>().unwrap();
+        let imported_key = "1.0.0+key".parse::<SemVer>().unwrap();
+        let registered = "1.0.0+record".parse::<Version>().unwrap();
         let record =
             PackageRecord::new(registered.clone(), None::<(PackageId, VersionRequirement)>);
-        let packages = BTreeMap::from_iter([(
-            package.clone(),
-            BTreeMap::from_iter([(registered.version.clone(), record)]),
-        )]);
+        let packages =
+            BTreeMap::from_iter([(package.clone(), BTreeMap::from_iter([(imported_key, record)]))]);
         let mut index = InMemoryPackageRegistry::from_packages(packages)
             .expect("single imported canonical version should be valid");
         let equivalent = "1.0.0+second".parse::<Version>().unwrap();
 
-        assert!(index.get_by_version(&package, &equivalent).is_some());
+        assert_eq!(
+            index
+                .get_by_version(&package, &equivalent)
+                .expect("metadata-only key and record difference should be accepted")
+                .semantic_version(),
+            &registered.version
+        );
         assert!(
             index
                 .available_versions(&package)
@@ -785,6 +790,33 @@ mod tests {
                 package: duplicate,
                 ..
             }) if duplicate == package
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_imported_key_record_precedence_mismatch() {
+        let package = PackageId::from("dep");
+        let key = "1.0.0+key".parse::<SemVer>().unwrap();
+        let record_version = "2.0.0+record".parse::<Version>().unwrap();
+        let record =
+            PackageRecord::new(record_version.clone(), None::<(PackageId, VersionRequirement)>);
+        let packages =
+            BTreeMap::from_iter([(package.clone(), BTreeMap::from_iter([(key.clone(), record)]))]);
+
+        let error = match InMemoryPackageRegistry::from_packages(packages) {
+            Ok(_) => panic!("mismatched index key and record version must be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            index::InMemoryPackageStoreError::MismatchedSemanticVersionKey {
+                package: mismatched_package,
+                key: mismatched_key,
+                record_version: mismatched_record,
+            } if mismatched_package == package
+                && mismatched_key == key
+                && mismatched_record == record_version.version
         ));
     }
 

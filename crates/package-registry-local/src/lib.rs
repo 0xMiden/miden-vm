@@ -918,6 +918,77 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn load_rejects_mismatched_version_key_and_record() {
+        let tempdir = TempDir::new().unwrap();
+        let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+
+        let key = "1.0.0+key".parse().unwrap();
+        let record_version = "2.0.0+record".parse::<Version>().unwrap();
+        let persisted = PersistedIndex {
+            packages: BTreeMap::from_iter([(
+                PackageId::from("pkg"),
+                BTreeMap::from_iter([(
+                    key,
+                    PackageRecord::new(record_version, None::<(PackageId, VersionRequirement)>),
+                )]),
+            )]),
+        };
+        fs::write(&index_path, toml::to_string_pretty(&persisted).unwrap()).unwrap();
+
+        let error = match LocalPackageRegistry::load(index_path, artifact_dir) {
+            Ok(_) => panic!("mismatched index key and record version must be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            LocalRegistryError::IndexValidation(
+                InMemoryPackageStoreError::MismatchedSemanticVersionKey { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn load_canonicalizes_metadata_only_key_and_record_difference() {
+        let tempdir = TempDir::new().unwrap();
+        let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+
+        let key = "1.0.0+key".parse().unwrap();
+        let record_version = "1.0.0+record".parse::<Version>().unwrap();
+        let persisted = PersistedIndex {
+            packages: BTreeMap::from_iter([(
+                PackageId::from("pkg"),
+                BTreeMap::from_iter([(
+                    key,
+                    PackageRecord::new(
+                        record_version.clone(),
+                        None::<(PackageId, VersionRequirement)>,
+                    ),
+                )]),
+            )]),
+        };
+        fs::write(&index_path, toml::to_string_pretty(&persisted).unwrap()).unwrap();
+
+        let registry = LocalPackageRegistry::load(index_path, artifact_dir)
+            .expect("metadata-only key and record difference should be accepted");
+        let record = registry
+            .get_by_semver(&PackageId::from("pkg"), &"1.0.0+query".parse().unwrap())
+            .expect("canonicalized record should remain queryable");
+
+        assert_eq!(record.semantic_version(), &record_version.version);
+        assert!(
+            registry
+                .available_versions(&PackageId::from("pkg"))
+                .expect("package should be indexed")
+                .contains_key(&"1.0.0".parse().unwrap())
+        );
+    }
+
     fn valid_debug_info_section() -> Section {
         Section::new(SectionId::DEBUG_INFO, PackageDebugInfoBuilder::default().build().to_bytes())
     }

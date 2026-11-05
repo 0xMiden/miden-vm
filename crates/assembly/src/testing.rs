@@ -208,7 +208,7 @@ mod package_features {
     use miden_mast_package::{Package, PackageId};
     use miden_package_registry::{
         PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
-        PackageVersions, Version, VersionRequirement,
+        PackageVersions, Version, VersionRequirement, insert_package_record,
     };
 
     use super::*;
@@ -253,7 +253,7 @@ mod package_features {
         pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
             let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.packages.retain(|(name, existing), _| {
-                name != &package.name || existing.version != package.version
+                name != &package.name || !existing.version.cmp_precedence(&package.version).is_eq()
             });
 
             let dependencies = package.manifest.dependencies().map(|dependency| {
@@ -262,10 +262,10 @@ mod package_features {
             });
             let record = PackageRecord::new(version.clone(), dependencies)
                 .with_description(package.description.clone().unwrap_or_default());
-            self.index
-                .entry(package.name.clone())
-                .or_default()
-                .insert(package.version.clone(), record);
+            let versions = self.index.entry(package.name.clone()).or_default();
+            versions.retain(|existing, _| !existing.cmp_precedence(&package.version).is_eq());
+            insert_package_record(versions, record)
+                .expect("the replaced semantic version should have been removed");
             self.packages.insert((package.name.clone(), version.clone()), package);
             version
         }
@@ -281,18 +281,14 @@ mod package_features {
         type Error = Report;
 
         fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
-            use std::collections::btree_map::Entry;
-
             let semver = record.semantic_version().clone();
-            match self.index.entry(name.clone()).or_default().entry(semver.clone()) {
-                Entry::Vacant(entry) => {
-                    entry.insert(record);
-                    Ok(())
+            insert_package_record(self.index.entry(name.clone()).or_default(), record).map_err(
+                |_error| {
+                    Report::msg(format!(
+                        "package '{name}' version '{semver}' is already registered"
+                    ))
                 },
-                Entry::Occupied(_) => Err(Report::msg(format!(
-                    "package '{name}' version '{semver}' is already registered"
-                ))),
-            }
+            )
         }
     }
 
@@ -473,6 +469,59 @@ mod package_features {
                     .expect("failed to add dependency");
             }
             package
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn package(context: &TestContext, version: &str, export: &str) -> Arc<Package> {
+            Arc::from(context.assemble_library_package_with_export("pkg", version, export, []))
+        }
+
+        #[test]
+        fn test_registry_cache_uses_canonical_semver_key() {
+            let context = TestContext::default();
+            let package = package(&context, "1.0.0+first", "pkg::first");
+            let mut registry = TestRegistry::default();
+
+            registry.cache_package(package).expect("package should be cached");
+
+            assert!(
+                registry
+                    .get_by_semver(&PackageId::from("pkg"), &"1.0.0+second".parse().unwrap())
+                    .is_some()
+            );
+            assert!(
+                registry
+                    .available_versions(&PackageId::from("pkg"))
+                    .expect("package should be indexed")
+                    .contains_key(&"1.0.0".parse().unwrap())
+            );
+        }
+
+        #[test]
+        fn test_registry_replace_semver_package_keeps_canonical_key() {
+            let context = TestContext::default();
+            let first = package(&context, "1.0.0+first", "pkg::first");
+            let replacement = package(&context, "1.0.0+second", "pkg::second");
+            let mut registry = TestRegistry::default();
+            registry.cache_package(first).expect("first package should be cached");
+
+            let replacement_version = registry.replace_semver_package(replacement);
+            let record = registry
+                .get_by_semver(&PackageId::from("pkg"), &"1.0.0+query".parse().unwrap())
+                .expect("replacement should remain queryable by canonical semantic version");
+
+            assert_eq!(record.version(), &replacement_version);
+            assert_eq!(
+                registry
+                    .available_versions(&PackageId::from("pkg"))
+                    .expect("package should be indexed")
+                    .len(),
+                1
+            );
         }
     }
 }

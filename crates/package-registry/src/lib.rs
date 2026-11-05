@@ -103,10 +103,43 @@ impl PackageRecord {
 /// metadata does not define a distinct canonical semantic version, so map keys must omit it.
 pub type PackageVersions = BTreeMap<SemVer, PackageRecord>;
 
+/// The error returned when a canonical semantic version is already present in a package-version
+/// map.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("semantic version '{version}' is already registered")]
+pub struct DuplicateSemanticVersionError {
+    version: SemVer,
+}
+
+impl DuplicateSemanticVersionError {
+    /// Returns the rejected semantic version.
+    pub fn version(&self) -> &SemVer {
+        &self.version
+    }
+}
+
 fn canonical_semver_key(version: &SemVer) -> SemVer {
     let mut canonical = version.clone();
     canonical.build = semver::BuildMetadata::EMPTY;
     canonical
+}
+
+/// Inserts `record` under its build-free canonical semantic-version key.
+///
+/// Returns an error if `versions` already contains a key with the same SemVer precedence. Registry
+/// implementations should use this function instead of inserting directly into [`PackageVersions`]
+/// so that writes follow the same build-metadata semantics as [`PackageRegistry`] lookups.
+pub fn insert_package_record(
+    versions: &mut PackageVersions,
+    record: PackageRecord,
+) -> Result<(), DuplicateSemanticVersionError> {
+    let version = record.semantic_version().clone();
+    if versions.keys().any(|existing| existing.cmp_precedence(&version).is_eq()) {
+        return Err(DuplicateSemanticVersionError { version });
+    }
+
+    versions.insert(canonical_semver_key(&version), record);
+    Ok(())
 }
 
 fn get_by_canonical_semver<'a>(
@@ -361,5 +394,28 @@ mod tests {
         let registry = EmptyVersionRegistry { versions: BTreeMap::new() };
 
         assert!(!registry.is_available(&PackageId::from("pkg")));
+    }
+
+    #[test]
+    fn package_record_insertion_uses_canonical_semver_key() {
+        let first = "1.0.0+first".parse::<Version>().unwrap();
+        let second = "1.0.0+second".parse::<Version>().unwrap();
+        let mut versions = PackageVersions::new();
+
+        insert_package_record(
+            &mut versions,
+            PackageRecord::new(first, None::<(PackageId, VersionRequirement)>),
+        )
+        .expect("first canonical semantic version should be inserted");
+
+        assert!(versions.contains_key(&"1.0.0".parse().unwrap()));
+        assert!(!versions.contains_key(&"1.0.0+first".parse().unwrap()));
+
+        let error = insert_package_record(
+            &mut versions,
+            PackageRecord::new(second, None::<(PackageId, VersionRequirement)>),
+        )
+        .expect_err("metadata-only variant should be rejected");
+        assert_eq!(error.version(), &"1.0.0+second".parse().unwrap());
     }
 }

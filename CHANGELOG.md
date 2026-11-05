@@ -93,7 +93,8 @@
 - `build_trace` returns an error for non-u32 AEAD replay lanes or ciphertext mismatches ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
 - [BREAKING] Fixed the VM package registry's version equality, ordering, keys and lookups to
   consistently ignore SemVer build metadata. Imported registries now validate and canonicalize
-  their version maps, and the inconsistent `Borrow<SemVer>` implementation was removed
+  their version maps, registry implementations share canonical record insertion, and the
+  inconsistent `Borrow<SemVer>` implementation was removed
   ([#4061](https://github.com/0xMiden/miden-vm/pull/4061)).
 - [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed an MSM soundness issue that allowed distinct claims sharing one expression to redistribute its terms and bind to incorrect results. Each MSM expression now serves at most one claim, and the prover lays a copy of it for each further claim. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).

@@ -5,13 +5,21 @@ use miden_mast_package::Package as MastPackage;
 
 use crate::{
     PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,
-    PackageStore, PackageVersions, SemVer, Version, VersionRequirement, canonical_semver_key,
+    PackageStore, PackageVersions, SemVer, Version, VersionRequirement, insert_package_record,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum InMemoryPackageStoreError {
     #[error("package '{package}' version '{version}' is already registered")]
     DuplicateSemanticVersion { package: PackageId, version: SemVer },
+    #[error(
+        "package '{package}' index key '{key}' does not match record version '{record_version}'"
+    )]
+    MismatchedSemanticVersionKey {
+        package: PackageId,
+        key: SemVer,
+        record_version: SemVer,
+    },
     #[error("package '{package}' depends on '{dependency}' without a semantic version")]
     MissingDependencyVersion {
         package: PackageId,
@@ -37,7 +45,15 @@ impl InMemoryPackageRegistry {
         let mut registry = Self::default();
         for (package, versions) in packages {
             registry.packages.entry(package.clone()).or_default();
-            for record in versions.into_values() {
+            for (key, record) in versions {
+                let record_version = record.semantic_version();
+                if !key.cmp_precedence(record_version).is_eq() {
+                    return Err(InMemoryPackageStoreError::MismatchedSemanticVersionKey {
+                        package,
+                        key,
+                        record_version: record_version.clone(),
+                    });
+                }
                 registry.insert_record(package.clone(), record)?;
             }
         }
@@ -72,31 +88,14 @@ impl InMemoryPackageRegistry {
         name: impl Into<PackageId>,
         record: PackageRecord,
     ) -> Result<(), InMemoryPackageStoreError> {
-        use alloc::collections::btree_map::Entry;
-
         let name = name.into();
         let display_semver = record.semantic_version().clone();
-        let semver = canonical_semver_key(&display_semver);
-        match self.packages.entry(name) {
-            Entry::Vacant(entry) => {
-                let versions = BTreeMap::from_iter([(semver, record)]);
-                entry.insert(versions);
-                Ok(())
+        insert_package_record(self.packages.entry(name.clone()).or_default(), record).map_err(
+            |_error| InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: name,
+                version: display_semver,
             },
-            Entry::Occupied(mut entry) => {
-                let package = entry.key().clone();
-                let versions = entry.get_mut();
-                if versions.keys().any(|existing| existing.cmp_precedence(&semver).is_eq()) {
-                    Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
-                        package,
-                        version: display_semver,
-                    })
-                } else {
-                    versions.insert(semver, record);
-                    Ok(())
-                }
-            },
-        }
+        )
     }
 
     /// Returns all packages recorded in this registry.
