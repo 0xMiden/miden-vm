@@ -1628,6 +1628,7 @@ fn checked_align_up_usize(value: usize, alignment: usize) -> Option<usize> {
     Clone,
     PartialEq,
     Eq,
+    Hash,
     zerocopy::FromBytes,
     zerocopy::Immutable,
     zerocopy::IntoBytes,

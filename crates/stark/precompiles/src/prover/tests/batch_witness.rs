@@ -192,16 +192,16 @@ fn preparation_reports_exact_canonical_work_classes() {
 
     let prepared = prepare(fixture.witness());
     let work = prepared.work();
-    assert_eq!(work.class(UINT_WORK).unwrap().count(), 5);
-    assert_eq!(work.class(UINT_WORK).unwrap().total_size(), 5);
-    assert_eq!(work.class(CURVE_WORK).unwrap().count(), 3);
-    assert_eq!(work.class(CURVE_WORK).unwrap().total_size(), 3);
-    assert_eq!(work.class(HASH_WORK).unwrap().count(), 1);
-    assert_eq!(work.class(HASH_WORK).unwrap().total_size(), 3);
-    assert_eq!(work.class(HASH_WORK).unwrap().max_size(), 3);
-    assert_eq!(work.class(MSM_WORK).unwrap().count(), 1);
-    assert_eq!(work.class(MSM_WORK).unwrap().total_size(), 2);
-    assert_eq!(work.class(MSM_WORK).unwrap().max_size(), 2);
+    assert_eq!(work.class(&UINT_WORK).unwrap().count(), 5);
+    assert_eq!(work.class(&UINT_WORK).unwrap().total_size(), 5);
+    assert_eq!(work.class(&CURVE_WORK).unwrap().count(), 3);
+    assert_eq!(work.class(&CURVE_WORK).unwrap().total_size(), 3);
+    assert_eq!(work.class(&HASH_WORK).unwrap().count(), 1);
+    assert_eq!(work.class(&HASH_WORK).unwrap().total_size(), 3);
+    assert_eq!(work.class(&HASH_WORK).unwrap().max_size(), 3);
+    assert_eq!(work.class(&MSM_WORK).unwrap().count(), 1);
+    assert_eq!(work.class(&MSM_WORK).unwrap().total_size(), 2);
+    assert_eq!(work.class(&MSM_WORK).unwrap().max_size(), 2);
 }
 
 #[test]
@@ -891,9 +891,9 @@ fn distinct_hash_claims_count_shared_payload_demand() {
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
             source: PreparationError::Precompile(PrecompileError::Limit(
-                PrecompileLimitError::TotalSize { class: HASH_WORK, .. }
+                PrecompileLimitError::TotalSize { class, .. }
             )),
-        }))
+        })) if class == HASH_WORK
     ));
     let admitted = miden_precompiles::default_verification_precompile_limits().with_class(
         HASH_WORK,
@@ -960,7 +960,7 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
         match expected_error {
             None => {
                 let prepared = result.unwrap();
-                let work = prepared.work().class(HASH_WORK).unwrap();
+                let work = prepared.work().class(&HASH_WORK).unwrap();
                 assert_eq!(work.count(), count as u64);
                 assert_eq!(work.total_size(), (count * bytes) as u64);
             },
@@ -991,10 +991,10 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
                     assert!(matches!(
                         fixture.witness().prepare(Arc::new(miden_precompiles::registry()), &limits),
                         Err(PreparationError::Precompile(PrecompileError::Limit(TotalSize {
-                            class: HASH_WORK,
+                            class,
                             actual,
                             max: 262_144,
-                        }))) if actual == 2 * bytes as u64
+                        }))) if class == HASH_WORK && actual == 2 * bytes as u64
                     ));
                 }
             },
@@ -1037,7 +1037,7 @@ fn default_msm_limits_charge_zero_scalars_and_repeated_bases() {
         match expected_error {
             None => {
                 let prepared = result.unwrap();
-                let work = prepared.work().class(MSM_WORK).unwrap();
+                let work = prepared.work().class(&MSM_WORK).unwrap();
                 assert_eq!(work.count(), count as u64);
                 assert_eq!(work.total_size(), (count * terms) as u64);
             },
@@ -1146,9 +1146,9 @@ fn msm_limits_are_per_node_and_per_witness() {
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
             source: PreparationError::Precompile(PrecompileError::Limit(
-                PrecompileLimitError::ItemSize { class: MSM_WORK, .. }
+                PrecompileLimitError::ItemSize { class, .. }
             )),
-        }))
+        })) if class == MSM_WORK
     ));
     let per_witness = miden_precompiles::default_verification_precompile_limits().with_class(
         MSM_WORK,
@@ -1163,9 +1163,9 @@ fn msm_limits_are_per_node_and_per_witness() {
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
             source: PreparationError::Precompile(PrecompileError::Limit(
-                PrecompileLimitError::TotalSize { class: MSM_WORK, .. }
+                PrecompileLimitError::TotalSize { class, .. }
             )),
-        }))
+        })) if class == MSM_WORK
     ));
     let above_old_ceiling = inputs.pop().unwrap();
     import_witnesses(
