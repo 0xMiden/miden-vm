@@ -8,6 +8,19 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
+    /// Whether `len` elements of `ty`, each padded to the element's alignment, fit in `u32::MAX`
+    /// bytes. This is the rule the decoder applies to an array, so every other place that builds
+    /// one (closing a template, decoding a recursive group) uses it too.
+    pub(crate) fn fits_in_u32_bytes(ty: &Type, len: usize) -> bool {
+        let Some(element_size) = ty.checked_size_in_bytes() else {
+            return false;
+        };
+        element_size
+            .checked_next_multiple_of(ty.min_alignment())
+            .and_then(|padded| padded.checked_mul(len))
+            .is_some_and(|size| u32::try_from(size).is_ok())
+    }
+
     /// Create a new [ArrayType] of length `len` and element type of `ty`
     pub fn new(ty: Type, len: usize) -> Self {
         Self { ty, len }

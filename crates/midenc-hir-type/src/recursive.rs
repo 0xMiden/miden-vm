@@ -1430,7 +1430,13 @@ fn close_template_inner(
             pointee: close_template_inner(pointee, resolve)?,
         })),
         TypeTemplate::Array(element, len) => {
-            Type::from(ArrayType::new(close_template_inner(element, resolve)?, *len))
+            let element = close_template_inner(element, resolve)?;
+            if !ArrayType::fits_in_u32_bytes(&element, *len) {
+                return Err(RecursiveTypeError::InvalidDefinition(
+                    "invalid array: size exceeds u32::MAX bytes".into(),
+                ));
+            }
+            Type::from(ArrayType::new(element, *len))
         },
         TypeTemplate::List(element) => {
             Type::List(Arc::new(close_template_inner(element, resolve)?))
@@ -2511,6 +2517,22 @@ mod tests {
         // wasm32), although the type fits in u32::MAX bytes.
         let ty = Type::from(ArrayType::new(Type::U8, 1 << 29));
         assert_eq!(layout_of(&ty).unwrap().size_in_bytes(), 1 << 29);
+    }
+
+    #[test]
+    fn closing_an_array_larger_than_u32_max_is_an_error() {
+        // A procedure signature closes its parameter types directly, so a bare array has to be
+        // checked here, not only as a struct field.
+        for template in [past_u32_range(), TypeTemplate::ptr(past_u32_range())] {
+            assert!(matches!(
+                close_template(&template, |_| None),
+                Err(RecursiveTypeError::InvalidDefinition(_))
+            ));
+        }
+
+        // One element fewer is 2^32 - 4 bytes, which fits.
+        let largest = TypeTemplate::array(TypeTemplate::from(Type::Felt), (1 << 30) - 1);
+        assert!(close_template(&largest, |_| None).is_ok());
     }
 
     #[test]

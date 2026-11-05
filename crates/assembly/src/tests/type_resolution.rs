@@ -443,6 +443,19 @@ fn struct_whose_fields_sum_past_u32_max_bytes_is_an_error() {
 }
 
 #[test]
+fn array_larger_than_u32_max_bytes_in_a_signature_is_an_error() {
+    // `[felt; 2^30]` is 2^32 bytes. The decoder rejects it on its own, so a signature that
+    // names it directly must be rejected too, not only one that wraps it in a struct.
+    let err = Assembler::default()
+        .assemble_program(
+            "program",
+            "proc f(x: [felt; 1073741824])\n    nop\nend\n\nbegin\n    exec.f\nend\n",
+        )
+        .expect_err("an array larger than u32::MAX bytes should be rejected");
+    assert_diagnostic!(&err, "invalid recursive type");
+}
+
+#[test]
 fn struct_with_a_field_larger_than_u32_max_bytes_is_an_error() {
     for masm in [
         "type T = struct { a: [felt; 1073741824] }\nbegin\n    nop\nend\n",
