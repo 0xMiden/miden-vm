@@ -537,6 +537,48 @@ fn test_aead_scheme_default_paths_roundtrip() {
     assert_eq!(plaintext, elements);
 }
 
+#[test]
+fn test_known_answer_serialized_bytes_ciphertext() {
+    let key = XChaCha::key_from_bytes(&[7_u8; SK_SIZE_BYTES]).unwrap();
+    let nonce = Nonce::from_slice(&[0x11; NONCE_SIZE_BYTES]);
+    let plaintext = b"known-answer-bytes";
+    let associated_data = b"known-answer-aad";
+
+    let encrypted = key.encrypt_bytes_with_nonce(plaintext, associated_data, nonce).unwrap();
+    let serialized = encrypted.to_bytes();
+
+    // Pins the serialized discriminator, ciphertext, tag, and nonce for the fixed inputs.
+    assert_eq!(
+        hex::encode(&serialized),
+        "014589ae8224668175b13b9603bc530fd88bdae53ab6a498e6f4abdd5ed6770d8d03eb02111111111111111111111111111111111111111111111111"
+    );
+    assert_eq!(
+        key.decrypt_bytes_with_associated_data(&encrypted, associated_data).unwrap(),
+        plaintext.to_vec()
+    );
+}
+
+#[test]
+fn test_known_answer_serialized_elements_ciphertext() {
+    let key = XChaCha::key_from_bytes(&[7_u8; SK_SIZE_BYTES]).unwrap();
+    let nonce = Nonce::from_slice(&[0x11; NONCE_SIZE_BYTES]);
+    let plaintext = [Felt::new_unchecked(42), Felt::new_unchecked(1337)];
+    let associated_data = [Felt::new_unchecked(9)];
+
+    let encrypted = key.encrypt_elements_with_nonce(&plaintext, &associated_data, nonce).unwrap();
+    let serialized = encrypted.to_bytes();
+
+    // Pins the serialized discriminator, ciphertext, tag, and nonce for the fixed inputs.
+    assert_eq!(
+        hex::encode(&serialized),
+        "0041c8c0ed5308ac14df71e466ce7e6da1ffef667a0fc67c5fdc672289461d95ff95111111111111111111111111111111111111111111111111"
+    );
+    assert_eq!(
+        key.decrypt_elements_with_associated_data(&encrypted, &associated_data).unwrap(),
+        plaintext.to_vec()
+    );
+}
+
 // SECURITY TESTS
 // ================================================================================================
 
