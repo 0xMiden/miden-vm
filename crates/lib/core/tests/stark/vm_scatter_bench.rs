@@ -10,11 +10,8 @@ use miden_core::{
 };
 use miden_stark::air::{BaseAir, LiftedAir};
 
-use super::{
-    vm_layout_const,
-    vm_sigma_scatter::{heights_for_order, permutations},
-};
-use crate::helpers::read_memory_felt;
+use super::vm_sigma_scatter::{heights_for_order, permutations};
+use crate::helpers::{read_memory_felt, stark_constant};
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
@@ -323,10 +320,57 @@ pub(super) fn expected_frame_memory(
 /// Checks both scattered rows and the working frame against Rust wire-order references.
 #[test]
 fn generated_hook_scatters_both_rows_to_canonical_addresses() {
-    let geometry = RowGeometry::vm();
+    // Every proof order, plus a tie the instance order must break.
+    let mut cases: Vec<Vec<u64>> = permutations(MIDEN_AIR_COUNT)
+        .iter()
+        .map(|order| heights_for_order(order))
+        .collect();
+    cases.push(vec![18u64, 18, 16, 18]);
+    check_scatter(RowGeometry::vm(), cases, None);
+}
+
+/// Odd numbers of dispatched groups leave a padding pair in each final record word.
+#[test]
+fn packed_records_handle_empty_and_unpaired_dispatch_groups() {
+    for geometry in [
+        RowGeometry {
+            preprocessed: vec![4, 0, 0, 0],
+            main: vec![0; 4],
+            aux: vec![0; 4],
+            quotient: 4,
+        },
+        RowGeometry {
+            preprocessed: vec![4, 0, 0, 0],
+            main: vec![4, 8, 12, 16],
+            aux: vec![0; 4],
+            quotient: 4,
+        },
+        RowGeometry {
+            preprocessed: vec![4, 8, 4, 8],
+            main: vec![12, 4, 8, 4],
+            aux: vec![4, 12, 8, 4],
+            quotient: 4,
+        },
+    ] {
+        let plan = miden_ace::compiler::OodScatterPlan::new(
+            &geometry.preprocessed,
+            &geometry.main,
+            &geometry.aux,
+            geometry.quotient,
+        )
+        .unwrap();
+        check_scatter(geometry, vec![vec![18, 16, 18, 17]], Some(&plan));
+    }
+}
+
+fn check_scatter(
+    geometry: RowGeometry,
+    cases: Vec<Vec<u64>>,
+    rendered_plan: Option<&miden_ace::compiler::OodScatterPlan>,
+) {
     let row_felts = geometry.row_felts();
     let wire = synthetic_row(2 * row_felts);
-    let ood_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let ood_ptr = stark_constant("OOD_EVALUATIONS_PTR");
 
     let alpha = QuadFelt::new(ALPHA.map(Felt::new_unchecked));
     let expected_acc = wire
@@ -347,25 +391,62 @@ fn generated_hook_scatters_both_rows_to_canonical_addresses() {
             Eidos::compress(cv, *block)
         });
 
-    // Every one of the MIDEN_AIR_COUNT! proof orders, plus a tie the instance order must break.
-    let mut cases: Vec<Vec<u64>> = permutations(MIDEN_AIR_COUNT)
-        .iter()
-        .map(|order| heights_for_order(order))
-        .collect();
-    cases.push(vec![18u64, 18, 16, 18]);
     for heights in cases {
         let order = proof_order(&heights);
         let mut advice = AdviceStack::new();
         advice.append_for_adv_pipe(&wire);
-        let (output, _) = build_test!(generated_hook_source(&heights, ood_ptr), &[], &advice)
+        let mut source = generated_hook_source(&heights, ood_ptr);
+        let mut guards = Vec::new();
+        if let Some(plan) = rendered_plan {
+            let table = stark_constant("OOD_SCATTER_TABLE_PTR");
+            assert!(
+                plan.table_felts() <= (stark_constant("RELATION_STATE_START") - table) as usize
+            );
+            guards = vec![table - 1, table + plan.table_felts() as u32];
+            let positions = stark_constant("PROOF_ORDER_POSITIONS_PTR");
+            let position_stores = order
+                .iter()
+                .enumerate()
+                .map(|(position, air)| {
+                    format!("push.{position} mem_store.{}\n", positions + *air as u32)
+                })
+                .collect::<String>();
+            let hook = plan.render("").replace("pub proc ", "proc ");
+            let guard_stores = guards
+                .iter()
+                .map(|address| format!("push.4919 mem_store.{address}\n"))
+                .collect::<String>();
+            source = source
+                .replacen(
+                    "begin",
+                    &format!(
+                        "use miden::core::stark::types\nuse {{OOD_SCATTER_TABLE_PTR, PROOF_ORDER_POSITIONS_PTR}} from miden::core::stark::constants\n{hook}\nbegin\n{guard_stores}",
+                    ),
+                    1,
+                )
+                .replace("exec.ood_frames::stage_proof_order_maps", &position_stores)
+                .replace("exec.ood_frames::stage_ood_scatter_table", "exec.stage_ood_scatter_table")
+                .replace(
+                    "exec.ood_frames::process_row_ood_evaluations",
+                    "exec.process_row_ood_evaluations",
+                );
+        }
+        let (output, _) = build_test!(source, &[], &advice)
             .execute_for_output()
-            .expect("the generated out-of-domain hook must execute");
+            .unwrap_or_else(|error| panic!("OOD geometry {geometry:?} failed: {error}"));
+        for address in guards {
+            assert_eq!(read_memory_felt(&output, address), Felt::from_u32(4919));
+        }
 
         let expected = expected_frame_memory(&geometry, &order, &wire);
-        // Every non-identity fixture must distinguish scattering from a flat wire-order write.
+        // A dispatched non-identity order must distinguish scattering from a flat wire-order write.
         let wire_order: Vec<u64> = wire.iter().map(Felt::as_canonical_u64).collect();
-        if order == (0..MIDEN_AIR_COUNT).collect::<Vec<_>>() {
-            assert_eq!(expected, wire_order, "the identity order must store the row flat");
+        let has_dispatch = geometry
+            .groups()
+            .iter()
+            .any(|widths| widths.iter().filter(|&&width| width != 0).count() > 1);
+        if order == (0..MIDEN_AIR_COUNT).collect::<Vec<_>>() || !has_dispatch {
+            assert_eq!(expected, wire_order, "rows without a routing permutation must be flat");
         } else {
             assert_ne!(expected, wire_order, "fixture {heights:?} does not move any segment");
         }
