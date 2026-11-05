@@ -3,7 +3,7 @@
 pub use crate::shared::eidos::layout::*;
 
 /// Number of auxiliary columns used by the shared narrow lookup core.
-pub const AUX_COLS: usize = 18;
+pub const AUX_COLS: usize = 16;
 const _: () = assert!(AUX_COLS == NARROW_AUX_COLS);
 
 /// Packed digest cells used by the PVM compression interface.

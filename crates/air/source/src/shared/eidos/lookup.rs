@@ -13,7 +13,7 @@ use super::{
     selectors::EidosCompressionSelectors,
 };
 
-/// Typed view of the 108 Eidos compression main-trace columns.
+/// Typed view of the 104 Eidos compression main-trace columns.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct EidosCompressionCols<T> {
@@ -45,8 +45,6 @@ pub struct NarrowLookupConfig {
     pub relation_bus: fn(eidos_lookup::BytePairRelation) -> usize,
     /// Bus carrying 16-bit range checks.
     pub range_check_bus: usize,
-    /// Bus carrying scheduled message words.
-    pub message_word_bus: usize,
     /// Sign of byte-table and range-check multiplicities.
     pub table_multiplicity_sign: LookupMultiplicitySign,
     /// Algebraic form used to reconstruct XOR.
@@ -87,7 +85,7 @@ pub enum XorExpression {
     RepeatedSubtraction,
 }
 
-/// Emits the 18 byte, range, rotation, and message-word lookup columns shared by both wrappers.
+/// Emits the 16 byte, range, and rotation lookup columns shared by both wrappers.
 #[doc(hidden)]
 pub fn emit_narrow_lookup_columns<LB>(
     builder: &mut LB,
@@ -149,10 +147,6 @@ where
     let spec = NARROW_SLOTS[slot];
 
     match (spec.fused_bus, spec.footer_bus) {
-        (NarrowSlotBus::MessageWord, Some(NarrowSlotBus::MessageWord)) => {
-            fused - LB::Expr::from_u64(7) * footer
-        },
-        (NarrowSlotBus::MessageWord, None) => fused,
         (_, Some(_)) => signed_table_multiplicity::<LB>(fused + footer, config),
         (_, None) => signed_table_multiplicity::<LB>(fused, config),
     }
@@ -198,14 +192,6 @@ where
                 .bus_prefix(config.rotation_bus(eidos_lookup::Rotation::Rot7, byte_position))
                 * selectors.is_cd();
         },
-        NarrowSlotBus::MessageWord => {
-            let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
-                fused.clone() + footer.clone()
-            } else {
-                fused.clone()
-            };
-            encoded += group.bus_prefix(config.message_word_bus) * activity;
-        },
         NarrowSlotBus::RangeCheck => {
             unreachable!("range checks are not used on fused rows")
         },
@@ -218,7 +204,6 @@ where
         Some(NarrowSlotBus::RangeCheck) => {
             encoded += group.bus_prefix(config.range_check_bus) * footer.clone();
         },
-        Some(NarrowSlotBus::MessageWord) => {},
         Some(NarrowSlotBus::Rotation(_)) => {
             unreachable!("rotations are not used on footer rows")
         },
@@ -233,7 +218,7 @@ where
             LB::Expr::ZERO
         };
     encoded += group.bus_prefix(config.range_check_bus) * (LB::Expr::ONE - activity);
-    let fields = narrow_slot_fields::<LB>(local, next, selectors, slot, config);
+    let fields = narrow_slot_fields::<LB>(local, next, slot, config);
     for (idx, field) in fields.into_iter().enumerate() {
         encoded += group.beta_powers()[idx].clone() * field;
     }
@@ -243,7 +228,6 @@ where
 fn narrow_slot_fields<LB>(
     local: &EidosCompressionCols<LB::Var>,
     next: &EidosCompressionCols<LB::Var>,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
     slot: usize,
     config: NarrowLookupConfig,
 ) -> [LB::Expr; 3]
@@ -283,28 +267,7 @@ where
                 ),
             ),
         ],
-        NarrowSlotFields::MessageWord(g) => {
-            let g = g as usize;
-            [
-                message_index::<LB>(selectors, g),
-                LB::Expr::from(local.columns[g_msg_word_col(g)]),
-                LB::Expr::from(local.columns[G_COMPRESSION_CYCLE_ID_COL]),
-            ]
-        },
     }
-}
-
-fn message_index<LB>(selectors: &EidosCompressionSelectors<LB::Expr>, g: usize) -> LB::Expr
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    let footer = selectors.is_footer();
-    let footer_idx = selectors.is_footer_row(1)
-        + LB::Expr::from_u64(2) * selectors.is_footer_row(2)
-        + LB::Expr::from_u64(3) * selectors.is_footer_row(3);
-    selectors.sigma_msg_index(g)
-        + LB::Expr::from_u64(g as u64) * footer
-        + LB::Expr::from_u64(4) * footer_idx
 }
 
 fn is_fused<LB>(selectors: &EidosCompressionSelectors<LB::Expr>) -> LB::Expr

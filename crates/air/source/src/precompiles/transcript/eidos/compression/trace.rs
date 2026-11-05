@@ -9,8 +9,8 @@ pub use crate::shared::eidos::trace::{
     retag_felt_trace_block_cycle_id,
 };
 use crate::shared::eidos::{
-    layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
-    trace::write_core_felt_trace_block_into_zeroed_with_lookups,
+    layout::{BLOCK_PERIOD, FOOTER_START, NUM_COLS as SHARED_NUM_COLS},
+    trace::{write_core_felt_trace_block_into_zeroed_with_lookups, write_full_felt_footer_cv},
 };
 
 pub(super) struct NoopByteLookupRecorder;
@@ -74,14 +74,18 @@ where
     R: ByteLookupRecorder,
 {
     let mut write_footer_interface = write_pvm_footer_output;
-    write_core_felt_trace_block_into_zeroed_with_lookups(
+    let final_v = write_core_felt_trace_block_into_zeroed_with_lookups(
         rows,
         block,
         h,
         compression_cycle_id,
         recorder,
         &mut write_footer_interface,
-    )
+    );
+    // Footer 2 has two free B-byte correction cells. Making its full CV available here keeps
+    // initial-CV and terminal-output lookups on distinct rows at degree three.
+    write_full_felt_footer_cv(&mut rows[FOOTER_START + 2], h);
+    final_v
 }
 
 pub(super) fn write_pvm_footer_output(row: &mut EidosCompressionFeltRow, output: &[u64; 4]) {
@@ -92,9 +96,9 @@ pub(super) fn write_pvm_footer_output(row: &mut EidosCompressionFeltRow, output:
 
 const _: () = assert!(NUM_COLS == SHARED_NUM_COLS);
 
-/// Set the terminal footer multiplicity while preserving the core's linear CV encoding.
-/// The caller must supply footer row 3: column 64 is a different witness on fused rows.
-pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
+/// Sets the multiplicity cell on footer 2 or 3 while preserving its linear CV encoding.
+/// The caller must supply a complete footer row; this cell is a different witness on fused rows.
+pub fn set_footer_multiplicity(row: &mut [Felt], multiplicity: Felt) {
     let col = super::super::COL_OUT_MULTIPLICITY;
     // Column 64 contributes 2^8 to CV word 1; its correction coordinate contributes 2^32.
     let delta = multiplicity - row[col];
@@ -102,13 +106,59 @@ pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
     row[col] = multiplicity;
 }
 
+/// Writes a cycle's interface metadata while preserving all eight initial-CV expressions.
+///
+/// `rows` must contain exactly one complete 32-row compression cycle. The incoming and outgoing
+/// flags describe unit-weight links to adjacent physical cycles; the AIR constrains them to bits.
+pub fn set_cycle_metadata(
+    rows: &mut [Felt],
+    input_multiplicity: Felt,
+    output_multiplicity: Felt,
+    incoming: Felt,
+    outgoing: Felt,
+    chain_head: Felt,
+) {
+    use super::{
+        super::{COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY},
+        layout::F_CV_STORAGE_COLS,
+    };
+
+    assert_eq!(rows.len(), BLOCK_PERIOD * NUM_COLS);
+    let footer2 = &mut rows[(FOOTER_START + 2) * NUM_COLS..(BLOCK_PERIOD - 1) * NUM_COLS];
+    set_footer_multiplicity(footer2, input_multiplicity);
+    set_footer_link(footer2, incoming);
+
+    let footer3 = &mut rows[(BLOCK_PERIOD - 1) * NUM_COLS..];
+    set_footer_multiplicity(footer3, output_multiplicity);
+    set_footer_link(footer3, outgoing);
+
+    // Head storage contributes 2^24 to B lane 3. Its CV correction has coefficient 2^16.
+    // Preserving that B word also preserves the corresponding A-word expression.
+    let delta = chain_head - footer3[COL_CHAIN_HEAD_ID];
+    footer3[F_CV_STORAGE_COLS[7]] -= delta.mul_2exp_u64(8);
+    footer3[COL_CHAIN_HEAD_ID] = chain_head;
+
+    // Input multiplicity contributes 2^24 to C lane 3; its A-CV correction has coefficient 2^32.
+    let delta = input_multiplicity - footer3[COL_IN_MULTIPLICITY];
+    footer3[F_CV_STORAGE_COLS[3]] -= delta.div_2exp_u64(8);
+    footer3[COL_IN_MULTIPLICITY] = input_multiplicity;
+}
+
+fn set_footer_link(row: &mut [Felt], value: Felt) {
+    let col = super::super::COL_IS_CONTINUATION;
+    // The reused k3 cell and A-CV correction both have coefficient 2^32.
+    let delta = value - row[col];
+    row[super::layout::F_CV_STORAGE_COLS[0]] -= delta;
+    row[col] = value;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         shared::eidos::{
+            footer_cv_word,
             layout::{F_CV_STORAGE_COLS, FOOTER_START},
-            universal_cv_word,
         },
         vm::trace::eidos_compression::{
             F_COMPRESSION_MULTIPLICITY_COL, TraceMode,
@@ -117,10 +167,34 @@ mod tests {
     };
 
     #[test]
+    fn footer_metadata_preserves_all_cv_words_and_fused_rows() {
+        let block = core::array::from_fn(|i| 1_000 + i as u32);
+        let cv = core::array::from_fn(|i| 2_000 + i as u32);
+        let mut rows = alloc::vec![[Felt::ZERO; NUM_COLS]; BLOCK_PERIOD];
+        write_felt_trace_block(&mut rows, block, cv, 7);
+        let original = rows.clone();
+        for (input, output, incoming, outgoing, head) in [
+            (Felt::ONE, Felt::from_u8(3), Felt::ONE, Felt::ZERO, Felt::from_u8(5)),
+            (-Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ONE, -Felt::ONE),
+            (Felt::ZERO, Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::from_u8(7)),
+        ] {
+            set_cycle_metadata(rows.as_flattened_mut(), input, output, incoming, outgoing, head);
+            assert_eq!(&rows[..FOOTER_START + 2], &original[..FOOTER_START + 2]);
+            for row in &rows[FOOTER_START + 2..] {
+                for (i, word) in cv.into_iter().enumerate() {
+                    assert_eq!(footer_cv_word(|col| row[col], i), Felt::from_u32(word));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compression_adapters_have_only_the_expected_footer_differences() {
-        let expected_differences: alloc::vec::Vec<_> = (FOOTER_START..BLOCK_PERIOD)
+        let mut expected_differences: alloc::vec::Vec<_> = (FOOTER_START..BLOCK_PERIOD)
             .flat_map(|row| [(row, F_COMPRESSION_MULTIPLICITY_COL), (row, F_CV_STORAGE_COLS[1])])
             .collect();
+        expected_differences.extend([2, 3, 6, 7].map(|i| (FOOTER_START + 2, F_CV_STORAGE_COLS[i])));
+        expected_differences.sort_unstable();
 
         for case in 0..16_u32 {
             let block = core::array::from_fn(|idx| {
@@ -160,14 +234,14 @@ mod tests {
 
                 for (idx, &word) in h.iter().enumerate().take(2 * footer + 2) {
                     let expected = Felt::from(word);
-                    assert_eq!(universal_cv_word(|col| pvm_row[col], idx), expected);
-                    assert_eq!(universal_cv_word(|col| mvm_row[col], idx), expected);
+                    assert_eq!(footer_cv_word(|col| pvm_row[col], idx), expected);
+                    assert_eq!(footer_cv_word(|col| mvm_row[col], idx), expected);
                 }
             }
 
             // The MVM multiplicity occupies a shared byte coordinate. The CV storage coordinate
             // for lane one compensates for that value, leaving the reconstructed input CV
-            // unchanged.
+            // unchanged. Footer 2 also carries all eight PVM CV words for its initial-CV lookup.
             assert_eq!(
                 differences, expected_differences,
                 "unexpected adapter delta in case {case}"

@@ -883,7 +883,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     });
                 }
                 let new_index = builder
-                    .debug_info_mut()
+                    .debug_info_mut_unindexed()
                     .nodes
                     .push(SourceNode {
                         exec_node,
@@ -929,12 +929,14 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
             }
 
             for root in debug_info.roots().iter().copied() {
-                builder.debug_info_mut().roots.push(remapped_nodes.get(&root).copied().ok_or(
-                    DebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: root,
-                    },
-                )?);
+                builder.debug_info_mut_unindexed().roots.push(
+                    remapped_nodes.get(&root).copied().ok_or(
+                        DebugInfoMergeError::MissingSourceNodeMapping {
+                            forest_index,
+                            source_node: root,
+                        },
+                    )?,
+                );
             }
 
             for (prev, new) in remapped_nodes.iter() {

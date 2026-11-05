@@ -1,7 +1,7 @@
 use miden_core::{Felt, field::PrimeField64};
 
 use super::{
-    algebra::{cv_storage_coefficient, missing_rotation_result, universal_cv_word},
+    algebra::{cv_storage_coefficient, footer_cv_word, missing_rotation_result},
     layout::*,
     model::{initial_working_state, low_output},
     schedule::fused_step_at,
@@ -58,7 +58,7 @@ fn assert_slot(slot: LookupSlot<'_, u64>, expected: [u64; 3]) {
 }
 
 fn cv_word(row: &EidosCompressionRow, idx: usize) -> u64 {
-    universal_cv_word(|col| Felt::new_unchecked(row[col]), idx).as_canonical_u64()
+    footer_cv_word(|col| Felt::new_unchecked(row[col]), idx).as_canonical_u64()
 }
 
 #[test]
@@ -202,7 +202,6 @@ fn fused_g_rows_materialize_expected_slots() {
 
             assert_eq!(*row.k3(g), k3);
             assert_eq!(*row.k2(g), k2);
-            assert_eq!(*row.msg_word(g), msg as u64);
             assert_eq!(*row.compression_cycle_id(), 0);
 
             let d_bytes = d.to_le_bytes();
@@ -249,7 +248,7 @@ fn fused_g_rows_materialize_expected_slots() {
             let actual_d_new = (actual_d ^ actual_a_new).rotate_right(step.first_rotation);
             let actual_k3 = *row.k3(g);
             let reconstructed_a =
-                actual_a_new as u64 + (actual_k3 << 32) - actual_b as u64 - *row.msg_word(g);
+                actual_a_new as u64 + (actual_k3 << 32) - actual_b as u64 - msg as u64;
             let reconstructed_c = actual_c_new as u64 + (*row.k2(g) << 32) - actual_d_new as u64;
             assert_eq!(reconstructed_a, a as u64);
             assert_eq!(reconstructed_c, c as u64);
@@ -315,7 +314,11 @@ fn footer_overlay_rows_materialize_expected_surface() {
         );
         for word_slot in 0..F_MSG_WORD_SLOTS {
             let msg_idx = footer_message_word_index(footer, word_slot);
-            assert_eq!(*row.msg_word(word_slot), block[msg_idx] as u64);
+            assert_eq!(
+                (*row.range_slot(2 * word_slot).field0
+                    + (*row.range_slot(2 * word_slot + 1).field0 << 16)),
+                block[msg_idx] as u64
+            );
         }
         for limb in 0..F_RANGE_SLOTS {
             let msg_idx = footer_range_limb_word_index(footer, limb);
@@ -332,8 +335,10 @@ fn footer_overlay_rows_materialize_expected_surface() {
             assert_eq!(*row.carried_r(idx), r_value);
         }
         for pair in 0..2 {
-            let lo = *row.msg_word(2 * pair) as u32;
-            let hi = *row.msg_word(2 * pair + 1) as u32;
+            let lo = (*row.range_slot(4 * pair).field0
+                + (*row.range_slot(4 * pair + 1).field0 << 16)) as u32;
+            let hi = (*row.range_slot(4 * pair + 2).field0
+                + (*row.range_slot(4 * pair + 3).field0 << 16)) as u32;
             assert_eq!(pack_pair(lo, hi), r_values[2 * footer + pair]);
         }
         for (idx, &word) in h.iter().enumerate().take(2 * footer + 2) {
@@ -385,7 +390,7 @@ fn padding_retag_preserves_full_cv_coordinates() {
         let row = &trace.rows[FOOTER_START + footer];
         assert_eq!(row[F_COMPRESSION_CYCLE_ID_COL], Felt::from_u8(17));
         for (idx, &word) in h.iter().enumerate().take(2 * footer + 2) {
-            let actual = universal_cv_word(|col| row[col], idx);
+            let actual = footer_cv_word(|col| row[col], idx);
             assert_eq!(actual, Felt::from_u32(word), "footer {footer}, CV word {idx}");
         }
     }

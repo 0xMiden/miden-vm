@@ -75,6 +75,22 @@ pub fn capture_into<A>(air: &A, builder: &mut GraphBuilder) -> CapturedConstrain
 where
     A: LiftedAir<Felt, EF>,
 {
+    capture_into_with(air, builder, |symbolic| air.eval(symbolic))
+}
+
+/// Capture a selected part of an AIR into an existing graph using the AIR's input layout.
+///
+/// `eval` supplies the assertions to capture. For example, evaluating only the ordinary lookup
+/// adapter lets an analysis distinguish its assertions from the AIR's other extension constraints.
+/// The same handwritten-source requirement and row-offset restrictions as [`capture_into`] apply.
+pub fn capture_into_with<A>(
+    air: &A,
+    builder: &mut GraphBuilder,
+    eval: impl FnOnce(&mut SymbolicAirBuilder<Felt, EF>),
+) -> CapturedConstraints
+where
+    A: LiftedAir<Felt, EF>,
+{
     let air_layout = AirLayout {
         preprocessed_width: BaseAir::<Felt>::preprocessed_width(air),
         main_width: BaseAir::<Felt>::width(air),
@@ -85,7 +101,7 @@ where
         num_periodic_columns: BaseAir::<Felt>::periodic_columns(air).len(),
     };
     let mut symbolic = SymbolicAirBuilder::<Felt, EF>::new(air_layout);
-    air.eval(&mut symbolic);
+    eval(&mut symbolic);
     let base_constraints = symbolic.base_constraints();
     let ext_constraints = symbolic.extension_constraints();
     let layout = symbolic.constraint_layout();
