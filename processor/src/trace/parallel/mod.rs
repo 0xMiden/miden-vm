@@ -247,7 +247,8 @@ fn build_trace_inner(
         eidos_compression_trace_len,
         byte_pair_lookup_rows,
         heights,
-    );
+    )
+    .expect("trace builder pads every AIR to at least its unpadded row count");
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
     let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = rayon::join(

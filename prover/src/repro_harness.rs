@@ -1,4 +1,7 @@
-use alloc::{format, string::String};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use core::borrow::BorrowMut;
 
 use miden_air_definitions::vm::{
@@ -162,7 +165,8 @@ impl ReproTrace {
                 main.eidos_compression_height(),
                 main.byte_pair_lookup_height(),
             ],
-        );
+        )
+        .map_err(|err| err.to_string())?;
         let trace = VmTrace::new_from_parts(
             self.program_info.clone(),
             self.init_stack,
