@@ -16,6 +16,7 @@
 #### Changes
 
 - [BREAKING] `PrecompileWork::class` and `PrecompileLimits::class` now take `&WorkClass` instead of `WorkClass`. Callers must pass `&WorkClass` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
+- [BREAKING] XChaCha AEAD now authenticates the encrypted-data type byte with a versioned domain separator, so flipping the type of a serialized ciphertext fails tag verification. Ciphertexts serialized by earlier versions no longer verify.
 - [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#4113](https://github.com/0xMiden/miden-vm/pull/4113)).
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
