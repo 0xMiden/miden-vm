@@ -666,11 +666,11 @@ mod tests {
         assert_eq!(decoded.execution_precompile_limits().max_elements(), 31);
         assert_eq!(decoded.verification_precompile_limits().max_elements(), 37);
         assert_eq!(
-            decoded.execution_precompile_limits().class(execution_class),
+            decoded.execution_precompile_limits().class(&execution_class),
             Some(execution_limit)
         );
         assert_eq!(
-            decoded.verification_precompile_limits().class(verification_class),
+            decoded.verification_precompile_limits().class(&verification_class),
             Some(verification_limit)
         );
         assert_ne!(decoded.execution_precompile_limits(), decoded.verification_precompile_limits());

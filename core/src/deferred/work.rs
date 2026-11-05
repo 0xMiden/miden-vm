@@ -113,8 +113,8 @@ impl PrecompileWork {
     }
 
     /// Returns the summary for `class`, if this scope contains that class.
-    pub fn class(&self, class: WorkClass) -> Option<WorkSummary> {
-        self.classes.get(&class).copied()
+    pub fn class(&self, class: &WorkClass) -> Option<WorkSummary> {
+        self.classes.get(class).copied()
     }
 
     /// Validates already-accumulated work against `limits` without changing it.
@@ -252,8 +252,8 @@ impl PrecompileLimits {
     }
 
     /// Returns the configured bound for `class`, if the policy admits it.
-    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
-        self.classes.get(&class).copied()
+    pub fn class(&self, class: &WorkClass) -> Option<WorkLimit> {
+        self.classes.get(class).copied()
     }
 
     /// Returns the structural field-element ceiling.
@@ -452,7 +452,7 @@ mod tests {
         work.charge(12, Some(WorkItem::new(TEST, 4)), &limits).unwrap();
         assert_eq!(work.nodes(), 2);
         assert_eq!(work.elements(), 24);
-        assert_eq!(work.class(TEST), Some(WorkSummary { count: 2, total_size: 7, max_size: 4 }));
+        assert_eq!(work.class(&TEST), Some(WorkSummary { count: 2, total_size: 7, max_size: 4 }));
 
         assert!(matches!(
             work.charge(1, None, &limits),
@@ -543,11 +543,8 @@ mod tests {
         assert_eq!(decoded, limits);
         assert_eq!(decoded.to_bytes(), bytes);
         assert_eq!(decoded.max_elements(), 123);
-        assert_eq!(decoded.classes().count(), 3);
-        assert!(decoded.classes().any(|(class, _)| class == &custom_a));
-        assert!(decoded.classes().any(|(class, _)| class == &custom_b));
         assert_eq!(
-            decoded.class(custom_a),
+            decoded.class(&custom_a),
             Some(WorkLimit {
                 max_count: 7,
                 max_total_size: 11,
@@ -555,14 +552,17 @@ mod tests {
             })
         );
         assert_eq!(
-            decoded.class(custom_b),
+            decoded.class(&custom_b),
             Some(WorkLimit {
                 max_count: 0,
                 max_total_size: 0,
                 max_size: 0
             })
         );
-        assert_eq!(decoded.class(WorkClass::new("hash")), Some(hash_limit));
+        assert_eq!(decoded.class(&WorkClass::new("hash")), Some(hash_limit));
+        assert_eq!(decoded.classes().count(), 3);
+        assert!(decoded.classes().any(|(class, _)| class == &custom_a));
+        assert!(decoded.classes().any(|(class, _)| class == &custom_b));
     }
 
     #[test]
@@ -665,7 +665,9 @@ mod tests {
         };
         let limits = PrecompileLimits::new(1).with_class(live, limit);
         let decoded = PrecompileLimits::read_from_bytes(&limits.to_bytes()).unwrap();
-        assert_eq!(decoded.class(decoded_name), Some(limit));
+        assert_eq!(decoded.class(&decoded_name), Some(limit));
+        // The same owned key can be reused for a lookup against an unrelated policy.
+        assert_eq!(PrecompileLimits::new(0).class(&decoded_name), None);
     }
 
     #[test]

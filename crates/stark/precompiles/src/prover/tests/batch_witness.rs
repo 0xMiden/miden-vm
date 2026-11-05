@@ -192,16 +192,16 @@ fn preparation_reports_exact_canonical_work_classes() {
 
     let prepared = prepare(fixture.witness());
     let work = prepared.work();
-    assert_eq!(work.class(UINT_WORK).unwrap().count(), 5);
-    assert_eq!(work.class(UINT_WORK).unwrap().total_size(), 5);
-    assert_eq!(work.class(CURVE_WORK).unwrap().count(), 3);
-    assert_eq!(work.class(CURVE_WORK).unwrap().total_size(), 3);
-    assert_eq!(work.class(HASH_WORK).unwrap().count(), 1);
-    assert_eq!(work.class(HASH_WORK).unwrap().total_size(), 3);
-    assert_eq!(work.class(HASH_WORK).unwrap().max_size(), 3);
-    assert_eq!(work.class(MSM_WORK).unwrap().count(), 1);
-    assert_eq!(work.class(MSM_WORK).unwrap().total_size(), 2);
-    assert_eq!(work.class(MSM_WORK).unwrap().max_size(), 2);
+    assert_eq!(work.class(&UINT_WORK).unwrap().count(), 5);
+    assert_eq!(work.class(&UINT_WORK).unwrap().total_size(), 5);
+    assert_eq!(work.class(&CURVE_WORK).unwrap().count(), 3);
+    assert_eq!(work.class(&CURVE_WORK).unwrap().total_size(), 3);
+    assert_eq!(work.class(&HASH_WORK).unwrap().count(), 1);
+    assert_eq!(work.class(&HASH_WORK).unwrap().total_size(), 3);
+    assert_eq!(work.class(&HASH_WORK).unwrap().max_size(), 3);
+    assert_eq!(work.class(&MSM_WORK).unwrap().count(), 1);
+    assert_eq!(work.class(&MSM_WORK).unwrap().total_size(), 2);
+    assert_eq!(work.class(&MSM_WORK).unwrap().max_size(), 2);
 }
 
 #[test]
@@ -960,7 +960,7 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
         match expected_error {
             None => {
                 let prepared = result.unwrap();
-                let work = prepared.work().class(HASH_WORK).unwrap();
+                let work = prepared.work().class(&HASH_WORK).unwrap();
                 assert_eq!(work.count(), count as u64);
                 assert_eq!(work.total_size(), (count * bytes) as u64);
             },
@@ -1037,7 +1037,7 @@ fn default_msm_limits_charge_zero_scalars_and_repeated_bases() {
         match expected_error {
             None => {
                 let prepared = result.unwrap();
-                let work = prepared.work().class(MSM_WORK).unwrap();
+                let work = prepared.work().class(&MSM_WORK).unwrap();
                 assert_eq!(work.count(), count as u64);
                 assert_eq!(work.total_size(), (count * terms) as u64);
             },
