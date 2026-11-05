@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
@@ -12,7 +12,7 @@ use miden_stark::lookup::{
 };
 
 use super::{
-    algebra::{cv_storage_coefficient, universal_cv_word},
+    algebra::cv_storage_coefficient,
     constraints_tests::eval_main_row,
     layout::*,
     lookup::{
@@ -73,24 +73,8 @@ fn test_h() -> [u32; 8] {
     ]
 }
 
-fn other_test_block() -> [u32; 16] {
-    core::array::from_fn(|idx| 0x1000_0000 + idx as u32 * 17)
-}
-
-fn other_test_h() -> [u32; 8] {
-    core::array::from_fn(|idx| 0x2000_0000 + idx as u32 * 19)
-}
-
 fn count_narrow(plan: &[NarrowLookup], kind: NarrowLookupKind, sign: i8) -> usize {
     plan.iter().filter(|lookup| lookup.kind == kind && lookup.sign == sign).count()
-}
-
-fn signed_narrow_total(kind: NarrowLookupKind) -> i64 {
-    (0..BLOCK_PERIOD)
-        .flat_map(|row| lookup_plan(row, EidosCompressionMode::Compression).narrow)
-        .filter(|lookup| lookup.kind == kind)
-        .map(|lookup| lookup.sign as i64)
-        .sum()
 }
 
 fn felt_trace_matrix(mode: TraceMode) -> RowMajorMatrix<Felt> {
@@ -143,15 +127,12 @@ fn fractions_at(
     &fractions.fractions()[start..end]
 }
 
-fn expected_column_counts(row: usize, mode: EidosCompressionMode) -> [usize; AUX_COLS] {
-    let mut counts = [0; AUX_COLS];
+fn expected_column_counts(row: usize, mode: EidosCompressionMode) -> [usize; NUM_LOGUP_COLS] {
+    let mut counts = [0; NUM_LOGUP_COLS];
     match row_kind(row) {
         RowKind::Ab | RowKind::Cd | RowKind::AbDiag | RowKind::CdDiag => {
             for (column, slots) in NARROW_SLOTS.as_chunks::<2>().0.iter().enumerate() {
                 counts[column] = slots.len();
-            }
-            if row == 0 {
-                counts[FOOTER_INPUT_COLUMN] = 1;
             }
         },
         RowKind::Footer(footer) => {
@@ -159,7 +140,7 @@ fn expected_column_counts(row: usize, mode: EidosCompressionMode) -> [usize; AUX
                 counts[column] = slots.iter().filter(|slot| slot.footer_bus.is_some()).count();
             }
             if footer == FOOTER_ROWS - 1 {
-                counts[FOOTER_INPUT_COLUMN] = 2;
+                counts[FOOTER_INPUT_COLUMN] = 1;
             }
             if mode == EidosCompressionMode::AeadXof {
                 counts[FOOTER_OUTPUT_COLUMN] = 2;
@@ -172,35 +153,12 @@ fn expected_column_counts(row: usize, mode: EidosCompressionMode) -> [usize; AUX
 fn assert_lookup_fraction_counts(mode: EidosCompressionMode, trace_mode: TraceMode) {
     let fractions = lookup_fractions(&felt_trace_matrix(trace_mode));
     assert_eq!(fractions.shape(), EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE);
-    assert_eq!(fractions.counts().len(), BLOCK_PERIOD * AUX_COLS);
+    assert_eq!(fractions.counts().len(), BLOCK_PERIOD * NUM_LOGUP_COLS);
 
     for row in 0..BLOCK_PERIOD {
         let expected = expected_column_counts(row, mode);
-        let actual = &fractions.counts()[row * AUX_COLS..(row + 1) * AUX_COLS];
+        let actual = &fractions.counts()[row * NUM_LOGUP_COLS..(row + 1) * NUM_LOGUP_COLS];
         assert_eq!(actual, expected, "row {row}");
-    }
-}
-
-fn full_cv_fields(row: &EidosCompressionRow) -> [Felt; 9] {
-    core::array::from_fn(|idx| {
-        if idx == 0 {
-            Felt::new_unchecked(row[F_COMPRESSION_CYCLE_ID_COL])
-        } else {
-            universal_cv_word(|col| Felt::new_unchecked(row[col]), idx - 1)
-        }
-    })
-}
-
-fn set_full_cv_words(row: &mut EidosCompressionRow, words: [u32; 8]) {
-    for idx in (NUM_G..8).chain(0..NUM_G) {
-        let word = words[idx];
-        let at = |col| Felt::new_unchecked(row[col]);
-        let target = Felt::from_u32(word);
-        let base = super::algebra::cv_word_base(&at, idx);
-        let offset = super::algebra::cv_storage_offset::<Felt>(idx);
-        let coefficient = cv_storage_coefficient::<Felt>(idx);
-        row[F_CV_STORAGE_COLS[idx]] =
-            ((target - base + offset) * coefficient.inverse()).as_canonical_u64();
     }
 }
 
@@ -242,33 +200,31 @@ fn aead_input_fields(block: [u32; 16], h: [u32; 8], clk: u64) -> [Felt; 16] {
 }
 
 #[test]
-fn lookup_plan_and_column_liveness_match_the_20_column_design() {
-    assert_eq!(EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, [2; 20]);
-    assert_eq!(NARROW_BATCH_COLUMNS, 18);
-    assert_eq!(FOOTER_INPUT_COLUMN, 18);
-    assert_eq!(FOOTER_OUTPUT_COLUMN, 19);
+fn lookup_plan_and_column_liveness_match_the_18_lookup_column_design() {
+    let mut expected = [2; 18];
+    expected[16] = 1;
+    assert_eq!(EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, expected);
+    assert_eq!(NARROW_BATCH_COLUMNS, 16);
+    assert_eq!(FOOTER_INPUT_COLUMN, 16);
+    assert_eq!(FOOTER_OUTPUT_COLUMN, 17);
 
     let first = lookup_plan(0, EidosCompressionMode::Compression);
-    assert_eq!(first.narrow.len(), 36);
-    assert_eq!(first.narrow_aux_columns(), 18);
-    assert_eq!(first.overlay_relations.len(), 1);
-    assert_eq!(first.overlay_relations[0].kind, OverlayRelationKind::FullCv);
-    assert_eq!(first.overlay_relations[0].sign, -1);
+    assert_eq!(first.narrow.len(), 32);
+    assert_eq!(first.narrow_aux_columns(), 16);
+    assert!(first.overlay_relations.is_empty());
 
     let later = lookup_plan(1, EidosCompressionMode::Compression);
-    assert_eq!(later.narrow.len(), 36);
+    assert_eq!(later.narrow.len(), 32);
     assert!(later.overlay_relations.is_empty());
 
     let footer0 = lookup_plan(FOOTER_START, EidosCompressionMode::Compression);
-    assert_eq!(footer0.narrow.len(), 29);
+    assert_eq!(footer0.narrow.len(), 25);
     assert!(footer0.overlay_relations.is_empty());
 
     let footer3 = lookup_plan(BLOCK_PERIOD - 1, EidosCompressionMode::Compression);
-    assert_eq!(footer3.narrow.len(), 29);
-    assert_eq!(footer3.overlay_relations.len(), 2);
-    assert_eq!(footer3.overlay_relations[0].kind, OverlayRelationKind::FullCv);
-    assert_eq!(footer3.overlay_relations[0].sign, 1);
-    assert_eq!(footer3.overlay_relations[1].kind, OverlayRelationKind::CompressionLink);
+    assert_eq!(footer3.narrow.len(), 25);
+    assert_eq!(footer3.overlay_relations.len(), 1);
+    assert_eq!(footer3.overlay_relations[0].kind, OverlayRelationKind::CompressionLink);
 }
 
 #[test]
@@ -285,18 +241,6 @@ fn lookup_plans_follow_periodic_row_families() {
         assert_eq!(is_cd, count_narrow(&plan.narrow, NarrowLookupKind::Rot7, -1) > 0);
         assert_eq!(is_footer, count_narrow(&plan.narrow, NarrowLookupKind::RangeCheck, -1) > 0);
     }
-}
-
-#[test]
-fn internal_relations_balance_over_one_cycle() {
-    assert_eq!(signed_narrow_total(NarrowLookupKind::MessageWord), 0);
-
-    let full_cv_total: i64 = (0..BLOCK_PERIOD)
-        .flat_map(|row| lookup_plan(row, EidosCompressionMode::Compression).overlay_relations)
-        .filter(|lookup| lookup.kind == OverlayRelationKind::FullCv)
-        .map(|lookup| lookup.sign as i64)
-        .sum();
-    assert_eq!(full_cv_total, 0);
 }
 
 #[test]
@@ -327,7 +271,7 @@ fn lookup_degree_annotations_match_air_expressions() {
 }
 
 #[test]
-fn compact_messages_and_derived_rotation_encode_expected_relations() {
+fn derived_rotation_encode_expected_relations() {
     let cycle_id = 7;
     let challenges = lookup_challenges();
     let trace = generate_trace_block_with_cycle_id(
@@ -340,18 +284,6 @@ fn compact_messages_and_derived_rotation_encode_expected_relations() {
 
     for row in 0..FUSED_G_ROWS {
         let step = fused_step_at(row).expect("row is fused");
-        for g in 0..NUM_G {
-            let expected = challenges.encode(
-                BusId::EidosCompressionMessageWord as usize,
-                [
-                    Felt::from_usize(step.message_indices[g]),
-                    Felt::new_unchecked(trace.rows[row][g_msg_word_col(g)]),
-                    Felt::new_unchecked(cycle_id),
-                ],
-            );
-            assert!(fractions_at(&fractions, row, 16 + g / 2).contains(&(Felt::ONE, expected)));
-        }
-
         let lhs =
             trace.rows[row][g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)] as u8;
         let rhs =
@@ -368,23 +300,6 @@ fn compact_messages_and_derived_rotation_encode_expected_relations() {
             ],
         );
         assert!(fractions_at(&fractions, row, 31 / 2).contains(&(-Felt::ONE, expected)));
-    }
-
-    for footer in 0..FOOTER_ROWS {
-        let row = FOOTER_START + footer;
-        for g in 0..NUM_G {
-            let expected = challenges.encode(
-                BusId::EidosCompressionMessageWord as usize,
-                [
-                    Felt::from_usize(footer_message_word_index(footer, g)),
-                    Felt::new_unchecked(trace.rows[row][footer_msg_word_col(g)]),
-                    Felt::new_unchecked(cycle_id),
-                ],
-            );
-            assert!(
-                fractions_at(&fractions, row, 16 + g / 2).contains(&(-Felt::from_u8(7), expected)),
-            );
-        }
     }
 }
 
@@ -404,7 +319,7 @@ fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
     row[F_TOP_BIT_SLOT_BASE_COL + 2] =
         eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, wrong_x);
 
-    // Keep the packed digest and its overlapping atomic-CV coordinate unchanged while selecting
+    // Keep the packed digest and its overlapping footer CV coordinate unchanged while selecting
     // the other locally valid boolean branch.
     let digest_delta = -Felt::from_u64(1 << 56) * (wrong_h - valid_h);
     row[footer_interface_tail_col(FOOTER_ROWS - 1)] += digest_delta;
@@ -432,30 +347,6 @@ fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
         fractions_at(&forged_fractions, footer, column).contains(&(-Felt::ONE, encode(wrong_x))),
     );
     assert_ne!(lookup_sigma(&honest), lookup_sigma(&forged));
-}
-
-#[test]
-fn atomic_full_cv_encoding_is_identical_on_first_fused_and_footer_three() {
-    let cycle_id = 7;
-    let challenges = lookup_challenges();
-    let trace = generate_trace_block_with_cycle_id(
-        test_block(),
-        test_h(),
-        cycle_id,
-        TraceMode::Compression,
-    );
-    let fractions = lookup_fractions(&felt_matrix_from_rows(&trace.rows));
-    let expected =
-        challenges.encode(BusId::EidosCompressionInputCv as usize, full_cv_fields(&trace.rows[0]));
-
-    let first = fractions_at(&fractions, 0, FOOTER_INPUT_COLUMN);
-    assert_eq!(first, &[(-Felt::ONE, expected)]);
-
-    let footer_row = BLOCK_PERIOD - 1;
-    assert_eq!(full_cv_fields(&trace.rows[footer_row]), full_cv_fields(&trace.rows[0]));
-    assert!(
-        fractions_at(&fractions, footer_row, FOOTER_INPUT_COLUMN).contains(&(Felt::ONE, expected)),
-    );
 }
 
 #[test]
@@ -499,55 +390,6 @@ fn footer_input_encoding_matches_each_domain_standard_message() {
 }
 
 #[test]
-fn full_cv_relation_binds_all_eight_raw_words_on_both_emission_rows() {
-    let honest = generate_trace_block_with_cycle_id(
-        test_block(),
-        test_h(),
-        0,
-        TraceMode::CompressionWithMultiplicity { multiplicity: 0 },
-    );
-    let honest_sigma = lookup_sigma(&felt_matrix_from_rows(&honest.rows));
-
-    // Zero compression multiplicity disables the external-input fraction. On footer 3 these
-    // correction cells are also outside every active narrow slot, so each footer mutation below
-    // is detected by the atomic CV relation alone.
-    for &row in &[0, BLOCK_PERIOD - 1] {
-        for &col in &F_CV_STORAGE_COLS {
-            let mut rows = honest.rows;
-            rows[row][col] += 1;
-            assert_ne!(
-                lookup_sigma(&felt_matrix_from_rows(&rows)),
-                honest_sigma,
-                "full-CV relation omitted row {row}, storage column {col}",
-            );
-        }
-    }
-}
-
-#[test]
-fn first_row_message_and_valid_carry_mutations_change_lookup_sum() {
-    let honest =
-        generate_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
-    let honest_sigma = lookup_sigma(&felt_matrix_from_rows(&honest.rows));
-
-    let mut rows = honest.rows;
-    rows[0][g_msg_word_col(0)] += 1;
-    assert_ne!(lookup_sigma(&felt_matrix_from_rows(&rows)), honest_sigma);
-
-    for g in 0..NUM_G {
-        let mut rows = honest.rows;
-        let k3 = rows[0][g_k3_col(g)];
-        let alternate = (k3 + 1) % 3;
-        rows[0][g_k3_col(g)] = alternate;
-        assert_ne!(
-            lookup_sigma(&felt_matrix_from_rows(&rows)),
-            honest_sigma,
-            "atomic CV relation did not anchor reconstructed a[{g}]",
-        );
-    }
-}
-
-#[test]
 fn derived_rotation_lookup_binds_the_omitted_next_b_transition() {
     let honest =
         generate_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
@@ -567,7 +409,6 @@ fn derived_rotation_lookup_binds_the_omitted_next_b_transition() {
         let mut rows = honest.rows;
 
         add_to_raw_cell(&mut rows[row + 1][g_bd_rot_slot_col(affected_next_g, 0, 0)], Felt::ONE);
-        add_to_raw_cell(&mut rows[row + 1][g_msg_word_col(affected_next_g)], -Felt::ONE);
         let mutated = lookup_fractions(&felt_matrix_from_rows(&rows));
         assert_ne!(
             fractions_at(&mutated, row, derived_column),
@@ -580,7 +421,6 @@ fn derived_rotation_lookup_binds_the_omitted_next_b_transition() {
         // tuple. The main AIR's unaffected lane transition is responsible for rejecting this case.
         let anchored_next_g = (affected_next_g + 1) % NUM_G;
         add_to_raw_cell(&mut rows[row + 1][g_bd_rot_slot_col(anchored_next_g, 0, 0)], -Felt::ONE);
-        add_to_raw_cell(&mut rows[row + 1][g_msg_word_col(anchored_next_g)], Felt::ONE);
         let compensated = lookup_fractions(&felt_matrix_from_rows(&rows));
         assert_eq!(
             fractions_at(&compensated, row, derived_column),
@@ -601,7 +441,6 @@ fn derived_rotation_cannot_cancel_a_mutated_stored_contribution() {
     // tuple therefore stays honest, while the independently looked-up stored tuple must change.
     add_to_raw_cell(&mut rows[0][g_bd_rot_slot_col(0, 0, 2)], Felt::ONE);
     add_to_raw_cell(&mut rows[1][g_bd_rot_slot_col(0, 0, 0)], Felt::ONE);
-    add_to_raw_cell(&mut rows[1][g_msg_word_col(0)], -Felt::ONE);
     let mutated = lookup_fractions(&felt_matrix_from_rows(&rows));
     assert_eq!(fractions_at(&mutated, 0, 31 / 2), fractions_at(&honest_fractions, 0, 31 / 2));
     assert_ne!(
@@ -696,7 +535,7 @@ fn external_input_binds_every_footer_three_payload_field() {
 
         let mut columns = Vec::new();
         columns.extend((0..6).map(|idx| footer_r_col(FOOTER_ROWS - 1, idx)));
-        columns.extend((0..4).map(footer_msg_word_col));
+        columns.extend((0..F_RANGE_SLOTS).map(|limb| footer_range_slot_col(limb, 0)));
         columns.extend(F_CV_STORAGE_COLS);
         match mode {
             TraceMode::Compression => {
@@ -760,149 +599,6 @@ fn aead_output_batch_binds_both_pairs_on_every_footer() {
 }
 
 #[test]
-fn cycle_tag_rejects_two_cycle_atomic_cv_swap() {
-    let h_a = test_h();
-    let h_b = other_test_h();
-    let mut tagged: BTreeMap<[u64; 9], i64> = BTreeMap::new();
-    let mut anonymous: BTreeMap<[u64; 8], i64> = BTreeMap::new();
-
-    for (cycle_id, consumed, advertised) in [(0u64, h_b, h_a), (1, h_a, h_b)] {
-        let consumed_tagged =
-            core::array::from_fn(|idx| if idx == 0 { cycle_id } else { consumed[idx - 1] as u64 });
-        let advertised_tagged =
-            core::array::from_fn(
-                |idx| {
-                    if idx == 0 { cycle_id } else { advertised[idx - 1] as u64 }
-                },
-            );
-        *tagged.entry(consumed_tagged).or_default() -= 1;
-        *tagged.entry(advertised_tagged).or_default() += 1;
-        *anonymous.entry(consumed.map(u64::from)).or_default() -= 1;
-        *anonymous.entry(advertised.map(u64::from)).or_default() += 1;
-    }
-
-    assert!(anonymous.values().all(|&count| count == 0));
-    assert!(tagged.values().any(|&count| count != 0));
-}
-
-#[test]
-fn actual_lookup_rejects_two_cycle_atomic_cv_swap() {
-    let h_a = test_h();
-    let h_b = other_test_h();
-    let trace_a = generate_trace_block_with_cycle_id(
-        test_block(),
-        h_a,
-        0,
-        TraceMode::CompressionWithMultiplicity { multiplicity: 0 },
-    );
-    let trace_b = generate_trace_block_with_cycle_id(
-        other_test_block(),
-        h_b,
-        1,
-        TraceMode::CompressionWithMultiplicity { multiplicity: 0 },
-    );
-    let mut rows = Vec::from(trace_a.rows);
-    rows.extend(trace_b.rows);
-    let honest_sigma = lookup_sigma(&felt_matrix_from_rows(&rows));
-
-    set_full_cv_words(&mut rows[BLOCK_PERIOD - 1], h_b);
-    set_full_cv_words(&mut rows[2 * BLOCK_PERIOD - 1], h_a);
-
-    assert_ne!(lookup_sigma(&felt_matrix_from_rows(&rows)), honest_sigma);
-}
-
-#[test]
-fn cycle_tag_rejects_two_cycle_message_swap() {
-    let trace_a =
-        generate_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
-    let trace_b = generate_trace_block_with_cycle_id(
-        other_test_block(),
-        other_test_h(),
-        1,
-        TraceMode::Compression,
-    );
-    let mut tagged: BTreeMap<[u64; 3], i64> = BTreeMap::new();
-    let mut anonymous: BTreeMap<[u64; 2], i64> = BTreeMap::new();
-
-    for (cycle_id, consumed, advertised) in [(0u64, &trace_b, &trace_a), (1, &trace_a, &trace_b)] {
-        for row in 0..FUSED_G_ROWS {
-            let step = fused_step_at(row).expect("row is fused");
-            for g in 0..NUM_G {
-                let payload =
-                    [step.message_indices[g] as u64, consumed.rows[row][g_msg_word_col(g)]];
-                *tagged.entry([payload[0], payload[1], cycle_id]).or_default() += 1;
-                *anonymous.entry(payload).or_default() += 1;
-            }
-        }
-        for footer in 0..FOOTER_ROWS {
-            let row = &advertised.rows[FOOTER_START + footer];
-            for word_slot in 0..F_MSG_WORD_SLOTS {
-                let payload = [
-                    footer_message_word_index(footer, word_slot) as u64,
-                    row[footer_msg_word_col(word_slot)],
-                ];
-                *tagged.entry([payload[0], payload[1], cycle_id]).or_default() -= 7;
-                *anonymous.entry(payload).or_default() -= 7;
-            }
-        }
-    }
-
-    assert!(anonymous.values().all(|&count| count == 0));
-    assert!(tagged.values().any(|&count| count != 0));
-}
-
-#[test]
-fn actual_lookup_rejects_each_two_cycle_message_swap() {
-    let h_a = test_h();
-    let h_b = other_test_h();
-    let trace_a = generate_trace_block_with_cycle_id(
-        test_block(),
-        h_a,
-        0,
-        TraceMode::CompressionWithMultiplicity { multiplicity: 0 },
-    );
-    let trace_b = generate_trace_block_with_cycle_id(
-        other_test_block(),
-        h_b,
-        1,
-        TraceMode::CompressionWithMultiplicity { multiplicity: 0 },
-    );
-    let honest_rows: Vec<_> = trace_a.rows.into_iter().chain(trace_b.rows).collect();
-    let honest_sigma = lookup_sigma(&felt_matrix_from_rows(&honest_rows));
-
-    // Swap one footer-advertised word at a time while leaving each cycle tag in place. Swapping
-    // the corresponding range limbs keeps the anonymous range-check multiset balanced. Footer 3
-    // overlaps the linear full-CV expression, so restore its correction coordinates to keep the
-    // atomic CV relation unchanged and isolate the message-word tag.
-    for word_idx in 0..16 {
-        let footer = word_idx / F_MSG_WORD_SLOTS;
-        let word_slot = word_idx % F_MSG_WORD_SLOTS;
-        let row = FOOTER_START + footer;
-        let mut rows = honest_rows.clone();
-        let (first_cycle, second_cycle) = rows.split_at_mut(BLOCK_PERIOD);
-
-        for col in [
-            footer_msg_word_col(word_slot),
-            footer_range_slot_col(2 * word_slot, 0),
-            footer_range_slot_col(2 * word_slot + 1, 0),
-        ] {
-            core::mem::swap(&mut first_cycle[row][col], &mut second_cycle[row][col]);
-        }
-
-        if footer == FOOTER_ROWS - 1 {
-            set_full_cv_words(&mut first_cycle[BLOCK_PERIOD - 1], h_a);
-            set_full_cv_words(&mut second_cycle[BLOCK_PERIOD - 1], h_b);
-        }
-
-        assert_ne!(
-            lookup_sigma(&felt_matrix_from_rows(&rows)),
-            honest_sigma,
-            "cycle-tagged message word {word_idx} accepted a two-cycle swap",
-        );
-    }
-}
-
-#[test]
 fn honest_aux_accumulation_matches_reference_and_inactive_columns_are_zero() {
     for (mode, is_aead) in [(TraceMode::Compression, false), (TraceMode::AeadXof { clk: 19 }, true)]
     {
@@ -911,17 +607,23 @@ fn honest_aux_accumulation_matches_reference_and_inactive_columns_are_zero() {
         let (slow_aux, slow_sum) = accumulate_slow(&fractions);
         for (col, slow_column) in slow_aux.iter().enumerate() {
             for (row, &expected) in slow_column.iter().enumerate() {
-                assert_eq!(fast_aux.values[row * AUX_COLS + col], expected);
+                assert_eq!(fast_aux.values[row * NUM_LOGUP_COLS + col], expected);
             }
         }
         assert_eq!(fast_sum, slow_sum);
 
         for row in 0..BLOCK_PERIOD {
-            if row != 0 && row != BLOCK_PERIOD - 1 {
-                assert_eq!(fast_aux.values[row * AUX_COLS + FOOTER_INPUT_COLUMN], QuadFelt::ZERO);
+            if row != BLOCK_PERIOD - 1 {
+                assert_eq!(
+                    fast_aux.values[row * NUM_LOGUP_COLS + FOOTER_INPUT_COLUMN],
+                    QuadFelt::ZERO
+                );
             }
             if !(is_aead && row >= FOOTER_START) {
-                assert_eq!(fast_aux.values[row * AUX_COLS + FOOTER_OUTPUT_COLUMN], QuadFelt::ZERO);
+                assert_eq!(
+                    fast_aux.values[row * NUM_LOGUP_COLS + FOOTER_OUTPUT_COLUMN],
+                    QuadFelt::ZERO
+                );
             }
         }
     }

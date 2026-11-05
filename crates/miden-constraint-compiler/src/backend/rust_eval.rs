@@ -1,19 +1,15 @@
 //! Rust-evaluator backend: emits a captured constraint graph as a flat,
 //! builder-generic Rust module.
 //!
-//! Per AIR, one `eval_{name}<AB: LiftedAirBuilder<F = Felt>>` function. Every
-//! unique graph node gets one `let` (global CSE), emitted at its first use —
-//! leaves named `h{n}` in first-use order, ops named `b{id}` (base) /
-//! `e{id}` (ext) — and each constraint assert is placed directly after its
-//! root, replayed in the exact global order of the captured eval, so
-//! `ConstraintLayout` (and hence alpha assignment and all proof artifacts) is
-//! unchanged.
+//! Each evaluator memoizes node results and emits bindings at first use: leaves named `h{n}`
+//! in first-use order, operations named `b{id}` (base) or `e{id}` (ext). Each constraint assertion
+//! follows its root in the exact global order of the captured eval, preserving `ConstraintLayout`
+//! and alpha assignment.
 //!
-//! Interleaving the asserts with the node `let`s bounds value live ranges:
-//! each constraint root dies at its assert. The alternative — all `let`s
-//! first, all asserts last — keeps every root live to the end of the
-//! function, and the resulting register spills regressed the prover in
-//! benchmarking on register-starved and cache-contended targets.
+//! Interleaving assertions with node bindings lets results die after their last use. Emitting all
+//! assertions at the end would keep every constraint result live until then, increasing register
+//! pressure. That layout caused register spills and slower proving in benchmarks on
+//! register-starved and cache-contended targets.
 //!
 //! Emission is deterministic: the same graph always produces byte-identical
 //! output (crate invariant 3).
@@ -27,17 +23,20 @@
 //! does not name `EF`, only ext constants liftable from the base field can be
 //! emitted (enforced at generation time).
 //!
-//! [`emit_module`] retains the baseline schedule described above.
-//! [`emit_optimized_module`] additionally specializes single-use arithmetic
-//! regions, preserving global CSE at shared nodes and all assertion metadata.
+//! Challenge-only expressions can be prepared once and reused across row evaluations. Shared IR
+//! analysis identifies their dependencies; a native preparation plan assigns cached results to
+//! slots. Preparation and row emission consume that same plan.
+//! [`emit_optimized_module`] also specializes single-use arithmetic while preserving cached terms.
 
 use std::fmt::Write as _;
 
+use self::preparation::PreparationPlan;
+use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
+
 mod plan;
+mod preparation;
 
 use plan::{Coefficient, DotKind, Piece, Plan, Rewrite};
-
-use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
 
 /// One AIR to emit an evaluator function for.
 pub struct AirEvaluator<'a> {
@@ -49,8 +48,12 @@ pub struct AirEvaluator<'a> {
     pub constraints: &'a CapturedConstraints,
 }
 
-/// Emit the complete generated-evaluators module: `header` (a `//!` doc block,
-/// newline-terminated) followed by imports and one evaluator function per entry.
+/// Emit evaluators with a reusable preparation step for challenge-only expressions.
+///
+/// The module begins with `header` (a newline-terminated doc block) and imports, followed by
+/// `precompute_{name}<B, E>`, `eval_{name}`, and `eval_{name}_with_challenge_terms` for each AIR.
+/// Preparation reads only challenges and constants. The ordinary evaluator prepares the terms
+/// and delegates to the prepared evaluator, which requires the same AIR and challenge values.
 ///
 /// # Panics
 ///
@@ -58,27 +61,63 @@ pub struct AirEvaluator<'a> {
 /// an out-of-range or duplicate global constraint index, or an ext constant with
 /// non-base coefficients (not representable under the builder bound).
 pub fn emit_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
-    let mut out = String::from(header);
-    out.push_str(MODULE_IMPORTS);
-    for eval in evals {
-        emit_evaluator(eval, &mut out);
-    }
-    out
+    emit_module_with_plan(header, evals, false)
 }
 
-/// Emit typed arithmetic specializations without modifying the captured graph.
+/// Emit prepared evaluators with typed arithmetic specializations.
 ///
-/// Unlike [`emit_module`], sums may be reassociated and single-use products
-/// fused or factored. Constraint order and classes are preserved. The baseline
-/// entry point remains available for structural compiler tests.
+/// Single-use products and sums may be fused or factored. Shared nodes, prepared terms, and
+/// assertion metadata are preserved; the captured graph is unchanged.
 pub fn emit_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
+    emit_module_with_plan(header, evals, true)
+}
+
+fn emit_module_with_plan(header: &str, evals: &[AirEvaluator<'_>], optimized: bool) -> String {
     let mut out = String::from(header);
-    out.push_str(
-        &MODULE_IMPORTS
-            .replace("field::PrimeCharacteristicRing", "field::{Algebra, PrimeCharacteristicRing}"),
-    );
+    out.push_str(MODULE_IMPORTS);
+    out.push_str("use p3_field::Algebra;\n");
     for eval in evals {
-        emit_evaluator_with_plan(eval, &mut out, true);
+        let plan = PreparationPlan::new(eval.graph, eval.constraints);
+        let terms = plan.terms();
+        let mut preparation = Emitter::new(EmissionMode::Preparation(&plan));
+        let values: Vec<_> = terms
+            .iter()
+            .map(|&id| as_expr(&preparation.token(id), preparation.types()))
+            .collect();
+        writeln!(out, "\n/// Prepare the challenge-only expressions for `{}`.", eval.air_label)
+            .unwrap();
+        writeln!(out, "pub fn precompute_{}<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges: &[E]) -> [E; {}] {{", eval.name, terms.len()).unwrap();
+        writeln!(out, "    let _ = challenges;").unwrap();
+        for line in preparation.lines {
+            writeln!(out, "{line}").unwrap();
+        }
+        writeln!(out, "    [{}]\n}}", values.join(", ")).unwrap();
+
+        // The generated preparation function needs only the challenge prefix used by this graph.
+        let challenges = (0..plan.challenge_count())
+            .map(|i| format!("builder.permutation_randomness()[{i}].into()"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            out,
+            "\n/// Evaluate `{}` with terms computed from the builder's challenges.",
+            eval.air_label
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {{",
+            eval.name
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    let terms = precompute_{}::<AB::Expr, AB::ExprEF>(&[{challenges}]);",
+            eval.name
+        )
+        .unwrap();
+        writeln!(out, "    eval_{}_with_challenge_terms(builder, &terms);\n}}", eval.name).unwrap();
+        emit_evaluator(eval, &mut out, &plan, optimized);
     }
     out
 }
@@ -126,30 +165,31 @@ struct Token {
     code: String,
 }
 
-/// Render `t` as an `Expr` value **in its own class** (`AB::Expr` for base,
-/// `AB::ExprEF` for ext): `.dup()` a materialized `Expr`, else promote the Copy
-/// `Var` leaf. A base `Var` promotes with `AB::Expr::from` (`AB::Expr:
-/// Algebra<AB::Var>` gives `From<AB::Var>`); an ext `VarEF` has no such `From`
-/// (only `VarEF: Into<ExprEF>`), so it uses an explicit `Into::<ExprEF>` — a
-/// bare `.into()` would be ambiguous against the reflexive `Into` impl.
-fn as_expr(t: &Token) -> String {
+#[derive(Clone, Copy)]
+struct ExprTypes {
+    base: &'static str,
+    ext: &'static str,
+}
+
+/// Render an expression in its own field class, promoting trace variables where necessary.
+/// Extension variables use `Into` because their builder contract does not require `From`.
+fn as_expr(t: &Token, types: ExprTypes) -> String {
     match t.repr {
         Repr::Expr => format!("{}.dup()", t.code),
         Repr::Var => match t.class {
-            Class::Base => format!("AB::Expr::from({})", t.code),
-            Class::Ext => format!("Into::<AB::ExprEF>::into({})", t.code),
+            Class::Base => format!("{}::from({})", types.base, t.code),
+            Class::Ext => format!("Into::<{}>::into({})", types.ext, t.code),
         },
     }
 }
 
-/// Render a base-class `t` lifted into `AB::ExprEF`. `AB::ExprEF: From<AB::Expr>`
-/// (via `Algebra<AB::Expr>`), so a base `Expr` lifts with `from`; a base `Var` is
-/// promoted to `AB::Expr` (also `from`) and then lifted.
-fn lift_base_to_ext(t: &Token) -> String {
+/// Lift a base-class token into the extension expression type. Promote a base variable to a
+/// base expression first; `Algebra` supplies both conversions.
+fn lift_base_to_ext(t: &Token, types: ExprTypes) -> String {
     debug_assert!(matches!(t.class, Class::Base), "lift_base_to_ext on a non-base token");
     match t.repr {
-        Repr::Expr => format!("AB::ExprEF::from({}.dup())", t.code),
-        Repr::Var => format!("AB::ExprEF::from(AB::Expr::from({}))", t.code),
+        Repr::Expr => format!("{}::from({}.dup())", types.ext, t.code),
+        Repr::Var => format!("{}::from({}::from({}))", types.ext, types.base, t.code),
     }
 }
 
@@ -164,8 +204,22 @@ fn operand(t: &Token) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
+enum EmissionMode<'g> {
+    Preparation(&'g PreparationPlan<'g>),
+    Row(&'g PreparationPlan<'g>),
+}
+
+impl<'g> EmissionMode<'g> {
+    fn graph(self) -> &'g Graph {
+        match self {
+            Self::Preparation(plan) | Self::Row(plan) => plan.graph(),
+        }
+    }
+}
+
 struct Emitter<'g> {
-    graph: &'g Graph,
+    mode: EmissionMode<'g>,
     plan: Option<Plan<'g>>,
     /// Token per emitted node, memoized on first use.
     tokens: Vec<Option<Token>>,
@@ -177,13 +231,20 @@ struct Emitter<'g> {
 }
 
 impl<'g> Emitter<'g> {
-    fn new(graph: &'g Graph) -> Self {
+    fn new(mode: EmissionMode<'g>) -> Self {
         Self {
-            graph,
+            mode,
             plan: None,
-            tokens: vec![None; graph.len()],
+            tokens: vec![None; mode.graph().len()],
             lines: Vec::new(),
             hoisted: 0,
+        }
+    }
+
+    fn types(&self) -> ExprTypes {
+        match self.mode {
+            EmissionMode::Preparation(_) => ExprTypes { base: "B", ext: "E" },
+            EmissionMode::Row(_) => ExprTypes { base: "AB::Expr", ext: "AB::ExprEF" },
         }
     }
 
@@ -193,7 +254,14 @@ impl<'g> Emitter<'g> {
         if let Some(tok) = &self.tokens[id.index()] {
             return tok.clone();
         }
-        let tok = match self.graph.node(id) {
+        if let EmissionMode::Row(plan) = self.mode
+            && let Some(index) = plan.slot(id)
+        {
+            let tok = self.ext_leaf(format!("terms[{index}].dup()"));
+            self.tokens[id.index()] = Some(tok.clone());
+            return tok;
+        }
+        let tok = match self.mode.graph().node(id) {
             Node::Leaf(leaf) => self.leaf_token(leaf),
             Node::Op { class, op, x, y } => self.op_token(id, class, op, x, y),
         };
@@ -219,7 +287,7 @@ impl<'g> Emitter<'g> {
         Token {
             class: Class::Base,
             repr: Repr::Expr,
-            code: self.hoist(Some("AB::Expr"), expr),
+            code: self.hoist(Some(self.types().base), expr),
         }
     }
 
@@ -228,7 +296,7 @@ impl<'g> Emitter<'g> {
         Token {
             class: Class::Ext,
             repr: Repr::Expr,
-            code: self.hoist(Some("AB::ExprEF"), expr),
+            code: self.hoist(Some(self.types().ext), expr),
         }
     }
 
@@ -266,11 +334,19 @@ impl<'g> Emitter<'g> {
             Leaf::IsLast => self.base_leaf("builder.is_last_row()".to_string()),
             Leaf::IsTransition => self.base_leaf("builder.is_transition()".to_string()),
             Leaf::BaseConst(raw) => {
-                self.base_leaf(format!("AB::Expr::from(Felt::from_u64({raw}))"))
+                if matches!(self.mode, EmissionMode::Preparation(_)) {
+                    self.base_leaf(format!("B::from_u64({raw})"))
+                } else {
+                    self.base_leaf(format!("AB::Expr::from(Felt::from_u64({raw}))"))
+                }
             },
             Leaf::Aux { offset, index } => self.ext_var_leaf(format!("a{offset}[{index}]")),
             Leaf::Challenge(index) => {
-                self.ext_leaf(format!("builder.permutation_randomness()[{index}].into()"))
+                if matches!(self.mode, EmissionMode::Preparation(_)) {
+                    self.ext_leaf(format!("challenges[{index}].dup()"))
+                } else {
+                    self.ext_leaf(format!("builder.permutation_randomness()[{index}].into()"))
+                }
             },
             Leaf::PermValue(index) => {
                 // PermutationVar is Clone-only (not Copy), so it cannot be kept as
@@ -281,7 +357,11 @@ impl<'g> Emitter<'g> {
                 // The builder bound does not name EF, so only constants liftable
                 // from the base field can be emitted.
                 assert_eq!(c1, 0, "ext constant with non-base coefficients");
-                self.ext_leaf(format!("AB::ExprEF::from(AB::Expr::from(Felt::from_u64({c0})))"))
+                if matches!(self.mode, EmissionMode::Preparation(_)) {
+                    self.ext_leaf(format!("E::from(B::from_u64({c0}))"))
+                } else {
+                    self.ext_leaf(format!("AB::ExprEF::from(AB::Expr::from(Felt::from_u64({c0})))"))
+                }
             },
             Leaf::ExtBase(inner) => self.token(inner),
         }
@@ -301,10 +381,11 @@ impl<'g> Emitter<'g> {
         }
         let xt = self.token(x);
         let yt = y.map(|y| self.token(y));
+        let types = self.types();
         let rhs = match class {
             Class::Base => match &yt {
                 // `AB::Var` has no `Neg`, so a Var operand is promoted by `as_expr`.
-                None => format!("-{}", as_expr(&xt)),
+                None => format!("-{}", as_expr(&xt, types)),
                 // Base arithmetic accepts a `Var` on either side directly
                 // (`AB::Var`'s own ops and `AB::Expr: Algebra<AB::Var>`), so
                 // operands stay bare where they are Vars.
@@ -312,30 +393,34 @@ impl<'g> Emitter<'g> {
             },
             Class::Ext => match &yt {
                 None => match xt.class {
-                    Class::Ext => format!("-{}", as_expr(&xt)),
-                    Class::Base => format!("-{}", lift_base_to_ext(&xt)),
+                    Class::Ext => format!("-{}", as_expr(&xt, types)),
+                    Class::Base => format!("-{}", lift_base_to_ext(&xt, types)),
                 },
                 Some(yt) => match (xt.class, yt.class) {
                     // The ext operand drives; the other side is rendered as an
                     // `Expr` in its own class (`AB::ExprEF: Algebra<AB::Expr>`
                     // consumes a base `Expr`).
                     (Class::Ext, _) => {
-                        format!("{} {} {}", as_expr(&xt), sym(op), as_expr(yt))
+                        format!("{} {} {}", as_expr(&xt, types), sym(op), as_expr(yt, types))
                     },
                     // Commutative ops flip so the ext operand drives the
                     // mixed-op impl; subtraction promotes the base operand.
                     (Class::Base, Class::Ext) if op != OpKind::Sub => {
-                        format!("{} {} {}", as_expr(yt), sym(op), as_expr(&xt))
+                        format!("{} {} {}", as_expr(yt, types), sym(op), as_expr(&xt, types))
                     },
                     (Class::Base, _) => {
-                        format!("{} {} {}", lift_base_to_ext(&xt), sym(op), as_expr(yt))
+                        format!(
+                            "{} {} {}",
+                            lift_base_to_ext(&xt, types),
+                            sym(op),
+                            as_expr(yt, types)
+                        )
                     },
                 },
             },
         };
         self.bind_op(id, class, rhs)
     }
-
     fn bind_op(&mut self, id: NodeId, class: Class, rhs: String) -> Token {
         let prefix = match class {
             Class::Base => 'b',
@@ -352,9 +437,9 @@ impl<'g> Emitter<'g> {
     fn expr(&mut self, id: NodeId, class: Class) -> String {
         let token = self.token(id);
         if class == Class::Ext && token.class == Class::Base {
-            lift_base_to_ext(&token)
+            lift_base_to_ext(&token, self.types())
         } else {
-            as_expr(&token)
+            as_expr(&token, self.types())
         }
     }
 
@@ -389,8 +474,8 @@ impl<'g> Emitter<'g> {
                     let right = self.expr(right, class);
                     return format!("({left} + {right}) * Felt::from_u64({scalar})");
                 }
-                let factor = self.graph.class(common);
-                let sum = plan::join(self.graph.class(left), self.graph.class(right));
+                let factor = self.mode.graph().class(common);
+                let sum = plan::join(self.mode.graph().class(left), self.mode.graph().class(right));
                 let common = self.expr(common, factor);
                 let left = self.expr(left, sum);
                 let right = self.expr(right, sum);
@@ -473,12 +558,13 @@ fn sym(op: OpKind) -> char {
     }
 }
 
-/// Append one `eval_{name}` function (preceded by a blank line) to `out`.
-fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
-    emit_evaluator_with_plan(eval, out, false);
-}
-
-fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized: bool) {
+/// Append a row evaluator that loads the cached results selected by the preparation plan.
+fn emit_evaluator(
+    eval: &AirEvaluator<'_>,
+    out: &mut String,
+    preparation: &PreparationPlan<'_>,
+    optimized: bool,
+) {
     // Order the constraint roots by global index; emission then walks them in
     // that order, so the asserts replay the hand-written eval's layout (and
     // alpha assignment) exactly.
@@ -492,9 +578,9 @@ fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized
         place(&mut roots, global, (cons.ext_roots[local], true));
     }
 
-    let mut e = Emitter::new(eval.graph);
+    let mut e = Emitter::new(EmissionMode::Row(preparation));
     if optimized {
-        e.plan = Some(Plan::new(eval.graph, cons));
+        e.plan = Some(Plan::new(eval.graph, cons, preparation.terms()));
     }
     for entry in roots {
         let (root, is_ext) = entry.expect("every global constraint index must be assigned");
@@ -503,7 +589,7 @@ fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized
             match t.class {
                 Class::Ext => format!("    builder.assert_zero_ext({});", operand(&t)),
                 Class::Base => {
-                    format!("    builder.assert_zero_ext({});", lift_base_to_ext(&t))
+                    format!("    builder.assert_zero_ext({});", lift_base_to_ext(&t, e.types()))
                 },
             }
         } else {
@@ -513,6 +599,7 @@ fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized
         e.lines.push(line);
     }
 
+    let term_count = preparation.terms().len();
     let schedule = if optimized {
         "with single-use arithmetic specialized at its first use."
     } else {
@@ -525,10 +612,11 @@ fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized
          /// Emits constraints in the exact global order of the hand-written `eval`,\n\
          /// {schedule}\n\
          #[inline(never)]\n\
-         pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {{",
+         pub fn eval_{}_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {{",
         eval.air_label, eval.name,
     )
     .unwrap();
+    writeln!(out, "    assert_eq!(terms.len(), {term_count});").unwrap();
     writeln!(out, "{FN_PROLOGUE}").unwrap();
     if eval
         .graph
@@ -624,13 +712,27 @@ use miden_core::Felt;
 use miden_crypto::field::PrimeCharacteristicRing;
 use miden_stark::air::{LiftedAirBuilder, WindowAccess};
 use p3_field::Dup;
+use p3_field::Algebra;
+
+/// Prepare the challenge-only expressions for `MockAir::BASE`.
+pub fn precompute_base_mock<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges: &[E]) -> [E; 0] {
+    let _ = challenges;
+    []
+}
+
+/// Evaluate `MockAir::BASE` with terms computed from the builder's challenges.
+pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+    let terms = precompute_base_mock::<AB::Expr, AB::ExprEF>(&[]);
+    eval_base_mock_with_challenge_terms(builder, &terms);
+}
 
 /// Generated globally-CSE'd evaluator for `MockAir::BASE`.
 ///
 /// Emits constraints in the exact global order of the hand-written `eval`,
 /// with each node's `let` placed at its first use.
 #[inline(never)]
-pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+pub fn eval_base_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+    assert_eq!(terms.len(), 0);
     let main = builder.main();
     let m0 = main.current_slice();
     let m1 = main.next_slice();
@@ -696,7 +798,8 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
             }],
         );
 
-        let body = r"pub fn eval_ext_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+        let body = r"pub fn eval_ext_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+    assert_eq!(terms.len(), 0);
     let main = builder.main();
     let m0 = main.current_slice();
     let m1 = main.next_slice();
@@ -725,11 +828,9 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
 ";
         // The module wrapper (header + imports) is pinned by the base golden;
         // compare only the emitted function here.
-        let tail = out
-            .split("pub fn ")
-            .nth(1)
-            .map(|s| format!("pub fn {s}"))
-            .expect("one function emitted");
+        let signature = "pub fn eval_ext_mock_with_challenge_terms";
+        let (_, tail) = out.split_once(signature).expect("prepared evaluator emitted");
+        let tail = format!("{signature}{tail}");
         assert_eq!(tail, body);
     }
 
@@ -769,7 +870,6 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
             }],
         );
     }
-
     /// Value of a planned rewrite. Scalar multiplications use the specialized
     /// field methods that the emitted source calls.
     fn eval_rewrite(values: &[QuadFelt], rewrite: &Rewrite) -> QuadFelt {
@@ -817,7 +917,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
 
     /// Every planned rewrite must evaluate to the value of the node it replaces.
     fn assert_rewrites_preserve_values(graph: &Graph, cons: &CapturedConstraints) {
-        let plan = Plan::new(graph, cons);
+        let plan = Plan::new(graph, cons, &[]);
         for seed in [0x243f6a8885a308d3, 0x13198a2e03707344] {
             let values = eval_graph(graph, seed);
             for (id, _) in graph.iter() {
@@ -978,7 +1078,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     #[test]
     fn optimized_extension_dots_keep_coefficient_types() {
         let mut b = GraphBuilder::new();
-        let es: Vec<_> = (0..8).map(|i| b.leaf(Leaf::Challenge(i))).collect();
+        let es: Vec<_> = (0..8).map(|index| b.leaf(Leaf::Aux { offset: 0, index })).collect();
         let products: Vec<_> = (0..4)
             .map(|i| b.op(Class::Ext, OpKind::Mul, es[i], Some(es[4 + i])).0)
             .collect();
@@ -987,10 +1087,10 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
             .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)).0)
             .unwrap();
         let mut mixed = es[0];
-        for (i, &challenge) in es.iter().enumerate().take(4).skip(1) {
+        for (i, &value) in es.iter().enumerate().take(4).skip(1) {
             let base = b.leaf(Leaf::Main { offset: 0, index: i - 1 });
             let lift = b.leaf(Leaf::ExtBase(base));
-            let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(challenge)).0;
+            let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(value)).0;
             mixed = b.op(Class::Ext, OpKind::Add, mixed, Some(weighted)).0;
         }
         let out = optimized(b, vec![], vec![sum, mixed]);
@@ -1039,7 +1139,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         let mut b = GraphBuilder::new();
         // s*x + y*s: a base multiplicity shared by extension terms.
         let s = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let x = b.leaf(Leaf::Challenge(0));
+        let x = b.leaf(Leaf::PermValue(0));
         let y = b.leaf(Leaf::Aux { offset: 0, index: 0 });
         let p = b.op(Class::Ext, OpKind::Mul, s, Some(x)).0;
         let q = b.op(Class::Ext, OpKind::Mul, y, Some(s)).0;
@@ -1126,5 +1226,25 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
                 }
             }
         }
+    }
+    #[test]
+    fn optimized_rows_preserve_prepared_sums_and_products() {
+        let mut b = GraphBuilder::new();
+        let alpha = b.leaf(Leaf::Challenge(0));
+        let beta = b.leaf(Leaf::Challenge(1));
+        let aux: [_; 9] = core::array::from_fn(|index| b.leaf(Leaf::Aux { offset: 0, index }));
+        let (mut sum, _) = b.op(Class::Ext, OpKind::Add, alpha, Some(beta));
+        for value in &aux[..3] {
+            (sum, _) = b.op(Class::Ext, OpKind::Add, sum, Some(*value));
+        }
+        let (mut products, _) = b.op(Class::Ext, OpKind::Mul, alpha, Some(beta));
+        for pair in aux[3..].as_chunks::<2>().0 {
+            let (product, _) = b.op(Class::Ext, OpKind::Mul, pair[0], Some(pair[1]));
+            (products, _) = b.op(Class::Ext, OpKind::Add, products, Some(product));
+        }
+        let out = optimized(b, vec![], vec![sum, products]);
+        let row = out.split("pub fn eval_optimized_with_challenge_terms").nth(1).unwrap();
+        assert!(row.contains("terms[0]") && row.contains("terms[1]"), "{row}");
+        assert!(!row.contains("permutation_randomness"), "{row}");
     }
 }

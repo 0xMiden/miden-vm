@@ -6,7 +6,7 @@ use miden_air_definitions::vm::trace::{
     eidos_compression::{
         EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_HIGH_EVEN_SLOT_BASE,
         F_HIGH_ODD_SLOT_BASE, FOOTER_START, NUM_EIDOS_COMPRESSION_COLS,
-        TraceMode as EidosCompressionTraceMode, footer_interface_tail_col, footer_msg_word_col,
+        TraceMode as EidosCompressionTraceMode, footer_interface_tail_col, footer_message_word,
         footer_r_col, footer_xor_slot_col,
         generate_felt_trace_block as generate_eidos_compression_felt_trace_block,
         write_felt_trace_block as write_eidos_compression_felt_trace_block,
@@ -709,8 +709,8 @@ fn compression_input_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState
             trace[footer_r_col(3, i)][footer3]
         } else if i < BLOCK_LEN {
             let pair = i - 6;
-            let lo = trace[footer_msg_word_col(2 * pair)][footer3];
-            let hi = trace[footer_msg_word_col(2 * pair + 1)][footer3];
+            let lo = footer_message_word(|col| trace[col][footer3], 2 * pair);
+            let hi = footer_message_word(|col| trace[col][footer3], 2 * pair + 1);
             lo + Felt::new_unchecked(1 << 32) * hi
         } else {
             let footer = i - BLOCK_LEN;
@@ -726,8 +726,8 @@ fn compression_output_state(trace: &[Vec<Felt>], start_row: usize) -> HasherStat
             trace[footer_r_col(3, i)][footer3]
         } else if i < BLOCK_LEN {
             let pair = i - 6;
-            let lo = trace[footer_msg_word_col(2 * pair)][footer3];
-            let hi = trace[footer_msg_word_col(2 * pair + 1)][footer3];
+            let lo = footer_message_word(|col| trace[col][footer3], 2 * pair);
+            let hi = footer_message_word(|col| trace[col][footer3], 2 * pair + 1);
             lo + Felt::new_unchecked(1 << 32) * hi
         } else {
             trace[footer_interface_tail_col(i - BLOCK_LEN)][footer3]

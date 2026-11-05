@@ -109,11 +109,11 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 ///
 /// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
 /// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
-/// of [`super::FIXED_BOUNDARY_LOOKUP_TERMS`] additional terms per proof. These terms are not
+/// of [`super::FIXED_LOOKUP_ERROR_TERMS`] additional terms per proof. These terms are not
 /// included in the production AIR shape's per-row count, so their contribution is accounted for
 /// separately. Both divisions round up, which keeps the correction conservative.
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
-    let numerator = u64::from(super::FIXED_BOUNDARY_LOOKUP_TERMS) * LOG2_E;
+    let numerator = u64::from(super::FIXED_LOOKUP_ERROR_TERMS) * LOG2_E;
     numerator
         .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)

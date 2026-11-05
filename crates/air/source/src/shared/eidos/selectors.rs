@@ -4,8 +4,7 @@ use core::array;
 
 use super::periodic::{
     NUM_PERIODIC_COLUMNS, P_IS_AB, P_IS_CD, P_IS_DIAG, P_IS_F0, P_IS_F1, P_IS_F2, P_IS_F3,
-    P_IS_FIRST_FUSED, P_IS_FOOTER, P_IS_LAST_FUSED, P_SIGMA_MSG_0, P_SIGMA_MSG_1, P_SIGMA_MSG_2,
-    P_SIGMA_MSG_3,
+    P_IS_FIRST_FUSED, P_IS_FOOTER, P_IS_LAST_FUSED,
 };
 
 #[derive(Clone, Debug)]
@@ -55,16 +54,6 @@ impl<T: Clone> EidosCompressionSelectors<T> {
             2 => self.columns[P_IS_F2].clone(),
             3 => self.columns[P_IS_F3].clone(),
             _ => panic!("footer selector index out of bounds"),
-        }
-    }
-
-    pub fn sigma_msg_index(&self, lane: usize) -> T {
-        match lane {
-            0 => self.columns[P_SIGMA_MSG_0].clone(),
-            1 => self.columns[P_SIGMA_MSG_1].clone(),
-            2 => self.columns[P_SIGMA_MSG_2].clone(),
-            3 => self.columns[P_SIGMA_MSG_3].clone(),
-            _ => panic!("sigma lane index out of bounds"),
         }
     }
 }

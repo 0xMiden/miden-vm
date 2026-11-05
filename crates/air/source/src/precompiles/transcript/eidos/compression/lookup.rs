@@ -25,7 +25,6 @@ fn pvm_relation_bus(relation: Relation) -> usize {
 const PVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
     relation_bus: pvm_relation_bus,
     range_check_bus: BusId::Range16 as usize,
-    message_word_bus: BusId::EidosWord as usize,
     table_multiplicity_sign: LookupMultiplicitySign::Positive,
     xor_expression: XorExpression::RepeatedSubtraction,
     pair_name: "lookup_pair",

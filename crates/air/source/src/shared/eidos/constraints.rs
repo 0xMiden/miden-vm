@@ -4,7 +4,9 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::{
-    algebra::{pack_pair, pack_u32_le, sum_input_b, universal_cv_word, xor_from_and},
+    algebra::{
+        footer_cv_word, footer_message_word, pack_pair, pack_u32_le, sum_input_b, xor_from_and,
+    },
     layout::*,
     rotation_lookup as eidos_lookup,
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
@@ -106,7 +108,7 @@ pub fn enforce_fused_rows<AB>(
     );
     for (g, residuals) in word_residuals.into_iter().enumerate() {
         for (position, residual) in residuals.into_iter().enumerate() {
-            if g != MISSING_ROTATION_G || position != 1 {
+            if position != 0 && (g != MISSING_ROTATION_G || position != 1) {
                 builder.assert_zero(residual);
             }
         }
@@ -227,16 +229,6 @@ pub(crate) fn enforce_footer_payload<AB>(
         .when(is_footer.clone())
         .assert_zero(top_bit.clone() * (top_bit - AB::Expr::from_u64(F_TOP_BIT_MASK as u64)));
 
-    for word_slot in 0..F_MSG_WORD_SLOTS {
-        let word = AB::Expr::from(local[footer_msg_word_col(word_slot)]);
-        let lo = AB::Expr::from(local[footer_range_slot_col(2 * word_slot, 0)]);
-        let hi = AB::Expr::from(local[footer_range_slot_col(2 * word_slot + 1, 0)]);
-
-        builder
-            .when(is_footer.clone())
-            .assert_zero(word - lo - AB::Expr::from_u64(1 << 16) * hi);
-    }
-
     for limb in 0..F_RANGE_SLOTS {
         let base = footer_range_slot_col(limb, 0);
         builder.when(is_footer.clone()).assert_zero(AB::Expr::from(local[base + 1]));
@@ -244,8 +236,8 @@ pub(crate) fn enforce_footer_payload<AB>(
     }
 
     for pair in 0..2 {
-        let lo = AB::Expr::from(local[footer_msg_word_col(2 * pair)]);
-        let hi = AB::Expr::from(local[footer_msg_word_col(2 * pair + 1)]);
+        let lo = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair);
+        let hi = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair + 1);
         enforce_canonical_pair::<AB>(
             builder,
             is_footer.clone(),
@@ -290,8 +282,8 @@ pub(crate) fn enforce_footer_transition<AB>(
         );
     }
     for pair in 0..2 {
-        let lo = AB::Expr::from(local[footer_msg_word_col(2 * pair)]);
-        let hi = AB::Expr::from(local[footer_msg_word_col(2 * pair + 1)]);
+        let lo = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair);
+        let hi = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair + 1);
         builder.when(gate.clone()).assert_zero(
             pack_pair(lo, hi) - AB::Expr::from(next[footer_r_col(footer + 1, 2 * footer + pair)]),
         );
@@ -368,7 +360,7 @@ fn accumulate_transition_for_maps<AB>(
         let (g, position) = lane_position(local_map, word_idx);
         // The missing tuple's lookup and the total-B relation below imply this transition once
         // the other three B transitions hold.
-        if g == MISSING_ROTATION_G && position == 1 {
+        if position == 0 || (g == MISSING_ROTATION_G && position == 1) {
             continue;
         }
         let lhs = transition_output_word::<AB>(local, local_map, word_idx, d_rotation);
@@ -438,7 +430,7 @@ where
 {
     let (g, position) = lane_position(lane_map, word_idx);
     match position {
-        0 => input_a::<AB>(row, g),
+        0 => unreachable!("A inputs are bound by the schedule fingerprint"),
         1 => input_b::<AB>(row, g),
         2 => input_c_for_rotation::<AB>(row, g, d_rotation),
         3 => input_d::<AB>(row, g),
@@ -578,17 +570,7 @@ fn cv_word<AB>(row: &[AB::Var], idx: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    universal_cv_word(|col| AB::Expr::from(row[col]), idx)
-}
-
-fn input_a<AB>(row: &[AB::Var], g: usize) -> AB::Expr
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let k3 = AB::Expr::from(row[g_k3_col(g)]);
-    a_new::<AB>(row, g) + AB::Expr::from_u64(1u64 << 32) * k3
-        - input_b::<AB>(row, g)
-        - msg_word::<AB>(row, g)
+    footer_cv_word(|col| AB::Expr::from(row[col]), idx)
 }
 
 fn input_b<AB>(row: &[AB::Var], g: usize) -> AB::Expr
@@ -621,13 +603,6 @@ where
         AB::Expr::from(row[g_ac_byte_slot_col(g, 2, 0)]),
         AB::Expr::from(row[g_ac_byte_slot_col(g, 3, 0)]),
     )
-}
-
-fn msg_word<AB>(row: &[AB::Var], g: usize) -> AB::Expr
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    AB::Expr::from(row[g_msg_word_col(g)])
 }
 
 fn fused_compression_cycle_id<AB>(row: &[AB::Var]) -> AB::Expr
