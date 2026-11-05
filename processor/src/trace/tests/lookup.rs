@@ -56,8 +56,8 @@ use super::{
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;
-const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
-const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
+const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 16;
+const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [1, 2];
 const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
     EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
 const AND8_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];
@@ -459,17 +459,16 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
 
 fn expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
-        0..=27 => 36,
-        28..=31 => 29,
+        0..=27 => 32,
+        28..=31 => 25,
         _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
 
 fn expected_eidos_compression_footer_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
-        0 => 1,
-        31 => 2,
-        1..=30 => 0,
+        31 => 1,
+        0..=30 => 0,
         _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
@@ -480,14 +479,13 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
     compression_multiplicity: Felt,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
-        0 => 37..=37,
         28..=31 if is_aead => {
             let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row)
-                + if cycle_row == 31 { 4 } else { 2 };
+                + if cycle_row == 31 { 3 } else { 2 };
             expected..=expected
         },
-        31 if compression_multiplicity != Felt::ZERO => 31..=31,
-        31 => 30..=30,
+        31 if compression_multiplicity != Felt::ZERO => 26..=26,
+        31 => 25..=25,
         _ => {
             let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
@@ -498,7 +496,7 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
 #[test]
 fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1127;
+    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 997;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();

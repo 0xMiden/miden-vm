@@ -137,6 +137,8 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// Number of lookup fractions `emit_core_boundary` emits unconditionally: the block-hash seed and
-/// the two log-deferred-root terminals. Matches `sys::vm::mod.masm`'s
-/// `CORE_BOUNDARY_LOOKUP_TERMS`.
+/// the two log-deferred-root terminals.
 pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
+
+/// Number of lookup fractions contributed by the fixed boundary messages.
+pub const FIXED_LOOKUP_ERROR_TERMS: u32 = CORE_BOUNDARY_LOOKUP_TERMS;

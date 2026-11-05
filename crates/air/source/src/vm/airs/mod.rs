@@ -5,7 +5,10 @@ use alloc::{borrow::Cow, vec::Vec};
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, ReductionError},
-    lookup::{BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed},
+    lookup::{
+        BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed,
+        build_logup_aux_trace_with_width,
+    },
 };
 
 use crate::vm::{
@@ -220,14 +223,30 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         _aux_inputs: &[Felt],
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, committed) =
-            build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges);
+        let (aux, sums) = if *self == Self::EidosCompression {
+            let (mut aux, sums) = build_logup_aux_trace_with_width(
+                self,
+                main,
+                preprocessed,
+                challenges,
+                crate::vm::constraints::eidos_compression::layout::AUX_COLS,
+            );
+            crate::shared::eidos::fill_aux_register(
+                main,
+                &mut aux,
+                crate::vm::constraints::eidos_compression::layout::AUX_REGISTER_COL,
+                challenges[1],
+            );
+            (aux, sums)
+        } else {
+            build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
+        };
         debug_assert_eq!(
-            committed.len(),
+            sums.len(),
             1,
             "build_logup_aux_trace returns one normalized LogUp sum per AIR"
         );
-        (aux_trace, committed)
+        (aux, sums)
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {

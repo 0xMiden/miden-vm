@@ -90,7 +90,7 @@ pub(crate) fn enforce_common_footer_rows<AB>(
     });
 }
 
-/// Pins the shared full-CV/input fraction column outside its two active rows.
+/// Pins the external-input fraction column outside the final footer.
 ///
 /// Its numerator is zero on these rows, but its denominator is still challenge-dependent. Without
 /// this constraint, a zero denominator would leave the auxiliary cell unconstrained and allow it
@@ -101,8 +101,7 @@ pub(crate) fn enforce_inactive_footer_input_aux<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let inactive =
-        AB::Expr::ONE - selectors.is_first_fused() - selectors.is_footer_row(FOOTER_ROWS - 1);
+    let inactive = AB::Expr::ONE - selectors.is_footer_row(FOOTER_ROWS - 1);
     let footer_input_aux: AB::ExprEF =
         builder.permutation().current_slice()[FOOTER_INPUT_COLUMN].into();
     builder.assert_zero_ext(footer_input_aux * inactive);

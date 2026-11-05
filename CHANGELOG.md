@@ -14,6 +14,7 @@
 
 #### Changes
 
+- [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#4113](https://github.com/0xMiden/miden-vm/pull/4113)).
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
 - Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
 - [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively.
@@ -26,6 +27,8 @@
 - [BREAKING] Moved optional compiler entry points under `miden_ace::compiler` and `miden_air_definitions::compiler::{vm, precompiles}` ([#4104](https://github.com/0xMiden/miden-vm/pull/4104)).
 - [BREAKING] Unified VM and precompile prover memory estimation in `miden_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
 - [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, security metadata, and canonical ACE circuits from one capture without adding compiler tooling to runtime dependencies. The recursive-verifier parameter generators consume the same capture and check the pinned relation identities instead of rewriting them. Removed the `regenerate-evaluator` tool. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
+- [BREAKING] Reduced the full aligned MVM and PVM widths from 280/768 to 272/760. Both proof relations and recursive verifier roots change ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
+- Added per-AIR precomputation of challenge-only terms to native MVM and PVM constraint evaluation ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
 - Improved native VM and PVM proving through interleaved LogUp batch inversion and quotient-buffer reuse. PVM STORE/MUL auxiliary traces are allocated at their final width to avoid copying lookup columns. Parallelized PVM integer and Keccak trace packing in concurrent builds ([#4095](https://github.com/0xMiden/miden-vm/pull/4095)).
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
@@ -1671,7 +1674,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
+- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#2146](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Modules can now be provided in any order to the `Assembler`, see #1669 (#1881).
 - Addressed bug which caused references to re-exported procedures whose definition internally referred to an aliased module import, to produce an "undefined module" error, see #1451 (#1892).

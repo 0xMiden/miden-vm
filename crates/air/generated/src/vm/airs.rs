@@ -3,7 +3,11 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::vm as source;
-use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    field::{Algebra, ExtensionField},
+    utils::RowMajorMatrix,
+};
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder},
     lookup,
@@ -104,6 +108,41 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
 
     fn constraint_degree(&self) -> ConstraintDegrees {
         generated_degrees(*self)
+    }
+
+    fn precompute_challenge_terms<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        challenges: &[E],
+    ) -> Vec<E> {
+        match self.0 {
+            source::MidenAir::Core => generated::precompute_core::<B, E>(challenges).into(),
+            source::MidenAir::Chiplets => generated::precompute_chiplets::<B, E>(challenges).into(),
+            source::MidenAir::EidosCompression => {
+                generated::precompute_eidos_compression::<B, E>(challenges).into()
+            },
+            source::MidenAir::And8Lookup => {
+                generated::precompute_and8_lookup::<B, E>(challenges).into()
+            },
+        }
+    }
+
+    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        terms: &[AB::ExprEF],
+    ) {
+        match self.0 {
+            source::MidenAir::Core => generated::eval_core_with_challenge_terms(builder, terms),
+            source::MidenAir::Chiplets => {
+                generated::eval_chiplets_with_challenge_terms(builder, terms)
+            },
+            source::MidenAir::EidosCompression => {
+                generated::eval_eidos_compression_with_challenge_terms(builder, terms)
+            },
+            source::MidenAir::And8Lookup => {
+                generated::eval_and8_lookup_with_challenge_terms(builder, terms)
+            },
+        }
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
