@@ -35,7 +35,7 @@ pub use constraints::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
+pub use execution_trace::{ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace};
 pub use inputs::{NUM_PUBLIC_VALUES, PublicInputs};
 pub use miden_core::{
     Felt,
