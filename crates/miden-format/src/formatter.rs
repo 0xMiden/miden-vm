@@ -810,9 +810,15 @@ fn render_signature_lines(
             .filter(|item| !item.is_empty())
             .collect::<Vec<_>>();
         // Measured without a trailing comma, like the one-line signature above: the wrapped
-        // layout below drops it, so keeping it here would flip the layout between passes.
+        // layout below drops it, so keeping it here would flip the layout between passes. Only
+        // used when the result has no comments, so its trivia is whitespace and is left out too.
+        let significant_result = result_tokens
+            .iter()
+            .filter(|token| !token.kind().is_trivia())
+            .cloned()
+            .collect::<Vec<_>>();
         let result = render_token_sequence_with_style(
-            &without_trailing_commas(&result_tokens),
+            &without_trailing_commas(&significant_result),
             SpacingStyle::TypeBodyItem,
         );
         if items.len() <= 1
@@ -1515,22 +1521,38 @@ fn result_tokens_after_params(tokens: &[SyntaxToken], params_close: usize) -> Ve
     trim_outer_whitespace_tokens(&tokens[(arrow_offset + 1)..])
 }
 
-/// Removes commas that directly precede a closing parenthesis, i.e. trailing commas in parameter
-/// and result lists.
+/// Removes trailing commas in parameter and result lists, i.e. commas whose next significant
+/// token is a closing parenthesis, together with the whitespace between them and the parenthesis.
 ///
 /// The multi-line signature layout never emits trailing commas, so the single-line layout must not
 /// either; otherwise a signature whose only overflow is the trailing comma would be wrapped on the
-/// first pass and collapsed again on the next, making formatting non-idempotent.
+/// first pass and collapsed again on the next, making formatting non-idempotent. The tokens may
+/// include trivia (a signature with comments keeps its whitespace), so the closing parenthesis is
+/// looked up past it.
 fn without_trailing_commas(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
-    tokens
-        .iter()
-        .enumerate()
-        .filter(|(index, token)| {
-            token.kind() != SyntaxKind::Comma
-                || tokens.get(index + 1).map(SyntaxToken::kind) != Some(SyntaxKind::RParen)
-        })
-        .map(|(_, token)| token.clone())
-        .collect()
+    let mut kept = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if token.kind() == SyntaxKind::Comma {
+            let next = tokens[(index + 1)..]
+                .iter()
+                .position(|token| !token.kind().is_trivia())
+                .map(|offset| index + 1 + offset);
+            if let Some(next) = next
+                && tokens[next].kind() == SyntaxKind::RParen
+                && tokens[(index + 1)..next].iter().all(|token| {
+                    matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline)
+                })
+            {
+                index = next;
+                continue;
+            }
+        }
+        kept.push(token.clone());
+        index += 1;
+    }
+    kept
 }
 
 /// Renders one comma-separated item of a signature parameter or result list.
@@ -2120,6 +2142,37 @@ end
         let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent");
         assert_eq!(formatted, "proc long_name(\n) -> (felt)\n    nop\nend\n");
+    }
+
+    #[test]
+    fn single_result_trailing_comma_is_dropped_next_to_signature_comments() {
+        // A comment in the signature makes the result tokens keep their whitespace, so a trailing
+        // comma can be separated from `)` by whitespace or a newline.
+        let config = Config {
+            max_line_length: Some(25),
+            ..Config::default()
+        };
+        let params = "proc foo(\n    a: felt,\n    # note\n)";
+        for (source, expected) in [
+            (
+                "proc foo(\n    a: felt, # note\n) -> (felt, )\n    nop\nend\n",
+                format!("{params} -> (felt)\n    nop\nend\n"),
+            ),
+            (
+                "proc foo(\n    a: felt, # note\n) -> (\n    felt,\n)\n    nop\nend\n",
+                format!("{params} -> (felt)\n    nop\nend\n"),
+            ),
+            // A comment after the comma keeps the result wrapped.
+            (
+                "proc foo(\n    a: felt, # note\n) -> (felt, # last\n)\n    nop\nend\n",
+                format!("{params} -> (\n    felt,\n    # last\n)\n    nop\nend\n"),
+            ),
+        ] {
+            let formatted = format_syntax(&config, &parse_text(source).syntax());
+            let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
+            assert_eq!(reformatted, formatted, "formatter was not idempotent for {source:?}");
+            assert_eq!(formatted, expected, "unexpected layout for {source:?}");
+        }
     }
 
     #[test]
