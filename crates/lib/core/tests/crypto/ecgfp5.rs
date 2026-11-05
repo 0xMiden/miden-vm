@@ -1,14 +1,21 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use miden_core::{Felt, Word, crypto::merkle::MerkleStore};
-use miden_core_lib::ecdh::ecgfp5::{
-    advice_inputs as direct_advice_inputs, preprocessed_advice_inputs as advice_inputs,
+use miden_core_lib::{
+    ecdh::ecgfp5::{
+        advice_inputs as direct_advice_inputs, preprocessed_advice_inputs as advice_inputs,
+    },
+    handlers::ecgfp5_eidos::{
+        ECGFP5_EIDOS_SEAL_EVENT_NAME, ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME, Ecgfp5SealHandler,
+    },
 };
 use miden_crypto::{
     ecdh::ecgfp5::{PreparedPublicKey, PublicKey, SecretKey},
     hash::eidos::{Eidos, domains::ECGFP5_PUBLIC_KEY},
 };
-use miden_processor::{ExecutionError, advice::AdviceInputs, operation::OperationError};
+use miden_processor::{
+    ExecutionError, advice::AdviceInputs, event::NoopEventHandler, operation::OperationError,
+};
 use miden_utils_testing::Test;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -36,9 +43,9 @@ fn recipient() -> SecretKey {
     SecretKey::from_bytes(&bytes).unwrap()
 }
 
-fn prepared() -> &'static PreparedPublicKey {
-    static KEY: OnceLock<PreparedPublicKey> = OnceLock::new();
-    KEY.get_or_init(|| PreparedPublicKey::new(recipient().public_key()))
+fn prepared() -> &'static Arc<PreparedPublicKey> {
+    static KEY: OnceLock<Arc<PreparedPublicKey>> = OnceLock::new();
+    KEY.get_or_init(|| Arc::new(PreparedPublicKey::new(recipient().public_key())))
 }
 
 fn scalar(limbs: [u32; 10]) -> SecretKey {
@@ -310,8 +317,7 @@ fn agreement_and_sealing_reject_a_different_recipient() {
         // The advice is internally consistent, but belongs to another valid recipient key.
         assert_failure(&agreement(source, commitment, advice.clone()), message);
         let program = seal_program(&[], &[], mode);
-        let mut test = build_test!(&program, &[]);
-        test.advice_inputs = advice;
+        let test = sealing_with_advice(&program, advice);
         assert_failure(&test, message);
     }
 }
@@ -322,7 +328,7 @@ fn agreement_rejects_generic_and_other_key_commitments() {
     let public_key = recipient().public_key();
     let direct = direct_advice_inputs(&public_key, &secret);
     let preprocessed = advice_inputs(prepared(), &secret);
-    let roots = miden_crypto::SequentialCommit::to_elements(prepared());
+    let roots = miden_crypto::SequentialCommit::to_elements(prepared().as_ref());
     for (source, commitments, advice, message) in [
         (
             DIRECT_SOURCE,
@@ -848,6 +854,15 @@ impl SealMode {
     }
 }
 
+fn sealing_with_advice(source: &str, advice: AdviceInputs) -> Test {
+    // These fixtures supply all private inputs beforehand, so the host only acknowledges requests.
+    let mut test = build_test!(source, &[])
+        .with_event_handler(ECGFP5_EIDOS_SEAL_EVENT_NAME, NoopEventHandler)
+        .with_event_handler(ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME, NoopEventHandler);
+    test.advice_inputs = advice;
+    test
+}
+
 fn seal_program(plaintext: &[Felt], context: &[Felt], mode: SealMode) -> String {
     let mut body = String::new();
     for (ptr, elements) in [(1000, plaintext), (2000, context)] {
@@ -904,8 +919,7 @@ fn sealing_matches_rust_with_general_associated_data() {
         let digest = Eidos::hash_elements(&expected_elements);
         for mode in [SealMode::Direct, SealMode::Preprocessed] {
             let source = seal_program(&plaintext, &context, mode);
-            let mut test = build_test!(&source, &[]);
-            test.advice_inputs = mode.advice(&ephemeral);
+            let test = sealing_with_advice(&source, mode.advice(&ephemeral));
             let (output, _) = test.execute_for_output().unwrap();
             assert_eq!(output.stack.get_num_elements(4), digest.as_elements());
             assert_eq!(output.stack.get_num_elements(16)[4..], [Felt::ZERO; 12]);
@@ -935,7 +949,156 @@ fn sealing_matches_rust_with_general_associated_data() {
 }
 
 #[test]
-fn sealing_rejects_bad_memory_before_reading_advice() {
+fn sealing_reexecutes_with_recorded_advice() {
+    use std::{collections::VecDeque, sync::Mutex};
+
+    use miden_crypto::ies::{UnsealingKey, ecgfp5_eidos::Envelope};
+    use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventHandler};
+
+    use crate::helpers::read_memory_felt;
+
+    let plaintext = [Felt::from_u32(42)];
+    let context = [Felt::from_u32(17)];
+    let envelope_len = 8 + 2 * plaintext.len() as u32;
+    for mode in [SealMode::Direct, SealMode::Preprocessed] {
+        let seal = mode.call();
+        let source = format!(
+            "use miden::core::crypto::ies::ecgfp5_eidos
+             begin
+                 push.42 mem_store.1000
+                 push.17 mem_store.2000
+                 push.3000.1.2000.1.1000 {seal}
+                 push.4000.1.2000.1.1000 {seal}
+                 adv_push push.777 assert_eq
+             end"
+        );
+        let event = match mode {
+            SealMode::Direct => ECGFP5_EIDOS_SEAL_EVENT_NAME,
+            SealMode::Preprocessed => ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME,
+        };
+        let handler = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([91; 32]))
+            .with_public_key(recipient().public_key())
+            .with_preprocessed_public_key(Arc::clone(prepared()));
+        let responses = Arc::new(Mutex::new(VecDeque::new()));
+        let record = {
+            let responses = Arc::clone(&responses);
+            move |process: &ProcessorState| {
+                let mutations = handler.on_event(process)?;
+                let recorded = mutations
+                    .iter()
+                    .map(|mutation| match mutation {
+                        AdviceMutation::ExtendStack { stack } => {
+                            AdviceMutation::extend_advice_stack(stack.clone())
+                        },
+                        AdviceMutation::ExtendMap { map } => {
+                            AdviceMutation::extend_map(map.clone())
+                        },
+                        AdviceMutation::ExtendMerkleStore { inner_nodes } => {
+                            AdviceMutation::extend_merkle_store(inner_nodes.iter().cloned())
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                responses.lock().unwrap().push_back(recorded);
+                Ok(mutations)
+            }
+        };
+        let initial_advice = AdviceInputs::default().with_stack(vec![Felt::from_u32(777)].into());
+        let mut test = build_test!(&source, &[]).with_event_handler(event.clone(), record);
+        test.advice_inputs = initial_advice.clone();
+        let (output, _) = test.execute_for_output().unwrap();
+        assert_eq!(responses.lock().unwrap().len(), 2);
+        drop(test);
+
+        // Replay each response in order without the key registry or RNG handler.
+        let replay = {
+            let responses = Arc::clone(&responses);
+            move |_: &ProcessorState| {
+                Ok(responses
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("each sealing call must have a recorded response"))
+            }
+        };
+        let mut replay_test = build_test!(&source, &[]).with_event_handler(event, replay);
+        replay_test.advice_inputs = initial_advice;
+        let (replayed, _) = replay_test.execute_for_output().unwrap();
+        assert!(responses.lock().unwrap().is_empty());
+
+        let [envelopes, replayed_envelopes] = [&output, &replayed].map(|output| {
+            [3000, 4000].map(|destination| {
+                (destination..destination + envelope_len)
+                    .map(|address| read_memory_felt(output, address))
+                    .collect::<Vec<_>>()
+            })
+        });
+        assert_eq!(envelopes, replayed_envelopes);
+
+        let envelopes = envelopes.map(|elements| Envelope::from_elements(&elements).unwrap());
+        assert_ne!(envelopes[0].ephemeral_key(), envelopes[1].ephemeral_key());
+        for envelope in envelopes {
+            assert_eq!(
+                UnsealingKey::Ecgfp5Eidos(recipient())
+                    .unseal_elements_with_associated_data(envelope.into(), &context)
+                    .unwrap(),
+                plaintext,
+            );
+        }
+    }
+}
+
+#[test]
+fn sealing_rejects_unregistered_keys_and_wrong_modes() {
+    for (commitment, seal, expected_error) in [
+        (Word::default(), "seal", "no EcGFp5 public key registered"),
+        (
+            Word::default(),
+            "seal_preprocessed",
+            "no preprocessed EcGFp5 public key registered",
+        ),
+        (prepared().to_commitment(), "seal", "no EcGFp5 public key registered"),
+        (
+            recipient().public_key().to_commitment(),
+            "seal_preprocessed",
+            "no preprocessed EcGFp5 public key registered",
+        ),
+    ] {
+        let source = format!(
+            "use miden::core::crypto::ies::ecgfp5_eidos
+             begin push.3000.0.2000.0.1000 push.{:?} exec.ecgfp5_eidos::{seal} end",
+            commitment.into_elements(),
+        );
+        let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([92; 32]))
+            .with_public_key(recipient().public_key())
+            .with_preprocessed_public_key(Arc::clone(prepared()))
+            .handlers();
+        let test = build_test!(&source, &[]).with_event_handlers(handlers);
+        let error = test.execute_for_output().unwrap_err();
+        assert!(matches!(
+            error,
+            ExecutionError::EventError { error, .. }
+                if error.to_string().contains(expected_error)
+        ));
+    }
+}
+
+#[test]
+fn sealing_requires_a_host_handler_even_with_preloaded_advice() {
+    for mode in [SealMode::Direct, SealMode::Preprocessed] {
+        let source = seal_program(&[], &[], mode);
+        let mut test = build_test!(&source, &[]);
+        test.advice_inputs = mode.advice(&sample());
+        let error = test.execute_for_output().unwrap_err();
+        assert!(matches!(
+            error,
+            ExecutionError::EventError { error, .. }
+                if error.to_string().contains("no event handler registered")
+        ));
+    }
+}
+
+#[test]
+fn sealing_rejects_bad_memory_before_requesting_advice() {
     let frame = miden_core::FMP_INIT_VALUE.as_canonical_u64();
     for (src, len, context, context_len, dst, message) in [
         (1001, 1, 2000, 1, 3000, "pointer must be word-aligned"),
@@ -991,8 +1154,11 @@ fn sealing_rejects_bad_memory_before_reading_advice() {
 fn proves_in_vm_encryption() {
     for mode in [SealMode::Direct, SealMode::Preprocessed] {
         let source = seal_program(&[Felt::ONE; 9], &[Felt::ONE; 7], mode);
-        let mut test = build_test!(&source, &[]);
-        test.advice_inputs = mode.advice(&sample());
+        let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([93; 32]))
+            .with_public_key(recipient().public_key())
+            .with_preprocessed_public_key(Arc::clone(prepared()))
+            .handlers();
+        let test = build_test!(&source, &[]).with_event_handlers(handlers);
         // This checks proof validity, not ZK; the program embeds public test plaintext.
         test.prove_and_verify(vec![], false);
     }
@@ -1014,8 +1180,7 @@ fn sealing_empty_ranges_does_not_read_their_addresses() {
             "use miden::core::crypto::ies::ecgfp5_eidos
             begin push.{dst}.0.{unread}.0.{unread} {seal} end"
         );
-        let mut test = build_test!(&source, &[]);
-        test.advice_inputs = mode.advice(&ephemeral);
+        let test = sealing_with_advice(&source, mode.advice(&ephemeral));
         test.expect_stack_and_memory(&[], dst, &expected);
     }
 }
@@ -1075,7 +1240,6 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
         end
         begin exec.caller end"
     );
-    let mut test = build_test!(&source, &[]);
-    test.advice_inputs = advice;
+    let test = sealing_with_advice(&source, advice);
     test.expect_stack(&[]);
 }
