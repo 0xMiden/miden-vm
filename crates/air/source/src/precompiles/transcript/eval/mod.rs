@@ -1010,7 +1010,7 @@ where
 
         // col 6/7: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
-        // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
+        // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ, scalar_bound)`
         // (positionless — tying to the chiplet's term *multiset*, so the absorb
         // order is the caller's). At the boundary: `MsmExpr(expr, group,
         // val, k = idx + 1)` (every term named, the value bound). Fields
@@ -1043,7 +1043,7 @@ where
                     h: m_rhs,
                     value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
                     ptr: m_b.clone(),
-                    bound_ptr: m_bound,
+                    bound_ptr: m_bound.clone(),
                 },
                 linear_deg
             ),
@@ -1060,7 +1060,8 @@ where
                 MsmClaimTermMsg {
                     expr_ptr: m_expr.clone(),
                     base_ptr: m_a,
-                    scalar_ptr: m_b
+                    scalar_ptr: m_b,
+                    scalar_bound_ptr: m_bound,
                 },
                 linear_deg
             ),

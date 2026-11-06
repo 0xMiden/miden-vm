@@ -16,10 +16,10 @@ use super::EcMsmAir;
 use super::{
     COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_A_PTR, COL_ACT, COL_B_DIFF_HI, COL_B_DIFF_LO,
     COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BETA_PTR, COL_BOUND_PTR, COL_ENDO_BASE_X, COL_ENDO_MINTED,
-    COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR, COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY,
-    COL_IS_CLAIMED, COL_IS_COMBINE, COL_IS_INTRO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J,
-    COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B,
-    COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_VAL, COL_VAL_A, COL_VAL_B,
+    COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR, COL_GROUP_PTR, COL_I, COL_IDX, COL_INTRO_IS_PAI,
+    COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_COMBINE, COL_IS_INTRO, COL_IS_INTRO_ZERO, COL_IS_NEG,
+    COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A,
+    COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_VAL, COL_VAL_A, COL_VAL_B,
     NUM_MAIN_COLS,
 };
 use crate::prover::{
@@ -211,14 +211,25 @@ impl EcMsmRequires {
     }
 
     /// Record an `intro` — `⟨base × 1⟩` with `val = base`. `scalar` must be
-    /// the store ptr of the value `1` under `sbound`. Returns the handle.
+    /// the store ptr of the value `1` under `sbound`. The AIR uses the supplied curve parameters
+    /// and base coordinates to authenticate the base's group and scalar bound. `None` denotes
+    /// an identity base.
+    #[allow(clippy::too_many_arguments)]
     pub fn intro(
         &mut self,
         group: EcGroupPtr,
         sbound: UintPtr,
         base: EcPointPtr,
         scalar: UintPtr,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        bound_ptr: UintPtr,
+        beta_ptr: UintPtr,
+        lambda_ptr: UintPtr,
+        coordinates: Option<(UintPtr, UintPtr)>,
     ) -> EcExprPtr {
+        let (base_x, base_y) =
+            coordinates.unwrap_or((UintPtr::from_addr(0), UintPtr::from_addr(0)));
         self.exprs.push(ExprRecord {
             kind: ExprKind::Intro,
             group: group.addr(),
@@ -228,22 +239,23 @@ impl EcMsmRequires {
             b_expr: 0,
             val_a: 0,
             val_b: 0,
-            a_ptr: 0,
-            b_ptr: 0,
-            bound_ptr: 0,
-            beta_ptr: 0,
-            lambda_ptr: 0,
+            a_ptr: a_ptr.addr(),
+            b_ptr: b_ptr.addr(),
+            bound_ptr: bound_ptr.addr(),
+            beta_ptr: beta_ptr.addr(),
+            lambda_ptr: lambda_ptr.addr(),
             neg_x: 0,
             neg_ya: 0,
             neg_yr: 0,
             neg_minted: 0,
-            endo_base_x: 0,
-            endo_y: 0,
+            endo_base_x: base_x.addr(),
+            endo_y: base_y.addr(),
             endo_val_x: 0,
             endo_minted: 0,
             rows: vec![RowVals {
                 base: base.addr(),
                 scalar: scalar.addr(),
+                s_a: u32::from(coordinates.is_none()),
                 ..RowVals::default()
             }],
             mult: 0,
@@ -265,8 +277,8 @@ impl EcMsmRequires {
     /// boundary's `EcPoint(val, is_pai = 1)` consume authenticates it — see
     /// [`msm::require::intro_zero`](crate::prover::ec::msm::require::intro_zero)).
     /// `a_ptr`/`b_ptr`/`bound_ptr`/`beta_ptr`/`lambda_ptr` are the group's
-    /// curve params (closing the boundary's `EcGroup` consume, shared with
-    /// `combine`/`neg`/`intro_endo`, pinning `sbound`); `base_x`/`base_y`
+    /// curve params (closing the `EcGroup` consume on every expression boundary,
+    /// pinning `sbound`); `base_x`/`base_y`
     /// are `base`'s own coordinates (closing a second `EcPoint(base, is_pai
     /// = 0)` consume, authenticating that `base` — unlike `val` — is a
     /// genuine finite point of `group`). Returns the handle.
@@ -826,7 +838,16 @@ pub fn generate_trace(
                 set(COL_ENDO_Y, e.endo_y);
                 store.require_uintval(UintPtr::from_addr(rv.scalar));
             } else {
-                // intro: the literal-1 scalar's UintVal demand.
+                // Plain intro authenticates the same curve and base records as the other
+                // introduction families. Its scalar lookup still fixes the value to one.
+                set(COL_A_PTR, e.a_ptr);
+                set(COL_B_PTR, e.b_ptr);
+                set(COL_BOUND_PTR, e.bound_ptr);
+                set(COL_BETA_PTR, e.beta_ptr);
+                set(COL_LAMBDA_PTR, e.lambda_ptr);
+                set(COL_ENDO_BASE_X, e.endo_base_x);
+                set(COL_ENDO_Y, e.endo_y);
+                set(COL_INTRO_IS_PAI, rv.s_a);
                 store.require_uintval(UintPtr::from_addr(rv.scalar));
             }
             vals.extend(r);
@@ -861,6 +882,18 @@ mod tests {
 
     use super::*;
 
+    // These fixtures check local equations. Session tests authenticate the group and point lookups.
+    fn local_intro(
+        req: &mut EcMsmRequires,
+        group: EcGroupPtr,
+        sbound: UintPtr,
+        base: EcPointPtr,
+        scalar: UintPtr,
+    ) -> EcExprPtr {
+        let zero = UintPtr::from_addr(0);
+        req.intro(group, sbound, base, scalar, zero, zero, zero, zero, zero, Some((zero, zero)))
+    }
+
     fn local_check(req: EcMsmRequires) {
         let mut store = UintStoreRequires::new();
         let mut bpl = BytePairLutRequires::new();
@@ -875,8 +908,8 @@ mod tests {
         let sbound = UintPtr::from_addr(7);
         let one = UintPtr::from_addr(9);
         let mut req = EcMsmRequires::new();
-        let g = req.intro(group, sbound, EcPointPtr::from_addr(3), one);
-        let q = req.intro(group, sbound, EcPointPtr::from_addr(4), one);
+        let g = local_intro(&mut req, group, sbound, EcPointPtr::from_addr(3), one);
+        let q = local_intro(&mut req, group, sbound, EcPointPtr::from_addr(4), one);
         req.consume_op(g, 2);
         req.consume_op(q, 1);
         local_check(req);
@@ -893,8 +926,8 @@ mod tests {
         let (g, q, r) =
             (EcPointPtr::from_addr(3), EcPointPtr::from_addr(4), EcPointPtr::from_addr(5));
         let mut req = EcMsmRequires::new();
-        let ga = req.intro(group, sbound, g, one);
-        let qb = req.intro(group, sbound, q, one);
+        let ga = local_intro(&mut req, group, sbound, g, one);
+        let qb = local_intro(&mut req, group, sbound, q, one);
         let rows = vec![
             CombineRow {
                 take_a: true,
@@ -960,8 +993,8 @@ mod tests {
         let (a_ptr, b_ptr, bound_ptr) =
             (UintPtr::from_addr(2), UintPtr::from_addr(3), UintPtr::from_addr(1));
         let mut req = EcMsmRequires::new();
-        let ga = req.intro(group, sbound, g, one);
-        let qb = req.intro(group, sbound, q, one);
+        let ga = local_intro(&mut req, group, sbound, g, one);
+        let qb = local_intro(&mut req, group, sbound, q, one);
         let combine_rows = vec![
             CombineRow {
                 take_a: true,
@@ -1048,7 +1081,8 @@ mod tests {
         let mut store = UintStoreRequires::new();
         let mut bpl = BytePairLutRequires::new();
         let mut req = EcMsmRequires::new();
-        let e = req.intro(
+        let e = local_intro(
+            &mut req,
             EcGroupPtr::from_addr(1),
             UintPtr::from_addr(7),
             EcPointPtr::from_addr(3),
@@ -1076,7 +1110,8 @@ mod tests {
         let mut store = UintStoreRequires::new();
         let mut bpl = BytePairLutRequires::new();
         let mut req = EcMsmRequires::new();
-        let e = req.intro(
+        let e = local_intro(
+            &mut req,
             EcGroupPtr::from_addr(1),
             UintPtr::from_addr(7),
             EcPointPtr::from_addr(3),

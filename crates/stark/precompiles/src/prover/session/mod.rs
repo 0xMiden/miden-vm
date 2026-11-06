@@ -372,6 +372,34 @@ impl Session {
         require::intro(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
 
+    /// Build a foreign-domain unit term to exercise the verifier independently of the importer.
+    #[cfg(test)]
+    pub(crate) fn msm_intro_with_scalar(
+        &mut self,
+        point: &EcNode,
+        one: &UintNode,
+        group_ptr: u32,
+    ) -> EcExprPtr {
+        let coordinates = self.ec.store.point_params(point.point).1;
+        let group = EcGroupPtr::from_addr(group_ptr);
+        let (a, b, bound) = self.ec.store.group_params(group);
+        let (beta, lambda) = self.ec.store.group_glv_params(group);
+        self.ec.store.require_ecpoint(point.point);
+        self.ec.store.require_ecgroup(group);
+        self.msm.intro(
+            group,
+            one.bound_ptr,
+            point.point,
+            one.ptr,
+            a,
+            b,
+            bound,
+            beta,
+            lambda,
+            coordinates,
+        )
+    }
+
     /// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
     /// (value `= φ(P)`) — GLV's endomorphism leaf. Chiplet-internal, like
     /// [`msm_intro`](Self::msm_intro). Mechanism in
@@ -631,6 +659,12 @@ pub struct SessionTraces {
 }
 
 impl SessionTraces {
+    /// Lets tests change witness rows without changing their committed inputs.
+    #[cfg(test)]
+    pub(crate) fn eval_main_mut(&mut self) -> &mut RowMajorMatrix<Felt> {
+        &mut self.eval
+    }
+
     /// Borrows the twelve main traces in [`Self::into_mains`] order.
     #[cfg(any(test, debug_assertions, feature = "testing"))]
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
