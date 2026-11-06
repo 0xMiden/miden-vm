@@ -398,17 +398,20 @@ fn write_open_type<W: ByteWriter>(ty: &OpenType, target: &mut W) {
 
 /// Reject an array whose layout would overflow, mirroring the ordinary decoder.
 ///
-/// The element is still a template, so its size is only known when it contains no
-/// back-reference. That is enough: an array is not a layout barrier, so an array whose element
-/// reaches a back-reference is rejected as unguarded recursion before any layout is computed.
+/// The element is still a template. If it reaches a back-reference without crossing a pointer,
+/// list or function, the group is rejected as unguarded recursion before any layout is computed,
+/// so there is nothing to size here. Otherwise every back-reference left sits behind one of
+/// those, whose layout does not depend on what it refers to, so closing the element with a
+/// stand-in for each reference gives its exact layout, padding included.
 fn check_array_size(element: &TypeTemplate, len: usize) -> Result<(), DeserializationError> {
     use alloc::string::ToString;
 
-    let Some(element_size) = known_min_size(element) else {
+    if reaches_back_reference(element) {
         return Ok(());
-    };
-    let size = u64::try_from(len).ok().and_then(|len| element_size.checked_mul(len));
-    if size.is_none_or(|size| size > u64::from(u32::MAX)) {
+    }
+    let element = close_template(element, |_| Some(Type::Felt))
+        .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+    if !ArrayType::fits_in_u32_bytes(&element, len) {
         return Err(DeserializationError::InvalidValue(
             "invalid array: size exceeds u32::MAX bytes".to_string(),
         ));
@@ -416,43 +419,20 @@ fn check_array_size(element: &TypeTemplate, len: usize) -> Result<(), Deserializ
     Ok(())
 }
 
-/// The size of a template's element, when it does not depend on a definition still being built.
-fn known_min_size(template: &TypeTemplate) -> Option<u64> {
+/// Whether `template` reaches a back-reference without crossing a pointer, list or function.
+fn reaches_back_reference(template: &TypeTemplate) -> bool {
     match template {
-        // The stride of an array is the element padded to its own alignment, not the allocation
-        // headroom `aligned_size_in_bytes` reports, which would overstate it and reject valid
-        // types.
-        TypeTemplate::Type(ty) => {
-            let size = u64::try_from(ty.size_in_bytes()).ok()?;
-            let align = u64::try_from(ty.min_alignment()).ok()?;
-            size.checked_next_multiple_of(align)
-        },
-        // Reference types have a fixed size whatever they refer to.
-        TypeTemplate::Ptr(..) | TypeTemplate::Function(_) => Some(4),
-        TypeTemplate::List(_) => Some(8),
-        TypeTemplate::Array(element, len) => {
-            known_min_size(element)?.checked_mul(u64::try_from(*len).ok()?)
-        },
-        // An aggregate that mentions no definition still under construction has a knowable size.
-        // Summing its fields is a lower bound rather than its exact layout, which is all that is
-        // needed to reject an array whose size cannot fit.
-        TypeTemplate::Struct(ty) => ty
-            .fields
+        TypeTemplate::Rec(_) => true,
+        TypeTemplate::Type(_)
+        | TypeTemplate::Ptr(..)
+        | TypeTemplate::List(_)
+        | TypeTemplate::Function(_) => false,
+        TypeTemplate::Array(element, _) => reaches_back_reference(element),
+        TypeTemplate::Struct(ty) => ty.fields.iter().any(|field| reaches_back_reference(&field.ty)),
+        TypeTemplate::Enum(ty) => ty
+            .variants
             .iter()
-            .try_fold(0u64, |total, field| total.checked_add(known_min_size(&field.ty)?)),
-        // An enum is at least as big as its discriminant, which is what a C-like enum consists
-        // of; omitting it reported such an enum as zero-sized and let an array of them through.
-        TypeTemplate::Enum(ty) => {
-            let discriminant = u64::try_from(ty.discriminant.size_in_bytes()).ok()?;
-            ty.variants.iter().try_fold(discriminant, |total, variant| {
-                match variant.value.as_ref() {
-                    Some(value) => Some(total.max(known_min_size(value)?)),
-                    None => Some(total),
-                }
-            })
-        },
-        // A back-reference names a definition whose size is not known until the group is built.
-        TypeTemplate::Rec(_) => None,
+            .any(|variant| variant.value.as_ref().is_some_and(reaches_back_reference)),
     }
 }
 
@@ -916,7 +896,11 @@ impl Type {
                         None
                     };
                     let ty = Type::read_from_with_depth(source, next_depth)?;
-                    if u32::try_from(ty.size_in_bytes()).is_err() {
+                    if ty
+                        .checked_size_in_bytes()
+                        .and_then(|size| u32::try_from(size).ok())
+                        .is_none()
+                    {
                         return Err(DeserializationError::InvalidValue(
                             "invalid struct field: size exceeds u32::MAX bytes".to_string(),
                         ));
@@ -924,25 +908,25 @@ impl Type {
                     fields.push(NameAndType { name, ty });
                 }
                 if repr == TypeRepr::Transparent
-                    && fields.iter().filter(|field| field.ty.size_in_bytes() != 0).count() > 1
+                    && fields
+                        .iter()
+                        .filter(|field| field.ty.checked_size_in_bytes() != Some(0))
+                        .count()
+                        > 1
                 {
                     return Err(DeserializationError::InvalidValue(
                         "invalid transparent struct: expected at most one non-zero-sized field"
                             .to_string(),
                     ));
                 }
-                Type::from(StructType::from_parts(name, repr, fields))
+                StructType::try_from_parts(name, repr, fields)
+                    .map(Type::from)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?
             },
             18 => {
                 let arity = source.read_usize()?;
                 let ty = Type::read_from_with_depth(source, next_depth)?;
-                let element_size = u64::try_from(ty.size_in_bytes()).unwrap_or(u64::MAX);
-                let element_align = u64::try_from(ty.min_alignment()).unwrap_or(u64::MAX);
-                let padded_element_size = element_size.checked_next_multiple_of(element_align);
-                let size_in_bytes = padded_element_size.and_then(|padded_size| {
-                    u64::try_from(arity).ok().and_then(|arity| padded_size.checked_mul(arity))
-                });
-                if size_in_bytes.is_none_or(|size| size > u64::from(u32::MAX)) {
+                if !ArrayType::fits_in_u32_bytes(&ty, arity) {
                     return Err(DeserializationError::InvalidValue(
                         "invalid array: size exceeds u32::MAX bytes".to_string(),
                     ));
@@ -1547,6 +1531,49 @@ mod tests {
     }
 
     #[test]
+    fn a_recursive_array_is_sized_by_its_element_layout() {
+        // `enum E: u8 { V([u8; 5]) }` lays out as 6 bytes, though its parts add up to 5. So
+        // 858993459 of them need 5153960754 bytes, which the ordinary decoder rejects; the group
+        // decoder must too, even behind a pointer.
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(1);
+        bytes.write_u8(0);
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(2);
+        bytes.write_bool(false);
+        bytes.write_u8(16); // a pointer field
+        bytes.write_u8(0);
+        bytes.write_u8(18); // to an array
+        bytes.write_usize(858_993_459);
+        bytes.write_u8(21); // of an enum
+        bytes.write_usize(1);
+        bytes.write_bytes(b"E");
+        bytes.write_u8(4); // u8 discriminant
+        bytes.write_usize(1);
+        bytes.write_usize(1);
+        bytes.write_bytes(b"V");
+        bytes.write_bool(true); // whose one variant carries
+        bytes.write_u8(18); // a [u8; 5]
+        bytes.write_usize(5);
+        bytes.write_u8(4);
+        bytes.write_bool(false); // with an implicit discriminant
+        bytes.write_bool(false);
+        bytes.write_u8(16); // and a pointer field, guarding the recursion
+        bytes.write_u8(0);
+        bytes.write_u8(24);
+        bytes.write_u16(0);
+        bytes.write_u16(0);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error, got {err:?}");
+        };
+        assert!(message.contains("exceeds u32::MAX bytes"), "unexpected message: {message}");
+    }
+
+    #[test]
     fn an_empty_group_is_rejected() {
         let mut bytes = Vec::new();
         bytes.write_u8(23);
@@ -1699,6 +1726,30 @@ mod tests {
     }
 
     #[test]
+    fn struct_type_rejects_fields_whose_sizes_sum_past_u32_max() {
+        // Each field is 2^31 bytes, so each passes the per-field check, but together they need
+        // 2^32 bytes, which a struct size cannot hold.
+        let field = Type::from(ArrayType::new(Type::Felt, 1 << 29));
+
+        // The oversized struct cannot be constructed to hand to the encoder -- constructing it is
+        // the overflow under test -- so take the struct header from the encoding of a valid
+        // two-field struct, and encode the fields themselves with the encoder.
+        let mut valid = Vec::new();
+        Type::from(StructType::new([Type::Felt, Type::Felt])).write_into(&mut valid);
+        let mut bytes = Vec::from(&valid[..4]);
+        for _ in 0..2 {
+            bytes.write_bool(false);
+            field.write_into(&mut bytes);
+        }
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid struct: size exceeds u32::MAX bytes"));
+    }
+
+    #[test]
     fn enum_type_allows_zero_sized_variant_payloads() {
         let mut bytes = Vec::new();
         bytes.write_u8(21);
@@ -1712,6 +1763,27 @@ mod tests {
 
         let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
         assert!(matches!(ty, Type::Enum(_)));
+    }
+
+    #[test]
+    fn enum_type_rejects_variant_payload_that_overflows_u32_size() {
+        // A `[u8; u32::MAX]` payload is a valid array on its own, but adding the `u8` tag in
+        // front of it needs 2^32 bytes. Decoding must report that instead of panicking.
+        let mut bytes = Vec::new();
+        bytes.write_u8(21);
+        write_str(&mut bytes, "E");
+        bytes.write_u8(4);
+        bytes.write_usize(1);
+        write_str(&mut bytes, "V");
+        bytes.write_bool(true);
+        Type::from(ArrayType::new(Type::U8, u32::MAX as usize)).write_into(&mut bytes);
+        bytes.write_bool(false);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid enum: size exceeds u32::MAX bytes"), "{message}");
     }
 
     #[test]
