@@ -65,7 +65,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_precompiles::{CurvePrecompile, UintDomain, UintPrecompile};
+use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 use miden_stark::{
     air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
     lookup::{
@@ -188,13 +188,13 @@ pub const COL_IS_IS: usize = COL_IS_MUL + 1;
 // a_ptr / b_ptr = operands / create coords / MSM base+scalar ptrs;
 // frame_param1 = domain-defined Eidos frame parameter;
 // uint_domain_selector = membership witness for bound_ptr;
-// ec_context_group_ptr = EC op/MSM group.
+// ec_context_group_ptr = curve group on create, PAI, EC value ops and MSM.
 //
 // Row-kind map for the polymorphic data cells:
 // - uint VALUE:       ptr=value, bound_ptr=modulus, frame_param1=bound_ptr.
 // - uint/EC op:       ptr=result, a_ptr/b_ptr=operands.
-// - EcCreate / PAI:   ptr=point, bound_ptr=coord modulus, a_ptr/b_ptr=x/y, frame_param1=group; PAI
-//   zeros bound/x/y.
+// - EcCreate / PAI:   ptr=point, bound_ptr=coord modulus, a_ptr/b_ptr=x/y,
+//   frame_param1=ec_context_group_ptr=group; PAI zeros bound/x/y.
 // - EcMsm absorb:     a_ptr=base, b_ptr=scalar, bound_ptr=scalar bound, ec_context_group_ptr=group;
 //   the boundary also sets ptr=value.
 // ================================================================
@@ -220,10 +220,8 @@ pub const COL_B_PTR: usize = COL_A_PTR + 1;
 /// Selects a group of supported uint bounds: 0 for {1, 2, 3}, 3 for {4, 5, 6},
 /// or 8 for {1, 14, 15}. Zero outside uint contexts.
 pub const COL_UINT_DOMAIN_SELECTOR: usize = COL_B_PTR + 1;
-/// Witnessed EC-store group handle for EC value-producing binops and EcMsm
-/// absorb runs. Create / PAI rows commit their group selector through
-/// [`COL_FRAME_PARAM1`], so the hash frame and `EcPoint` consume share one physical
-/// cell.
+/// Curve group on create/PAI, value-producing EC operations and EcMsm absorb rows.
+/// Zero on other rows. Curve VALUE rows also carry it in [`COL_FRAME_PARAM1`].
 pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_UINT_DOMAIN_SELECTOR + 1;
 
 // ================================================================
@@ -504,7 +502,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // The op one-hot sums to "this is an op row" = is_uint_op + is_ec_op,
         // so a set op flag forces exactly one op family (and conversely).
         // EC has no multiply — is_mul only ever rides a uint-op row.
-        builder.assert_zero(is_ec_op.clone() * is_mul);
+        builder.assert_zero(is_ec_op * is_mul);
 
         // Row 0 is the public transcript root and must be a True-binding node.
         // This excludes value rows and EcMsm interior absorbs, whose `h` is not
@@ -513,8 +511,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.when_first_row().assert_zero(root_truthy - AB::Expr::ONE);
 
         // Both create modes (finite + PAI) carry the group in frame parameter 1 and
-        // consume EcPoint. They do not use COL_EC_CONTEXT_GROUP_PTR. PAI has
-        // no coordinate children, so its VALUE payload is the canonical
+        // consume EcPoint. PAI has no coordinate children, so its VALUE payload is the canonical
         // `(TRUE_DIGEST, TRUE_DIGEST)` pair (zero digest in both block halves).
         let is_create = is_ec_create.clone() + is_ec_pai.clone();
         for i in 0..DIGEST_WIDTH {
@@ -568,7 +565,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // earlier absorbs.
         builder.assert_zero(
             (not_uint_leaf.clone()
-                - is_result_op
+                - is_result_op.clone()
                 - is_ec_create.clone()
                 - is_ec_pai
                 - is_msm_last.clone())
@@ -580,15 +577,14 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             (not_uint_leaf - is_uint_op - is_ec_create.clone() - is_ec_msm.clone())
                 * bound_ptr.clone(),
         );
-        // Materialize frame param1 without a degree-2 Eidos frame component:
-        // Uint VALUE rows use `bound_ptr`; EcCreate / PAI rows use `group_ptr`.
-        // On create rows the `EcPoint` consume reads the same cell, tying the
-        // hashed group selector to the point's group with no extra constraint.
+        // Keep frame parameter 1 linear in the Eidos messages. Uint VALUE rows carry the bound,
+        // and curve VALUE rows carry the admitted group. EcMsm carries its term count, checked
+        // at the run's tail below.
         let frame_param1: AB::Expr = local[COL_FRAME_PARAM1].into();
-        let expected_frame_param1 = is_uint_leaf * bound_ptr;
+        let expected_frame_param1 =
+            is_uint_leaf * bound_ptr + is_create.clone() * group_ptr.clone();
         builder.assert_zero(
-            (AB::Expr::ONE - is_create - is_ec_msm.clone())
-                * (frame_param1.clone() - expected_frame_param1),
+            (AB::Expr::ONE - is_ec_msm.clone()) * (frame_param1.clone() - expected_frame_param1),
         );
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
@@ -604,17 +600,22 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.assert_zero(
             (AB::Expr::ONE - is_op - is_ec_create - is_ec_msm.clone()) * b_ptr.clone(),
         );
-        builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
+        builder.assert_zero(is_is * (b_ptr - a_ptr));
 
-        // group_ptr: the witnessed EC-store handle for result-binding ec ops
-        // (add/sub, not Is) and EcMsm absorb runs. Create / PAI rows use the
-        // VALUE frame `[CurvePrecompile::domain(), VALUE_OP_ID, group_ptr, 0]`, with
-        // that group selector carried in COL_EC_CREATE_GROUP_PTR (the physical
-        // COL_FRAME_PARAM1 cell) so the hash frame and EcPoint consume share one cell.
-        // For EcMsm, group_ptr is not in the frame; it remains live in the boundary's MsmExpr and
-        // Group-binding relations on every absorb row.
+        // Subtract the uint value-op selectors to get a linear curve-context flag.
+        // Point equality compares child pointers and carries no group context.
+        // For curve contexts, the roots are the native group pointers; elsewhere the cubic
+        // becomes group_ptr^3 = 0.
+        let uint_result_op = AB::Expr::from(local[COL_IS_UINT_ADD])
+            + AB::Expr::from(local[COL_IS_UINT_SUB])
+            + AB::Expr::from(local[COL_IS_MUL]);
+        let curve_context = is_create + is_result_op - uint_result_op + is_ec_msm.clone();
+        let [first, second, third] =
+            CurveId::ALL.map(|curve| AB::Expr::from(Felt::from(curve.group_ptr())));
         builder.assert_zero(
-            (AB::Expr::ONE - is_ec_op * (AB::Expr::ONE - is_is) - is_ec_msm.clone()) * group_ptr,
+            (group_ptr.clone() - curve_context.clone() * first)
+                * (group_ptr.clone() - curve_context.clone() * second)
+                * (group_ptr - curve_context * third),
         );
 
         // ---- EcMsm chaining run: the head binds the initial frame, continuations are

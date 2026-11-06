@@ -270,13 +270,11 @@ fn forged_result_ptr_unbalances() {
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* frame parameter 0 swapped
-/// consistently from `Add` to `Sub` — passes every local constraint
-/// (the one-hot, the frame materialization, the ptr pins). What rejects it
-/// is the bus: the row's initial-CV message no longer matches the Eidos
-/// compression that produced its hash, and the `UintAdd` consume re-wires to a
-/// tuple no chiplet proved. The op id lives in the *hash*, not in local
-/// algebra.
+/// Switching the op flags from `Add` to `Sub` also changes the derived frame parameter 0.
+/// The row still satisfies the local constraints, but its initial-CV message no longer
+/// matches the Eidos compression that produced its hash. The `UintAdd` consume for
+/// `b + result = a` also has no matching provider. The buses bind the operation to the
+/// hashed frame and computation.
 #[test]
 fn reencoded_op_id_passes_constraints_but_unbalances() {
     let mut rng = StdRng::seed_from_u64(0xf043_0002);

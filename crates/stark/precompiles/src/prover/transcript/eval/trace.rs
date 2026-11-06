@@ -1204,6 +1204,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_EC_CREATE_X_PTR] = Felt::from(*x_ptr); // x coord (0 on PAI)
             row[COL_EC_CREATE_Y_PTR] = Felt::from(*y_ptr); // y coord (0 on PAI)
             row[COL_EC_CREATE_GROUP_PTR] = Felt::from(*group_ptr); // curve VALUE group_ptr
+            row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group_ptr);
             if !is_pai {
                 write_uint_domain(&mut row, *bound_ptr);
             }
