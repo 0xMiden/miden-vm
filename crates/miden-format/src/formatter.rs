@@ -556,15 +556,16 @@ fn render_type_body(
     prefix_width: usize,
     config: &Config,
 ) -> String {
+    let tokens = all_tokens(body.syntax());
+    if let Some(lines) = render_braced_type_body(&tokens, indent, prefix_width, config) {
+        return lines.join("\n");
+    }
+
     let text = body.syntax().text().to_string();
     let has_multiline_body = text.contains('\n');
-    let has_comment = body
-        .syntax()
-        .descendants_with_tokens()
-        .filter_map(NodeOrToken::into_token)
-        .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment));
+    let has_comment = has_comment_tokens(&tokens);
 
-    let compact_body = render_inline_type_body(body);
+    let compact_body = render_inline_type_tokens(&significant_tokens(body.syntax()));
     if !has_multiline_body
         && !has_comment
         && prefix_width + 1 + line_length(&compact_body) <= config.max_line_length()
@@ -573,9 +574,6 @@ fn render_type_body(
     }
 
     if !has_multiline_body && !has_comment {
-        if let Some(braced_body) = render_wrapped_braced_type_body(body, indent, config) {
-            return braced_body;
-        }
         return format!("\n{}{}", indent_string(indent + config.indent_size()), compact_body);
     }
 
@@ -1126,63 +1124,478 @@ fn render_compact_tokens(node: &SyntaxNode) -> String {
     render_token_sequence(&significant_tokens(node))
 }
 
-fn render_wrapped_braced_type_body(
-    body: &TypeBody,
+/// Renders a type body of the form `= struct { .. }` or `: u16 { .. }`, returning `None` for any
+/// other shape. The first returned line is appended to the declaration prefix.
+///
+/// A body that is written on one line, has no comments inside its braces and fits within the line
+/// limit stays on one line. Otherwise each field or variant is placed on its own line, and fields
+/// whose types overflow are wrapped in turn, so comments and existing line breaks never force a
+/// line past the limit.
+fn render_braced_type_body(
+    tokens: &[SyntaxToken],
     indent: usize,
+    prefix_width: usize,
     config: &Config,
-) -> Option<String> {
-    let tokens = significant_tokens(body.syntax());
-    let (open_index, close_index) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
-
-    let prefix_tokens = &tokens[..=open_index];
-    let suffix_tokens = &tokens[close_index..];
-    let items = split_top_level_items(&tokens[(open_index + 1)..close_index]);
-
-    let mut rendered = String::new();
-    rendered.push(' ');
-    rendered.push_str(&render_token_sequence(prefix_tokens));
-
-    for item in items {
-        if item.is_empty() {
-            continue;
+) -> Option<Vec<String>> {
+    let (open_index, close_index) = braced_body_bounds(tokens)?;
+    let braced = &tokens[..=close_index];
+    if !braced.iter().any(|token| matches!(token.kind(), SyntaxKind::Newline))
+        && !has_comment_tokens(braced)
+    {
+        let significant = braced
+            .iter()
+            .filter(|token| !token.kind().is_trivia())
+            .cloned()
+            .collect::<Vec<_>>();
+        let compact = render_inline_type_tokens(&significant);
+        // push_trailing_comments appends a comment on the brace's line to the same output line.
+        let trailing_width = same_line_comment(&tokens[(close_index + 1)..])
+            .map_or(0, |comment| 1 + line_length(&comment));
+        if prefix_width + 1 + line_length(&compact) + trailing_width <= config.max_line_length() {
+            let mut lines = vec![format!(" {compact}")];
+            push_trailing_comments(&mut lines, &tokens[(close_index + 1)..], indent);
+            return Some(lines);
         }
-
-        rendered.push('\n');
-        rendered.push_str(&format!(
-            "{}{},",
-            indent_string(indent + config.indent_size()),
-            render_token_sequence_with_style(&item, SpacingStyle::TypeBodyItem)
-        ));
     }
 
-    rendered.push('\n');
-    rendered.push_str(&indent_string(indent));
-    rendered.push_str(&render_token_sequence(suffix_tokens));
-    Some(rendered)
+    Some(render_expanded_braced_body(
+        " ",
+        tokens,
+        open_index,
+        close_index,
+        SpacingStyle::Default,
+        indent,
+        config,
+    ))
 }
 
-fn render_inline_type_body(body: &TypeBody) -> String {
-    let tokens = significant_tokens(body.syntax());
+/// Returns the indices of the opening and closing brace of a braced type body, if the braces
+/// enclose the body's last significant token and nothing but the header precedes them.
+///
+/// The header may contain balanced groups, such as `@align(16)` or `@packed(4)`, but the brace
+/// must not be inside one of them. Comments in the header are allowed; the expanded layout moves
+/// them after the opening brace.
+fn braced_body_bounds(tokens: &[SyntaxToken]) -> Option<(usize, usize)> {
+    let open_index = tokens.iter().position(|token| token.kind() == SyntaxKind::LBrace)?;
+    if !groups_are_balanced(&tokens[..open_index]) {
+        return None;
+    }
+
+    let close_index =
+        matching_group_end(tokens, open_index, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
+    tokens[(close_index + 1)..]
+        .iter()
+        .all(|token| {
+            token.kind().is_trivia()
+                || matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+        })
+        .then_some((open_index, close_index))
+}
+
+/// Returns whether every parenthesis, bracket and angle bracket in `tokens` is closed, in order.
+fn groups_are_balanced(tokens: &[SyntaxToken]) -> bool {
+    let mut depth = 0usize;
+    for token in tokens {
+        match token.kind() {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LAngle => depth += 1,
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RAngle => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next;
+            },
+            _ => (),
+        }
+    }
+    depth == 0
+}
+
+/// Returns whether every parenthesis, bracket, angle bracket and brace in `tokens` is closed, in
+/// order.
+fn all_groups_balanced(tokens: &[SyntaxToken]) -> bool {
+    let mut open = Vec::new();
+    for token in tokens {
+        let kind = token.kind();
+        match kind {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LAngle | SyntaxKind::LBrace => {
+                open.push(kind)
+            },
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RAngle | SyntaxKind::RBrace => {
+                let expected = match kind {
+                    SyntaxKind::RParen => SyntaxKind::LParen,
+                    SyntaxKind::RBracket => SyntaxKind::LBracket,
+                    SyntaxKind::RAngle => SyntaxKind::LAngle,
+                    _ => SyntaxKind::LBrace,
+                };
+                if open.pop() != Some(expected) {
+                    return false;
+                }
+            },
+            _ => (),
+        }
+    }
+    open.is_empty()
+}
+
+/// Renders significant tokens ending in a braced group as `head { item, item }`.
+fn render_inline_type_tokens(tokens: &[SyntaxToken]) -> String {
     let Some((open_index, close_index)) =
-        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
+        outer_group_indices(tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
     else {
-        return render_token_sequence(&tokens);
+        return render_token_sequence(tokens);
     };
 
     let prefix = render_token_sequence(&tokens[..=open_index]);
-    let suffix = render_token_sequence(&tokens[close_index..]);
     let items = split_top_level_items(&tokens[(open_index + 1)..close_index])
         .into_iter()
-        .map(|item| trim_outer_whitespace_tokens(&item))
         .filter(|item| !item.is_empty())
         .map(|item| render_token_sequence_with_style(&item, SpacingStyle::TypeBodyItem))
         .collect::<Vec<_>>();
 
     if items.is_empty() {
-        format!("{prefix}{suffix}")
+        format!("{prefix}}}")
     } else {
-        format!("{prefix} {} {suffix}", items.join(", "))
+        format!("{prefix} {} }}", items.join(", "))
+    }
+}
+
+/// Renders a braced group with one field or variant per line, each followed by a comma.
+///
+/// `tokens[open_index]` and `tokens[close_index]` are the braces; tokens after the closing brace
+/// may only be trivia or comments. Comments on their own lines stay on their own lines, comments
+/// trailing a field (before or after its comma) follow the comma, and single blank lines between
+/// fields are kept.
+fn render_expanded_braced_body(
+    head: &str,
+    tokens: &[SyntaxToken],
+    open_index: usize,
+    close_index: usize,
+    header_style: SpacingStyle,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    let item_indent = indent + config.indent_size();
+    let header = tokens[..=open_index]
+        .iter()
+        .filter(|token| !token.kind().is_trivia())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut lines =
+        vec![format!("{head}{}", render_token_sequence_with_style(&header, header_style))];
+    // Comments written in the header would swallow the brace if kept before it: the first one
+    // follows the brace on the header line, any others open the body on their own lines.
+    let header_comments = tokens[..open_index]
+        .iter()
+        .filter(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        .map(trimmed_comment)
+        .collect::<Vec<_>>();
+    let has_header_comments = !header_comments.is_empty();
+    if let Some((first, rest)) = header_comments.split_first() {
+        append_inline_comment(&mut lines[0], first);
+        for comment in rest {
+            lines.push(format!("{}{comment}", indent_string(item_indent)));
+        }
+    }
+
+    let inner = &tokens[(open_index + 1)..close_index];
+    // Whether the source is still on the line of the last output line, and whether a comment found
+    // there may be appended to it (only the header line accepts one this way, once).
+    let mut same_line = true;
+    let mut can_attach = !has_header_comments;
+    let mut pending_blank_line = false;
+    let mut depth = 0usize;
+    // The field being collected, and a field whose comma was seen but which still collects the
+    // comments that follow on the comma's line, so their width is known when it is rendered.
+    let mut item = TypeBodyItem::default();
+    let mut finished: Option<TypeBodyItem> = None;
+
+    for (index, token) in inner.iter().enumerate() {
+        let kind = token.kind();
+        if depth == 0 {
+            match kind {
+                SyntaxKind::Whitespace if item.tokens.is_empty() => continue,
+                SyntaxKind::Newline if item.tokens.is_empty() => {
+                    if let Some(finished) = finished.take() {
+                        finished.push_to(&mut lines, item_indent, config);
+                        same_line = false;
+                    } else if same_line {
+                        same_line = false;
+                    } else {
+                        pending_blank_line = true;
+                    }
+                    continue;
+                },
+                SyntaxKind::Comment | SyntaxKind::DocComment
+                    if !item.tokens.is_empty() && field_continues(&inner[(index + 1)..]) =>
+                {
+                    // A comment inside a field (between `name:` and its type, say) stays where it
+                    // was written; the field is rendered with its comments in place.
+                    item.tokens.push(token.clone());
+                    continue;
+                },
+                SyntaxKind::Comment | SyntaxKind::DocComment => {
+                    let comment = trimmed_comment(token);
+                    if !item.tokens.is_empty() && !item.ends_on_earlier_line(&inner[index..]) {
+                        item.comments.push(comment);
+                        continue;
+                    }
+                    if !item.tokens.is_empty() {
+                        // A comment on its own line after a field that ends here: the field is
+                        // complete, so the comment stays on its own line below it.
+                        TypeBodyItem::flush(&mut finished, &mut lines, item_indent, config);
+                        mem::take(&mut item).push_to(&mut lines, item_indent, config);
+                        same_line = false;
+                        can_attach = false;
+                    }
+
+                    if let Some(finished) = finished.as_mut() {
+                        finished.comments.push(comment);
+                    } else if same_line && can_attach {
+                        let last_line = lines.last_mut().expect("header line is always present");
+                        append_inline_comment(last_line, &comment);
+                        can_attach = false;
+                    } else {
+                        if mem::take(&mut pending_blank_line) {
+                            push_blank_line(&mut lines);
+                        }
+                        lines.push(format!("{}{comment}", indent_string(item_indent)));
+                        same_line = true;
+                        can_attach = false;
+                    }
+                    continue;
+                },
+                SyntaxKind::Comma => {
+                    if !item.tokens.is_empty() {
+                        TypeBodyItem::flush(&mut finished, &mut lines, item_indent, config);
+                        finished = Some(mem::take(&mut item));
+                        can_attach = false;
+                    }
+                    same_line = true;
+                    continue;
+                },
+                _ => (),
+            }
+        }
+
+        if item.tokens.is_empty() {
+            TypeBodyItem::flush(&mut finished, &mut lines, item_indent, config);
+            if mem::take(&mut pending_blank_line) {
+                push_blank_line(&mut lines);
+            }
+        }
+        match kind {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LBrace | SyntaxKind::LAngle => {
+                depth += 1
+            },
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RBrace | SyntaxKind::RAngle => {
+                depth = depth.saturating_sub(1)
+            },
+            _ => (),
+        }
+        item.tokens.push(token.clone());
+    }
+    TypeBodyItem::flush(&mut finished, &mut lines, item_indent, config);
+    item.push_to(&mut lines, item_indent, config);
+
+    lines.push(format!("{}}}", indent_string(indent)));
+    push_trailing_comments(&mut lines, &tokens[(close_index + 1)..], indent);
+    lines
+}
+
+/// Returns whether more of the current field follows, i.e. whether the next token that is not
+/// trivia is anything but the comma ending the field (or the end of the body).
+fn field_continues(rest: &[SyntaxToken]) -> bool {
+    rest.iter()
+        .find(|token| !token.kind().is_trivia())
+        .is_some_and(|token| token.kind() != SyntaxKind::Comma)
+}
+
+/// A field or variant of a type body, with the comments written after it at the body's level.
+#[derive(Default)]
+struct TypeBodyItem {
+    tokens: Vec<SyntaxToken>,
+    comments: Vec<String>,
+}
+
+impl TypeBodyItem {
+    /// Returns whether the item is complete and a line break separates it from the comment that
+    /// starts `rest`, so that the comment belongs on its own line rather than after the item.
+    fn ends_on_earlier_line(&self, rest: &[SyntaxToken]) -> bool {
+        let Some(last) = self.tokens.iter().rposition(|token| !token.kind().is_trivia()) else {
+            return false;
+        };
+        let next = rest.iter().find(|token| {
+            !token.kind().is_trivia()
+                && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+        });
+        self.tokens[last..].iter().any(|token| token.kind() == SyntaxKind::Newline)
+            && next.is_none_or(|token| token.kind() == SyntaxKind::Comma)
+    }
+
+    /// Pushes the item held in `slot`, if any, leaving the slot empty.
+    fn flush(slot: &mut Option<Self>, lines: &mut Vec<String>, indent: usize, config: &Config) {
+        if let Some(item) = slot.take() {
+            item.push_to(lines, indent, config);
+        }
+    }
+
+    /// Pushes the item followed by a comma, then its comments: the first one on the same line,
+    /// the others on their own lines.
+    fn push_to(mut self, lines: &mut Vec<String>, indent: usize, config: &Config) {
+        // A comment ending the item must follow the comma, or it would swallow it.
+        let mut tokens = trim_outer_whitespace_tokens(&self.tokens);
+        while let Some(last) = tokens
+            .pop_if(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        {
+            self.comments.insert(0, trimmed_comment(&last));
+            tokens = trim_outer_whitespace_tokens(&tokens);
+        }
+        if tokens.is_empty() {
+            emit_trailing_comments(lines, &self.comments, indent);
+            return;
+        }
+
+        let comment_width = self.comments.first().map_or(0, |comment| 1 + line_length(comment));
+        let mut item_lines = render_type_body_item(&tokens, comment_width, indent, config);
+        if let Some(last_line) = item_lines.last_mut() {
+            last_line.push(',');
+        }
+        lines.extend(item_lines);
+
+        if let Some((first, rest)) = self.comments.split_first() {
+            let last_line = lines.last_mut().expect("an item renders at least one line");
+            append_inline_comment(last_line, first);
+            emit_trailing_comments(lines, rest, indent);
+        }
+    }
+}
+
+/// Renders one field or variant of a type body without its separating comma.
+///
+/// A field whose type is itself a braced body is expanded like the outer body when it contains
+/// comments, is already written across several lines, or overflows together with the
+/// `comment_width` columns of the comment that will follow its comma.
+fn render_type_body_item(
+    tokens: &[SyntaxToken],
+    comment_width: usize,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    let significant = tokens
+        .iter()
+        .filter(|token| {
+            !token.kind().is_trivia()
+                && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let has_comments = has_comment_tokens(tokens);
+    let inline = format!(
+        "{}{}",
+        indent_string(indent),
+        render_token_sequence_with_style(&significant, SpacingStyle::TypeBodyItem)
+    );
+    // The caller appends a comma and then the first trailing comment, if any.
+    let fits = line_length(&inline) + 1 + comment_width <= config.max_line_length();
+
+    if outer_group_indices(&significant, SyntaxKind::LBrace, SyntaxKind::RBrace).is_some() {
+        let has_line_breaks = tokens.iter().any(|token| token.kind() == SyntaxKind::Newline);
+        if !has_comments
+            && !has_line_breaks
+            && line_length(&inline) + 1 + comment_width <= config.max_line_length()
+        {
+            return vec![inline];
+        }
+        if let Some((open_index, close_index)) = braced_body_bounds(tokens) {
+            return render_expanded_braced_body(
+                &indent_string(indent),
+                tokens,
+                open_index,
+                close_index,
+                SpacingStyle::TypeBodyItem,
+                indent,
+                config,
+            );
+        }
+    }
+
+    if has_comments {
+        // Comments before the field's type (`name:` then a comment, say) stay in place, and the
+        // type after the last comment is rendered on its own, so it can still be wrapped.
+        let last_comment = tokens
+            .iter()
+            .rposition(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+            .expect("has_comments");
+        let head = &tokens[..=last_comment];
+        let tail = trim_outer_whitespace_tokens(&tokens[(last_comment + 1)..]);
+        // Only when the comments sit outside every group of the field, so both parts are whole.
+        if head.iter().any(|token| !token.kind().is_trivia())
+            && tail.iter().any(|token| !token.kind().is_trivia())
+            && all_groups_balanced(head)
+            && all_groups_balanced(&tail)
+        {
+            let mut lines =
+                render_token_stream_with_comments(head, indent, SpacingStyle::TypeBodyItem, config);
+            lines.extend(render_type_body_item(&tail, comment_width, indent, config));
+            return lines;
+        }
+        return render_token_stream_with_comments(
+            tokens,
+            indent,
+            SpacingStyle::TypeBodyItem,
+            config,
+        );
+    }
+    if fits {
+        return vec![inline];
+    }
+    // The type may fit on its own and overflow only with the comment that follows the comma, so
+    // an outer group is split here rather than left to the width check below, which cannot see
+    // the comment.
+    for (open, close) in [
+        (SyntaxKind::LParen, SyntaxKind::RParen),
+        (SyntaxKind::LBracket, SyntaxKind::RBracket),
+    ] {
+        if let Some((open_index, close_index)) = outer_group_indices(&significant, open, close) {
+            return render_delimited_group(
+                &significant,
+                indent,
+                open_index,
+                close_index,
+                SpacingStyle::TypeBodyItem,
+                config,
+            );
+        }
+    }
+    render_token_lines_with_style(&significant, indent, true, SpacingStyle::TypeBodyItem, config)
+}
+
+/// Returns the comment written on the same line as the start of `tokens`, if any.
+fn same_line_comment(tokens: &[SyntaxToken]) -> Option<String> {
+    tokens
+        .iter()
+        .take_while(|token| token.kind() != SyntaxKind::Newline)
+        .find(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        .map(trimmed_comment)
+}
+
+/// Pushes comments that follow a closing brace: a comment on the brace's line is appended to it,
+/// later ones get their own lines.
+fn push_trailing_comments(lines: &mut Vec<String>, tokens: &[SyntaxToken], indent: usize) {
+    let mut same_line = true;
+    for token in tokens {
+        match token.kind() {
+            SyntaxKind::Newline => same_line = false,
+            SyntaxKind::Comment | SyntaxKind::DocComment => {
+                let comment = trimmed_comment(token);
+                match lines.last_mut() {
+                    Some(last_line) if same_line => append_inline_comment(last_line, &comment),
+                    _ => lines.push(format!("{}{comment}", indent_string(indent))),
+                }
+                same_line = false;
+            },
+            _ => (),
+        }
     }
 }
 
@@ -1241,7 +1654,56 @@ fn render_token_lines_with_style(
         return render_delimited_group(tokens, indent, open_index, close_index, style, config);
     }
 
+    // A braced type nested in a delimited group, such as the `struct { .. }` of
+    // `[struct { .. }; 2]`, is expanded like a type body, with the tokens after its closing brace
+    // kept on the closing line.
+    if matches!(style, SpacingStyle::TypeBodyItem)
+        && let Some(open_index) = top_level_index(tokens, SyntaxKind::LBrace)
+        && let Some(close_index) =
+            matching_group_end(tokens, open_index, SyntaxKind::LBrace, SyntaxKind::RBrace)
+    {
+        let mut lines = render_expanded_braced_body(
+            &indent_string(indent),
+            &tokens[..=close_index],
+            open_index,
+            close_index,
+            style,
+            indent,
+            config,
+        );
+        if close_index + 1 < tokens.len()
+            && let Some(last_line) = lines.last_mut()
+        {
+            *last_line = format!(
+                "{}{}",
+                indent_string(indent),
+                render_token_sequence_with_style(&tokens[close_index..], style)
+            );
+        }
+        return lines;
+    }
+
     vec![inline]
+}
+
+/// Returns the index of the first `kind` token that is not nested in a group.
+fn top_level_index(tokens: &[SyntaxToken], kind: SyntaxKind) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if token.kind() == kind && depth == 0 {
+            return Some(index);
+        }
+        match token.kind() {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LBrace | SyntaxKind::LAngle => {
+                depth += 1
+            },
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RBrace | SyntaxKind::RAngle => {
+                depth = depth.saturating_sub(1)
+            },
+            _ => (),
+        }
+    }
+    None
 }
 
 fn render_delimited_group(
@@ -1252,8 +1714,8 @@ fn render_delimited_group(
     style: SpacingStyle,
     config: &Config,
 ) -> Vec<String> {
-    let opener = render_token_sequence(&tokens[..=open_index]);
-    let closer = render_token_sequence(&tokens[close_index..]);
+    let opener = render_token_sequence_with_style(&tokens[..=open_index], style);
+    let closer = render_token_sequence_with_style(&tokens[close_index..], style);
     let items = split_top_level_items(&tokens[(open_index + 1)..close_index]);
     let item_count = items.len();
 
@@ -1842,7 +2304,7 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
     match next_kind {
         Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace => false,
         LBracket | Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
-        Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
+        Colon | Semicolon if matches!(style, SpacingStyle::TypeBodyItem) => false,
         Tombstone | Error | SourceFile | Doc | Namespace | ExternPackage | Submodule | Import
         | ImportList | ImportSpecifier | Constant | TypeDecl | AdviceMap | BeginBlock
         | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp | DoWhileOp
@@ -2435,6 +2897,63 @@ adv_map CIRCUIT_COMMITMENT =
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
     }
 
+    /// Formats `source`, checks that the result is stable, parses, stays within the line limit
+    /// and keeps every comment, and returns it.
+    fn format_checked(source: &str, config: &Config) -> String {
+        let comments = |text: &str| text.matches('#').count();
+        let formatted = format_syntax(config, &parse_text(source).syntax());
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert_eq!(format_syntax(config, &reparsed.syntax()), formatted, "not idempotent");
+        assert!(
+            formatted.lines().all(|line| line.chars().count() <= config.max_line_length()),
+            "line over the limit:\n{formatted}"
+        );
+        assert_eq!(comments(&formatted), comments(source), "a comment was lost:\n{formatted}");
+        formatted
+    }
+
+    #[test]
+    fn expands_a_type_body_with_a_header_comment() {
+        let source = "pub type VeryLongTypeName = struct # header\n{ lower_bound_key_value: u128, \
+                      upper_bound_key_value: u128, extra_field: felt, another_field: felt }\n";
+        assert_eq!(
+            format_checked(source, &Config::default()),
+            "pub type VeryLongTypeName = struct { # header\n    lower_bound_key_value: u128,\n    \
+             upper_bound_key_value: u128,\n    extra_field: felt,\n    another_field: felt,\n}\n"
+        );
+    }
+
+    #[test]
+    fn expands_a_braced_type_inside_an_array_field() {
+        let source = "pub type VeryLongTypeName = struct { items: [struct { lower_bound_key_value: \
+                      u128, upper_bound_key_value: u128, extra_field: felt, another: felt }; 2], \
+                      b: felt }\n";
+        assert_eq!(
+            format_checked(source, &Config::default()),
+            "pub type VeryLongTypeName = struct {\n    items: [\n        struct {\n            \
+             lower_bound_key_value: u128,\n            upper_bound_key_value: u128,\n            \
+             extra_field: felt,\n            another: felt,\n        }; 2\n    ],\n    b: felt,\n}\n"
+        );
+    }
+
+    #[test]
+    fn counts_the_comment_after_a_type_body_in_its_width() {
+        let source = "pub type VeryLongTypeName = struct { lower_bound: u128, upper_bound: u128 } \
+                      # a trailing comment that is quite long\n";
+        assert_eq!(
+            format_checked(source, &Config::default()),
+            "pub type VeryLongTypeName = struct {\n    lower_bound: u128,\n    upper_bound: u128,\n\
+             } # a trailing comment that is quite long\n"
+        );
+    }
+
+    #[test]
+    fn keeps_a_comment_inside_a_field_in_place() {
+        let source = "type T = struct {\n    field:\n    # field type\n    felt,\n    b: u32,\n}\n";
+        assert_eq!(format_checked(source, &Config::default()), source);
+    }
+
     #[test]
     fn wraps_long_type_bodies_and_normalizes_multiline_body_comments() {
         let source = "\
@@ -2472,6 +2991,257 @@ enum Status : u16 {
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    fn assert_within_line_limit(formatted: &str) {
+        let max_line_length = Config::default().max_line_length();
+        for line in formatted.lines() {
+            assert!(
+                line.chars().count() <= max_line_length,
+                "line exceeds {max_line_length} columns: {line:?}\n{formatted}"
+            );
+        }
+    }
+
+    #[test]
+    fn wraps_long_struct_type_bodies_with_trailing_field_comments() {
+        let source = "\
+pub type VeryLongTypeName = struct { lower_bound_key_value: u128, upper_bound_key_value: u128, extra_field: felt, # extra field
+}
+";
+        let formatted = assert_format_idempotent(source, "struct body with trailing comment");
+        assert_eq!(
+            formatted,
+            "\
+pub type VeryLongTypeName = struct {
+    lower_bound_key_value: u128,
+    upper_bound_key_value: u128,
+    extra_field: felt, # extra field
+}
+"
+        );
+    }
+
+    #[test]
+    fn wraps_long_struct_type_bodies_with_existing_line_breaks() {
+        let source = "\
+pub type VeryLongTypeName = struct { lower_bound_key_value: u128, upper_bound_key_value: u128, extra_field: felt,
+}
+";
+        let formatted = assert_format_idempotent(source, "struct body with line breaks");
+        assert_eq!(
+            formatted,
+            "\
+pub type VeryLongTypeName = struct {
+    lower_bound_key_value: u128,
+    upper_bound_key_value: u128,
+    extra_field: felt,
+}
+"
+        );
+    }
+
+    #[test]
+    fn wraps_long_nested_struct_field_types() {
+        let source = "type Outer = struct { inner: struct { lower_bound_key_value: u128, \
+                      upper_bound_key_value: u128, extra_field: felt, additional_field: felt } }\n";
+        let formatted = assert_format_idempotent(source, "nested struct field type");
+        assert_within_line_limit(&formatted);
+        assert_eq!(
+            formatted,
+            "\
+type Outer = struct {
+    inner: struct {
+        lower_bound_key_value: u128,
+        upper_bound_key_value: u128,
+        extra_field: felt,
+        additional_field: felt,
+    },
+}
+"
+        );
+    }
+
+    #[test]
+    fn wraps_long_struct_bodies_after_representation_attributes() {
+        let source = "\
+type Point = struct @align(16) { first_coordinate_value: u128, second_coordinate_value: u128, third: felt }
+type Packed = struct @packed(4) { first_coordinate_value: u128, second_coordinate_value: u128, third: felt }
+";
+        let formatted =
+            assert_format_idempotent(source, "struct bodies with representation attributes");
+        assert_eq!(
+            formatted,
+            "\
+type Point = struct @align(16) {
+    first_coordinate_value: u128,
+    second_coordinate_value: u128,
+    third: felt,
+}
+type Packed = struct @packed(4) {
+    first_coordinate_value: u128,
+    second_coordinate_value: u128,
+    third: felt,
+}
+"
+        );
+    }
+
+    #[test]
+    fn near_limit_fields_count_their_comma_and_trailing_comment() {
+        let config = Config::default();
+        let max_line_length = config.max_line_length();
+        // `    tuple_field: (...)` is padded so that the field alone is a few columns short of the
+        // limit, but not once the comma and the trailing comment are added.
+        let padding = max_line_length - "    tuple_field: (u128, u128, )".len() - 4;
+        let types = vec!["u8"; padding / 4].join(", ");
+        let source = format!(
+            "type T = struct {{\n    tuple_field: (u128, u128, {types}), # note\n    b: felt,\n}}\n"
+        );
+        let formatted = assert_format_idempotent(&source, "near-limit commented field");
+        assert_within_line_limit(&formatted);
+        assert!(formatted.contains(", # note\n"), "{formatted}");
+    }
+
+    #[test]
+    fn keeps_a_standalone_comment_after_the_first_field_on_its_own_line() {
+        let source = "\
+type T = struct { a: felt
+    # about the fields below
+}
+";
+        let formatted =
+            assert_format_idempotent(source, "standalone comment after the first field");
+        assert_eq!(
+            formatted,
+            "\
+type T = struct {
+    a: felt,
+    # about the fields below
+}
+"
+        );
+    }
+
+    #[test]
+    fn wrapped_type_groups_keep_type_spacing() {
+        let source = "\
+type T = struct { tuple_field_with_a_long_name: (u128, u128, u128, u128, u128, u128, u128, u128, u128, u128, u128, u128), b: felt }
+
+proc foo(first_parameter_name: felt, second_parameter_name: felt, third_parameter_name: [felt; 4]) -> felt
+    push.1
+end
+";
+        let formatted = assert_format_idempotent(source, "wrapped type groups");
+        assert!(formatted.contains("    tuple_field_with_a_long_name: (\n"), "{formatted}");
+        assert!(
+            formatted.contains("    third_parameter_name: [\n        felt; 4\n    ]\n"),
+            "{formatted}"
+        );
+        assert_within_line_limit(&formatted);
+    }
+
+    #[test]
+    fn wraps_long_commented_type_bodies_while_preserving_comment_placement() {
+        let source = "\
+type Outer = struct { # fields
+    # standalone comment
+    inner: struct { lower_bound_key_value: u128, upper_bound_key_value: u128, extra_field: felt }, # inner
+
+    # nested comments
+    other: struct {
+        # first
+        first: felt, second: felt
+    } # other
+} # outer
+
+enum VeryLongEnumName : u16 { FIRST_VARIANT_WITH_A_LONG_NAME = 1, SECOND_VARIANT_WITH_A_LONG_NAME = 2,
+    THIRD = 3 # third
+}
+";
+        let formatted = assert_format_idempotent(source, "commented type bodies");
+        assert_within_line_limit(&formatted);
+        assert_eq!(
+            formatted,
+            "\
+type Outer = struct { # fields
+    # standalone comment
+    inner: struct {
+        lower_bound_key_value: u128,
+        upper_bound_key_value: u128,
+        extra_field: felt,
+    }, # inner
+
+    # nested comments
+    other: struct {
+        # first
+        first: felt,
+        second: felt,
+    }, # other
+} # outer
+
+enum VeryLongEnumName : u16 {
+    FIRST_VARIANT_WITH_A_LONG_NAME = 1,
+    SECOND_VARIANT_WITH_A_LONG_NAME = 2,
+    THIRD = 3, # third
+}
+"
+        );
+        assert_eq!(
+            print_parsed_module(&formatted, "formatted type bodies"),
+            print_parsed_module(source, "source type bodies"),
+        );
+    }
+
+    #[test]
+    fn keeps_type_body_comment_lines_and_blank_lines_when_expanding() {
+        let source = "\
+enum Status : u16 {
+    A,
+    B
+    # after the last variant
+}
+
+type T = struct {
+    a: felt, b: felt, # ab
+
+
+    # after blanks
+    c: felt # c
+    ,
+    d: felt
+    # after d
+    ,
+    field_with_a_really_long_name: [felt; 4], another_field_with_a_long_name: [u32; 8],
+}
+";
+        let formatted = assert_format_idempotent(source, "type body comment lines");
+        assert_eq!(
+            formatted,
+            "\
+enum Status : u16 {
+    A,
+    B,
+    # after the last variant
+}
+
+type T = struct {
+    a: felt,
+    b: felt, # ab
+
+    # after blanks
+    c: felt, # c
+    d: felt,
+    # after d
+    field_with_a_really_long_name: [felt; 4],
+    another_field_with_a_long_name: [u32; 8],
+}
+"
+        );
+        assert_eq!(
+            print_parsed_module(&formatted, "formatted type bodies"),
+            print_parsed_module(source, "source type bodies"),
+        );
     }
 
     #[test]
