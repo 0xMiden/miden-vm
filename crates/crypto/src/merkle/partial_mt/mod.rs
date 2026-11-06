@@ -288,6 +288,8 @@ impl PartialMerkleTree {
     /// - The depth of the specified node_index is greater than 64 or smaller than 1.
     /// - The specified path is not consistent with other paths in the set (i.e., resolves to a
     ///   different root).
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn add_path(
         &mut self,
         index_value: u64,
@@ -297,6 +299,19 @@ impl PartialMerkleTree {
         let index_value = NodeIndex::new(path.len() as u8, index_value)?;
 
         Self::check_depth(index_value.depth())?;
+
+        // Compute the candidate root and the parent hashes without changing the tree.
+        let mut parent_hashes = [EMPTY_DIGEST; PartialMerkleTree::MAX_DEPTH as usize];
+        let (root, parent_count) =
+            Self::compute_path_nodes(index_value, value, &path, &mut parent_hashes);
+
+        // if the path set is empty (the root is all ZEROs), set the root to the root of the added
+        // path; otherwise, the root of the added path must be identical to the current root
+        let expected_root = self.root();
+        if expected_root != EMPTY_DIGEST && expected_root != root {
+            return Err(MerkleError::ConflictingRoots { expected_root, actual_root: root });
+        }
+
         self.update_depth(index_value.depth());
 
         // add provided node and its sibling to the leaves set
@@ -308,13 +323,14 @@ impl PartialMerkleTree {
         self.nodes.insert(index_value, value);
         self.nodes.insert(sibling_node_index, path[0]);
 
-        // traverse to the root, updating the nodes
+        // traverse to the root, updating the nodes from the staged parent hashes
         let mut index_value = index_value;
-        let node = Poseidon2::merge(&index_value.build_node(value, path[0]));
-        let root = path.iter().skip(1).copied().fold(node, |node, hash| {
+        for (&parent_hash, &sibling_hash) in
+            parent_hashes[..parent_count].iter().zip(path.iter().skip(1))
+        {
             index_value.move_up();
             // insert calculated node to the nodes map
-            self.nodes.insert(index_value, node);
+            self.nodes.insert(index_value, parent_hash);
 
             // if the calculated node was a leaf, remove it from leaves set.
             self.leaves.remove(&index_value);
@@ -332,22 +348,13 @@ impl PartialMerkleTree {
             // - New node can be a calculated node or a "sibling" node from a Merkle Path:
             // --- Calculated node, obviously, never can be a leaf.
             // --- Sibling node can be only a leaf, because otherwise it is not a new node.
-            if self.nodes.insert(sibling_node, hash).is_none() {
+            if self.nodes.insert(sibling_node, sibling_hash).is_none() {
                 self.leaves.insert(sibling_node);
             }
+        }
 
-            Poseidon2::merge(&index_value.build_node(node, hash))
-        });
-
-        // if the path set is empty (the root is all ZEROs), set the root to the root of the added
-        // path; otherwise, the root of the added path must be identical to the current root
-        if self.root() == EMPTY_DIGEST {
+        if expected_root == EMPTY_DIGEST {
             self.nodes.insert(ROOT_INDEX, root);
-        } else if self.root() != root {
-            return Err(MerkleError::ConflictingRoots {
-                expected_root: self.root(),
-                actual_root: root,
-            });
         }
 
         Ok(())
@@ -445,6 +452,30 @@ impl PartialMerkleTree {
             return Err(MerkleError::DepthTooBig(depth as u64));
         }
         Ok(())
+    }
+
+    /// Computes the candidate root and staged parent hashes without changing the tree.
+    ///
+    /// The buffer receives one parent hash for each path node above the leaf. The returned count
+    /// is the number of hashes written to the buffer.
+    fn compute_path_nodes(
+        index_value: NodeIndex,
+        value: Word,
+        path: &MerklePath,
+        parent_hashes: &mut [Word],
+    ) -> (Word, usize) {
+        let mut index_value = index_value;
+        let mut node = Poseidon2::merge(&index_value.build_node(value, path[0]));
+        let mut parent_count = 0;
+
+        for &sibling_hash in path.iter().skip(1) {
+            index_value.move_up();
+            parent_hashes[parent_count] = node;
+            parent_count += 1;
+            node = Poseidon2::merge(&index_value.build_node(node, sibling_hash));
+        }
+
+        (node, parent_count)
     }
 }
 
