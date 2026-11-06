@@ -504,7 +504,7 @@ fuzz-signatures: fuzz-seeds-crypto ## Run bounded Falcon signature and construct
 	@$(FUZZ_CARGO) fuzz run signatures --release --fuzz-dir tools/miden-crypto-fuzz -- $(FUZZ_ARGS)
 
 .PHONY: fuzz-all
-fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
+fuzz-all: fuzz-seeds fuzz-seeds-crypto ## Run all fuzz targets (in sequence)
 	FAILED=0; \
 	$(FUZZ_CARGO) fuzz run sparse_mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
@@ -555,7 +555,7 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 	$(FUZZ_CARGO) fuzz coverage mast_forest_validate --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-seeds
-fuzz-seeds: fuzz-seeds-crypto ## Generate seed corpus files for fuzzing
+fuzz-seeds: ## Generate core seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-vm --features internal --test miden-cli generate_execution_witness_fuzz_seeds -- --ignored --nocapture
