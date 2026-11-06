@@ -1,0 +1,294 @@
+use std::{
+    fmt,
+    future::Future,
+    marker::PhantomData,
+    sync::{Arc, Mutex as DispatchMutex},
+};
+
+use miden_processor::ExecutionWitness;
+use miden_prover::Prover;
+use tokio::{
+    sync::{Mutex, Semaphore, TryAcquireError},
+    time::{Instant, sleep_until, timeout_at},
+};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tonic::{Request, Response, Status};
+
+use crate::{
+    PROTOCOL_VERSION, ServerConfig,
+    failure::{prover_error, status},
+    protocol::{
+        ErrorCode, ProveRequest, ProveResponse, prover_service_server::ProverService as Rpc,
+    },
+};
+
+mod sealed {
+    use miden_core::serde::DeserializationError;
+    use miden_processor::ExecutionWitness;
+
+    pub trait Sealed {
+        fn read(bytes: &[u8]) -> Result<ExecutionWitness, DeserializationError>;
+    }
+}
+
+/// A service input policy implemented only by [`Untrusted`] and [`Trusted`].
+pub trait InputPolicy: sealed::Sealed + Send + Sync + 'static {}
+
+/// A service that uses the bounded reader for externally supplied witness bytes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Untrusted;
+
+/// A service that accepts witness bytes retained inside a trusted proving system.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Trusted;
+
+impl sealed::Sealed for Untrusted {
+    fn read(bytes: &[u8]) -> Result<ExecutionWitness, miden_core::serde::DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
+    }
+}
+impl sealed::Sealed for Trusted {
+    fn read(bytes: &[u8]) -> Result<ExecutionWitness, miden_core::serde::DeserializationError> {
+        ExecutionWitness::read_from_bytes_trusted(bytes)
+    }
+}
+impl InputPolicy for Untrusted {}
+impl InputPolicy for Trusted {}
+
+/// A proving service whose input policy is fixed by its type.
+///
+/// Each instance owns immutable resource configuration. Cloning an instance retains
+/// its input policy and shares its worker, admission capacity, and shutdown state.
+pub struct ProvingService<P: InputPolicy = Untrusted> {
+    pub(crate) state: Arc<State>,
+    policy: PhantomData<P>,
+}
+
+impl<P: InputPolicy> Clone for ProvingService<P> {
+    fn clone(&self) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl ProvingService<Untrusted> {
+    /// Creates the default service for externally supplied witness bytes.
+    pub fn new(config: ServerConfig) -> Self {
+        Self {
+            state: Arc::new(State::new(config)),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl ProvingService<Trusted> {
+    /// Creates a service for witness bytes from trusted producers.
+    pub fn new_trusted(config: ServerConfig) -> Self {
+        Self {
+            state: Arc::new(State::new(config)),
+            policy: PhantomData,
+        }
+    }
+}
+
+impl<P: InputPolicy> ProvingService<P> {
+    /// Returns the resource settings shared by this instance and its clones.
+    pub fn config(&self) -> &ServerConfig {
+        &self.state.config
+    }
+
+    /// Stops admission and queued jobs, then waits for any running proof to exit.
+    ///
+    /// Synchronous proving cannot be interrupted. A disconnected or timed-out job
+    /// retains its worker and admission slot until the blocking operation exits.
+    ///
+    /// # Cancel safety
+    ///
+    /// Shutdown is requested when this future is first polled. Dropping it before
+    /// then has no effect. Once polled, admission remains closed and queued jobs
+    /// remain cancelled even if this future is dropped. Active proof jobs continue.
+    /// Call `shutdown().await` again on this instance or a clone to finish joining
+    /// them. Also retain and await the serving future to finish graceful health
+    /// and connection cleanup.
+    pub async fn shutdown(&self) {
+        self.state.begin_shutdown();
+        self.state.tasks.wait().await;
+    }
+}
+
+impl<P: InputPolicy> fmt::Debug for ProvingService<P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProvingService")
+            .field("config", self.config())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+type TestProver = Arc<dyn Fn(ExecutionWitness) -> Result<Vec<u8>, Status> + Send + Sync>;
+
+pub(crate) struct State {
+    pub config: ServerConfig,
+    prover: Prover,
+    admission: Arc<Semaphore>,
+    ingress: Arc<Semaphore>,
+    health_ingress: Arc<Semaphore>,
+    health_watch_ingress: Arc<Semaphore>,
+    worker: Arc<Mutex<()>>,
+    // Serializes only shutdown and dispatch; never held while proving or awaiting.
+    dispatch: DispatchMutex<()>,
+    shutdown: CancellationToken,
+    pub tasks: TaskTracker,
+    pub response_tasks: TaskTracker,
+    #[cfg(test)]
+    test_prover: Option<TestProver>,
+}
+
+impl State {
+    pub fn new(config: ServerConfig) -> Self {
+        let mut prover = Prover::new()
+            .with_max_prover_memory_bytes(config.vm_memory_bytes())
+            .with_max_precompile_prover_memory_bytes(config.precompile_memory_bytes());
+        if let Some(limits) = config.verification_precompile_limits() {
+            prover = prover.with_verification_precompile_limits(limits.clone());
+        }
+        Self {
+            admission: Arc::new(Semaphore::new(config.capacity().get())),
+            ingress: Arc::new(Semaphore::new(config.capacity().get())),
+            health_ingress: Arc::new(Semaphore::new(config.capacity().get())),
+            health_watch_ingress: Arc::new(Semaphore::new(config.capacity().get())),
+            config,
+            prover,
+            worker: Arc::new(Mutex::new(())),
+            dispatch: DispatchMutex::new(()),
+            shutdown: CancellationToken::new(),
+            tasks: TaskTracker::new(),
+            response_tasks: TaskTracker::new(),
+            #[cfg(test)]
+            test_prover: None,
+        }
+    }
+
+    pub fn begin_shutdown(&self) {
+        let _dispatch = self.dispatch.lock().expect("dispatch lock poisoned");
+        self.admission.close();
+        self.shutdown.cancel();
+        self.tasks.close();
+        self.response_tasks.close();
+    }
+
+    pub fn track_response(&self, future: impl Future<Output = ()> + Send + 'static) {
+        let _dispatch = self.dispatch.lock().expect("dispatch lock poisoned");
+        // Shutdown's connection grace already bounds draining. Serialize this
+        // check with shutdown so no timer can appear after its tracker is joined.
+        if !self.shutdown.is_cancelled() {
+            self.response_tasks.spawn(future);
+        }
+    }
+
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown.clone()
+    }
+
+    pub fn ingress_semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.ingress)
+    }
+
+    pub fn health_ingress_semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.health_ingress)
+    }
+
+    pub fn health_watch_ingress_semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.health_watch_ingress)
+    }
+
+    fn prove<P: InputPolicy>(&self, bytes: &[u8]) -> Result<ProveResponse, Status> {
+        let witness = P::read(bytes).map_err(|_| status(ErrorCode::InvalidWitness))?;
+        let proof = self.prove_witness(witness)?;
+        if proof.len() > self.config.max_proof_bytes() {
+            return Err(status(ErrorCode::ResponseTooLarge));
+        }
+        Ok(ProveResponse { execution_proof: proof })
+    }
+
+    fn prove_witness(&self, witness: ExecutionWitness) -> Result<Vec<u8>, Status> {
+        #[cfg(test)]
+        if let Some(prove) = &self.test_prover {
+            return prove(witness);
+        }
+        Ok(self.prover.prove_full(witness).map_err(prover_error)?.to_bytes())
+    }
+}
+
+#[tonic::async_trait]
+impl<P: InputPolicy> Rpc for ProvingService<P> {
+    #[tracing::instrument(name = "prover_service.prove", skip_all)]
+    async fn prove(
+        &self,
+        request: Request<ProveRequest>,
+    ) -> Result<Response<ProveResponse>, Status> {
+        let deadline = Instant::now()
+            .checked_add(self.config().request_timeout())
+            .ok_or_else(|| status(ErrorCode::Internal))?;
+        let request = request.into_inner();
+        if request.protocol_version != PROTOCOL_VERSION {
+            return Err(status(ErrorCode::UnsupportedVersion));
+        }
+        if request.execution_witness.is_empty() {
+            return Err(status(ErrorCode::InvalidWitness));
+        }
+        if request.execution_witness.len() > self.config().max_witness_bytes() {
+            return Err(status(ErrorCode::RequestTooLarge));
+        }
+
+        let permit = Arc::clone(&self.state.admission).try_acquire_owned().map_err(|error| {
+            status(match error {
+                TryAcquireError::Closed => ErrorCode::ShuttingDown,
+                TryAcquireError::NoPermits => ErrorCode::QueueFull,
+            })
+        })?;
+        tracing::debug!("proof request admitted");
+        // Tokio's mutex serves accepted waiters in FIFO order. Waiting retains
+        // serialized bytes; no blocking task or expanded witness exists yet.
+        let worker = tokio::select! {
+            biased;
+            _ = self.state.shutdown.cancelled() => return Err(status(ErrorCode::ShuttingDown)),
+            _ = sleep_until(deadline) => return Err(status(ErrorCode::DeadlineExceeded)),
+            guard = Arc::clone(&self.state.worker).lock_owned() => guard,
+        };
+        let task = {
+            let _dispatch = self.state.dispatch.lock().expect("dispatch lock poisoned");
+            if self.state.shutdown.is_cancelled() {
+                return Err(status(ErrorCode::ShuttingDown));
+            }
+            if Instant::now() >= deadline {
+                return Err(status(ErrorCode::DeadlineExceeded));
+            }
+            let state = Arc::clone(&self.state);
+            let span = tracing::Span::current();
+            self.state.tasks.spawn_blocking(move || {
+                // These guards belong to the actual blocking operation, even
+                // after the RPC future drops or times out. Unwinding drops them.
+                let _worker = worker;
+                let _permit = permit;
+                span.in_scope(|| {
+                    tracing::debug!("proof job started");
+                    let result = state.prove::<P>(&request.execution_witness);
+                    tracing::debug!("proof job finished");
+                    result
+                })
+            })
+        };
+        let result = timeout_at(deadline, task)
+            .await
+            .map_err(|_| status(ErrorCode::DeadlineExceeded))?
+            .map_err(|_| status(ErrorCode::Internal))??;
+        Ok(Response::new(result))
+    }
+}
+
+#[cfg(test)]
+mod tests;

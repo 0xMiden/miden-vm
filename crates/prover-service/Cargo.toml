@@ -1,0 +1,100 @@
+[package]
+name = "miden-prover-service"
+version.workspace = true
+description = "Remote proving of Miden VM execution witnesses"
+documentation = "https://docs.rs/miden-prover-service"
+readme = "README.md"
+categories = ["cryptography", "network-programming"]
+keywords = ["miden", "prover", "grpc"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+default-run = "miden-prover-service"
+
+[features]
+default = ["server"]
+server = [
+    "dep:clap",
+    "dep:http-body",
+    "dep:miden-core",
+    "dep:miden-precompiles",
+    "dep:miden-precompiles-stark",
+    "dep:miden-processor",
+    "dep:miden-prover",
+    "dep:thiserror",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tokio-util",
+    "dep:tonic-health",
+    "dep:tower",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "tonic/router",
+    "tonic/server",
+]
+
+[[bin]]
+name = "miden-prover-service"
+path = "src/bin/miden-prover-service.rs"
+required-features = ["server"]
+test = false
+bench = false
+
+[[bin]]
+name = "miden-prover-service-trusted"
+path = "src/bin/miden-prover-service-trusted.rs"
+required-features = ["server"]
+test = false
+bench = false
+
+[lib]
+doctest = false
+
+[dependencies]
+clap = { workspace = true, optional = true }
+http-body = { version = "1", optional = true }
+miden-core = { workspace = true, features = ["std"], optional = true }
+miden-precompiles = { workspace = true, features = ["std"], optional = true }
+miden-precompiles-stark = { workspace = true, features = ["prover", "std"], optional = true }
+miden-processor = { workspace = true, features = ["std"], optional = true }
+miden-prover = { workspace = true, features = ["concurrent"], optional = true }
+prost = { version = "0.14", default-features = false, features = ["derive", "std"] }
+thiserror = { workspace = true, features = ["std"], optional = true }
+tokio = { workspace = true, features = ["macros", "net", "rt", "signal", "sync", "time"], optional = true }
+tokio-stream = { version = "0.1", default-features = false, features = ["net"], optional = true }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"], optional = true }
+tonic = { version = "0.14", default-features = false, features = ["channel", "codegen"] }
+tonic-health = { version = "0.14", optional = true }
+tonic-prost = "0.14"
+tower = { version = "0.5", default-features = false, features = ["util"], optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[build-dependencies]
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+
+[dev-dependencies]
+codspeed-criterion-compat.workspace = true
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http2"] }
+hyper-util = { version = "0.1", default-features = false, features = ["client", "http2", "tokio"] }
+miden-assembly.workspace = true
+miden-core-lib = { workspace = true, features = ["std"] }
+miden-verifier = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["io-util", "process"] }
+
+[[test]]
+name = "binaries"
+required-features = ["server"]
+
+[[bench]]
+name = "proving_service"
+harness = false
+required-features = ["server"]
+
+[package.metadata.cargo-shear]
+# The generated gRPC codec refers to this crate.
+ignored = ["tonic-prost"]

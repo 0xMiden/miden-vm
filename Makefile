@@ -18,6 +18,7 @@ help:
 	@printf "  make test-crypto                 # Test specialized crypto feature configurations\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
+	@printf "  make test-prover-service         # Test prover service crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
@@ -266,7 +267,8 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
 		--exclude miden-bench \
-		--exclude miden-crypto-wycheproof-tests
+		--exclude miden-crypto-wycheproof-tests \
+		--exclude miden-prover-service
 
 .PHONY: build-target-miden
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
@@ -458,6 +460,16 @@ check-bench: ## Builds all benchmarks
 .PHONY: bench
 bench: ## Benchmarks either a specific bench or all; accepts 'benchmark=' to select a benchmark
 	cargo bench --profile optimized --features internal $(if $(benchmark),--bench $(benchmark),)
+
+PROVER_PERF_RESULTS ?= target/prover-service-perf
+PROVER_PERF_FLAGS ?=
+
+.PHONY: bench-prover-service test-prover-service-perf
+bench-prover-service: ## Compares service and native proving; pass PROVER_PERF_FLAGS=--enforce to fail on regressions
+	bash scripts/prover-service-perf.sh "$(PROVER_PERF_RESULTS)" $(PROVER_PERF_FLAGS)
+
+test-prover-service-perf: ## Tests the performance comparison and invalid-result handling
+	bash scripts/test-prover-service-perf.sh
 
 # ============================================================
 # Fuzzing targets

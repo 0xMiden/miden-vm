@@ -29,6 +29,7 @@ members = [
     "crates/package-registry-local",
     "crates/miden-format",
     "crates/project",
+    "crates/prover-service",
     "crates/serde-utils",
     "crates/test-serialization-macros",
     "crates/test-utils",

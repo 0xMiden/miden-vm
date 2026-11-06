@@ -33,6 +33,8 @@
 - [BREAKING] Reduced the full aligned MVM and PVM widths from 280/768 to 272/760. Both proof relations and recursive verifier roots change ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
 - Added per-AIR precomputation of challenge-only terms to native MVM and PVM constraint evaluation ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
 - Improved native VM and PVM proving through interleaved LogUp batch inversion and quotient-buffer reuse. PVM STORE/MUL auxiliary traces are allocated at their final width to avoid copying lookup columns. Parallelized PVM integer and Keccak trace packing in concurrent builds ([#4095](https://github.com/0xMiden/miden-vm/pull/4095)).
+- Added a gRPC proving service and Rust client for serialized execution witnesses, with separate trusted and untrusted service types ([#4097](https://github.com/0xMiden/miden-vm/pull/4097)).
+- [BREAKING] The proving service requires exactly one request message for proving and health RPCs. It rejects trailing messages and bounds aggregate uploads by the configured message limit plus the five-byte gRPC header.
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
