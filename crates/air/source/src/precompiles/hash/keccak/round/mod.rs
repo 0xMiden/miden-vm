@@ -140,6 +140,8 @@ impl BaseAir<Felt> for KeccakRoundAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         ROUND_PERIOD
     }
@@ -166,7 +168,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         build_logup_aux_trace(self, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         // Phase 1: local row constraints, replicated per lane over its
         // disjoint column band. The periodic program is shared — every lane
         // sits on the same program slot each row.

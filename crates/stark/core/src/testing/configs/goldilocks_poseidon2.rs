@@ -13,9 +13,9 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::{Hash, TruncatedPermutation};
 use rand::{SeedableRng, rngs::SmallRng};
 
-pub use super::{Felt, PackedFelt, QuadFelt};
+pub use super::{Felt, PackedFelt, PackedQuadFelt, QuadFelt};
 use crate::{
-    air::{MultiAir, ProverStatement, Statement},
+    air::{LiftedAir, MultiAir, ProverStatement, Statement},
     testing::TEST_SEED,
 };
 
@@ -143,6 +143,7 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
 pub fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
+    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let config = test_config();
 
@@ -179,7 +180,7 @@ impl<A> TestMultiAir<A> {
 
 impl<A> MultiAir<Felt, QuadFelt> for TestMultiAir<A>
 where
-    A: crate::air::LiftedAir<Felt, QuadFelt>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     type Air = A;
 
@@ -191,7 +192,8 @@ where
 /// Prove and verify multiple traces sharing one AIR.
 pub fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
 where
-    A: crate::air::LiftedAir<Felt, QuadFelt> + Clone,
+    A: LiftedAir<Felt, QuadFelt> + Clone,
+    A::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();

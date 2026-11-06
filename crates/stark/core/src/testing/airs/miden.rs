@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{Algebra, Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
@@ -65,6 +65,8 @@ impl<F> BaseAir<F> for DummyMidenAir {
 }
 
 impl<F: Field, EF: Field> LiftedAir<F, EF> for DummyMidenAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -90,7 +92,7 @@ impl<F: Field, EF: Field> LiftedAir<F, EF> for DummyMidenAir {
         (aux, EF::zero_vec(self.num_aux_cols))
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         eval_miden_constraints(builder);
     }
 }
