@@ -15,6 +15,7 @@
 
 #### Changes
 
+- Added `scripts/check-user-doc-cycles.sh` to verify user-facing core library and assembly instruction cycle counts against generated MASM docs and measured `clk` fixtures ([#3111](https://github.com/0xMiden/miden-vm/issues/3111)).
 - [BREAKING] `PrecompileWork::class` and `PrecompileLimits::class` now take `&WorkClass` instead of `WorkClass`. Callers must pass `&WorkClass` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#4113](https://github.com/0xMiden/miden-vm/pull/4113)).
 - [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest.
@@ -198,6 +199,7 @@
 
 #### Changes
 
+- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
 - Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).

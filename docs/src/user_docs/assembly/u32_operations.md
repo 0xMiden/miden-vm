@@ -10,6 +10,8 @@ For instructions where one or more operands can be provided as immediate paramet
 
 In all the table below, the number of cycles it takes for the VM to execute each instruction is listed beneath the instruction.
 
+Where cycle counts are checked by CI fixtures, they come from reference measurement programs; surrounding code (padding, stack setup, call overhead) can change the observed cost of a call site.
+
 ### Notes on Undefined Behavior
 
 Most of the instructions documented below expect to receive operands whose values are valid `u32`
@@ -111,7 +113,7 @@ The message is hashed and turned into a field element. If the error code is omit
 | u32shr <br /> - *(20 cycles)* <br /> u32shr.*b* <br /> - *(5 cycles)*   | [b, a, ...]    | [c, ...]      | $c \leftarrow \lfloor a/2^b \rfloor$ <br /> Undefined if $a \ge 2^{32}$ or $b > 31$                                              |
 | u32rotl <br /> - *(18 cycles)* <br /> u32rotl.*b* <br /> - *(3 cycles)* | [b, a, ...]    | [c, ...]      | Computes $c$ by rotating a 32-bit representation of $a$ to the left by $b$ bits. <br /> Undefined if $a \ge 2^{32}$ or $b > 31$  |
 | u32rotr <br /> - *(22 cycles)* <br /> u32rotr.*b* <br /> - *(3 cycles)* | [b, a, ...]    | [c, ...]      | Computes $c$ by rotating a 32-bit representation of $a$ to the right by $b$ bits. <br /> Undefined if $a \ge 2^{32}$ or $b > 31$ |
-| u32popcnt <br /> - *(32 cycles)*                                              | [a, ...]       | [b, ...]      | Computes $b$ by counting the number of set bits in $a$ (hamming weight of $a$). <br /> Undefined if $a \ge 2^{32}$               |
+| u32popcnt <!-- cycle-check: u32popcnt --> <br /> - *(38 cycles)*              | [a, ...]       | [b, ...]      | Computes $b$ by counting the number of set bits in $a$ (hamming weight of $a$). <br /> Undefined if $a \ge 2^{32}$               |
 | u32clz <br /> - *(48 cycles)*                                                     | [a, ...]    | [b, ...]      | Computes $b$ as a number of leading zeros of $a$. <br /> Undefined if $a \ge 2^{32}$               |
 | u32ctz <br /> - *(34 cycles)*                                                     | [a, ...]    | [b, ...]      | Computes $b$ as a number of trailing zeros of $a$. <br /> Undefined if $a \ge 2^{32}$               |
 | u32clo <br /> - *(40 cycles)*                                                     | [a, ...]    | [b, ...]      | Computes $b$ as a number of leading ones of $a$. <br /> Undefined if $a \ge 2^{32}$               |
