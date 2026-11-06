@@ -300,10 +300,10 @@ impl PartialMerkleTree {
 
         Self::check_depth(index_value.depth())?;
 
-        // Compute the candidate root and the parent and sibling hashes without changing the tree.
-        let mut path_nodes = [(EMPTY_DIGEST, EMPTY_DIGEST); PartialMerkleTree::MAX_DEPTH as usize];
-        let (root, path_node_count) =
-            Self::compute_path_nodes(index_value, value, &path, &mut path_nodes);
+        // Compute the candidate root and the parent hashes without changing the tree.
+        let mut parent_hashes = [EMPTY_DIGEST; PartialMerkleTree::MAX_DEPTH as usize];
+        let (root, parent_count) =
+            Self::compute_path_nodes(index_value, value, &path, &mut parent_hashes);
 
         // if the path set is empty (the root is all ZEROs), set the root to the root of the added
         // path; otherwise, the root of the added path must be identical to the current root
@@ -323,9 +323,11 @@ impl PartialMerkleTree {
         self.nodes.insert(index_value, value);
         self.nodes.insert(sibling_node_index, path[0]);
 
-        // traverse to the root, updating the nodes from the staged hashes
+        // traverse to the root, updating the nodes from the staged parent hashes
         let mut index_value = index_value;
-        for &(parent_hash, sibling_hash) in &path_nodes[..path_node_count] {
+        for (&parent_hash, &sibling_hash) in
+            parent_hashes[..parent_count].iter().zip(path.iter().skip(1))
+        {
             index_value.move_up();
             // insert calculated node to the nodes map
             self.nodes.insert(index_value, parent_hash);
@@ -452,28 +454,28 @@ impl PartialMerkleTree {
         Ok(())
     }
 
-    /// Computes the candidate root and staged parent and sibling hashes without changing the tree.
+    /// Computes the candidate root and staged parent hashes without changing the tree.
     ///
-    /// The buffer receives one `(parent_hash, sibling_hash)` pair for each path node above the
-    /// leaf. The returned count is the number of pairs written to the buffer.
+    /// The buffer receives one parent hash for each path node above the leaf. The returned count
+    /// is the number of hashes written to the buffer.
     fn compute_path_nodes(
         index_value: NodeIndex,
         value: Word,
         path: &MerklePath,
-        path_nodes: &mut [(Word, Word)],
+        parent_hashes: &mut [Word],
     ) -> (Word, usize) {
         let mut index_value = index_value;
         let mut node = Poseidon2::merge(&index_value.build_node(value, path[0]));
-        let mut path_node_count = 0;
+        let mut parent_count = 0;
 
         for &sibling_hash in path.iter().skip(1) {
             index_value.move_up();
-            path_nodes[path_node_count] = (node, sibling_hash);
-            path_node_count += 1;
+            parent_hashes[parent_count] = node;
+            parent_count += 1;
             node = Poseidon2::merge(&index_value.build_node(node, sibling_hash));
         }
 
-        (node, path_node_count)
+        (node, parent_count)
     }
 }
 
