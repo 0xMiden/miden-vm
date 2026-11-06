@@ -11,7 +11,6 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_precompiles::UintPrecompile;
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},
     lookup::{
@@ -35,11 +34,11 @@ use crate::prover::{
         eval::{
             COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CONTEXT_GROUP_PTR,
             COL_EC_CREATE_GROUP_PTR, COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR,
-            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0, COL_FRAME_PARAM1, COL_H_BEGIN, COL_IS_AND,
-            COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL,
-            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
-            COL_LHS_BEGIN, COL_MSM_IDX, COL_OUT_MULT, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
-            NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM1, COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL, COL_IS_SUB,
+            COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN,
+            COL_MSM_IDX, COL_OUT_MULT, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH, NUM_MAIN_COLS,
+            TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
     },
@@ -450,7 +449,7 @@ fn corruption_non_binary_is_zero() {
     for col in [COL_ACT, COL_IS_AND, COL_IS_UINT_OP, COL_IS_IS] {
         row[col] = Felt::ONE;
     }
-    row[COL_FRAME_PARAM0] = Felt::from_u32(UintPrecompile::EQ_OP_ID as u32);
+    row[COL_BOUND_PTR] = Felt::ONE;
     row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
     crate::prover::tests::check_local_inputs(
         TranscriptEvalAir,
@@ -462,13 +461,15 @@ fn corruption_non_binary_is_zero() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_add() {
-    // Sub and Is on a uint-op row derive is_add = -1. Materialize the matching
-    // frame parameter 0 (-1 * Add + Sub + Is = 5) so the derived flag's boolean check rejects it.
+    // Sub and Is on a uint-op row derive is_add = -1. Set the matching uint
+    // selectors so the derived flag's boolean check rejects it.
     let mut row = vec![Felt::ZERO; NUM_MAIN_COLS];
     for col in [COL_ACT, COL_IS_UINT_OP, COL_IS_SUB, COL_IS_IS] {
         row[col] = Felt::ONE;
     }
-    row[COL_FRAME_PARAM0] = Felt::from(5u8);
+    row[COL_IS_UINT_ADD] = -Felt::ONE;
+    row[COL_IS_UINT_SUB] = Felt::ONE;
+    row[COL_BOUND_PTR] = Felt::ONE;
     row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
     crate::prover::tests::check_local_inputs(
         TranscriptEvalAir,
@@ -566,10 +567,9 @@ fn uint_value_cannot_be_a_truth_root() {
 }
 
 #[test]
-fn uint_value_rejects_pin_frame_parameters_below_the_root() {
+fn uint_value_frame_must_commit_its_bound_below_the_root() {
     let (mut main, public_root, value_row) = build_uint_value_trace(0x59_02);
     let offset = value_row * NUM_MAIN_COLS;
-    main.values[offset + COL_FRAME_PARAM0] = main.values[offset + COL_BOUND_PTR];
     main.values[offset + COL_FRAME_PARAM1] = main.values[offset + COL_PTR];
     crate::prover::tests::assert_local_rejects_inputs(
         TranscriptEvalAir,

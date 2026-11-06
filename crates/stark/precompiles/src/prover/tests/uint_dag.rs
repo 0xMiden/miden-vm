@@ -24,13 +24,9 @@ use crate::prover::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces, statements::horner_sign_paths},
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
-    transcript::{
-        eval::{
-            COL_FRAME_PARAM0, COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_SUB,
-            COL_OUT_MULT, COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
-            add_flag,
-        },
-        nodes::UintOpId,
+    transcript::eval::{
+        COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_SUB, COL_OUT_MULT, COL_PTR,
+        NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir, add_flag,
     },
 };
 
@@ -321,7 +317,6 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_SUB] = Felt::ONE;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_FRAME_PARAM0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).

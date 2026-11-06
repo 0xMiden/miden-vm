@@ -60,12 +60,13 @@ use crate::prover::{
         eval::{
             COL_A_PTR, COL_ABSORPTION_ID, COL_ACT, COL_B_PTR, COL_BOUND_PTR,
             COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
-            COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
-            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_SUB,
-            COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN,
-            COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PTR,
-            COL_RHS_BEGIN, COL_RHS_END, COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS,
+            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM1,
+            COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP,
+            COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD,
+            COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN, COL_LHS_END,
+            COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PTR, COL_RHS_BEGIN,
+            COL_RHS_END, COL_UINT_DOMAIN_SELECTOR, COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH,
+            NUM_MAIN_COLS,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -1073,20 +1074,21 @@ fn ec_op_col(op: EcOpId) -> Option<usize> {
     }
 }
 
-fn ec_op_id(op: EcOpId) -> u64 {
-    match op {
-        EcOpId::Add => CurvePrecompile::ADD_OP_ID,
-        EcOpId::Sub => CurvePrecompile::SUB_OP_ID,
-        EcOpId::Is => CurvePrecompile::EQ_OP_ID,
-    }
-}
-
 /// Copy two child digests into the `lhs` / `rhs` hash blocks.
 fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &EidosDigest, rhs: &EidosDigest) {
     let lhs = lhs.as_array();
     let rhs = rhs.as_array();
     row[COL_LHS_BEGIN..COL_LHS_END].copy_from_slice(&lhs);
     row[COL_RHS_BEGIN..COL_RHS_END].copy_from_slice(&rhs);
+}
+
+fn write_uint_domain(row: &mut [Felt; NUM_MAIN_COLS], bound_ptr: u32) {
+    let domain = UintDomain::from_bound_ptr(bound_ptr).expect("known uint bound pointer");
+    row[COL_UINT_DOMAIN_SELECTOR] = Felt::from_u8(match domain {
+        UintDomain::U256 | UintDomain::K1Base | UintDomain::K1Scalar => 0,
+        UintDomain::Ed25519Base | UintDomain::Ed25519Scalar | UintDomain::Ed25519Order => 3,
+        UintDomain::P256Base | UintDomain::P256Scalar => 8,
+    });
 }
 
 /// Append one eval row, written by column *constant* so the layout in
@@ -1119,7 +1121,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_MSM_EXPR] = Felt::from(*expr);
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group);
             row[COL_BOUND_PTR] = Felt::from(*bound);
-            row[COL_FRAME_PARAM0] = Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32);
+            write_uint_domain(&mut row, *bound);
             row[COL_FRAME_PARAM1] = Felt::from(n_pairs);
             if is_last {
                 row[COL_PTR] = Felt::from(*val);
@@ -1160,6 +1162,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
             row[COL_UINT_VALUE_BOUND_PTR] = Felt::from(*bound_ptr);
+            write_uint_domain(&mut row, *bound_ptr);
         },
         NodeKind::UintOp {
             op,
@@ -1179,9 +1182,9 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             }
             row[COL_PTR] = Felt::from(*r_ptr); // result ptr
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
+            write_uint_domain(&mut row, *bound_ptr);
             row[COL_A_PTR] = Felt::from(*a_ptr);
             row[COL_B_PTR] = Felt::from(*b_ptr);
-            row[COL_FRAME_PARAM0] = Felt::from(*op as u8);
             // Frame parameter 1 stays 0: the bound rides the Binding / uint-relation buses.
         },
         NodeKind::EcCreate {
@@ -1201,8 +1204,9 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_EC_CREATE_X_PTR] = Felt::from(*x_ptr); // x coord (0 on PAI)
             row[COL_EC_CREATE_Y_PTR] = Felt::from(*y_ptr); // y coord (0 on PAI)
             row[COL_EC_CREATE_GROUP_PTR] = Felt::from(*group_ptr); // curve VALUE group_ptr
-            // COL_FRAME_PARAM0 stays 0: curve VALUE_OP_ID. COL_EC_CONTEXT_GROUP_PTR is not live on
-            // create rows.
+            if !is_pai {
+                write_uint_domain(&mut row, *bound_ptr);
+            }
         },
         NodeKind::EcBinOp {
             op,
@@ -1221,7 +1225,6 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PTR] = Felt::from(*r_ptr); // result (0 for Is)
             row[COL_A_PTR] = Felt::from(*p_ptr); // P
             row[COL_B_PTR] = Felt::from(*q_ptr); // Q
-            row[COL_FRAME_PARAM0] = Felt::from_u32(ec_op_id(*op) as u32);
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group_ptr); // 0 for Is
         },
         NodeKind::EcMsm { .. } => unreachable!("EcMsm is laid as a multi-row run above"),
