@@ -70,7 +70,9 @@ fn fixture_expected_cycles(fixture_id: &str) -> u64 {
                 });
         }
     }
-    panic!("fixture id {fixture_id:?} with an `expected` field not found in assembly-cycle-fixtures.toml");
+    panic!(
+        "fixture id {fixture_id:?} with an `expected` field not found in assembly-cycle-fixtures.toml"
+    );
 }
 
 /// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
