@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.36.4 (Unreleased)
+## v0.36.5 (Unreleased)
+
+## v0.36.4 (2026-11-06)
 
 #### Changes
 
@@ -452,7 +454,7 @@
 
 ## miden-vm v0.25.2 (2026-07-11)
 
-- Support constructing initial `ResumeContext` for execution stepping from a `Package`, in order to ensure debug context is correctly initialized
+- Support constructing initial `ResumeContext` for execution stepping from a `Package` so debug context is correctly initialized
 
 ## miden-vm v0.25.1 (2026-07-10)
 
@@ -1021,7 +1023,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Standardized operand-stack ordering around a unified little-endian (LE) convention (low limb/coeff closest to the top). This includes multi-limb integer ops, extension field elements, and streaming memory operations. Also remapped the sponge state and adjusts hperm/digest extraction plus advice hash-insert instructions for consistent LE semantics. ([#2547](https://github.com/0xMiden/miden-vm/pull/2547)).
 - [BREAKING] Renamed `u32overflowing_mul` to `u32widening_mul`, `u32overflowing_madd` to `u32widening_madd`, and `math::u64::overflowing_mul` to `math::u64::widening_mul` ([#2584](https://github.com/0xMiden/miden-vm/pull/2584)).
-- [BREAKING] Changed the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Changed the VM's native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
 
 #### Enhancements
 
