@@ -182,8 +182,19 @@ impl Deserializable for SignatureHeader {
 // ================================================================================================
 
 /// A polynomial used as the `s2` component of the signature.
+///
+/// A valid `SignaturePoly` has 512 coefficients in `-2047..=2047` whose Falcon compressed
+/// encoding fits the fixed 625-byte representation. All constructors enforce that invariant and
+/// the coefficient vector is private, so a caller cannot bypass it. Use [`Deref`] for read access.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignaturePoly(pub Polynomial<FalconFelt>);
+// The shared macro contributes a fixed 100-case arbitrary-value roundtrip when the `arbitrary`
+// feature is enabled under test. It does not cover raw coefficient construction or the encoding
+// boundary; those properties live in this module's tests.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
+pub struct SignaturePoly(Polynomial<FalconFelt>);
 
 impl Deref for SignaturePoly {
     type Target = Polynomial<FalconFelt>;
@@ -193,15 +204,13 @@ impl Deref for SignaturePoly {
     }
 }
 
-impl From<Polynomial<FalconFelt>> for SignaturePoly {
-    fn from(pk_poly: Polynomial<FalconFelt>) -> Self {
-        Self(pk_poly)
-    }
-}
-
 impl TryFrom<&[i16; N]> for SignaturePoly {
     type Error = ();
 
+    /// Builds a signature polynomial from balanced coefficients.
+    ///
+    /// Returns an error when a coefficient is outside `-2047..=2047` or when the compressed
+    /// encoding would exceed the fixed 625-byte capacity.
     fn try_from(coefficients: &[i16; N]) -> Result<Self, Self::Error> {
         if are_coefficients_valid(coefficients) {
             Ok(Self(coefficients.to_vec().into()))
@@ -211,7 +220,65 @@ impl TryFrom<&[i16; N]> for SignaturePoly {
     }
 }
 
-impl Serializable for &SignaturePoly {
+impl TryFrom<Polynomial<FalconFelt>> for SignaturePoly {
+    type Error = ();
+
+    /// Builds a signature polynomial from field elements after converting them to their balanced
+    /// representatives and validating the compressed encoding size.
+    fn try_from(polynomial: Polynomial<FalconFelt>) -> Result<Self, Self::Error> {
+        let coefficients = polynomial.to_balanced_values();
+        if are_coefficients_valid(&coefficients) {
+            Ok(Self(polynomial))
+        } else {
+            Err(())
+        }
+    }
+}
+
+/// Generates coefficients that always fit the fixed encoding by spending at most the 392 bits
+/// available above the 512 * 9-bit baseline. The strategy is shared by the `Arbitrary`
+/// implementation and the accepted-value property test.
+#[cfg(any(test, feature = "arbitrary"))]
+fn accepted_coefficient_strategy() -> proptest::strategy::BoxedStrategy<[i16; N]> {
+    use proptest::prelude::*;
+
+    (
+        proptest::collection::vec(0u8..=15, N),
+        proptest::collection::vec(0i16..=127, N),
+        proptest::collection::vec(any::<bool>(), N),
+    )
+        .prop_map(|(extras, lows, negative)| {
+            let mut remaining = SIG_POLY_BYTE_LEN * 8 - N * 9;
+            let mut coefficients = [0i16; N];
+            for index in 0..N {
+                let extra = (extras[index] as usize).min(remaining);
+                remaining -= extra;
+                let magnitude = ((extra as i16) << 7) + lows[index];
+                coefficients[index] = if negative[index] { -magnitude } else { magnitude };
+            }
+            coefficients
+        })
+        .boxed()
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for SignaturePoly {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        accepted_coefficient_strategy()
+            .prop_map(|coefficients| {
+                SignaturePoly::try_from(&coefficients)
+                    .expect("budget-aware Arbitrary strategy must produce valid coefficients")
+            })
+            .boxed()
+    }
+}
+
+impl Serializable for SignaturePoly {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let sig_coeff = self.0.to_balanced_values();
         let mut sk_bytes = vec![0_u8; SIG_POLY_BYTE_LEN];
@@ -221,6 +288,9 @@ impl Serializable for &SignaturePoly {
         let mut v = 0;
         let mut t;
         let mut w;
+
+        // Constructor validation guarantees that the encoded length fits SIG_POLY_BYTE_LEN bytes,
+        // so the fixed-size buffer is never overrun.
 
         // For each coefficient of x:
         // - the sign is encoded on 1 bit
@@ -320,7 +390,7 @@ impl Deserializable for SignaturePoly {
                 "Failed to decode signature: Non-zero trailing bytes".to_string(),
             ));
         }
-        Ok(Polynomial::new(coefficients.to_vec()).into())
+        Ok(Self(Polynomial::new(coefficients.to_vec())))
     }
 }
 
@@ -363,14 +433,26 @@ fn verify_helper<V: FalconVariant>(
     length_squared < SIG_L2_BOUND
 }
 
-/// Checks whether a set of coefficients is a valid one for a signature polynomial.
+/// Checks whether a set of coefficients is valid for a signature polynomial.
+///
+/// The check mirrors the encoder exactly. Each coefficient occupies `9 + (abs(c) >> 7)` bits, and
+/// the fixed compressed representation holds `SIG_POLY_BYTE_LEN * 8` bits. A coefficient range
+/// check alone is insufficient: for example, 512 coefficients of magnitude 128 have a squared norm
+/// below `SIG_L2_BOUND` but need 640 encoded bytes.
 fn are_coefficients_valid(x: &[i16]) -> bool {
     if x.len() != N {
         return false;
     }
 
+    let capacity_bits = SIG_POLY_BYTE_LEN * 8;
+    let mut encoded_bits = 0;
     for &c in x {
         if !(-2047..=2047).contains(&c) {
+            return false;
+        }
+
+        encoded_bits += 9 + (c.unsigned_abs() as usize >> 7);
+        if encoded_bits > capacity_bits {
             return false;
         }
     }
@@ -383,6 +465,7 @@ fn are_coefficients_valid(x: &[i16]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use proptest::{collection::vec, prelude::*};
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
 
@@ -419,12 +502,232 @@ mod tests {
     fn signature_poly_rejects_nonzero_trailing_bytes() {
         let coefficients = [0i16; N];
         let poly = SignaturePoly::try_from(&coefficients).unwrap();
-        let mut encoded = (&poly).to_bytes();
+        let mut encoded = poly.to_bytes();
         assert!(SignaturePoly::read_from_bytes(&encoded).is_ok());
 
         *encoded.last_mut().unwrap() = 1;
         let err = SignaturePoly::read_from_bytes(&encoded).unwrap_err();
 
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    // CONSTRUCTOR AND ENCODING PROPERTIES
+    // --------------------------------------------------------------------------------------------
+
+    /// The fixed compressed signature-polynomial capacity in bits.
+    const SIG_POLY_BITS: usize = SIG_POLY_BYTE_LEN * 8;
+
+    /// Independently computes the compressed bit length used by the encoder:
+    /// one sign bit, seven low bits, and one unary terminator plus `abs(c) >> 7` high bits.
+    fn encoded_bit_len(coefficients: &[i16; N]) -> usize {
+        coefficients.iter().map(|c| 9 + (c.unsigned_abs() as usize >> 7)).sum()
+    }
+
+    /// Builds vectors by whole-vector family so the encoded budget is the deciding property.
+    ///
+    /// `accepted_coefficient_strategy` always fits. The boundary family sets between 0 and 512
+    /// coefficients to magnitude 128, so counts at or below 392 are accepted and counts above are
+    /// rejected. The high family always exceeds the budget, and the sparse family accepts one
+    /// coefficient of any allowed magnitude. This exercises both constructor outcomes and varied
+    /// under-budget, boundary, and extreme values.
+    fn boundary_coefficient_strategy() -> impl Strategy<Value = [i16; N]> {
+        (0usize..=N, vec(any::<bool>(), N)).prop_map(|(count, negative)| {
+            let mut coefficients = [0i16; N];
+            for (index, coefficient) in coefficients.iter_mut().enumerate() {
+                if index < count {
+                    *coefficient = if negative[index] { -128 } else { 128 };
+                }
+            }
+            coefficients
+        })
+    }
+
+    fn high_coefficient_strategy() -> impl Strategy<Value = [i16; N]> {
+        (vec(128i16..=2047, N), vec(any::<bool>(), N)).prop_map(|(magnitudes, negative)| {
+            let mut coefficients = [0i16; N];
+            for (index, (&magnitude, &negative)) in
+                magnitudes.iter().zip(negative.iter()).enumerate()
+            {
+                coefficients[index] = if negative { -magnitude } else { magnitude };
+            }
+            coefficients
+        })
+    }
+
+    fn sparse_extreme_strategy() -> impl Strategy<Value = [i16; N]> {
+        (0usize..N, 0i16..=2047, any::<bool>()).prop_map(|(index, magnitude, negative)| {
+            let mut coefficients = [0i16; N];
+            coefficients[index] = if negative { -magnitude } else { magnitude };
+            coefficients
+        })
+    }
+
+    fn coefficient_strategy() -> BoxedStrategy<[i16; N]> {
+        prop_oneof![
+            2 => accepted_coefficient_strategy(),
+            1 => boundary_coefficient_strategy().boxed(),
+            1 => high_coefficient_strategy().boxed(),
+            1 => sparse_extreme_strategy().boxed(),
+        ]
+        .boxed()
+    }
+
+    fn magnitude_coefficients(count: usize, magnitude: i16) -> [i16; N] {
+        let mut coefficients = [0i16; N];
+        for coefficient in coefficients.iter_mut().take(count) {
+            *coefficient = magnitude;
+        }
+        coefficients
+    }
+
+    #[test]
+    fn coefficient_strategy_exercises_both_constructor_outcomes() {
+        use proptest::{strategy::ValueTree, test_runner::TestRunner};
+
+        let mut runner = TestRunner::deterministic();
+        let mut accepted = 0usize;
+        let mut rejected = 0usize;
+        for _ in 0..256 {
+            let coefficients = coefficient_strategy().new_tree(&mut runner).unwrap().current();
+            if SignaturePoly::try_from(&coefficients).is_ok() {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+
+        assert!(accepted > 0, "strategy never produced an accepted polynomial");
+        assert!(rejected > 0, "strategy never produced a rejected polynomial");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn signature_poly_constructor_matches_encoded_budget(
+            coefficients in coefficient_strategy()
+        ) {
+            let bits = encoded_bit_len(&coefficients);
+            match SignaturePoly::try_from(&coefficients) {
+                Ok(poly) => {
+                    prop_assert!(bits <= SIG_POLY_BITS);
+                    let bytes = poly.to_bytes();
+                    prop_assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
+                    let decoded = SignaturePoly::read_from_bytes(&bytes).unwrap();
+                    prop_assert_eq!(decoded, poly);
+                },
+                Err(()) => prop_assert!(bits > SIG_POLY_BITS),
+            }
+        }
+
+        #[test]
+        fn accepted_signature_poly_roundtrips(
+            coefficients in accepted_coefficient_strategy()
+        ) {
+            let poly = SignaturePoly::try_from(&coefficients)
+                .expect("budget-aware generator must be accepted");
+            let bytes = poly.to_bytes();
+            prop_assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
+            let decoded = SignaturePoly::read_from_bytes(&bytes).unwrap();
+            prop_assert_eq!(decoded, poly);
+        }
+
+        #[test]
+        fn signature_poly_polynomial_constructor_matches_raw_constructor(
+            coefficients in coefficient_strategy()
+        ) {
+            let polynomial =
+                Polynomial::new(coefficients.iter().map(|&c| FalconFelt::new(c)).collect());
+            let from_polynomial = SignaturePoly::try_from(polynomial);
+            let from_raw = SignaturePoly::try_from(&coefficients);
+
+            prop_assert_eq!(from_polynomial.is_ok(), from_raw.is_ok());
+            if let Ok(poly) = from_polynomial {
+                let bytes = poly.to_bytes();
+                prop_assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
+                prop_assert_eq!(SignaturePoly::read_from_bytes(&bytes).unwrap(), poly);
+            }
+        }
+    }
+
+    #[test]
+    fn signature_poly_polynomial_constructor_rejects_invalid_shapes() {
+        let wrong_length = Polynomial::new(vec![FalconFelt::new(0); N - 1]);
+        assert!(SignaturePoly::try_from(wrong_length).is_err());
+
+        let out_of_range = Polynomial::new(vec![FalconFelt::new(2048); N]);
+        assert!(SignaturePoly::try_from(out_of_range).is_err());
+
+        let over_budget = Polynomial::new(vec![FalconFelt::new(2047); N]);
+        assert!(SignaturePoly::try_from(over_budget).is_err());
+    }
+
+    #[test]
+    fn signature_poly_polynomial_constructor_uses_balanced_values() {
+        // 12288 is the canonical representative of -1 in the Falcon field. The constructor must
+        // validate the balanced value and the decoder must recover the same canonical element.
+        let polynomial = Polynomial::new(vec![FalconFelt::new(12288); N]);
+        let poly = SignaturePoly::try_from(polynomial).unwrap();
+        let bytes = poly.to_bytes();
+        assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
+        let decoded = SignaturePoly::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, poly);
+    }
+
+    #[test]
+    fn signature_poly_rejects_coefficients_that_exceed_encoded_capacity() {
+        let mut single_2047 = [0i16; N];
+        single_2047[0] = 2047;
+        let mut mixed_signs = magnitude_coefficients(392, 128);
+        for coefficient in mixed_signs.iter_mut().take(392).skip(1).step_by(2) {
+            *coefficient = -128;
+        }
+
+        let cases = [
+            ([2047i16; N], false),
+            ([-2047i16; N], false),
+            ([128i16; N], false),
+            (magnitude_coefficients(392, 128), true),
+            (magnitude_coefficients(393, 128), false),
+            (single_2047, true),
+            (mixed_signs, true),
+            ([0i16; N], true),
+        ];
+
+        for (coefficients, expected_ok) in cases {
+            match SignaturePoly::try_from(&coefficients) {
+                Ok(poly) => {
+                    let bytes = poly.to_bytes();
+                    assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
+                    let decoded = SignaturePoly::read_from_bytes(&bytes).unwrap();
+                    assert_eq!(decoded, poly);
+                    assert!(expected_ok, "constructor accepted an over-budget polynomial");
+                },
+                Err(()) => assert!(!expected_ok, "constructor rejected a representable polynomial"),
+            }
+        }
+    }
+
+    #[test]
+    fn encoded_budget_boundary_is_exact() {
+        let exact = magnitude_coefficients(392, 128);
+        assert_eq!(encoded_bit_len(&exact), SIG_POLY_BITS);
+        assert_eq!(encoded_bit_len(&exact).div_ceil(8), SIG_POLY_BYTE_LEN);
+        assert!(SignaturePoly::try_from(&exact).is_ok());
+
+        let over = magnitude_coefficients(393, 128);
+        assert_eq!(encoded_bit_len(&over), SIG_POLY_BITS + 1);
+        assert!(SignaturePoly::try_from(&over).is_err());
+    }
+
+    #[test]
+    fn norm_bound_does_not_guarantee_encoded_size() {
+        let coefficients = [128i16; N];
+        let polynomial =
+            Polynomial::new(coefficients.iter().map(|&c| FalconFelt::new(c)).collect());
+
+        assert!(polynomial.norm_squared() < SIG_L2_BOUND);
+        assert_eq!(encoded_bit_len(&coefficients), 5120);
+        assert_eq!(encoded_bit_len(&coefficients).div_ceil(8), 640);
     }
 }
