@@ -33,10 +33,10 @@ crate::eidos_domain_registry! {
             }
             pub FALCON_HASH_TO_POINT: FalconHashToPointDomain {
                 local_id: 0x0004,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Falcon512-Eidos hash-to-point construction.",
-                schema: "params = [0, 0, 0]; absorb the eight-Felt nonce, then the four-Felt message padded with four zeros; repeat 128 times: compress an all-zero block, continue the chain from the Eidos CV without Falcon-field reduction, and emit its four Felts reduced modulo 12289 in order; 2^63 mod 12289 = 2832",
+                schema: "params = [0, 0, 0]; absorb the eight-Felt nonce, then the four-Felt message padded with four zeros to derive a fixed seed; for counters 0 through 127, compress [counter, 0, 0, 0, 0, 0, 0, 0] under that seed and emit its four Felts reduced modulo 12289 in order; 2^63 mod 12289 = 2832",
             }
             pub FALCON_PUBLIC_KEY: FalconPublicKeyDomain {
                 local_id: 0x0005,
@@ -47,14 +47,14 @@ crate::eidos_domain_registry! {
             }
             pub AEAD_CTR_KEY: AeadCtrKeyDomain {
                 local_id: 0x0006,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Eidos AEAD counter-mode key derivation.",
                 schema: "params = [0, 0, 0]; one fixed key || nonce block",
             }
             pub AEAD_MAC_KEY: AeadMacKeyDomain {
                 local_id: 0x0007,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Eidos AEAD polynomial-MAC key derivation.",
                 schema: "params = [0, 0, 0]; one fixed key || nonce block",
@@ -85,7 +85,56 @@ crate::eidos_domain_registry! {
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Canonical Eidos LMCS leaf hashing.",
-                schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; the verifier fixes the row boundaries and widths",
+                schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; an empty leaf returns the unmasked initial CV; the verifier fixes the row boundaries and widths",
+            }
+            pub ECGFP5_SEAL_KEY: Ecgfp5SealKeyDomain {
+                local_id: 0x000c,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message key expansion; four-Felt output.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = extracted secret(4), context digest(4)",
+            }
+            pub ECGFP5_SEAL_NONCE: Ecgfp5SealNonceDomain {
+                local_id: 0x000d,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message nonce expansion; four-Felt output.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = extracted secret(4), context digest(4)",
+            }
+            pub ECGFP5_SEAL_CONTEXT: Ecgfp5SealContextDomain {
+                local_id: 0x000e,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos application-context commitment.",
+                schema: "param0 = context length in Felts; param1 = 0; param2 = 0; payload = application context",
+            }
+            pub ECGFP5_SEAL_EXTRACT: Ecgfp5SealExtractDomain {
+                local_id: 0x000f,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message DH extraction; four-Felt output.",
+                schema: "param0 = 24; param1 = 0; param2 = 0; payload = shared point S(5), zero(3), ephemeral point R(5), zero(3), recipient point Q(5), zero(3)",
+            }
+            pub ECGFP5_PUBLIC_KEY: Ecgfp5PublicKeyDomain {
+                local_id: 0x0010,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 public-key commitment.",
+                schema: "param0 = 5; param1 = 0; param2 = 0; payload = canonical point encoding in increasing coefficient order",
+            }
+            pub ECGFP5_PREPROCESSED_PUBLIC_KEY: Ecgfp5PreprocessedPublicKeyDomain {
+                local_id: 0x0011,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 preprocessed public-key commitment.",
+                schema: "param0 = 80; param1 = 0; param2 = 0; payload = twenty ordered Merkle roots of paired 16-bit multiplication tables",
+            }
+            pub ECGFP5_SEAL_BYTE_CONTEXT: Ecgfp5SealByteContextDomain {
+                local_id: 0x0012,
+                version: DomainVersion::numbered(1),
+                encoding: ByteString,
+                description: "EcGFp5-Eidos byte-message application-context commitment.",
+                schema: "param0 = context length in bytes; param1 = 0; param2 = 0; payload = application context",
             }
         }
     }

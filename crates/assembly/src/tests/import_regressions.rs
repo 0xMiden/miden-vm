@@ -192,7 +192,7 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
     let module = r#"
         namespace m
 
-        const LOCAL = foo::BAR
+        pub const LOCAL = foo::BAR
         use external::module as foo
     "#;
 

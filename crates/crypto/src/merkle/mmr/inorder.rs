@@ -13,6 +13,10 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, Serializable};
 
 /// Index of nodes in a perfectly balanced binary tree based on an in-order tree walk.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct InOrderIndex {
     idx: usize,
 }
@@ -167,9 +171,15 @@ mod test {
     /// silently constructing an index the traversal operations assume cannot exist.
     #[test]
     fn deserialization_rejects_the_zero_index() {
+        use crate::utils::DeserializationError;
+
         let mut bytes = Vec::new();
         bytes.write_usize(0);
-        assert!(InOrderIndex::read_from_bytes(&bytes).is_err());
+        assert!(matches!(
+            InOrderIndex::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == "InOrderIndex must be nonzero"
+        ));
     }
 
     proptest! {
@@ -211,5 +221,31 @@ mod test {
         let bytes = index.to_bytes();
         let index2 = InOrderIndex::read_from_bytes(&bytes).unwrap();
         assert_eq!(index, index2);
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::InOrderIndex;
+
+    impl Arbitrary for InOrderIndex {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // In-order indices are one-based; zero is the invalid sentinel the decoder rejects.
+            (1usize..)
+                .prop_map(|idx| {
+                    InOrderIndex::new(
+                        core::num::NonZeroUsize::new(idx).expect("range starts at one"),
+                    )
+                })
+                .boxed()
+        }
     }
 }

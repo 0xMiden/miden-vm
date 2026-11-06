@@ -6,7 +6,7 @@
 
 use super::{
     DIGEST_WIDTH, PACKED_LANES, PackedU32ChainingValue, domain::EidosDomain,
-    domains::GenericFeltSequenceDomain, encoding, primitive::IV,
+    domains::GenericFeltSequenceDomain, primitive::IV,
 };
 use crate::Felt;
 
@@ -20,20 +20,22 @@ pub(super) const MERKLE_NODE_INIT_CV: [u32; 8] = init_cv(0, [0; 3]);
 
 /// Construct an Eidos initial chaining value from the BLAKE3 IV layout.
 ///
-/// The tag and three domain-defined parameters occupy the four even u32 lanes. The four
-/// odd lanes are fixed and masked, so the initial CV is already in the same 252-bit subspace as
-/// every Eidos compression output. Each parameter may use its complete u32 lane.
+/// The tag and three domain-defined parameters occupy the four even u32 lanes. The odd lanes
+/// hold the full IV words. The first three odd lanes have their top bit set, separating initial
+/// CVs from compression outputs, whose odd-lane top bits are cleared.
 pub(super) const fn init_cv(tag: u32, params: [u32; 3]) -> [u32; 8] {
-    [
-        tag,
-        IV[1] & encoding::ODD_LANE_MASK,
-        params[0],
-        IV[3] & encoding::ODD_LANE_MASK,
-        params[1],
-        IV[5] & encoding::ODD_LANE_MASK,
-        params[2],
-        IV[7] & encoding::ODD_LANE_MASK,
-    ]
+    [tag, IV[1], params[0], IV[3], params[1], IV[5], params[2], IV[7]]
+}
+
+/// Packs an initial CV without applying the compression output mask.
+///
+/// Each fixed IV high word is below `u32::MAX`, so even a low word of `u32::MAX` produces a
+/// value below the Goldilocks modulus `0xffff_ffff_0000_0001`. This bound is specific to the
+/// initial CV; arbitrary compression outputs still require masking.
+#[inline]
+pub(super) fn init_u64_cv(tag: u32, params: [u32; 3]) -> [u64; DIGEST_WIDTH] {
+    let cv = init_cv(tag, params);
+    core::array::from_fn(|word| ((cv[2 * word + 1] as u64) << 32) | cv[2 * word] as u64)
 }
 
 #[inline]
@@ -44,7 +46,7 @@ pub(super) fn init_packed_u32_cv(tag: u32, params: [u32; 3]) -> PackedU32Chainin
 
 #[inline]
 pub(super) fn init_packed_cv(tag: u32, params: [u32; 3]) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
-    encoding::pack_cv_to_felts(init_packed_u32_cv(tag, params))
+    init_u64_cv(tag, params).map(|value| [Felt::new_unchecked(value); PACKED_LANES])
 }
 
 #[inline]
@@ -52,7 +54,7 @@ pub(super) fn init_packed_u64_cv(
     tag: u32,
     params: [u32; 3],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    encoding::pack_cv_to_packed_u64s(init_packed_u32_cv(tag, params))
+    init_u64_cv(tag, params).map(|value| [value; PACKED_LANES])
 }
 
 /// Fold an exact logical input into fixed-size, zero-padded physical blocks.
@@ -112,13 +114,21 @@ mod tests {
         for (tag, params) in [(0, [0, 0, 0]), (u32::MAX, [u32::MAX; 3]), (7, [42, 11, 9])] {
             let cv = init_cv(tag, params);
             assert_eq!(cv[0], tag);
-            assert_eq!(cv[1], IV[1] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[1], IV[1]);
             assert_eq!(cv[2], params[0]);
-            assert_eq!(cv[3], IV[3] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[3], IV[3]);
             assert_eq!(cv[4], params[1]);
-            assert_eq!(cv[5], IV[5] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[5], IV[5]);
             assert_eq!(cv[6], params[2]);
-            assert_eq!(cv[7], IV[7] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[7], IV[7]);
+
+            let packed = init_u64_cv(tag, params);
+            assert!(packed.iter().all(|&value| value < Felt::ORDER));
+            assert_eq!(packed.map(|value| value >> 63), [1, 1, 1, 0]);
+            for (index, value) in packed.into_iter().enumerate() {
+                assert_eq!(value as u32, cv[2 * index]);
+                assert_eq!((value >> 32) as u32, cv[2 * index + 1]);
+            }
         }
     }
 

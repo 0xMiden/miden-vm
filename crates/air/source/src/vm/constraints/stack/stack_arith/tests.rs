@@ -1,0 +1,349 @@
+use alloc::vec::Vec;
+
+use miden_core::{
+    Felt,
+    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    operations::opcodes,
+};
+
+use super::enforce_main;
+use crate::vm::constraints::{
+    columns::CoreCols,
+    op_flags::{OpFlags, generate_test_row},
+    stack::test_utils::ConstraintEvalBuilder,
+};
+
+/// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
+fn set_u32_helpers(row: &mut CoreCols<Felt>, lo: u32, hi: u32) {
+    row.decoder.hasher_state[2] = Felt::new_unchecked(lo as u64 & 0xffff);
+    row.decoder.hasher_state[3] = Felt::new_unchecked((lo as u64) >> 16);
+    row.decoder.hasher_state[4] = Felt::new_unchecked(hi as u64 & 0xffff);
+    row.decoder.hasher_state[5] = Felt::new_unchecked((hi as u64) >> 16);
+    row.decoder.hasher_state[6] = Felt::ZERO;
+}
+
+fn set_u32div_helpers(
+    row: &mut CoreCols<Felt>,
+    quotient: u32,
+    remainder: u32,
+    remainder_diff: u32,
+) {
+    set_u32_helpers(row, quotient, remainder);
+    row.decoder.hasher_state[6] = Felt::new_unchecked(remainder_diff as u64 & 0xffff);
+    row.decoder.hasher_state[7] = Felt::new_unchecked((remainder_diff as u64) >> 16);
+}
+
+fn eval_stack_arith(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+) -> Vec<QuadFelt> {
+    let mut builder = ConstraintEvalBuilder::new();
+    enforce_main(&mut builder, local, next, op_flags);
+    builder.evaluations
+}
+
+fn assert_constraints_accept(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+    message: &str,
+) {
+    let evaluations = eval_stack_arith(local, next, op_flags);
+    assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO), "{message}");
+}
+
+fn assert_constraints_reject(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+    message: &str,
+) {
+    let evaluations = eval_stack_arith(local, next, op_flags);
+    assert!(evaluations.iter().any(|value| *value != QuadFelt::ZERO), "{message}");
+}
+
+#[test]
+fn stack_arith_u32add_constraints_allow_non_u32_operands() {
+    let non_u32 = Felt::new_unchecked(Felt::ORDER_U64 - 1);
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32ADD as usize);
+    local.stack.top[0] = non_u32;
+    local.stack.top[1] = Felt::ONE;
+    set_u32_helpers(&mut local, 0, 0);
+
+    let next = generate_test_row(0);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32add(), Felt::ONE);
+    assert_eq!(op_flags.u32sub(), Felt::ZERO);
+
+    assert_constraints_accept(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32ADD constraints to accept a non-u32 operand with forged u32 outputs",
+    );
+}
+
+#[test]
+fn stack_arith_u32add_constraints_reject_forged_high_carry_limb() {
+    let mut local = generate_test_row(opcodes::U32ADD as usize);
+    local.stack.top[0] = Felt::ZERO;
+    local.stack.top[1] = Felt::ZERO;
+    set_u32_helpers(&mut local, 0, 1 << 16);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ZERO;
+    next.stack.top[1] = Felt::new_unchecked(1 << 16);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32add(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32ADD constraints to reject carry values with a nonzero high limb",
+    );
+}
+
+#[test]
+fn stack_arith_u32add3_constraints_reject_forged_high_carry_limb() {
+    let mut local = generate_test_row(opcodes::U32ADD3 as usize);
+    local.stack.top[0] = Felt::ZERO;
+    local.stack.top[1] = Felt::ZERO;
+    local.stack.top[2] = Felt::ZERO;
+    set_u32_helpers(&mut local, 0, 1 << 16);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ZERO;
+    next.stack.top[1] = Felt::new_unchecked(1 << 16);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32add3(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32ADD3 constraints to reject carry values with a nonzero high limb",
+    );
+}
+
+#[test]
+fn stack_arith_u64_overflowing_add_rejects_forged_low_limb_carry() {
+    let mut add_local = generate_test_row(opcodes::U32ADD as usize);
+    add_local.stack.top[0] = Felt::ZERO;
+    add_local.stack.top[1] = Felt::ZERO;
+    set_u32_helpers(&mut add_local, 0, 1 << 16);
+
+    let mut add_next = generate_test_row(opcodes::U32ADD3 as usize);
+    add_next.stack.top[0] = Felt::ZERO;
+    add_next.stack.top[1] = Felt::new_unchecked(1 << 16);
+    add_next.stack.top[2] = Felt::ZERO;
+    add_next.stack.top[3] = Felt::ZERO;
+
+    let mut add3_local = generate_test_row(opcodes::U32ADD3 as usize);
+    add3_local.stack.top[0] = Felt::new_unchecked(1 << 16);
+    add3_local.stack.top[1] = Felt::ZERO;
+    add3_local.stack.top[2] = Felt::ZERO;
+    add3_local.stack.top[3] = Felt::ZERO;
+    set_u32_helpers(&mut add3_local, 1 << 16, 0);
+
+    let mut add3_next = generate_test_row(0);
+    add3_next.stack.top[0] = Felt::new_unchecked(1 << 16);
+    add3_next.stack.top[1] = Felt::ZERO;
+
+    let add_op_flags: OpFlags<Felt> =
+        OpFlags::new(&add_local.decoder, &add_local.stack, &add_next.decoder);
+    let add3_op_flags: OpFlags<Felt> =
+        OpFlags::new(&add3_local.decoder, &add3_local.stack, &add3_next.decoder);
+
+    assert_constraints_reject(
+        &add_local,
+        &add_next,
+        &add_op_flags,
+        "expected the forged low-limb carry in u64::overflowing_add to be rejected at U32ADD",
+    );
+    assert_constraints_accept(
+        &add3_local,
+        &add3_next,
+        &add3_op_flags,
+        "expected U32ADD3 to accept honest propagation of a 65536 carry once it is on the stack",
+    );
+}
+
+#[test]
+fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
+    let non_u32 = Felt::new_unchecked(Felt::ORDER_U64 - 1);
+    let diff = ((1u64 << 32) - 12_290) as u32;
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32SUB as usize);
+    local.stack.top[0] = Felt::new_unchecked(12_289);
+    local.stack.top[1] = non_u32;
+    set_u32_helpers(&mut local, diff, 0);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ONE;
+    next.stack.top[1] = Felt::new_unchecked(diff as u64);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32sub(), Felt::ONE);
+    assert_eq!(op_flags.u32add(), Felt::ZERO);
+
+    assert_constraints_accept(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32SUB constraints to accept a non-u32 operand with forged u32 outputs",
+    );
+}
+
+#[test]
+fn stack_arith_u32mul_constraints_allow_non_u32_sha256_rotr_operand() {
+    let non_u32 = Felt::new_unchecked((u32::MAX as u64) + 2);
+    let rotr_7_multiplier = Felt::new_unchecked(1 << 25);
+    let product = non_u32.as_canonical_u64() * rotr_7_multiplier.as_canonical_u64();
+    let lo = product as u32;
+    let hi = (product >> 32) as u32;
+
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32MUL as usize);
+    local.stack.top[0] = rotr_7_multiplier;
+    local.stack.top[1] = non_u32;
+    set_u32_helpers(&mut local, lo, hi);
+    local.decoder.hasher_state[6] = Felt::new_unchecked(u32::MAX as u64 - hi as u64).inverse();
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::new_unchecked(lo as u64);
+    next.stack.top[1] = Felt::new_unchecked(hi as u64);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32mul(), Felt::ONE);
+
+    assert_constraints_accept(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32MUL constraints to accept a non-u32 operand with forged rotr outputs",
+    );
+}
+
+#[test]
+fn stack_arith_u32div_constraints_allow_non_u32_sha256_shr_operand() {
+    let non_u32 = Felt::new_unchecked((u32::MAX as u64) + 2);
+    let divisor = Felt::new_unchecked(8);
+    let quotient = Felt::new_unchecked(non_u32.as_canonical_u64() / divisor.as_canonical_u64());
+    let remainder = Felt::new_unchecked(non_u32.as_canonical_u64() % divisor.as_canonical_u64());
+    let remainder_diff = divisor.as_canonical_u64() - remainder.as_canonical_u64() - 1;
+
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = divisor;
+    local.stack.top[1] = non_u32;
+    set_u32div_helpers(
+        &mut local,
+        quotient.as_canonical_u64() as u32,
+        remainder.as_canonical_u64() as u32,
+        remainder_diff as u32,
+    );
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = remainder;
+    next.stack.top[1] = quotient;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_accept(
+        &local,
+        &next,
+        &op_flags,
+        "expected U32DIV constraints to accept a non-u32 operand with forged shr outputs",
+    );
+}
+
+/// The field equation admits `q = 1` and a remainder of the field modulus minus 12189 for
+/// `100 / 12289`, while the remainder difference still has a 32-bit representative. The direct
+/// remainder binding rejects the remainder outside the u32 range.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_non_u32_remainder() {
+    let non_u32_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 12189);
+    assert!(non_u32_remainder.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(12289);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, 1, non_u32_remainder.as_canonical_u64() as u32, 24477);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = non_u32_remainder;
+    next.stack.top[1] = Felt::ONE;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the direct remainder binding to reject a remainder outside the u32 range",
+    );
+}
+
+/// For `100 / 3`, choosing `r = 0` makes the field equation admit a quotient outside the u32
+/// range. The direct quotient binding rejects it.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_non_u32_quotient() {
+    let quotient = ((100_u128 + 2 * Felt::ORDER_U64 as u128) / 3) as u64;
+    let quotient = Felt::new_unchecked(quotient);
+    assert!(quotient.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(3);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, quotient.as_canonical_u64() as u32, 0, 2);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ZERO;
+    next.stack.top[1] = quotient;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the direct quotient binding to reject a quotient outside the u32 range",
+    );
+}
+
+/// The identity `100 = 10 * 9 + 10` has 32-bit outputs but is not Euclidean division because the
+/// remainder equals the divisor. The remainder-difference binding rejects it.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_remainder_equal_to_the_divisor() {
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(10);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, 9, 10, 0);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::new_unchecked(10);
+    next.stack.top[1] = Felt::new_unchecked(9);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the remainder-difference binding to reject a remainder equal to the divisor",
+    );
+}

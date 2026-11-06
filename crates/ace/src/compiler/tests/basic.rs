@@ -1,0 +1,1096 @@
+use std::borrow::Cow;
+
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::field::PrimeCharacteristicRing;
+use miden_stark::air::{
+    AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+    symbolic::{AirLayout, SymbolicAirBuilder},
+};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
+use crate::{
+    InputKey, InputLayout,
+    compiler::{
+        AceCircuit, AceConfig, LayoutKind,
+        circuit::emit_circuit,
+        dag::NodeKind,
+        pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
+    },
+};
+
+// Base and extension field types for tests.
+type F = Felt;
+type EF = QuadFelt;
+
+struct MockAir;
+
+#[derive(Clone, Copy)]
+enum Selector {
+    None,
+    First,
+    Last,
+    Transition,
+}
+
+#[derive(Clone, Copy)]
+struct TestAir {
+    public: usize,
+    preprocessed: usize,
+    main: usize,
+    aux: usize,
+    boundaries: usize,
+    period: usize,
+    selector: Selector,
+}
+
+impl TestAir {
+    fn simple() -> Self {
+        Self {
+            public: 0,
+            preprocessed: 0,
+            main: 1,
+            aux: 0,
+            boundaries: 0,
+            period: 0,
+            selector: Selector::None,
+        }
+    }
+}
+
+impl BaseAir<F> for TestAir {
+    fn num_public_values(&self) -> usize {
+        self.public
+    }
+
+    fn width(&self) -> usize {
+        self.main
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        self.preprocessed
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        if self.period == 0 {
+            return Cow::Borrowed(&[]);
+        }
+        let mut column = vec![F::ZERO; self.period];
+        column[1] = F::ONE;
+        Cow::Owned(vec![column])
+    }
+}
+
+impl LiftedAir<F, EF> for TestAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        self.aux
+    }
+
+    fn num_aux_values(&self) -> usize {
+        self.boundaries
+    }
+
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        unreachable!("ACE codegen tests do not build concrete traces")
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let mut expression: AB::Expr = {
+            let main = builder.main();
+            main.current_slice()[self.main - 1].into()
+        };
+        for &value in builder.public_values() {
+            let value: AB::Expr = value.into();
+            expression += value;
+        }
+        if self.preprocessed > 0 {
+            let preprocessed: AB::Expr = {
+                let trace = builder.preprocessed();
+                trace.current_slice()[self.preprocessed - 1].into()
+            };
+            expression += preprocessed;
+        }
+        if self.period > 0 {
+            let periodic: AB::Expr = builder.periodic_values()[0].into();
+            expression += periodic;
+        }
+
+        match self.selector {
+            Selector::None => builder.assert_zero(expression),
+            Selector::First => builder.when_first_row().assert_zero(expression),
+            Selector::Last => builder.when_last_row().assert_zero(expression),
+            Selector::Transition => builder.when_transition().assert_zero(expression),
+        }
+
+        if self.aux > 0 {
+            let mut expression: AB::ExprEF = {
+                let aux = builder.permutation();
+                aux.current_slice()[self.aux - 1].into()
+            };
+            if self.boundaries > 0 {
+                let boundary: AB::ExprEF =
+                    builder.permutation_values()[self.boundaries - 1].clone().into();
+                expression += boundary;
+            }
+            builder.assert_zero_ext(expression);
+        }
+    }
+}
+
+impl BaseAir<F> for MockAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        Cow::Owned(vec![vec![Felt::ONE]])
+    }
+}
+
+struct MockPreprocessedAir;
+
+impl BaseAir<F> for MockPreprocessedAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
+        Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1))
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        1
+    }
+}
+
+impl LiftedAir<F, EF> for MockPreprocessedAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), Vec::new())
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let preprocessed = builder.preprocessed();
+        let curr = preprocessed.current_slice()[0];
+        let next = preprocessed.next_slice()[0];
+        builder.assert_zero(curr + next);
+    }
+}
+
+impl LiftedAir<F, EF> for MockAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let b = main.next_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let per0 = builder.periodic_values()[0];
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+        builder.when_transition().assert_zero(b - a);
+        let a_expr: AB::Expr = a.into();
+        let a_ext: AB::ExprEF = a_expr.into();
+        let per_expr: AB::ExprEF = per0.into().into();
+        builder.assert_zero_ext(per_expr - a_ext);
+    }
+}
+
+struct MockPeriodicAir;
+
+impl BaseAir<F> for MockPeriodicAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        // Period 128, mostly zero: cheaper to evaluate via the sparse Lagrange path.
+        let mut sparse_col = vec![Felt::ZERO; 128];
+        sparse_col[0] = Felt::new_unchecked(7);
+        sparse_col[50] = Felt::new_unchecked(11);
+        sparse_col[100] = Felt::new_unchecked(13);
+
+        // Period 8, fully dense: cheaper to evaluate via the Horner path.
+        let dense_col: Vec<Felt> =
+            [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(Felt::new_unchecked).collect();
+
+        Cow::Owned(vec![sparse_col, dense_col])
+    }
+}
+
+impl LiftedAir<F, EF> for MockPeriodicAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let per0 = builder.periodic_values()[0];
+        let per1 = builder.periodic_values()[1];
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+
+        let per0_ext: AB::ExprEF = per0.into().into();
+        let per1_ext: AB::ExprEF = per1.into().into();
+        builder.assert_zero_ext(per0_ext + per1_ext);
+    }
+}
+
+/// Many period-32 small-integer columns, so their period adopts the shared Lagrange basis, next
+/// to a mostly-one column combined through the basis complement, a constant column, and a sparse
+/// period-128 column that keep their standalone forms.
+struct MockSharedBasisAir;
+
+const SHARED_BASIS_COLUMNS: usize = 12;
+
+fn shared_basis_columns() -> Vec<Vec<F>> {
+    let mut columns: Vec<Vec<F>> = (0..SHARED_BASIS_COLUMNS)
+        .map(|column| {
+            (0..32u64)
+                .map(|row| F::new_unchecked((row * (column as u64 + 3) + column as u64) % 17))
+                .collect()
+        })
+        .collect();
+    let mut mostly_one = vec![F::ONE; 32];
+    mostly_one[3] = F::ZERO;
+    mostly_one[20] = F::new_unchecked(6);
+    columns.push(mostly_one);
+    columns.push(vec![F::new_unchecked(9)]);
+    let mut sparse = vec![F::ZERO; 128];
+    sparse[17] = F::new_unchecked(23);
+    columns.push(sparse);
+    columns
+}
+
+impl BaseAir<F> for MockSharedBasisAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        Cow::Owned(shared_basis_columns())
+    }
+}
+
+impl LiftedAir<F, EF> for MockSharedBasisAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let periodic: Vec<AB::ExprEF> =
+            builder.periodic_values().iter().map(|value| (*value).into().into()).collect();
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+        let a_expr: AB::Expr = a.into();
+        let a_ext: AB::ExprEF = a_expr.into();
+        for value in periodic {
+            builder.assert_zero_ext(value * a_ext.clone());
+        }
+    }
+}
+
+fn ef(x: u64) -> EF {
+    EF::from(F::new_unchecked(x))
+}
+
+fn set_input(circuit: &AceCircuit<EF>, inputs: &mut [EF], key: InputKey, value: EF) {
+    inputs[circuit.layout().index(key).unwrap()] = value;
+}
+
+fn build_inputs(layout: &InputLayout) -> Vec<EF> {
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    let mut set = |key, value| {
+        let idx = layout.index(key).unwrap();
+        inputs[idx] = value;
+    };
+
+    set(InputKey::Public(0), ef(5));
+    set(InputKey::AuxRandAlpha, ef(7));
+    set(InputKey::AuxRandBeta, ef(11));
+    set(InputKey::Main { offset: 0, index: 0 }, ef(3));
+    set(InputKey::Main { offset: 1, index: 0 }, ef(9));
+    set(InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }, ef(11));
+    set(InputKey::AuxCoord { offset: 0, index: 0, coord: 1 }, ef(101));
+    set(InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }, ef(12));
+    set(InputKey::AuxCoord { offset: 1, index: 0, coord: 1 }, ef(102));
+    set(InputKey::Alpha, ef(17));
+    set(InputKey::ZPowN, ef(19));
+    set(InputKey::ZK, ef(23));
+    set(InputKey::IsFirst, ef(47));
+    set(InputKey::IsLast, ef(43));
+    set(InputKey::IsTransition, ef(2) - ef(3));
+    set(InputKey::Reserved, ef(53));
+    set(InputKey::Weight0, ef(31));
+    set(InputKey::F, ef(37));
+    set(InputKey::S0, ef(41));
+
+    set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, ef(2));
+    set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, ef(3));
+    set(InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 0 }, ef(5));
+    set(InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 1 }, ef(7));
+
+    inputs
+}
+
+#[test]
+fn multi_air_uses_canonical_offsets_and_stable_selectors() {
+    let airs = [
+        TestAir {
+            preprocessed: 1,
+            main: 1,
+            aux: 1,
+            boundaries: 1,
+            selector: Selector::First,
+            ..TestAir::simple()
+        },
+        TestAir {
+            preprocessed: 2,
+            main: 3,
+            aux: 2,
+            boundaries: 2,
+            selector: Selector::Last,
+            ..TestAir::simple()
+        },
+        TestAir {
+            preprocessed: 3,
+            main: 5,
+            aux: 3,
+            boundaries: 1,
+            selector: Selector::Transition,
+            ..TestAir::simple()
+        },
+    ];
+    let circuit = build_canonical_multi_air_ace_circuit(
+        &airs,
+        AceConfig {
+            num_quotient_chunks: 1,
+            layout: LayoutKind::Masm,
+        },
+        4,
+    )
+    .unwrap();
+
+    assert_eq!(
+        (
+            circuit.layout().counts.preprocessed_width,
+            circuit.layout().counts.width,
+            circuit.layout().counts.aux_width,
+            circuit.layout().counts.num_aux_boundary,
+        ),
+        (12, 16, 8, 4)
+    );
+
+    let values = [
+        (InputKey::Alpha, 1),
+        (InputKey::IsFirstAir(0), 2),
+        (InputKey::IsLastAir(1), 3),
+        (InputKey::IsTransitionAir(2), 5),
+        (InputKey::Preprocessed { offset: 0, index: 0 }, 3),
+        (InputKey::Preprocessed { offset: 0, index: 5 }, 4),
+        (InputKey::Preprocessed { offset: 0, index: 10 }, 7),
+        (InputKey::Main { offset: 0, index: 0 }, 2),
+        (InputKey::Main { offset: 0, index: 6 }, 7),
+        (InputKey::Main { offset: 0, index: 12 }, 6),
+    ];
+    let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+    for (key, value) in values.into_iter().chain([
+        (InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }, 2),
+        (InputKey::AuxCoord { offset: 0, index: 3, coord: 1 }, 3),
+        (InputKey::AuxCoord { offset: 0, index: 6, coord: 0 }, 5),
+        (InputKey::AuxBusBoundary(0), 7),
+        (InputKey::AuxBusBoundary(2), 11),
+        (InputKey::AuxBusBoundary(3), 13),
+        (InputKey::ZPowN, 19),
+        (InputKey::Weight0, 7),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, 2),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, 3),
+    ]) {
+        set_input(&circuit, &mut inputs, key, ef(value));
+    }
+
+    // The per-AIR constraints give 19, 44 + 3u and 83, where u is the extension-field basis.
+    // With one quotient chunk, q*v = 7 * (2 + 3u) * (19 - 1) = 252 + 378u.
+    let quotient_binding = EF::new([F::from_u64(252), F::from_u64(378)]);
+    for (order, coefficients, expected) in [
+        ([2, 0, 1], [10, 1, 100], EF::new([F::from_u64(8_534), F::from_u64(3)])),
+        ([0, 1, 2], [100, 10, 1], EF::new([F::from_u64(2_423), F::from_u64(30)])),
+    ] {
+        for (i, coefficient) in coefficients.into_iter().enumerate() {
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), ef(coefficient));
+        }
+        let expected = expected - quotient_binding;
+        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(
+            crate::compiler::testing::eval_multi_air_constraints(
+                &airs,
+                circuit.layout(),
+                &inputs,
+                &order,
+                ef(10),
+                4,
+            ),
+            expected,
+        );
+    }
+    circuit.to_ace().expect("multi-AIR root must be MASM encodable");
+}
+
+#[test]
+fn multi_air_concatenates_distinct_public_inputs() {
+    let airs = [0, 1, 0, 2, 0].map(|public| TestAir { public, ..TestAir::simple() });
+    let order = [3, 0, 4, 1, 2];
+    let beta = ef(3);
+    let roots = [ef(1), ef(13), ef(3), ef(34), ef(5)];
+    let expected = order.iter().fold(EF::ZERO, |acc, &i| acc * beta + roots[i]);
+    for layout in [LayoutKind::Native, LayoutKind::Masm] {
+        let circuit = build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig { num_quotient_chunks: 1, layout },
+            1,
+        )
+        .unwrap();
+        assert_eq!(circuit.layout().counts.num_public, 3);
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for (i, value) in [11, 13, 17].into_iter().enumerate() {
+            set_input(&circuit, &mut inputs, InputKey::Public(i), ef(value));
+        }
+        for i in 0..airs.len() {
+            set_input(
+                &circuit,
+                &mut inputs,
+                InputKey::Main { offset: 0, index: i },
+                ef(i as u64 + 1),
+            );
+        }
+        for (position, i) in order.into_iter().enumerate() {
+            let coefficient = beta.exp_u64((order.len() - 1 - position) as u64);
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), coefficient);
+        }
+        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(
+            crate::compiler::testing::eval_multi_air_constraints(
+                &airs,
+                circuit.layout(),
+                &inputs,
+                &order,
+                beta,
+                1,
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn mixed_air_periods_use_one_shared_basis() {
+    let airs = [
+        TestAir { period: 4, ..TestAir::simple() },
+        TestAir { period: 32, ..TestAir::simple() },
+    ];
+    let circuit = build_canonical_multi_air_ace_circuit(
+        &airs,
+        AceConfig {
+            num_quotient_chunks: 1,
+            layout: LayoutKind::Native,
+        },
+        1,
+    )
+    .unwrap();
+    let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+    let z_k = ef(3);
+    set_input(&circuit, &mut inputs, InputKey::ZK, z_k);
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(0), ef(7));
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(1), ef(1));
+
+    let mut period_four_point = z_k;
+    for _ in 0..3 {
+        period_four_point *= period_four_point;
+    }
+    let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
+    let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
+    let expected = period_four * ef(7) + period_thirty_two;
+    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    assert_eq!(
+        crate::compiler::testing::eval_multi_air_constraints(
+            &airs,
+            circuit.layout(),
+            &inputs,
+            &[0, 1],
+            ef(7),
+            1,
+        ),
+        expected,
+    );
+    assert_ne!(period_four, eval_periodic_values(&airs[0].periodic_columns(), z_k)[0]);
+}
+
+#[test]
+fn multi_air_rejects_empty_airs_and_invalid_alignment() {
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+    };
+    let airs = [TestAir { aux: 1, ..TestAir::simple() }];
+    assert!(build_canonical_multi_air_ace_circuit::<TestAir>(&[], config, 2).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 0).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 3).is_err());
+}
+
+#[test]
+fn test_preprocessed_entries_lower_to_input_keys() {
+    let air = MockPreprocessedAir;
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+
+    assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
+    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
+    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).is_some());
+    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
+        node,
+        NodeKind::Input(InputKey::Preprocessed { offset: 0, index: 0 })
+    )));
+    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
+        node,
+        NodeKind::Input(InputKey::Preprocessed { offset: 1, index: 0 })
+    )));
+}
+
+#[test]
+fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
+    let air = MockPreprocessedAir;
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
+    inputs[layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap()] = ef(17);
+
+    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+
+    assert_eq!(dag_value, ef(30));
+    assert_eq!(circuit_value, dag_value);
+}
+
+#[test]
+fn test_verifier_dag_matches_manual_eval() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: layout.counts.preprocessed_width,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+}
+
+/// Cross-checks the DAG's periodic-column lowering against the independent
+/// `eval_periodic_values` reference (dense IDFT + Horner) for a column pair chosen
+/// so one column resolves via the sparse Lagrange path (period 128, 3/128 nonzero)
+/// and the other via the dense Horner path (period 8, fully dense) — see
+/// `build_periodic_nodes` in `dag/lower.rs`.
+#[test]
+fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
+    let air = MockPeriodicAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(circuit_value, actual);
+}
+
+/// The shared-basis lowering must agree with the independent dense reference, and the
+/// representation choice must actually exercise it alongside the standalone forms.
+#[test]
+fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
+    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
+    let columns = data.columns();
+    assert!(
+        columns[..SHARED_BASIS_COLUMNS]
+            .iter()
+            .all(|column| matches!(column, PeriodicColumn::Basis { period: 32, .. })),
+        "dense small-integer columns of one period must share its basis"
+    );
+    assert!(
+        matches!(&columns[SHARED_BASIS_COLUMNS], PeriodicColumn::Basis { offset, .. } if *offset == EF::ONE),
+        "a mostly-one column must be combined through the basis complement"
+    );
+    assert!(matches!(columns[SHARED_BASIS_COLUMNS + 2], PeriodicColumn::Sparse { .. }));
+
+    let air = MockSharedBasisAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+}
+
+/// Constant columns and repeats of another column add nothing to the basis savings of their
+/// period: the DAG folds a constant column to a single constant and shares a repeat's nodes. A
+/// lone one-hot column saves too little over the period-8 basis to adopt it, and adding either
+/// kind of column must not change that.
+#[test]
+fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
+    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let mut one_hot = vec![F::ZERO; 8];
+    one_hot[5] = F::ONE;
+    let with_constants =
+        vec![one_hot.clone(), vec![F::new_unchecked(2); 8], vec![F::new_unchecked(3); 8]];
+    let repeated = vec![one_hot; 4];
+
+    for (case, columns) in [("constant", with_constants), ("repeated", repeated)] {
+        let data = PeriodicColumnData::<EF>::from_periodic_columns(columns);
+        assert!(
+            data.columns()
+                .iter()
+                .all(|column| !matches!(column, PeriodicColumn::Basis { .. })),
+            "{case} columns must not push a period onto the shared basis"
+        );
+    }
+}
+
+#[test]
+fn test_emitted_circuit_matches_dag_eval() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+
+    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(circuit_value, dag_value);
+}
+
+#[test]
+fn pipeline_rejects_zero_quotient_chunks() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 0,
+        layout: LayoutKind::Native,
+    };
+
+    let err = build_ace_dag_for_air(&air, config).unwrap_err();
+    assert!(
+        matches!(err, crate::AceError::InvalidInputLayout { .. }),
+        "expected InvalidInputLayout, got {err:?}"
+    );
+}
+
+#[test]
+fn test_encoded_circuit_structure() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+
+    let encoded = circuit.to_ace().unwrap();
+    assert!(encoded.size_in_felt().is_multiple_of(8));
+    assert_eq!(encoded.num_inputs(), layout.total_inputs);
+}
+
+#[test]
+fn stream_geometry_rejects_the_node_id_packing_bound() {
+    use crate::compiler::encode::StreamGeometry;
+
+    // Valid streams have an even node count because READ and EVAL rows are word-aligned. Thus,
+    // 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30-wire bound.
+    let below_limit = StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
+    assert!(below_limit.validate().is_ok(), "the largest aligned shape must validate");
+
+    let at_limit = StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
+    assert!(at_limit.validate().is_err(), "a shape with 2^30 nodes must be rejected");
+}
+
+#[test]
+fn canonical_builder_air_count_is_independent_of_order_maps() {
+    for num_airs in [1, crate::MAX_ORDER_AIRS + 1] {
+        let airs = vec![TestAir::simple(); num_airs];
+        let circuit = build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig {
+                num_quotient_chunks: 1,
+                layout: LayoutKind::Masm,
+            },
+            8,
+        )
+        .expect("canonical circuit");
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for i in 0..num_airs {
+            set_input(
+                &circuit,
+                &mut inputs,
+                InputKey::Main { offset: 0, index: 8 * i },
+                ef((i + 1) as u64),
+            );
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), EF::ONE);
+        }
+        assert_eq!(circuit.eval(&inputs).unwrap(), ef((num_airs * (num_airs + 1) / 2) as u64));
+        circuit.to_ace().expect("canonical circuit must encode");
+    }
+}
+
+#[test]
+fn compiled_relation_reuses_capture_and_pads_each_air_row() {
+    use crate::compiler::{CapturedAir, CompiledRelation};
+    let first = TestAir {
+        main: 3,
+        aux: 1,
+        preprocessed: 2,
+        ..TestAir::simple()
+    };
+    let second = TestAir {
+        main: 5,
+        aux: 3,
+        boundaries: 2,
+        period: 4,
+        ..TestAir::simple()
+    };
+    let captures = [CapturedAir::new(&first).unwrap(), CapturedAir::new(&second).unwrap()];
+    let relation = CompiledRelation::from_captured(&[&captures[0], &captures[1]], 8).unwrap();
+    assert_eq!(relation.geometry().main_width, 16);
+    assert_eq!(relation.geometry().preprocessed_width, 8);
+    assert_eq!(relation.geometry().aux_width, 16);
+    assert_eq!(relation.geometry().airs[1].main.offset, 8);
+    assert_eq!(relation.geometry().airs[1].aux.raw_width, 6);
+    assert_eq!(relation.geometry().num_constraints, 4);
+    assert_eq!(relation.geometry().num_quotient_chunks, 1);
+    assert_eq!(relation.geometry().quotient_width, 8);
+    assert_eq!(relation.geometry().shared_period, 4);
+    let circuit = relation.build_circuit(LayoutKind::Masm).unwrap();
+    assert_eq!(circuit.layout.quotient_width(), 8);
+    assert!(core::ptr::eq(relation.airs()[0], &captures[0]));
+    assert!(CompiledRelation::from_captured(&[], 8).is_err());
+    assert!(CompiledRelation::from_captured(&[&captures[0]], 0).is_err());
+}
+
+#[test]
+fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
+    use miden_stark::air::ConstraintDegrees;
+
+    use crate::compiler::CapturedAir;
+    for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {
+        let air = TestAir {
+            selector,
+            period: 4,
+            aux: 1,
+            boundaries: 1,
+            ..TestAir::simple()
+        };
+        let captured = CapturedAir::new(&air).unwrap();
+        assert_eq!(captured.degrees(), ConstraintDegrees::from_air::<F, EF, _>(&air));
+        assert_eq!(captured.constraint_counts().base, 1);
+        assert_eq!(captured.constraint_counts().ext, 1);
+    }
+}
+
+#[test]
+fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
+    use crate::compiler::{CapturedAir, CompiledRelation};
+    let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
+    let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
+    let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
+    assert_eq!(relation.geometry().num_public, 3);
+    assert_eq!(relation.geometry().airs[0].public_offset, 0);
+    assert_eq!(relation.geometry().airs[0].num_public, 2);
+    assert_eq!(relation.geometry().airs[1].public_offset, 2);
+    assert_eq!(relation.geometry().airs[1].num_public, 1);
+
+    // Intentionally inject invalid crate-private metadata to exercise defensive geometry checks.
+    // Production callers can only read a capture's metadata through immutable getters.
+    second.counts.num_public = usize::MAX;
+    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
+    second.counts.num_public = 1;
+    second.counts.width = usize::MAX;
+    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
+    second.counts.width = 1;
+    second.counts.aux_width = 1;
+    assert!(CompiledRelation::from_captured(&[&second], 3).is_err());
+}
+
+struct CountedCubicAir {
+    eval_count: std::sync::atomic::AtomicUsize,
+}
+
+impl BaseAir<F> for CountedCubicAir {
+    fn width(&self) -> usize {
+        1
+    }
+}
+
+impl LiftedAir<F, EF> for CountedCubicAir {
+    fn aux_width(&self) -> usize {
+        0
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        unreachable!("capture-only AIR")
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        self.eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let x: AB::Expr = builder.main().current_slice()[0].into();
+        builder.assert_zero(x.clone() * x.clone() * x);
+    }
+}
+
+#[test]
+fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
+    use crate::compiler::{CapturedAir, CompiledRelation};
+    let air = CountedCubicAir {
+        eval_count: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let captured = CapturedAir::new(&air).unwrap();
+    assert_eq!(captured.degrees().base, 3);
+    let relation = CompiledRelation::from_captured(&[&captured], 8).unwrap();
+    assert_eq!(relation.geometry().num_quotient_chunks, 2);
+    for layout in [LayoutKind::Native, LayoutKind::Masm] {
+        let circuit = relation.build_circuit(layout).unwrap();
+        assert_eq!(circuit.layout().quotient_width(), 8);
+        assert_eq!(circuit.layout().counts.num_quotient_chunks, 2);
+    }
+    assert_eq!(air.eval_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+}

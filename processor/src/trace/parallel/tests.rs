@@ -1,9 +1,8 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::{
+use miden_air_definitions::vm::{
     MidenAir,
-    lookup::build_logup_aux_trace,
-    trace::{RowIndex, chiplets::hasher::HASH_CYCLE_LEN},
+    trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
@@ -15,7 +14,9 @@ use miden_core::{
     },
     operations::{Operation, opcodes},
     program::{KernelDescriptor, Program, StackInputs},
+    utils::RowMajorMatrix,
 };
+use miden_stark::lookup::build_logup_aux_trace;
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
@@ -23,7 +24,7 @@ use rstest::{fixture, rstest};
 use super::*;
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
-    trace::trace_state::{HasherOp, MemoryReadsReplay},
+    trace::trace_state::MemoryReadsReplay,
 };
 
 const DEFAULT_STACK: &[Felt] =
@@ -121,44 +122,39 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // Join node. Same execution as case 4, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
 #[case(split_program(), 9, &[ZERO, SENTINEL_VALUE])]
-// Case 7: LOOP start — fragment boundary lands on the LOOP row. The LOOP is do-while: with
-// stack `[ZERO, SENTINEL]` the body runs once (Pad+Drop is net-zero, so the trailing condition
-// at the body's exit is the same `ZERO` that drove entry), then END exits the loop.
+// Case 7: LOOP start
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
-//  5:   LOOP                <-- fragment boundary
+//  5:   LOOP END
+//  7: END
+//  8: HALT
+#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
+// Case 8: LOOP END, when loop was not entered
+//  0: JOIN
+//  1:   BLOCK SWAP SWAP END
+//  5:   LOOP END
+//  7: END
+//  8: HALT
+#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
+// Case 9: LOOP END, when loop was entered
+//  0: JOIN
+//  1:   BLOCK SWAP SWAP END
+//  5:   LOOP
 //  6:     BLOCK PAD DROP END
 // 10:   END
 // 11: END
 // 12: HALT
-#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
-// Case 8: fragment boundary one row inside the loop body (SPAN of body) — same execution as
-// Case 7, just a different boundary.
-#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
-// Case 9: LOOP REPEAT — `[ONE, ZERO, SENTINEL]` makes the body run twice (first iteration
-// trailing condition is ONE, second is ZERO).
+#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
+// Case 10: LOOP REPEAT
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP
 //  6:     BLOCK PAD DROP END
-// 10:   REPEAT              <-- fragment boundary
+// 10:   REPEAT
 // 11:     BLOCK PAD DROP END
 // 15:   END
 // 16: END
 // 17: HALT
-#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
-// Case 10: LOOP REPEAT (deeper) — `[ONE, ONE, ZERO, SENTINEL]` makes the body run three times.
-//  0: JOIN
-//  1:   BLOCK SWAP SWAP END
-//  5:   LOOP
-//  6:     BLOCK PAD DROP END
-// 10:   REPEAT              <-- fragment boundary
-// 11:     BLOCK PAD DROP END
-// 15:   REPEAT
-// 16:     BLOCK PAD DROP END
-// 20:   END
-// 21: END
-// 22: HALT
 #[case(loop_program(), 10, &[ONE, ONE, ZERO, SENTINEL_VALUE])]
 // Case 11: CALL START
 //  0: JOIN
@@ -340,7 +336,7 @@ fn test_trace_generation_at_fragment_boundaries(
         host.load_library(create_simple_library()).unwrap();
         let vm_witness =
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -358,7 +354,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
         assert!(vm_witness.trace_replay().core_trace_contexts.len() == 1);
 
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -408,31 +404,41 @@ fn test_trace_generation_at_fragment_boundaries(
 
     // Verify precompile-backed deferred data match deterministically.
 
-    // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
-    assert_eq!(
-        format!("{:?}", DeterministicTrace(&trace_from_fragments)),
-        format!("{:?}", DeterministicTrace(&trace_from_single_fragment)),
-        "Deterministic trace mismatch between fragments and single fragment"
-    );
-
     // Build the LogUp aux trace from each main trace under identical random challenges and
     // verify every column matches row-for-row. Catches fragment-boundary nondeterminism in
-    // lookup collection that `DeterministicTrace` (main-trace only) would miss.
+    // lookup collection.
     let raw = rand::random::<[Felt; 4]>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let (core_from_fragments, chip_from_fragments, poseidon2_from_fragments) =
-        trace_from_fragments.main_trace().to_air_matrices();
-    let (core_from_single, chip_from_single, poseidon2_from_single) =
-        trace_from_single_fragment.main_trace().to_air_matrices();
+    let (
+        core_from_fragments,
+        chip_from_fragments,
+        eidos_compression_from_fragments,
+        and8_from_fragments,
+    ) = trace_from_fragments.main_trace().clone_air_matrices();
+    let (core_from_single, chip_from_single, eidos_compression_from_single, and8_from_single) =
+        trace_from_single_fragment.main_trace().clone_air_matrices();
+
+    // Compare every committed main-trace cell exactly. The column-oriented check above provides
+    // precise diagnostics for the Core and Chiplets matrices; these assertions extend the exact
+    // comparison to the independently committed Eidos compression and And8 matrices.
+    assert_eq!(core_from_fragments, core_from_single, "Core main trace mismatch");
+    assert_eq!(chip_from_fragments, chip_from_single, "Chiplets main trace mismatch");
+    assert_eq!(
+        eidos_compression_from_fragments, eidos_compression_from_single,
+        "EidosCompression main trace mismatch"
+    );
+    assert_eq!(and8_from_fragments, and8_from_single, "And8 main trace mismatch");
+
     for (label, air, air_frag, air_single) in [
-        ("Core", MidenAir::Core, &core_from_fragments, &core_from_single),
-        ("Chiplets", MidenAir::Chiplets, &chip_from_fragments, &chip_from_single),
+        ("Core", MidenAir::CORE, &core_from_fragments, &core_from_single),
+        ("Chiplets", MidenAir::CHIPLETS, &chip_from_fragments, &chip_from_single),
         (
-            "Poseidon2Permutation",
-            MidenAir::Poseidon2Permutation,
-            &poseidon2_from_fragments,
-            &poseidon2_from_single,
+            "EidosCompression",
+            MidenAir::EIDOS_COMPRESSION,
+            &eidos_compression_from_fragments,
+            &eidos_compression_from_single,
         ),
+        ("And8Lookup", MidenAir::AND8_LOOKUP, &and8_from_fragments, &and8_from_single),
     ] {
         let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
         let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
@@ -446,10 +452,16 @@ fn test_trace_generation_at_fragment_boundaries(
         );
     }
 
-    // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
-    // We use DeterministicTrace to produce stable Debug output, since VmTrace contains
-    // a MerkleStore backed by HashMap whose iteration order is non-deterministic.
-    insta::assert_compact_debug_snapshot!(testname, DeterministicTrace(&trace_from_fragments));
+    // Snapshot compact matrix summaries so protocol drift remains reviewable. In particular, do
+    // not serialize the fixed 65,536-row And8 table into every fragment-boundary fixture.
+    let trace_snapshot = DeterministicTrace {
+        trace: &trace_from_fragments,
+        core: &core_from_fragments,
+        chiplets: &chip_from_fragments,
+        eidos_compression: &eidos_compression_from_fragments,
+        and8: &and8_from_fragments,
+    };
+    insta::assert_compact_debug_snapshot!(testname, trace_snapshot);
 }
 
 #[test]
@@ -510,11 +522,11 @@ fn test_nested_loop_end_flags_stable_across_fragmentation() {
     );
     assert!(
         end_flags.contains(&[ONE, ONE, ZERO, ZERO].into()),
-        "expected an END row for inner loop node (is_loop_body=1, is_loop=1)"
+        "expected an END row for inner loop node (is_loop_body=1, loop_entered=1)"
     );
     assert!(
         end_flags.contains(&[ZERO, ONE, ZERO, ZERO].into()),
-        "expected an END row for outer loop node (is_loop_body=0, is_loop=1)"
+        "expected an END row for outer loop node (is_loop_body=0, loop_entered=1)"
     );
 }
 
@@ -543,7 +555,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(vm_witness).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
@@ -576,7 +588,7 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 
     assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
 
-    let _ = build_trace(vm_witness);
+    let _ = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -948,7 +960,7 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -981,12 +993,15 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     // is well past any node actually in the sparse forest.
     let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
     let forest_id = MastForestId::from(0u32);
-    vm_witness
-        .trace_replay_mut()
-        .hasher_for_chiplet
-        .record_raw(HasherOp::HashBasicBlock((forest_id, bogus_node_id, [ZERO; 4].into())));
+    vm_witness.trace_replay_mut().hasher_for_chiplet.record_raw(
+        crate::trace::trace_state::HasherOp::HashBasicBlock((
+            forest_id,
+            bogus_node_id,
+            [ZERO; 4].into(),
+        )),
+    );
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1075,7 +1090,7 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         },
     }
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
@@ -1093,7 +1108,7 @@ fn chiplet_preflight_caps_combined_trace_len() {
 
     let kernel = KernelDescriptor::default();
     let ace = AceReplay::default();
-    let combined_len = OP_CYCLE_LEN + 2;
+    let combined_len = bitwise.trace_len().expect("single bitwise operation length fits") + 2;
 
     assert!(matches!(
         non_hasher_trace_len(
@@ -1113,12 +1128,10 @@ fn chiplet_preflight_caps_combined_trace_len() {
 }
 
 /// Verifies that `validate_heights_within_max_trace_len` rejects any padded per-AIR height above
-/// `MAX_TRACE_LEN`, independent of the memory budget: a large budget can keep the controller
-/// height (2 rows per unique Poseidon2 permutation) under `MAX_TRACE_LEN` while the Poseidon2
-/// permutation AIR (16 rows per unique permutation) exceeds it.
+/// `MAX_TRACE_LEN`, independent of the memory budget.
 #[test]
 fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
-    let heights = [MIN_TRACE_LEN, MIN_TRACE_LEN, MAX_TRACE_LEN + 1];
+    let heights = [MIN_TRACE_LEN, MIN_TRACE_LEN, MAX_TRACE_LEN + 1, MIN_TRACE_LEN];
     assert!(
         matches!(
             validate_heights_within_max_trace_len(&heights),
@@ -1130,7 +1143,7 @@ fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
     assert!(validate_heights_within_max_trace_len(&[MIN_TRACE_LEN; MIDEN_AIR_COUNT]).is_ok());
 }
 
-/// Tests `build_trace_with_budget` behavior at the exact byte-budget boundary computed from the
+/// Tests `build_trace` behavior at the exact byte-budget boundary computed from the
 /// actual padded per-AIR heights of a small program.
 #[rstest]
 // Case 1: budget is 1 byte less than the exact modelled peak, so the budget check should fail.
@@ -1138,7 +1151,7 @@ fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
 // Case 2: budget equals the exact modelled peak, so the budget check should pass (not strictly
 // greater), and the function should succeed.
 #[case(0, true)]
-fn test_build_trace_with_budget_corner_cases(
+fn test_build_trace_corner_cases(
     #[case] budget_offset_from_exact_peak: i64,
     #[case] build_trace_succeeds: bool,
 ) {
@@ -1161,13 +1174,15 @@ fn test_build_trace_with_budget_corner_cases(
 
     // Measure the actual padded per-AIR heights under the default (generous) budget, then derive
     // the exact modelled peak for those heights.
-    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
-    let result = build_trace_with_budget(build_witness(), budget);
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
 
     assert_eq!(
         result.is_ok(),
@@ -1194,12 +1209,12 @@ fn test_build_trace_with_budget_corner_cases(
 /// Regression test for a tier-1 over-rejection: the raw core-trace buffer allocated by
 /// `generate_core_trace_row_major` (`core_trace_contexts.len() * fragment_size` rows at its
 /// unblown-up 1x size) used to be checked against a cap derived from the *full* proving-pipeline
-/// model (`memory::max_any_height_for_budget`, which additionally prices in blowup, quotient, and
+/// model (`ProvingBudget::max_any_height`, which additionally prices in blowup, quotient, and
 /// Merkle-tree overhead this buffer hasn't incurred yet). At the default (unshrunk) core trace
 /// fragment size, that rejected small programs under budgets that comfortably cover their real,
 /// much smaller padded heights.
 #[test]
-fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size() {
+fn test_build_trace_accepts_small_program_at_default_fragment_size() {
     fn build_witness() -> VmWitness {
         let program = basic_block_program_small();
         let processor = FastProcessor::new_with_options(
@@ -1214,10 +1229,12 @@ fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size()
 
     // Measure the exact modelled peak for the program's real (small) padded heights under the
     // default (generous) budget.
-    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
 
     // A budget well above the exact peak, but that the buggy tier-1 cap (`max_any_height_for_
     // budget`, which divides the budget by the full proving pipeline's per-row cost) still shrinks
@@ -1225,15 +1242,15 @@ fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size()
     // at its own (unblown-up) per-row cost instead.
     let budget = exact_peak * 3;
 
-    let result = build_trace_with_budget(build_witness(), budget);
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
     assert!(
         result.is_ok(),
-        "expected build_trace_with_budget to succeed at budget={budget} (exact peak={exact_peak}) \
+        "expected build_trace to succeed at budget={budget} (exact peak={exact_peak}) \
          with the default core trace fragment size, got: {result:?}"
     );
 }
 
-/// Verifies that `build_trace_with_budget` returns `TraceLenExceeded` (instead of panicking due
+/// Verifies that `build_trace` returns `TraceLenExceeded` (instead of panicking due
 /// to arithmetic overflow) when `core_trace_contexts.len() * fragment_size` overflows `usize`.
 #[test]
 fn test_build_trace_returns_err_on_fragment_size_overflow() {
@@ -1256,7 +1273,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace_with_budget(vm_witness, u64::MAX);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(u64::MAX));
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1264,14 +1281,11 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_budget` returns `ProverMemoryExceeded` when the Poseidon2
-/// permutation trace pushes the exact modelled peak over budget, even though the core trace rows
-/// and the hasher chiplet's own trace fit comfortably: the AIRs pad independently, so a cheap
-/// core/chiplets trace does not bound the Poseidon2 AIR height.
+/// Verifies that `build_trace` returns `ProverMemoryExceeded` when the Eidos
+/// compression trace pushes the exact modelled peak over budget. The AIRs pad independently, so
+/// a cheap core/chiplets trace does not bound the Eidos compression AIR height.
 #[test]
-fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
+fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     // Use the DYN program because it exercises both hasher and memory chiplets.
     let program = dyn_program();
     let stack_inputs = dyn_target_proc_hash();
@@ -1281,7 +1295,7 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
             StackInputs::new(stack_inputs).unwrap(),
             AdviceInputs::default(),
             ExecutionOptions::default()
-                .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+                .with_core_trace_fragment_size(MIN_TRACE_LEN)
                 .unwrap(),
         )
         .expect("processor advice inputs should fit advice map limits");
@@ -1289,42 +1303,87 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
         processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0
     }
 
-    // Inject enough unique permutation requests that the Poseidon2 permutation trace dominates
-    // the other two AIRs' heights. Each unique state adds one HASH_CYCLE_LEN cycle.
-    fn inject_extra_permutations(vm_witness: &mut VmWitness) {
-        let core_trace_rows = vm_witness.trace_replay().core_trace_contexts.len()
-            * vm_witness.trace_replay().fragment_size;
-        let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
-        for i in 0..num_permutations {
+    // Inject enough unique compression requests that the padded Eidos compression trace is strictly
+    // taller than the fixed And8 table as well as the core and chiplets traces. Unique states
+    // prevent replay deduplication from weakening the test.
+    fn inject_extra_compressions(vm_witness: &mut VmWitness) {
+        let num_compressions = AND8_LOOKUP_TRACE_HEIGHT / EIDOS_COMPRESSION_CYCLE_LEN + 1;
+        for i in 0..num_compressions {
             let mut state = [ZERO; 12];
             state[0] = Felt::from_u32(i as u32);
-            vm_witness.trace_replay_mut().hasher_for_chiplet.record_permute_input(state);
+            vm_witness.trace_replay_mut().hasher_for_chiplet.record_compress_input(state);
         }
     }
 
     // Measure the actual padded per-AIR heights under the default (generous) budget.
     let mut measuring_witness = build_witness(&program, stack_inputs);
-    inject_extra_permutations(&mut measuring_witness);
-    let measured = build_trace(measuring_witness).expect("default budget must succeed");
+    inject_extra_compressions(&mut measuring_witness);
+    let measured = build_trace(measuring_witness, &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let heights = *summary.padded_heights().expect("build_trace records padded heights");
+    let heights = *summary.padded_heights();
+    let eidos_compression_height = heights[MidenAir::EIDOS_COMPRESSION.instance_index()];
     assert!(
-        heights[MidenAir::Poseidon2Permutation.instance_index()]
-            > heights[MidenAir::Core.instance_index()]
-            && heights[MidenAir::Poseidon2Permutation.instance_index()]
-                > heights[MidenAir::Chiplets.instance_index()],
-        "test setup must make the Poseidon2 AIR the dominant height: {heights:?}"
+        eidos_compression_height > heights[MidenAir::CORE.instance_index()]
+            && eidos_compression_height > heights[MidenAir::CHIPLETS.instance_index()]
+            && eidos_compression_height > heights[MidenAir::AND8_LOOKUP.instance_index()],
+        "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
 
     let mut vm_witness = build_witness(&program, stack_inputs);
-    inject_extra_permutations(&mut vm_witness);
-    let result = build_trace_with_budget(vm_witness, exact_peak - 1);
+    inject_extra_compressions(&mut vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 
     assert!(
         matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
         "expected ProverMemoryExceeded, got: {result:?}"
+    );
+}
+
+/// The continuation stack of a fragment comes from a deserialized witness, so it must be checked
+/// against the replayed forest. A continuation that names a missing node, a node of the wrong
+/// kind, or a batch the basic block does not have must make `build_trace` return an error instead
+/// of panicking.
+#[rstest]
+#[case::start_missing_node(Continuation::StartNode(MastNodeId::new_unchecked(1_000)))]
+#[case::resume_missing_node(Continuation::ResumeBasicBlock {
+    node_id: MastNodeId::new_unchecked(1_000),
+    batch_index: 0,
+    op_idx_in_batch: 0,
+})]
+#[case::resume_batch_out_of_range(Continuation::ResumeBasicBlock {
+    node_id: MastNodeId::new_unchecked(0),
+    batch_index: 7,
+    op_idx_in_batch: 0,
+})]
+#[case::finish_loop_on_basic_block(Continuation::FinishLoop(MastNodeId::new_unchecked(0)))]
+#[case::finish_dyn_on_basic_block(Continuation::FinishDyn(MastNodeId::new_unchecked(0)))]
+fn test_build_trace_returns_err_on_inconsistent_continuation(
+    #[case] continuation: Continuation<MastForestId>,
+) {
+    let program = basic_block_program_small();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default().with_core_trace_fragment_size(4).unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
+
+    let ctx = vm_witness.trace_replay_mut().core_trace_contexts.last_mut().unwrap();
+    let mut stack = ContinuationStack::default();
+    stack.push_continuation(continuation);
+    ctx.continuation = stack;
+
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    assert!(
+        matches!(result, Err(ExecutionError::Internal(_))),
+        "expected ExecutionError::Internal, got: {result:?}"
     );
 }
 
@@ -1351,7 +1410,7 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     // Clear core_trace_contexts to simulate an empty trace.
     vm_witness.trace_replay_mut().core_trace_contexts.clear();
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1385,7 +1444,7 @@ fn build_trace_for_program(
     host.load_library(create_simple_library()).unwrap();
     let vm_witness = processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0;
 
-    build_trace(vm_witness).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 fn collect_end_flags(trace: &VmTrace) -> Vec<Word> {
@@ -1409,19 +1468,92 @@ fn read_opcode(main_trace: &MainTrace, row_idx: RowIndex) -> u8 {
     opcode as u8
 }
 
-/// Wrapper around `VmTrace` that produces deterministic `Debug` output.
+/// Compact, deterministic view of a [`VmTrace`] for snapshot testing.
 ///
-/// `VmTrace` contains a `MerkleStore` backed by `HashMap`, whose iteration order is
-/// non-deterministic. This wrapper formats the Merkle store nodes sorted by key, making the
-/// output stable across runs for snapshot testing.
-struct DeterministicTrace<'a>(&'a VmTrace);
+/// Main-trace equality is asserted cell-for-cell before this view is built. The checksums here are
+/// drift markers which keep the snapshots useful without embedding the fixed And8 table in every
+/// fixture.
+struct DeterministicTrace<'a> {
+    trace: &'a VmTrace,
+    core: &'a RowMajorMatrix<Felt>,
+    chiplets: &'a RowMajorMatrix<Felt>,
+    eidos_compression: &'a RowMajorMatrix<Felt>,
+    and8: &'a RowMajorMatrix<Felt>,
+}
+
+struct AirMatrixSummaries {
+    core: MatrixSummary,
+    chiplets: MatrixSummary,
+    eidos_compression: MatrixSummary,
+    and8_lookup: MatrixSummary,
+}
+
+struct MatrixSummary {
+    width: usize,
+    height: usize,
+    nonzero_values: usize,
+    fnv1a64: u64,
+}
+
+impl core::fmt::Debug for AirMatrixSummaries {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AirMatrixSummaries")
+            .field("core", &self.core)
+            .field("chiplets", &self.chiplets)
+            .field("eidos_compression", &self.eidos_compression)
+            .field("and8_lookup", &self.and8_lookup)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for MatrixSummary {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MatrixSummary")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("nonzero_values", &self.nonzero_values)
+            .field("fnv1a64", &self.fnv1a64)
+            .finish()
+    }
+}
+
+impl MatrixSummary {
+    fn new(matrix: &RowMajorMatrix<Felt>) -> Self {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+        let mut fnv1a64 = FNV_OFFSET_BASIS;
+        let mut nonzero_values = 0;
+        for &value in &matrix.values {
+            nonzero_values += usize::from(value != ZERO);
+            for byte in value.as_canonical_u64().to_le_bytes() {
+                fnv1a64 ^= u64::from(byte);
+                fnv1a64 = fnv1a64.wrapping_mul(FNV_PRIME);
+            }
+        }
+
+        Self {
+            width: matrix.width,
+            height: matrix.values.len() / matrix.width,
+            nonzero_values,
+            fnv1a64,
+        }
+    }
+}
 
 impl core::fmt::Debug for DeterministicTrace<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let trace = self.0;
+        let trace = self.trace;
+        let air_matrices = AirMatrixSummaries {
+            core: MatrixSummary::new(self.core),
+            chiplets: MatrixSummary::new(self.chiplets),
+            eidos_compression: MatrixSummary::new(self.eidos_compression),
+            and8_lookup: MatrixSummary::new(self.and8),
+        };
 
         f.debug_struct("VmTrace")
-            .field("main_trace", trace.main_trace())
+            .field("air_matrices", &air_matrices)
+            .field("last_program_row", &trace.main_trace().last_program_row())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
             .field("trace_len_summary", trace.trace_len_summary())

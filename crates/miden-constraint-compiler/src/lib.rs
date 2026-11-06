@@ -4,7 +4,7 @@
 //! auditable source of truth — are captured symbolically into a hash-consed,
 //! class-aware IR ([`ir::Graph`]). Analyses and code-generation backends consume
 //! that graph. A backend with target-specific machinery lives with its target
-//! (the ACE circuit backend in `miden-ace-codegen`); the rest live here.
+//! (the ACE circuit backend in `miden-ace`); the rest live here.
 //!
 //! # Invariants
 //!
@@ -23,3 +23,6 @@
 
 pub mod backend;
 pub mod ir;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;

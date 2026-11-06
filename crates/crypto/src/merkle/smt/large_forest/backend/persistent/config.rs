@@ -236,7 +236,7 @@ mod test {
         assert_eq!(config.cache_size_bytes, DEFAULT_CACHE_SIZE_BYTES);
         assert_eq!(config.max_open_files, DEFAULT_MAX_OPEN_FILES);
         assert_eq!(config.max_wal_size, DEFAULT_MAX_TOTAL_WAL_SIZE_BYTES);
-        assert_eq!(config.bloom_filter_bits, DEFAULT_BLOOM_FILTER_BITS_PER_KEY);
+        assert_eq!(config.bloom_filter_bits.to_bits(), DEFAULT_BLOOM_FILTER_BITS_PER_KEY.to_bits());
         assert_eq!(config.target_file_size, DEFAULT_TARGET_FILE_SIZE);
         assert_eq!(config.sync_writes, DEFAULT_SYNC_WRITES);
 

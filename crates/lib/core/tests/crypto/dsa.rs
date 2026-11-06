@@ -9,19 +9,20 @@ use miden_core_lib::{
 use miden_crypto::{
     SequentialCommit, Word,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
-    hash::keccak::Keccak256,
+    hash::{eidos::Eidos, keccak::Keccak256},
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_prover::{HashFunction, prove_precompiles};
-use miden_precompiles_verifier::verify_deferred;
+use miden_precompiles_stark::{
+    prover::{HashFunction, prove_precompiles},
+    verifier::verify_deferred,
+};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
 };
-use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 use crate::{
@@ -53,8 +54,9 @@ fn core_ecdsa_k256_keccak_recover_loads_signature_before_local_write() {
     let fixture = valid_fixture();
     // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
     // load-before-local-write ordering requested in review.
-    // `recover` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins here.
-    // Its candidate-key `adv_pipe` overwrites this region after the signature has been loaded.
+    // `recover_with_root` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame
+    // begins here. Its candidate-key `adv_pipe` overwrites this region after the signature has
+    // been loaded.
     let recover_digest_locals_ptr = (1_u32 << 31) + 8;
 
     let output = run_recover_with_native_signature(
@@ -290,7 +292,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
 
         let proof = prove_precompiles(
             vec![output.precompile_witness.clone().expect("execution has deferred work")],
-            HashFunction::Blake3_256,
+            HashFunction::Eidos,
         )
         .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
         verify_deferred(&proof.proof, output.precompile_root()).unwrap_or_else(|_| {
@@ -331,7 +333,12 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let output = run_core_program_with_advice(&verify_cycle_source(&fixture), &fixture.advice)
         .expect("valid core ECDSA K256/Keccak signature must verify");
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
-    assert_eq!(cycles, 1325);
+    // This includes the deferred-node registration and hashing performed by the Keccak and
+    // secp256k1 precompile wrappers.
+    // The parent fixture used 1191 cycles. Independent obligation roots compose into one
+    // signature subgraph, which the native wrapper logs once. Primitive native hashing
+    // baselines remain separate.
+    assert_eq!(cycles, 1249);
 }
 
 #[test]
@@ -346,7 +353,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_wrong_pk_comm() {
 fn core_ecdsa_k256_keccak_verify_traps_on_off_curve_public_key() {
     let mut fixture = valid_fixture();
     fixture.advice[8..16].copy_from_slice(&[Felt::from_u32(0); 8]);
-    fixture.public_key_commitment = Poseidon2::hash_elements(&fixture.advice[..16]);
+    fixture.public_key_commitment = Eidos::hash_elements(&fixture.advice[..16]);
 
     run_verify(&fixture).expect_err("off-curve public key advice must trap");
 }
@@ -357,7 +364,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_non_u32_limb() {
 
     let mut pubkey_fixture = valid_fixture();
     pubkey_fixture.advice[0] = non_u32;
-    pubkey_fixture.public_key_commitment = Poseidon2::hash_elements(&pubkey_fixture.advice[..16]);
+    pubkey_fixture.public_key_commitment = Eidos::hash_elements(&pubkey_fixture.advice[..16]);
     run_verify(&pubkey_fixture).expect_err("non-u32 public-key limb must trap");
 
     let mut r_fixture = valid_fixture();
@@ -654,7 +661,8 @@ fn run_core_program(
         .expect("failed to load CoreLibrary into the host");
     if let Some(handler) = recovery_handler {
         assert!(
-            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler),
+            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler)
+                .expect("the recovery event name is valid"),
             "the default recovery handler must already be registered",
         );
     }
@@ -688,7 +696,7 @@ fn recovery_public_key_handler(public_key: &PublicKey) -> Arc<dyn EventHandler> 
 fn assert_deferred_proof_verifies(output: &ExecutionOutput) {
     let proof = prove_precompiles(
         vec![output.precompile_witness.clone().expect("execution has deferred work")],
-        HashFunction::Blake3_256,
+        HashFunction::Eidos,
     )
     .expect("the GLV-decomposed deferred claims must be provable");
     verify_deferred(&proof.proof, output.precompile_root())
@@ -706,4 +714,80 @@ fn tamper_felt(felt: &mut Felt) {
     } else {
         Felt::new(value - 1).expect("decremented canonical field element must stay canonical")
     };
+}
+
+#[test]
+fn manual_signature_variants_export_all_obligations_and_preserve_results() {
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
+
+    let fixture = valid_fixture();
+    let message_bytes = fixture.message.as_bytes();
+    let message_stores =
+        masm_store_felts(&bytes_to_packed_u32_elements(&message_bytes), MESSAGE_PTR);
+    let signature_stores =
+        masm_store_felts(&native_recovery_signature(&fixture.signature), SIGNATURE_PTR);
+    let message = masm_push_word(&fixture.message);
+    let commitment = masm_push_word(&fixture.public_key_commitment);
+    for (procedure, setup, advice, obligations) in [
+        ("verify", format!("{message} {commitment}"), fixture.advice.as_slice(), 4),
+        (
+            "verify_bytes",
+            format!("{message_stores} push.32 push.{MESSAGE_PTR} {commitment}"),
+            fixture.advice.as_slice(),
+            4,
+        ),
+        (
+            "recover",
+            format!("{signature_stores} push.{SIGNATURE_PTR} {message}"),
+            &[][..],
+            3,
+        ),
+        (
+            "recover_bytes",
+            format!(
+                "{message_stores} {signature_stores} push.{SIGNATURE_PTR} push.32 push.{MESSAGE_PTR}"
+            ),
+            &[][..],
+            3,
+        ),
+    ] {
+        let source = format!(
+            "begin {setup} exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::{procedure} exec.::miden::core::sys::truncate_stack end"
+        );
+        let native = run_core_program_with_advice(&source, advice).unwrap();
+        for composed in [false, true] {
+            let manual_source =
+                manual_signature_source(&source, "ecdsa_k256_keccak", procedure, composed);
+            let manual = run_core_program_with_advice(&manual_source, advice).unwrap();
+            assert_manual_signature_matches_native(
+                &native,
+                &manual,
+                obligations,
+                obligations - 1,
+                composed,
+            );
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_core_program_with_advice(&tail_source, advice).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "ecdsa_k256_keccak", procedure, true);
+                let tail_manual = run_core_program_with_advice(&tail_source, advice).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(
+                    &tail_native,
+                    &tail_manual,
+                    obligations,
+                    obligations - 1,
+                    true,
+                );
+            }
+            if procedure == "verify" || procedure == "verify_bytes" {
+                let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
+                assert!(run_core_program_with_advice(&wrong, advice).is_err());
+            }
+        }
+    }
 }

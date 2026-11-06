@@ -10,8 +10,9 @@ use miden_utils_testing::{Felt, PrimeField64, U32_BOUND, expect_exec_error_match
 
 #[test]
 fn wrapping_add() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in wrapping_add_proptest.
+    let a: u64 = 0x0000_0002_0000_0005;
+    let b: u64 = 0x0000_0001_0000_0003;
     let c = a.wrapping_add(b);
 
     let source = "
@@ -61,8 +62,9 @@ fn overflowing_add() {
             exec.u64::overflowing_add
         end";
 
-    let a = rand::random::<u64>() as u32 as u64;
-    let b = rand::random::<u64>() as u32 as u64;
+    // a + b stays below 2^64: no overflow
+    let a = u32::MAX as u64;
+    let b = u32::MAX as u64;
     let (c, _) = a.overflowing_add(b);
 
     let (a1, a0) = split_u64(a);
@@ -74,8 +76,9 @@ fn overflowing_add() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[0, c0, c1]);
 
+    // a + b overflows: u64::MAX + 1 wraps to 0 with the flag set
     let a = u64::MAX;
-    let b = rand::random::<u64>();
+    let b = 1;
     let (c, _) = a.overflowing_add(b);
 
     let (a1, a0) = split_u64(a);
@@ -95,8 +98,9 @@ fn widening_add() {
             exec.u64::widening_add
         end";
 
-    let a = rand::random::<u64>() as u32 as u64;
-    let b = rand::random::<u64>() as u32 as u64;
+    // no carry: both operands fit in u32
+    let a = u32::MAX as u64;
+    let b = u32::MAX as u64;
     let (c, overflow) = a.overflowing_add(b);
     let carry = if overflow { 1 } else { 0 };
 
@@ -109,8 +113,9 @@ fn widening_add() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1, carry]);
 
+    // carry out of the high limb: u64::MAX + 1
     let a = u64::MAX;
-    let b = rand::random::<u64>();
+    let b = 1;
     let (c, overflow) = a.overflowing_add(b);
     let carry = if overflow { 1 } else { 0 };
 
@@ -128,8 +133,9 @@ fn widening_add() {
 
 #[test]
 fn wrapping_sub() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in wrapping_sub_proptest.
+    let a: u64 = 5;
+    let b: u64 = 7; // wraps to a large value
     let c = a.wrapping_sub(b);
 
     let source = "
@@ -150,8 +156,9 @@ fn wrapping_sub() {
 
 #[test]
 fn overflowing_sub() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage of all three borrow classes lives in overflowing_sub_proptest.
+    let a: u64 = 3;
+    let b: u64 = 5; // a < b: borrow set
     let (c, flag) = a.overflowing_sub(b);
 
     let source = "
@@ -169,8 +176,8 @@ fn overflowing_sub() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[flag as u64, c0, c1]);
 
-    let base = rand::random::<u64>() as u32 as u64;
-    let diff = rand::random::<u64>() as u32 as u64;
+    let base = 10_u64;
+    let diff = 4_u64;
 
     let a = base;
     let b = base + diff;
@@ -184,8 +191,8 @@ fn overflowing_sub() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[1, c0, c1]);
 
-    let base = rand::random::<u64>() as u32 as u64;
-    let diff = rand::random::<u64>() as u32 as u64;
+    let base = 10_u64;
+    let diff = 4_u64;
 
     let a = base + diff;
     let b = base;
@@ -205,8 +212,9 @@ fn overflowing_sub() {
 
 #[test]
 fn wrapping_mul() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in wrapping_mul_proptest.
+    let a: u64 = 0x0000_0001_0000_0003;
+    let b: u64 = 0x0000_0002_0000_0005;
     let c = a.wrapping_mul(b);
 
     let source = "
@@ -249,20 +257,7 @@ fn widening_mul() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1, c2, c3]);
 
-    let a = rand::random::<u64>() as u128;
-    let b = rand::random::<u64>() as u128;
-    let c = a.wrapping_mul(b);
-
-    let a = a as u64;
-    let b = b as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c3, c2, c1, c0) = split_u128(c);
-
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1, c2, c3]);
+    // Randomized coverage lives in widening_mul_proptest.
 }
 
 #[test]
@@ -332,7 +327,7 @@ fn overflowing_mul() {
         (u32::MAX as u64, u32::MAX as u64), // largest no-overflow product
         (1u64 << 32, 1u64 << 32),           // smallest overflowing product
         (u64::MAX, u64::MAX),
-        (rand::random(), rand::random()),
+        (0xdead_beef_cafe_f00d, 0x1234_5678_9abc_def0),
     ];
 
     for &(a, b) in cases {
@@ -349,7 +344,7 @@ fn overflowing_mul() {
 
 #[test]
 fn checked_not() {
-    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, rand::random()];
+    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, 0xdead_beef_cafe_f00d];
 
     let source = "
         use miden::core::math::u64
@@ -409,14 +404,7 @@ fn unchecked_lte() {
     // a = 1, b = 0 => 1 <= 0 = false
     build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[0]);
 
-    // randomized test
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
-    let c = (a <= b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    build_test!(source, &stack![b0, b1, a0, a1]).expect_stack(&[c]);
+    // Randomized coverage lives in unchecked_lte_proptest.
 }
 
 #[test]
@@ -457,14 +445,7 @@ fn unchecked_gte() {
     // a = 1, b = 0 => 1 >= 0 = true
     build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[1]);
 
-    // randomized test
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
-    let c = (a >= b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    build_test!(source, &stack![b0, b1, a0, a1]).expect_stack(&[c]);
+    // Randomized coverage lives in unchecked_gte_proptest.
 }
 
 #[test]
@@ -526,8 +507,9 @@ fn unchecked_eq() {
     build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[0]);
 
     // randomized test
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in unchecked_eq_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0xdead_beef_cafe_f00d;
     let c = (a == b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -554,8 +536,9 @@ fn unchecked_neq() {
     build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[1]);
 
     // randomized test
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in unchecked_neq_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0xdead_beef_cafe_f00d + 1;
     let c = (a != b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -579,7 +562,7 @@ fn unchecked_eqz() {
     build_test!(source, &stack![1, 0]).expect_stack(&[0]);
 
     // randomized test
-    let a: u64 = rand::random();
+    let a: u64 = 0xdead_beef_cafe_f00d;
     let c = (a == 0) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -588,43 +571,6 @@ fn unchecked_eqz() {
 
 // DIVISION
 // ------------------------------------------------------------------------------------------------
-
-#[test]
-fn advice_push_u64div() {
-    // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
-    let source = format!(
-        "begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push adv_push adv_push adv_push movupw.2 dropw end"
-    );
-
-    // get two random 64-bit integers and split them into 32-bit limbs
-    let a = rand::random::<u64>();
-    let a_hi = a >> 32;
-    let a_lo = a as u32 as u64;
-
-    let b = rand::random::<u64>();
-    let b_hi = b >> 32;
-    let b_lo = b as u32 as u64;
-
-    // compute expected quotient
-    let q = a / b;
-    let q_hi = q >> 32;
-    let q_lo = q as u32 as u64;
-
-    // compute expected remainder
-    let r = a % b;
-    let r_hi = r >> 32;
-    let r_lo = r as u32 as u64;
-
-    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
-    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
-    let test = build_test!(source, &input_stack);
-    // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
-    // First adv_push adv_push: pops q_hi then q_lo → [q_lo, q_hi, ...]
-    // Second adv_push adv_push: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
-    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
-    test.expect_stack(&expected);
-}
 
 #[test]
 fn advice_push_u64div_two_pushes() {
@@ -650,53 +596,6 @@ fn advice_push_u64div_two_pushes() {
     let test = build_test!(source, &input_stack);
     // Expected: [r_lo=3, r_hi=0, q_lo=12, q_hi=0]
     test.expect_stack(&[3, 0, 12, 0]);
-}
-
-#[test]
-fn advice_push_u64div_local_procedure() {
-    // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
-    let source = format!(
-        "
-    proc foo
-        emit.event(\"{U64_DIV_EVENT_NAME}\")
-        adv_push adv_push  # quotient
-        adv_push adv_push  # remainder
-    end
-
-    begin
-        exec.foo
-        movupw.2 dropw
-    end"
-    );
-
-    // get two random 64-bit integers and split them into 32-bit limbs
-    let a = rand::random::<u64>();
-    let a_hi = a >> 32;
-    let a_lo = a as u32 as u64;
-
-    let b = rand::random::<u64>();
-    let b_hi = b >> 32;
-    let b_lo = b as u32 as u64;
-
-    // compute expected quotient
-    let q = a / b;
-    let q_hi = q >> 32;
-    let q_lo = q as u32 as u64;
-
-    // compute expected remainder
-    let r = a % b;
-    let r_hi = r >> 32;
-    let r_lo = r as u32 as u64;
-
-    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
-    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
-    let test = build_test!(source, &input_stack);
-    // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
-    // First adv_push adv_push: pops q_hi then q_lo → [q_lo, q_hi, ...]
-    // Second adv_push adv_push: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
-    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
-    test.expect_stack(&expected);
 }
 
 #[test]
@@ -741,8 +640,10 @@ fn advice_push_u64div_conditional_execution() {
 
 #[test]
 fn unchecked_div() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in unchecked_div_proptest.
+    // Low-limb-only divisor boundary (high limb = 0):
+    let a: u64 = 10;
+    let b: u64 = 3;
     let c = a / b;
 
     let source = "
@@ -829,8 +730,9 @@ fn ensure_div_doesnt_crash() {
 
 #[test]
 fn unchecked_mod() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in unchecked_mod_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0x0000_0001_0000_0003;
     let c = a % b;
 
     let source = "
@@ -861,8 +763,9 @@ fn unchecked_mod() {
 
 #[test]
 fn unchecked_divmod() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in unchecked_divmod_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0x0000_0001_0000_0003;
     let q = a / b;
     let r = a % b;
 
@@ -889,8 +792,9 @@ fn unchecked_divmod() {
 
 #[test]
 fn checked_and() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in checked_and_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0x1234_5678_9abc_def0;
     let c = a & b;
 
     let source = "
@@ -911,8 +815,9 @@ fn checked_and() {
 
 #[test]
 fn checked_and_fail() {
-    let a0: u64 = rand::random();
-    let b0: u64 = rand::random();
+    // Low limbs above 2^32, so the reported NotU32Values are exactly these operands.
+    let a0: u64 = (1u64 << 32) + 0xdead_beef;
+    let b0: u64 = (1u64 << 32) + 0xcafe_f00d;
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -937,8 +842,9 @@ fn checked_and_fail() {
 
 #[test]
 fn checked_or() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in checked_or_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0x1234_5678_9abc_def0;
     let c = a | b;
 
     let source = "
@@ -959,8 +865,9 @@ fn checked_or() {
 
 #[test]
 fn checked_or_fail() {
-    let a0: u64 = rand::random();
-    let b0: u64 = rand::random();
+    // Low limbs above 2^32, so the reported NotU32Values are exactly these operands.
+    let a0: u64 = (1u64 << 32) + 0xdead_beef;
+    let b0: u64 = (1u64 << 32) + 0xcafe_f00d;
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -985,8 +892,9 @@ fn checked_or_fail() {
 
 #[test]
 fn checked_xor() {
-    let a: u64 = rand::random();
-    let b: u64 = rand::random();
+    // Randomized coverage lives in checked_xor_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
+    let b: u64 = 0x1234_5678_9abc_def0;
     let c = a ^ b;
 
     let source = "
@@ -1007,8 +915,9 @@ fn checked_xor() {
 
 #[test]
 fn checked_xor_fail() {
-    let a0: u64 = rand::random();
-    let b0: u64 = rand::random();
+    // Low limbs above 2^32, so the reported NotU32Values are exactly these operands.
+    let a0: u64 = (1u64 << 32) + 0xdead_beef;
+    let b0: u64 = (1u64 << 32) + 0xcafe_f00d;
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -1041,7 +950,8 @@ fn unchecked_shl() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand::random();
+    // Randomized coverage lives in unchecked_shl_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1092,7 +1002,8 @@ fn unchecked_shr() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand::random();
+    // Randomized coverage lives in unchecked_shr_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1212,7 +1123,8 @@ fn unchecked_rotl() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand::random();
+    // Randomized coverage lives in unchecked_rotl_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1263,7 +1175,8 @@ fn unchecked_rotr() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand::random();
+    // Randomized coverage lives in unchecked_rotr_proptest.
+    let a: u64 = 0xdead_beef_cafe_f00d;
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1409,6 +1322,7 @@ fn u32clz_nonzero_boundary_regression() {
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(miden_utils_testing::proptest::test_runner::Config::with_cases(64))]
     #[test]
     fn u32clz_matches_rust_leading_zeros(n in any::<u32>()) {
         let source = "begin u32clz end";
@@ -1499,6 +1413,323 @@ fn cto() {
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(miden_utils_testing::proptest::test_runner::Config::with_cases(64))]
+    #[test]
+    fn wrapping_add_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::wrapping_add
+            end";
+
+        let c = a.wrapping_add(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
+    #[test]
+    fn overflowing_add_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::overflowing_add
+            end";
+
+        let (c, overflow) = a.overflowing_add(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [overflow_flag, c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e])
+            .prop_expect_stack(&[overflow as u64, c0, c1, e])?;
+    }
+
+    #[test]
+    fn widening_add_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::widening_add
+            end";
+
+        let (c, overflow) = a.overflowing_add(b);
+        let carry = if overflow { 1 } else { 0 };
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi, carry]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, carry, e])?;
+    }
+
+    #[test]
+    fn wrapping_sub_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::wrapping_sub
+            end";
+
+        let c = a.wrapping_sub(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [c_lo, c_hi]
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
+    #[test]
+    fn overflowing_sub_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::overflowing_sub
+            end";
+
+        let (c, flag) = a.overflowing_sub(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [borrow, c_lo, c_hi]
+        build_test!(source, &stack![b0, b1, a0, a1, e])
+            .prop_expect_stack(&[flag as u64, c0, c1, e])?;
+    }
+
+    #[test]
+    fn wrapping_mul_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::wrapping_mul
+            end";
+
+        let c = a.wrapping_mul(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
+    #[test]
+    fn unchecked_lte_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::lte
+            end";
+
+        let c = (a <= b) as u64;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a <= b
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[c, e])?;
+    }
+
+    #[test]
+    fn unchecked_gte_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::gte
+            end";
+
+        let c = (a >= b) as u64;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a >= b
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[c, e])?;
+    }
+
+    #[test]
+    fn unchecked_eq_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::eq
+            end";
+
+        let c = (a == b) as u64;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[c, e])?;
+    }
+
+    #[test]
+    fn unchecked_neq_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::neq
+            end";
+
+        let c = (a != b) as u64;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[c, e])?;
+    }
+
+    #[test]
+    fn unchecked_eqz_proptest(a in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::eqz
+            end";
+
+        let c = (a == 0) as u64;
+        let (a1, a0) = split_u64(a);
+
+        build_test!(source, &stack![a0, a1, e]).prop_expect_stack(&[c, e])?;
+    }
+
+    #[test]
+    fn advice_push_u64div_proptest(a in boundary_biased_u64(), b in nonzero_u64()) {
+        // push a/b onto the advice stack and then move these values onto the operand stack.
+        // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
+        let source = format!(
+            "begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push adv_push adv_push adv_push movupw.2 dropw end"
+        );
+
+        let a_hi = a >> 32;
+        let a_lo = a as u32 as u64;
+        let b_hi = b >> 32;
+        let b_lo = b as u32 as u64;
+
+        let q = a / b;
+        let q_hi = q >> 32;
+        let q_lo = q as u32 as u64;
+        let r = a % b;
+        let r_hi = r >> 32;
+        let r_lo = r as u32 as u64;
+
+        // stack from top [b_lo, b_hi, a_lo, a_hi].
+        // NOTE: no stack-preservation sentinel is possible here — the snippet's `movupw.2 dropw`
+        // unconditionally drops word 2, so anything below the inputs is consumed by the program
+        // itself, not by the event handler under test.
+        let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
+        let test = build_test!(source, &input_stack);
+        // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
+        test.prop_expect_stack(&[r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi])?;
+    }
+
+    #[test]
+    fn advice_push_u64div_local_procedure_proptest(a in boundary_biased_u64(), b in nonzero_u64()) {
+        let source = format!(
+            "
+    proc foo
+        emit.event(\"{U64_DIV_EVENT_NAME}\")
+        adv_push adv_push  # quotient
+        adv_push adv_push  # remainder
+    end
+
+    begin
+        exec.foo
+        movupw.2 dropw
+    end"
+        );
+
+        let a_hi = a >> 32;
+        let a_lo = a as u32 as u64;
+        let b_hi = b >> 32;
+        let b_lo = b as u32 as u64;
+
+        let q = a / b;
+        let q_hi = q >> 32;
+        let q_lo = q as u32 as u64;
+        let r = a % b;
+        let r_hi = r >> 32;
+        let r_lo = r as u32 as u64;
+
+        // Same note as above: `movupw.2 dropw` consumes word 2, so no sentinel is possible.
+        let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
+        let test = build_test!(source, &input_stack);
+        test.prop_expect_stack(&[r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi])?;
+    }
+
+    #[test]
+    fn unchecked_divmod_proptest(a in boundary_biased_u64(), b in nonzero_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::divmod
+            end";
+
+        let q = a / b;
+        let r = a % b;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (q1, q0) = split_u64(q);
+        let (r1, r0) = split_u64(r);
+
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [r_lo, r_hi, q_lo, q_hi]
+        build_test!(source, &stack![b0, b1, a0, a1, e]).prop_expect_stack(&[r0, r1, q0, q1, e])?;
+    }
+
+    #[test]
+    fn checked_and_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::and
+            end";
+
+        let c = a & b;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
+    #[test]
+    fn checked_or_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::or
+            end";
+
+        let c = a | b;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
+    #[test]
+    fn checked_xor_proptest(a in boundary_biased_u64(), b in boundary_biased_u64(), e in 0..Felt::ORDER_U64) {
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::xor
+            end";
+
+        let c = a ^ b;
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1, e]).prop_expect_stack(&[c0, c1, e])?;
+    }
+
     #[test]
     fn unchecked_lt_proptest(a in any::<u64>(), b in any::<u64>()) {
 
@@ -1767,6 +1998,13 @@ proptest! {
 /// Strategy that mixes boundary u64 values with uniformly random ones. Each variant has equal
 /// probability of being sampled; the boundary cases stress 32-bit limb edges where carry handling
 /// is most likely to fail.
+/// Uniform over 1..=u64::MAX, built constructively (no filtering) so it can be used where
+/// zero would panic the test harness (e.g. integer division in expected-value computation).
+#[cfg(feature = "arbitrary")]
+fn nonzero_u64() -> impl Strategy<Value = u64> {
+    (0u64..u64::MAX).prop_map(|x| x + 1)
+}
+
 #[cfg(feature = "arbitrary")]
 fn boundary_biased_u64() -> impl Strategy<Value = u64> {
     prop_oneof![

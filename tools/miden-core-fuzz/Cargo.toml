@@ -11,12 +11,19 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+[lib]
+name = "miden_core_fuzz"
+path = "lib.rs"
+
 [dependencies]
 libfuzzer-sys = "0.4"
 
 [dependencies.miden-core]
 path = "../../core"
-features = ["std"]
+# "arbitrary" unlocks the builder add_to_forest impls (gated any(test, feature)) used by
+# the mast_forest_wire_view_new known-roots oracle; the serialization derives stay
+# test-only (all(feature = "arbitrary", test)), so fuzz-build behavior is unchanged.
+features = ["std", "arbitrary"]
 
 [dependencies.miden-assembly-syntax]
 path = "../../crates/assembly-syntax"
@@ -38,6 +45,13 @@ features = ["std"]
 path = "../../crates/package-registry"
 features = ["std", "resolver"]
 
+[dependencies.miden-wasm-event-handlers]
+path = "../../crates/wasm-event-handlers"
+features = ["std"]
+
+[dependencies.wasmi]
+version = "1.1"
+
 [dependencies.miden-project]
 path = "../../crates/project"
 features = ["std", "serde"]
@@ -47,6 +61,13 @@ version = "1.0"
 features = ["parse", "display", "serde"]
 
 # Fuzz targets - each is a separate binary
+[[bin]]
+name = "sparse_mast_forest_deserialize"
+path = "fuzz_targets/sparse_mast_forest_deserialize.rs"
+test = false
+doc = false
+bench = false
+
 [[bin]]
 name = "mast_forest_deserialize"
 path = "fuzz_targets/mast_forest_deserialize.rs"
@@ -176,6 +197,27 @@ bench = false
 [[bin]]
 name = "project_assemble"
 path = "fuzz_targets/project_assemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "event_handler_section_deserialize"
+path = "fuzz_targets/event_handler_section_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_handler_manifest"
+path = "fuzz_targets/wasm_handler_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_section_walk_differential"
+path = "fuzz_targets/wasm_section_walk_differential.rs"
 test = false
 doc = false
 bench = false

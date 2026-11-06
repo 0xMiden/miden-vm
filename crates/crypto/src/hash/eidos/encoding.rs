@@ -17,7 +17,7 @@ pub const ODD_LANE_MASK: u32 = 0x7fff_ffff;
 /// Decode a canonical field element into its low and high `u32` lanes.
 ///
 /// This is lossless for every canonical Goldilocks field element. It does not require the element
-/// to have been produced by [`pack_output_felt`].
+/// to have been produced by [`mask_and_pack_felt`].
 #[inline]
 pub fn unpack_felt(felt: Felt) -> (u32, u32) {
     let value = felt.as_canonical_u64();
@@ -42,25 +42,22 @@ pub fn felts_to_block(block: [Felt; BLOCK_LEN]) -> [u32; 16] {
     encode_felt_block(&block)
 }
 
-/// Pack two lanes from an Eidos output CV into one canonical field element.
+/// Pack two output lanes into a canonical field element, clearing bit 31 of `hi`.
 ///
-/// Bit 31 of `hi` is cleared. This operation is for compression outputs and completed digests,
-/// not for round-tripping arbitrary compression inputs.
+/// This discards one output bit and must not be used to round-trip arbitrary compression inputs.
 #[inline]
-pub fn pack_output_felt(lo: u32, hi: u32) -> Felt {
+pub fn mask_and_pack_felt(lo: u32, hi: u32) -> Felt {
     Felt::new_unchecked(pack_output_pair_u64(lo, hi))
 }
 
-/// Pack an eight-lane Eidos output CV into a four-Felt word.
-///
-/// Bit 31 of each odd lane is cleared.
+/// Clear the high bit of each odd output lane and pack the eight lanes into a four-Felt word.
 #[inline]
-pub fn output_cv_to_word(cv: [u32; 8]) -> Word {
+pub fn mask_and_pack_word(cv: [u32; 8]) -> Word {
     Word::new([
-        pack_output_felt(cv[0], cv[1]),
-        pack_output_felt(cv[2], cv[3]),
-        pack_output_felt(cv[4], cv[5]),
-        pack_output_felt(cv[6], cv[7]),
+        mask_and_pack_felt(cv[0], cv[1]),
+        mask_and_pack_felt(cv[2], cv[3]),
+        mask_and_pack_felt(cv[4], cv[5]),
+        mask_and_pack_felt(cv[6], cv[7]),
     ])
 }
 
@@ -74,7 +71,7 @@ pub(super) fn pack_cv_to_felts<const LANES: usize>(
     cv: [[u32; LANES]; 8],
 ) -> [[Felt; LANES]; DIGEST_WIDTH] {
     array::from_fn(|word| {
-        array::from_fn(|lane| pack_output_felt(cv[2 * word][lane], cv[2 * word + 1][lane]))
+        array::from_fn(|lane| mask_and_pack_felt(cv[2 * word][lane], cv[2 * word + 1][lane]))
     })
 }
 
@@ -234,7 +231,7 @@ mod tests {
             0x4567_89ab,
             0,
         ];
-        let packed = output_cv_to_word(cv);
+        let packed = mask_and_pack_word(cv);
         let decoded = word_to_cv(packed);
 
         assert_eq!(decoded[0], cv[0]);

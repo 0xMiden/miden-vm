@@ -49,6 +49,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bitflags"
+version = "2.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+
+[[package]]
 name = "blake3"
 version = "1.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -196,9 +202,9 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -221,9 +227,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
 dependencies = [
  "cmov",
  "subtle",
@@ -343,6 +349,16 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys",
 ]
 
 [[package]]
@@ -503,6 +519,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.34.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "blake3",
  "cc",
@@ -526,17 +548,15 @@ dependencies = [
  "k256",
  "miden-crypto-derive",
  "miden-field",
- "miden-lifted-stark",
  "miden-serde-utils",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
  "p3-challenger",
- "p3-dft",
+ "p3-field",
  "p3-goldilocks",
  "p3-keccak",
- "p3-matrix",
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
@@ -553,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.34.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -569,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.34.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -585,63 +605,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-lifted-air"
-version = "0.34.0"
-dependencies = [
- "p3-air",
- "p3-challenger",
- "p3-field",
- "p3-matrix",
- "p3-util",
- "thiserror",
-]
-
-[[package]]
-name = "miden-lifted-stark"
-version = "0.34.0"
-dependencies = [
- "miden-lifted-air",
- "miden-stark-transcript",
- "miden-stateful-hasher",
- "p3-challenger",
- "p3-dft",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-symmetric",
- "p3-util",
- "rand",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "miden-serde-utils"
-version = "0.34.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "rustix",
  "wincode",
-]
-
-[[package]]
-name = "miden-stark-transcript"
-version = "0.34.0"
-dependencies = [
- "p3-challenger",
- "p3-field",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "miden-stateful-hasher"
-version = "0.34.0"
-dependencies = [
- "p3-field",
- "p3-symmetric",
 ]
 
 [[package]]
@@ -735,19 +705,6 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 dependencies = [
  "critical-section",
  "portable-atomic",
-]
-
-[[package]]
-name = "p3-air"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be7a317aa82ba3d758229db6dd1e2baa75f9aa6f1179d98b3b1e0c2c6b930d59"
-dependencies = [
- "p3-field",
- "p3-matrix",
- "serde",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -1093,6 +1050,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1347,6 +1317,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "thiserror",
+]
+
+[[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-sys"
+version = "0.61.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]

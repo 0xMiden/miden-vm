@@ -521,8 +521,8 @@ impl Assembler {
 
             // ----- cryptographic instructions ---------------------------------------------------
             Instruction::Hash => crypto_ops::hash(block_builder),
-            Instruction::HPerm => block_builder.push_op(HPerm),
-            Instruction::HMerge => crypto_ops::hmerge(block_builder),
+            Instruction::Compress => block_builder.push_op(Compress),
+            Instruction::HDword => crypto_ops::hdword(block_builder),
             Instruction::MTreeGet => crypto_ops::mtree_get(block_builder),
             Instruction::MTreeSet => crypto_ops::mtree_set(block_builder),
             Instruction::MTreeMerge => crypto_ops::mtree_merge(block_builder),
@@ -539,6 +539,7 @@ impl Assembler {
             Instruction::HornerExt => block_builder.push_op(HornerExt),
             Instruction::EvalCircuit => block_builder.push_op(EvalCircuit),
             Instruction::LogDeferred => block_builder.push_op(LogDeferred),
+            Instruction::ClearDeferred => block_builder.push_op(ClearDeferred),
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
@@ -548,6 +549,7 @@ impl Assembler {
                         InvokeKind::Exec,
                         callee,
                         proc_ctx.id(),
+                        span,
                         block_builder.mast_forest_builder_mut(),
                         None,
                         inline_calls,
@@ -561,6 +563,7 @@ impl Assembler {
                         InvokeKind::Call,
                         callee,
                         proc_ctx.id(),
+                        span,
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("call instructions must provide an AssemblyOp")),
                         inline_calls,
@@ -574,6 +577,7 @@ impl Assembler {
                         InvokeKind::SysCall,
                         callee,
                         proc_ctx.id(),
+                        span,
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("syscall instructions must provide an AssemblyOp")),
                         inline_calls,

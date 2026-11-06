@@ -1,6 +1,6 @@
 namespace batch
 
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::mem
 use miden::core::stark::security
 use miden::core::sys
@@ -11,7 +11,8 @@ use miden::core::word
 # The claim count is a runtime input; this limit keeps the example small.
 const MAX_CLAIMS = 4
 const MIN_SECURITY_BITS = 96
-const AND_TAG = [1, 0, 0, 0]
+# Registered deferred-AND domain; its three frame parameters are zero.
+const DEFERRED_AND_DOMAIN = 0x01000301
 
 #! Fetches and verifies the MVM proof for a claim, returning its deferred root.
 #!
@@ -42,11 +43,11 @@ proc append_deferred_root(deferred_root: word, batch_root: word) -> word
             # The first non-TRUE root starts the fold unchanged.
             dropw
         else
-            push.AND_TAG movdnw.2
-            # => [BATCH_ROOT, DEFERRED_ROOT, AND_TAG, ...]
+            # => [BATCH_ROOT, DEFERRED_ROOT, ...]
 
             # Hash the AND node without adding deferred work to the batcher's own proof.
-            hperm exec.poseidon2::squeeze_digest
+            push.0.0.0.DEFERRED_AND_DOMAIN exec.eidos::init_chaining_word_with_params
+            exec.eidos::compress_double_word
         end
     end
 end
@@ -101,14 +102,16 @@ pub proc verify_batch(claims_ptr: ptr<word>, num_claims: u32, claims_commitment:
 
     exec.word::testz
     if.true
-        # No execution left deferred work, so there is no PVM proof to request.
+        # No execution left deferred work, so no PVM proof is needed.
         dropw
     else
-        # 3. Ask the host for one PVM proof of our combined root. This event can suspend
-        # execution while the host obtains the proof. The root stays on the stack.
-        exec.pvm::request_proof
+        # 3. Fetch the PVM proof prepared by Rust for our combined root.
+        dupw procref.pvm::verify_proof exec.sys::build_proof_request_key
+        # => [PROOF_REQUEST_KEY, BATCH_ROOT, ...]
+        adv.push_mapval dropw
+        # => [BATCH_ROOT, ...]; the proof stream is on the advice stack.
 
-        # 4. Verify the returned proof against that root and enforce the security requirement.
+        # 4. Verify the staged proof against that root and enforce the security requirement.
         exec.pvm::verify_proof
         exec.security::compute_conjectured_security_level
         u32lt.MIN_SECURITY_BITS assertz.err="PVM proof security is below the required minimum"

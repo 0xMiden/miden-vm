@@ -1,15 +1,15 @@
 #! Shared stack representations used by the recursive STARK verifier.
 
-use {State} from miden::core::crypto::hashes::poseidon2
+use {State} from miden::core::crypto::hashes::eidos
 
 #! A quadratic extension-field value, with the constant coefficient on top of the stack.
 pub type QuadFelt = struct { c0: felt, c1: felt }
 
-#! Poseidon2 sponge state in operand-stack order.
-pub type PoseidonState = State
+#! Eidos compression state in operand-stack order.
+pub type EidosState = State
 
-# A Poseidon2 commitment or procedure digest.
-pub use {Digest} from miden::core::crypto::hashes::poseidon2
+# An Eidos commitment or procedure digest.
+pub use {Digest} from miden::core::crypto::hashes::eidos
 
 #! A base-field-element address in VM memory.
 pub type Address = ptr<felt>

@@ -139,6 +139,31 @@ impl EphemeralPublicKey {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+mod ephemeral_key_arbitrary {
+    use proptest::prelude::*;
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+    use super::EphemeralPublicKey;
+    use crate::ecdh::k256::EphemeralSecretKey;
+
+    impl Arbitrary for EphemeralPublicKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader decompresses the curve point; derive it from a deterministically
+            // seeded ephemeral secret - valid by construction.
+            any::<[u8; 32]>()
+                .prop_map(|seed| {
+                    let mut rng = ChaCha20Rng::from_seed(seed);
+                    EphemeralSecretKey::with_rng(&mut rng).public_key()
+                })
+                .boxed()
+        }
+    }
+}
+
 impl Serializable for EphemeralPublicKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Compressed format

@@ -1,5 +1,7 @@
-use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
-use miden_air::MIDEN_AIR_COUNT;
+use miden_ace::{
+    InputKey,
+    compiler::{AceCircuit, AceConfig, LayoutKind},
+};
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStack,
@@ -41,7 +43,11 @@ fn circuit_evaluation_prove_verify() {
     );
 
     // the circuit
-    let input_0 = QuadFelt::new(rand::random());
+    let mut seed = 1u64;
+    let input_0 = QuadFelt::new([
+        miden_utils_testing::rand::seeded_element(&mut seed),
+        miden_utils_testing::rand::seeded_element(&mut seed),
+    ]);
     let input_1 = input_0 * (input_0 - QuadFelt::ONE);
     // inputs
     let input_0_coeffs = input_0.as_basis_coefficients_slice();
@@ -86,21 +92,13 @@ fn circuit_evaluation_prove_verify() {
 
 #[test]
 fn multi_air_eval_circuit_masm() {
-    // Exercises the combined Miden multi-AIR circuit. If this test passes, the
-    // codegen + MASM ACE chip are consistent for the multi-AIR shape; any
-    // failure in the recursive verifier (`test_poseidon2_prove_verify`) is then in the
-    // input plumbing (memory layout, advice ordering, transcript binding), not in the
-    // circuit.
+    // Check that the encoded canonical circuit accepts inputs whose Rust evaluation is zero.
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
-    let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order(
-        config,
-        &miden_air::ProofOrder::instance_order(),
-    )
-    .unwrap();
+    let circuit =
+        miden_air_definitions::compiler::vm::build_canonical_multi_air_ace_circuit(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);
@@ -153,7 +151,7 @@ fn multi_air_eval_circuit_masm() {
     test.check_constraints()
 }
 
-fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
+fn fill_inputs(layout: &miden_ace::InputLayout) -> Vec<QuadFelt> {
     let mut values = Vec::with_capacity(layout.total_inputs);
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     for _ in 0..layout.total_inputs {
@@ -168,7 +166,7 @@ fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
 
 fn adjust_quotient_to_zero(
     circuit: &AceCircuit<QuadFelt>,
-    layout: &miden_ace_codegen::InputLayout,
+    layout: &miden_ace::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
     let root = circuit.eval(inputs).expect("circuit eval");
@@ -185,14 +183,14 @@ fn adjust_quotient_to_zero(
 
 fn find_nonzero_quotient_slope(
     circuit: &AceCircuit<QuadFelt>,
-    layout: &miden_ace_codegen::InputLayout,
+    layout: &miden_ace::InputLayout,
     inputs: &mut [QuadFelt],
     root: QuadFelt,
 ) -> Option<(usize, QuadFelt)> {
     // Search for a quotient coordinate that has a non-zero influence on the output.
     // We do this by bumping a coordinate by +1 and re-evaluating to get the slope.
     for chunk in 0..layout.counts.num_quotient_chunks {
-        for coord in 0..miden_ace_codegen::EXT_DEGREE {
+        for coord in 0..miden_ace::EXT_DEGREE {
             let idx = layout
                 .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
                 .expect("quotient coord exists");

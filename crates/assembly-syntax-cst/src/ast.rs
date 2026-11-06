@@ -154,11 +154,22 @@ ast_node!(
     "attribute"
 );
 ast_node!(
-    #[doc = "A visibility marker such as `pub`."]
+    #[doc = "A visibility marker such as `pub` or `pub(package)`."]
     Visibility,
     SyntaxKind::Visibility,
     "visibility modifier"
 );
+
+impl Visibility {
+    /// Returns true if this marker specifies `pub(package)` visibility.
+    pub fn is_internal(&self) -> bool {
+        self.syntax()
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .any(|token| token.kind() == SyntaxKind::LParen)
+    }
+}
+
 ast_node!(
     #[doc = "A procedure signature node."]
     Signature,

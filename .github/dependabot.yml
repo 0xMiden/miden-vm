@@ -25,6 +25,31 @@ updates:
       semver-minor-days: 7
       semver-major-days: 15
 
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    labels:
+      - "dependencies"
+      - "no changelog"
+    open-pull-requests-limit: 1
+    groups:
+      docs-npm:
+        patterns:
+          - "*"
+      docs-npm-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 7
+      semver-patch-days: 7
+      semver-minor-days: 7
+      semver-major-days: 15
+
   # Action updates still have to pass actionlint and zizmor.
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -90,9 +90,9 @@ impl MastNodeExt for LoopNode {
     /// the domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let body_digest = Word::default();
-    /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -158,7 +158,7 @@ impl LoopNodeBuilder {
         } else {
             let body_hash = body.digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
         Ok(LoopNode { body: self.body, digest })
@@ -195,7 +195,7 @@ impl MastForestContributor for LoopNodeBuilder {
                 .ok_or_else(|| MastForestError::NodeIdOverflow(self.body, context.node_count()))?
                 .digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &[self.body], context, hash_by_node_id)

@@ -1,0 +1,369 @@
+#! EcGFp5 point and field arithmetic for the two agreement implementations.
+#!
+#! Each agreement uses a fresh call context. R_X/Y hold the generator sum R; ACC_X/Y hold
+#! the other accumulator. The preprocessed path sums Q multiples there; the direct path
+#! uses it for the joint short-scalar check and then restores S before encoding the outputs.
+#!
+#! R_TERM_X/Y and TERM_X/Y hold the next points to add. Their packed layout matches a
+#! multiplication-table entry. The direct path also fills TERM_X/Y from its own joint table.
+#! Point addition here requires nonidentity subgroup points with distinct X coordinates;
+#! the callers either establish this from scalar prefixes or handle exceptional cases first.
+
+use {PointEncoding} from miden::core::crypto::ecdh::ecgfp5
+
+#! An element of Fp[z]/(z^5 - 3), in increasing coefficient order.
+pub type Fp5 = struct { c0: felt, c1: felt, c2: felt, c3: felt, c4: felt }
+
+# POINT WORKSPACE
+# ==================================================================================================
+
+# Five-Felt coordinates use eight-Felt accumulator slots for aligned word loads.
+pub const R_X0 = 64
+const R_X1 = R_X0 + 1
+const R_X2 = R_X0 + 2
+const R_X3 = R_X0 + 3
+pub const R_X4 = R_X0 + 4
+pub const R_Y0 = 72
+const R_Y1 = R_Y0 + 1
+const R_Y2 = R_Y0 + 2
+const R_Y3 = R_Y0 + 3
+pub const R_Y4 = R_Y0 + 4
+pub const ACC_X0 = 80
+pub const ACC_X1 = ACC_X0 + 1
+pub const ACC_X2 = ACC_X0 + 2
+pub const ACC_X3 = ACC_X0 + 3
+pub const ACC_X4 = ACC_X0 + 4
+pub const ACC_Y0 = 88
+pub const ACC_Y1 = ACC_Y0 + 1
+pub const ACC_Y2 = ACC_Y0 + 2
+pub const ACC_Y3 = ACC_Y0 + 3
+pub const ACC_Y4 = ACC_Y0 + 4
+
+# Two packed terms; tables::read_entry writes 24 Felts starting here.
+pub const TERMS_PTR = 96
+pub const R_TERM_X0 = TERMS_PTR
+const R_TERM_X1 = R_TERM_X0 + 1
+const R_TERM_X2 = R_TERM_X0 + 2
+const R_TERM_X3 = R_TERM_X0 + 3
+pub const R_TERM_X4 = TERMS_PTR + 16
+pub const R_TERM_Y0 = TERMS_PTR + 4
+const R_TERM_Y1 = R_TERM_Y0 + 1
+const R_TERM_Y2 = R_TERM_Y0 + 2
+const R_TERM_Y3 = R_TERM_Y0 + 3
+pub const R_TERM_Y4 = TERMS_PTR + 17
+pub const TERM_X0 = TERMS_PTR + 8
+pub const TERM_X1 = TERM_X0 + 1
+pub const TERM_X2 = TERM_X0 + 2
+pub const TERM_X3 = TERM_X0 + 3
+pub const TERM_X4 = TERMS_PTR + 18
+pub const TERM_Y0 = TERMS_PTR + 12
+pub const TERM_Y1 = TERM_Y0 + 1
+pub const TERM_Y2 = TERM_Y0 + 2
+pub const TERM_Y3 = TERM_Y0 + 3
+pub const TERM_Y4 = TERMS_PTR + 19
+
+pub const TWO_THIRDS = 6148914689804861441
+const WEIERSTRASS_A0 = 6148914689804861439 # -4/3
+pub const WEIERSTRASS_A1 = 263
+
+# POINT OPERATIONS
+# ==================================================================================================
+
+# Table accumulation visits nonzero digits from low to high and copies the first term.
+# For each later addition, the prefix s and next term t = d_i*2^(16*i) satisfy
+# 0 < s < 2^(16*i) <= t and s+t <= r < n. For either order-n base and correctly generated
+# tables, the points are neither equal nor opposite, so their X coordinates differ.
+# The direct path's joint computation instead handles these exceptions in add_complete.
+
+#! Adds R_TERM_X/Y to the generator accumulator R_X/Y.
+#!
+#! Input:  [...]
+#! Advice: [slope(5), ...]
+#! Output: [...]
+#!
+#! Requires nonidentity subgroup points with distinct X coordinates. Checks
+#! slope*(X2-X1) = Y2-Y1, then writes X3 = slope^2-X1-X2 and Y3 = slope*(X1-X3)-Y1.
+pub proc add_generator()
+    mem_load.R_Y4 padw mem_loadw_le.R_Y0
+    adv_pushw adv_push movdn.4
+    repeat.5 dup.4 end
+
+    # Check the advised slope using slope*(X2-X1) = Y2-Y1; keep a copy for X3 and Y3.
+    mem_load.R_TERM_X4 mem_load.R_X4 sub
+    mem_load.R_TERM_X3 mem_load.R_X3 sub
+    mem_load.R_TERM_X2 mem_load.R_X2 sub
+    mem_load.R_TERM_X1 mem_load.R_X1 sub
+    mem_load.R_TERM_X0 mem_load.R_X0 sub
+    # => [X2-X1(5), slope(5), slope(5), Y1(5), ...]
+    exec.mul_fp5
+    # => [slope*(X2-X1)(5), slope(5), Y1(5), ...]
+    # Loading Y2_i first keeps Y1_i at depth 11 as the products are checked in order.
+    # Each dup.11 is one VM operation; duplicating Y1_i before the load would take three.
+    mem_load.R_TERM_Y0 dup.11 sub assert_eq.err="slope"
+    mem_load.R_TERM_Y1 dup.11 sub assert_eq.err="slope"
+    mem_load.R_TERM_Y2 dup.11 sub assert_eq.err="slope"
+    mem_load.R_TERM_Y3 dup.11 sub assert_eq.err="slope"
+    mem_load.R_TERM_Y4 dup.11 sub assert_eq.err="slope"
+    # => [slope(5), Y1(5), ...]
+
+    repeat.5 dup.4 end
+    exec.square_fp5
+    # => [slope_squared(5), slope(5), Y1(5), ...]
+    # Rotate each delta_x coefficient behind the unprocessed square coefficients.
+    mem_load.R_X0 mem_load.R_TERM_X0
+    exec.addition_x_coefficient mem_store.R_X0 movdn.4
+    mem_load.R_X1 mem_load.R_TERM_X1
+    exec.addition_x_coefficient mem_store.R_X1 movdn.4
+    mem_load.R_X2 mem_load.R_TERM_X2
+    exec.addition_x_coefficient mem_store.R_X2 movdn.4
+    mem_load.R_X3 mem_load.R_TERM_X3
+    exec.addition_x_coefficient mem_store.R_X3 movdn.4
+    mem_load.R_X4 mem_load.R_TERM_X4
+    exec.addition_x_coefficient mem_store.R_X4 movdn.4
+    # => [delta_x(5), slope(5), Y1(5), ...]
+
+    exec.mul_fp5
+    exec.sub_fp5
+    # => [Y3(5), ...], where Y3 = slope*delta_x - Y1.
+    mem_storew_le.R_Y0 dropw mem_store.R_Y4
+end
+
+#! Adds TERM_X/Y to the accumulator ACC_X/Y.
+#!
+#! Input:  [...]
+#! Advice: [slope(5), ...]
+#! Output: [...]
+#!
+#! Requires nonidentity subgroup points with distinct X coordinates. Checks the slope
+#! and updates the accumulator using the same affine formulas as `add_generator`.
+pub proc add_point()
+    mem_load.ACC_Y4 padw mem_loadw_le.ACC_Y0
+    adv_pushw adv_push movdn.4
+    repeat.5 dup.4 end
+    mem_load.TERM_X4 mem_load.ACC_X4 sub
+    mem_load.TERM_X3 mem_load.ACC_X3 sub
+    mem_load.TERM_X2 mem_load.ACC_X2 sub
+    mem_load.TERM_X1 mem_load.ACC_X1 sub
+    mem_load.TERM_X0 mem_load.ACC_X0 sub
+    # => [X2-X1(5), slope(5), slope(5), Y1(5), ...]
+    exec.mul_fp5
+    mem_load.TERM_Y0 dup.11 sub assert_eq.err="slope"
+    mem_load.TERM_Y1 dup.11 sub assert_eq.err="slope"
+    mem_load.TERM_Y2 dup.11 sub assert_eq.err="slope"
+    mem_load.TERM_Y3 dup.11 sub assert_eq.err="slope"
+    mem_load.TERM_Y4 dup.11 sub assert_eq.err="slope"
+    # => [slope(5), Y1(5), ...]
+
+    repeat.5 dup.4 end
+    exec.square_fp5
+    # => [slope_squared(5), slope(5), Y1(5), ...]
+    mem_load.ACC_X0 mem_load.TERM_X0
+    exec.addition_x_coefficient mem_store.ACC_X0 movdn.4
+    mem_load.ACC_X1 mem_load.TERM_X1
+    exec.addition_x_coefficient mem_store.ACC_X1 movdn.4
+    mem_load.ACC_X2 mem_load.TERM_X2
+    exec.addition_x_coefficient mem_store.ACC_X2 movdn.4
+    mem_load.ACC_X3 mem_load.TERM_X3
+    exec.addition_x_coefficient mem_store.ACC_X3 movdn.4
+    mem_load.ACC_X4 mem_load.TERM_X4
+    exec.addition_x_coefficient mem_store.ACC_X4 movdn.4
+    # => [delta_x(5), slope(5), Y1(5), ...]
+
+    exec.mul_fp5
+    exec.sub_fp5
+    # => [Y3(5), ...]
+    mem_storew_le.ACC_Y0 dropw mem_store.ACC_Y4
+end
+
+#! Doubles the nonidentity subgroup point at ACC_X/Y in place.
+#!
+#! Input:  [...]
+#! Advice: [slope(5), ...]
+#! Output: [...]
+#!
+#! Checks slope*(2Y) = 3X^2+A, then writes X' = slope^2-2X and Y' = slope*(X-X')-Y.
+#! A nonidentity point in the prime-order subgroup has Y != 0, so the slope is unique.
+pub proc double_point()
+    mem_load.ACC_Y4 padw mem_loadw_le.ACC_Y0
+    adv_pushw adv_push movdn.4
+    repeat.5 dup.4 end
+    mem_load.ACC_Y4 padw mem_loadw_le.ACC_Y0
+    repeat.5 mul.2 movdn.4 end
+    exec.mul_fp5
+    # => [lambda*(2Y)(5), lambda(5), Y(5), ...]
+    mem_load.ACC_X4 padw mem_loadw_le.ACC_X0
+    exec.square_fp5
+    mul.3 add.WEIERSTRASS_A0 movup.5 assert_eq.err="doubling slope"
+    mul.3 add.WEIERSTRASS_A1 movup.4 assert_eq.err="doubling slope"
+    mul.3 movup.3 assert_eq.err="doubling slope"
+    mul.3 movup.2 assert_eq.err="doubling slope"
+    mul.3 swap assert_eq.err="doubling slope"
+    # => [lambda(5), Y(5), ...]
+    repeat.5 dup.4 end
+    exec.square_fp5
+    # Reuse the addition coefficient helper with X1=X2, retaining X-X' for Y'.
+    mem_load.ACC_X0 dup exec.addition_x_coefficient mem_store.ACC_X0 movdn.4
+    mem_load.ACC_X1 dup exec.addition_x_coefficient mem_store.ACC_X1 movdn.4
+    mem_load.ACC_X2 dup exec.addition_x_coefficient mem_store.ACC_X2 movdn.4
+    mem_load.ACC_X3 dup exec.addition_x_coefficient mem_store.ACC_X3 movdn.4
+    mem_load.ACC_X4 dup exec.addition_x_coefficient mem_store.ACC_X4 movdn.4
+    # => [X-X'(5), lambda(5), Y(5), ...]
+    exec.mul_fp5 exec.sub_fp5
+    mem_storew_le.ACC_Y0 dropw mem_store.ACC_Y4
+end
+
+#! Computes x3 = slope_squared-x1-x2 and retains delta_x = x1-x3 for the Y update.
+#!
+#! Input:  [x2, x1, slope_squared, ...]
+#! Output: [x3, delta_x, ...]
+proc addition_x_coefficient(x2: felt, x1: felt, slope_squared: felt) -> (felt, felt)
+    dup.1 movdn.3 add sub
+    # => [x3_i, x1_i, ...]
+    dup movdn.2 sub swap
+end
+
+#! Checks the advised R and S encodings against the two accumulator points.
+#!
+#! Input:  [scratch(16)]
+#! Advice: [R(5), S(5), ...]
+#! Output: [R(5), S(5), scratch(6)]
+#!
+#! Reads R_X/Y and ACC_X/Y, both of which must contain nonidentity subgroup points.
+pub proc encode_agreement(scratch: [felt; 16]) -> (PointEncoding, PointEncoding, [felt; 6])
+    # Check the advised encodings instead of computing two Fp5 inverses.
+    # For each (X, Y), verify w*(X - 2/3) + Y = 0. The only curve point with X = 2/3
+    # has order two, so neither nonzero sum in the prime-order subgroup can reach it.
+    # => [scratch(16)]
+    adv_loadw adv_push movdn.4
+    movup.5 drop
+    # => [R(5), scratch(11)]
+    repeat.5 dup.4 end
+    mem_load.R_X4 padw mem_loadw_le.R_X0 sub.TWO_THIRDS
+    exec.mul_fp5
+    mem_load.R_Y0 add assertz.err="point encoding"
+    mem_load.R_Y1 add assertz.err="point encoding"
+    mem_load.R_Y2 add assertz.err="point encoding"
+    mem_load.R_Y3 add assertz.err="point encoding"
+    mem_load.R_Y4 add assertz.err="point encoding"
+    # Expose four scratch slots above R before loading S; preserve R beneath S and its check.
+    repeat.4 movup.8 end
+    adv_loadw adv_push movdn.4
+    movup.10 drop
+    # => [S(5), R(5), scratch(6)]
+    repeat.5 dup.4 end
+    mem_load.ACC_X4 padw mem_loadw_le.ACC_X0 sub.TWO_THIRDS
+    exec.mul_fp5
+    mem_load.ACC_Y0 add assertz.err="point encoding"
+    mem_load.ACC_Y1 add assertz.err="point encoding"
+    mem_load.ACC_Y2 add assertz.err="point encoding"
+    mem_load.ACC_Y3 add assertz.err="point encoding"
+    mem_load.ACC_Y4 add assertz.err="point encoding"
+    # => [S(5), R(5), scratch(6)]
+    repeat.5 movup.9 end
+    # => [R(5), S(5), scratch(6)]
+end
+
+# FIELD ARITHMETIC
+# ==================================================================================================
+
+#! Multiplies two elements of Fp[z]/(z^5 - 3).
+#!
+#! Input:  [b(5), a(5), ...]
+#! Output: [a*b(5), ...]
+#!
+#! Builds coefficients c4..c1 above a and b; computing c0 removes the inputs.
+#! Deep operands use dup.9/.11/.13; the even-depth alternatives expand to three VM operations.
+pub proc mul_fp5(b: Fp5, a: Fp5) -> Fp5
+    # c4 = a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0
+    dup.9 dup.1 mul dup.9 dup.3 mul add
+    dup.3 dup.9 mul add
+    dup.7 dup.5 mul add
+    dup.5 dup.7 mul add
+    # => [c4, b(5), a(5), ...]
+
+    # c3 = a0*b3 + a1*b2 + a2*b1 + a3*b0 + 3*a4*b4
+    dup.5 dup.11 mul mul.3
+    dup.2 dup.11 mul add
+    dup.9 dup.4 mul add
+    dup.4 dup.9 mul add
+    dup.7 dup.6 mul add
+    # => [c3..c4, b(5), a(5), ...]
+
+    # c2 = a0*b2 + a1*b1 + a2*b0 + 3*(a3*b4 + a4*b3)
+    dup.6 dup.11 mul dup.6 dup.13 mul add
+    mul.3
+    dup.3 dup.11 mul add
+    dup.9 dup.5 mul add
+    dup.5 dup.9 mul add
+    # => [c2..c4, b(5), a(5), ...]
+
+    # c1 = a0*b1 + a1*b0 + 3*(a2*b4 + a3*b3 + a4*b2)
+    dup.5 dup.13 mul dup.7 dup.13 mul add
+    dup.11 dup.9 mul add
+    mul.3
+    dup.4 dup.11 mul add
+    dup.9 dup.6 mul add
+    # => [c1..c4, b(5), a(5), ...]
+
+    # c0 = a0*b0 + 3*(a1*b4 + a2*b3 + a3*b2 + a4*b1)
+    movup.5 movup.13 mul movup.6 movup.12 mul add
+    movup.6 movup.10 mul add
+    movup.6 movup.8 mul add
+    mul.3
+    movup.5 movup.6 mul add
+    # => [c0, c1, c2, c3, c4, ...]
+end
+
+#! Squares an element of Fp[z]/(z^5 - 3).
+#!
+#! Input:  [a(5), ...]
+#! Output: [a^2(5), ...]
+#!
+#! Symmetric products share their factors of 2, and z^5 = 3 reduces the high terms.
+pub proc square_fp5(a: Fp5) -> Fp5
+    # c4 = a2^2 + 2*(a0*a4 + a1*a3)
+    dup.2 dup.3 mul dup.1 dup.6 mul dup.3 dup.6 mul add
+    mul.2
+    add
+    # => [c4, a(5), ...]
+
+    # c3 = 2*(a0*a3 + a1*a2) + 3*a4^2
+    dup.1 dup.5 mul dup.3 dup.5 mul add
+    mul.2
+    dup.6 dup.7 mul mul.3
+    add
+    # => [c3..c4, a(5), ...]
+
+    # c2 = a1^2 + 2*a0*a2 + 6*a3*a4
+    dup.3 dup.4 mul dup.3 dup.6 mul mul.2
+    add
+    dup.7 dup.7 mul mul.6
+    add
+    # => [c2..c4, a(5), ...]
+
+    # c1 = 2*a0*a1 + 3*(2*a2*a4 + a3^2)
+    dup.6 dup.7 mul dup.6 dup.9 mul mul.2
+    add
+    mul.3
+    dup.4 dup.6 mul mul.2
+    add
+    # => [c1..c4, a(5), ...]
+
+    # c0 = a0^2 + 6*(a1*a4 + a2*a3)
+    movup.4 dup mul movup.5 movup.8 mul movup.6 movup.7 mul add
+    mul.6
+    add
+    # => [c0, c1, c2, c3, c4, ...]
+end
+
+#! Subtracts two elements of Fp[z]/(z^5 - 3).
+#!
+#! Input:  [a(5), b(5), ...]
+#! Output: [a-b(5), ...]
+#!
+#! Each result moves behind the remaining coefficients, restoring degree order after five steps.
+pub proc sub_fp5(a: Fp5, b: Fp5) -> Fp5
+    repeat.5
+        movup.5 sub movdn.4
+    end
+end

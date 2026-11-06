@@ -5,6 +5,9 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -38,18 +41,21 @@ jobs:
           if [ "${EVENT_NAME}" != "pull_request" ]; then
             run=true
           else
+            : "${BASE_SHA:?Missing PR base SHA}" "${HEAD_SHA:?Missing PR head SHA}"
+            changed_paths="$(mktemp)"
+            trap 'rm -f "${changed_paths}"' EXIT
+            git diff --no-renames --name-only -z "${BASE_SHA}...${HEAD_SHA}" -- > "${changed_paths}"
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
-                .github/workflows/test.yml|Cargo.lock|Cargo.toml|rust-toolchain.toml|\
-                crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
-                crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
-                crates/stateful-hasher/*)
+                .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
+                crates/crypto/*|crates/crypto-derive/*|crates/field/*|\
+                crates/stark/core/*|crates/serde-utils/*)
                   run=true
                   break
                   ;;
               esac
-            done < <(git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
+            done < "${changed_paths}"
           fi
 
           echo "run=${run}" >> "${GITHUB_OUTPUT}"
@@ -60,14 +66,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check benchmark runner preflight
+        run: |
+          if [ -f scripts/bench_eidos_vs_poseidon2.sh ]; then
+            bash -n scripts/bench_eidos_vs_poseidon2.sh
+            python3 -m unittest discover -s scripts/tests -v
+          fi
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -114,7 +127,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -152,7 +165,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -203,6 +216,9 @@ jobs:
             RUSTFLAGS="-C target-feature=${target_features}" \
               cargo nextest run --profile ci -p miden-crypto --lib --no-default-features \
                 --no-tests=fail 'hash::eidos::' || return 1
+            RUSTFLAGS="-C target-feature=${target_features}" \
+              cargo nextest run --profile ci -p miden-stark --lib --no-default-features \
+                --no-tests=fail 'config::tests::' || return 1
           }
 
           failed=0
@@ -246,18 +262,32 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
+      - name: Check runtime dependency boundaries
+        run: |
+          for package in miden-air miden-crypto miden-precompiles-stark miden-verifier; do
+            cargo tree --locked --package "$package" --edges normal --prefix none > runtime-dependencies.txt
+            if grep -E '^miden-constraint-compiler ' runtime-dependencies.txt; then
+              echo "Compiler tooling leaked into $package runtime dependencies" >&2
+              exit 1
+            fi
+            if [ "$package" = miden-crypto ] && grep -E '^miden-stark ' runtime-dependencies.txt; then
+              echo "The STARK engine leaked into crypto dependencies" >&2
+              exit 1
+            fi
+          done
+          rm runtime-dependencies.txt
 
-  check-pvm-registry:
-    name: check PVM registry and MASM artifacts
+  pvm-checks:
+    name: PVM checks
     runs-on: warp-ubuntu-latest-x64-8x
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,8 +299,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
-        run: make check-pvm-registry
+      - name: Check PVM and precompile artifacts for drift
+        run: make check-pvm-artifacts
 
   run-examples:
     name: run masm examples
@@ -306,7 +336,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-hack
       - name: Check all feature combinations
@@ -316,7 +346,7 @@ jobs:
     name: check user doc cycle counts
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -328,3 +358,29 @@ jobs:
         run: rustup update --no-self-update
       - name: Check user doc cycle counts
         run: make check-user-doc-cycles
+
+  wasm-handlers-host:
+    name: wasm event handlers on a wasm32 host
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: |
+          rustup update --no-self-update
+          rustup target add wasm32-wasip1
+      # Keep this on a released install-action commit with an explicit tool; see
+      # the nextest install above for the zizmor/tool-shortcut rationale.
+      - name: Install wasmtime
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: wasmtime-cli@45.0.2
+      - name: Run the Wasm event handler tests inside a wasm32 host
+        run: make test-wasm-handlers-host
+

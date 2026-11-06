@@ -9,7 +9,7 @@ use proptest::prelude::*;
 
 use crate::{
     Word,
-    crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::Blake3_256,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileWitness, fold_deferred_root},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(18352034216511426813),
-    crate::Felt::new_unchecked(2771254177156660218),
-    crate::Felt::new_unchecked(14322494607462446103),
-    crate::Felt::new_unchecked(16260217228119741841),
+    crate::Felt::new_unchecked(1009829767306772375),
+    crate::Felt::new_unchecked(744627578325925276),
+    crate::Felt::new_unchecked(1515076166110533160),
+    crate::Felt::new_unchecked(997483930715971815),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(2603579078152391117),
-    crate::Felt::new_unchecked(12386687546833389509),
-    crate::Felt::new_unchecked(8018071947834312355),
-    crate::Felt::new_unchecked(8983933696347141424),
+    crate::Felt::new_unchecked(6165209526369279488),
+    crate::Felt::new_unchecked(6477355435270788358),
+    crate::Felt::new_unchecked(5747642927516763256),
+    crate::Felt::new_unchecked(4136793334925920687),
 ]);
 
 // HASH FUNCTION
@@ -54,14 +54,11 @@ pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
 pub enum HashFunction {
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
-    /// RPO hash function with 256-bit output.
-    Rpo256 = 0x02,
-    /// RPX hash function with 256-bit output.
-    Rpx256 = 0x03,
-    /// Poseidon2 hash function with 256-bit output.
-    Poseidon2 = 0x04,
+    // IDs 0x02..=0x04 belonged to removed hash functions and must not be reused.
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
+    /// Eidos hash function with 252-bit packed output.
+    Eidos = 0x06,
 }
 
 impl HashFunction {
@@ -69,19 +66,15 @@ impl HashFunction {
     pub const fn collision_resistance(&self) -> u32 {
         match self {
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
-            HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
-            HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
-            HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
+            HashFunction::Eidos => 126,
         }
     }
 }
 
 /// Error type for invalid hash function strings.
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
-)]
+#[error("invalid hash function '{hash_function}'. Valid options are: blake3-256, keccak, eidos")]
 pub struct InvalidHashFunctionError {
     pub hash_function: String,
 }
@@ -92,10 +85,8 @@ impl TryFrom<u8> for HashFunction {
     fn try_from(repr: u8) -> Result<Self, Self::Error> {
         match repr {
             0x01 => Ok(Self::Blake3_256),
-            0x02 => Ok(Self::Rpo256),
-            0x03 => Ok(Self::Rpx256),
-            0x04 => Ok(Self::Poseidon2),
             0x05 => Ok(Self::Keccak),
+            0x06 => Ok(Self::Eidos),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -109,10 +100,8 @@ impl TryFrom<&str> for HashFunction {
     fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
         match hash_fn_str {
             "blake3-256" => Ok(Self::Blake3_256),
-            "rpo" => Ok(Self::Rpo256),
-            "rpx" => Ok(Self::Rpx256),
-            "poseidon2" => Ok(Self::Poseidon2),
             "keccak" => Ok(Self::Keccak),
+            "eidos" => Ok(Self::Eidos),
             _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
         }
     }
@@ -125,12 +114,10 @@ impl Arbitrary for HashFunction {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         any::<u8>()
-            .prop_map(|tag| match tag % 5 {
+            .prop_map(|tag| match tag % 3 {
                 0 => Self::Blake3_256,
-                1 => Self::Rpo256,
-                2 => Self::Rpx256,
-                3 => Self::Poseidon2,
-                _ => Self::Keccak,
+                1 => Self::Keccak,
+                _ => Self::Eidos,
             })
             .boxed()
     }
@@ -153,6 +140,10 @@ impl Deserializable for HashFunction {
 
 /// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct VmProof {
     pub proof: StarkProof,
     pub precompile_root: DeferredRoot,
@@ -193,6 +184,10 @@ impl Deserializable for VmProof {
 /// Binary decoding enforces the fixed root ceiling before reserving root storage, but otherwise
 /// preserves the encoded artifact shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PrecompileProof {
     pub proof: StarkProof,
     pub roots: Vec<DeferredRoot>,
@@ -340,6 +335,10 @@ pub enum PrecompileStatus {
 ///
 /// This type preserves proof artifacts without establishing their validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionProof {
     compatibility: ExecutionProofCompatibility,
     vm: VmProof,
@@ -526,6 +525,10 @@ pub enum ExecutionProofError {
 
 /// A serialized STARK proof and the hash function used during proof generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StarkProof {
     bytes: Vec<u8>,
     hash_fn: HashFunction,
@@ -599,12 +602,29 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{Node, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
+        deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST},
         serde::ByteWriter,
     };
 
     fn dummy_stark_proof(bytes: &[u8]) -> StarkProof {
-        StarkProof::new(bytes.to_vec(), HashFunction::Blake3_256)
+        StarkProof::new(bytes.to_vec(), HashFunction::Eidos)
+    }
+
+    #[test]
+    fn hash_function_wire_tags_are_pinned_and_retired_tags_are_rejected() {
+        for (hash_fn, tag, name) in [
+            (HashFunction::Blake3_256, 0x01, "blake3-256"),
+            (HashFunction::Keccak, 0x05, "keccak"),
+            (HashFunction::Eidos, 0x06, "eidos"),
+        ] {
+            assert_eq!(hash_fn.to_bytes(), [tag]);
+            assert_eq!(HashFunction::read_from_bytes(&[tag]).unwrap(), hash_fn);
+            assert_eq!(HashFunction::try_from(name).unwrap(), hash_fn);
+        }
+        for (tag, name) in [(0x02, "rpo"), (0x03, "rpx"), (0x04, "poseidon2")] {
+            assert!(HashFunction::read_from_bytes(&[tag]).is_err());
+            assert!(HashFunction::try_from(name).is_err());
+        }
     }
 
     fn root(value: u64) -> DeferredRoot {
@@ -645,12 +665,12 @@ mod tests {
 
     fn wire() -> (PrecompileWitness, DeferredRoot) {
         let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-            tag: Tag::AND,
+            frame: DEFERRED_AND_FRAME,
             lhs: 0,
             rhs: 0,
         }])
         .unwrap();
-        let root = witness.root_unchecked();
+        let root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         (witness, root)
     }
 
@@ -774,7 +794,7 @@ mod tests {
 
     #[test]
     fn proof_minimum_serialized_sizes_match_shortest_canonical_encodings() {
-        let stark = StarkProof::new(Vec::new(), HashFunction::Blake3_256);
+        let stark = StarkProof::new(Vec::new(), HashFunction::Eidos);
         assert_eq!(StarkProof::min_serialized_size(), stark.to_bytes().len());
         assert_eq!(StarkProof::min_serialized_size(), 2);
 
@@ -786,14 +806,14 @@ mod tests {
         assert_eq!(VmProof::min_serialized_size(), 34);
 
         let empty = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: Vec::new(),
         };
         assert_eq!(PrecompileProof::min_serialized_size(), empty.to_bytes().len());
         assert_eq!(PrecompileProof::min_serialized_size(), 3);
 
         let singleton = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: alloc::vec![root(1)],
         };
         assert_eq!(singleton.to_bytes().len(), 35);
@@ -819,6 +839,8 @@ mod tests {
 
     #[test]
     fn precompile_proof_decoder_rejects_oversized_root_count_before_payload() {
+        let at_limit = precompile_proof(&[root(3); MAX_PRECOMPILE_ROOTS]);
+        assert_eq!(PrecompileProof::read_from_bytes(&at_limit.to_bytes()).unwrap(), at_limit);
         let mut bytes = dummy_stark_proof(&[2]).to_bytes();
         bytes.write_usize(MAX_PRECOMPILE_ROOTS + 1);
 
@@ -927,5 +949,97 @@ mod tests {
         assert!(
             matches!(error, DeserializationError::InvalidValue(message) if message.contains("STARK proof contains too many bytes"))
         );
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod proof_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{
+        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
+        PrecompileStatus, PrecompileWitness, StarkProof, VmProof,
+    };
+    use crate::{Felt, Word};
+
+    impl Arbitrary for StarkProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces only the byte-count ceiling (64 MiB); bound well under it. The
+            // bytes are an opaque serialized artifact - the type does not validate their contents.
+            (
+                proptest::collection::vec(any::<u8>(), 0..=64),
+                prop_oneof![
+                    Just(HashFunction::Blake3_256),
+                    Just(HashFunction::Keccak),
+                    Just(HashFunction::Eidos),
+                ],
+            )
+                .prop_map(|(bytes, hash_fn)| StarkProof::new(bytes, hash_fn))
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for VmProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // DeferredRoot is a Word alias; both fields are any-valid.
+            (any::<StarkProof>(), any::<Word>())
+                .prop_map(|(proof, precompile_root)| Self { proof, precompile_root })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for PrecompileProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces the MAX_PRECOMPILE_ROOTS ceiling; bound well under it.
+            (any::<StarkProof>(), proptest::collection::vec(any::<Word>(), 0..=4))
+                .prop_map(|(proof, roots)| Self { proof, roots })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for PrecompileStatus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                Just(Self::Empty),
+                any::<PrecompileWitness>().prop_map(Self::Deferred).boxed(),
+                any::<PrecompileProof>().prop_map(Self::Proven).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction: compatibility roots are index-derived (distinct within each
+            // list, satisfying the duplicate check); the rest composes covered parts.
+            (0usize..=3, 0usize..=3, any::<VmProof>(), any::<PrecompileStatus>())
+                .prop_map(|(vm_count, pvm_count, vm, precompile)| {
+                    let compatibility = ExecutionProofCompatibility::new(
+                        (0..vm_count).map(|i| [Felt::from(i as u32); 4].into()).collect(),
+                        (0..pvm_count).map(|i| [Felt::from((i as u32) + 1000); 4].into()).collect(),
+                    )
+                    .expect("index-derived roots are distinct");
+                    Self::from_parts(compatibility, vm, precompile)
+                })
+                .boxed()
+        }
     }
 }

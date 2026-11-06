@@ -1,12 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, chiplets::hasher::HasherState},
-};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
-    WORD_SIZE, Word, ZERO,
-    crypto::{hash::Poseidon2, merkle::MerklePath},
+    Felt, WORD_SIZE, Word, ZERO,
+    chiplets::{eidos_compression, hasher::compress_state},
+    crypto::merkle::MerklePath,
     deferred::Digest,
     program::MIN_STACK_DEPTH,
     utils::range,
@@ -69,14 +67,24 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn permute(
+    fn compress(
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
-        Poseidon2::apply_permutation(&mut input_state);
+        compress_state(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))
+    }
+
+    #[inline(always)]
+    fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError> {
+        Ok(eidos_compression::compress_raw_xof_lanes(&state).map(Felt::from_u32))
     }
 
     #[inline(always)]
@@ -156,6 +164,13 @@ impl SystemInterface for FastProcessor {
         self.deferred_state
             .log_verified_statement(statement_digest, expected_new_root)
             .map(|_| ())
+            .map_err(OperationError::from)
+    }
+
+    #[inline(always)]
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
+        self.deferred_state
+            .clear_deferred(expected_previous_root)
             .map_err(OperationError::from)
     }
 

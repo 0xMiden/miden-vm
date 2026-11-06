@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
+    debuginfo::SourceSpan,
     diagnostics::Report,
 };
 use miden_core::operations::{AssemblyOp, Operation};
@@ -27,15 +28,34 @@ impl Assembler {
         kind: InvokeKind,
         callee: &InvocationTarget,
         caller: GlobalItemIndex,
+        call_site: SourceSpan,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
-        inline_calls: Vec<DebugSourceInlineCall>,
+        mut inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeUse, Report> {
         let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef => Ok(resolved.node),
             InvokeKind::Exec => {
+                // Ordinary exec is the innermost caller context; explicit source inline
+                // annotations enclose it. Existing callee rows remain still further inside.
+                if !matches!(callee, InvocationTarget::MastRoot(_))
+                    && let Some(callee_idx) = resolved.function
+                    && let Ok(location) = self.source_manager().location(call_site)
+                {
+                    let loc_idx = mast_forest_builder.debug_info_mut().add_location(location);
+                    // The exec source-tree copy assigns each occurrence's operation range.
+                    inline_calls.insert(
+                        0,
+                        DebugSourceInlineCall {
+                            op_idx: 0,
+                            op_end: 0,
+                            callee_idx,
+                            loc_idx,
+                        },
+                    );
+                }
                 mast_forest_builder.record_exec_inline_calls(resolved.node, &inline_calls)
             },
             InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_use(

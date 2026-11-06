@@ -60,7 +60,10 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
-pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
+pub use fast::{
+    BreakReason, DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput,
+    FastProcessor, ResumeContext,
+};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
     SyncHost,
@@ -169,6 +172,12 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
         self.processor.stack().iter().rev().copied().collect()
+    }
+
+    /// Returns the current depth of the stack, including overflow entries.
+    #[inline(always)]
+    pub fn stack_depth(&self) -> u32 {
+        self.processor.stack_depth()
     }
 
     /// Returns the element located at the specified context/address, or None if the address hasn't
@@ -303,6 +312,10 @@ pub trait Stopper {
 
 /// Represents the ID of an execution context
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ContextId(u32);
 
 impl ContextId {
@@ -344,6 +357,23 @@ impl From<ContextId> for u64 {
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
         Felt::from_u32(context_id.0)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod context_id_arbitrary {
+    use proptest::prelude::*;
+
+    use super::ContextId;
+
+    impl Arbitrary for ContextId {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Plain u32 newtype; edge-biased to the 0 and u32::MAX bounds.
+            prop_oneof![Just(0u32), Just(u32::MAX), any::<u32>()].prop_map(Self).boxed()
+        }
     }
 }
 

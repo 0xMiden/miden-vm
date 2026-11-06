@@ -49,37 +49,30 @@ The effect of this operation on the rest of the operand stack is:
 ## Memory access operations
 Miden VM exposes several operations for reading from and writing to random access memory. Memory in Miden VM is managed by the [Memory chiplet](../chiplets/memory.md).
 
-Communication between the stack and the memory chiplet is accomplished via the chiplet bus $b_{chip}$. To make requests to the chiplet bus we need to divide its current value by the value representing memory access request. The structure of memory access request value is described [here](../chiplets/memory.md#memory-row-value).
-
-To enforce the correctness of memory access, we can use the following constraint:
+Memory accesses use domain-separated typed messages in the VM's
+[LogUp argument](../lookups/logup.md). For access kind $k$, define
 
 $$
-b_{chip}' \cdot u_{mem} = b_{chip}
+M_k(ctx,addr,clk,p) = P_k + ctx + \beta addr + \beta^2 clk
++ \sum_{i=0}^{|p|-1}\beta^{i+3}p_i,
 $$
 
-In the above, $u_{mem}$ is the value of the memory access request. The effective degree of this
-constraint is $1 + \deg(u_{mem})$. Thus, to describe AIR constraint for memory operations, it is
-sufficient to describe how $u_{mem}$ is computed. We do this in the following sections.
+where $P_k$ distinguishes element and word reads and writes. Each stack operation removes its
+request with multiplicity $-1$; the memory chiplet adds the matching response with multiplicity
+$+1$. The shared LogUp constraints and closure are described in the linked overview.
 
 ### MLOADW
 Assume that the word with elements $v_0, v_1, v_2, v_3$ is located in memory starting at address $a$. The `MLOADW` operation pops an element off the stack, interprets it as a memory address, and replaces the remaining 4 elements at the top of the stack with values located at the specified address. The diagram below illustrates this graphically.
 
 ![mloadw](../../img/design/stack/io_ops/MLOADW.png)
 
-To simplify description of the memory access request value, we first define a variable for the value that represents the state of memory after the operation:
+The operation removes the following typed word-read message:
 
 $$
-v = \sum_{i=0}^3\alpha_{i+5} \cdot s_i'
-$$
-
-Using the above variable, we define the value representing the memory access request as follows:
-
-$$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_0 + \alpha_4 \cdot clk + v
+M_{read\_word}(ctx,s_0,clk,[s'_0,s'_1,s'_2,s'_3]).
 $$
 
 In the above:
-- $op_{mem\_readword}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the memory "read word" operation.
 - $ctx$ is the identifier of the current memory context.
 - $s_0$ is the memory address from which the values are to be loaded onto the stack.
 - $clk$ is the current clock cycle of the VM.
@@ -93,14 +86,13 @@ Assume that the element $v$ is located in memory at address $a$. The `MLOAD` ope
 ![mload](../../img/design/stack/io_ops/MLOAD.png)
 
 
-We define the value representing the memory access request as follows:
+The operation removes the following typed element-read message:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readelement} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_0 + \alpha_4 \cdot clk + \alpha_5 \cdot s_0'
+M_{read\_element}(ctx,s_0,clk,[s'_0]).
 $$
 
 In the above:
-- $op_{mem\_readelement}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the memory "read element" operation.
 - $ctx$ is the identifier of the current memory context.
 - $s_0$ is the memory address from which the value is to be loaded onto the stack.
 - $clk$ is the current clock cycle of the VM.
@@ -115,20 +107,13 @@ The `MSTOREW` operation pops an element off the stack, interprets it as a memory
 
 After the operation the contents of memory at addresses $a$, $a+1$, $a+2$, $a+3$ would be set to $v_0, v_1, v_2, v_3$, respectively.
 
-To simplify description of the memory access request value, we first define a variable for the value that represents the state of memory after the operation:
+The operation removes the following typed word-write message:
 
 $$
-v = \sum_{i=0}^3\alpha_{i+5} \cdot s_i'
-$$
-
-Using the above variable, we define the value representing the memory access request as follows:
-
-$$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_0 + \alpha_4 \cdot clk + v
+M_{write\_word}(ctx,s_0,clk,[s_1,s_2,s_3,s_4]).
 $$
 
 In the above:
-- $op_{mem\_writeword}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the memory "write word" operation.
 - $ctx$ is the identifier of the current memory context.
 - $s_0$ is the memory address into which the values from the stack are to be saved.
 - $clk$ is the current clock cycle of the VM.
@@ -143,14 +128,13 @@ The `MSTORE` operation pops an element off the stack, interprets it as a memory 
 
 After the operation the contents of memory at address $a$ would be set to $b$.
 
-We define the value representing the memory access request as follows:
+The operation removes the following typed element-write message:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeelement} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_0 + \alpha_4 \cdot clk + \alpha_5 \cdot s_0'
+M_{write\_element}(ctx,s_0,clk,[s_1]).
 $$
 
 In the above:
-- $op_{mem\_writeelement} $ is the unique [operation label](../chiplets/index.md#operation-labels) of the memory "write element" operation.
 - $ctx$ is the identifier of the current memory context.
 - $s_0$ is the memory address into which the value from the stack is to be saved.
 - $clk$ is the current clock cycle of the VM.
@@ -170,32 +154,17 @@ $$
 s_{12}' = s_{12} + 8
 $$
 
-To simplify description of the memory access request value, we first define variables for the values that represent the state of memory after the operation:
+The operation removes two typed word-read messages:
 
 $$
-v_1 = \sum_{i=0}^3\alpha_{i+5} \cdot s_i'
-$$
-
-$$
-v_2 = \sum_{i=0}^3\alpha_{i+5} \cdot s_{i+4}'
-$$
-
-Using the above variables, we define the values representing the memory access request as follows:
-
-$$
-u_{mem, 1} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{12} + \alpha_4 \cdot clk + v_1
+M_{read\_word}(ctx,s_{12},clk,[s'_0,s'_1,s'_2,s'_3])
 $$
 
 $$
-u_{mem, 2} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot (s_{12} + 4) + \alpha_4 \cdot clk + v_2
-$$
-
-$$
-u_{mem} = u_{mem, 1} \cdot u_{mem, 2}
+M_{read\_word}(ctx,s_{12}+4,clk,[s'_4,s'_5,s'_6,s'_7]).
 $$
 
 In the above:
-- $op_{mem\_readword}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the memory "read word" operation.
 - $ctx$ is the identifier of the current memory context.
 - $s_{12}$ and $s_{12} + 4$ are the memory addresses from which the words are to be loaded onto the stack.
 - $clk$ is the current clock cycle of the VM.
@@ -213,37 +182,18 @@ $$
 s_{12}' = s_{12} + 8
 $$
 
-To simplify description of the memory access request value, we first define
-variables for the values that represent the state of memory after the operation:
+The operation removes two typed word-write messages:
 
 $$
-v_1 = \sum_{i=0}^3\alpha_{i+5} \cdot s_i'
-$$
-
-$$
-v_2 = \sum_{i=0}^3\alpha_{i+5} \cdot s_{i+4}'
-$$
-
-Using the above variables, we define the values representing the memory access
-requests as follows:
-
-$$
-u_{mem,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot s_{12} + \alpha_4 \cdot clk + v_1
+M_{write\_word}(ctx,s_{12},clk,[s'_0,s'_1,s'_2,s'_3])
 $$
 
 $$
-u_{mem,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot (s_{12} + 4) + \alpha_4 \cdot clk + v_2
-$$
-
-$$
-u_{mem} = u_{mem,1} \cdot u_{mem,2}
+M_{write\_word}(ctx,s_{12}+4,clk,[s'_4,s'_5,s'_6,s'_7]).
 $$
 
 In the above:
-- $op_{mem\_writeword}$ is the unique [operation label](../chiplets/index.md#operation-labels)
-  of the memory "write word" operation.
+- $ctx$ is the identifier of the current memory context.
 - $s_{12}$ and $s_{12} + 4$ are the memory addresses for the two words.
 - $clk$ is the current clock cycle of the VM.
 

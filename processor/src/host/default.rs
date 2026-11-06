@@ -58,16 +58,34 @@ where
     }
 
     /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
+    ///
+    /// The load is atomic: if one handler fails to register, the host keeps the state it had
+    /// before the call. It holds no handler of the library and it does not hold the MAST forest.
+    ///
+    /// # Errors
+    /// Returns an error when a handler of the library has an empty or reserved event name, or
+    /// when its event already has a handler in this host.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
         let library = library.into();
+
+        // Each successful registration adds a handler that the registry did not have, so
+        // un-registering the added IDs gives back the state before the call.
+        let mut registered = Vec::with_capacity(library.handlers.len());
+        for (event, handler) in library.handlers {
+            let id = event.to_event_id();
+            if let Err(err) = self.event_handlers.register(event, handler) {
+                for id in registered {
+                    self.event_handlers.unregister(id);
+                }
+                return Err(err);
+            }
+            registered.push(id);
+        }
+
         self.store.insert_loaded(LoadedMastForest::with_package_debug_info(
             library.mast_forest,
             library.package_debug_info,
         ));
-
-        for (event, handler) in library.handlers {
-            self.event_handlers.register(event, handler)?;
-        }
         Ok(())
     }
 
@@ -98,11 +116,16 @@ where
 
     /// Replaces a handler with the given event, returning a flag indicating whether a handler
     /// was previously registered with this event ID.
-    pub fn replace_handler(&mut self, event: EventName, handler: Arc<dyn EventHandler>) -> bool {
-        let event_id = event.to_event_id();
-        let existed = self.event_handlers.unregister(event_id);
-        self.register_handler(event, handler).unwrap();
-        existed
+    ///
+    /// # Errors
+    /// Returns an error when the event name is empty or reserved; the host is not changed
+    /// then.
+    pub fn replace_handler(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn EventHandler>,
+    ) -> Result<bool, ExecutionError> {
+        self.event_handlers.replace(event, handler)
     }
 
     /// Registers a single [`TraceHandler`] into this host.
@@ -126,15 +149,16 @@ where
 
     /// Replaces a trace handler with the given event, returning a flag indicating whether a
     /// handler was previously registered with this event ID.
+    ///
+    /// # Errors
+    /// Returns an error when the event name is empty or reserved; the host is not changed
+    /// then.
     pub fn replace_trace_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> bool {
-        let event_id = event.to_event_id();
-        let existed = self.trace_handlers.unregister(event_id);
-        self.register_trace_handler(event, handler).unwrap();
-        existed
+    ) -> Result<bool, ExecutionError> {
+        self.trace_handlers.replace(event, handler)
     }
 }
 
@@ -243,6 +267,17 @@ pub struct HostLibrary {
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
+impl HostLibrary {
+    /// Replaces the event handlers of this library.
+    ///
+    /// Use this to supply handlers that the source of the library does not provide, for example
+    /// the Wasm event handlers of a package.
+    pub fn set_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
+        self.handlers = handlers;
+        self
+    }
+}
+
 impl Default for HostLibrary {
     fn default() -> Self {
         Self {
@@ -253,6 +288,11 @@ impl Default for HostLibrary {
     }
 }
 
+/// Converts a package into a host library.
+///
+/// The packaged Wasm event handlers are NOT loaded: this crate cannot depend on the Wasm runner
+/// crate. To get a library with the handlers of the `event_handlers` section, use
+/// `miden_wasm_event_handlers::host_library_from_package`.
 impl From<Arc<miden_mast_package::Package>> for HostLibrary {
     fn from(package: Arc<miden_mast_package::Package>) -> Self {
         let package_debug_info = match package.debug_info() {
@@ -285,5 +325,70 @@ impl From<&Arc<MastForest>> for HostLibrary {
             package_debug_info: Ok(None),
             handlers: vec![],
         }
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{mast::BasicBlockNodeBuilder, operations::Operation};
+
+    use super::{super::handlers::NoopEventHandler, *};
+    use crate::errors::HostError;
+
+    /// Builds a library with one procedure and one handler per event name.
+    fn library(events: &[&'static str]) -> HostLibrary {
+        let mut mast_forest = MastForest::new();
+        let block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        mast_forest.make_root(block);
+
+        let handlers = events
+            .iter()
+            .map(|event| {
+                (EventName::new(event), Arc::new(NoopEventHandler) as Arc<dyn EventHandler>)
+            })
+            .collect();
+        HostLibrary::from(Arc::new(mast_forest)).set_handlers(handlers)
+    }
+
+    /// Returns `true` when the host resolves a handler for the named event.
+    fn is_registered(host: &DefaultHost, event: &'static str) -> bool {
+        host.resolve_event(EventName::new(event).to_event_id()).is_some()
+    }
+
+    #[test]
+    fn load_library_registers_the_handlers_and_the_forest() {
+        let library = library(&["test::a", "test::b"]);
+        let procedure = library.mast_forest.local_procedure_digests().next().unwrap();
+
+        let mut host = DefaultHost::default();
+        host.load_library(library).unwrap();
+
+        assert!(is_registered(&host, "test::a"));
+        assert!(is_registered(&host, "test::b"));
+        assert!(host.get_mast_forest(&procedure).is_some());
+    }
+
+    #[test]
+    fn failed_load_library_leaves_no_partial_state() {
+        let mut host = DefaultHost::default();
+        host.register_handler(EventName::new("test::b"), Arc::new(NoopEventHandler))
+            .unwrap();
+
+        // The second handler of the library collides with the handler of the host.
+        let library = library(&["test::a", "test::b"]);
+        let procedure = library.mast_forest.local_procedure_digests().next().unwrap();
+        let err = host.load_library(library).unwrap_err();
+
+        assert!(
+            matches!(err, ExecutionError::HostError(HostError::DuplicateEventHandler { .. })),
+            "unexpected error: {err}"
+        );
+        assert!(!is_registered(&host, "test::a"), "the first handler must be rolled back");
+        assert!(host.get_mast_forest(&procedure).is_none(), "the forest must not be loaded");
     }
 }

@@ -1,10 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use miden_crypto::{
-    Felt, Word, field::PrimeField64, hash::eidos::EidosChallenger, parallel::*,
-    stark::challenger::GrindingChallenger,
-};
+use miden_crypto::{Felt, Word, field::PrimeField64, hash::eidos::EidosChallenger, parallel::*};
+use p3_challenger::GrindingChallenger;
 
 const CASES: [(usize, usize); 4] = [(4, 0), (12, 0), (17, 0), (12, 7)];
 

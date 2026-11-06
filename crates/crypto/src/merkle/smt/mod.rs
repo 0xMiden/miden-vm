@@ -9,7 +9,7 @@ use core::{
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
     EMPTY_WORD, Map, Set, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -32,6 +32,9 @@ pub use large::{
     RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
 };
 
+#[cfg(feature = "rocksdb")]
+mod persistent_hash;
+
 mod large_forest;
 pub use large_forest::{
     AppliedLineageMutation, Backend, BackendError, BackendReader, Config as ForestConfig,
@@ -53,8 +56,7 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-use miden_field::Felt;
-pub use partial::{PartialSmt, UniqueNodes};
+pub use partial::{PartialSmt, SmtWitness, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
 
@@ -63,9 +65,6 @@ pub const SMT_MIN_DEPTH: u8 = 1;
 
 /// Maximum supported depth.
 pub const SMT_MAX_DEPTH: u8 = 64;
-
-/// The felt used as a domain separator when hashing leaves in merkle trees.
-pub const LEAF_DOMAIN: Felt = Felt::new_unchecked(0x13af);
 
 // SPARSE MERKLE TREE
 // ================================================================================================
@@ -405,7 +404,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             } else {
                 (node_hash, right)
             };
-            node_hash = Poseidon2::merge(&[left, right]);
+            node_hash = Eidos::merge(&[left, right]);
 
             if node_hash == *EmptySubtreeRoots::entry(DEPTH, node_depth) {
                 // If a subtree is empty, then can remove the inner node, since it's equal to the
@@ -573,6 +572,10 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
 /// part of the public API.
 #[doc(hidden)]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct InnerNode {
     pub left: Word,
     pub right: Word,
@@ -580,7 +583,7 @@ pub struct InnerNode {
 
 impl InnerNode {
     pub fn hash(&self) -> Word {
-        Poseidon2::merge(&[self.left, self.right])
+        Eidos::merge(&[self.left, self.right])
     }
 }
 
@@ -672,6 +675,10 @@ impl<const DEPTH: u8> Display for LeafIndex<DEPTH> {
 /// [`MutationSet`] stores this type in relation to a [`NodeIndex`] to keep track of what changes
 /// need to occur at which node indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum NodeMutation {
     /// Node needs to be removed.
     Removal,
@@ -864,6 +871,44 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
 // TESTS
 // ================================================================================================
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{InnerNode, NodeMutation, Word};
+
+    impl Arbitrary for InnerNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (left, right) pair is structurally valid; hashing consistency is the tree's
+            // concern, not the node's.
+            (any::<Word>(), any::<Word>())
+                .prop_map(|(left, right)| InnerNode { left, right })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for NodeMutation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Both variants must be generated so the wire format's bool discriminant is exercised
+            // in both directions.
+            prop_oneof![
+                Just(NodeMutation::Removal),
+                any::<InnerNode>().prop_map(NodeMutation::Addition),
+            ]
+            .boxed()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LeafIndex, NodeIndex, SMT_MAX_DEPTH};
@@ -893,5 +938,105 @@ mod tests {
         let decoded = LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&leaf.to_bytes()).unwrap();
 
         assert_eq!(leaf, decoded);
+    }
+}
+
+// ARBITRARY TEST GENERATORS (proptest)
+// ================================================================================================
+
+/// Shared generators for the SMT family's `Arbitrary` strategies. Random `Word`s practically
+/// never share a leaf index, so these generate keys with deliberately colliding/sibling leaf
+/// positions to exercise `SmtLeaf::Multiple` and value-only-leaf serialization paths.
+#[cfg(any(test, feature = "arbitrary"))]
+pub(crate) mod test_gen {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use crate::{Felt, Word};
+
+    /// Entries grouped by a deliberately-shared leaf position (the most significant element,
+    /// `key[3]`, since `LeafIndex::<SMT_DEPTH>::from(key)` uses `key[3].as_canonical_u64()`).
+    /// Two or more keys in one group yield a multi-entry leaf (`SmtLeaf::Multiple`).
+    pub fn colliding_leaf_entries() -> impl Strategy<Value = Vec<(Word, Word)>> {
+        proptest::collection::vec(
+            (
+                any::<Felt>(),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    1..=3,
+                ),
+            ),
+            1..=3,
+        )
+        .prop_map(|mut groups| {
+            // Guarantee one retained entry even under shrinking: the first entry gets a
+            // non-empty value (with_entries drops empty values) and a key distinct from the
+            // other keys in its group (differing in the third element).
+            if let Some((_, keys)) = groups.first_mut()
+                && let Some((_, value)) = keys.first_mut()
+                && *value == crate::EMPTY_WORD
+            {
+                // Anchor entry: guaranteed non-empty value so the tree is never empty.
+                *value = Word::new([value[0], value[1], value[2], Felt::new(1).unwrap()]);
+            }
+            groups
+                .into_iter()
+                .flat_map(|(shared, keys)| {
+                    keys.into_iter().map(move |(prefix, value)| {
+                        (Word::new([prefix[0], prefix[1], prefix[2], shared]), value)
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// Entries grouped at adjacent even/odd leaf positions `2k` and `2k + 1` (sibling leaves at
+    /// SMT_MAX_DEPTH). Opening one leaf of a pair while the other is present-but-unopened is
+    /// what produces value-only leaves in partial SMTs. Positions are bounded to `2k + 1 <
+    /// 2^63 < Felt::ORDER`, so `Felt::new` cannot panic.
+    pub fn sibling_leaf_entries() -> impl Strategy<Value = Vec<(Word, Word)>> {
+        proptest::collection::vec(
+            (
+                0u64..(1 << 62),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    1..=2,
+                ),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    0..=2,
+                ),
+            ),
+            1..=3,
+        )
+        .prop_map(|mut groups| {
+            // Same shrinking guarantee as colliding_leaf_entries: the first entry keeps a
+            // non-empty value and a group-distinct key.
+            if let Some((_, keys_a, _)) = groups.first_mut()
+                && let Some((_, value)) = keys_a.first_mut()
+                && *value == crate::EMPTY_WORD
+            {
+                // Anchor entry: guaranteed non-empty value so the tree is never empty.
+                *value = Word::new([value[0], value[1], value[2], Felt::new(1).unwrap()]);
+            }
+            groups
+                .into_iter()
+                .flat_map(|(base, keys_a, keys_b)| {
+                    let pos_a = Felt::new(2 * base).expect("2k < 2^63 < Felt::ORDER");
+                    let pos_b = Felt::new(2 * base + 1).expect("2k+1 < 2^63 < Felt::ORDER");
+                    keys_a
+                        .into_iter()
+                        .map(move |(prefix, value)| {
+                            (Word::new([prefix[0], prefix[1], prefix[2], pos_a]), value)
+                        })
+                        .chain(keys_b.into_iter().map(move |(prefix, value)| {
+                            (Word::new([prefix[0], prefix[1], prefix[2], pos_b]), value)
+                        }))
+                })
+                .collect()
+        })
     }
 }

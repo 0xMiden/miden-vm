@@ -31,7 +31,7 @@ use miden_core::{
 use miden_mast_package::{
     ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
     PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+    debug_info::{DebugFunctionIdx, DebugSourceNodeId, PackageDebugInfo},
 };
 use miden_project::{Linkage, TargetType};
 
@@ -376,7 +376,6 @@ impl Assembler {
         self.linker.kernel()
     }
 
-    #[cfg(any(feature = "std", all(test, feature = "std")))]
     pub(crate) fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }
@@ -527,7 +526,7 @@ impl Assembler {
 
                     let path: Arc<Path> = {
                         let symbol = &self.linker[gid];
-                        if !symbol.visibility().is_public() {
+                        if !symbol.visibility().is_exported() {
                             continue;
                         }
                         module_path
@@ -549,7 +548,7 @@ impl Assembler {
                 }
 
                 for import in imports.iter() {
-                    if !import.visibility().is_public() {
+                    if !import.visibility().is_exported() {
                         continue;
                     }
 
@@ -603,7 +602,7 @@ impl Assembler {
             let module = &self.linker[module_idx];
             let mut submodules = Vec::new();
             for decl in module.submodules() {
-                if !decl.visibility.is_public() {
+                if !decl.visibility.is_exported() {
                     continue;
                 }
 
@@ -647,11 +646,8 @@ impl Assembler {
         let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
-                let resolved = match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_use(),
-                        signature: proc.signature(),
-                    },
+                let (node, signature) = match mast_forest_builder.get_procedure(gid) {
+                    Some(proc) => (proc.body_node_use(), proc.signature()),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
                     None => {
@@ -666,11 +662,23 @@ impl Assembler {
                             item.source_debug_root_id().map(DebugSourceNodeId::from),
                             mast_forest_builder,
                         )?;
-                        ResolvedProcedure { node, signature: item.signature.clone() }
+                        let path = self.linker[gid.module].path().join(&item.name);
+                        if let Some(library_id) = item.source_library_commitment()
+                            && let Some(library) = self.linker.library_by_commitment(library_id)
+                        {
+                            mast_forest_builder.import_procedure_function(
+                                gid,
+                                library_id,
+                                library,
+                                &path,
+                                item.source_debug_root_id().map(DebugSourceNodeId::from),
+                                item.digest,
+                            )?;
+                        }
+                        (node, item.signature.clone())
                     },
                 };
                 let digest = item.digest;
-                let ResolvedProcedure { node, signature } = resolved;
                 let attributes = item.attributes.clone();
                 let pctx = ProcedureContext::new(
                     gid,
@@ -733,6 +741,9 @@ impl Assembler {
             },
         };
 
+        if let PendingPackageExport::Procedure(procedure) = &export {
+            mast_forest_builder.record_exported_function(gid, &procedure.path);
+        }
         Ok(export)
     }
 
@@ -815,15 +826,15 @@ impl Assembler {
         for module_index in module_indices.iter().copied() {
             let module = &self.linker[module_index];
             for symbol in module.symbols() {
-                if !symbol.visibility().is_public() {
+                if !symbol.visibility().is_exported() {
                     continue;
                 }
 
-                self.verify_exported_item(&resolver, module_index, symbol, None)?;
+                self.verify_exported_item(&resolver, module_index, symbol)?;
             }
 
             for import in module.imports() {
-                if !import.visibility().is_public()
+                if !import.visibility().is_exported()
                     || !matches!(import.kind(), ast::ImportKind::Item)
                 {
                     continue;
@@ -833,12 +844,7 @@ impl Assembler {
                     continue;
                 };
 
-                self.verify_exported_item(
-                    &resolver,
-                    gid.module,
-                    &self.linker[gid],
-                    Some(import.span()),
-                )?;
+                self.verify_exported_item(&resolver, gid.module, &self.linker[gid])?;
             }
         }
 
@@ -850,7 +856,6 @@ impl Assembler {
         resolver: &SymbolResolver<'_>,
         module_index: ModuleIndex,
         symbol: &crate::linker::Symbol,
-        export_span: Option<SourceSpan>,
     ) -> Result<(), Report> {
         match symbol.item() {
             SymbolItem::Procedure(proc) => {
@@ -858,13 +863,6 @@ impl Assembler {
                 self.verify_exported_signature(resolver, module_index, proc.signature())
             },
             SymbolItem::Type(type_decl) => {
-                if !symbol.visibility().is_public() {
-                    return Err(Report::new(SemanticAnalysisError::PrivateTypeInExportedType {
-                        span: export_span.unwrap_or_else(|| type_decl.name().span()),
-                        defined: type_decl.name().span(),
-                    }));
-                }
-
                 let mut visiting_types = BTreeSet::default();
                 self.verify_exported_type_decl(
                     resolver,
@@ -985,14 +983,11 @@ impl Assembler {
                     kind: None,
                 };
                 let resolution =
-                    resolver.resolve_path(&context, path.as_deref()).map_err(Report::from)?;
-
-                let gid = match resolution {
-                    SymbolResolution::Exact { gid, .. } => gid,
-                    SymbolResolution::Local(item) => current_module + item.into_inner(),
-                    SymbolResolution::External(_)
-                    | SymbolResolution::MastRoot(_)
-                    | SymbolResolution::Module { .. } => return Ok(()),
+                    resolver.resolve_reference(&context, path.as_deref()).map_err(Report::from)?;
+                let crate::linker::namespaces::ResolvedUse::Item { id: gid, visibility } =
+                    resolution
+                else {
+                    return Ok(());
                 };
 
                 let symbol = &self.linker[gid];
@@ -1000,7 +995,7 @@ impl Assembler {
                     return Ok(());
                 };
 
-                if !symbol.visibility().is_public() {
+                if !visibility.is_public() {
                     return Err(Report::new(
                         usage.private_type_error(path.span(), type_decl.name().span()),
                     ));
@@ -1637,13 +1632,13 @@ impl Assembler {
                     None,
                     mast_forest_builder,
                 )?;
-                Ok(ResolvedProcedure { node, signature: None })
+                Ok(ResolvedProcedure { node, function: None })
             },
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(ResolvedProcedure {
                         node: proc.body_node_use(),
-                        signature: proc.signature(),
+                        function: mast_forest_builder.procedure_function_index(gid),
                     }),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
@@ -1659,7 +1654,23 @@ impl Assembler {
                                 p.source_debug_root_id().map(DebugSourceNodeId::from),
                                 mast_forest_builder,
                             )?;
-                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
+                            let path = self.linker[gid.module].path().join(&p.name);
+                            let mut function = mast_forest_builder.procedure_function_index(gid);
+                            if kind == InvokeKind::Exec
+                                && function.is_none()
+                                && let Some(library_id) = p.source_library_commitment()
+                                && let Some(library) = self.linker.library_by_commitment(library_id)
+                            {
+                                function = mast_forest_builder.import_procedure_function(
+                                    gid,
+                                    library_id,
+                                    library,
+                                    &path,
+                                    p.source_debug_root_id().map(DebugSourceNodeId::from),
+                                    p.digest,
+                                )?;
+                            }
+                            Ok(ResolvedProcedure { node, function })
                         },
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
@@ -1761,5 +1772,5 @@ pub(crate) struct BodyWrapper {
 
 pub(super) struct ResolvedProcedure {
     pub node: MastNodeUse,
-    pub signature: Option<Arc<FunctionType>>,
+    pub function: Option<DebugFunctionIdx>,
 }

@@ -3,7 +3,7 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
-use miden_air::CoreCols;
+use miden_air_definitions::vm::CoreCols;
 use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
@@ -13,16 +13,14 @@ use miden_core::{
 };
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 struct ForgedTrace {
     repro: ReproTrace,
     core: RowMajorMatrix<Felt>,
     chiplets: RowMajorMatrix<Felt>,
-    poseidon2: RowMajorMatrix<Felt>,
+    eidos_compression: RowMajorMatrix<Felt>,
+    and8: RowMajorMatrix<Felt>,
     forged_outputs: StackOutputs,
 }
 
@@ -45,7 +43,7 @@ fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace 
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     trace
@@ -69,20 +67,20 @@ fn opcode(row: &CoreCols<Felt>) -> u8 {
 ///
 /// Row 0 carries the public stack inputs `[1, 5, 7]` and a REPEAT opcode. REPEAT pops the loop
 /// condition, so every later row is copied (one row down) from an honest execution of the same
-/// program on `[5, 7]`. The range-checker columns stay in place because they are independent of
-/// the decoder rows in this fixture.
+/// program on `[5, 7]`. Its hasher and byte-lookup matrices are copied without shifting rows.
 fn build_first_row_repeat_trace() -> ForgedTrace {
     let program = build_program(vec![Operation::Add]);
     let honest_trace = execute(&program, &[1, 5, 7]);
     let popped_trace = execute(&program, &[5, 7]);
 
-    let (honest_core, ..) = honest_trace.main_trace().to_air_matrices();
-    let (popped_core, chiplets, poseidon2) = popped_trace.main_trace().to_air_matrices();
+    let (honest_core, ..) = honest_trace.main_trace().clone_air_matrices();
+    let (popped_core, chiplets, eidos_compression, and8) =
+        popped_trace.main_trace().clone_air_matrices();
     assert_eq!(honest_core.height(), popped_core.height());
     assert_eq!(core_row(&honest_core, 0).stack.top[0], Felt::ONE);
 
     let loop_trace = execute(&build_loop_program(vec![Operation::Not]), &[0, 1]);
-    let (loop_core, ..) = loop_trace.main_trace().to_air_matrices();
+    let (loop_core, ..) = loop_trace.main_trace().clone_air_matrices();
     let repeat_row = (0..loop_core.height())
         .find(|&row| opcode(core_row(&loop_core, row)) == opcodes::REPEAT)
         .expect("the two-iteration loop executes REPEAT");
@@ -111,7 +109,8 @@ fn build_first_row_repeat_trace() -> ForgedTrace {
         repro: ReproTrace::new(&honest_trace),
         core,
         chiplets,
-        poseidon2,
+        eidos_compression,
+        and8,
         forged_outputs,
     }
 }
@@ -126,7 +125,8 @@ fn first_row_repeat_is_rejected() {
     let result = forged.repro.prove_and_verify_parts_allowing_lookup_rejection(
         forged.core,
         forged.chiplets,
-        forged.poseidon2,
+        forged.eidos_compression,
+        forged.and8,
         forged.forged_outputs,
     );
     let error = result.expect_err("a REPEAT row before the committed program must be rejected");

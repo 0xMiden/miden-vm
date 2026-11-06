@@ -2,13 +2,13 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{
+    Word,
     dsa::{
-        eddsa_25519_sha512::{PublicKey as EdDsaPublicKey, Signature as EdDsaSignature},
         ecdsa_k256_keccak::{PublicKey as EcdsaPublicKey, Signature as EcdsaSignature},
-        falcon512_poseidon2::{PublicKey as FalconPublicKey, Signature as FalconSignature},
+        eddsa_25519_sha512::{PublicKey as EdDsaPublicKey, Signature as EdDsaSignature},
+        falcon512_eidos::{PublicKey as FalconPublicKey, Signature as FalconSignature},
     },
     utils::Deserializable,
-    Word,
 };
 
 fuzz_target!(|data: &[u8]| {

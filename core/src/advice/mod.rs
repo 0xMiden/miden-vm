@@ -26,7 +26,14 @@ pub use stack::AdviceStack;
 /// 2. Key-mapped element lists which can be pushed onto the advice stack.
 /// 3. Merkle store, which is used to provide nondeterministic inputs for instructions that operates
 ///    with Merkle trees.
+///
+/// Serialization includes the `MerkleStore` format header and version. Encodings containing an
+/// unversioned store are rejected.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AdviceInputs {
     stack: AdviceStack,
     map: AdviceMap,
@@ -134,7 +141,7 @@ mod tests {
     use crate::{
         Felt, Word,
         crypto::merkle::MerkleStore,
-        serde::{Deserializable, Serializable},
+        serde::{Deserializable, DeserializationError, Serializable},
     };
 
     #[test]
@@ -160,6 +167,19 @@ mod tests {
         let advice2 = AdviceInputs::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(advice1, advice2);
+    }
+
+    #[test]
+    fn advice_inputs_reject_unversioned_merkle_store() {
+        let mut bytes = Vec::<Felt>::new().to_bytes();
+        AdviceMap::default().write_into(&mut bytes);
+        // An unversioned empty store contains only its u64 node count.
+        0u64.write_into(&mut bytes);
+        assert!(matches!(
+            AdviceInputs::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == "unsupported MerkleStore format: expected a versioned encoding"
+        ));
     }
 
     #[test]

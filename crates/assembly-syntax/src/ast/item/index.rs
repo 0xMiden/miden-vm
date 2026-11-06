@@ -84,9 +84,16 @@ impl core::fmt::Display for GlobalItemIndex {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct ModuleIndex(u16);
+
 impl ModuleIndex {
+    pub const MAX_MODULES: usize = u16::MAX as usize + 1;
+
     pub fn new(index: usize) -> Self {
-        Self(index.try_into().expect("invalid module index: too many modules"))
+        Self::try_new(index).expect("invalid module index: too many modules")
+    }
+
+    pub fn try_new(index: usize) -> Result<Self, core::num::TryFromIntError> {
+        index.try_into().map(Self)
     }
 
     pub const fn const_new(index: u16) -> Self {
@@ -117,7 +124,17 @@ impl core::fmt::Display for ModuleIndex {
 mod regression_tests {
     use std::string::String;
 
+    use super::ModuleIndex;
     use crate::sema::{LimitKind, SemanticAnalysisError, SyntaxError};
+
+    #[test]
+    fn module_index_try_new_checks_capacity() {
+        let last = ModuleIndex::try_new(ModuleIndex::MAX_MODULES - 1)
+            .expect("the final representable module index must be accepted");
+
+        assert_eq!(last.as_usize(), ModuleIndex::MAX_MODULES - 1);
+        assert!(ModuleIndex::try_new(ModuleIndex::MAX_MODULES).is_err());
+    }
 
     fn huge_library_masm() -> String {
         let num_consts = usize::from(u16::MAX) + 2;

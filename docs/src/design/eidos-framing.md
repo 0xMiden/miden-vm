@@ -10,6 +10,8 @@ value. Domain tags are allocated rather than derived by hashing names. Rust APIs
 as a type, and downstream MASM constants can be generated from the same declarations.
 
 This document specifies Eidos framing and the domain-registry contract.
+The [security and usage guide](./eidos-security.md) specifies the digest output distribution and
+its consequences for commitments, sampling, and encryption.
 
 ## Construction overview
 
@@ -48,10 +50,10 @@ Let `IV` be the eight 32-bit words of the BLAKE3 initialization vector and let
 `pack(low, high) = low + 2^32 * high`. Define four packed base field elements:
 
 ```text
-BASE0 = pack(0, IV[1] & 0x7fff_ffff) = 4280581857092829184
-BASE1 = pack(0, IV[3] & 0x7fff_ffff) = 2688637132020383744
-BASE2 = pack(0, IV[5] & 0x7fff_ffff) = 1947077364412317696
-BASE3 = pack(0, IV[7] & 0x7fff_ffff) = 6620516959492505600
+BASE0 = pack(0, IV[1]) = 13503953893947604992
+BASE1 = pack(0, IV[3]) = 11912009168875159552
+BASE2 = pack(0, IV[5]) = 11170449401267093504
+BASE3 = pack(0, IV[7]) = 6620516959492505600
 ```
 
 For a domain tag and three parameters, Eidos initializes:
@@ -69,22 +71,25 @@ Equivalently, unpacking the four field elements into eight 32-bit lanes gives:
 
 ```text
 [
-    tag,    fixed0,
-    param0, fixed1,
-    param1, fixed2,
-    param2, fixed3,
+    tag,    IV[1],
+    param0, IV[3],
+    param1, IV[5],
+    param2, IV[7],
 ]
 ```
 
 The tag and each parameter may use the complete `u32` range. Each fixed high lane is below
-`2^31`, so the largest packed value is:
+`2^32 - 1`, so every packed value is at most:
 
 ```text
-(2^31 - 1) * 2^32 + (2^32 - 1) = 2^63 - 1
+(2^32 - 2) * 2^32 + (2^32 - 1) = 2^64 - 2^32 - 1
 ```
 
 This is below the Goldilocks modulus `2^64 - 2^32 + 1`. The additions therefore place each input
 directly in the low half of one Felt without a carry or runtime bit manipulation.
+
+The first three packed elements of an initial CV have their top bit set. Compression clears these
+bits, so an initial CV cannot equal a compression output.
 
 ## Domain-tag hierarchy
 
@@ -105,15 +110,20 @@ the correct namespace and unique tags, but allocation across repositories remain
 rule. The `(namespace, local_id) = (0, 0)` pair is reserved, so the all-zero tag is never
 registrable. A nonzero namespace may allocate owner-local ID zero.
 
-| Namespace | Owner | Responsibility |
-| ---: | --- | --- |
-| `0x00` | `miden-crypto` | Cryptographic constructions implemented by `miden-crypto` |
-| `0x01` | `miden-vm` | VM, proof-system, and precompile constructions |
-| `0x02` | `miden-protocol` | Protocol commitments and transaction constructions |
-| `0x10` | Miden ecosystem | Reserved for a centrally maintained ecosystem registry; not for ad hoc allocation |
+| Namespace | Owner            | Responsibility                                                                    |
+|----------:|------------------|-----------------------------------------------------------------------------------|
+| `0x00`    | `miden-crypto`   | Cryptographic constructions implemented by `miden-crypto`                         |
+| `0x01`    | `miden-vm`       | VM, proof-system, and precompile constructions                                    |
+| `0x02`    | `miden-protocol` | Protocol commitments and transaction constructions                                |
+| `0x10`    | Miden ecosystem  | Reserved for a centrally maintained ecosystem registry; not for ad hoc allocation |
 
 Unlisted namespace values remain unallocated. Adding one requires an update to the central
 namespace registry in `miden-crypto`; it is not a local convention.
+
+Values in the reserved `(namespace, local_id) = (0, 0)` region are not domain tags. The all-zero
+tuple initializes Merkle internal-node compression. MAST control nodes place an opcode in the tag
+lane, bind `param0 = 8`, and leave the other parameters zero. Registered tags are at least `0x100`,
+so neither VM-internal framing family can overlap a registry allocation.
 
 ### Versioning
 
@@ -179,11 +189,10 @@ versioning policy per local ID. It cannot detect an independent registry that wr
 same namespace. `render_masm_constants` renders the declarations as MASM constants; downstream
 generators should use this output rather than copying numeric tags by hand.
 
-Dynamic registries, such as the deferred-precompile registry, may decode a numeric tag with
-`DomainTag::from_u32` and pass it to `Eidos::init_chaining_word_with_tag`. Parsing checks the
-reserved namespace/local-ID pair and namespace allocation only. The dynamic consumer must use the
-owner's registry `resolve` method, then validate the domain's parameters and payload. This runtime
-bridge constructs an initial CV; it does not make the ordinary Felt and byte hash APIs untyped.
+Dynamic boundaries may recover an `EidosFrame` from an initial chaining word. This checks the
+fixed IV lanes and the canonical `u32` representation of the domain and parameters, but not registry
+membership or domain semantics. The dynamic consumer must resolve the domain in the owner's
+registry, then validate the parameters and payload.
 
 ## Standard Felt and byte schedules
 
@@ -225,9 +234,9 @@ exactly. The adapter deliberately splits any other `u64` into its two 32-bit lim
 reduction for its low-level consumers; those extra inputs do not define another registered
 construction or alter the typed `FeltSequence` API.
 
-## Reserved Merkle inner-node construction
+## Reserved Merkle internal-node construction
 
-Merkle inner-node compression is the only unregistered Eidos construction. It uses the all-zero
+Merkle internal nodes use a fixed construction outside the domain registry. It uses the all-zero
 framing tuple and exactly one 8-Felt block:
 
 ```text
@@ -242,17 +251,19 @@ MerkleInner(left, right):
 "All zero" refers to the four injected lanes. The actual initial chaining word is
 `[BASE0, BASE1, BASE2, BASE3]`, not the literal zero word.
 
-This construction is reserved exclusively for Merkle inner nodes so that the VM's Merkle-path
-operations have one fixed initialization. Structured leaves bind their own meaning before they
-enter the tree, and callers bind the role of a root where it is consumed. In particular:
+The VM's native Merkle verification and update operations enforce this fixed initialization.
+Trees used with these operations must therefore use the same internal-node construction.
+Structured leaves bind their own meaning before they enter the tree, and callers bind the role
+of a root where it is consumed. In particular:
 
 ```text
 Eidos::merge([left, right]) != Eidos::hash_elements(left || right)
 ```
 
-The right-hand side uses the registered generic Felt tag and binds length eight. Code scheduling a
-Merkle compression through a separate engine obtains the reserved initial word from
-`Eidos::merkle_node_init_chaining_word`; ordinary callers use `Eidos::merge`.
+The right-hand side uses the registered generic Felt tag and binds length eight. The VM's `hdword`
+instruction and `eidos::hash_double_word` procedure implement that generic hash. Merkle code uses
+`Eidos::merge`, or obtains its reserved initial word from
+`Eidos::merkle_node_init_chaining_word` when compression is scheduled by a separate engine.
 
 ## Custom schedules
 
@@ -261,6 +272,35 @@ encoding, compression schedule, and output extraction. A delegated tag identifie
 hash schedule plus the stable rule used to find the object version in its payload. The three
 parameter lanes do not have global names; their interpretation belongs to the registered domain.
 
+### Deferred-node framing
+
+A non-TRUE deferred node stores this frame:
+
+```text
+FRAME = [domain_tag, param0, param1, param2]
+```
+
+For `b` complete payload blocks, its digest is:
+
+```text
+CV_0 = init(domain_tag, [param0, param1, param2])
+CV_{i + 1} = compress(CV_i, payload_block_i)
+digest = CV_b
+```
+
+Every frame value is a canonical `u32`. The domain defines the meaning of all three parameters and
+must validate them against the payload. There is no framework-wide length parameter. Every
+compression consumes payload; there is no terminal framing block. Framework AND and CHUNKS nodes
+use the registered `DEFERRED_AND` and `DEFERRED_CHUNKS` domains. The TRUE node is a sentinel and is
+not hashed.
+
+When the PVM proves a multi-block deferred digest, the semantic owner provides `EidosInit` at the
+physical chain head, `EidosBlock` for each compression, and the terminal
+`EidosOut(head, tail, digest)` relation. Including both endpoints in the terminal relation binds the
+digest to the same physical chain the owner initialized. The owner derives the tail from its
+domain's payload grammar; the generic Eidos controller consumes all three relations, proves
+contiguous chaining, and propagates the head identity.
+
 LMCS is an example. Leaf hashing has its own `Custom` domain because it absorbs matrix rows in
 commitment order, padding each row independently to eight Felts. Its first parameter binds the sum
 of those padded widths, including the independently padded salt when present. The verifier still
@@ -268,6 +308,10 @@ supplies the row boundaries and widths fixed by its LMCS configuration; the tota
 replace that shape check. LMCS internal nodes use the reserved Merkle construction above. The tag
 is part of the canonical `EidosLmcs` configuration, not something callers choose per matrix. A
 different leaf schedule needs its own registered domain and matching hasher.
+
+An empty LMCS leaf returns its initial CV without compression. This value is outside the 252-bit
+packed subspace and cannot equal a nonempty leaf digest. Absorbing an empty row leaves the state
+unchanged. Salt, when present, is absorbed as another row, so a salted leaf is not empty.
 
 The Fiat-Shamir challenger also uses a dedicated schedule. `transcript_init_cv(domain)` creates the
 standard framed initial CV with the registered transcript tag and three zero parameters. The
@@ -296,19 +340,44 @@ does not provide backtracking resistance within a reseed interval.
 The declarations in `hash::eidos::domains` are normative and are the source for this table and
 generated MASM constants.
 
-| Local ID | Version | Rust domain | Encoding |
-| ---: | ---: | --- | --- |
-| `0x0001` | 1 | `SMT_BUCKET_LEAF` | `Custom` |
-| `0x0002` | 1 | `MMR_PEAKS` | `Custom` |
-| `0x0003` | 1 | `GENERIC_BYTE_STRING` | `ByteString` |
-| `0x0004` | 1 | `FALCON_HASH_TO_POINT` | `Custom` |
-| `0x0005` | 1 | `FALCON_PUBLIC_KEY` | `FeltSequence` |
-| `0x0006` | 1 | `AEAD_CTR_KEY` | `Custom` |
-| `0x0007` | 1 | `AEAD_MAC_KEY` | `Custom` |
-| `0x0008` | 1 | `RANDOM_COIN_STATE` | `FeltSequence` |
-| `0x0009` | 1 | `RANDOM_COIN_OUTPUT` | `FeltSequence` |
-| `0x000a` | 1 | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
-| `0x000b` | 1 | `LMCS_LEAF` | `Custom` |
+| Local ID | Version | Rust domain             | Encoding       |
+|---------:|--------:|-------------------------|----------------|
+| `0x0001` | 1       | `SMT_BUCKET_LEAF`       | `Custom`       |
+| `0x0002` | 1       | `MMR_PEAKS`             | `Custom`       |
+| `0x0003` | 1       | `GENERIC_BYTE_STRING`   | `ByteString`   |
+| `0x0004` | 2       | `FALCON_HASH_TO_POINT`  | `Custom`       |
+| `0x0005` | 1       | `FALCON_PUBLIC_KEY`     | `FeltSequence` |
+| `0x0006` | 2       | `AEAD_CTR_KEY`          | `Custom`       |
+| `0x0007` | 2       | `AEAD_MAC_KEY`          | `Custom`       |
+| `0x0008` | 1       | `RANDOM_COIN_STATE`     | `FeltSequence` |
+| `0x0009` | 1       | `RANDOM_COIN_OUTPUT`    | `FeltSequence` |
+| `0x000a` | 1       | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
+| `0x000b` | 1       | `LMCS_LEAF`             | `Custom`       |
+| `0x000c` | 1       | `ECGFP5_SEAL_KEY`       | `FeltSequence` |
+| `0x000d` | 1       | `ECGFP5_SEAL_NONCE`     | `FeltSequence` |
+| `0x000e` | 1       | `ECGFP5_SEAL_CONTEXT`   | `FeltSequence` |
+| `0x000f` | 1       | `ECGFP5_SEAL_EXTRACT`   | `FeltSequence` |
+| `0x0010` | 1       | `ECGFP5_PUBLIC_KEY`    | `FeltSequence` |
+| `0x0011` | 1       | `ECGFP5_PREPROCESSED_PUBLIC_KEY` | `FeltSequence` |
+| `0x0012` | 1       | `ECGFP5_SEAL_BYTE_CONTEXT` | `ByteString` |
+
+## `miden-vm` local registry
+
+The declarations in `core::program::domain` are normative and are the source for this table.
+
+| Local ID | Version | Rust domain            | Encoding       |
+|---------:|--------:|------------------------|----------------|
+| `0x0000` | 1       | `KERNEL_COMMITMENT`    | `FeltSequence` |
+| `0x0001` | 1       | `EXECUTION_CLAIM`      | `FeltSequence` |
+| `0x0002` | 1       | `PROOF_REQUEST`        | `FeltSequence` |
+| `0x0003` | 1       | `DEFERRED_AND`         | `Custom`       |
+| `0x0004` | 1       | `DEFERRED_CHUNKS`      | `Custom`       |
+| `0x0005` | 1       | `STARK_TRANSCRIPT`     | `Transcript`   |
+| `0x0006` | 1       | `KECCAK256_PRECOMPILE` | `Custom`       |
+| `0x0007` | 1       | `UINT256_PRECOMPILE`   | `Custom`       |
+| `0x0008` | 1       | `CURVE_PRECOMPILE`     | `Custom`       |
+| `0x0009` | 1       | `PVM_UINT_PIN_CLAIM`   | `Custom`       |
+| `0x000a` | 2       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar

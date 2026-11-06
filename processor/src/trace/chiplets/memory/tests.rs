@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::{assert_matches, ops::Range};
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     RowIndex,
     chiplets::memory::{
         MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
@@ -482,9 +482,9 @@ fn append_range_checks_does_not_panic_when_first_access_clk_is_zero() {
     mem.write(ContextId::root(), ZERO, 0.into(), ONE).unwrap();
 
     let mut range_checker = RangeChecker::new();
-    mem.append_range_checks(0.into(), &mut range_checker);
+    mem.append_range_checks(&mut range_checker);
 
-    assert!(range_checker.trace_len() > 0);
+    assert!(range_checker.count(0) > 0);
 }
 
 // HELPER STRUCT & FUNCTIONS

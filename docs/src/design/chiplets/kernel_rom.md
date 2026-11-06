@@ -23,39 +23,37 @@ The following example table shows the execution trace for three procedures with 
 
 Column meanings:
 
-- $m$ is the CALL-label multiplicity — the number of times the procedure was invoked by a `SYSCALL`. It may be zero for procedures declared in the kernel but never called.
+- $m$ is the `KernelRomCall` multiplicity — the number of times the procedure was invoked by a
+  `SYSCALL`. It may be zero for procedures declared in the kernel but never called.
 - $r_0, \ldots, r_3$ contain the digest of the kernel procedure.
-
-## Main-trace constraints
-
-The kernel ROM chiplet has **no main-trace shape constraints** under the all-LogUp layout.
-Earlier designs carried a binary "first-row-of-block" selector, a digest-contiguity rule, and an entry-row anchor to shape the trace for a permutation argument.
-LogUp replaces those with multiset equality under a random challenge $\alpha$, so any prover assignment to $(m, r_0, \ldots, r_3)$ that balances the chiplets bus is sound; no extra shape constraints are required.
 
 ## Chiplets bus constraints
 
-The kernel ROM chiplet emits two fractions on the chiplets bus $b_{chip}$ per active row, gated by the selector flag $f_{krom}$.
-Let
+Each active kernel ROM row participates in two typed [LogUp](../lookups/logup.md) relations. Their
+denominators are
 
 $$
 \begin{aligned}
-\tilde{r} &= \sum_{i=0}^{3} \alpha_{i+2} \cdot r_i \\
-v_{init} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_INIT} + \tilde{r} \\
-v_{call} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_CALL} + \tilde{r}
+d_{init} &= \operatorname{bus\_prefix}[\mathsf{KernelRomInit}]
+    + \sum_{i=0}^{3} \beta^i r_i, \\
+d_{call} &= \operatorname{bus\_prefix}[\mathsf{KernelRomCall}]
+    + \sum_{i=0}^{3} \beta^i r_i.
 \end{aligned}
 $$
 
-denote the two encoded bus messages for a row's digest. Here $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./index.md#operation-labels), and $\alpha_i$ are challenges received from the verifier.
-
-The chiplet contributes to $b_{chip}$ via
+The row contributes
 
 > $$
-> f_{krom} \cdot \left( -\frac{1}{v_{init}} + \frac{m}{v_{call}} \right)
+> -\frac{1}{d_{init}} + \frac{m}{d_{call}}.
 > $$
 
-- The **INIT term** removes exactly one fraction per declared procedure. It is balanced by the public-input boundary term the verifier injects on $b_{chip}$ (one add per kernel procedure digest read from public inputs). This anchors every chiplet row to a declared procedure: a forged row would leave an unmatched INIT remove.
-- The **CALL term** contributes $m$ fractions. Each `SYSCALL` in the decoder emits one matching remove on $b_{chip}$. Bus balance forces $m$ to equal the true syscall count for that procedure.
+- The `KernelRomInit` term consumes one copy of the row digest. The verifier provides one matching
+  boundary contribution for every kernel procedure digest in the public inputs, so an
+  unauthenticated row leaves the relation unbalanced.
+- The `KernelRomCall` term provides $m$ copies of the row digest. Each `SYSCALL` consumes one
+  matching message, which binds $m$ to the call count for that procedure.
 
-The full set of constraints applied to $b_{chip}$ (including the public-input boundary term for INIT) is described in the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
+The [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints) describe how these
+contributions are closed with the public-input boundary terms.
 
 By using the bus this way, the verifier only learns which procedures can be invoked, not how often they were called — the multiplicity $m$ is a private witness that only reaches the verifier through the bus balance.

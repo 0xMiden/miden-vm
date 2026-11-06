@@ -1,65 +1,33 @@
 #!/bin/bash
-
-# RELEASE_TAG, EVENT_NAME, GH_TOKEN, GH_REPO, GITHUB_OUTPUT are set on the
-# workspace-publish.yml workflow.
+# Validate the dispatched release and emit its commit, tag and release type for GitHub Actions.
 
 set -euo pipefail
 
-git fetch origin main --depth=1
-main_sha="$(git rev-parse origin/main)"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/release-policy.sh
+source "$DIR/lib/release-policy.sh"
 
-if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
-    # Canonical release path: operators provide only the tag. The commit is
-    # derived from origin/main so release assets, crates, and the GitHub
-    # release all point at the same protected revision.
-    release_sha="${main_sha}"
+verify_release_reviewers
 
-    if git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}^{commit}" >/dev/null; then
-        tag_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
-        if [[ "${tag_sha}" != "${release_sha}" ]]; then
-            echo "::error::Existing tag ${RELEASE_TAG} points at ${tag_sha}, expected ${release_sha}."
-            echo "::error::Tags are immutable under the release ruleset. Do not move or delete ${RELEASE_TAG}; choose a new tag after main points at the intended release commit."
-            echo "::error::Recovery: gh workflow run workspace-publish.yml --ref main -f tag=<new-tag>"
-            exit 1
-        fi
-    fi
-else
-    # Guardrail path: a release is already public. We do not build or
-    # upload assets here, because doing so would recreate the public-first
-    # race this workflow is meant to avoid. Instead, require the expected
-    # assets to already be present before crates are published.
-    git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" --force --depth=1
-    release_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+release_sha="${GITHUB_SHA}"
+prerelease=false
+[[ "$RELEASE_TAG" != *-rc.* ]] || prerelease=true
 
-    if [[ "${release_sha}" != "${main_sha}" ]]; then
-        echo "::error::Release tag ${RELEASE_TAG} points at ${release_sha}, but origin/main is ${main_sha}."
-        echo "::error::Tags are immutable under the release ruleset. Do not move or delete ${RELEASE_TAG}; publish a follow-up release from the current main commit instead."
-        echo "::error::Recovery: gh workflow run workspace-publish.yml --ref main -f tag=<new-tag>"
-        exit 1
-    fi
+[[ "${GITHUB_REF_TYPE}" == branch ]] || {
+    echo "::error::Dispatch from a release branch, not a tag." >&2
+    exit 1
+}
+release_branch="${GITHUB_REF_NAME}"
 
-    release_assets="$(gh release view "${RELEASE_TAG}" --json assets -q '.assets[].name')"
-    required_assets=(
-        "miden-vm-aarch64-apple-darwin"
-        "miden-vm-x86_64-unknown-linux-gnu"
-        "core.masp"
-    )
+verify_release_commit "$release_branch" "$release_sha" "$RELEASE_TAG"
+{
+    echo "tag=${RELEASE_TAG}"
+    echo "sha=${release_sha}"
+    echo "branch=${release_branch}"
+    echo "prerelease=${prerelease}"
+} >> "${GITHUB_OUTPUT}"
 
-    missing=0
-    for asset in "${required_assets[@]}"; do
-        if ! grep -Fxq "${asset}" <<< "${release_assets}"; then
-            echo "::error::Release ${RELEASE_TAG} is already public but is missing required asset ${asset}."
-            missing=1
-        fi
-    done
-
-    if [[ "${missing}" -ne 0 ]]; then
-        echo "::error::This fallback never builds assets after a release is public."
-        echo "::error::If this release can still be converted back to draft, do that first, then rerun: gh workflow run workspace-publish.yml --ref main -f tag=${RELEASE_TAG}"
-        echo "::error::If release/tag immutability prevents making it draft again, leave this release alone and cut a new tag with: gh workflow run workspace-publish.yml --ref main -f tag=<new-tag>"
-        exit 1
-    fi
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    # shellcheck disable=SC2016
+    printf 'Release %s from `%s` at `%s`.\n' "$RELEASE_TAG" "$release_branch" "$release_sha" >> "$GITHUB_STEP_SUMMARY"
 fi
-
-echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
-echo "sha=${release_sha}" >> "${GITHUB_OUTPUT}"

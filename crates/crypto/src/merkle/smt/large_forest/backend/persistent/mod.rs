@@ -74,6 +74,7 @@ use crate::{
                     AppliedLineageMutation, LineageMutation, LineageMutationKind, MutationSet,
                 },
             },
+            persistent_hash::ensure_hash_scheme,
         },
     },
 };
@@ -688,13 +689,18 @@ impl PersistentBackend {
     /// Constructs an instance of the persistent backend, either opening or creating the data store
     /// at the location specified in the `config`.
     ///
+    /// Stored hashes must match the current native hash construction. Incompatible or unmarked
+    /// nonempty databases must be rebuilt from their key-value entries.
+    ///
     /// # Errors
     ///
     /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
     ///   from disk.
-    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
+    /// - [`BackendError::Internal`] if the database uses an incompatible hash construction or the
+    ///   backend cannot be started up properly.
     pub fn load(config: Config) -> Result<Self> {
         let db = Arc::new(Self::build_db_with_options(&config)?);
+        ensure_hash_scheme(&db).map_err(BackendError::internal_from)?;
         let lineages = Arc::new(Self::read_all_metadata(&db)?);
         let sync_writes = config.sync_writes;
 

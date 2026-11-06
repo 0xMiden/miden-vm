@@ -157,12 +157,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::InsertHdword),
     },
     PrimitiveSpec {
-        spelling: "adv.insert_hdword_d",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
-    },
-    PrimitiveSpec {
-        spelling: "adv.insert_hperm",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHperm),
+        spelling: "adv.insert_compress",
+        build: || Instruction::SysEvent(SystemEventNode::InsertCompress),
     },
     PrimitiveSpec {
         spelling: "adv.insert_hqword",
@@ -193,6 +189,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
     },
     PrimitiveSpec {
+        spelling: "adv.push_deferred_root",
+        build: || Instruction::SysEvent(SystemEventNode::PushDeferredRoot),
+    },
+    PrimitiveSpec {
         spelling: "adv.register_deferred",
         build: || Instruction::SysEvent(SystemEventNode::DeferredRegister),
     },
@@ -205,12 +205,16 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluate),
     },
     PrimitiveSpec {
-        spelling: "adv.evaluate_deferred_tag",
-        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateTag),
+        spelling: "adv.evaluate_deferred_frame",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateFrame),
     },
     PrimitiveSpec {
         spelling: "adv.evaluate_deferred_payload",
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
+    },
+    PrimitiveSpec {
+        spelling: "adv.export_deferred_witness",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredExportWitness),
     },
     PrimitiveSpec {
         spelling: "add",
@@ -409,6 +413,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Ext2Sub,
     },
     PrimitiveSpec {
+        spelling: "compress",
+        build: || Instruction::Compress,
+    },
+    PrimitiveSpec {
         spelling: "fri_ext2fold4",
         build: || Instruction::FriExt2Fold4,
     },
@@ -417,12 +425,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Hash,
     },
     PrimitiveSpec {
-        spelling: "hmerge",
-        build: || Instruction::HMerge,
-    },
-    PrimitiveSpec {
-        spelling: "hperm",
-        build: || Instruction::HPerm,
+        spelling: "hdword",
+        build: || Instruction::HDword,
     },
     PrimitiveSpec {
         spelling: "horner_eval_base",
@@ -443,6 +447,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         spelling: "log_deferred",
         build: || Instruction::LogDeferred,
+    },
+    PrimitiveSpec {
+        spelling: "clear_deferred",
+        build: || Instruction::ClearDeferred,
     },
     PrimitiveSpec {
         spelling: "nop",

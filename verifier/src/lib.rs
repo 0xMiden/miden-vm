@@ -7,44 +7,30 @@ extern crate std;
 
 use alloc::{boxed::Box, sync::Arc};
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
-use miden_core::{
-    Felt,
-    deferred::{
-        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
-    },
-    field::QuadFelt,
-    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
-};
-use miden_crypto::stark::{
-    StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
-};
-use miden_serde_utils::deserialize_schema_exact;
-use serde::de::DeserializeOwned;
-use serde_wincode::{SerdeCompat, wincode};
-
+#[cfg(test)]
+use miden_air::vm::{MidenMultiAir, config};
+#[cfg(test)]
+use miden_core::{Felt, field::QuadFelt};
 // RE-EXPORTS
 // ================================================================================================
-mod exports {
-    pub use miden_core::{
-        Word,
-        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{
-            ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
-            HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
-        },
-    };
-    pub mod math {
-        pub use miden_core::Felt;
-    }
-}
-pub use exports::*;
-pub use miden_air::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
+pub use miden_core::{
+    Word,
+    deferred::{DeferredRoot, PrecompileError, PrecompileLimits, PreparationError},
+    program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+    proof::{
+        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+        HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+    },
 };
-
-pub mod recursive;
+use miden_core::{
+    deferred::{MAX_PRECOMPILE_ROOTS, PrecompileRegistry, TRUE_DIGEST},
+    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
+};
+#[cfg(test)]
+use miden_stark::air::Statement;
+pub use miden_stark::security::{ProofSecurityParameters, ProvenSecurityReport, SecurityReport};
+#[cfg(test)]
+use miden_vm_stark::setup::config::eidos_config;
 
 struct VerifierSupport {
     format: u8,
@@ -82,6 +68,7 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 #[derive(Debug, Clone)]
 pub struct Verifier {
     precompile_registry: Arc<PrecompileRegistry>,
+    verification_precompile_limits: PrecompileLimits,
     min_security_level: Option<u32>,
 }
 
@@ -91,8 +78,17 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             precompile_registry: Arc::new(miden_precompiles::registry()),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
             min_security_level: None,
         }
+    }
+
+    /// Sets the verification policy applied to one deferred precompile witness.
+    #[must_use]
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
+        self
     }
 
     /// Requires at least `min_security_level` bits of conjectured security for each verified STARK.
@@ -117,16 +113,18 @@ impl Verifier {
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
-    /// proof, the verifier first verifies the VM STARK, then evaluates the carried
-    /// `PrecompileWitness` and checks that its recomputed root matches the VM root. It returns the
-    /// authenticated root as an outstanding obligation until a precompile STARK is supplied.
+    /// proof, the verifier first verifies the VM STARK, then prepares the carried
+    /// `PrecompileWitness` under its configured limits, binds the computed root to the VM root,
+    /// and evaluates it. It returns the authenticated root as an outstanding obligation until a
+    /// precompile STARK is supplied.
     /// Complete proofs that contain precompile work additionally verify the aggregate precompile
     /// STARK against the VM-authenticated root.
     ///
     /// The outcome reports the authenticated security parameters of the components actually
     /// verified and any precompile root that remains outstanding. Callers can use
-    /// [`ProofSecurityParameters::conjectured_security_level`] to estimate each verified proof's
-    /// conjectured security level. If configured, the minimum security level is enforced for each
+    /// [`ProofSecurityParameters::conjectured_security_level`] or
+    /// [`ProofSecurityParameters::proven_security_level`] to estimate each verified proof's
+    /// security level. If configured, the minimum conjectured security level is enforced for each
     /// verified STARK, before evaluating a deferred witness in the VM's case.
     ///
     /// # Errors
@@ -185,12 +183,15 @@ impl Verifier {
         self.check_security_level(&vm_security_parameters)?;
         // Authenticate the VM statement and enforce the configured minimum security before
         // performing potentially expensive witness evaluation.
-        if let PrecompileStatus::Deferred(witness) = proof.precompile()
-            && (witness.root_unchecked() != vm.precompile_root
-                || witness.compute_root(Arc::clone(&self.precompile_registry))?
-                    != vm.precompile_root)
-        {
-            return Err(VerificationError::DeferredWitnessRootMismatch);
+        if let PrecompileStatus::Deferred(witness) = proof.precompile() {
+            let prepared = witness.clone().prepare(
+                Arc::clone(&self.precompile_registry),
+                &self.verification_precompile_limits,
+            )?;
+            if prepared.root() != vm.precompile_root {
+                return Err(VerificationError::DeferredWitnessRootMismatch);
+            }
+            prepared.evaluate()?;
         }
         let precompile_security_parameters = precompile
             .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
@@ -228,7 +229,7 @@ impl Verifier {
         let aggregate_root =
             proof.aggregate_root().expect("precompile roots were checked to be non-empty");
         let security_parameters =
-            miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?;
+            miden_precompiles_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
         self.check_security_level(&security_parameters)?;
         Ok(security_parameters)
     }
@@ -279,24 +280,16 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &VmProof,
     ) -> Result<(), VerificationError> {
-        let size = proof.proof.bytes().len();
-        if size > MAX_STARK_PROOF_BYTES {
-            return Err(VerificationError::StarkVerificationError(
-                claim.program_root(),
-                Box::new(StarkVerificationError::ProofTooLarge {
-                    size,
-                    max: MAX_STARK_PROOF_BYTES,
-                }),
-            ));
-        }
-        Ok(())
+        miden_vm_stark::verifier::preflight(proof).map_err(|error| {
+            VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
+        })
     }
 
     fn preflight_precompile_stark(&self, proof: &PrecompileProof) -> Result<(), VerificationError> {
         let size = proof.proof.bytes().len();
         if size > MAX_STARK_PROOF_BYTES {
             return Err(VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge {
+                miden_precompiles_stark::verifier::VerifyError::ProofTooLarge {
                     size,
                     max: MAX_STARK_PROOF_BYTES,
                 },
@@ -316,105 +309,9 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &VmProof,
     ) -> Result<ProofSecurityParameters, VerificationError> {
-        let program_root = claim.program_root();
-        let pub_inputs = PublicInputs::new(
-            claim.to_program_info(),
-            *claim.stack_inputs(),
-            *claim.stack_outputs(),
-            proof.precompile_root,
-        );
-        let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
-
-        let stark = &proof.proof;
-        let proof_bytes = stark.bytes();
-        let pcs_params = config::pcs_params();
-        let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
-        match stark.hash_fn() {
-            HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
-            },
-            HashFunction::Rpo256 => {
-                let config = config::rpo_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
-            },
-            HashFunction::Rpx256 => {
-                let config = config::rpx_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
-            },
-            HashFunction::Poseidon2 => {
-                let config = config::poseidon2_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
-            },
-            HashFunction::Keccak => {
-                let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
-            },
-        }
-        .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
-        .map(|(log_max_height, alignment)| {
-            security::proof_security_parameters(
-                &pcs_params,
-                log_max_height,
-                num_kernel_procedures,
-                alignment,
-                stark.hash_fn().collision_resistance(),
-            )
+        miden_vm_stark::verifier::verify(claim, proof).map_err(|error| {
+            VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
         })
-    }
-
-    /// Verifies a multi-AIR STARK proof for the Miden VM statement, returning the proof's largest
-    /// AIR log height and the LMCS's column alignment for grading.
-    ///
-    /// Pre-seeds the challenger with protocol parameters, AIR public values, and statement
-    /// `aux_inputs` (program hash, final deferred root, and kernel-procedure digests). Then
-    /// delegates to the lifted multi-AIR verifier.
-    fn verify_stark_proof<SC>(
-        &self,
-        config: &SC,
-        public_values: &[Felt],
-        aux_inputs: &[Felt],
-        proof_bytes: &[u8],
-    ) -> Result<(u32, usize), StarkVerificationError>
-    where
-        SC: StarkConfig<Felt, QuadFelt>,
-        <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
-    {
-        if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
-            return Err(StarkVerificationError::ProofTooLarge {
-                size: proof_bytes.len(),
-                max: MAX_STARK_PROOF_BYTES,
-            });
-        }
-
-        let proof_encoding_config = wincode::config::Configuration::default()
-            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-        let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
-            proof_bytes,
-            proof_encoding_config,
-        )?;
-
-        let mut challenger = config.challenger();
-        config::observe_protocol_params(config.pcs(), &mut challenger);
-
-        // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-        // statement inputs read during observation/boundary correction. The lifted verifier absorbs
-        // both into Fiat-Shamir internally, and derives the multi-AIR ordering deterministically
-        // from the proof's per-AIR trace heights.
-        let statement = Statement::<Felt, QuadFelt, _>::new(
-            MidenMultiAir::new(),
-            public_values.to_vec(),
-            aux_inputs.to_vec(),
-        )
-        .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
-
-        VerifierInstance::new(config, &statement, None)
-            .expect("Miden AIRs declare no preprocessed columns")
-            .verify(&proof, challenger)?;
-
-        let log_max_height =
-            u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
-        Ok((log_max_height, config.lmcs().alignment()))
     }
 }
 
@@ -491,6 +388,8 @@ pub enum VerificationError {
     DeferredTrueRoot,
     #[error("deferred witness root does not match the VM obligation")]
     DeferredWitnessRootMismatch,
+    #[error("deferred witness preparation failed: {0}")]
+    DeferredWitnessPreparation(#[from] PreparationError),
     #[error("deferred witness evaluation failed: {0}")]
     DeferredWitnessEvaluation(#[from] PrecompileError),
     #[error("a precompile proof must contain at least one constituent root")]
@@ -506,19 +405,11 @@ pub enum VerificationError {
     #[error("precompile proof roots do not cover the VM obligation")]
     InsufficientPrecompileRootCoverage,
     #[error("failed to verify aggregate precompile STARK proof: {0}")]
-    PrecompileStarkVerification(#[from] miden_precompiles_verifier::VerifyError),
+    PrecompileStarkVerification(#[from] PrecompileVerificationError),
 }
 
-/// Errors that can occur during low-level STARK proof verification.
-#[derive(Debug, thiserror::Error)]
-pub enum StarkVerificationError {
-    #[error("failed to deserialize proof: {0}")]
-    Deserialization(#[from] wincode::error::ReadError),
-    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
-    ProofTooLarge { size: usize, max: usize },
-    #[error(transparent)]
-    Verifier(#[from] VerifierError),
-}
+pub use miden_precompiles_stark::verifier::VerifyError as PrecompileVerificationError;
+pub use miden_vm_stark::verifier::VerificationError as StarkVerificationError;
 
 // HELPER FUNCTIONS
 // ================================================================================================
@@ -534,7 +425,7 @@ fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::{PrecompileWitness, PrecompileWitnessEntry, Tag};
+    use miden_core::deferred::{DEFERRED_AND_FRAME, PrecompileWitness, PrecompileWitnessEntry};
 
     use super::*;
 
@@ -558,14 +449,14 @@ mod tests {
 
     fn vm_proof(precompile_root: Word) -> VmProof {
         VmProof {
-            proof: StarkProof::new(vec![0, 0], HashFunction::Blake3_256),
+            proof: StarkProof::new(vec![0, 0], HashFunction::Eidos),
             precompile_root,
         }
     }
 
     fn precompile_proof(roots: Vec<Word>) -> PrecompileProof {
         PrecompileProof {
-            proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
+            proof: StarkProof::new(vec![0, 0], HashFunction::Eidos),
             roots,
         }
     }
@@ -585,7 +476,7 @@ mod tests {
         let required = root(1);
         let deferred = PrecompileStatus::Deferred(
             PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-                tag: Tag::AND,
+                frame: DEFERRED_AND_FRAME,
                 lhs: 0,
                 rhs: 0,
             }])
@@ -631,30 +522,37 @@ mod tests {
 
         let witness = PrecompileWitness::from_entries(vec![
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![[Felt::from_u32(0); 8]],
             },
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![core::array::from_fn(|i| Felt::from_u32(u32::from(i == 0)))],
             },
             PrecompileWitnessEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
+                frame: UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID),
                 lhs: 1,
                 rhs: 2,
             },
-            PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+            PrecompileWitnessEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 3,
+            },
         ])
         .unwrap();
         // Evaluating this witness first would reject its false assertion instead of the VM STARK.
-        assert!(matches!(
-            witness.compute_root(Arc::new(miden_precompiles::registry())),
-            Err(error) if matches!(error.root(), PrecompileError::AssertionFailed)
-        ));
-        let proof = ExecutionProof::new(
-            vm_proof(witness.root_unchecked()),
-            PrecompileStatus::Deferred(witness),
-        );
+        let prepared = witness
+            .clone()
+            .prepare(
+                Arc::new(miden_precompiles::registry()),
+                &miden_precompiles::default_verification_precompile_limits(),
+            )
+            .unwrap();
+        let root = prepared.root();
+        let error = prepared.evaluate().unwrap_err();
+        assert!(matches!(error.root(), PrecompileError::AssertionFailed));
+        let proof = ExecutionProof::new(vm_proof(root), PrecompileStatus::Deferred(witness));
         assert!(matches!(
             Verifier::new().verify(&claim(), &proof),
             Err(VerificationError::StarkVerificationError(..))
@@ -666,6 +564,9 @@ mod tests {
         type CheckError = fn(VerificationError) -> bool;
 
         let required = root(1);
+        Verifier::new()
+            .validate_precompile(&precompile_proof(vec![required; MAX_PRECOMPILE_ROOTS]), required)
+            .unwrap();
         let cases: Vec<(PrecompileProof, Word, CheckError)> = vec![
             (precompile_proof(vec![]), required, |error| {
                 matches!(error, VerificationError::EmptyPrecompileRoots)
@@ -700,7 +601,7 @@ mod tests {
         let proof = ExecutionProof::new(
             vm_proof(required),
             PrecompileStatus::Proven(PrecompileProof {
-                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Poseidon2),
+                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Eidos),
                 roots: vec![required],
             }),
         );
@@ -709,7 +610,7 @@ mod tests {
         assert!(matches!(
             error,
             VerificationError::PrecompileStarkVerification(
-                miden_precompiles_verifier::VerifyError::ProofTooLarge { size, max }
+                miden_precompiles_stark::verifier::VerifyError::ProofTooLarge { size, max }
             ) if size == MAX_STARK_PROOF_BYTES + 1 && max == MAX_STARK_PROOF_BYTES
         ));
     }
@@ -731,10 +632,7 @@ mod tests {
     fn verifier_rejects_oversized_directly_constructed_vm_proof() {
         let proof = ExecutionProof::new(
             VmProof {
-                proof: StarkProof::new(
-                    vec![0; MAX_STARK_PROOF_BYTES + 1],
-                    HashFunction::Blake3_256,
-                ),
+                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Eidos),
                 precompile_root: TRUE_DIGEST,
             },
             PrecompileStatus::Empty,
@@ -825,5 +723,21 @@ mod tests {
             proof.precompile().clone(),
         );
         assert!(SUPPORT.check(&old_compatible).is_ok());
+    }
+
+    #[test]
+    fn eidos_preprocessed_commitment_matches_fixed_table() {
+        let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+            MidenMultiAir::new(),
+            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let commitment = miden_stark::Preprocessed::build(&statement, &config)
+            .map(|preprocessed| preprocessed.commitment());
+
+        assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));
     }
 }

@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_serde_utils::{ByteReader, Deserializable, SliceReader};
+use miden_serde_utils::{ByteReader, Deserializable, Serializable, SliceReader};
 
 fuzz_target!(|data: &[u8]| {
     // Test usize deserialization (vint64 encoding)
@@ -27,4 +27,15 @@ fuzz_target!(|data: &[u8]| {
     let _ = reader3.read_usize();
     let _ = reader3.read_usize();
     let _ = reader3.read_usize();
+
+    // STABILITY ORACLE (upgraded from crash-only): a successful decode must be stable
+    // under canonical re-encoding — re-encoding the decoded value with the writer and
+    // decoding again must yield the same value. This catches decode-side semantic
+    // drift (a reader change that alters decoded values), not just panics/hangs.
+    if let Ok(value) = usize::read_from_bytes(data) {
+        let canonical = value.to_bytes();
+        let redecoded =
+            usize::read_from_bytes(&canonical).expect("canonical encoding must decode");
+        assert_eq!(redecoded, value, "canonical re-encoding must decode to the same value");
+    }
 });

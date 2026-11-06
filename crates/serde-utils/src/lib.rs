@@ -94,6 +94,11 @@ pub use byte_reader::{BudgetedReader, ByteReader, ReadManyIter, SliceReader};
 mod byte_writer;
 pub use byte_writer::ByteWriter;
 
+#[cfg(feature = "std")]
+mod file;
+#[cfg(feature = "std")]
+pub use file::read_file_bounded;
+
 // BOUNDED LENGTH HELPERS
 // ================================================================================================
 

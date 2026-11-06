@@ -1,48 +1,47 @@
 use alloc::string::{String, ToString};
 
 use data::{
-    DETERMINISTIC_SIGNATURE, EXPECTED_SIG, EXPECTED_SIG_POLYS, NUM_TEST_VECTORS, SK_POLYS,
-    SYNC_DATA, SYNC_DATA_FOR_TEST_VECTOR,
+    DETERMINISTIC_SIGNATURE, EXPECTED_SIG, EXPECTED_SIG_POLYS, HASH_TO_POINT_COEFFICIENTS,
+    NUM_TEST_VECTORS, SK_POLYS, SYNC_DATA, SYNC_DATA_FOR_TEST_VECTOR,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use super::{FalconFelt, N, Polynomial, PublicKey};
+use super::{
+    FalconFelt, N, Nonce, Polynomial, PublicKey, Signature, hash_to_point::hash_to_point_eidos,
+};
 use crate::{
-    SequentialCommit,
+    Felt, SequentialCommit, Word,
     dsa::{
         falcon512_common::test_utils::Shake256Testing,
         falcon512_eidos::{
             PREVERSIONED_NONCE, PREVERSIONED_NONCE_LEN, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SecretKey,
         },
-        falcon512_poseidon2,
     },
-    hash::{
-        eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
-        poseidon2::Poseidon2,
-    },
-    utils::Serializable,
+    hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
+    utils::{Deserializable, Serializable},
 };
 
 mod data;
 
 #[test]
-fn eidos_and_poseidon2_falcon_coexist() {
+fn eidos_hash_to_point_is_frozen() {
+    let nonce = Nonce::from_bytes(core::array::from_fn(|i| i as u8));
+    let message: Word = [0, 1, 0x0123_4567_89ab_cdef, 0xffff_ffff_0000_0000]
+        .map(Felt::new_unchecked)
+        .into();
+    let polynomial = hash_to_point_eidos(message, &nonce);
+    assert_eq!(polynomial.coefficients, HASH_TO_POINT_COEFFICIENTS.map(FalconFelt::new));
+}
+
+#[test]
+fn public_key_commitment_uses_eidos() {
     let mut eidos_rng = ChaCha20Rng::from_seed([3_u8; 32]);
     let eidos_public_key = SecretKey::with_rng(&mut eidos_rng).public_key();
     let elements = eidos_public_key.to_elements();
     let commitment = eidos_public_key.to_commitment();
 
     assert_eq!(commitment, Eidos::hash_elements_in_domain(&elements, FALCON_PUBLIC_KEY));
-    assert_ne!(commitment, Poseidon2::hash_elements(&elements));
-
-    let mut poseidon2_rng = ChaCha20Rng::from_seed([5_u8; 32]);
-    let poseidon2_public_key =
-        falcon512_poseidon2::SecretKey::with_rng(&mut poseidon2_rng).public_key();
-    assert_eq!(
-        poseidon2_public_key.to_commitment(),
-        Poseidon2::hash_elements(&poseidon2_public_key.to_elements())
-    );
 }
 
 #[test]
@@ -54,10 +53,10 @@ fn eidos_public_key_commitment_is_frozen() {
     assert_eq!(
         public_key.to_commitment().into_elements().map(|value| value.as_canonical_u64()),
         [
-            1_503_226_522_383_133_554,
-            9_124_963_703_222_507_410,
-            4_170_264_538_401_487_428,
-            5_215_050_092_812_883_080,
+            404_049_173_810_884_556,
+            9_081_898_896_579_124_497,
+            7_242_774_609_851_667_830,
+            7_466_572_463_465_226_028,
         ],
     );
 }
@@ -157,6 +156,15 @@ fn test_signature_determinism() {
 
     assert_eq!(serialized_signature, DETERMINISTIC_SIGNATURE);
     assert!(sk.public_key().verify(message.into(), &signature));
+
+    let decoded = Signature::read_from_bytes(&serialized_signature).unwrap();
+    assert!(sk.public_key().verify(message.into(), &decoded));
+    assert!(!sk.public_key().verify(b"datb".into(), &decoded));
+
+    let mut changed_nonce = serialized_signature;
+    changed_nonce[1] += 1;
+    let decoded = Signature::read_from_bytes(&changed_nonce).unwrap();
+    assert!(!sk.public_key().verify(message.into(), &decoded));
 }
 
 #[test]

@@ -686,16 +686,20 @@ fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
-        "begin adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_tag adv.evaluate_deferred_payload end"
+        "begin adv.push_deferred_root adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_frame adv.evaluate_deferred_payload adv.export_deferred_witness end"
     );
     let forms = module!(begin!(
+        inst!(SysEvent(PushDeferredRoot)),
         inst!(SysEvent(DeferredRegister)),
         inst!(SysEvent(DeferredRegisterData)),
         inst!(SysEvent(DeferredEvaluate)),
-        inst!(SysEvent(DeferredEvaluateTag)),
-        inst!(SysEvent(DeferredEvaluatePayload))
+        inst!(SysEvent(DeferredEvaluateFrame)),
+        inst!(SysEvent(DeferredEvaluatePayload)),
+        inst!(SysEvent(DeferredExportWitness))
     ));
     assert_eq!(context.parse_forms(source)?, forms);
+    assert_eq!(PushDeferredRoot.to_string(), "push_deferred_root");
+    assert_eq!(DeferredExportWitness.to_string(), "export_deferred_witness");
     Ok(())
 }
 
@@ -1579,7 +1583,7 @@ end
 }
 
 #[test]
-fn test_constant_expr_parentheses_roundtrip_formatting() {
+fn test_constant_expr_roundtrip_formatting() {
     let source = "\
 namespace test::formatting
 
@@ -1588,6 +1592,7 @@ use {N} from dep
 const LOWER_PRECEDENCE_LHS = (N + 1) * 3
 const LOWER_PRECEDENCE_RHS = 3 * (N + 1)
 const SAME_PRECEDENCE_RHS = N - (N - 1)
+const LONG_EXPRESSION = LOWER_PRECEDENCE_LHS + LOWER_PRECEDENCE_RHS + SAME_PRECEDENCE_RHS
 ";
 
     let context = SyntaxTestContext::default();

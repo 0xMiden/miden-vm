@@ -8,7 +8,7 @@ use super::{
     EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word, smt::SMT_MAX_DEPTH,
 };
 use crate::{
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -24,6 +24,10 @@ use crate::{
 /// NOTE: This type assumes that Merkle paths always span from the root of the tree to a leaf.
 /// Partial paths are not supported.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SparseMerklePath {
     /// A bitmask representing empty nodes. The set bit corresponds to the depth of an empty node.
     /// The least significant bit (bit 0) describes depth 1 node (root's children).
@@ -166,7 +170,7 @@ impl SparseMerklePath {
             // Compute the node and move to the next iteration.
             let children = index.build_node(node, sibling);
             index.move_up();
-            Poseidon2::merge(&children)
+            Eidos::merge(&children)
         });
 
         Ok(root)
@@ -283,6 +287,10 @@ impl Deserializable for SparseMerklePath {
         Self::from_parts(empty_nodes_mask, nodes).map_err(|err| {
             DeserializationError::InvalidValue(format!("invalid SparseMerklePath: {err}"))
         })
+    }
+
+    fn min_serialized_size() -> usize {
+        1 + 8 // depth and empty-sibling mask
     }
 }
 
@@ -407,7 +415,7 @@ impl Iterator for InnerNodeIterator<'_> {
         let path_node = self.path.at_depth(index_depth).unwrap();
 
         let children = self.index.build_node(self.value, path_node);
-        self.value = Poseidon2::merge(&children);
+        self.value = Eidos::merge(&children);
         self.index.move_up();
 
         Some(InnerNodeInfo {
@@ -465,7 +473,35 @@ mod arbitrary {
     use proptest::prelude::*;
 
     use super::{MerklePath, SparseMerklePath};
-    use crate::{Word, merkle::smt::SMT_MAX_DEPTH};
+    use crate::{
+        Word,
+        merkle::{MerkleProof, RootPath, smt::SMT_MAX_DEPTH},
+    };
+
+    impl Arbitrary for MerkleProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Both components have their own sound strategies; any pairing is a valid proof.
+            (any::<Word>(), any::<MerklePath>())
+                .prop_map(|(value, path)| MerkleProof::new(value, path))
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RootPath {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The type explicitly does not guarantee path-to-root correctness, so any
+            // (root, path) pairing is valid.
+            (any::<Word>(), any::<MerklePath>())
+                .prop_map(|(root, path)| RootPath { root, path })
+                .boxed()
+        }
+    }
 
     impl Arbitrary for MerklePath {
         type Parameters = ();

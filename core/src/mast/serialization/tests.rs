@@ -2,17 +2,18 @@ use core::assert_matches;
 use std::{
     string::{String, ToString},
     sync::{Arc, Mutex, Once},
+    thread::{self, ThreadId},
 };
 
 use super::*;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExecutableMastForest,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView,
-        MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SparseMastForest, SparseMastForestBuilder,
-        SplitNodeBuilder, UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor,
+        MastForestError, MastForestView, MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch,
+        SparseMastForest, SparseMastForestBuilder, SplitNodeBuilder, UntrustedMastForest,
+        UntrustedMastForestReadOptions, VisitKind, node::hash_op_batches,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -20,7 +21,7 @@ use crate::{
 };
 
 struct TestLogger {
-    messages: Mutex<Vec<(log::Level, String)>>,
+    messages: Mutex<Vec<(ThreadId, log::Level, String)>>,
 }
 
 impl log::Log for TestLogger {
@@ -30,7 +31,11 @@ impl log::Log for TestLogger {
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            self.messages.lock().unwrap().push((record.level(), record.args().to_string()));
+            self.messages.lock().unwrap().push((
+                thread::current().id(),
+                record.level(),
+                record.args().to_string(),
+            ));
         }
     }
 
@@ -55,9 +60,17 @@ fn with_captured_logs<T>(
 
     let _guard = TEST_LOGGER_GUARD.lock().unwrap();
     log::set_max_level(level);
+    let current_thread = thread::current().id();
     TEST_LOGGER.messages.lock().unwrap().clear();
     let result = f();
-    let messages = TEST_LOGGER.messages.lock().unwrap().clone();
+    let messages = TEST_LOGGER
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(thread_id, ..)| *thread_id == current_thread)
+        .map(|(_, level, message)| (*level, message.clone()))
+        .collect();
     (result, messages)
 }
 
@@ -140,7 +153,7 @@ fn confirm_operation_structure() {
         Operation::MStream => (),
         Operation::Pipe => (),
         Operation::CryptoStream => (),
-        Operation::HPerm => (),
+        Operation::Compress => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),
         Operation::FriE2F4 => (),
@@ -149,6 +162,7 @@ fn confirm_operation_structure() {
         Operation::EvalCircuit => (),
         Operation::Emit => (),
         Operation::LogDeferred => (),
+        Operation::ClearDeferred => (),
     };
 }
 
@@ -230,7 +244,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::MStream,
         Operation::Pipe,
         Operation::CryptoStream,
-        Operation::HPerm,
+        Operation::Compress,
         Operation::MpVerify(Felt::from_u32(1022)),
         Operation::MrUpdate,
         Operation::FriE2F4,
@@ -239,6 +253,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::EvalCircuit,
         Operation::Emit,
         Operation::LogDeferred,
+        Operation::ClearDeferred,
     ]
 }
 
@@ -316,7 +331,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::MStream
         | Operation::Pipe
         | Operation::CryptoStream
-        | Operation::HPerm
+        | Operation::Compress
         | Operation::MpVerify(_)
         | Operation::MrUpdate
         | Operation::FriE2F4
@@ -324,7 +339,8 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::HornerExt
         | Operation::EvalCircuit
         | Operation::Emit
-        | Operation::LogDeferred) => {
+        | Operation::LogDeferred
+        | Operation::ClearDeferred) => {
             assert_eq!(operation.encoded_size(), operation.to_bytes().len());
         },
     }
@@ -359,6 +375,7 @@ fn test_operation_encoded_size_push_varint_boundaries() {
 
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let forest = canonicalized_for_test(forest);
+    assert_size_hints_match_serialized_lengths(&forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
 
@@ -385,6 +402,100 @@ fn canonicalized_for_test(forest: &MastForest) -> MastForest {
         forest.advice_map().clone(),
     )
     .unwrap()
+}
+
+#[test]
+fn mast_forest_size_hints_match_serialized_lengths() {
+    let mut forest = MastForest::new();
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let external = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let block = BasicBlockNodeBuilder::new(sample_basic_block_operations_all_variants())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    forest.advice_map.insert(Word::default(), Vec::<Felt>::new());
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    for count in [0, 1, 127, 128, 255, 256] {
+        let mut forest = forest.clone();
+        let block = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(42)); 300])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.roots.extend(core::iter::repeat_n(block, count));
+        for i in 0..count {
+            let key = Word::new([Felt::from_u32(i as u32), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            forest.advice_map.insert(key, vec![Felt::from_u32(42); count]);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+    }
+}
+
+#[test]
+fn mast_forest_hashless_size_hint_preserves_external_digests() {
+    for count in [1, 127, 128, 255, 256] {
+        let mut forest = MastForest::new();
+        for i in 0..count {
+            let digest = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            let external = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest).unwrap();
+            forest.make_root(external);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+        assert_eq!(forest.hashless_size_hint(), forest.get_size_hint());
+    }
+}
+
+fn assert_size_hints_match_serialized_lengths(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_into(&mut bytes);
+    assert_eq!(forest.get_size_hint(), bytes.len());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    assert_eq!(forest.hashless_size_hint(), hashless_bytes.len());
+}
+
+fn forest_exceeding_u32_serialized_size() -> MastForest {
+    let mut forest = MastForest::new();
+    let root = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    forest.roots = vec![root; 262_144];
+
+    let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+    for i in 0..4095u32 {
+        let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        forest.advice_map.insert(key, Arc::clone(&values));
+    }
+
+    let advice_size = forest.advice_map.get_size_hint() as u64;
+    assert!(u32::try_from(advice_size).is_ok());
+    // The map fits in 32 bits, but the additional roots push the forest over the limit.
+    assert!(advice_size + forest.roots.len() as u64 * 4 > u64::from(u32::MAX));
+    forest
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.get_size_hint() as u64 > u64::from(u32::MAX));
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_hashless_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.hashless_size_hint() as u64 > u64::from(u32::MAX));
 }
 
 #[test]
@@ -793,6 +904,216 @@ fn sparse_mast_round_trip_preserves_sparse_replay_ids() {
     assert_eq!(restored.get_digest_by_id(true_branch), Some(source[true_branch].digest()));
     assert_eq!(restored.get_digest_by_id(false_branch), Some(source[false_branch].digest()));
     assert_eq!(restored.get_digest_by_id(root), Some(source[root].digest()));
+}
+
+#[test]
+fn sparse_reader_rejects_suffix_inside_basic_block_data() {
+    let (source, _sparse, true_branch, _false_branch, _root) = sparse_split_fixture();
+    let block = source[true_branch].unwrap_basic_block();
+    let mut data = BasicBlockDataBuilder::new();
+    data.encode_basic_block(block);
+    let mut data = data.finalize();
+    data.push(0);
+
+    let mut bytes = Vec::new();
+    bytes.write_usize(0); // roots
+    bytes.write_usize(1); // full nodes
+    true_branch.write_into(&mut bytes);
+    bytes.write_u8(0); // block
+    block.digest().write_into(&mut bytes);
+    bytes.write_usize(data.len());
+    bytes.write_bytes(&data);
+    bytes.write_usize(0); // digest-only entries
+    bytes.write_usize(0); // advice
+
+    for result in [
+        SparseMastForest::read_from_bytes(&bytes),
+        SparseMastForest::read_from_bytes_trusted(&bytes),
+    ] {
+        assert_matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message.contains("extra bytes after basic block data")
+        );
+    }
+}
+
+#[test]
+fn sparse_reader_checks_hashes_on_byte_slice_and_trait_paths() {
+    let (source, sparse, true_branch, _false_branch, root) = sparse_split_fixture();
+    for corrupted_id in [true_branch, root] {
+        let nodes = sparse
+            .nodes()
+            .iter()
+            .map(|(&id, node)| {
+                let node = if id == corrupted_id {
+                    node.clone()
+                        .to_builder(&source)
+                        .with_digest(Word::default())
+                        .build_linked()
+                        .unwrap()
+                } else {
+                    node.clone()
+                };
+                (id, node)
+            })
+            .collect();
+        let corrupted = SparseMastForest::from_serialized_parts(
+            nodes,
+            sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect(),
+            sparse.procedure_roots().to_vec(),
+            AdviceMap::default(),
+        )
+        .unwrap()
+        .to_bytes();
+
+        assert!(SparseMastForest::read_from_bytes(&corrupted).is_err());
+        assert!(SparseMastForest::read_from(&mut SliceReader::new(&corrupted)).is_err());
+        assert!(
+            SparseMastForest::read_from_bytes_with_budget(&corrupted, corrupted.len()).is_err()
+        );
+        let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+        assert_matches!(
+            trusted.validate(),
+            Err(MastForestError::HashMismatch { node_id, .. }) if node_id == corrupted_id
+        );
+    }
+}
+
+#[test]
+fn sparse_reader_checks_parent_hash_against_opaque_child() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let corrupted = SparseMastForest::from_serialized_parts(
+        sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect(),
+        vec![(false_branch, Word::default())],
+        sparse.procedure_roots().to_vec(),
+        AdviceMap::default(),
+    )
+    .unwrap()
+    .to_bytes();
+    let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+    let validation_error = trusted.validate().unwrap_err();
+    assert_matches!(
+        &validation_error,
+        MastForestError::HashMismatch { node_id, .. } if *node_id == sparse.procedure_roots()[0]
+    );
+    assert_matches!(
+        SparseMastForest::read_from_bytes(&corrupted),
+        Err(DeserializationError::InvalidValue(message))
+            if message == validation_error.to_string()
+    );
+}
+
+#[test]
+fn sparse_reader_rejects_self_and_forward_references() {
+    for child in [0, 1] {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0); // roots
+        bytes.write_usize(1); // full nodes
+        bytes.write_u32(0);
+        bytes.write_u8(3); // loop
+        Word::default().write_into(&mut bytes);
+        bytes.write_u32(child);
+        bytes.write_usize(usize::from(child != 0));
+        if child != 0 {
+            bytes.write_u32(child);
+            Word::default().write_into(&mut bytes);
+        }
+        bytes.write_usize(0); // advice
+        assert!(SparseMastForest::read_from_bytes(&bytes).is_err());
+        assert!(SparseMastForest::read_from_bytes_trusted(&bytes).is_err());
+    }
+}
+
+#[test]
+fn sparse_reader_checks_dynamic_node_hashes_and_accepts_high_sparse_ids() {
+    for (tag, node) in [
+        (6, DynNodeBuilder::new_dyn().build()),
+        (7, DynNodeBuilder::new_dyncall().build()),
+    ] {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_usize(1);
+        bytes.write_u32((MastForest::MAX_NODES - 1) as u32);
+        bytes.write_u8(tag);
+        let hash_offset = bytes.len();
+        node.digest().write_into(&mut bytes);
+        bytes.write_usize(0);
+        bytes.write_usize(0);
+        assert_eq!(SparseMastForest::read_from_bytes(&bytes).unwrap().nodes().len(), 1);
+
+        // Only the hash differs; the sparse ID remains valid.
+        bytes[hash_offset..hash_offset + Word::SERIALIZED_SIZE]
+            .copy_from_slice(&Word::default().to_bytes());
+        assert!(SparseMastForest::read_from_bytes(&bytes).is_err());
+        assert!(SparseMastForest::read_from_bytes_trusted(&bytes).is_ok());
+    }
+}
+
+#[test]
+fn sparse_reader_checks_loop_call_and_syscall_hashes() {
+    let mut source = MastForest::new();
+    let child = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let loop_id = LoopNodeBuilder::new(child).add_to_forest(&mut source).unwrap();
+    let call_id = CallNodeBuilder::new(child).add_to_forest(&mut source).unwrap();
+    let syscall_id = CallNodeBuilder::new_syscall(child).add_to_forest(&mut source).unwrap();
+    for root in [loop_id, call_id, syscall_id] {
+        source.make_root(root);
+    }
+
+    let source = Arc::new(source);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&source));
+    builder.record_visit(child, VisitKind::DigestOnly);
+    for node_id in [loop_id, call_id, syscall_id] {
+        builder.record_visit(node_id, VisitKind::FullVisit);
+    }
+    let sparse = builder.finalize();
+
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+    for node_id in [loop_id, call_id, syscall_id] {
+        assert_eq!(restored.get_node_by_id(node_id), sparse.get_node_by_id(node_id));
+    }
+
+    for corrupted_id in [loop_id, call_id, syscall_id] {
+        let nodes = sparse
+            .nodes()
+            .iter()
+            .map(|(&id, node)| {
+                let node = if id == corrupted_id {
+                    node.clone()
+                        .to_builder(&source)
+                        .with_digest(Word::default())
+                        .build_linked()
+                        .unwrap()
+                } else {
+                    node.clone()
+                };
+                (id, node)
+            })
+            .collect();
+        let corrupted = SparseMastForest::from_serialized_parts(
+            nodes,
+            sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect(),
+            sparse.procedure_roots().to_vec(),
+            AdviceMap::default(),
+        )
+        .unwrap()
+        .to_bytes();
+
+        let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+        let validation_error = trusted.validate().unwrap_err();
+        assert_matches!(
+            &validation_error,
+            MastForestError::HashMismatch { node_id, .. } if *node_id == corrupted_id
+        );
+        assert_matches!(
+            SparseMastForest::read_from_bytes(&corrupted),
+            Err(DeserializationError::InvalidValue(message))
+                if message == validation_error.to_string()
+        );
+    }
 }
 
 #[test]
@@ -1535,7 +1856,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
+    assert_eq!(&bytes[5..8], &[0, 0, 5], "Version should be [0, 0, 5]");
 }
 
 fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
@@ -1582,9 +1903,12 @@ fn test_header_counts_match_node_kinds() {
     assert_eq!(external_node_count, 1);
 }
 
-/// Test that legacy version headers are rejected.
+/// Version 4 encoded opcode 0x50 as HPERM, while version 5 interprets it as COMPRESS. Every load
+/// path must reject version-4 bytes before it can attach the new semantics to an old stored digest.
 #[test]
-fn test_legacy_version_is_rejected() {
+fn test_pre_eidos_wire_version_is_rejected_by_every_load_path() {
+    assert_eq!(VERSION, [0, 0, 5]);
+
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
@@ -1592,12 +1916,25 @@ fn test_legacy_version_is_rejected() {
     forest.make_root(block_id);
 
     let mut bytes = forest.to_bytes();
-    bytes[5..8].copy_from_slice(&[0, 0, 3]);
+    bytes[5..8].copy_from_slice(&[0, 0, 4]);
 
-    let result = MastForest::read_from_bytes(&bytes);
+    assert_unsupported_version(MastForest::read_from_bytes(&bytes));
+    assert_unsupported_version(MastForest::read_view_from_bytes(
+        &bytes,
+        MastForestReadMode::Materialized,
+    ));
+    assert_unsupported_version(MastForest::read_view_from_bytes(
+        &bytes,
+        MastForestReadMode::WireBacked,
+    ));
+    assert_unsupported_version(UntrustedMastForest::read_from_bytes(&bytes));
+}
+
+fn assert_unsupported_version<T: core::fmt::Debug>(result: Result<T, DeserializationError>) {
     assert_matches!(
         result,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Unsupported version")
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("Unsupported version")
     );
 }
 
@@ -2170,15 +2507,10 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
 }
 
 fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word> {
-    use crate::chiplets::hasher;
-
     let forest = MastForest::read_from_bytes(bytes).ok()?;
     let block = forest[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
 
-    let op_groups: Vec<Felt> =
-        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-
-    Some(hasher::hash_elements(&op_groups))
+    Some(hash_op_batches(block.op_batches()))
 }
 
 /// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
@@ -2186,8 +2518,7 @@ fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word>
 fn test_untrusted_forest_rejects_non_full_prefix_batch() {
     let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
@@ -2207,8 +2538,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
 fn test_untrusted_forest_accepts_full_prefix_batch() {
     let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
@@ -2522,4 +2852,44 @@ fn duplicate_advice_map_key_rejected_by_every_reader_path() {
     assert!(MastForestWireView::new(&dup_bytes).is_err());
     assert!(MastForest::read_from_bytes(&dup_bytes).is_err());
     assert!(UntrustedMastForest::read_from_bytes(&dup_bytes).is_err());
+}
+
+/// Internal digest limbs are validated lazily. An in-range entry remains readable even when
+/// both digest-bearing accessors reject its digest with the same decoding error.
+#[test]
+fn wire_view_defers_internal_digest_validation_until_access() {
+    use crate::serde::DeserializationError;
+
+    // Minimized fuzz counterexample (crash-08fc67b9, 173 bytes): 'MAST' magic, version 4,
+    // 3 nodes; the node-hash section at the tail carries 0xf8ffffffffffffff (>= ORDER).
+    const BYTES: [u8; 173] = [
+        0x4d, 0x41, 0x53, 0x54, 0x00, 0x00, 0x00, 0x04, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a,
+        0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x5c, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a,
+        0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x8b, 0x85, 0x85, 0x85, 0x85,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x7a, 0x00, 0xff, 0xff,
+        0xfe, 0xf7, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let mut bytes = BYTES;
+    bytes[5..8].copy_from_slice(&VERSION);
+    let view = MastForestWireView::new(&bytes).expect("structure should materialize");
+    assert_eq!(view.node_count(), 3);
+    for i in 0..2 {
+        view.node_info_at(i)
+            .unwrap_or_else(|e| panic!("node {i} should materialize but failed: {e:?}"));
+    }
+    let expected = DeserializationError::InvalidValue("value not in the appropriate range".into());
+    assert!(view.has_node(2));
+    assert!(view.node_entry_at(2).is_ok());
+    assert_eq!(view.node_info_at(2), Err(expected.clone()));
+    assert_eq!(view.node_digest_at(2), Err(expected.clone()));
+    let trait_view: &dyn MastForestView = &view;
+    assert_eq!(trait_view.node_info_at(2), Err(expected.clone()));
+    assert_eq!(trait_view.node_digest_at(2), Err(expected));
 }

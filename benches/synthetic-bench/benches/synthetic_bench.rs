@@ -1,21 +1,19 @@
 //! Synthetic VM benchmark driven by row-count snapshots.
 //!
-//! Pipeline each bench run:
-//!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
-//!      snapshots in this run).
-//!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
-//!      load its canonical Falcon/ECDSA P2ID scenarios and: solve for per-snippet iteration counts,
-//!      emit the resulting MASM program, check it lands in the scenario's padded-trace bracket, and
-//!      run four Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
+//! Each run calibrates snippet costs against the VM, selects producer scenarios, and synthesizes
+//! their workloads. All four independently padded AIR heights must match before timing the
+//! `exec`, `trace_prep`, `prove`, and `verify` axes.
 //!
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
 //!   every `snapshots/*.json` in the manifest dir is used.
 //! - `SYNTH_SCENARIO`: if set, restrict to scenarios whose slugified key contains this slugified
 //!   substring (case- and separator-insensitive; `"P2ID"`, `"p2id"`, `"P2ID note"`, and
-//!   `"p2id-note"` all match `"consume single P2ID note"`).
+//!   `"p2id-note"` all match `"consume single P2ID note"`). Without a filter, selects the six
+//!   default Falcon/ECDSA P2ID scenarios.
 //! - `SYNTH_BENCH_AXES`: comma-separated axes to run. Supported values are `exec`, `trace_prep`,
 //!   `prove`, `verify`, and `all`. Defaults to all axes.
+//! - `SYNTH_HASH_LDE_BLOCKS`: enable blockwise LDE hashing with `1`; defaults to `0`.
 //! - `SYNTH_SAMPLE_SIZE`: Criterion sample size. Defaults to 30.
 //! - `SYNTH_MEASUREMENT_TIME_SECS`: Criterion measurement time per benchmark. Defaults to 30.
 //! - `SYNTH_WARM_UP_TIME_SECS`: Criterion warm-up time per benchmark. Defaults to 1.
@@ -35,15 +33,14 @@ use miden_vm::{
     prove_sync,
 };
 use miden_vm_synthetic_bench::{
-    calibrator::{Calibration, calibrate, measure_program},
-    snapshot::{POSEIDON2_AUTH_SCENARIOS, TraceShape, TraceSnapshot},
-    snippets::{SNIPPETS, memory_max_iters, u32arith_max_iters},
-    solver::{Plan, emit, solve},
-    verifier::VerificationReport,
+    calibrator::{Calibration, calibrate},
+    snapshot::{DEFAULT_SCENARIOS, TraceSnapshot},
+    snippets::SNIPPETS,
+    workload::{load_scenarios, slugify, synthesize},
 };
 
 /// Hash function used for STARK `prove` and `verify` axes.
-const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
+const BENCH_HASH: HashFunction = HashFunction::Eidos;
 const ALL_AXES: [&str; 4] = ["exec", "trace_prep", "prove", "verify"];
 
 fn resolve_bench_axes() -> BTreeSet<&'static str> {
@@ -116,54 +113,14 @@ fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) 
 }
 
 fn execute_and_prove(
+    prover: &Prover,
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (StackOutputs, ExecutionProof) {
-    prove_sync(
-        &Prover::new().with_hash_fn(BENCH_HASH),
-        program,
-        stack_inputs,
-        advice_inputs,
-        host,
-        ExecutionOptions::default(),
-    )
-    .expect("execute and prove program")
-}
-
-fn resolve_snapshot_paths() -> Vec<PathBuf> {
-    if let Ok(explicit) = std::env::var("SYNTH_SNAPSHOT") {
-        return vec![PathBuf::from(explicit)];
-    }
-    let snapshots_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("snapshots");
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&snapshots_dir)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", snapshots_dir.display()))
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-        .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "no snapshots found under {}", snapshots_dir.display());
-    paths
-}
-
-/// Lower-case ASCII slug; non-alphanumerics collapse to single `-` separators.
-fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut last_was_dash = true;
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            last_was_dash = false;
-        } else if !last_was_dash {
-            out.push('-');
-            last_was_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    out
+    prove_sync(prover, program, stack_inputs, advice_inputs, host, ExecutionOptions::default())
+        .expect("execute and prove program")
 }
 
 fn synthetic_bench(c: &mut Criterion) {
@@ -181,53 +138,30 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3} range={:6.3}",
+            "    {:<18} core={:7.3} eidos_compression={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3}",
             snippet.name,
             cost.core,
-            cost.hasher,
+            cost.eidos_compression,
             cost.bitwise,
             cost.chiplets,
             cost.memory,
-            cost.range,
         );
     }
 
-    // Slugify the filter so substring-matching is case- and separator-insensitive
-    // (`SYNTH_SCENARIO=P2ID` matches `consume-single-p2id-note` etc.).
-    let scenario_filter = std::env::var("SYNTH_SCENARIO").ok().map(|s| slugify(&s));
-    let mut benched_anything = false;
-    for path in resolve_snapshot_paths() {
-        let producer_stem =
-            path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-        let mut scenarios = TraceSnapshot::load_all(&path)
-            .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
-        scenarios.sort_by_key(|(_, snap)| snap.trace.chiplets_rows);
-        for (scenario_key, snapshot) in scenarios {
-            if !POSEIDON2_AUTH_SCENARIOS.contains(&scenario_key.as_str()) {
-                continue;
-            }
-            let scenario_slug = slugify(&scenario_key);
-            if let Some(filter) = &scenario_filter
-                && !scenario_slug.contains(filter.as_str())
-            {
-                continue;
-            }
-            bench_one_scenario(
-                c,
-                &calibration,
-                &producer_stem,
-                &scenario_key,
-                &scenario_slug,
-                &snapshot,
-                &axes,
-                sample_size,
-                measurement_time_secs,
-                warm_up_time_secs,
-            );
-            benched_anything = true;
-        }
+    for scenario in load_scenarios(DEFAULT_SCENARIOS) {
+        bench_one_scenario(
+            c,
+            &calibration,
+            &scenario.producer,
+            &scenario.name,
+            &slugify(&scenario.name),
+            &scenario.snapshot,
+            &axes,
+            sample_size,
+            measurement_time_secs,
+            warm_up_time_secs,
+        );
     }
-    assert!(benched_anything, "no scenarios matched (filter: {scenario_filter:?})");
 }
 
 fn bench_one_scenario(
@@ -242,13 +176,21 @@ fn bench_one_scenario(
     measurement_time_secs: u64,
     warm_up_time_secs: u64,
 ) {
+    let hash_lde_blocks = match std::env::var("SYNTH_HASH_LDE_BLOCKS") {
+        Ok(value) if value == "0" => false,
+        Ok(value) if value == "1" => true,
+        Err(std::env::VarError::NotPresent) => false,
+        _ => panic!("SYNTH_HASH_LDE_BLOCKS must be 0 or 1"),
+    };
+    let prover = Prover::new().with_hash_fn(BENCH_HASH).with_hash_lde_blocks(hash_lde_blocks);
+    println!("BENCH_SYNTH_CONFIG hash_lde_blocks={}", u8::from(hash_lde_blocks));
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
     println!(
-        "    trace:   core={} chiplets={} poseidon2={} range={} (padded_total={})",
+        "    trace:   core={} chiplets={} eidos_compression={} and8={} (padded_total={})",
         snapshot.trace.core_rows,
         snapshot.trace.chiplets_rows,
-        snapshot.trace.poseidon2_permutation_rows,
-        snapshot.trace.range_rows,
+        snapshot.trace.eidos_compression_rows,
+        snapshot.trace.byte_pair_lookup_rows,
         snapshot.trace.padded_total(),
     );
     println!(
@@ -268,17 +210,15 @@ fn bench_one_scenario(
         );
     }
 
-    let target_shape = snapshot.shape();
-    let mut plan = solve(calibration, &target_shape);
-    range_correction_pass(&mut plan, &target_shape);
-    assert_counters_fit(&plan);
+    let synthesized = synthesize(calibration, snapshot);
+    let plan = &synthesized.plan;
 
     println!("\n=== plan");
     for snippet in SNIPPETS {
         println!("    {:<14} iters={}", snippet.name, plan.iters(snippet.name),);
     }
 
-    let source = emit(&plan);
+    let source = synthesized.source;
     if std::env::var("SYNTH_MASM_WRITE").is_ok() {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
@@ -289,13 +229,7 @@ fn bench_one_scenario(
         println!("\n=== wrote MASM dump to {}", out.display());
     }
 
-    let actual = measure_program(&source).expect("measure emitted program");
-    let report = VerificationReport::new(target_shape, actual);
-    println!("\n=== verification\n{report}");
-    assert!(
-        report.brackets_match(),
-        "emitted program lands in a different padded-trace bracket than the scenario target",
-    );
+    println!("\n=== verification\n{}", synthesized.report);
 
     let program = Assembler::default()
         .assemble_program("program", &source)
@@ -361,6 +295,7 @@ fn bench_one_scenario(
                 },
                 |(host, program, stack, advice)| {
                     black_box(execute_and_prove(
+                        &prover,
                         program,
                         stack.take().unwrap(),
                         advice.take().unwrap(),
@@ -374,8 +309,13 @@ fn bench_one_scenario(
 
     if axes.contains("verify") {
         let mut host = DefaultHost::default();
-        let (stack_outputs, proof) =
-            execute_and_prove(&program, StackInputs::default(), AdviceInputs::default(), &mut host);
+        let (stack_outputs, proof) = execute_and_prove(
+            &prover,
+            &program,
+            StackInputs::default(),
+            AdviceInputs::default(),
+            &mut host,
+        );
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::from(program.clone()),
             StackInputs::default(),
@@ -391,173 +331,6 @@ fn bench_one_scenario(
     }
 
     group.finish();
-}
-
-/// Panic if any snippet's plan iteration count would overflow its counter beyond `u32::MAX` (which
-/// would trip `u32assert2` or a memory op at runtime). Cheap safeguard in case a snapshot with
-/// unusually large range or memory targets gets fed in.
-fn assert_counters_fit(plan: &Plan) {
-    let u32arith = plan.iters("u32arith");
-    assert!(
-        u32arith <= u32arith_max_iters(),
-        "u32arith iters ({}) would overflow its u32 counter (max {}); \
-         revisit the banded-counter start constants",
-        u32arith,
-        u32arith_max_iters(),
-    );
-    let memory = plan.iters("memory");
-    assert!(
-        memory <= memory_max_iters(),
-        "memory iters ({}) would overflow its u32 address counter (max {}); \
-         revisit the banded-address start constants",
-        memory,
-        memory_max_iters(),
-    );
-}
-
-// RANGE CORRECTION PASS
-// ------------------------------------------------------------------------
-//
-// Range's trace length is not perfectly linear under composition, so the primary solver can leave
-// a few-percent residual. This pass closes it by measuring marginal rates and applying a combo of
-// `+u32arith -hasher -decoder_pad` that lifts range while keeping core and chiplets approximately
-// fixed. Memory is deliberately left alone so the emitted memory-chiplet workload stays
-// representative.
-
-#[derive(Debug, Clone, Copy)]
-struct MarginalRates {
-    core: f64,
-    chiplets: f64,
-    poseidon2: f64,
-    range: f64,
-}
-
-const CORRECTION_PROBE_DELTA: u64 = 256;
-const CORRECTION_TOLERANCE: f64 = 0.01;
-const CORRECTION_MAX_PASSES: usize = 2;
-
-fn measure_plan(plan: &Plan) -> TraceShape {
-    let source = emit(plan);
-    measure_program(&source).expect("measure emitted plan")
-}
-
-fn measure_marginal(
-    base_plan: &Plan,
-    base_shape: TraceShape,
-    snippet: &'static str,
-    delta: u64,
-) -> MarginalRates {
-    let mut probe = base_plan.clone();
-    probe.add(snippet, delta);
-    let shape = measure_plan(&probe);
-    let d = delta as f64;
-    MarginalRates {
-        core: (shape.totals.core_rows as f64 - base_shape.totals.core_rows as f64) / d,
-        chiplets: (shape.totals.chiplets_rows as f64 - base_shape.totals.chiplets_rows as f64) / d,
-        poseidon2: (shape.totals.poseidon2_permutation_rows as f64
-            - base_shape.totals.poseidon2_permutation_rows as f64)
-            / d,
-        range: (shape.totals.range_rows as f64 - base_shape.totals.range_rows as f64) / d,
-    }
-}
-
-/// Solve for `(add_u32arith, sub_hasher, sub_pad)` that lifts range by `range_residual` while
-/// holding core and chiplets approximately fixed. Returns `None` if the 2x2 system for the two
-/// subtractions is degenerate, any coefficient comes out negative, or the net range gain is
-/// non-positive.
-fn solve_range_correction(
-    range_residual: f64,
-    u32arith: MarginalRates,
-    hasher: MarginalRates,
-    decoder_pad: MarginalRates,
-) -> Option<(u64, u64, u64)> {
-    if range_residual <= 0.0 {
-        return None;
-    }
-    // Solve per unit of u32arith:
-    //   hasher.core * y     + decoder_pad.core * z     = u32arith.core
-    //   hasher.chiplets * y + decoder_pad.chiplets * z = u32arith.chiplets
-    let det = hasher.core * decoder_pad.chiplets - decoder_pad.core * hasher.chiplets;
-    if det.abs() < 1e-9 {
-        return None;
-    }
-    let y_per_x =
-        (u32arith.core * decoder_pad.chiplets - decoder_pad.core * u32arith.chiplets) / det;
-    let z_per_x = (hasher.core * u32arith.chiplets - u32arith.core * hasher.chiplets) / det;
-    if y_per_x < 0.0 || z_per_x < 0.0 {
-        return None;
-    }
-    let net_range_per_x = u32arith.range - hasher.range * y_per_x - decoder_pad.range * z_per_x;
-    if net_range_per_x <= 0.0 {
-        return None;
-    }
-    let x = (range_residual / net_range_per_x).round();
-    if x <= 0.0 {
-        return None;
-    }
-    Some((x as u64, (x * y_per_x).round() as u64, (x * z_per_x).round() as u64))
-}
-
-fn range_correction_pass(plan: &mut Plan, target: &TraceShape) {
-    let target_range = target.totals.range_rows;
-    if target_range == 0 {
-        return;
-    }
-    let tolerance = (target_range as f64 * CORRECTION_TOLERANCE) as u64;
-    for pass in 0..CORRECTION_MAX_PASSES {
-        let actual = measure_plan(plan);
-        let actual_range = actual.totals.range_rows;
-        let residual = target_range as i64 - actual_range as i64;
-        println!(
-            "\n=== range correction pass {}: target={} actual={} residual={}",
-            pass + 1,
-            target_range,
-            actual_range,
-            residual,
-        );
-        if residual <= tolerance as i64 {
-            // Already within band, or overshoot (residual <= 0).
-            return;
-        }
-
-        let u32arith = measure_marginal(plan, actual, "u32arith", CORRECTION_PROBE_DELTA);
-        let hasher = measure_marginal(plan, actual, "hasher", CORRECTION_PROBE_DELTA);
-        let decoder_pad = measure_marginal(plan, actual, "decoder_pad", CORRECTION_PROBE_DELTA);
-
-        match solve_range_correction(residual as f64, u32arith, hasher, decoder_pad) {
-            Some((add_u32arith, sub_hasher, sub_pad)) => {
-                let sub_hasher = sub_hasher.min(plan.iters("hasher"));
-                let sub_pad = sub_pad.min(plan.iters("decoder_pad"));
-                let projected_poseidon2 = actual.totals.poseidon2_permutation_rows as f64
-                    + u32arith.poseidon2 * add_u32arith as f64
-                    - hasher.poseidon2 * sub_hasher as f64
-                    - decoder_pad.poseidon2 * sub_pad as f64;
-                let mut projected_totals = actual.totals;
-                projected_totals.poseidon2_permutation_rows =
-                    projected_poseidon2.max(0.0).round() as u64;
-                if projected_totals.padded_poseidon2_permutation()
-                    != target.totals.padded_poseidon2_permutation()
-                {
-                    println!(
-                        "    correction skipped: projected Poseidon2 rows ({}) would leave target bracket ({})",
-                        projected_totals.poseidon2_permutation_rows,
-                        target.totals.padded_poseidon2_permutation(),
-                    );
-                    return;
-                }
-                println!(
-                    "    applying: +u32arith {add_u32arith}  -hasher {sub_hasher}  -decoder_pad {sub_pad}"
-                );
-                plan.add("u32arith", add_u32arith);
-                plan.sub_saturating("hasher", sub_hasher);
-                plan.sub_saturating("decoder_pad", sub_pad);
-            },
-            None => {
-                println!("    no valid local correction found");
-                return;
-            },
-        }
-    }
 }
 
 criterion_group!(benches, synthetic_bench);

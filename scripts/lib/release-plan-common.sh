@@ -13,7 +13,8 @@ crates_io_get() {
     local status
 
     if ! status="$(
-        curl -sS -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
+        curl -sS --retry 3 --retry-max-time 60 --connect-timeout 10 --max-time 60 \
+            -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
             -o "$output_file" \
             -w "%{http_code}" \
             "https://crates.io/api/v1/${path}"
@@ -32,7 +33,8 @@ download_published_crate() {
     local status
 
     if ! status="$(
-        curl -sS -L -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
+        curl -sS -L --retry 3 --retry-max-time 60 --connect-timeout 10 --max-time 60 \
+            -A "${CRATES_IO_USER_AGENT:-miden-vm-release-plan}" \
             -o "$output_file" \
             -w "%{http_code}" \
             "https://crates.io/api/v1/crates/${package}/${version}/download"
@@ -97,6 +99,7 @@ published_package_has_library_target() {
 
 latest_published_version() {
     local package="$1"
+    local current_version="${2:?current version is required}"
     local body_file="$RELEASE_PLAN_TMPDIR/${package}.latest.json"
     local status
 
@@ -104,7 +107,10 @@ latest_published_version() {
 
     case "$status" in
         200)
-            jq -r '.crate.max_stable_version // .crate.max_version // empty' "$body_file"
+            if ! release_policy latest "$current_version" "$body_file"; then
+                echo "ERROR: invalid published version metadata for $package" >&2
+                return 1
+            fi
             ;;
         404)
             printf ''
@@ -198,6 +204,7 @@ package_archive_matches_published() {
     local package="$1"
     local version="$2"
     local workspace_root="$3"
+    local has_binary_target="${4:?binary target classification is required}"
     local package_target_dir package_log local_archive published_archive local_dir published_dir
     local diff_output diff_status
 
@@ -231,7 +238,7 @@ package_archive_matches_published() {
         return 2
     fi
 
-    download_published_crate "$package" "$version" "$published_archive"
+    download_published_crate "$package" "$version" "$published_archive" || return 2
 
     if ! tar -xzf "$local_archive" -C "$local_dir"; then
         echo "ERROR: could not extract local archive for $package v$version" >&2
@@ -243,6 +250,19 @@ package_archive_matches_published() {
     fi
 
     find "$local_dir" "$published_dir" -name .cargo_vcs_info.json -delete
+    case "$has_binary_target" in
+        false)
+            # Cargo regenerates this file against the registry during packaging.
+            # Library consumers resolve dependencies from the manifest instead.
+            rm -f "$local_dir/$package-$version/Cargo.lock" \
+                "$published_dir/$package-$version/Cargo.lock"
+            ;;
+        true) ;; # Preserve cargo install --locked behavior for executable packages.
+        *)
+            echo "ERROR: invalid binary target metadata for $package" >&2
+            return 2
+            ;;
+    esac
     if diff -qr "$local_dir" "$published_dir" >"$diff_output"; then
         return 0
     else
@@ -259,39 +279,15 @@ package_archive_matches_published() {
     return 1
 }
 
+release_policy() {
+    local source_root
+    source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    cargo run --quiet --locked --manifest-path "$source_root/Cargo.toml" \
+        --package miden-release-policy -- "$@"
+}
+
 version_cmp() {
-    local left="$1"
-    local right="$2"
-
-    awk -v left="$left" -v right="$right" '
-        function core(version, parts) {
-            sub(/\+.*/, "", version)
-            split(version, prerelease_parts, "-")
-            split(prerelease_parts[1], parts, ".")
-        }
-
-        BEGIN {
-            core(left, left_parts)
-            core(right, right_parts)
-
-            for (i = 1; i <= 3; i++) {
-                left_part = left_parts[i] + 0
-                right_part = right_parts[i] + 0
-
-                if (left_part > right_part) {
-                    print 1
-                    exit
-                }
-
-                if (left_part < right_part) {
-                    print -1
-                    exit
-                }
-            }
-
-            print 0
-        }
-    '
+    release_policy compare "$1" "$2"
 }
 
 semver_release_type() {
@@ -321,18 +317,6 @@ semver_release_type() {
             }
         }
     '
-}
-
-is_publishable_package() {
-    local package="$1"
-
-    printf '%s' "$metadata_json" |
-        jq -e --arg package "$package" '
-          . as $m
-          | $m.packages[]
-          | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
-          | select(.publish != [])
-        ' >/dev/null
 }
 
 package_has_library_target() {

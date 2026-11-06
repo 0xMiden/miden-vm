@@ -119,6 +119,14 @@ it with `ExecutionProof::read_from_bytes`. Pass the carried witnesses to
 root order and repeated roots. After precompile proving, call `complete` and then `Verifier::verify`.
 Completion preserves the compatibility declaration.
 
+`ExecutionOptions::with_execution_precompile_limits` bounds guest-induced deferred work, while
+`ExecutionOptions::with_verification_precompile_limits` bounds the final root-reachable witness
+exported after execution. `Verifier::with_verification_precompile_limits` and
+`Prover::with_verification_precompile_limits` configure the same per-singleton verification policy
+for transported witnesses. Preparation applies verification limits before commitment hashing;
+native semantic evaluation and Session import do not reapply admission. These logical limits are
+distinct from the prover's batch-wide peak-memory budget.
+
 `ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
 one synchronous call while preserving optimized overlapped execution and trace construction.
@@ -180,9 +188,10 @@ Stack outputs are expected to be ordered as if they would be popped off the stac
 The verifier returns `Result<VerificationOutcome, VerificationError>`. A successful deferred outcome
 evaluates the carried witness and authenticates its outstanding VM root; a successful
 complete outcome verifies every applicable STARK. Canonical proof decoding checks portable graph
-structure without a registry. Precompile proving imports each witness directly into a shared Session. See the
-[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit
-details.
+encoding and allocation bounds without a registry. Preparation later validates and commits each
+graph under the configured per-witness limits. Precompile proving imports the prepared witnesses
+directly into a shared Session. See the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit details.
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
@@ -294,6 +303,24 @@ Above, we used public inputs to initialize the stack. This keeps the program sim
 ## CLI interface
 
 If you want to execute, prove, and verify programs on Miden VM, but don't want to write Rust code, you can use Miden CLI. It also contains a number of useful tools to help analyze and debug programs.
+
+The CLI limits package (`.masp`) files to 512 MiB, input (`.inputs`) JSON files to
+64 MiB, and output (`.outputs`) JSON files to 64 KiB. Files at the limit are accepted;
+larger files are rejected before decoding. These readers accept regular files and
+symlinks to regular files. Pipes, devices, and directories are rejected.
+
+The CLI writes each proof and output JSON artifact to a temporary file in the
+destination directory. It replaces the destination after writing and syncing the
+complete artifact, so a write failure leaves the previous file intact. Replacing
+a destination symlink replaces the link itself.
+
+New artifacts and replacements belong to the current user and use normal file
+creation permissions, including inherited ACLs. The CLI does not copy the previous
+file's ownership or access controls.
+
+On Unix, the CLI syncs the destination directory after replacement to persist the
+rename. A failure at this final step reports that the new artifact has already
+replaced the previous file.
 
 ### Compiling Miden VM
 

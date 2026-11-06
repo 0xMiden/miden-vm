@@ -6,10 +6,8 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap, AdviceStack},
-    crypto::{
-        hash::Poseidon2,
-        merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
-    },
+    chiplets::hasher,
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
 };
 #[cfg(test)]
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
@@ -152,12 +150,6 @@ impl AdviceProvider {
         self.advice_size_bytes = advice_size_bytes;
         self.max_advice_size_bytes = max;
         Ok(())
-    }
-
-    #[cfg(test)]
-    #[expect(dead_code)]
-    pub(crate) fn merkle_store(&self) -> &MerkleStore {
-        &self.store
     }
 
     /// Applies the mutations given in order to the `AdviceProvider`.
@@ -399,6 +391,17 @@ impl AdviceProvider {
         self.stack.iter().copied().collect()
     }
 
+    /// Returns the number of elements on the advice stack without allocating.
+    pub fn stack_len(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// Returns an iterator over the advice stack elements, ordered from the top (first) to the
+    /// bottom, without allocating.
+    pub fn stack_iter(&self) -> impl Iterator<Item = &Felt> {
+        self.stack.iter()
+    }
+
     /// Extends the stack with typed advice stack values.
     pub fn extend_advice_stack(&mut self, stack: AdviceStack) -> Result<(), AdviceError> {
         self.check_stack_capacity(stack.len())?;
@@ -488,6 +491,22 @@ impl AdviceProvider {
     pub(crate) fn check_map_value_allocation(&self, value_len: usize) -> Result<(), AdviceError> {
         let added = Self::map_entry_bytes(value_len)?;
         self.check_advice_size_addition(added)
+    }
+
+    /// Stores a VM-computed value, replacing any existing entry only after checking its budget.
+    /// Ordinary advice insertion retains its conflicting-value checks.
+    pub(crate) fn replace_into_map(
+        &mut self,
+        key: Word,
+        values: Vec<Felt>,
+    ) -> Result<(), AdviceError> {
+        let old_bytes =
+            self.map.get(&key).map_or(Ok(0), |values| Self::map_entry_bytes(values.len()))?;
+        let new_bytes = Self::map_entry_bytes(values.len())?;
+        self.check_advice_size_addition(new_bytes.saturating_sub(old_bytes))?;
+        self.map.insert(key, values);
+        self.advice_size_bytes = self.advice_size_bytes - old_bytes + new_bytes;
+        Ok(())
     }
 
     /// Inserts the provided value into the advice map under the specified key.
@@ -662,7 +681,7 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        let root = Poseidon2::merge(&[lhs, rhs]);
+        let root = hasher::merge(&[lhs, rhs]);
         let added = self.store.new_internal_node_count([root]);
         self.check_merkle_store_node_addition(added)?;
 
@@ -888,6 +907,62 @@ mod tests {
     }
 
     #[test]
+    fn advice_map_replace_accounts_for_growth_shrinkage_and_failure() {
+        for (old_len, new_len, below_limit) in [
+            (None, 3, false),
+            (None, 3, true),
+            (Some(1), 3, false),
+            (Some(1), 3, true),
+            (Some(3), 3, false),
+            (Some(5), 2, false),
+            (Some(0), 0, false),
+        ] {
+            let mut provider = AdviceProvider::default();
+            // Advice-stack storage remains charged when a map value is replaced.
+            provider.push_stack(Felt::ONE).unwrap();
+            let base = provider.advice_size_bytes;
+            let key = make_leaf(0);
+            if let Some(old_len) = old_len {
+                provider.insert_into_map(key, vec![Felt::ONE; old_len]).unwrap();
+            }
+            let expected = base + AdviceProvider::map_entry_bytes(new_len).unwrap();
+            let max = base
+                + AdviceProvider::map_entry_bytes(new_len.max(old_len.unwrap_or(0))).unwrap()
+                - usize::from(below_limit);
+            provider
+                .set_options(&ExecutionOptions::default().with_max_advice_size_bytes(max))
+                .unwrap();
+            let before = provider.clone();
+            let values = vec![Felt::from_u32(2); new_len];
+            let result = provider.replace_into_map(key, values.clone());
+            if below_limit {
+                assert!(
+                    matches!(result, Err(AdviceError::SizeBudgetExceeded { current, added, max: limit })
+                    if current == before.advice_size_bytes && added == expected - current && limit == max)
+                );
+                assert_eq!(provider, before);
+            } else {
+                result.unwrap();
+                assert_eq!(provider.get_mapped_values(&key), Some(values.as_slice()));
+                assert_eq!(provider.advice_size_bytes, expected);
+                assert_eq!(
+                    provider.advice_size_bytes,
+                    provider.compute_advice_size_bytes().unwrap()
+                );
+                // Repeated equal replacements are budget-neutral even at the exact ceiling.
+                provider.replace_into_map(key, values).unwrap();
+                for _ in 0..old_len.unwrap_or(0).saturating_sub(new_len) {
+                    provider.push_stack(Felt::ONE).unwrap();
+                }
+                assert!(matches!(
+                    provider.push_stack(Felt::ONE),
+                    Err(AdviceError::SizeBudgetExceeded { .. })
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn advice_map_extend_respects_combined_budget_atomically() {
         let base = AdviceProvider::default().advice_size_bytes;
         let entry_bytes = AdviceProvider::map_entry_bytes(1).unwrap();
@@ -1025,6 +1100,23 @@ mod tests {
         ));
 
         assert_eq!(provider.merkle_store_node_count, base_node_count);
+    }
+
+    #[test]
+    fn merkle_store_merge_counts_existing_parent_once() {
+        let lhs = make_leaf(0);
+        let rhs = make_leaf(4);
+        let mut store = MerkleStore::default();
+        let root = store.merge_roots(lhs, rhs).unwrap();
+        let node_count = store.num_internal_nodes();
+        let max_advice_size = AdviceProvider::merkle_node_bytes(node_count).unwrap();
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size);
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default().with_merkle_store(store), &options)
+                .unwrap();
+
+        assert_eq!(provider.merge_roots(lhs, rhs).unwrap(), root);
+        assert_eq!(provider.merkle_store_node_count, node_count);
     }
 
     #[test]

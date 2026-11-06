@@ -71,7 +71,7 @@ fn execution_replay_round_trip_preserves_replay_order() {
         Word::from([Felt::from_u32(6), ZERO, ZERO, ZERO]),
         Word::default(),
     ]);
-    replay.hasher.record_permute(Felt::from_u32(40), [Felt::from_u32(41); 12]);
+    replay.hasher.record_compression(Felt::from_u32(40), [Felt::from_u32(41); 12]);
     replay.block_address.record_block_address(Felt::from_u32(50));
     replay
         .mast_forest_resolution
@@ -114,7 +114,7 @@ fn execution_replay_round_trip_preserves_replay_order() {
         [Word::from([Felt::from_u32(6), ZERO, ZERO, ZERO]), Word::default()]
     );
     assert_eq!(
-        restored.hasher.replay_permute().unwrap(),
+        restored.hasher.replay_compression().unwrap(),
         (Felt::from_u32(40), [Felt::from_u32(41); 12])
     );
     assert_eq!(restored.block_address.replay_block_address().unwrap(), Felt::from_u32(50));

@@ -854,6 +854,16 @@ impl<'input> Parser<'input> {
     fn parse_visibility(&mut self) {
         self.start_node(SyntaxKind::Visibility);
         let _ = self.expect_keyword("pub", "expected `pub`");
+        if self
+            .next_relevant_top_level_token(self.pos)
+            .and_then(|index| self.tokens.get(index))
+            .is_some_and(|token| token.kind() == SyntaxKind::LParen)
+        {
+            self.bump_regular_trivia();
+            self.bump();
+            let _ = self.expect_keyword("package", "expected `package` in visibility modifier");
+            let _ = self.expect_kind(SyntaxKind::RParen, "expected `)` after `package`");
+        }
         self.finish_node();
     }
 
@@ -1388,7 +1398,7 @@ impl<'input> Parser<'input> {
                         Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
                     ),
                     "pub" => matches!(
-                        self.next_relevant_top_level_token(index + 1)
+                        self.next_token_after_visibility(index)
                             .and_then(|next| self.tokens.get(next)),
                         Some(next)
                             if next.kind() == SyntaxKind::Ident
@@ -1499,10 +1509,29 @@ impl<'input> Parser<'input> {
             return false;
         }
 
+        let next = if prefix == "pub" {
+            self.next_token_after_visibility(self.pos)
+        } else {
+            self.next_relevant_top_level_token(self.pos + 1)
+        };
         matches!(
-            self.next_relevant_top_level_token(self.pos + 1).and_then(|index| self.tokens.get(index)),
+            next.and_then(|index| self.tokens.get(index)),
             Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword
         )
+    }
+
+    /// Looks past an optional visibility qualifier when recognizing declarations.
+    fn next_token_after_visibility(&self, index: usize) -> Option<usize> {
+        let mut next = self.next_relevant_top_level_token(index + 1)?;
+        if self.tokens.get(next)?.kind() == SyntaxKind::LParen {
+            next = self.next_relevant_top_level_token(next + 1)?;
+            next = self.next_relevant_top_level_token(next + 1)?;
+            if self.tokens.get(next)?.kind() != SyntaxKind::RParen {
+                return None;
+            }
+            next = self.next_relevant_top_level_token(next + 1)?;
+        }
+        Some(next)
     }
 
     fn at_regular_trivia(&self) -> bool {
@@ -2963,5 +2992,27 @@ begin end
         let end = start + "foo".len() as u32;
         let expected = SourceSpan::new(parse.source().id(), start..end);
         assert_eq!(parse.span_for_token(&name), expected);
+    }
+}
+
+#[cfg(test)]
+mod visibility_trivia_tests {
+    use alloc::string::ToString;
+
+    use super::*;
+    use crate::ast::AstNode;
+
+    #[test]
+    fn unqualified_visibility_does_not_consume_trailing_trivia() {
+        let input = "pub # keep me\nmod api\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors());
+        let visibility = parse
+            .syntax()
+            .descendants()
+            .find_map(crate::ast::Visibility::cast)
+            .expect("visibility marker");
+        assert_eq!(visibility.syntax().text().to_string(), "pub");
+        assert_eq!(parse.syntax().text().to_string(), input);
     }
 }

@@ -6,15 +6,14 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
-    advice::AdviceInputs,
-    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace},
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
+    trace::build_trace,
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
 /// A program mixing basic blocks (including repeats, which exercise the
-/// hasher's memoized-trace path), control blocks, and an `hperm` (a streamed
-/// `Permute` request). The test processor uses a small fragment size so the
+/// hasher's memoized-trace path), control blocks, and a `compress` request. The test processor
+/// uses a small fragment size so the
 /// run spans multiple trace fragments.
 const PROGRAM: &str = "
 begin
@@ -28,7 +27,7 @@ begin
     else
         push.7 add
     end
-    padw padw padw hperm dropw dropw dropw
+    padw padw padw compress dropw dropw dropw
     repeat.4
         push.11 u32wrapping_add
     end
@@ -78,24 +77,31 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .unwrap();
         let (vm_witness, precompiles_witness) = execution_witness.into_parts();
         assert!(precompiles_witness.is_none());
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
         let (trace, precompiles_witness) = processor(stack, advice.clone())
-            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .execute_and_build_trace_sync(
+                &program,
+                &mut host,
+                &miden_vm_stark::memory::default_budget(),
+            )
             .unwrap();
         assert!(precompiles_witness.is_none());
         trace
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());
-    let (b_core, b_chiplets, b_p2) = buffered.main_trace().to_air_matrices();
-    let (s_core, s_chiplets, s_p2) = streamed.main_trace().to_air_matrices();
+    let (b_core, b_chiplets, b_eidos_compression, b_and8) =
+        buffered.main_trace().clone_air_matrices();
+    let (s_core, s_chiplets, s_eidos_compression, s_and8) =
+        streamed.main_trace().clone_air_matrices();
     assert_eq!(b_core, s_core, "core segment diverged");
     assert_eq!(b_chiplets, s_chiplets, "chiplets segment diverged");
-    assert_eq!(b_p2, s_p2, "poseidon2 segment diverged");
+    assert_eq!(b_eidos_compression, s_eidos_compression, "EidosCompression segment diverged");
+    assert_eq!(b_and8, s_and8, "And8 segment diverged");
 }
 
 #[test]
@@ -202,7 +208,11 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
         processor(&[1], AdviceInputs::default())
-            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .execute_and_build_trace_sync(
+                &program,
+                &mut host,
+                &miden_vm_stark::memory::default_budget(),
+            )
             .unwrap();
     });
 

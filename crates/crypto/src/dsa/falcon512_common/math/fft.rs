@@ -77,16 +77,6 @@ where
         + MulAssign
         + Inverse,
 {
-    /// Gets the inverse of 2^n.
-    #[allow(dead_code)]
-    fn power_of_two_inverse(n: usize) -> Self {
-        let mut a = Self::one() + Self::one();
-        for _ in 0..n {
-            a *= a;
-        }
-        Self::inverse_or_zero(a)
-    }
-
     /// Gets a primitive nth (with n a power of 2) root of unity.
     #[allow(dead_code)]
     fn primitive_root_of_unity(n: usize) -> Self;

@@ -1,0 +1,440 @@
+//! EcMsm recording layer — building MSM expressions (`intro` / `intro_zero` /
+//! `intro_endo` / `combine` / `neg`) is *chiplet mechanism*: it walks term
+//! lists and authenticates scalar and point relations through the uint and
+//! EC buses. That belongs here, beside the chiplet, not in the DAG-only
+//! [`Session`](crate::prover::session), which just delegates (`msm_intro` etc.).
+//!
+//! Each function borrows the MSM accumulator
+//! ([`EcMsmRequires`]) plus the EC and
+//! uint stores below it — the same three the `Session` holds — and
+//! constructs the lower-layer `require` views as needed (mirroring how the
+//! `Session` itself wired them).
+
+use alloc::vec::Vec;
+
+use crate::prover::{
+    ec::{
+        EcStores,
+        msm::trace::{CombineRow, DedupKey, EcExprPtr, EcMsmRequires, NegRow},
+        trace::EcPointPtr,
+    },
+    math::from_hex,
+    uint::{UintRequire, UintStores, trace::UintPtr},
+};
+
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × 1⟩`
+/// (value `= P`) — the base of any addition chain. The scalar `1` is
+/// interned under the group's scalar bound. Returns the expression handle.
+pub fn intro(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro(base) {
+        return e; // a prior ⟨base × 1⟩ — reuse it
+    }
+    fresh_intro(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × 1⟩` without consulting the dedup map.
+fn fresh_intro(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    let group = ec.store.point_params(base).0;
+    let sbound = ec.store.group_sbound(group);
+    let one = uint.require().intern(from_hex("1"), sbound);
+    msm.intro(group, sbound, base, one)
+}
+
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`
+/// (value = the group's point at infinity) — the zero-scalar leaf, dual to
+/// [`intro`]'s `⟨P × 1⟩`. Unlike `intro`, `val = base` doesn't hold here, so
+/// `base`'s own group membership (`is_pai = 0`) isn't implied by `val`'s
+/// PAI tie — this independently authenticates it, the same way
+/// [`intro_endo`] authenticates its own base. Panics if `base` is the point
+/// at infinity.
+pub fn intro_zero(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro_zero(base) {
+        return e; // a prior ⟨base × 0⟩ — reuse it
+    }
+    fresh_intro_zero(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × 0⟩` without consulting the dedup map.
+fn fresh_intro_zero(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    let group = ec.store.point_params(base).0;
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+    let sbound = ec.store.group_sbound(group);
+    let zero = uint.require().intern(from_hex("0"), sbound);
+    let (base_x, base_y) =
+        ec.store.point_params(base).1.expect("intro_zero of the point at infinity");
+    let val = ec.store.group_pai(group);
+    ec.store.require_ecpoint(base);
+    ec.store.require_ecpoint(val);
+    ec.store.require_ecgroup(group);
+
+    msm.intro_zero(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, base_x, base_y, zero,
+        val,
+    )
+}
+
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
+/// (value `= φ(P)`) — GLV's endomorphism leaf, the second base a joint
+/// wNAF ladder walks alongside [`intro`]'s `⟨P × 1⟩` (the two merge back
+/// onto one term at `combine` time: `msm_combine`'s shared-base rule
+/// gives `⟨P × (a + b·λ)⟩`). `λ` is never an AIR-known constant — the
+/// term's scalar is the group's own `lambda_ptr`, authenticated by the
+/// boundary's `EcGroup` consume — and `φ(P)`'s membership rides its
+/// value relation (`x_φ = β·x_P`, `y_φ = y_P`, both certified in-circuit)
+/// rather than a fresh MAC trio, so this never revalidates `P`. Panics if
+/// `base` is the point at infinity or its group has no GLV endomorphism.
+/// Returns the expression handle.
+pub fn intro_endo(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro_endo(base) {
+        return e; // a prior ⟨base × λ⟩ — reuse it
+    }
+    fresh_intro_endo(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × λ⟩` without consulting the dedup map.
+fn fresh_intro_endo(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    let group = ec.store.point_params(base).0;
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+    assert_ne!(beta_ptr.addr(), 0, "intro_endo requires a group with a GLV endomorphism");
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let sbound = ec.store.group_sbound(group);
+    let (px, py) = ec.store.point_params(base).1.expect("intro_endo of the point at infinity");
+
+    // x_φ = β·x_P uses the plain `κ_a = 1, κ_c = 0` product arrangement. Reusing the
+    // `endo_y` pointer constrains y_φ = y_P.
+    let phi_x = uint.require().mac(1, beta_ptr, px, 0, bound_ptr);
+    let (val, minted) = ec.store.add_point_cert(group, phi_x, py);
+    ec.store.require_ecpoint(base);
+    ec.store.require_ecpoint(val);
+    ec.store.require_ecgroup(group);
+
+    msm.intro_endo(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, val, px, py, phi_x,
+        minted,
+    )
+}
+
+/// Combine two MSM expressions: union their term multisets (scalars on a
+/// shared base merge `mod` the scalar bound) and add their values. The
+/// merge walks both base-ordered term lists ([`merge_terms`]); the value is
+/// one `EcGroupAdd` (provided at mult 1). The operands' use counts are
+/// bumped. Returns the combined expression handle.
+pub fn combine(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_combine(a, b) {
+        return e; // identical combine already laid — reuse it (no second
+        // merge walk, value `EcGroupAdd`, or operand consume)
+    }
+    fresh_combine(msm, ec, uint, a, b)
+}
+
+/// Lays `combine(a, b)` without consulting the dedup map.
+fn fresh_combine(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let b_terms = msm.terms(b);
+    let val_a = msm.value(a);
+    let val_b = msm.value(b);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+
+    let rows = merge_terms(&a_terms, &b_terms, &mut uint.require());
+
+    let val = ec.require(uint.require()).add(val_a, val_b, 1);
+    ec.store.require_ecgroup(group);
+
+    let c = msm.combine(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, b, val_a, val_b, val, rows,
+    );
+    msm.consume_op(a, 1);
+    msm.consume_op(b, 1);
+    c
+}
+
+/// Combine two MSM expressions **without merging shared bases** — every
+/// term of both operands survives as its own row (see [`concat_terms`]),
+/// even if a base occurs in both.
+pub fn combine_terms_preserving(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_concat_combine(a, b) {
+        return e; // identical concat-combine already laid — reuse it
+    }
+    fresh_combine_terms_preserving(msm, ec, uint, a, b)
+}
+
+/// Lays `combine_terms_preserving(a, b)` without consulting the dedup map.
+fn fresh_combine_terms_preserving(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let b_terms = msm.terms(b);
+    let val_a = msm.value(a);
+    let val_b = msm.value(b);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+
+    let rows = concat_terms(&a_terms, &b_terms);
+
+    let val = ec.require(uint.require()).add(val_a, val_b, 1);
+    ec.store.require_ecgroup(group);
+
+    let c = msm.combine_concat(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, b, val_a, val_b, val, rows,
+    );
+    msm.consume_op(a, 1);
+    msm.consume_op(b, 1);
+    c
+}
+
+/// Negate an MSM expression: every term's scalar negated (the base kept),
+/// the value negated. Each term's `out = −s` is an `is_c_zero` `UintAdd`
+/// (`s + out ≡ 0`); the value shares `val_a`'s x-coordinate and uses an
+/// `is_c_zero` `UintAdd` to negate its y-coordinate. The operand's use count
+/// is bumped. Returns the negated expression handle.
+pub fn neg(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_neg(a) {
+        return e; // a prior neg(a) — reuse it
+    }
+    fresh_neg(msm, ec, uint, a)
+}
+
+/// Lays `neg(a)` without consulting the dedup map.
+fn fresh_neg(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+) -> EcExprPtr {
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let val_a = msm.value(a);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+
+    // Per term: keep the base, negate the scalar (one UintAdd each).
+    let mut rows = Vec::with_capacity(a_terms.len());
+    for (i, (base, s)) in a_terms.iter().enumerate() {
+        let out_scalar = uint.require().neg(*s);
+        rows.push(NegRow {
+            i: i as u32,
+            base: *base,
+            s_a: *s,
+            out_scalar,
+        });
+    }
+
+    // Value: −val_a as a TRIO-FREE on-curve cert point R = (x_a, −y_a) — no
+    // group law. The boundary pins it: an is_c_zero `UintAdd(y_a, y_R ≡ 0)`
+    // (the y-flip), a shared `x` pointer that constrains `x_R = x_a`, and R's membership
+    // rides the `EcOnCurveCert` the boundary provides when it freshly mints R
+    // (R is on-curve because val_a is). The `−y_a` value is interned by the
+    // store's `neg`; the boundary consumes the resulting `UintAdd`.
+    let (px, py) = ec.store.point_params(val_a).1.expect("neg of the point at infinity");
+    let neg_py = uint.require().neg(py);
+    let (val, minted) = ec.store.add_point_cert(group, px, neg_py);
+    ec.store.require_ecpoint(val_a); // the boundary reads val_a's coords …
+    ec.store.require_ecpoint(val); //  … and R's
+    ec.store.require_ecgroup(group);
+
+    let c = msm.neg(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, val_a, val, px, py,
+        neg_py, minted, rows,
+    );
+    msm.consume_op(a, 1);
+    c
+}
+
+/// Lay a fresh copy of `expr` — the same terms and value under a new
+/// expression ptr — by repeating the fresh construction of the operation
+/// that produced it. The copy re-records every lower-chiplet demand of that
+/// operation and carries its own use counts; the dedup entry keeps naming
+/// the expression it named before (see `EcMsmRequires::lay_copy`). The
+/// AIR admits one transcript claim per expression, so each further claim on
+/// the same terms takes a copy. Returns the copy's handle.
+pub fn duplicate(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    expr: EcExprPtr,
+) -> EcExprPtr {
+    msm.lay_copy(expr, |msm, derivation| match derivation {
+        DedupKey::Intro(base) => fresh_intro(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroEndo(base) => fresh_intro_endo(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroZero(base) => fresh_intro_zero(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::Combine(a, b) => fresh_combine(msm, ec, uint, EcExprPtr(a), EcExprPtr(b)),
+        DedupKey::ConcatCombine(a, b) => {
+            fresh_combine_terms_preserving(msm, ec, uint, EcExprPtr(a), EcExprPtr(b))
+        },
+        DedupKey::Neg(a) => fresh_neg(msm, ec, uint, EcExprPtr(a)),
+    })
+}
+
+/// The combine merge walk: a base-ordered two-pointer merge of two
+/// expressions' term lists into [`CombineRow`]s. Disjoint bases copy
+/// through one operand (`take_a` / `take_b`); a base shared by both merges
+/// its two scalars into one — recorded as a `UintAdd` (mod the scalar
+/// bound) via `uint`, the `take_both` row. Both cursors advance on
+/// `take_both`, one on a single take.
+///
+/// Term lists are read in their stored (`idx`) order; the AIR re-checks
+/// each row, so faithfulness rests on the prover's discipline of laying
+/// operands in a consistent base order (equal bases must align to merge) —
+/// it is *completeness*, not soundness.
+pub fn merge_terms(
+    a_terms: &[(EcPointPtr, UintPtr)],
+    b_terms: &[(EcPointPtr, UintPtr)],
+    uint: &mut UintRequire<'_>,
+) -> Vec<CombineRow> {
+    let zero_u = UintPtr::from_addr(0);
+    let (mut i, mut j) = (0usize, 0usize);
+    let mut rows = Vec::new();
+    while i < a_terms.len() || j < b_terms.len() {
+        let (ci, cj) = (i as u32, j as u32);
+        let a_first =
+            j >= b_terms.len() || (i < a_terms.len() && a_terms[i].0.addr() < b_terms[j].0.addr());
+        let b_first =
+            i >= a_terms.len() || (j < b_terms.len() && b_terms[j].0.addr() < a_terms[i].0.addr());
+        if a_first {
+            let (base, s) = a_terms[i];
+            rows.push(CombineRow {
+                take_a: true,
+                take_b: false,
+                i: ci,
+                j: cj,
+                s_a: s,
+                s_b: zero_u,
+                out_base: base,
+                out_scalar: s,
+            });
+            i += 1;
+        } else if b_first {
+            let (base, s) = b_terms[j];
+            rows.push(CombineRow {
+                take_a: false,
+                take_b: true,
+                i: ci,
+                j: cj,
+                s_a: zero_u,
+                s_b: s,
+                out_base: base,
+                out_scalar: s,
+            });
+            j += 1;
+        } else {
+            // Shared base: merge the two scalars mod the scalar bound.
+            let (base, sa) = a_terms[i];
+            let (_, sb) = b_terms[j];
+            let s_out = uint.add(sa, sb);
+            rows.push(CombineRow {
+                take_a: false,
+                take_b: false,
+                i: ci,
+                j: cj,
+                s_a: sa,
+                s_b: sb,
+                out_base: base,
+                out_scalar: s_out,
+            });
+            i += 1;
+            j += 1;
+        }
+    }
+    rows
+}
+
+/// The [`combine_terms_preserving`] walk: every one of A's terms copied
+/// through via `take_a` (in A's stored order), followed by every one of
+/// B's via `take_b` — never `take_both`, even when a base recurs between
+/// the two lists.
+pub fn concat_terms(
+    a_terms: &[(EcPointPtr, UintPtr)],
+    b_terms: &[(EcPointPtr, UintPtr)],
+) -> Vec<CombineRow> {
+    let zero_u = UintPtr::from_addr(0);
+    let mut rows = Vec::with_capacity(a_terms.len() + b_terms.len());
+    for (i, &(base, s)) in a_terms.iter().enumerate() {
+        rows.push(CombineRow {
+            take_a: true,
+            take_b: false,
+            i: i as u32,
+            j: 0,
+            s_a: s,
+            s_b: zero_u,
+            out_base: base,
+            out_scalar: s,
+        });
+    }
+    for (j, &(base, s)) in b_terms.iter().enumerate() {
+        rows.push(CombineRow {
+            take_a: false,
+            take_b: true,
+            i: a_terms.len() as u32,
+            j: j as u32,
+            s_a: zero_u,
+            s_b: s,
+            out_base: base,
+            out_scalar: s,
+        });
+    }
+    rows
+}

@@ -15,8 +15,89 @@ use crate::{
 };
 
 mod serialization;
+mod witness;
+pub use witness::SmtWitness;
 #[cfg(test)]
 mod tests;
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    use proptest::prelude::*;
+
+    use super::PartialSmt;
+    use crate::{Word, merkle::smt::Smt};
+
+    impl Arbitrary for PartialSmt {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Build a sound partial SMT by construction: dedup keys in a BTreeMap (so all keys
+            // are distinct), materialize a full tree from those entries, then derive the partial
+            // from a SPARSE selection of proofs opened against that same tree (consistent roots
+            // guaranteed). The selection mixes inclusion proofs (subset of present keys, via the
+            // generated mask) and exclusion proofs (fresh keys, absent with overwhelming
+            // probability), so the sparse `nodes` / `value_only_leaves` serialization paths are
+            // exercised. Explicit branches cover the empty partial and the root-only partial.
+            // The sibling-leaf branch generates entries at adjacent even/odd leaf positions, so
+            // opening one leaf while its non-empty sibling is present-but-unopened (masked out
+            // of the inclusion proofs) produces value-only leaves deliberately. Random keys
+            // practically never share or adjoin leaf indices, so both branches are needed.
+            prop_oneof![
+                proptest::collection::vec((any::<Word>(), any::<Word>()), 0..=6).boxed(),
+                super::super::test_gen::sibling_leaf_entries().boxed(),
+            ]
+            .prop_flat_map(|pairs| {
+                // Drop empty values before deduplication (mirrors smt_from_pairs): the anchor
+                // entry must survive keep-last duplicate ordering even under shrinking.
+                let entries: BTreeMap<Word, Word> =
+                    pairs.into_iter().filter(|(_, value)| *value != crate::EMPTY_WORD).collect();
+                (
+                    proptest::collection::vec(any::<bool>(), entries.len()),
+                    proptest::collection::vec(any::<Word>(), 0..=3),
+                    Just(entries),
+                )
+            })
+            .prop_map(|(include_mask, exclusion_keys, entries)| {
+                if entries.is_empty() {
+                    // Explicit empty-partial branch.
+                    return PartialSmt::default();
+                }
+
+                let smt = Smt::with_entries(entries).expect("keys are distinct");
+
+                let mut proofs = Vec::new();
+                for (i, key) in
+                    smt.entries().map(|(k, _)| *k).collect::<Vec<_>>().into_iter().enumerate()
+                {
+                    if include_mask.get(i).copied().unwrap_or(true) {
+                        proofs.push(smt.open(&key));
+                    }
+                }
+                for key in exclusion_keys {
+                    // Absent with overwhelming probability; a collision just yields an
+                    // inclusion proof, which is equally valid input.
+                    proofs.push(smt.open(&key));
+                }
+
+                if proofs.is_empty() {
+                    // Explicit root-only branch: the partial tracks the root only.
+                    return PartialSmt::new(smt.root());
+                }
+
+                PartialSmt::from_proofs(proofs).expect("proofs share the tree's root")
+            })
+            .boxed()
+        }
+    }
+}
 
 pub use serialization::UniqueNodes;
 
@@ -43,6 +124,10 @@ pub use serialization::UniqueNodes;
 /// Once a partial SMT has been constructed, its root is set in stone. All subsequently added proofs
 /// or merkle paths must match that root, otherwise an error is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PartialSmt {
     root: Word,
     num_entries: usize,
@@ -420,8 +505,17 @@ impl PartialSmt {
     /// # Errors
     ///
     /// - [`DeserializationError::InvalidValue`] if a leaf's map key does not match its embedded
-    ///   index, or the reconstructed tree fails validation.
+    ///   index, a frontier node overlaps a supplied descendant, or the reconstructed tree fails
+    ///   validation.
     pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
+        Self::from_unique_nodes_with_limit(unique_nodes, usize::MAX)
+    }
+
+    /// Limits reconstructed parents, including canonical empty parents which are not retained.
+    fn from_unique_nodes_with_limit(
+        unique_nodes: UniqueNodes,
+        mut remaining_nodes: usize,
+    ) -> Result<Self, DeserializationError> {
         unique_nodes.validate()?;
 
         let mut smt = Self::new(unique_nodes.root);
@@ -450,7 +544,22 @@ impl PartialSmt {
             // next layer is built.
             let parents = active_nodes.into_iter().map(NodeIndex::parent).collect::<BTreeSet<_>>();
 
+            remaining_nodes = remaining_nodes.checked_sub(parents.len()).ok_or_else(|| {
+                DeserializationError::InvalidValue(
+                    "SMT witness reconstruction limit exceeded".into(),
+                )
+            })?;
+
             for parent in &parents {
+                // A frontier hash must not mask reconstructed descendants, including empty
+                // parents that insertion would discard before the next layer's hash lookup.
+                if unique_nodes.nodes.contains_key(parent) {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "SMT frontier node at depth {} position {} overlaps a descendant",
+                        parent.depth(),
+                        parent.position(),
+                    )));
+                }
                 // A child is either a leaf, a node rebuilt on the prior pass, a stored sparse node,
                 // or an omitted empty subtree root. The lookup helpers handle the last two cases.
                 let [left, right] = [parent.left_child(), parent.right_child()].map(|child| {
@@ -462,7 +571,15 @@ impl PartialSmt {
                             .unwrap_or_else(|| unique_nodes.get_node_hash(child))
                     }
                 });
-                smt.insert_inner_node(*parent, InnerNode { left, right });
+                let inner_node = InnerNode { left, right };
+                // Check before insertion: canonical empty parents are not retained, so the
+                // later validation cannot compare an empty reconstructed root to the claimed root.
+                if parent.is_root() && inner_node.hash() != smt.root {
+                    return Err(DeserializationError::InvalidValue(
+                        "reconstructed SMT root does not match expected root".into(),
+                    ));
+                }
+                smt.insert_inner_node(*parent, inner_node);
             }
 
             if child_depth > 1 {
@@ -472,8 +589,11 @@ impl PartialSmt {
         }
 
         for (position, leaf) in unique_nodes.leaves {
-            smt.num_entries += leaf.num_entries();
-            smt.leaves.insert(position, leaf);
+            let num_entries = leaf.num_entries();
+            if num_entries > 0 {
+                smt.num_entries += num_entries;
+                smt.leaves.insert(position, leaf);
+            }
         }
 
         smt.validate()?;
@@ -645,7 +765,7 @@ impl PartialSmt {
         leaf_index: LeafIndex<SMT_DEPTH>,
         leaf_hash: Word,
     ) {
-        use crate::hash::poseidon2::Poseidon2;
+        use crate::hash::eidos::Eidos;
 
         let mut index: NodeIndex = leaf_index.into();
         let mut node_hash = leaf_hash;
@@ -659,7 +779,7 @@ impl PartialSmt {
             } else {
                 (node_hash, right)
             };
-            node_hash = Poseidon2::merge(&[left, right]);
+            node_hash = Eidos::merge(&[left, right]);
 
             // insert_inner_node handles removing empty subtree roots
             self.insert_inner_node(index, InnerNode { left, right });
@@ -741,5 +861,9 @@ impl Deserializable for PartialSmt {
         let unique_rep = UniqueNodes::read_from(source)?;
         PartialSmt::from_unique_nodes(unique_rep)
             .map_err(|e| DeserializationError::InvalidValue(format!("{e}")))
+    }
+
+    fn min_serialized_size() -> usize {
+        UniqueNodes::min_serialized_size()
     }
 }

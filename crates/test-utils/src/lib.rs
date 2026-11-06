@@ -13,7 +13,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
+pub use miden_air_definitions::vm::VmTrace;
+use miden_air_definitions::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
@@ -27,17 +28,13 @@ pub use miden_core::{
     program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{
-    chiplets::hasher::apply_permutation,
-    events::{EventName, SystemEvent},
-};
+use miden_core::{chiplets::hasher::compress_state, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    trace::VmTrace,
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
@@ -364,18 +361,11 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("handler for event '{event_name}' was already added")
-            }
-            self.handlers.push((event, handler));
-        }
+        self.handlers.extend(handlers);
     }
 
     /// Add a trace handler for a specific event when running the `Host`.
@@ -384,18 +374,11 @@ impl Test {
     }
 
     /// Add trace handlers for specific events when running the `Host`.
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
     pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register trace handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.trace_handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("trace handler for event '{event_name}' was already added")
-            }
-            self.trace_handlers.push((event, handler));
-        }
+        self.trace_handlers.extend(handlers);
     }
 
     // TEST METHODS
@@ -632,7 +615,7 @@ impl Test {
 
         fast_stack_result.and_then(|witness| {
             let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness)?;
+            let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -689,10 +672,7 @@ impl Test {
         }
         .unwrap();
         let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(miden_core::proof::HashFunction::Blake3_256)
-            .prove_full(witness)
-            .unwrap();
+        let proof = Prover::new().prove_full(witness).unwrap();
         let claim =
             ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
         if test_fail {
@@ -717,7 +697,7 @@ impl Test {
     /// Executes the test program and checks all AIR constraints without generating a STARK proof.
     ///
     /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`VmTrace::check_constraints`], which is much faster than the
+    /// [`miden_vm_stark::debug::check_constraints`], which is much faster than the
     /// full prove/verify pipeline and provides better error diagnostics. Use
     /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
     /// complete STARK proof generation and verification flow.
@@ -735,7 +715,7 @@ impl Test {
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
-        trace.check_constraints();
+        miden_vm_stark::debug::check_constraints(&trace);
     }
 
     /// Returns the last state of the stack after executing a test.
@@ -771,10 +751,15 @@ impl Test {
             host.load_library(library.mast_forest()).unwrap();
         }
         for (event, handler) in &self.handlers {
-            host.register_handler(event.clone(), handler.clone()).unwrap();
+            host.register_handler(event.clone(), handler.clone()).unwrap_or_else(|err| {
+                panic!("Failed to register handler for event '{}': {err}", event.as_str())
+            });
         }
         for (event, handler) in &self.trace_handlers {
-            host.register_trace_handler(event.clone(), handler.clone()).unwrap();
+            host.register_trace_handler(event.clone(), handler.clone())
+                .unwrap_or_else(|err| {
+                    panic!("Failed to register trace handler for event '{}': {err}", event.as_str())
+                });
         }
 
         (program, host, debug_info)
@@ -1018,25 +1003,24 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Given a hasher state, perform one permutation.
+/// Computes one expected COMPRESS state transition.
 ///
-/// This helper reconstructs that state, applies a permutation, and returns the resulting
-/// `[RATE0',RATE1',CAP']` back in stack order.
-pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
+/// The block lanes are preserved and the chaining-value lanes are replaced with the
+/// Eidos compression output.
+pub fn build_expected_compress(values: &[u64]) -> [Felt; STATE_WIDTH] {
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for compress test");
 
-    // Reconstruct the internal Poseidon2 state from the initial stack:
+    // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
-    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    // => state[0..12] = stack[0..12] in [BLOCK_LO, BLOCK_HI, CV] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
         state[i] = Felt::new_unchecked(values[i]);
     }
 
-    // Apply the permutation
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
-    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    // Map internal state back to stack layout [BLOCK_LO, BLOCK_HI, CV'].
     let mut out = [ZERO; STATE_WIDTH];
     out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
 
@@ -1046,6 +1030,14 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     let digest = hash_elements(&values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>());
     digest.into()
+}
+
+/// Computes the generic eight-Felt hash used by `hdword`.
+pub fn build_expected_hdword(values: &[u64]) -> [Felt; 4] {
+    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hdword test");
+
+    let values = values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
+    hash_elements(&values[..2 * WORD_SIZE]).into()
 }
 
 // Generates the MASM code which pushes the input values during the execution of the program.
@@ -1088,7 +1080,8 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         in_span: "in_span",
         group_count: "group_count",
         op_index: "op_index",
-        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        full_batch: "full_batch",
+        batch_size_code: "batch_size_code",
         extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
     },
     stack: StackCols {
@@ -1113,10 +1106,6 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         b0: "stack_b0",
         b1: "stack_b1",
         h0: "stack_h0",
-    },
-    range: RangeCols {
-        multiplicity: "range_check[0]",
-        value: "range_check[1]",
     },
 };
 

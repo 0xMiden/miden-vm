@@ -9,7 +9,7 @@ use alloc::{
 
 use crate::{
     Felt, WORD_SIZE, Word,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -86,9 +86,8 @@ impl AdviceMap {
     /// Returns a commitment to this advice map.
     ///
     /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
-    /// value elements. [`Poseidon2::hash_elements`] binds the entry length, and
-    /// [`Poseidon2::merge_many`] folds the ordered entry commitments into the final map
-    /// commitment.
+    /// value elements. [`hasher::hash_elements`] binds the entry length, and
+    /// [`hasher::hash_words`] folds the ordered entry commitments into the final map commitment.
     pub fn commitment(&self) -> Word {
         let entry_commitments = self
             .iter()
@@ -96,11 +95,11 @@ impl AdviceMap {
                 let mut elements = Vec::with_capacity(WORD_SIZE + values.len());
                 elements.extend_from_slice(key.as_elements());
                 elements.extend_from_slice(values);
-                Poseidon2::hash_elements(&elements)
+                hasher::hash_elements(&elements)
             })
             .collect::<Vec<_>>();
 
-        Poseidon2::merge_many(&entry_commitments)
+        hasher::hash_words(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -203,6 +202,23 @@ impl Serializable for AdviceMap {
             target.write((key, values.to_vec()));
         }
     }
+
+    /// Returns the exact serialized size in bytes without allocating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the serialized size exceeds [`usize::MAX`].
+    fn get_size_hint(&self) -> usize {
+        self.0
+            .iter()
+            .try_fold(self.0.len().get_size_hint(), |size, (key, values)| {
+                let values_size = values.len().checked_mul(Felt::min_serialized_size())?;
+                size.checked_add(key.get_size_hint())?
+                    .checked_add(values.len().get_size_hint())?
+                    .checked_add(values_size)
+            })
+            .expect("advice map serialized size exceeds usize::MAX")
+    }
 }
 
 impl Deserializable for AdviceMap {
@@ -223,6 +239,8 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::hash::eidos::Eidos;
+
     use super::*;
 
     #[test]
@@ -235,6 +253,90 @@ mod tests {
         let map2 = AdviceMap::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(map1, map2);
+    }
+
+    #[cfg(feature = "arbitrary")]
+    ::proptest::proptest! {
+        /// The duplicate-key rejection covers the FULL repetition class: a repeated key
+        /// is rejected even when the two values are EQUAL (the map is a set of bindings,
+        /// not a multiset), and for arbitrary keys and values — `write_into` never
+        /// produces a repeated key (the BTreeMap source cannot), but a hand-written
+        /// payload can.
+        #[test]
+        fn prop_rejects_generated_duplicate_key_payloads(
+            (key, first, second) in (
+                proptest::prelude::any::<Word>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+            ),
+        ) {
+            use crate::serde::ByteWriter;
+
+            for (repeated, label) in [(second, "different value"), (first.clone(), "equal value")]
+            {
+                let mut bytes = Vec::new();
+                bytes.write_usize(2);
+                (key, first.clone()).write_into(&mut bytes);
+                (key, repeated).write_into(&mut bytes);
+
+                let err = AdviceMap::read_from_bytes(&bytes).unwrap_err();
+                let DeserializationError::InvalidValue(message) = err else {
+                    panic!("expected InvalidValue for a duplicate key with {label}, got {err:?}");
+                };
+                assert_eq!(
+                    message, "duplicate advice map key in serialized payload",
+                    "expected the duplicate-key rejection for {label}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn advice_map_commitment_matches_eidos_primitive() {
+        let low_key =
+            Word::new([Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+        let high_key =
+            Word::new([Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6)]);
+        let low_values = [Felt::from_u32(11), Felt::from_u32(12)];
+        let high_values = [Felt::from_u32(21), Felt::from_u32(22), Felt::from_u32(23)];
+
+        // Insert in reverse key order to pin that the BTreeMap's canonical key order is what gets
+        // committed.
+        let map = AdviceMap::from_iter([
+            (high_key, high_values.to_vec()),
+            (low_key, low_values.to_vec()),
+        ]);
+        let low_entry = [low_key.as_elements(), low_values.as_slice()].concat();
+        let high_entry = [high_key.as_elements(), high_values.as_slice()].concat();
+        let expected = Eidos::hash_words(&[
+            Eidos::hash_elements(&low_entry),
+            Eidos::hash_elements(&high_entry),
+        ]);
+
+        assert_eq!(map.commitment(), expected);
+    }
+
+    #[test]
+    #[cfg_attr(
+        target_pointer_width = "32",
+        should_panic(expected = "advice map serialized size exceeds usize::MAX")
+    )]
+    fn size_hint_for_shared_values_exceeding_u32() {
+        // The values occupy 1 MiB, but serializing every reference would exceed 4 GiB.
+        let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+        let map: AdviceMap = (0..4096u32)
+            .map(|i| {
+                let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+                (key, Arc::clone(&values))
+            })
+            .collect();
+
+        let size = map.get_size_hint();
+        let expected = map.len().get_size_hint() as u64
+            + 4096
+                * (Word::SERIALIZED_SIZE as u64 + values.len().get_size_hint() as u64 + 1_048_576);
+        assert!(expected > u64::from(u32::MAX));
+        assert_eq!(size as u64, expected);
     }
 
     #[test]

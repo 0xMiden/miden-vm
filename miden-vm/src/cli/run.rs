@@ -5,14 +5,19 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor,
-    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
+    trace::{VmTrace, build_trace},
 };
 use miden_vm::internal::InputFile;
+use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    precompile_limits::PrecompileArgs,
+    utils::{
+        get_masm_program, get_masp_package, load_package_with_handlers,
+        load_program_package_with_handlers, parse_byte_size,
+    },
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -38,13 +43,22 @@ pub struct RunCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
-    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    /// Maximum combined logical advice size in bytes, also bounding witness loading
+    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
+    max_advice_size: usize,
+
+    /// Maximum modelled peak memory for VM trace construction (512M, 32Gi)
+    ///
+    /// Does not cover precompile proving or total process memory.
     #[arg(
         long = "max-prover-memory",
         default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
         value_parser = parse_byte_size
     )]
     max_prover_memory: u64,
+
+    #[command(flatten)]
+    precompile_limits: PrecompileArgs,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -60,7 +74,19 @@ pub struct RunCmd {
 }
 
 impl RunCmd {
+    fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
+        let options = ExecutionOptions::new(
+            Some(self.max_cycles),
+            self.expected_cycles,
+            ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        )
+        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
+        .map_err(|err| Report::msg(format!("{err}")))?;
+        Ok(self.precompile_limits.apply_to(options))
+    }
+
     pub fn execute(&self) -> Result<(), Report> {
+        let execution_options = self.get_execution_options()?;
         println!("===============================================================================");
         println!("Run program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -77,8 +103,8 @@ impl RunCmd {
 
         // use a single match expression based on file extension
         let (trace, program_hash) = match ext.as_str() {
-            "masp" => run_masp_program(self)?,
-            "masm" => run_masm_program(self)?,
+            "masp" => run_masp_program(self, execution_options)?,
+            "masm" => run_masm_program(self, execution_options)?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -96,35 +122,39 @@ impl RunCmd {
             println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
         }
 
-        // calculate the percentage of padded rows
-        let padding_percentage = (trace.trace_len_summary().padded_trace_len()
-            - trace.trace_len_summary().trace_len())
-            * 100
-            / trace.trace_len_summary().padded_trace_len();
+        let summary = trace.trace_len_summary();
+        let chiplets = summary.chiplets();
+        let padding_percentage =
+            |rows: usize, height: usize| (height.saturating_sub(rows)) * 100 / height;
+
         // print the required cycles for each component
         println!(
-            "VM cycles: {} extended to {} steps ({}% padding).
-├── Stack rows: {}
-├── Range checker rows: {}
-├── Chiplets rows: {}
-│   ├── Hash chiplet rows: {}
-│   ├── Bitwise chiplet rows: {}
-│   ├── Memory chiplet rows: {}
-│   ├── ACE chiplet rows: {}
-│   └── Kernel ROM rows: {}
-└── Poseidon2 permutation rows: {}",
-            trace.trace_len_summary().trace_len(),
-            trace.trace_len_summary().padded_trace_len(),
-            padding_percentage,
-            trace.trace_len_summary().core_trace_len(),
-            trace.trace_len_summary().range_trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().bitwise_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().memory_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().ace_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().kernel_rom_len(),
-            trace.trace_len_summary().poseidon2_permutation_trace_len(),
+            "VM trace rows:
+├── Core rows: {} extended to {} ({}% padding)
+├── Chiplets rows: {} extended to {} ({}% padding)
+    ├── Hash chiplet rows: {}
+    ├── Bitwise chiplet rows: {}
+    ├── Memory chiplet rows: {}
+    └── Kernel ROM rows: {}
+├── Eidos compression rows: {} extended to {} ({}% padding)
+└── Byte-pair lookup rows: {} (fixed table)",
+            summary.core_rows(),
+            summary.core_height(),
+            padding_percentage(summary.core_rows(), summary.core_height()),
+            summary.chiplets_rows(),
+            summary.chiplets_height(),
+            padding_percentage(summary.chiplets_rows(), summary.chiplets_height()),
+            chiplets.hash_chiplet_len(),
+            chiplets.bitwise_chiplet_len(),
+            chiplets.memory_chiplet_len(),
+            chiplets.kernel_rom_len(),
+            summary.eidos_compression_rows(),
+            summary.eidos_compression_height(),
+            padding_percentage(
+                summary.eidos_compression_rows(),
+                summary.eidos_compression_height()
+            ),
+            summary.byte_pair_lookup_rows(),
         );
 
         Ok(())
@@ -135,24 +165,30 @@ impl RunCmd {
 // ================================================================================================
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
-    let program = get_masp_program(&params.program_file)?;
+fn run_masp_program(
+    params: &RunCmd,
+    exec_options: ExecutionOptions,
+) -> Result<(VmTrace, [u8; 32]), Report> {
+    if params.kernel_file.is_some() {
+        return Err(Report::msg(
+            "The `--kernel` option does not apply to a `.masp` package: the package fixes its own kernel.",
+        ));
+    }
+
+    let package = get_masp_package(&params.program_file)?;
+    let program = package.try_into_program()?;
 
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+    let advice_inputs = input_data
+        .parse_advice_inputs_with_options(&exec_options)
+        .map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
 
     let program_hash: [u8; 32] = program.hash().into();
-
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
@@ -161,14 +197,17 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         .execute_for_proving_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
         .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
+fn run_masm_program(
+    params: &RunCmd,
+    exec_options: ExecutionOptions,
+) -> Result<(VmTrace, [u8; 32]), Report> {
     for lib in &params.library_paths {
         if !lib.is_file() {
             let name = lib.display();
@@ -190,29 +229,28 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     }
 
     // load program from file and compile
-    let (program, package_debug_info, entrypoint_source_node, source_manager) =
+    let (program, package_debug_info, entrypoint_source_node, source_manager, kernel_package) =
         get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+    let advice_inputs = input_data
+        .parse_advice_inputs_with_options(&exec_options)
+        .map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
-    for lib in libraries.libraries {
-        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
+    let mut loaded_handler_sections = Vec::new();
+    for lib in &libraries.libraries {
+        load_package_with_handlers(&mut host, lib, &mut loaded_handler_sections)?;
+    }
+    if let Some(kernel_package) = &kernel_package {
+        load_package_with_handlers(&mut host, kernel_package, &mut loaded_handler_sections)?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();
-
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
@@ -234,7 +272,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
             .wrap_err("Failed to execute program")?,
     };
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
         .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))

@@ -219,7 +219,7 @@ fn public_item_import_reexporting_private_signature_is_rejected() {
 }
 
 #[test]
-fn public_item_import_reexporting_private_type_is_rejected() {
+fn public_item_import_reexporting_private_type_is_allowed() {
     let context = TestContext::default();
 
     let module = context
@@ -229,18 +229,17 @@ fn public_item_import_reexporting_private_type_is_rejected() {
                 namespace cycle::module_a
 
                 type PrivateType = felt
+                pub proc entry nop end
 
                 pub use {PrivateType as PublicType} from self
             "#
         ))
         .expect("private type should be valid before public re-export");
 
-    let err = Assembler::new(context.source_manager())
+    let library = Assembler::new(context.source_manager())
         .assemble_library("library", module, None::<Box<Module>>)
-        .expect_err("expected public re-export of private type to be rejected");
-
-    assert_diagnostic!(&err, "private type in exported type declaration");
-    assert_diagnostic!(&err, "exported type declarations may only reference public types");
+        .expect("visible private types can be re-exported");
+    assert_eq!(library.manifest.exports().count(), 2);
 }
 
 #[test]

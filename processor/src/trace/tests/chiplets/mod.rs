@@ -6,9 +6,9 @@
 //! subset matcher in [`super::lookup_harness`] is column-blind, so a test passes regardless
 //! of which aux column the framework routes a given bus message onto.
 //!
-//! Tests pair the subset match with explicit cardinality guardrails (e.g. "exactly 2 HOUT
-//! adds") so a silent-pass bug — extra emissions, missing emissions, or the matcher ignoring
-//! a whole category — fails structurally rather than just by shape.
+//! Tests pair the subset match with explicit cardinality guardrails, so a silent-pass bug
+//! (extra emissions, missing emissions, or the matcher ignoring a whole category) fails
+//! structurally rather than just by shape.
 
 mod bitwise;
 mod hasher;

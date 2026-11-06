@@ -1,0 +1,8 @@
+begin
+    push.21
+    emit.event("test::project::double")
+    adv_push
+    push.42
+    assert_eq
+    drop
+end

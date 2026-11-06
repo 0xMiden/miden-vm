@@ -140,3 +140,39 @@ pub proc div(numerator: Expr, denominator: Expr) -> Expr
     exec.mul
     # => [QUOTIENT_DIGEST, ...]
 end
+
+#! Computes an inverse and returns its binding obligation first without logging it.
+#! Input:  [X_DIGEST, ...]
+#! Output: [ROOT, INV_DIGEST, ...]
+#! ROOT binds X * INV = 1; zero inputs fail. The caller must include ROOT in its own obligation.
+pub proc inv_with_root(value: Expr) -> (precompiles::Digest, Expr)
+    emit.event("miden::precompiles::fields::field_inv")
+    adv_pushw
+    adv_pushw
+    swapw
+    exec.load
+    # => [INV_DIGEST, X_DIGEST, ...]
+    dupw swapw.2
+    # => [X_DIGEST, INV_DIGEST, INV_DIGEST, ...]
+    exec.mul
+    # => [PRODUCT_DIGEST, INV_DIGEST, ...]
+    exec.push_one_digest
+    exec.assert_eq_with_root
+    # => [ROOT=EQ(ONE, PRODUCT), INV_DIGEST, ...]
+end
+
+#! Divides two field expressions and returns the denominator's inverse obligation first.
+#! Input:  [NUMERATOR, DENOMINATOR, ...]
+#! Output: [ROOT, QUOTIENT_EXPR, ...]
+#! The VM built-in root is unchanged; the caller must include ROOT in its own obligation.
+pub proc div_with_root(numerator: Expr, denominator: Expr) -> (precompiles::Digest, Expr)
+    swapw
+    # => [DENOMINATOR, NUMERATOR, ...]
+    exec.inv_with_root
+    # => [ROOT, INVERSE, NUMERATOR, ...]
+    swapw.2
+    # => [NUMERATOR, INVERSE, ROOT, ...]
+    exec.mul
+    swapw
+    # => [ROOT, QUOTIENT_EXPR, ...]
+end

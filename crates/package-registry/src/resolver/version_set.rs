@@ -256,13 +256,13 @@ impl pubgrub::VersionSet for VersionSet {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::crypto::hash::Rpo256;
+    use miden_core::crypto::hash::Eidos;
 
     use super::*;
 
     #[test]
     fn version_set_contains_requires_both_digest_and_semver() {
-        let digest = Rpo256::hash(b"same-digest");
+        let digest = Eidos::hash(b"same-digest");
         let set = VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest));
         let candidate = Version::new("9.9.9".parse().unwrap(), digest);
 
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn digest_and_semantic_intersection_preserves_both_constraints() {
-        let digest = Rpo256::hash(b"shared-digest");
+        let digest = Eidos::hash(b"shared-digest");
         let set = <VersionSet as pubgrub::VersionSet>::intersection(
             &VersionSet::from(digest),
             &VersionSet::from("^1.0.0".parse::<VersionReq>().unwrap()),
@@ -282,7 +282,7 @@ mod tests {
 
         let matching = Version::new("1.2.3".parse().unwrap(), digest);
         let wrong_semver = Version::new("2.0.0".parse().unwrap(), digest);
-        let wrong_digest = Version::new("1.2.3".parse().unwrap(), Rpo256::hash(b"other-digest"));
+        let wrong_digest = Version::new("1.2.3".parse().unwrap(), Eidos::hash(b"other-digest"));
 
         assert!(
             <VersionSet as pubgrub::VersionSet>::contains(&set, &matching),
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn semantic_range_contains_digest_qualified_versions() {
         let set = VersionSet::from("^1.0.0".parse::<VersionReq>().unwrap());
-        let digest = Rpo256::hash(b"same-version-digest");
+        let digest = Eidos::hash(b"same-version-digest");
         let candidate = Version::new("1.2.3".parse().unwrap(), digest);
 
         assert!(
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn empty_digest_constrained_intersection_stays_empty() {
-        let digest = Rpo256::hash(b"revived-digest");
+        let digest = Eidos::hash(b"revived-digest");
         let impossible = <VersionSet as pubgrub::VersionSet>::intersection(
             &VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest)),
             &VersionSet::from("=2.0.0".parse::<VersionReq>().unwrap()),

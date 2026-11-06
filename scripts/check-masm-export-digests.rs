@@ -1,4 +1,4 @@
-#!/usr/bin/env -S cargo +nightly -Zscript
+#!/usr/bin/env -S RUSTC_BOOTSTRAP=1 cargo +stable -Zscript
 ---cargo
 [package]
 edition = "2024"

@@ -2,69 +2,74 @@
 //!
 //! The two ECDSA programs stand in for transactions; they do not use the protocol kernel.
 //! Each leaves a deferred root identifying the precompile work still to be proved. `verify_batch`
-//! in `batch.masm` accepts an even runtime claim count bounded by `MAX_CLAIMS`. `PvmSettlementHost`
-//! in the parent module uses the executions' deferred witness data to generate a PVM proof when
-//! MASM requests it.
+//! in `batch.masm` accepts an even runtime claim count bounded by `MAX_CLAIMS`. Rust generates the
+//! shared PVM proof from the executions' deferred witnesses before batch execution, then stages
+//! its proof package for MASM to fetch and verify against the combined root.
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     deferred::{TRUE_DIGEST, fold_deferred_root},
     program::ExecutionClaim,
     proof::{ExecutionProof, HashFunction, PrecompileStatus},
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    ExecutionOptions, FastProcessor, Program, StackInputs, advice::AdviceInputs,
+    DefaultHost, ExecutionOptions, FastProcessor, Program, StackInputs, advice::AdviceInputs,
 };
 use miden_prover::Prover;
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::Verifier;
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
-use super::{PvmSettlementHost, prove_ecdsa_execution};
+use super::{prove_ecdsa_execution, pvm_proof_advice};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 
 mod checks;
 
-#[tokio::test(flavor = "current_thread")]
-async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
+#[test]
+fn batch_settles_deferred_obligations_with_one_pvm_proof() {
     let core_lib = CoreLibrary::default();
     let program = assemble_batch(&core_lib);
 
-    // Each returned witness contains the precompile inputs needed by the host.
+    // Each returned witness contains the precompile inputs needed by the PVM prover.
     let (first_proof, first_claim, first_witness) =
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
     let (second_proof, second_claim, second_witness) =
         prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
-    let roots = [first_witness.root_unchecked(), second_witness.root_unchecked()];
+    let roots = [first_proof.vm().precompile_root, second_proof.vm().precompile_root];
     assert_ne!(roots[0], roots[1]);
 
     // Public inputs identify the ordered claims; advice supplies the proofs.
-    let (stack_inputs, advice_inputs) =
+    let (stack_inputs, mut advice_inputs) =
         batch_inputs(&core_lib, &[(&first_proof, &first_claim), (&second_proof, &second_claim)]);
 
-    // Keep D1 and D2 in order. The host waits for the MASM request before proving
-    // D = digest(AND(D1, D2)) from their portable witnesses.
+    // Keep D1 and D2 in order and prove D = digest(AND(D1, D2)) before batch execution.
     let expected_root = fold_deferred_root(roots[0], roots[1]);
-    let mut host = PvmSettlementHost::new(&core_lib, vec![first_witness, second_witness]);
+    let precompile_proof = Prover::new()
+        .with_hash_fn(HashFunction::Eidos)
+        .prove_precompiles(vec![first_witness, second_witness])
+        .expect("failed to prove the batch's precompile work");
+    assert_eq!(precompile_proof.roots, roots);
+    assert_eq!(precompile_proof.aggregate_root(), Some(expected_root));
+    let pvm_advice = pvm_proof_advice(core_lib.pvm_recursive_verifier_root(), &precompile_proof)
+        .expect("failed to prepare the shared PVM proof for MASM");
+    advice_inputs.extend(pvm_advice);
 
-    // Execution awaits the PVM proof, then MASM verifies it against the combined root.
+    // MASM derives the combined root from verified MVM proofs and checks the staged PVM proof.
+    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
     let witness =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
             .unwrap()
-            .execute_for_proving(&program, &mut host)
-            .await
+            .execute_for_proving_sync(&program, &mut host)
             .expect("batch settlement failed");
-    let precompile_proof = host.precompile_proof.take().expect("the host did not produce a proof");
-    assert_eq!(precompile_proof.roots, roots);
-    assert_eq!(precompile_proof.aggregate_root(), Some(expected_root));
     assert!(!witness.has_precompiles(), "the batch left precompile work unsettled");
 
     // Prove the batcher itself. Its proof settles both executions, so the recipient needs no
     // separate precompile proof.
     let batch_claim = witness.claim();
     let batch_proof = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
         .expect("failed to prove the batcher");
     assert!(matches!(batch_proof.precompile(), PrecompileStatus::Empty));
@@ -73,7 +78,9 @@ async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
         .verify(&batch_claim, &batch_proof)
         .expect("batch proof verification failed");
     assert!(outcome.is_complete());
-    assert!(outcome.vm_security_parameters().conjectured_security_level() >= 96);
+    // At 2^20 rows, Eidos's lookup bound gives the outer proof about 95.54 bits.
+    // The inner proofs meet the separate 96-bit requirement enforced in batch.masm.
+    assert!(outcome.vm_security_parameters().conjectured_security_level() >= 95);
 }
 
 fn assemble_batch(core_lib: &CoreLibrary) -> Program {
@@ -114,7 +121,7 @@ fn batch_inputs(
 ) -> (StackInputs, AdviceInputs) {
     let commitments: Vec<_> = executions.iter().map(|(_, claim)| claim.commitment()).collect();
     let claim_elements = Word::words_as_elements(&commitments);
-    let batch_commitment = Poseidon2::hash_elements(claim_elements);
+    let batch_commitment = hasher::hash_elements(claim_elements);
     let mut inputs = vec![Felt::from_u32(executions.len().try_into().unwrap())];
     inputs.extend_from_slice(batch_commitment.as_elements());
     let stack_inputs = StackInputs::new(&inputs).unwrap();

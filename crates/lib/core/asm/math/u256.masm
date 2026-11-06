@@ -1402,7 +1402,7 @@ const U256_DIV_EVENT = event("miden::core::math::u256::u256_div")
 @locals(32)
 pub proc divmod(b: u256, a: u256) -> (remainder: u256, quotient: u256)
     emit.U256_DIV_EVENT
-    # Advice stack (top to bottom): [r0..r7, q0..q7].
+    # Advice stack (top to bottom): [r4..r7, r0..r3, q4..q7, q0..q3].
 
     # ----- Phase 0: load (q, r) from advice and stash all four operands to local mem -----
     # mem[0..7]   = q

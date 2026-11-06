@@ -295,7 +295,7 @@ impl<R: PackageRegistry + ?Sized> From<pubgrub::PubGrubError<PackageResolver<'_,
 mod tests {
     use alloc::vec;
 
-    use miden_core::{Word, crypto::hash::Rpo256};
+    use miden_core::{Word, crypto::hash::Eidos};
     use pubgrub::SelectedDependencies;
 
     use super::*;
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn registry_find_digest_version() {
-        let digest = Rpo256::hash(b"foo");
+        let digest = Eidos::hash(b"foo");
         let index = InMemoryPackageRegistry::from_iter([(
             "foo",
             vec![(Version::new("1.0.0".parse().unwrap(), digest), vec![])],
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn registry_find_digest_prefers_latest_matching_semver_when_digest_is_reused() {
-        let digest = Rpo256::hash(b"foo");
+        let digest = Eidos::hash(b"foo");
         let index = InMemoryPackageRegistry::from_iter([(
             "foo",
             vec![
@@ -427,14 +427,14 @@ mod tests {
 
     #[test]
     fn exact_requirement_uses_hash_separator() {
-        let digest = Rpo256::hash(b"foo");
+        let digest = Eidos::hash(b"foo");
         let requirement = exact_requirement("1.0.0", digest);
         assert_eq!(format!("{requirement}"), format!("1.0.0#{digest}"));
     }
 
     #[test]
     fn resolver_resolve_mixed_versioning_schemes() {
-        let digest = Rpo256::hash(b"the digest for 'b'");
+        let digest = Eidos::hash(b"the digest for 'b'");
         let index = InMemoryPackageRegistry::from_iter([
             ("a", vec![("0.1.0".parse().unwrap(), vec![("b", digest_requirement(digest))])]),
             (
@@ -555,8 +555,8 @@ mod tests {
 
     #[test]
     fn resolver_resolves_transitive_exact_digest_dependencies() {
-        let b_digest = Rpo256::hash(b"b");
-        let c_digest = Rpo256::hash(b"c");
+        let b_digest = Eidos::hash(b"b");
+        let c_digest = Eidos::hash(b"c");
         let index = InMemoryPackageRegistry::from_iter([
             ("a", vec![("0.1.0".parse().unwrap(), vec![("b", digest_requirement(b_digest))])]),
             (
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn resolver_resolves_exact_version_requirements() {
-        let b_digest = Rpo256::hash(b"b");
+        let b_digest = Eidos::hash(b"b");
         let index = InMemoryPackageRegistry::from_iter([
             (
                 "a",
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn resolver_resolves_semantic_singleton_to_digest_qualified_version() {
-        let b_digest = Rpo256::hash(b"b");
+        let b_digest = Eidos::hash(b"b");
         let index = InMemoryPackageRegistry::from_iter([
             ("a", vec![("0.1.0".parse().unwrap(), vec![("b", req("=1.0.0"))])]),
             (
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn resolver_exact_requirement_ignores_newer_versions_with_same_digest() {
-        let b_digest = Rpo256::hash(b"b");
+        let b_digest = Eidos::hash(b"b");
         let index = InMemoryPackageRegistry::from_iter([
             (
                 "a",
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn registry_rejects_duplicate_canonical_semantic_versions() {
-        let digest = Rpo256::hash(b"a");
+        let digest = Eidos::hash(b"a");
         let mut index = InMemoryPackageRegistry::default();
 
         let dep_id = PackageId::from("dep");
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn resolver_prefers_compatible_shared_digest_version() {
-        let digest = Rpo256::hash(b"shared");
+        let digest = Eidos::hash(b"shared");
         let index = InMemoryPackageRegistry::from_iter([
             (
                 "a",

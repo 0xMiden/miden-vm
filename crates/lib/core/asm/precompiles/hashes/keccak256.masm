@@ -9,18 +9,39 @@ use miden::core::precompiles
 # - Conversion: v_i = u32::from_le_bytes([b_{4i}, b_{4i+1}, b_{4i+2}, b_{4i+3}])
 # - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
 
-# CONSTANTS — Keccak256Precompile assertion tag fields and digest advice event
+# CONSTANTS — Keccak256Precompile assertion frame and digest advice event
 # ================================================================================================
-# Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the Blake3-derived
-# `precompile_id(&Keccak256Precompile)` over NAME ("keccak256"); changing the NAME in Rust must
-# update this literal in lockstep. ASSERT_TAG_ID is the generic hash assertion discriminant.
+# Pinned to the Rust-side Keccak256Precompile constants. DOMAIN_TAG identifies the registered
+# Keccak-256 precompile domain; ASSERT_OP_ID identifies the assertion operation within that domain.
 
-const PRECOMPILE_ID = 1416710563871706399
-const ASSERT_TAG_ID = 0
+# DOMAIN_TAG = 16778753
+# ASSERT_OP_ID = 0
 const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::digest")
+
+# Fixed lanes of `init(DOMAIN_TAG, [ASSERT_OP_ID, len_bytes, 0])`.
+const ASSERT_INIT_CV_0 = 13503953893964383745
+const ASSERT_INIT_CV_1 = 11912009168875159552
+const ASSERT_INIT_CV_2_BASE = 11170449401267093504
+const ASSERT_INIT_CV_3 = 6620516959492505600
 
 # PROCEDURES
 # ================================================================================================
+
+#! Registers a Keccak assertion expression and returns its content-addressed digest.
+#!
+#! The frame is `[DOMAIN_TAG, ASSERT_OP_ID, len_bytes, 0]`. Only `len_bytes` is dynamic; this
+#! procedure validates it and injects it into the otherwise precomputed initial chaining word.
+#!
+#! Input:  [len_bytes, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+#! Output: [ASSERTION_DIGEST, ...]
+proc register_hash_assert
+    u32assert.err="Keccak preimage length must fit in u32"
+
+    push.ASSERT_INIT_CV_2_BASE add
+    push.ASSERT_INIT_CV_3 swap push.ASSERT_INIT_CV_1 push.ASSERT_INIT_CV_0
+    # => [CV, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
+end
 
 #! Writes the advised Keccak256 digest, registers expected digest chunks, and logs the hash assertion.
 #!
@@ -43,10 +64,9 @@ proc finish_hash_assert(out_ptr: ptr<u32>, preimage: precompiles::Digest, len_by
     # => [EXPECTED_DIGEST_CHUNKS_DIGEST, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
     swapw
     # => [PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, len_bytes, ...]
-    movup.8 push.0 swap push.ASSERT_TAG_ID push.PRECOMPILE_ID
-    # => [ASSERT_TAG=[PRECOMPILE_ID,0,len_bytes,0], PREIMAGE_CHUNKS_DIGEST,
-    #     EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
-    exec.precompiles::register_expr
+    movup.8
+    # => [len_bytes, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    exec.register_hash_assert
     # => [ASSERTION_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [...]
@@ -120,4 +140,74 @@ pub proc hash_2_chunks_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
 
     exec.finish_hash_assert
     # => [...]
+end
+
+#! Writes the advised Keccak256 digest and returns its registered hash assertion.
+#! Input:  [out_ptr, PREIMAGE, len_bytes, ...]
+#! Output: [ROOT, ...]
+proc finish_hash_assert_with_root(
+    out_ptr: ptr<u32>,
+    preimage: precompiles::Digest,
+    len_bytes: u32,
+) -> precompiles::Digest
+    adv_pushw
+    dup.4 mem_storew_le dropw
+    adv_pushw
+    dup.4 add.4 mem_storew_le dropw
+    exec.precompiles::register_chunks_mem_1
+    swapw
+    movup.8
+    exec.register_hash_assert
+end
+
+#! Returns the obligation root for `hash_bytes_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+pub proc hash_bytes_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    dup.1
+    add.31 u32div.32
+    dup eq.0 add
+    swap
+    exec.precompiles::register_chunks_mem
+    movup.5
+    exec.finish_hash_assert_with_root
+end
+
+#! Returns the obligation root for `hash_1_chunk_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+pub proc hash_1_chunk_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    exec.precompiles::register_chunks_mem_1
+    movup.5
+    exec.finish_hash_assert_with_root
+end
+
+#! Returns the obligation root for `hash_2_chunks_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+pub proc hash_2_chunks_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    exec.precompiles::register_chunks_mem_2
+    movup.5
+    exec.finish_hash_assert_with_root
 end

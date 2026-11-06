@@ -1,13 +1,12 @@
 use alloc::string::ToString;
 
 use rand::{
-    Rng,
+    Rng, RngExt,
     rand_core::{Infallible, TryRng, utils},
 };
 
-use super::{Felt, FeltRng};
 use crate::{
-    Word,
+    Felt, Word,
     field::ExtensionField,
     hash::eidos::{
         Eidos,
@@ -31,6 +30,10 @@ const OUTPUT_FELTS: usize = Word::NUM_ELEMENTS;
 /// interval: knowledge of the stored state permits recomputing every output block derived from
 /// that state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct EidosRandomCoin {
     state: Word,
     output: Word,
@@ -91,16 +94,18 @@ impl EidosRandomCoin {
 
     /// Draws a uniformly distributed base-field element.
     ///
+    /// This samples the full Goldilocks field, whereas `EidosChallenger::sample_felt` samples only
+    /// values below `2^63`.
+    ///
     /// # Panics
     ///
     /// Panics if output generation requires another block after the `u64` block counter is
     /// exhausted.
     pub fn draw_basefield(&mut self) -> Felt {
+        // Reject noncanonical values to avoid bias from reducing candidates modulo the field.
         loop {
-            let candidate =
-                self.try_next_u64().expect("Eidos random-coin generation is infallible");
-            if let Ok(value) = Felt::new(candidate) {
-                return value;
+            if let Ok(felt) = Felt::new(self.random::<u64>()) {
+                return felt;
             }
         }
     }
@@ -147,21 +152,14 @@ impl EidosRandomCoin {
     }
 
     fn next_output_u32(&mut self) -> u32 {
-        loop {
-            if self.current == OUTPUT_FELTS {
-                self.refill_output();
-            }
-
-            let value = self.output[self.current].as_canonical_u64();
-            self.current += 1;
-
-            // Masked Eidos outputs already have uniform low-u32 limbs under the pseudorandom-output
-            // assumption. For a uniform Goldilocks-field output, p - 1 is the sole extra preimage
-            // of zero; removing it leaves exactly 2^32 - 1 preimages for every u32 value.
-            if value != Felt::ORDER - 1 {
-                return value as u32;
-            }
+        if self.current == OUTPUT_FELTS {
+            self.refill_output();
         }
+
+        // Generated Eidos words lie below 2^63, so every u32 has the same number of preimages.
+        let value = self.output[self.current].as_canonical_u64() as u32;
+        self.current += 1;
+        value
     }
 
     fn refill_output(&mut self) {
@@ -181,16 +179,6 @@ impl EidosRandomCoin {
     }
 }
 
-impl FeltRng for EidosRandomCoin {
-    fn draw_element(&mut self) -> Felt {
-        self.draw_basefield()
-    }
-
-    fn draw_word(&mut self) -> Word {
-        Word::new(core::array::from_fn(|_| self.draw_basefield()))
-    }
-}
-
 impl TryRng for EidosRandomCoin {
     type Error = Infallible;
 
@@ -204,6 +192,46 @@ impl TryRng for EidosRandomCoin {
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         utils::fill_bytes_via_next_word(dest, || self.try_next_u32())
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod eidos_coin_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{EidosRandomCoin, OUTPUT_FELTS};
+    use crate::Word;
+
+    impl Arbitrary for EidosRandomCoin {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects current > OUTPUT_FELTS and a buffered current (<
+            // OUTPUT_FELTS) with counter == 0; both regimes are generated explicitly and all
+            // remaining fields are any-valid.
+            prop_oneof![
+                // Exhausted-buffer regime: current == OUTPUT_FELTS, any counter.
+                (any::<Word>(), any::<Word>(), any::<u64>())
+                    .prop_map(|(state, output, counter)| Self {
+                        state,
+                        output,
+                        counter,
+                        current: OUTPUT_FELTS
+                    })
+                    .boxed(),
+                // Buffered regime: current < OUTPUT_FELTS requires counter >= 1.
+                (any::<Word>(), any::<Word>(), 1u64..=u64::MAX, 0usize..OUTPUT_FELTS)
+                    .prop_map(|(state, output, counter, current)| Self {
+                        state,
+                        output,
+                        counter,
+                        current
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
     }
 }
 
@@ -278,7 +306,7 @@ mod tests {
         assert_eq!(coin.state, initial_state);
         assert_eq!(coin.output, expected);
         assert_eq!(coin.counter, 1);
-        assert_eq!(actual, [3_343_138_332, 3_182_666_834, 3_956_264_476, 4_003_292_457]);
+        assert_eq!(actual, [850_465_975, 2_814_286_374, 3_247_141_700, 1_839_660_647]);
     }
 
     #[test]
@@ -294,16 +322,6 @@ mod tests {
 
         assert_eq!(coin.draw_basefield(), Felt::from_u64(42));
         assert_eq!(coin.current, 4);
-    }
-
-    #[test]
-    fn u32_sampling_rejects_the_extra_low_limb_preimage() {
-        let output =
-            Word::new([Felt::new_unchecked(Felt::ORDER - 1), Felt::from_u32(42), ZERO, ZERO]);
-        let mut coin = EidosRandomCoin::from_parts(Word::default(), output, 1, 0);
-
-        assert_eq!(coin.random::<u32>(), 42);
-        assert_eq!(coin.current, 2);
     }
 
     #[test]
@@ -360,19 +378,7 @@ mod tests {
         coin.reseed(data);
 
         let actual: [u32; OUTPUT_FELTS] = core::array::from_fn(|_| coin.random());
-        assert_eq!(actual, [3_145_282_389, 2_211_610_295, 3_232_936_185, 3_064_838_016]);
-    }
-
-    #[test]
-    fn felt_rng_methods_follow_the_base_field_stream() {
-        let mut actual = EidosRandomCoin::new(seed());
-        let mut expected = actual;
-
-        assert_eq!(actual.draw_element(), expected.draw_basefield());
-        assert_eq!(
-            actual.draw_word(),
-            Word::new(core::array::from_fn(|_| expected.draw_basefield()))
-        );
+        assert_eq!(actual, [3_745_419_018, 1_592_641_853, 33_771_270, 3_071_911_292]);
     }
 
     #[test]

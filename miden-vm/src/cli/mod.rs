@@ -2,6 +2,7 @@ mod bundle;
 mod compile;
 pub mod data;
 
+mod precompile_limits;
 mod prove;
 mod run;
 pub mod utils;

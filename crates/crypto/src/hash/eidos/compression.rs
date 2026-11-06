@@ -35,7 +35,7 @@ pub(super) fn compress_xof_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
 pub(super) fn compress_felt_block(cv: Word, block: [Felt; BLOCK_LEN]) -> Word {
     let cv = encoding::word_to_cv(cv);
     let block = encoding::encode_felt_block(&block);
-    encoding::output_cv_to_word(compress_cv(cv, block))
+    encoding::mask_and_pack_word(compress_cv(cv, block))
 }
 
 #[cfg(test)]
@@ -232,7 +232,7 @@ mod tests {
             Felt::new_unchecked(((0x8000_0000u64 | (i as u64 + 1)) << 32) | i as u64)
         });
 
-        let expected = encoding::output_cv_to_word(CompressionCore::compress(
+        let expected = encoding::mask_and_pack_word(CompressionCore::compress(
             encoding::word_to_cv(cv),
             encoding::encode_felt_block(&block),
         ));

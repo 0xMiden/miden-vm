@@ -1,6 +1,6 @@
 [package]
 name = "miden-core"
-version = "0.34.0"
+version.workspace = true
 description = "Miden VM core components"
 documentation = "https://docs.rs/miden-core"
 readme = "README.md"
@@ -20,6 +20,16 @@ doctest = false
 
 [[bench]]
 name = "mast_forest_merge"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
+name = "mast_forest_subset"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
+name = "mast_forest_extraction"
 required-features = ["arbitrary"]
 harness = false
 
@@ -56,6 +66,7 @@ miden-utils-sync.workspace = true
 # External dependencies
 derive_more.workspace = true
 log.workspace = true
+p3-matrix.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 

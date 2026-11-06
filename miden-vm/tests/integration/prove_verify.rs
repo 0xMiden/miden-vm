@@ -116,6 +116,23 @@ fn assert_recursive_verify(
 }
 
 #[test]
+fn test_clear_deferred_prove_verify() {
+    // Exercise proof plumbing for the unsafe opcode. A production kernel epilogue must
+    // recursively verify the top stack root before executing clear_deferred.
+    assert_prove_verify(
+        "begin
+            padw log_deferred dropw
+            adv.push_deferred_root padw adv_loadw
+            clear_deferred dropw
+        end",
+        HashFunction::Eidos,
+        "Eidos",
+        false,
+        false,
+    );
+}
+
+#[test]
 fn test_all_hash_functions_prove_verify() {
     let source = "
         begin
@@ -125,12 +142,12 @@ fn test_all_hash_functions_prove_verify() {
         end
     ";
 
+    // The direct verifier accepts every supported proof hasher. The recursive MASM verifier is
+    // Eidos-only and is exercised separately below.
     for (hash_fn, hash_name) in [
         (HashFunction::Blake3_256, "Blake3_256"),
         (HashFunction::Keccak, "Keccak"),
-        (HashFunction::Rpo256, "RPO"),
-        (HashFunction::Poseidon2, "Poseidon2"),
-        (HashFunction::Rpx256, "RPX"),
+        (HashFunction::Eidos, "Eidos"),
     ] {
         assert_prove_verify(source, hash_fn, hash_name, false, false);
     }
@@ -146,7 +163,7 @@ fn test_u32div_prove_verify() {
             push.196612 push.3 u32divmod drop drop
         end
     ";
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, true);
 }
 
 #[test]
@@ -160,7 +177,7 @@ fn test_exp_lowerings_prove_verify() {
         end
     "
     );
-    assert_prove_verify(&source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(&source, HashFunction::Eidos, "Eidos", false, true);
 }
 
 #[test]
@@ -196,7 +213,6 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
             .expect("failed to execute Keccak precompile program");
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = Prover::new()
-        .with_hash_fn(HashFunction::Blake3_256)
         .prove_full(witness)
         .expect("failed to prove Keccak precompile execution");
 
@@ -216,7 +232,7 @@ fn test_equal_heights_recursive() {
             push.1 drop
         end
     ";
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, true);
 }
 
 /// Hash-heavy program where chiplets grow beyond the core trace. Regression for per-AIR-height
@@ -227,28 +243,110 @@ fn test_hash_heavy_divergent_heights() {
         begin
             padw padw padw
             repeat.20
-                hperm
+                compress
             end
             dropw dropw dropw
         end
     ";
-    assert_prove_verify(source, HashFunction::Blake3_256, "Blake3", false, false);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, false);
 }
 
-/// Exercises the MASM recursive verifier when the Poseidon2 permutation AIR is taller than the
-/// core trace.
+/// Exercises the MASM recursive verifier when the Eidos compression AIR is taller than
+/// the core trace.
 #[test]
 fn test_hash_heavy_divergent_heights_recursive() {
     let source = "
         begin
             padw padw padw
             repeat.20
-                hperm
+                compress
             end
             dropw dropw dropw
         end
     ";
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, true);
+}
+
+/// Regression for phase alignment in the shared bitwise/AEAD stream trace region. The ordinary
+/// `u32and` executes first, but the stream entry must still begin on a period-8 boundary.
+#[test]
+fn test_mixed_u32and_crypto_stream_prove_verify() {
+    let source = "
+        begin
+            push.1 push.1 u32and drop
+            padw push.100 mem_storew_le dropw
+            padw push.104 mem_storew_le dropw
+            push.1 push.0 push.200 push.100 padw
+            crypto_stream
+            dropw dropw
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, false);
+}
+
+/// A precompile request produces deferred material: the outer statement binds a non-TRUE
+/// deferred root and the default prover attaches a STARK-backed deferred proof. The MASM
+/// recursive verifier must consume that non-trivial deferred root end to end.
+#[test]
+fn test_eidos_recursive_verify_with_precompile_requests() {
+    // One keccak256 chunk hashed through the precompile wrapper registers a deferred claim.
+    const IN_PTR: u32 = 128;
+    const OUT_PTR: u32 = 256;
+    const CHUNK_BYTES: u32 = 32;
+
+    let stores = (0..8_u32)
+        .map(|i| format!("push.{} push.{} mem_store", i + 1, IN_PTR + i))
+        .collect::<Vec<_>>()
+        .join("\n            ");
+    let source = format!(
+        "
+        begin
+            {stores}
+            push.{OUT_PTR}
+            push.{CHUNK_BYTES}
+            push.{IN_PTR}
+            exec.::miden::core::precompiles::hashes::keccak256::hash_1_chunk_mem
+        end
+        "
+    );
+
+    let core_lib = CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
+        .assemble_program("program", source.as_str())
+        .expect("failed to assemble keccak precompile fixture")
+        .unwrap_program();
+
+    let stack_inputs = StackInputs::default();
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load core library into the host");
+    let witness = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor initialization failed")
+    .execute_for_proving_sync(&program, &mut host)
+    .expect("execution failed");
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = Prover::new()
+        .with_hash_fn(HashFunction::Eidos)
+        .prove_full(witness)
+        .expect("Proving failed");
+
+    // The precompile request left non-trivial deferred material behind.
+    assert!(matches!(proof.precompile(), miden_vm::PrecompileStatus::Proven(_)));
+    assert_ne!(proof.vm().precompile_root, miden_core::deferred::TRUE_DIGEST);
+
+    assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
+
+    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
+    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    assert!(outcome.is_complete());
 }
 
 // PROVER API LIFECYCLE TESTS
@@ -258,13 +356,14 @@ mod prover_api_lifecycle {
     use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{Node, PrecompileWitnessEntry, Tag, precompile_id},
+        deferred::{Node, PrecompileWitnessEntry, deferred_chunks_frame},
     };
+    use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
-        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, VerificationOutcome,
-        Verifier, advice::AdviceInputs, prove_sync,
+        FastProcessor, HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus,
+        PrecompileWitness, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
+        VerificationError, VerificationOutcome, Verifier, advice::AdviceInputs, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -293,46 +392,33 @@ mod prover_api_lifecycle {
     }
 
     fn u256_program(value: u64) -> Program {
-        let precompile_id = precompile_id("uint256");
-        let value_tag = Tag::precompile(
-            precompile_id,
-            [
-                Felt::new(0).expect("VALUE operation ID is a felt"),
-                Felt::new(1).expect("U256 bound pointer is a felt"),
-                ZERO,
-            ],
-        )
-        .expect("uint precompile ID is not reserved");
+        let value_frame = UintPrecompile::value_frame(UintDomain::U256);
         let mut value_chunk = [ZERO; 8];
         value_chunk[0] = Felt::new(value).expect("test U256 value is a felt");
-        let value_digest = Node::value(value_tag, value_chunk)
+        let value_digest = Node::value(value_frame, value_chunk)
             .expect("U256 value node should be valid")
             .digest();
-        let equality_tag = Tag::precompile(
-            precompile_id,
-            [Felt::new(4).expect("EQ operation ID is a felt"), ZERO, ZERO],
-        )
-        .expect("uint precompile ID is not reserved");
+        let equality_cv =
+            UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID).initial_chaining_word();
 
         // This is the inlined equivalent of the core library's U256 `push_*_digest`, `assert_eq`,
-        // `precompiles::register_expr`, and `precompiles::log_deferred` procedures. The processor's
-        // built-in registry seeds the constant U256 value nodes used here.
+        // `precompiles::register_fixed_expr`, and `precompiles::log_deferred` procedures. The
+        // processor's built-in registry seeds the constant U256 value nodes used here.
         let source = format!(
             "begin\n\
                  push.{}\n\
                  push.{}\n\
                  push.{}\n\
-                 movdnw.2\n\
                  adv.register_deferred\n\
-                 hperm\n\
-                 swapw.2 dropw dropw\n\
-                 padw padw movdnw.2\n\
+                 movdnw.2\n\
+                 compress\n\
+                 dropw dropw\n\
                  log_deferred\n\
-                 dropw dropw dropw\n\
+                 dropw\n\
              end",
             word_literal(value_digest),
             word_literal(value_digest),
-            word_literal(equality_tag.as_word().into()),
+            word_literal(equality_cv),
         );
 
         assemble(&source)
@@ -417,13 +503,13 @@ mod prover_api_lifecycle {
             .prove_vm_witness(vm_witness)
             .expect_err("VM witness with precompile work should be rejected");
 
-        assert!(matches!(error, miden_vm::ProverError::VmWitnessHasPrecompiles));
+        assert!(matches!(error, ProverError::VmWitnessHasPrecompiles));
     }
 
     #[test]
     fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
         let stack_inputs = StackInputs::default();
-        let prover = Prover::new().with_hash_fn(HashFunction::Blake3_256);
+        let prover = Prover::new();
         let execution_options = ExecutionOptions::default()
             .with_core_trace_fragment_size(1)
             .expect("one-row trace fragments should be supported");
@@ -436,7 +522,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut buffered_host,
-                execution_options.with_overlapped_trace_build(false),
+                execution_options.clone().with_overlapped_trace_build(false),
             )
             .expect("buffered execute-and-prove should succeed");
 
@@ -447,7 +533,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut overlapped_host,
-                execution_options.with_overlapped_trace_build(true),
+                execution_options.clone().with_overlapped_trace_build(true),
             )
             .expect("overlapped execute-and-prove should succeed");
 
@@ -466,7 +552,6 @@ mod prover_api_lifecycle {
         let one_witness = u256_witness(1);
         let one_claim = one_witness.claim();
         let one_deferred = Prover::new()
-            .with_hash_fn(HashFunction::Blake3_256)
             .prove(one_witness)
             .expect("root-one execution should produce a deferred proof");
         assert!(matches!(one_deferred.precompile(), PrecompileStatus::Deferred(_)));
@@ -477,6 +562,12 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
         assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
+        assert!(matches!(
+            Verifier::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .verify(&one_claim, &one_deferred),
+            Err(VerificationError::DeferredWitnessPreparation(_))
+        ));
 
         // This unrelated witness would fail evaluation because its final node is data, not TRUE.
         // Reject its root mismatch before reaching that evaluation failure.
@@ -484,7 +575,7 @@ mod prover_api_lifecycle {
             one_deferred.vm().clone(),
             PrecompileStatus::Deferred(
                 PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Data {
-                    tag: Tag::CHUNKS,
+                    frame: deferred_chunks_frame(1),
                     chunks: vec![[ZERO; 8]],
                 }])
                 .expect("data is a structurally valid witness"),
@@ -509,7 +600,6 @@ mod prover_api_lifecycle {
         let two_witness = u256_witness(2);
         let two_claim = two_witness.claim();
         let two_deferred = Prover::new()
-            .with_hash_fn(HashFunction::Blake3_256)
             .prove(two_witness)
             .expect("root-two execution should produce a deferred proof");
 
@@ -525,11 +615,17 @@ mod prover_api_lifecycle {
         let PrecompileStatus::Deferred(two_precompile) = two_transported.precompile() else {
             panic!("transported root-two proof should remain deferred");
         };
+        assert!(matches!(
+            Prover::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .prove_precompiles(vec![one_precompile.clone()]),
+            Err(ProverError::PrecompileProofGeneration(_))
+        ));
         let two_root = two_transported.vm().precompile_root;
         let ordered_roots = vec![one_root, two_root, one_root];
 
         let shared_precompile = Prover::new()
-            .with_hash_fn(HashFunction::Poseidon2)
+            .with_hash_fn(HashFunction::Eidos)
             .prove_precompiles(vec![
                 one_precompile.clone(),
                 two_precompile.clone(),
@@ -613,7 +709,7 @@ mod prover_api_lifecycle {
         let invalid_complete = one_transported
             .clone()
             .complete(PrecompileProof {
-                proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
+                proof: StarkProof::new(vec![0, 0], HashFunction::Eidos),
                 roots: vec![one_root],
             })
             .expect("completion should only attach the precompile proof");
@@ -662,12 +758,13 @@ mod execution_witness_serialization {
             BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
         },
         operations::Operation,
+        serde::Serializable,
     };
     use miden_processor::{
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{HashFunction, Prover, serde::Serializable};
+    use miden_prover::{HashFunction, Prover};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
@@ -785,9 +882,9 @@ mod execution_witness_serialization {
             let (original_vm, _) = witness.into_parts();
             let (restored_vm, _) = restored.into_parts();
             let original_trace =
-                build_trace(original_vm).expect("original generated witness should build a trace");
+                build_trace(original_vm, &miden_vm_stark::memory::default_budget()).expect("original generated witness should build a trace");
             let restored_trace =
-                build_trace(restored_vm).expect("restored generated witness should build a trace");
+                build_trace(restored_vm, &miden_vm_stark::memory::default_budget()).expect("restored generated witness should build a trace");
             prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
             prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
             prop_assert_eq!(
@@ -836,8 +933,10 @@ mod execution_witness_serialization {
         );
 
         let (vm, _) = witness.into_parts();
-        let original_trace = build_trace(vm).expect("original witness builds trace");
-        let restored_trace = build_trace(restored_vm).expect("restored witness builds trace");
+        let original_trace = build_trace(vm, &miden_vm_stark::memory::default_budget())
+            .expect("original witness builds trace");
+        let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
+            .expect("restored witness builds trace");
         assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
         assert_eq!(restored_trace.program_info(), original_trace.program_info());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
@@ -849,7 +948,6 @@ mod execution_witness_serialization {
         let restored_witness = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("execution witness round trip");
         let proof = Prover::new()
-            .with_hash_fn(HashFunction::Blake3_256)
             .prove(restored_witness)
             .expect("restored execution witness should prove");
 
@@ -882,15 +980,14 @@ mod execution_witness_serialization {
         let witness_bytes = witness.to_bytes();
         let inspected =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
-        let (_, precompile) = inspected.into_parts();
+        let (vm, precompile) = inspected.into_parts();
+        let expected_deferred_root = vm.precompile_root();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
-        let expected_deferred_root = precompile.root_unchecked();
         let expected_witness = precompile;
 
         let proving =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
         let proof = Prover::new()
-            .with_hash_fn(HashFunction::Blake3_256)
             .prove(proving)
             .expect("portable partial proof should be produced from the restored witness");
 

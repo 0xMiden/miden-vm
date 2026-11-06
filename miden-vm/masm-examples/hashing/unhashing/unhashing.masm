@@ -2,22 +2,28 @@
 # read untrusted data from the advice provider, and verify that it hashes to an expected
 # value. Specifically, we
 # 1. Read data from the advice provider and store it simultaneously on the stack and
-# 2. Apply a permutation of the Poseidon2 hash function
+# 2. Compress the native hash state.
 
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
+use miden::core::sys
 
 begin
     # Reads 100 words from the advice provider, stores them in memory, and computes their hash.
-    repeat.50
-        adv_pipe hperm
-    end
-    # => [X, HASH, X, addr]
+    # Bind the full 400-Felt message length into the initial Eidos chaining value.
+    push.400 exec.eidos::init
+    # => [BLOCK_LO=ZERO_WORD, BLOCK_HI=ZERO_WORD, CV, addr=0]
 
-    # Drop the junk words (denoted by `X` above).
-    exec.poseidon2::squeeze_digest
-    # => [HASH, addr]
+    repeat.50
+        adv_pipe compress
+    end
+    # => [BLOCK_LO, BLOCK_HI, DIGEST, addr]
+
+    # Drop the two preserved block words.
+    exec.eidos::digest
+    # => [DIGEST, addr]
 
     # Drop the memory address.
     movup.4 drop
-    # => [HASH]
+    exec.sys::truncate_stack
+    # => [DIGEST]
 end

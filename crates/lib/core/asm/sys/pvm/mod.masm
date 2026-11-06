@@ -1,98 +1,114 @@
+use {
+    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    RELATION_DIGEST_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-pub mod aux_trace
-pub mod constraints_eval
-pub mod deep_queries
-pub mod layout
-pub mod ood_frames
-pub mod public_inputs
-
-use miden::core::stark::constants
+use {
+    FIXED_LOOKUP_ERROR_TERMS,
+    LOOKUP_FRACTIONS_PER_ROW,
+    MAX_CONSTRAINT_DEGREE,
+    MAX_MESSAGE_WIDTH,
+    MIN_LOG_HEIGHT_0,
+    MIN_LOG_HEIGHT_1,
+    MIN_LOG_HEIGHT_2,
+    MIN_LOG_HEIGHT_4,
+    MIN_LOG_HEIGHT_5,
+    MIN_LOG_HEIGHT_6,
+    MIN_LOG_HEIGHT_7,
+    MIN_LOG_HEIGHT_8,
+    MIN_LOG_HEIGHT_9,
+    MIN_LOG_HEIGHT_10,
+    MIN_LOG_HEIGHT_11,
+    NUM_COMPOSED_CONSTRAINTS,
+    NUM_DEEP_TERMS,
+    PREPROCESSED_COMMITMENT_0,
+    PREPROCESSED_COMMITMENT_1,
+    PREPROCESSED_COMMITMENT_2,
+    PREPROCESSED_COMMITMENT_3,
+    PREPROCESSED_TRACE_LOG_HEIGHT,
+    RELATION_DIGEST_0,
+    RELATION_DIGEST_1,
+    RELATION_DIGEST_2,
+    RELATION_DIGEST_3,
+} from miden::core::sys::pvm::parameters
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
-# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
-# zero because Lifted STARK does not grind lookup challenges.
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod fixed_boundary
+pub mod layout
+pub mod ood_frames
+pub mod parameters
+pub mod public_inputs
+
+# Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
-const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 591
-const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 770
-const LOOKUP_FRACTIONS_PER_ROW = 247
-const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
 
-# Fixed ChipletAir::all() cardinality and registry metadata.
-const NUM_CHIPLETS = 10
+# Fixed ChipletAir::all() cardinality.
+# NUM_CHIPLETS = 12
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 
-# Minimum log2 trace height for each ChipletAir::all() instance. These are derived from the
-# AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
-# BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
-const MIN_LOG_HEIGHT_0 = 5
-const MIN_LOG_HEIGHT_1 = 4
-const MIN_LOG_HEIGHT_2 = 7
-const FIXED_LOG_HEIGHT_3 = 16
-const MIN_LOG_HEIGHT_4 = 1
-const MIN_LOG_HEIGHT_5 = 3
-const MIN_LOG_HEIGHT_6 = 1
-const MIN_LOG_HEIGHT_7 = 1
-const MIN_LOG_HEIGHT_8 = 2
-const MIN_LOG_HEIGHT_9 = 1
-
-# PVM_RELATION_DIGEST = Poseidon2(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 12484196935672772437
-const RELATION_DIGEST_1 = 3477320138365322110
-const RELATION_DIGEST_2 = 6979635564408716733
-const RELATION_DIGEST_3 = 16634898497425374784
-
-# Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
-const ACE_REGISTRY_ROOT_0 = 8757348742711293875
-const ACE_REGISTRY_ROOT_1 = 6538879707987301428
-const ACE_REGISTRY_ROOT_2 = 17356837600309008648
-const ACE_REGISTRY_ROOT_3 = 13870270840525555445
-
 #! Loads the fixed PVM relation context.
 #!
-#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
-#! relation commitments, and fixed OOD/query-row addresses.
+#! Stores the twelve AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of
+#! the height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
+#! OOD/query-row addresses.
 #!
-#! Advice order: [h0, ..., h9].
+#! Advice order: [h0, ..., h11].
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc load_air_context()
     # [next_height_ptr, max_height]
     push.0
-    exec.constants::air_trace_length_logs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
 
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
     push.MIN_LOG_HEIGHT_2 exec.load_air_height
-    push.FIXED_LOG_HEIGHT_3 exec.load_fixed_air_height
+    # BytePairLut must match its fixed setup height.
+    push.PREPROCESSED_TRACE_LOG_HEIGHT exec.load_fixed_air_height
     push.MIN_LOG_HEIGHT_4 exec.load_air_height
     push.MIN_LOG_HEIGHT_5 exec.load_air_height
     push.MIN_LOG_HEIGHT_6 exec.load_air_height
     push.MIN_LOG_HEIGHT_7 exec.load_air_height
     push.MIN_LOG_HEIGHT_8 exec.load_air_height
     push.MIN_LOG_HEIGHT_9 exec.load_air_height
+    push.MIN_LOG_HEIGHT_10 exec.load_air_height
+    push.MIN_LOG_HEIGHT_11 exec.load_air_height
 
     drop
-    exec.constants::set_trace_length_log
+    mem_store.LOG_TRACE_LENGTH_PTR
 
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_CHIPLETS
-    exec.utils::derive_order_tag_from_heights
-    exec.constants::set_order_tag
+    # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
+    # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
+    exec.ood_frames::stage_proof_order_maps
+
+    # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
+    exec.store_preprocessed_commitment
     exec.layout::preprocessed_current_ptr
-    exec.constants::set_ood_evaluations_address
+    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
     exec.layout::current_trace_row_ptr
-    exec.constants::set_current_trace_row_address
+    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
+    exec.layout::auxiliary_ace_inputs_ptr
+    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
+    exec.layout::aux_rand_elem_ptr
+    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -152,13 +168,7 @@ end
 
 proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    exec.constants::relation_digest_ptr mem_storew_le
-    dropw
-end
-
-proc store_ace_registry_root()
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
+    mem_storew_le.RELATION_DIGEST_PTR
     dropw
 end
 
@@ -166,22 +176,27 @@ end
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages;
-#! the native AIR tests derive and check this count.
+#! binds. `FIXED_LOOKUP_ERROR_TERMS` counts the fixed boundary fractions.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    exec.constants::get_trace_length_log
+    mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
-    push.FIXED_BOUNDARY_LOOKUP_TERMS
+    push.FIXED_LOOKUP_ERROR_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
     push.MAX_CONSTRAINT_DEGREE
     push.NUM_COMPOSED_CONSTRAINTS
     push.LOOKUP_POW_BITS
+end
+
+proc store_preprocessed_commitment
+    push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
+    dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
+    exec.layout::preprocessed_com_ptr mem_storew_le dropw
 end
 
 #! Requests and stages a PVM proof package for the deferred root.
@@ -214,7 +229,7 @@ pub proc request_proof(root: types::Digest) -> types::Digest
     adv.push_mapval dropw
 end
 
-#! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the common security
+#! Verifies a lifted-STARK proof for the twelve-chiplet PVM relation and returns the common security
 #! descriptor.
 #!
 #! The deferred root is the relation's four public base-field values, supplied by the caller as the
@@ -222,7 +237,8 @@ end
 #! and AIR heights. Successful verification authenticates the root. The returned descriptor
 #! combines those transcript-bound parameters and the maximum AIR height with relation-shape
 #! constants compiled into this verifier. The caller passes all twelve elements unchanged to
-#! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
+#! `stark::security::compute_conjectured_security_level` or
+#! `stark::security::compute_proven_security_level`, then applies its own acceptance policy.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this
 #! procedure.

@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::Felt;
-use miden_core::{Word, ZERO};
+use miden_core::{Felt, Word, ZERO};
 
 use crate::ContextId;
 

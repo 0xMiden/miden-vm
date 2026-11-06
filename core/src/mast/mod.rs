@@ -66,7 +66,6 @@ pub use node::{
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    crypto::hash::Poseidon2,
     serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
@@ -84,8 +83,8 @@ mod untrusted;
 pub use untrusted::{UntrustedMastForest, UntrustedMastForestReadOptions};
 
 mod merger;
-pub(crate) use merger::MastForestMerger;
-pub use merger::MastForestRootMap;
+pub use merger::{MastForestMergeSource, MastForestRootMap};
+pub(crate) use merger::{MastForestMerger, MixedMastForestMerger};
 
 mod multi_forest_node_iterator;
 pub(crate) use multi_forest_node_iterator::*;
@@ -95,6 +94,10 @@ pub use node_builder_utils::build_node_with_remapped_ids;
 
 mod sparse;
 pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitKind};
+
+mod forest_read;
+pub use forest_read::MastForestRead;
+pub(crate) use forest_read::StoredContentKey;
 
 #[cfg(test)]
 mod tests;
@@ -367,10 +370,20 @@ impl MastForest {
     /// If any forest being merged contains an `External(qux)` node and another forest contains a
     /// node whose digest is `qux`, then the external node will be replaced with the `qux` node,
     /// which is effectively deduplication.
-    pub fn merge<'forest>(
-        forests: impl IntoIterator<Item = &'forest MastForest>,
-    ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
-        MastForestMerger::merge(forests)
+    pub fn merge<'forest, F>(
+        forests: impl IntoIterator<Item = F>,
+    ) -> Result<(MastForest, MastForestRootMap), MastForestError>
+    where
+        F: Into<MastForestMergeSource<'forest>>,
+    {
+        let forests = forests.into_iter().map(Into::into).collect::<Vec<_>>();
+        if forests.iter().all(|forest| forest.as_dense().is_some()) {
+            return MastForestMerger::merge(forests.iter().map(|forest| {
+                forest.as_dense().expect("all merge sources were checked as dense")
+            }));
+        }
+
+        MixedMastForestMerger::merge_dense(forests)
     }
 }
 
@@ -465,8 +478,8 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> MastForestCommitment {
-    let interface_commitment = Poseidon2::merge_many(&[]);
-    let dependency_commitment = Poseidon2::merge_many(&[]);
+    let interface_commitment = crate::chiplets::hasher::hash_words(&[]);
+    let dependency_commitment = crate::chiplets::hasher::hash_words(&[]);
     let advice_commitment = AdviceMap::default().commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
@@ -477,7 +490,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::hash_words(&digests)
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
@@ -487,7 +500,7 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
         .map(MastNodeExt::digest)
         .collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::hash_words(&digests)
 }
 
 impl MastForestCommitment {
@@ -496,7 +509,7 @@ impl MastForestCommitment {
         dependency_commitment: Word,
         advice_commitment: Word,
     ) -> Self {
-        let commitment = Poseidon2::merge_many(&[
+        let commitment = crate::chiplets::hasher::hash_words(&[
             interface_commitment,
             dependency_commitment,
             advice_commitment,
@@ -661,6 +674,18 @@ impl MastForest {
     pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
         serialization::write_hashless_into(self, target);
     }
+
+    /// Returns the exact size in bytes produced by [`Self::write_hashless`] without allocating
+    /// or serializing the forest.
+    ///
+    /// This includes external node digests and omits rebuildable internal node hashes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the serialized size exceeds [`usize::MAX`].
+    pub fn hashless_size_hint(&self) -> usize {
+        self.serialized_size_hint(true)
+    }
 }
 
 /// Validation methods
@@ -729,83 +754,16 @@ impl MastForest {
     ///
     /// Returns [`MastForestError::ForwardReference`] if nodes are not in topological order.
     fn compute_node_hashes(&self) -> Result<Vec<Word>, MastForestError> {
-        use crate::chiplets::hasher;
-
-        /// Checks that child_id references a node that appears before node_id in topological order.
-        fn check_no_forward_ref(
-            node_id: MastNodeId,
-            child_id: MastNodeId,
-        ) -> Result<(), MastForestError> {
-            if child_id.0 >= node_id.0 {
-                return Err(MastForestError::ForwardReference(node_id, child_id));
-            }
-            Ok(())
-        }
-
         let mut computed_hashes = Vec::with_capacity(self.nodes.len());
         for (node_idx, node) in self.nodes.iter().enumerate() {
             let node_id = MastNodeId::new_unchecked(node_idx as u32);
-
-            // Check topological ordering and compute digest.
-            let computed_digest = match node {
-                MastNode::Block(block) => {
-                    let op_groups: Vec<Felt> =
-                        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-                    hasher::hash_elements(&op_groups)
-                },
-                MastNode::Join(join) => {
-                    let left_id = join.first();
-                    let right_id = join.second();
-                    check_no_forward_ref(node_id, left_id)?;
-                    check_no_forward_ref(node_id, right_id)?;
-
-                    let left_digest = computed_hashes[left_id.0 as usize];
-                    let right_digest = computed_hashes[right_id.0 as usize];
-                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
-                },
-                MastNode::Split(split) => {
-                    let true_id = split.on_true();
-                    let false_id = split.on_false();
-                    check_no_forward_ref(node_id, true_id)?;
-                    check_no_forward_ref(node_id, false_id)?;
-
-                    let true_digest = computed_hashes[true_id.0 as usize];
-                    let false_digest = computed_hashes[false_id.0 as usize];
-                    hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
-                },
-                MastNode::Loop(loop_node) => {
-                    let body_id = loop_node.body();
-                    check_no_forward_ref(node_id, body_id)?;
-
-                    let body_digest = computed_hashes[body_id.0 as usize];
-                    hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
-                },
-                MastNode::Call(call) => {
-                    let callee_id = call.callee();
-                    check_no_forward_ref(node_id, callee_id)?;
-
-                    let callee_digest = computed_hashes[callee_id.0 as usize];
-                    let domain = if call.is_syscall() {
-                        CallNode::SYSCALL_DOMAIN
-                    } else {
-                        CallNode::CALL_DOMAIN
-                    };
-                    hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
-                },
-                MastNode::Dyn(dyn_node) => {
-                    if dyn_node.is_dyncall() {
-                        DynNode::DYNCALL_DEFAULT_DIGEST
-                    } else {
-                        DynNode::DYN_DEFAULT_DIGEST
-                    }
-                },
-                MastNode::External(_) => {
-                    // External nodes have externally-provided digests that cannot be recomputed.
-                    node.digest()
-                },
-            };
-
-            computed_hashes.push(computed_digest);
+            let digest = node.compute_digest(|child_id| {
+                if child_id >= node_id {
+                    return Err(MastForestError::ForwardReference(node_id, child_id));
+                }
+                Ok(computed_hashes[child_id.0 as usize])
+            })?;
+            computed_hashes.push(digest);
         }
 
         Ok(computed_hashes)
@@ -924,6 +882,10 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -1081,6 +1043,18 @@ pub enum MastForestError {
     EmptyBasicBlock,
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
+    #[error("sparse MAST merge cannot retain advice map entries")]
+    AdviceMapNotSupportedInSparseMerge,
+    #[error("dense MAST merge requires full node data for {0:?}")]
+    MissingNodeOnDenseMerge(MastNodeId),
+    #[error("MAST merge requires node data or a digest for procedure root {0:?}")]
+    MissingRootOnMerge(MastNodeId),
+    #[error("node {0:?} is not a procedure root in the source MAST forest")]
+    NotAProcedureRoot(MastNodeId),
+    #[error("external node digest {0} resolves to conflicting full nodes")]
+    ConflictingNodeDigestOnMerge(Word),
+    #[error("cyclic dependency encountered while merging node {0:?}")]
+    CyclicDependencyOnMerge(MastNodeId),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]

@@ -58,7 +58,7 @@ pub fn finish_load_mast_forest_from_external<F, T>(
     new_package_debug_info: Option<Arc<PackageDebugInfo>>,
     new_source_node_id: Option<DebugSourceNodeId>,
     inline_call_context: Option<SourceInlineCallContext>,
-    external_node_id_old_forest: MastNodeId,
+    external_origin: (MastNodeId, Option<DebugSourceNodeId>),
     current_forest: &mut F,
     current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
     inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
@@ -69,6 +69,7 @@ where
     F: ExecutableMastForest + Clone,
     T: Tracer<Forest = F>,
 {
+    let (external_node_id_old_forest, old_source_node_id) = external_origin;
     let old_forest = current_forest as &F;
     let external_node_old_forest = option_map_break_reason(
         old_forest.get_node_by_id(external_node_id_old_forest),
@@ -100,6 +101,7 @@ where
         old_forest.clone(),
         old_package_debug_info,
         inline_context_depth,
+        old_source_node_id,
     );
 
     // Push the root node of the external MAST forest onto the continuation stack.
@@ -162,7 +164,7 @@ mod tests {
             None,
             None,
             None,
-            external_id,
+            (external_id, None),
             &mut current_forest,
             &mut package_debug_info,
             &mut inline_call_contexts,

@@ -262,8 +262,8 @@ pub enum Instruction {
 
     // ----- cryptographic operations ------------------------------------------------------------
     Hash,
-    HMerge,
-    HPerm,
+    HDword,
+    Compress,
     MTreeGet,
     MTreeSet,
     MTreeMerge,
@@ -277,6 +277,12 @@ pub enum Instruction {
     HornerExt,
     EvalCircuit,
     LogDeferred,
+    /// Unsafely clears the precompile accumulator in root context.
+    ///
+    /// Stack effect: `[ROOT, ...] -> [ROOT, ...]`; the four-element `ROOT` word must equal the
+    /// active accumulator. Only use in a kernel epilogue after recursively verifying that exact
+    /// final accumulator. This instruction binds the reset to `ROOT` but does not verify its proof.
+    ClearDeferred,
 
     // ----- exec / call -------------------------------------------------------------------------
     Exec(InvocationTarget),

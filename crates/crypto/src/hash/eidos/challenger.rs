@@ -44,8 +44,7 @@ enum EidosChallengerMode {
 /// Generic Eidos challenger.
 ///
 /// This type supports scalar observation for Plonky3 challenger traits.
-/// Each sampled base-field element comes from one packed 63-bit Eidos digest word rather than the
-/// full Goldilocks field range.
+/// Each sampled base-field element is an Eidos digest element and is below `2^63`.
 #[derive(Clone, Debug)]
 pub struct EidosChallenger {
     cv: Word,

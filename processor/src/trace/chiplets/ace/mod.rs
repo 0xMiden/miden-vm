@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use crate::trace::ChipletTraceFragment;
@@ -8,13 +8,24 @@ use crate::trace::ChipletTraceFragment;
 mod trace;
 pub use trace::CircuitEvaluation;
 
-mod instruction;
 #[cfg(test)]
 mod tests;
 
 pub const PTR_OFFSET_ELEM: Felt = Felt::ONE;
 pub const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
-pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
+pub const MAX_NUM_ACE_WIRES: u32 = miden_ace::instruction::MAX_ID;
+
+/// Maximum combined number of READ and EVAL wires accepted by one `eval_circuit` operation.
+///
+/// Bounds host allocation and work before circuit evaluation begins. Both recursive verifier
+/// circuits must fit this limit (see `sys/{vm,pvm}/constraints_eval.masm` in the core library).
+pub const MAX_EVAL_CIRCUIT_WIRES: u32 = 1 << 15;
+
+/// Maximum number of `eval_circuit` invocations recorded in an execution witness.
+///
+/// Together with [`MAX_EVAL_CIRCUIT_WIRES`], bounds cumulative ACE work and witness storage
+/// during witness collection. Execution without tracing only enforces the per-call wire limit.
+pub const MAX_EVAL_CIRCUIT_INVOCATIONS: u32 = 1 << 5;
 
 /// Arithmetic circuit evaluation (ACE) chiplet.
 ///

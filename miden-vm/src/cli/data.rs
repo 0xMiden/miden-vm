@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -12,7 +12,7 @@ use miden_assembly::{
     report,
     serde::Deserializable,
 };
-use miden_core::{Felt, field::QuotientMap};
+use miden_core::{Felt, field::QuotientMap, serde::read_file_bounded};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
@@ -21,6 +21,77 @@ use tracing::{field::Empty, instrument};
 
 // HELPERS
 // ================================================================================================
+
+/// Writes and syncs a sibling temporary file before replacing the destination.
+///
+/// A write or file-sync failure leaves the destination intact. Persist errors drop the temporary
+/// file along with the error wrapper. On Unix, the containing directory is synced after
+/// replacement; an error at that stage reports that replacement has already committed.
+fn write_file_atomically(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    write_file_atomically_with_sync(path, write, fs::File::sync_all, sync_directory)
+}
+
+fn write_file_atomically_with_sync(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    sync_file: impl FnOnce(&fs::File) -> io::Result<()>,
+    sync_directory: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() && !metadata.is_symlink() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a regular artifact file",
+            ));
+        },
+        Ok(_) => (),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (),
+        Err(err) => return Err(err),
+    }
+    let builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    let builder = {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut builder = builder;
+        // New files and replacements use ordinary creation permissions and umask.
+        builder.permissions(fs::Permissions::from_mode(0o666));
+        builder
+    };
+    let mut temporary = builder.tempfile_in(parent)?;
+    write(temporary.as_file_mut())?;
+    sync_file(temporary.as_file())?;
+    temporary.persist(path).map_err(|err| err.error)?;
+    sync_directory(parent).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "Artifact `{}` was replaced. Failed to sync destination directory `{}`: {err}",
+                path.display(),
+                parent.display()
+            ),
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    // Directory syncing through std::fs::File is supported on Unix.
+    Ok(())
+}
 
 // OUTPUT FILE
 // ================================================================================================
@@ -33,6 +104,9 @@ pub struct OutputFile {
 
 /// Helper methods to interact with the output file
 impl OutputFile {
+    /// Maximum output JSON file size in bytes (64 KiB).
+    pub const MAX_FILE_SIZE: usize = 64 * 1024;
+
     /// Returns a new [OutputFile] from the specified outputs vectors
     pub fn new(stack_outputs: &StackOutputs) -> Self {
         Self {
@@ -40,7 +114,8 @@ impl OutputFile {
         }
     }
 
-    /// Read the output file
+    /// Reads output JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
+    /// Symlinks to regular files are accepted.
     #[instrument(name = "read_output_file",
         fields(path = %outputs_path.clone().unwrap_or(program_path.with_extension("outputs")).display()), skip_all)]
     pub fn read(outputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, String> {
@@ -51,9 +126,11 @@ impl OutputFile {
             None => program_path.with_extension("outputs"),
         };
 
-        // read outputs file to string
-        let outputs_file = fs::read_to_string(&path)
+        // Bound the file before deserializing any JSON collections.
+        let outputs_file = read_file_bounded(&path, Self::MAX_FILE_SIZE)
             .map_err(|err| format!("Failed to open outputs file `{}` - {}", path.display(), err))?;
+        let outputs_file = String::from_utf8(outputs_file)
+            .map_err(|err| format!("Failed to open outputs file `{}` - {err}", path.display()))?;
 
         // deserialize outputs data
         let outputs: OutputFile = serde_json::from_str(&outputs_file)
@@ -62,17 +139,13 @@ impl OutputFile {
         Ok(outputs)
     }
 
-    /// Write the output file
+    /// Writes output JSON through a temporary file and atomically replaces the destination.
     #[instrument(name = "write_data_to_output_file", fields(path = %path.display()), skip_all)]
-    pub fn write(stack_outputs: &StackOutputs, path: &PathBuf) -> Result<(), String> {
-        // if path provided, create output file
-        let file = fs::File::create(path).map_err(|err| {
-            format!("Failed to create output file `{}` - {}", path.display(), err)
-        })?;
-
-        // write outputs to output file
-        serde_json::to_writer_pretty(file, &Self::new(stack_outputs))
-            .map_err(|err| format!("Failed to write output data - {err}"))
+    pub fn write(stack_outputs: &StackOutputs, path: &Path) -> Result<(), String> {
+        write_file_atomically(path, |file| {
+            serde_json::to_writer_pretty(file, &Self::new(stack_outputs)).map_err(io::Error::from)
+        })
+        .map_err(|err| format!("Failed to write output file `{}` - {err}", path.display()))
     }
 
     /// Converts stack output vector to [StackOutputs].
@@ -199,7 +272,7 @@ impl ProofFile {
             .map_err(|err| format!("Failed to decode proof data - {err}"))
     }
 
-    /// Write stark proof to file
+    /// Writes the proof through a temporary file and atomically replaces the destination.
     #[instrument(name = "write_data_to_proof_file",
                  fields(
                     path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
@@ -220,15 +293,8 @@ impl ProofFile {
         tracing::Span::current()
             .record("size", tracing::field::display(format!("{} KB", proof_bytes.len() / 1024)));
 
-        // create output file
-        let mut file = fs::File::create(&path)
-            .map_err(|err| format!("Failed to create proof file `{}` - {}", path.display(), err))?;
-
-        // write proof bytes to file
-        file.write_all(&proof_bytes)
-            .map_err(|err| format!("Failed to write proof file `{}` - {}", path.display(), err))?;
-
-        Ok(())
+        write_file_atomically(&path, |file| file.write_all(&proof_bytes))
+            .map_err(|err| format!("Failed to write proof file `{}` - {err}", path.display()))
     }
 }
 
@@ -283,5 +349,240 @@ impl Libraries {
         }
 
         Ok(Self { libraries })
+    }
+}
+
+#[cfg(test)]
+mod output_file_tests {
+    use super::*;
+
+    #[test]
+    fn output_file_read_accepts_the_limit_and_rejects_an_extra_byte() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let json = br#"{"stack":["7"]}"#;
+        file.write_all(json).unwrap();
+        file.write_all(&vec![b' '; OutputFile::MAX_FILE_SIZE - json.len()]).unwrap();
+        let path = Some(file.path().to_path_buf());
+        let outputs = OutputFile::read(&path, file.path()).unwrap();
+        assert_eq!(outputs.stack, ["7"]);
+        assert!(outputs.stack_outputs().is_ok());
+
+        file.write_all(b" ").unwrap();
+        let err = OutputFile::read(&path, file.path()).unwrap_err();
+        assert!(err.contains("size limit of 65536 bytes"), "{err}");
+    }
+
+    #[test]
+    fn output_file_read_rejects_invalid_utf8_in_ignored_fields() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"{\"stack\":[],\"ignored\":\"\xff\"}").unwrap();
+        let err = OutputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
+        assert!(err.contains("utf-8"));
+    }
+
+    #[test]
+    fn output_file_read_reports_malformed_json_and_non_regular_files() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"invalid JSON").unwrap();
+        let err = OutputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
+        assert!(err.contains("Failed to deserialize outputs data"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let err = OutputFile::read(&Some(dir.path().to_path_buf()), dir.path()).unwrap_err();
+        assert!(err.contains("expected a regular file"));
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+
+    #[test]
+    fn partial_write_failure_preserves_existing_artifacts_and_removes_temporary_files() {
+        for extension in ["outputs", "proof"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(format!("program.{extension}"));
+            fs::write(&path, b"previous complete artifact").unwrap();
+
+            let err = write_file_atomically(&path, |file| {
+                file.write_all(b"partial replacement")?;
+                assert_eq!(fs::read(&path).unwrap(), b"previous complete artifact");
+                Err(io::Error::new(io::ErrorKind::StorageFull, "injected disk full"))
+            })
+            .unwrap_err();
+
+            assert_eq!(err.kind(), io::ErrorKind::StorageFull);
+            assert_eq!(err.to_string(), "injected disk full");
+            assert_eq!(fs::read(&path).unwrap(), b"previous complete artifact");
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn partial_write_failure_leaves_a_missing_destination_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.proof");
+        let err = write_file_atomically(&path, |file| {
+            file.write_all(b"partial proof")?;
+            Err(io::Error::new(io::ErrorKind::StorageFull, "injected disk full"))
+        })
+        .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::StorageFull);
+        assert_eq!(err.to_string(), "injected disk full");
+        assert!(!path.exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn file_sync_failure_preserves_destination_and_removes_temporary_file() {
+        for exists in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("program.proof");
+            if exists {
+                fs::write(&path, b"previous proof").unwrap();
+            }
+            let err = write_file_atomically_with_sync(
+                &path,
+                |file| file.write_all(b"complete replacement"),
+                |file| {
+                    assert_eq!(file.metadata()?.len(), b"complete replacement".len() as u64);
+                    Err(io::Error::new(io::ErrorKind::StorageFull, "injected file sync failure"))
+                },
+                |_| panic!("directory sync must not run after file sync fails"),
+            )
+            .unwrap_err();
+
+            assert_eq!(err.kind(), io::ErrorKind::StorageFull);
+            assert_eq!(err.to_string(), "injected file sync failure");
+            if exists {
+                assert_eq!(fs::read(&path).unwrap(), b"previous proof");
+            } else {
+                assert!(!path.exists());
+            }
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), usize::from(exists));
+        }
+    }
+
+    #[test]
+    fn replacement_failure_preserves_destination_and_removes_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.proof");
+        let err = write_file_atomically(&path, |file| {
+            file.write_all(b"complete proof")?;
+            // Create a conflicting destination after the initial metadata check.
+            fs::create_dir(&path)?;
+            fs::write(path.join("existing"), b"keep me")
+        })
+        .unwrap_err();
+
+        assert!(err.raw_os_error().is_some(), "replacement should return the OS error: {err}");
+        assert_eq!(fs::read(path.join("existing")).unwrap(), b"keep me");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        let err = write_file_atomically(&path, |_| panic!("must reject the existing directory"))
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(path.join("existing")).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn directory_sync_failure_reports_that_replacement_has_committed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.proof");
+        fs::write(&path, b"previous proof").unwrap();
+
+        let err = write_file_atomically_with_sync(
+            &path,
+            |file| file.write_all(b"complete replacement"),
+            fs::File::sync_all,
+            |parent| {
+                assert_eq!(parent, dir.path());
+                assert_eq!(fs::read(&path).unwrap(), b"complete replacement");
+                Err(io::Error::new(io::ErrorKind::StorageFull, "injected directory sync failure"))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::StorageFull);
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Artifact `{}` was replaced. Failed to sync destination directory `{}`: injected directory sync failure",
+                path.display(),
+                dir.path().display()
+            )
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"complete replacement");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn output_file_write_creates_and_replaces_readable_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.outputs");
+        for value in [7, 8] {
+            let outputs = StackOutputs::new(&[Felt::from_u32(value)]).unwrap();
+            OutputFile::write(&outputs, &path).unwrap();
+            let loaded = OutputFile::read(&Some(path.clone()), &path).unwrap();
+            assert_eq!(loaded, OutputFile::new(&outputs));
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                serde_json::to_vec_pretty(&OutputFile::new(&outputs)).unwrap()
+            );
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_and_replaced_artifacts_use_ordinary_file_creation_permissions() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let reference = dir.path().join("ordinary");
+        let path = dir.path().join("program.outputs");
+        fs::write(&reference, b"ordinary file").unwrap();
+        let expected = fs::metadata(reference).unwrap();
+        for replace in [false, true] {
+            if replace {
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+            }
+            write_file_atomically(&path, |file| file.write_all(b"new artifact")).unwrap();
+            let actual = fs::metadata(&path).unwrap();
+            assert_eq!(actual.permissions().mode() & 0o777, expected.permissions().mode() & 0o777);
+            assert_eq!(actual.uid(), expected.uid());
+            assert_eq!(actual.gid(), expected.gid());
+            assert_eq!(fs::read(&path).unwrap(), b"new artifact");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_replacement_replaces_symlink_and_preserves_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.outputs");
+        let directory = dir.path().join("target-directory");
+        let loop_path = dir.path().join("loop.outputs");
+        let missing = dir.path().join("missing");
+        fs::write(&target, b"previous target").unwrap();
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("keep"), b"keep me").unwrap();
+
+        for (name, destination) in [
+            ("program.outputs", &target),
+            ("directory.outputs", &directory),
+            ("loop.outputs", &loop_path),
+            ("missing.outputs", &missing),
+        ] {
+            let path = dir.path().join(name);
+            std::os::unix::fs::symlink(destination, &path).unwrap();
+            write_file_atomically(&path, |file| file.write_all(b"replacement")).unwrap();
+            assert!(fs::symlink_metadata(&path).unwrap().is_file());
+            assert_eq!(fs::read(path).unwrap(), b"replacement");
+        }
+        assert_eq!(fs::read(target).unwrap(), b"previous target");
+        assert_eq!(fs::read(directory.join("keep")).unwrap(), b"keep me");
+        assert!(!missing.exists());
     }
 }

@@ -6,8 +6,7 @@ extern crate std;
 #[cfg(any(feature = "constraints-tools", all(test, feature = "std")))]
 pub mod constraints_regen;
 pub mod dsa;
-#[cfg(feature = "constraints-tools")]
-pub mod evaluator_regen;
+pub mod ecdh;
 pub mod handlers;
 
 extern crate alloc;
@@ -20,12 +19,16 @@ use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
-    aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
+    aead_eidos::{AEAD_EIDOS_DECRYPT_EVENT_NAME, handle_aead_eidos_decrypt},
     debug::default_debug_handlers,
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
+    ecdsa_p256_sha256::{ECDSA_P256_SHA256_RECOVER_EVENT_NAME, handle_ecdsa_p256_sha256_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     precompiles::{
+        ed25519::{ED25519_DECOMPRESS_EVENT_NAME, handle_ed25519_decompress},
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
+        sha256::{SHA256_DIGEST_EVENT_NAME, handle_sha256_digest},
+        sha512::{SHA512_DIGEST_EVENT_NAME, handle_sha512_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
     readonly::readonly_noop_handlers,
@@ -68,9 +71,8 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 ///
 /// The core library provides several categories of functionality:
 ///
-/// - **Cryptographic primitives**: Poseidon2, Blake3, SHA-256, Falcon signature verification,
-///   authenticated encryption (AEAD decryption), and stable core facades for bundled deferred
-///   precompiles under `::miden::core::*`.
+/// - **Cryptographic primitives**: Eidos, Blake3, SHA-256, Falcon signature verification, and
+///   stable core facades for bundled deferred precompiles under `::miden::core::*`.
 /// - **Mathematical operations**: Division operations for u64, u128, and u256.
 /// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
 ///   array utilities with lower-bound search capabilities.
@@ -171,6 +173,18 @@ impl CoreLibrary {
             .expect("the conjectured security estimator is exported from the core library")
     }
 
+    /// Returns the MAST root of the common recursive proven security estimator.
+    ///
+    /// Like the conjectured estimator, it encodes no acceptance threshold and does not
+    /// authenticate caller-assembled descriptors.
+    pub fn proven_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::stark::security::compute_proven_security_level",
+            )
+            .expect("the proven security estimator is exported from the core library")
+    }
+
     /// Returns the default event handlers required by the core library.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
@@ -181,6 +195,7 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
+            (AEAD_EIDOS_DECRYPT_EVENT_NAME, Arc::new(handle_aead_eidos_decrypt)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
@@ -188,9 +203,12 @@ impl CoreLibrary {
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
-            (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
             (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
+            (ECDSA_P256_SHA256_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_p256_sha256_recover)),
             (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
+            (SHA512_DIGEST_EVENT_NAME, Arc::new(handle_sha512_digest)),
+            (SHA256_DIGEST_EVENT_NAME, Arc::new(handle_sha256_digest)),
+            (ED25519_DECOMPRESS_EVENT_NAME, Arc::new(handle_ed25519_decompress)),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());
@@ -218,6 +236,11 @@ pub fn conjectured_security_estimator_root() -> Word {
     CoreLibrary::default().conjectured_security_estimator_root()
 }
 
+/// Returns the MAST root of the common recursive proven security estimator.
+pub fn proven_security_estimator_root() -> Word {
+    CoreLibrary::default().proven_security_estimator_root()
+}
+
 // TESTS
 // ================================================================================================
 
@@ -227,18 +250,71 @@ mod tests {
 
     use super::*;
 
+    fn core_package_versions_match(
+        crate_version: &miden_mast_package::Version,
+        package_version: &miden_mast_package::Version,
+    ) -> bool {
+        if !crate_version.pre.is_empty() || !package_version.pre.is_empty() {
+            crate_version == package_version
+        } else {
+            (crate_version.major, crate_version.minor)
+                == (package_version.major, package_version.minor)
+        }
+    }
+
     #[test]
-    fn core_package_version_matches_crate_version() {
+    fn core_package_version_matches_crate_release_line() {
         let core_lib = CoreLibrary::default();
+        let package_version = &core_lib.package.version;
         let crate_version = env!("CARGO_PKG_VERSION")
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
-        assert_eq!(
-            &core_lib.package.version, &crate_version,
-            "embedded package {} should track the miden-core-lib crate version",
+        assert!(
+            core_package_versions_match(&crate_version, package_version),
+            "embedded package {} version {} does not match the miden-core-lib crate version {}",
             core_lib.package.name,
+            package_version,
+            crate_version,
         );
+    }
+
+    #[test]
+    fn core_package_version_policy() {
+        for (crate_version, package_version, expected) in [
+            ("0.36.4", "0.36.3", true),
+            ("1.0.1", "1.0.0", true),
+            ("1.0.0", "1.0.1", true),
+            ("1.0.0-rc.0", "1.0.0-rc.0", true),
+            ("1.0.0-rc.0", "1.0.0-rc.1", false),
+            ("1.0.0-rc.0", "1.0.1-rc.0", false),
+            ("1.0.1-rc.0", "1.0.0-rc.0", false),
+            ("1.0.0-rc.0", "1.0.0", false),
+            ("1.0.0", "1.0.0-rc.0", false),
+            ("1.0.0", "1.1.0", false),
+            ("1.0.0", "2.0.0", false),
+        ] {
+            let crate_version = crate_version.parse().unwrap();
+            let package_version = package_version.parse().unwrap();
+            assert_eq!(
+                core_package_versions_match(&crate_version, &package_version),
+                expected,
+                "crate {crate_version}, package {package_version}",
+            );
+        }
+    }
+
+    #[test]
+    fn core_package_debug_info_is_readable_with_standard_limits() {
+        let core_lib = CoreLibrary::default();
+        let debug_info = core_lib
+            .package()
+            .debug_info()
+            .expect("embedded core library debug info must satisfy standard decode limits")
+            .expect("embedded core library should contain debug info");
+
+        assert!(!debug_info.functions().is_empty());
+        assert!(!debug_info.nodes().is_empty());
     }
 
     #[test]

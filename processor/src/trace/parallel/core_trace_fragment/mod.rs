@@ -1,5 +1,5 @@
-use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
-use miden_core::{mast::BasicBlockNode, operations::opcodes};
+use miden_air_definitions::vm::trace::decoder::NUM_OP_BITS;
+use miden_core::{Felt, mast::BasicBlockNode, operations::opcodes};
 
 use crate::errors::OperationError;
 
