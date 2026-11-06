@@ -22,6 +22,7 @@ mod eval;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
+mod msm_scalar_domain;
 mod sha256;
 mod sha256_io;
 mod sha256_multiplex;
