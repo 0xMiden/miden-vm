@@ -10,6 +10,8 @@ For instructions where one or more operands can be provided as immediate paramet
 
 In all the table below, the number of cycles it takes for the VM to execute each instruction is listed beneath the instruction.
 
+Where cycle counts are checked by CI fixtures, they come from reference measurement programs; surrounding code (padding, stack setup, call overhead) can change the observed cost of a call site.
+
 ### Notes on Undefined Behavior
 
 Most of the instructions documented below expect to receive operands whose values are valid `u32`

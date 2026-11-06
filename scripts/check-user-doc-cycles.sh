@@ -30,4 +30,5 @@ RUST_MIN_STACK="${TEST_RUST_MIN_STACK:-16777216}" \
 
 echo "Checking core-lib num_leaves_to_num_peaks cycle fixture..."
 RUST_MIN_STACK="${TEST_RUST_MIN_STACK:-16777216}" \
-    cargo test -p miden-core-lib --test core-lib test_num_leaves_to_num_peaks_cycle_count -- --exact
+    cargo test -p miden-core-lib --test core-lib \
+    collections::mmr::test_num_leaves_to_num_peaks_cycle_count -- --exact

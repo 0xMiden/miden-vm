@@ -38,16 +38,48 @@ fn test_num_leaves_to_num_peaks() {
     build_test!(hash_size, &[0b0001_1111_1111_1111_1111]).expect_stack(&[17]);
 }
 
+/// Reads `expected` for `id` from the shared assembly cycle fixture TOML.
+fn fixture_expected_cycles(fixture_id: &str) -> u64 {
+    // Shared with scripts/check_user_doc_cycles.py and processor assembly fixtures.
+    const FIXTURES: &str =
+        include_str!("../../../../../processor/src/tests/assembly-cycle-fixtures.toml");
+
+    let id_line = format!("id = \"{fixture_id}\"");
+    let mut in_matching_case = false;
+    for line in FIXTURES.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[case]]" {
+            in_matching_case = false;
+            continue;
+        }
+        if trimmed == id_line {
+            in_matching_case = true;
+            continue;
+        }
+        if !in_matching_case {
+            continue;
+        }
+        if let Some(raw) = trimmed.strip_prefix("expected = ") {
+            let text = raw.trim().trim_matches('"');
+            return text
+                .split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| {
+                    panic!("could not parse cycle count from fixture {fixture_id}: {raw}")
+                });
+        }
+    }
+    panic!("fixture id {fixture_id:?} with an `expected` field not found in assembly-cycle-fixtures.toml");
+}
+
 /// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
 ///
-/// Must stay aligned with `Cycles: 46` in:
-/// - `processor/src/tests/assembly-cycle-fixtures.toml` (`id = "num_leaves_to_num_peaks"`)
-/// - `crates/lib/core/asm/collections/mmr.masm`
-/// - `crates/lib/core/docs/collections/mmr.md`
-/// - `docs/src/user_docs/core_lib/collections.md`
+/// Expected count comes from `processor/src/tests/assembly-cycle-fixtures.toml`
+/// (`id = "num_leaves_to_num_peaks"`), which the user-doc cycle checker also uses.
 #[test]
 fn test_num_leaves_to_num_peaks_cycle_count() {
-    const EXPECTED_CYCLES: u64 = 46;
+    let expected_cycles = fixture_expected_cycles("num_leaves_to_num_peaks");
 
     // Same wrap as processor `measure_program_cycles`: clk leaves one stack value,
     // so truncate to stay within the 16-element end-of-program limit.
@@ -86,8 +118,9 @@ fn test_num_leaves_to_num_peaks_cycle_count() {
         .as_canonical_u64();
     let delta = measured.saturating_sub(base);
     assert_eq!(
-        delta, EXPECTED_CYCLES,
-        "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base})"
+        delta, expected_cycles,
+        "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base}); \
+         update assembly-cycle-fixtures.toml and the matching MASM/user docs together"
     );
 }
 
