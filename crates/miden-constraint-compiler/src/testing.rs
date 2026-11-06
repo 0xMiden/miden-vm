@@ -321,7 +321,7 @@ pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     assert_eq!(scalar.base_indices, captured.base_global_indices);
     assert_eq!(scalar.ext_indices, captured.ext_global_indices);
     let mut packed = packed_inputs.builder();
-    let public: Vec<P> = packed_inputs.public.iter().copied().map(P::from).collect();
+    let public: Vec<P> = packed_inputs.public.iter().copied().map(P::broadcast).collect();
     let data = air.prepare(EvalInputs {
         public_values: &public,
         challenges: &packed_inputs.challenges,
@@ -381,7 +381,7 @@ pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     {
         let inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), 0x243f6a8885a308d3);
         let mut builder = inputs.builder();
-        let public: Vec<P> = inputs.public.iter().copied().map(P::from).collect();
+        let public: Vec<P> = inputs.public.iter().copied().map(P::broadcast).collect();
         let data = air.prepare(EvalInputs {
             public_values: &public,
             challenges: &inputs.challenges,

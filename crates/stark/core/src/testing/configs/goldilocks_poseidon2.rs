@@ -167,7 +167,7 @@ where
 }
 
 /// Minimal [`MultiAir`] wrapper for tests: a list of AIRs, each building its own
-/// aux trace via [`LiftedAir::build_aux_trace`](crate::air::LiftedAir::build_aux_trace).
+/// aux trace via [`LiftedAir::build_aux_trace`].
 pub struct TestMultiAir<A> {
     pub airs: Vec<A>,
 }
