@@ -1,7 +1,9 @@
 use alloc::string::String;
 
 use crate::{
-    ast::{AttributeSet, Constant, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility},
+    ast::{
+        AttributeSet, ConstantDecl, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility,
+    },
     debuginfo::{SourceSpan, Span, Spanned},
 };
 
@@ -14,7 +16,7 @@ pub enum Item {
     /// A locally-defined procedure.
     Procedure(Procedure),
     /// A locally-defined constant.
-    Constant(Constant),
+    Constant(ConstantDecl),
     /// A locally-defined type.
     Type(TypeDecl),
 }
@@ -33,7 +35,7 @@ impl Item {
     pub fn name(&self) -> &Ident {
         match self {
             Self::Procedure(item) => item.name().as_ref(),
-            Self::Constant(item) => &item.name,
+            Self::Constant(item) => item.name(),
             Self::Type(item) => item.name(),
         }
     }
@@ -61,7 +63,7 @@ impl Item {
     pub fn visibility(&self) -> Visibility {
         match self {
             Self::Procedure(item) => item.visibility(),
-            Self::Constant(item) => item.visibility,
+            Self::Constant(item) => item.visibility(),
             Self::Type(item) => item.visibility(),
         }
     }

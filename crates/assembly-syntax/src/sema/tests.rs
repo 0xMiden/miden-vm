@@ -9,15 +9,15 @@ use miden_debug_types::{Span, Spanned};
 use crate::{
     MAX_REPEAT_COUNT, Path,
     ast::{
-        Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
-        TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
+        ConstantDecl, ConstantExpr, ConstantKind, ImportKind, Item, Module, ModuleKind,
+        SymbolResolutionError, TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
     },
     diagnostics::reporting::PrintDiagnostic,
     sema::{SemanticAnalysisError, SyntaxError},
     testing::SyntaxTestContext,
 };
 
-fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
+fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a ConstantDecl {
     match module
         .items()
         .iter()
@@ -211,9 +211,9 @@ fn ident_with_name(name: &str) -> crate::ast::Ident {
     crate::ast::Ident::from_raw_parts(Span::unknown(Arc::<str>::from(name)))
 }
 
-fn constant_with_name(name: &str) -> Constant {
+fn constant_with_name(name: &str) -> ConstantDecl {
     let ident = ident_with_name(name);
-    Constant::new(
+    ConstantDecl::new(
         ident.span(),
         Visibility::Private,
         ident,
@@ -243,6 +243,50 @@ enum thing: u8 {}
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
     assert_symbol_conflict(&error, "thing");
     assert!(rendered.contains("symbol conflict"));
+}
+
+#[test]
+fn typed_constants_pass_analysis() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module("namespace test\npub const N: u8 = 42\n")
+        .expect("typed constant should pass analysis");
+    let constant = exported_constant(&module, "N");
+    assert!(matches!(
+        constant.ty(),
+        Some(TypeExpr::Primitive(ty)) if ty.inner() == &types::Type::U8
+    ));
+}
+
+#[test]
+fn event_and_string_constants_classified_in_analysis() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module(
+            r#"
+namespace test
+pub const EVENT = event("test::event")
+pub const MESSAGE = "message"
+pub const EVENT_ALIAS = EVENT
+pub const MESSAGE_ALIAS = MESSAGE
+"#,
+        )
+        .expect("constant declarations should pass analysis");
+
+    assert_eq!(exported_constant(&module, "EVENT").kind(), ConstantKind::Event);
+    assert_eq!(exported_constant(&module, "MESSAGE").kind(), ConstantKind::String);
+    for name in ["EVENT_ALIAS", "MESSAGE_ALIAS"] {
+        assert_eq!(exported_constant(&module, name).kind(), ConstantKind::Untyped);
+        assert_eq!(exported_constant(&module, name).event_id(), None);
+    }
+    assert!(matches!(
+        exported_constant(&module, "EVENT_ALIAS").value(),
+        ConstantExpr::Var(_)
+    ));
+    assert!(matches!(
+        exported_constant(&module, "MESSAGE_ALIAS").value(),
+        ConstantExpr::Var(_)
+    ));
 }
 
 #[test]
@@ -373,7 +417,7 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
         .expect("expected semantic analysis to succeed");
 
     let exported = exported_constant(&module, "ACCOUNT_ID_SUFFIX_OFFSET");
-    let references = exported.value.references();
+    let references = exported.value().references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].inner().as_str(), "ACCOUNT_ID_AND_NONCE_OFFSET");
 }
@@ -665,6 +709,86 @@ end
 }
 
 #[test]
+fn constant_annotation_marks_item_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType} from some::module
+pub const N: ForeignType = 42
+",
+        )
+        .expect("type import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "ForeignType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_marks_renamed_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType as LocalType} from some::module
+pub const N: LocalType = 42
+",
+        )
+        .expect("renamed type import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "LocalType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_marks_module_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use some::module as sm
+pub const N: sm::ForeignType = 42
+",
+        )
+        .expect("module import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "sm", ImportKind::Module, true);
+}
+
+#[test]
+fn constant_annotation_marks_nested_type_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType} from some::module
+pub const N: [ForeignType; 1] = 42
+",
+        )
+        .expect("type import nested in a constant annotation should pass analysis");
+
+    assert_import(&module, "ForeignType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_leaves_unrelated_import_unused() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType, OtherType} from some::module
+const N: ForeignType = 42
+",
+        )
+        .expect_err("unrelated import should remain unused");
+
+    assert_eq!(unused_import_slices(&error), vec!["OtherType"]);
+}
+
+#[test]
 fn sema_import_renamed_proc_resolves_local_name() {
     let context = SyntaxTestContext::default();
     let module = context
@@ -934,7 +1058,7 @@ fn name_map_rebuilds_after_mutable_item_rename() {
         let Item::Constant(constant) = item else {
             continue;
         };
-        constant.name = ident_with_name("dup");
+        *constant.definition_mut().name_mut() = ident_with_name("dup");
     }
 
     let result = module.define_type(type_alias_with_name("dup"));
@@ -955,7 +1079,7 @@ fn name_map_drops_old_name_after_mutable_item_rename() {
         let Item::Constant(constant) = item else {
             continue;
         };
-        constant.name = ident_with_name("new");
+        *constant.definition_mut().name_mut() = ident_with_name("new");
     }
 
     module

@@ -135,13 +135,12 @@ pub fn analyze(
                 // Ensure the constants defined by the enum are made known to the analyzer
                 for variant in ty.variants() {
                     let Variant { span, name, discriminant, .. } = variant;
-                    analyzer.register_constant(Constant {
-                        span: *span,
-                        docs: None,
-                        visibility: ty.visibility(),
-                        name: name.clone(),
-                        value: discriminant.clone(),
-                    });
+                    analyzer.register_constant(ConstantDecl::new(
+                        *span,
+                        ty.visibility(),
+                        name.clone(),
+                        discriminant.clone(),
+                    ));
                 }
 
                 // Defer definition of the enum until we discover all constants
@@ -281,7 +280,7 @@ pub fn analyze(
 
     for constant in module.constants() {
         if !analyzer.is_constant_used(constant) {
-            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
+            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span() });
         }
     }
 
@@ -526,7 +525,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                         &mut used_aliases,
                         None,
                     );
-                    visitor.set_current_constant(Some(constant.name.clone()));
+                    visitor.set_current_constant(Some(constant.name().clone()));
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 if let Err(err) = module.push_export(Item::Constant(constant)) {
@@ -683,7 +682,7 @@ fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mu
         Some(key) => Word::from(key.inner().0),
         None => hasher::hash_elements(&entry.value),
     };
-    let cst = Constant::new(
+    let cst = ConstantDecl::new(
         entry.span,
         Visibility::Private,
         entry.name.clone(),
