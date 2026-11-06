@@ -27,8 +27,8 @@ mod data;
 /// Generates the deterministic seed corpus used by `tools/miden-crypto-fuzz/signatures`.
 ///
 /// The coefficient seeds are written as raw little-endian `i16` pairs so that generation does not
-/// call `SignaturePoly::to_bytes` on a value the old constructor accepted but the encoder cannot
-/// represent. That keeps the panic in the fuzz harness replay rather than in seed generation.
+/// call `SignaturePoly::to_bytes` on a value the old constructor accepted but the encoder could
+/// not represent. These seeds reproduce the former panic and now verify rejection without one.
 #[cfg(feature = "std")]
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
