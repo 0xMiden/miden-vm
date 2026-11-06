@@ -744,7 +744,7 @@ fn render_signature_lines(
     let has_comments = has_comment_tokens(&all_tokens(signature.syntax()));
     let compact_signature = (!has_comments).then(|| {
         render_token_sequence_with_style(
-            &significant_tokens(signature.syntax()),
+            &without_trailing_commas(&significant_tokens(signature.syntax())),
             SpacingStyle::TypeBodyItem,
         )
     });
@@ -784,14 +784,12 @@ fn render_signature_lines(
     let mut lines = vec![format!("{header_prefix}(")];
     let param_count = params.len();
     for (index, param) in params.into_iter().enumerate() {
-        let mut param_lines =
-            render_signature_item_lines(&param, indent + config.indent_size(), config);
-        if index + 1 != param_count
-            && let Some(last_line) = param_lines.last_mut()
-        {
-            last_line.push(',');
-        }
-        lines.extend(param_lines);
+        lines.extend(render_signature_list_item(
+            &param,
+            indent + config.indent_size(),
+            config,
+            index + 1 != param_count,
+        ));
     }
 
     let mut closing = format!("{})", indent_string(indent));
@@ -811,7 +809,18 @@ fn render_signature_lines(
             .map(|item| trim_outer_whitespace_tokens(&item))
             .filter(|item| !item.is_empty())
             .collect::<Vec<_>>();
-        let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
+        // Measured without a trailing comma, like the one-line signature above: the wrapped
+        // layout below drops it, so keeping it here would flip the layout between passes. Only
+        // used when the result has no comments, so its trivia is whitespace and is left out too.
+        let significant_result = result_tokens
+            .iter()
+            .filter(|token| !token.kind().is_trivia())
+            .cloned()
+            .collect::<Vec<_>>();
+        let result = render_token_sequence_with_style(
+            &without_trailing_commas(&significant_result),
+            SpacingStyle::TypeBodyItem,
+        );
         if items.len() <= 1
             && !result_has_comments
             && line_length(&closing) + 4 + line_length(&result) <= config.max_line_length()
@@ -827,14 +836,12 @@ fn render_signature_lines(
 
         let item_count = items.len();
         for (index, item) in items.into_iter().enumerate() {
-            let mut item_lines =
-                render_signature_item_lines(&item, indent + config.indent_size(), config);
-            if index + 1 != item_count
-                && let Some(last_line) = item_lines.last_mut()
-            {
-                last_line.push(',');
-            }
-            lines.extend(item_lines);
+            lines.extend(render_signature_list_item(
+                &item,
+                indent + config.indent_size(),
+                config,
+                index + 1 != item_count,
+            ));
         }
 
         lines.push(format!("{})", indent_string(indent)));
@@ -1514,6 +1521,79 @@ fn result_tokens_after_params(tokens: &[SyntaxToken], params_close: usize) -> Ve
     trim_outer_whitespace_tokens(&tokens[(arrow_offset + 1)..])
 }
 
+/// Removes trailing commas in parameter and result lists, i.e. commas whose next significant
+/// token is a closing parenthesis, together with the whitespace between them and the parenthesis.
+///
+/// The multi-line signature layout never emits trailing commas, so the single-line layout must not
+/// either; otherwise a signature whose only overflow is the trailing comma would be wrapped on the
+/// first pass and collapsed again on the next, making formatting non-idempotent. The tokens may
+/// include trivia (a signature with comments keeps its whitespace), so the closing parenthesis is
+/// looked up past it.
+fn without_trailing_commas(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
+    let mut kept = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if token.kind() == SyntaxKind::Comma {
+            let next = tokens[(index + 1)..]
+                .iter()
+                .position(|token| !token.kind().is_trivia())
+                .map(|offset| index + 1 + offset);
+            if let Some(next) = next
+                && tokens[next].kind() == SyntaxKind::RParen
+                && tokens[(index + 1)..next].iter().all(|token| {
+                    matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline)
+                })
+            {
+                index = next;
+                continue;
+            }
+        }
+        kept.push(token.clone());
+        index += 1;
+    }
+    kept
+}
+
+/// Renders one comma-separated item of a signature parameter or result list.
+///
+/// Comments trailing the item (i.e. written between the item and its separating comma) must not
+/// be rendered before the comma, since a comment extends to the end of the line and would swallow
+/// it. When a comma follows, such comments are moved onto their own lines after the item, which
+/// matches how comments written after the comma are rendered.
+fn render_signature_list_item(
+    tokens: &[SyntaxToken],
+    indent: usize,
+    config: &Config,
+    trailing_comma: bool,
+) -> Vec<String> {
+    let body_end = tokens.iter().rposition(|token| !token.kind().is_trivia()).map_or(0, |i| i + 1);
+    let (body, trailing) = tokens.split_at(body_end);
+
+    let mut lines = render_signature_item_lines(body, indent, config);
+    if trailing_comma && let Some(last_line) = lines.last_mut() {
+        last_line.push(',');
+    }
+
+    let mut same_line = !trailing_comma && !lines.is_empty();
+    for token in trailing {
+        match token.kind() {
+            SyntaxKind::Newline => same_line = false,
+            SyntaxKind::Comment | SyntaxKind::DocComment => {
+                let comment = trimmed_comment(token);
+                match lines.last_mut() {
+                    Some(last_line) if same_line => append_inline_comment(last_line, &comment),
+                    _ => lines.push(format!("{}{comment}", indent_string(indent))),
+                }
+                same_line = false;
+            },
+            _ => (),
+        }
+    }
+
+    lines
+}
+
 fn render_signature_item_lines(
     tokens: &[SyntaxToken],
     indent: usize,
@@ -2011,6 +2091,87 @@ end
                 "formatting changed what {} parses to",
                 path.display()
             );
+        }
+    }
+
+    #[test]
+    fn keeps_signature_commas_out_of_trailing_item_comments() {
+        let source = "\
+proc foo(
+    a: felt # note
+    ,
+    b: felt,
+) -> (
+    felt # result note
+    ,
+    felt
+)
+    nop
+end
+";
+        let formatted = assert_format_idempotent(source, "comment before signature comma");
+        assert_eq!(
+            print_parsed_module(&formatted, "formatted signature"),
+            print_parsed_module(source, "source signature"),
+        );
+    }
+
+    #[test]
+    fn signature_trailing_comma_does_not_affect_wrapping() {
+        let config = Config {
+            max_line_length: Some(34),
+            ..Config::default()
+        };
+        let source = "proc foo(a: felt, b: felt,) -> felt\n    nop\nend\n";
+
+        let formatted = format_syntax(&config, &parse_text(source).syntax());
+        let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
+        assert_eq!(reformatted, formatted, "formatter was not idempotent");
+        assert_eq!(formatted, "proc foo(a: felt, b: felt) -> felt\n    nop\nend\n");
+    }
+
+    #[test]
+    fn wrapped_single_result_ignores_its_trailing_comma() {
+        let config = Config {
+            max_line_length: Some(11),
+            ..Config::default()
+        };
+        let source = "proc long_name() -> (felt,)\n    nop\nend\n";
+
+        let formatted = format_syntax(&config, &parse_text(source).syntax());
+        let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
+        assert_eq!(reformatted, formatted, "formatter was not idempotent");
+        assert_eq!(formatted, "proc long_name(\n) -> (felt)\n    nop\nend\n");
+    }
+
+    #[test]
+    fn single_result_trailing_comma_is_dropped_next_to_signature_comments() {
+        // A comment in the signature makes the result tokens keep their whitespace, so a trailing
+        // comma can be separated from `)` by whitespace or a newline.
+        let config = Config {
+            max_line_length: Some(25),
+            ..Config::default()
+        };
+        let params = "proc foo(\n    a: felt,\n    # note\n)";
+        for (source, expected) in [
+            (
+                "proc foo(\n    a: felt, # note\n) -> (felt, )\n    nop\nend\n",
+                format!("{params} -> (felt)\n    nop\nend\n"),
+            ),
+            (
+                "proc foo(\n    a: felt, # note\n) -> (\n    felt,\n)\n    nop\nend\n",
+                format!("{params} -> (felt)\n    nop\nend\n"),
+            ),
+            // A comment after the comma keeps the result wrapped.
+            (
+                "proc foo(\n    a: felt, # note\n) -> (felt, # last\n)\n    nop\nend\n",
+                format!("{params} -> (\n    felt,\n    # last\n)\n    nop\nend\n"),
+            ),
+        ] {
+            let formatted = format_syntax(&config, &parse_text(source).syntax());
+            let reformatted = format_syntax(&config, &parse_text(&formatted).syntax());
+            assert_eq!(reformatted, formatted, "formatter was not idempotent for {source:?}");
+            assert_eq!(formatted, expected, "unexpected layout for {source:?}");
         }
     }
 
