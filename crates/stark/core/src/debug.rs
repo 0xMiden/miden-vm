@@ -59,7 +59,7 @@ where
 /// assume valid selectors. The full constraint check then uses the constructed auxiliary traces.
 /// Each AIR sees its own public-input slice from the [`ProverStatement`].
 ///
-/// Uses [`LiftedAir::eval_with_challenge_terms`] and
+/// Uses [`LiftedAir::prepare`], [`LiftedAir::eval`], and
 /// [`LiftedAir::build_aux_trace_with_preprocessed`], matching the prover's entry points. Each
 /// preprocessed trace is shared by the auxiliary builder and both constraint-checking passes.
 ///
@@ -204,7 +204,7 @@ fn check_single_trace<F, EF, A>(
     let periodic_matrix = air.periodic_columns_matrix();
     let dummy_aux_row = vec![EF::ZERO; air.aux_width()];
     let challenges = &challenges[..air.num_randomness()];
-    let challenge_terms = air.precompute_challenge_terms::<F, EF>(challenges);
+    let data = air.prepare(crate::air::EvalInputs { public_values, challenges, aux_values });
     for row in 0..height {
         let next_row = (row + 1) % height;
 
@@ -249,7 +249,7 @@ fn check_single_trace<F, EF, A>(
         #[cfg(debug_assertions)]
         crate::air::debug::check_builder_shape(air, &builder);
 
-        air.eval_with_challenge_terms(&mut builder, &challenge_terms);
+        air.eval(&mut builder, &data);
     }
 }
 

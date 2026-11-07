@@ -15,6 +15,7 @@ use miden_stark::{
     air::{BaseAir, LiftedAir, LiftedAirBuilder},
     lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
 };
+use p3_field::Algebra;
 
 use crate::precompiles::{
     ec::{self, groups},
@@ -40,6 +41,8 @@ impl BaseAir<Felt> for EcPointStoreGroupsAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcPointStoreGroupsAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -62,7 +65,7 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreGroupsAir {
         miden_stark::lookup::build_logup_aux_trace(&EcPointStoreGroupsAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         ec::eval_point_store_main(builder, 0);
         groups::eval_main(builder, GROUPS_COL_OFFSET);
 

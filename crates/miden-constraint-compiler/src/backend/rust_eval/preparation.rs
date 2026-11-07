@@ -11,7 +11,6 @@ pub(super) struct PreparationPlan<'g> {
     graph: &'g Graph,
     terms: Vec<NodeId>,
     slots: Vec<Option<usize>>,
-    challenge_count: usize,
 }
 
 impl<'g> PreparationPlan<'g> {
@@ -46,7 +45,6 @@ impl<'g> PreparationPlan<'g> {
         // Assign slots in graph order, independently of the root traversal order.
         let mut terms = Vec::new();
         let mut slots = vec![None; graph.len()];
-        let mut challenge_count = 0;
         for (id, node) in graph.iter() {
             if needed[id.index()]
                 && dependencies.is_challenge_only(id)
@@ -55,11 +53,8 @@ impl<'g> PreparationPlan<'g> {
                 slots[id.index()] = Some(terms.len());
                 terms.push(id);
             }
-            if let Node::Leaf(Leaf::Challenge(index)) = node {
-                challenge_count = challenge_count.max(index + 1);
-            }
         }
-        Self { graph, terms, slots, challenge_count }
+        Self { graph, terms, slots }
     }
 
     pub(super) fn graph(&self) -> &'g Graph {
@@ -72,10 +67,6 @@ impl<'g> PreparationPlan<'g> {
 
     pub(super) fn slot(&self, id: NodeId) -> Option<usize> {
         self.slots[id.index()]
-    }
-
-    pub(super) fn challenge_count(&self) -> usize {
-        self.challenge_count
     }
 }
 
@@ -117,7 +108,6 @@ mod tests {
         for id in [beta, square, unused, main, aux, first, second, third] {
             assert_eq!(plan.slot(id), None, "{id:?}");
         }
-        assert_eq!(plan.challenge_count(), 2);
     }
 
     #[test]

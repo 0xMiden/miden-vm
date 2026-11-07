@@ -7,7 +7,7 @@ use miden_stark::{
     air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
     testing::airs::{blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir},
 };
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{Algebra, ExtensionField, Field, PrimeField64, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::info_span;
 
@@ -37,6 +37,8 @@ impl<F> BaseAir<F> for LiftedBenchAir {
 }
 
 impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBenchAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         match self {
             Self::Miden(a) => LiftedAir::<F, EF>::num_randomness(a),
@@ -72,11 +74,11 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBenchAir {
         (aux, EF::zero_vec(num_aux_values))
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         match self {
-            Self::Keccak(a) => LiftedAir::<F, EF>::eval(a, builder),
-            Self::Blake3(a) => LiftedAir::<F, EF>::eval(a, builder),
-            Self::Miden(a) => LiftedAir::<F, EF>::eval(a, builder),
+            Self::Keccak(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
+            Self::Blake3(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
+            Self::Miden(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
         }
     }
 }

@@ -11,6 +11,7 @@ use miden_stark::{
     lookup::{ConstraintLookupBuilder, LookupAir, LookupBuilder},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Algebra;
 
 use crate::precompiles::{
     hash::{
@@ -63,6 +64,8 @@ impl BaseAir<Felt> for ChunkNodeSpongeAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         sponge::SPONGE_PERIOD
     }
@@ -89,7 +92,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
         miden_stark::lookup::build_logup_aux_trace(&ChunkNodeSpongeAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         chunk_node::eval_main(builder);
         sponge::eval_main_with_shared_capacity(builder, SPONGE_COL_OFFSET);
 

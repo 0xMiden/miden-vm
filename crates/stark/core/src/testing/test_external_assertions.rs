@@ -4,7 +4,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
@@ -41,6 +41,8 @@ impl BaseAir<Felt> for ExternalAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ExternalAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -66,7 +68,7 @@ impl LiftedAir<Felt, QuadFelt> for ExternalAir {
         (RowMajorMatrix::new(values, 1), vec![value])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let start = builder.public_values()[0];
 
         let main = builder.main();

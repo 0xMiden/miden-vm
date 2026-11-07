@@ -33,7 +33,12 @@ where
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
     #[cfg(debug_assertions)]
     crate::air::debug::check_builder_shape(air, &builder);
-    air.eval(&mut builder);
+    let data = air.prepare(crate::air::EvalInputs {
+        public_values: builder.public_values(),
+        challenges: builder.permutation_randomness(),
+        aux_values: builder.permutation_values(),
+    });
+    air.eval(&mut builder, &data);
     builder.into_layout()
 }
 
