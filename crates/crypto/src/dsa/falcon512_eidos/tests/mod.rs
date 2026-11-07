@@ -24,6 +24,99 @@ use crate::{
 
 mod data;
 
+/// Generates the deterministic seed corpus used by `tools/miden-crypto-fuzz/signatures`.
+///
+/// The coefficient seeds are written as raw little-endian `i16` pairs so that generation does not
+/// call `SignaturePoly::to_bytes` on a value the old constructor accepted but the encoder could
+/// not represent. These seeds reproduce the former panic and now verify rejection without one.
+#[cfg(feature = "std")]
+#[test]
+#[ignore = "run manually to generate fuzz seeds"]
+fn generate_fuzz_seeds() {
+    use alloc::vec::Vec;
+    use std::path::Path;
+
+    fn write_seed(corpus_dir: &Path, name: &str, bytes: &[u8]) {
+        std::fs::create_dir_all(corpus_dir).expect("failed to create corpus directory");
+        std::fs::write(corpus_dir.join(name), bytes).expect("failed to write seed");
+        std::println!("Generated signatures/{name} ({} bytes)", bytes.len());
+    }
+
+    fn sigpoly_bytes(coefficients: &[i16; N]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(2 * N);
+        for &coefficient in coefficients {
+            let magnitude = coefficient.unsigned_abs();
+            let raw = magnitude | if coefficient < 0 { 0x8000 } else { 0 };
+            bytes.extend_from_slice(&raw.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn magnitude_coefficients(count: usize, magnitude: i16) -> [i16; N] {
+        let mut coefficients = [0i16; N];
+        for coefficient in coefficients.iter_mut().take(count) {
+            *coefficient = magnitude;
+        }
+        coefficients
+    }
+
+    let corpus_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/miden-crypto-fuzz/corpus/signatures");
+
+    // The issue's reproducer: accepted by the old range-only validator, 1,536 encoded bytes.
+    let all_2047 = [2047i16; N];
+    write_seed(&corpus_dir, "sigpoly_constructor_all_2047.bin", &sigpoly_bytes(&all_2047));
+
+    // Squared norm 8,388,608 is below SIG_L2_BOUND, but the encoding needs 640 bytes.
+    let all_128 = [128i16; N];
+    write_seed(&corpus_dir, "sigpoly_constructor_all_128.bin", &sigpoly_bytes(&all_128));
+
+    // Exactly 5,000 bits: 392 * 10 + 120 * 9. Accepted and serialized to 625 bytes.
+    let exact_budget = magnitude_coefficients(392, 128);
+    write_seed(
+        &corpus_dir,
+        "sigpoly_constructor_exact_budget.bin",
+        &sigpoly_bytes(&exact_budget),
+    );
+
+    // 5,001 bits: 393 * 10 + 119 * 9. Rejected by the fixed constructor.
+    let over_budget = magnitude_coefficients(393, 128);
+    write_seed(
+        &corpus_dir,
+        "sigpoly_constructor_one_bit_over.bin",
+        &sigpoly_bytes(&over_budget),
+    );
+
+    // Accepted extremes: one 2,047 coefficient plus 511 zeros is 4,623 bits.
+    let mut single_2047 = [0i16; N];
+    single_2047[0] = 2047;
+    write_seed(&corpus_dir, "sigpoly_constructor_single_2047.bin", &sigpoly_bytes(&single_2047));
+
+    // Both signs at the exact budget.
+    let mut mixed_signs = [0i16; N];
+    for (index, coefficient) in mixed_signs.iter_mut().take(392).enumerate() {
+        *coefficient = if index.is_multiple_of(2) { 128 } else { -128 };
+    }
+    write_seed(&corpus_dir, "sigpoly_constructor_mixed_signs.bin", &sigpoly_bytes(&mixed_signs));
+
+    let zeros = [0i16; N];
+    write_seed(&corpus_dir, "sigpoly_constructor_zero.bin", &sigpoly_bytes(&zeros));
+
+    // message || public key || signature. The harness splits this at PK_LEN and reaches verify.
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let sk = SecretKey::with_rng(&mut rng);
+    let message = Word::default();
+    let signature = sk.sign(message);
+    let public_key = sk.public_key();
+    assert!(public_key.verify(message, &signature));
+
+    let mut valid_signature_seed = Vec::new();
+    valid_signature_seed.extend_from_slice(&message.to_bytes());
+    valid_signature_seed.extend_from_slice(&(&public_key).to_bytes());
+    valid_signature_seed.extend_from_slice(&signature.to_bytes());
+    write_seed(&corpus_dir, "signature_valid.bin", &valid_signature_seed);
+}
+
 #[test]
 fn eidos_hash_to_point_is_frozen() {
     let nonce = Nonce::from_bytes(core::array::from_fn(|i| i as u8));
