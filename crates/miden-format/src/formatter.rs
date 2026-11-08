@@ -1686,7 +1686,11 @@ fn render_token_lines_with_style(
     vec![inline]
 }
 
-/// Returns the index of the first `kind` token that is not nested in a group.
+/// Returns the index of the first `kind` token that is not nested in a parenthesis, bracket or
+/// brace.
+///
+/// Generic angle brackets do not count as nesting, so the struct of a `ptr<struct { .. }>` field
+/// is found and can be expanded like any other braced type.
 fn top_level_index(tokens: &[SyntaxToken], kind: SyntaxKind) -> Option<usize> {
     let mut depth = 0usize;
     for (index, token) in tokens.iter().enumerate() {
@@ -1694,10 +1698,8 @@ fn top_level_index(tokens: &[SyntaxToken], kind: SyntaxKind) -> Option<usize> {
             return Some(index);
         }
         match token.kind() {
-            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LBrace | SyntaxKind::LAngle => {
-                depth += 1
-            },
-            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RBrace | SyntaxKind::RAngle => {
+            SyntaxKind::LParen | SyntaxKind::LBracket | SyntaxKind::LBrace => depth += 1,
+            SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RBrace => {
                 depth = depth.saturating_sub(1)
             },
             _ => (),
@@ -2935,6 +2937,32 @@ adv_map CIRCUIT_COMMITMENT =
              lower_bound_key_value: u128,\n            upper_bound_key_value: u128,\n            \
              extra_field: felt,\n            another: felt,\n        }; 2\n    ],\n    b: felt,\n}\n"
         );
+    }
+
+    #[test]
+    fn expands_a_braced_type_inside_a_pointer_field() {
+        let config = Config {
+            max_line_length: Some(60),
+            ..Config::default()
+        };
+        let fields = "        lower_bound_key_value: u128,\n        upper_bound_key_value: u128,\n";
+        for (pointer, expected_open, expected_close) in [
+            ("ptr<struct { STRUCT }>", "ptr<struct {", "}>"),
+            ("ptr<struct { STRUCT }, addrspace(byte)>", "ptr<struct {", "}, addrspace(byte)>"),
+            ("ptr<ptr<struct { STRUCT }>>", "ptr<ptr<struct {", "}>>"),
+        ] {
+            let pointer = pointer
+                .replace("STRUCT", "lower_bound_key_value: u128, upper_bound_key_value: u128");
+            let source = format!("type T = struct {{ p: {pointer}, b: felt }}\n");
+            assert_eq!(
+                format_checked(&source, &config),
+                format!(
+                    "type T = struct {{\n    p: {expected_open}\n{fields}    {expected_close},\n    \
+                     b: felt,\n}}\n"
+                ),
+                "{source}"
+            );
+        }
     }
 
     #[test]
