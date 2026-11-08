@@ -397,7 +397,7 @@ mod tests {
                 assert!(!result, "is_nth_bit_odd should return false for n >= 64, got true for n={n}");
             }
             if n < 64 {
-                let expected = (index.value() >> n) & 1 == 1;
+                let expected = (index.position() >> n) & 1 == 1;
                 assert_eq!(result, expected, "is_nth_bit_odd({n}) returned {result}, expected {expected}");
             }
         }
