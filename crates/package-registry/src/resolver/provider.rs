@@ -694,7 +694,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+            InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package,
                 version,
             } if package == dep_id && version == "1.0.0".parse().unwrap()
@@ -723,7 +723,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+            InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package: duplicate,
                 version,
             } if duplicate == package && version == "1.0.0+second".parse().unwrap()
@@ -786,7 +786,7 @@ mod tests {
         );
         assert!(matches!(
             index.insert(package.clone(), equivalent, None::<(PackageId, VersionRequirement)>),
-            Err(index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+            Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package: duplicate,
                 ..
             }) if duplicate == package
@@ -810,7 +810,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            index::InMemoryPackageStoreError::MismatchedSemanticVersionKey {
+            InMemoryPackageStoreError::MismatchedSemanticVersionKey {
                 package: mismatched_package,
                 key: mismatched_key,
                 record_version: mismatched_record,
@@ -846,7 +846,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+            InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package: duplicate,
                 ..
             } if duplicate == package
