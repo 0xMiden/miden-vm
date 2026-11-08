@@ -396,7 +396,29 @@ mod tests {
             if n >= 64 {
                 assert!(!result, "is_nth_bit_odd should return false for n >= 64, got true for n={n}");
             }
+            if n < 64 {
+                let expected = (index.value() >> n) & 1 == 1;
+                assert_eq!(result, expected, "is_nth_bit_odd({n}) returned {result}, expected {expected}");
+            }
         }
+    }
+
+    #[test]
+    fn is_nth_bit_odd_boundary() {
+        // depth=64 allows any u64 position; use u64::MAX to exercise all bits set.
+        let all_ones = NodeIndex::new(64, u64::MAX).unwrap();
+        // bit 63 is the highest valid bit for a u64 position.
+        assert!(all_ones.is_nth_bit_odd(63), "bit 63 of u64::MAX must be true");
+
+        let all_zeros = NodeIndex::new(64, 0).unwrap();
+        assert!(!all_zeros.is_nth_bit_odd(63), "bit 63 of 0 must be false");
+
+        // n = 64 is the first out-of-range value; must always return false.
+        assert!(!all_ones.is_nth_bit_odd(64), "is_nth_bit_odd(64) must return false");
+        assert!(!all_zeros.is_nth_bit_odd(64), "is_nth_bit_odd(64) must return false");
+
+        // u8::MAX = 255 must also return false.
+        assert!(!all_ones.is_nth_bit_odd(255), "is_nth_bit_odd(255) must return false");
     }
 
     #[test]

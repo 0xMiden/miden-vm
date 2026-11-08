@@ -42,12 +42,12 @@
 - Added the recursive proven security estimator `stark::security::compute_proven_security_level` for descriptors returned by the MVM and PVM recursive verifiers, with its root exposed by `proven_security_estimator_root()` ([#4101](https://github.com/0xMiden/miden-vm/pull/4101)).
 
 #### Fixes
+- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4114](https://github.com/0xMiden/miden-vm/pull/4114)).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387) ([#4086](https://github.com/0xMiden/miden-vm/pull/4086)).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/pull/4111)).
 - Fixed `DebugInfoBuilder` deduplication of file and error-message rows being quadratic when debug info tables are merged during static linking. The builder now keeps hash indices for these tables ([#4124](https://github.com/0xMiden/miden-vm/pull/4124)).
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
@@ -100,7 +100,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - `build_trace` returns an error for non-u32 AEAD replay lanes or ciphertext mismatches ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
 - [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
@@ -133,7 +132,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Updated `zstd-sys` to 2.1.2 to address [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410).
 - Restored exact `Serializable::get_size_hint` implementations for `MastForest` and `AdviceMap`, and added `MastForest::hashless_size_hint` to size hashless payloads without allocation or serialization ([#4080](https://github.com/0xMiden/miden-vm/pull/4080)).
@@ -142,7 +140,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
 - Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes per store while preserving compatibility with existing readers and payloads ([#4060](https://github.com/0xMiden/miden-vm/pull/4060)).
@@ -160,7 +157,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
 
@@ -168,7 +164,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed release version comparisons to respect prerelease precedence and compare patch releases within their major/minor line. API compatibility checks use stable releases instead of release candidates ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
@@ -206,7 +201,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
 - [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
@@ -237,7 +231,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested constant and type expressions by rejecting nesting beyond 256 levels ([#3700](https://github.com/0xMiden/miden-vm/pull/3700)).
@@ -262,7 +255,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
 - Fixed exponential traversal of shared deferred-state DAGs during precompile prover session construction by caching translated nodes and counting shared claim uses ([#3798](https://github.com/0xMiden/miden-vm/pull/3798)).
@@ -287,7 +279,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
@@ -302,7 +293,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
 
 ## v0.31.1 (2026-09-04)
@@ -329,7 +319,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 - [BREAKING] Relaxes the deferred MSM contract to accept valid edge cases ([#3740](https://github.com/0xMiden/miden-vm/pull/3740)).
@@ -423,7 +412,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed deferred MSM session lowering so structurally distinct claims with the same canonical
   expression retain their own hashes, while exact repeats reuse one balanced eval row
@@ -446,7 +434,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `FastProcessor::execute_and_build_trace_sync` aborting on targets that build a full `std`
   but cannot spawn threads, such as `wasm32-unknown-unknown`. The failed spawn panicked under
@@ -458,7 +445,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `miden-vm bundle --release` to remove package debug information from library and kernel artifacts while preserving their MAST digests ([#3719](https://github.com/0xMiden/miden-vm/issues/3719)).
 - Fixed `miden-vm bundle --version` to store the requested version in library and kernel packages and reject invalid semantic versions ([#3659](https://github.com/0xMiden/miden-vm/issues/3659)).
@@ -471,7 +457,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `Felt`'s `Debug` impl on the `miden` target by formatting the canonical `u64` value instead of the `f32` backing type. The `Debug` output format changed from `Felt { inner: .. }` to `Felt(..)` ([#3693](https://github.com/0xMiden/miden-vm/pull/3693)).
 
@@ -479,7 +464,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `PartialSmt::from_unique_nodes()` reconstruction for partial trees containing both inclusion and exclusion proofs by processing leaf-derived and inner-node-derived branches in a shared bottom-up priority order ([#3470](https://github.com/0xMiden/miden-vm/issues/3470)).
 - Added `ecdsa_k256_keccak::verify_bytes` for verifying signatures over variable-length Keccak256 message bytes stored in VM memory ([#3563](https://github.com/0xMiden/miden-vm/pull/3563)).
@@ -496,7 +480,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - [BREAKING] Fixed collisions between empty input and full rate blocks in domain-separated field-element hashing by marking nonzero-domain empty input in capacity. This changes empty domain-separated commitments ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
 - [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
@@ -554,7 +537,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Restored public `miden-lifted-stark` testing constants to preserve compatibility with version 0.28.1.
 - Changed overspecified untrusted MAST forest input with wire hashes from an error log to a warning, and included the caller location in the warning ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
@@ -697,7 +679,6 @@
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
@@ -907,7 +888,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed quote-equivalent path ambiguity in library deserialization and linker symbol resolution ([#2836](https://github.com/0xMiden/miden-vm/pull/2836)).
 - Memoized semantic constant evaluation in `AnalysisContext` to prevent exponential work from shared constant-dependency graphs during parsing and semantic analysis ([#2858](https://github.com/0xMiden/miden-vm/pull/2858)).
@@ -1088,7 +1068,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
 - Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
@@ -1192,7 +1171,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 - Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484)).
@@ -1733,7 +1711,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 #### Fixes
 
 - Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#2146](https://github.com/0xMiden/miden-vm/pull/2146)).
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
@@ -1802,7 +1779,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - `miden debug` rewind command no longer panics at clock 0 (#1751)
 - Prevent overflow in ACE circuit evaluation (#1820)
@@ -1847,7 +1823,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed various issues with pretty printing of Miden Assembly (#1740).
 
@@ -1980,7 +1955,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed an issue with formatting of blocks in Miden Assembly syntax
 - Fixed the construction of the block hash table (#1506)
@@ -2038,7 +2012,6 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `NodeIndex::is_nth_bit_odd` panicking on shift overflow when `n >= 64` in debug builds, and returning a wrong answer in release builds; the method now returns `false` for any `n >= 64` ([#4128](https://github.com/0xMiden/miden-vm/pull/4128)).
 
 - Fixed an issue with registering non-local procedures in `MemMastForestStore` (#1462).
 - Added a check for circular external node lookups in the processor (#1464).
