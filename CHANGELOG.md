@@ -57,7 +57,7 @@
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
 - Fixed `DebugInfoBuilder` deduplication of file and error-message rows being quadratic when debug info tables are merged during static linking. The builder now keeps hash indices for these tables ([#4112](https://github.com/0xMiden/miden-vm/issues/4112)).
-- Fixed the `StackInterface::get_word` documentation, which said the top of the stack lands in the last position of the returned word; it lands in `Word[0]` ([#4139](https://github.com/0xMiden/miden-vm/pull/4139)).
+- Fixed the `StackInterface::get_word` documentation, which said that for `start_idx=0` the top of the stack lands in the last position of the returned word; it lands in `Word[0]` ([#4139](https://github.com/0xMiden/miden-vm/pull/4139)).
 
 ## v1.0.0-rc.0 (2026-10-21)
 
