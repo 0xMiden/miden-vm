@@ -340,9 +340,9 @@ mod tests {
         assert_eq!(package.claim_commitment(), claim.commitment());
     }
 
-    /// Pins the complete packaged advice produced before extracting the shared writers.
+    /// Pins the complete packaged advice for the current PVM proof fixture.
     #[test]
-    fn packaged_advice_matches_pre_extraction_bytes() {
+    fn packaged_advice_matches_current_fixture() {
         use miden_core::serde::Serializable;
         use miden_crypto::hash::blake::Blake3_256;
 
@@ -380,10 +380,10 @@ mod tests {
         assert_eq!(
             digest,
             [
-                139, 45, 187, 139, 12, 172, 206, 60, 31, 209, 8, 11, 2, 174, 37, 210, 52, 87, 62,
-                29, 229, 194, 198, 135, 40, 104, 209, 62, 202, 64, 217, 43
+                122, 28, 166, 65, 99, 190, 167, 62, 64, 109, 113, 103, 147, 207, 134, 206, 17, 213,
+                173, 210, 39, 85, 83, 215, 98, 6, 144, 245, 131, 225, 173, 90
             ],
-            "shared advice writers must preserve the pre-extraction PVM encoding",
+            "packaged PVM advice differs from the current fixture's encoding",
         );
     }
 }

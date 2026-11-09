@@ -279,3 +279,6 @@ fn write_mvm_footer_interface<T: TraceRow>(row: &mut T, output: &[u64; 4], mode:
         },
     }
 }
+
+#[cfg(test)]
+pub(super) use crate::shared::eidos::trace::write_full_felt_footer_cv;

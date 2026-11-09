@@ -2,7 +2,7 @@
 use miden_air::vm::{
     config,
     security::{
-        AIR_SHAPE, COMMITMENT_ALIGNMENT, CORE_BOUNDARY_LOOKUP_TERMS, LOOKUP_POW_BITS, LOOKUP_SHAPE,
+        AIR_SHAPE, COMMITMENT_ALIGNMENT, FIXED_LOOKUP_ERROR_TERMS, LOOKUP_POW_BITS, LOOKUP_SHAPE,
         OOD_POW_BITS,
     },
 };
@@ -74,7 +74,7 @@ pub fn security_report(
     };
     let report = security_report_with_hash(params, &instance, &AIR_SHAPE, hash_fn);
     let correction = lookup_boundary_correction(
-        CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+        FIXED_LOOKUP_ERROR_TERMS + num_kernel_procedures,
         LOOKUP_SHAPE.fractions_per_row,
         log_max_height,
     );

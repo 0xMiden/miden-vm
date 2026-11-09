@@ -43,12 +43,12 @@ impl PrecompileArgs {
             limits = limits.with_max_elements(elements);
         }
         if let Some(bytes) = self.max_precompile_hash_bytes {
-            let hash = limits.class(HASH_WORK).expect("library policy includes hash work");
+            let hash = limits.class(&HASH_WORK).expect("library policy includes hash work");
             limits = limits.with_class(HASH_WORK, WorkLimit { max_total_size: bytes, ..hash });
         }
         if self.max_precompile_msm_terms.is_some() || self.max_precompile_total_msm_terms.is_some()
         {
-            let msm = limits.class(MSM_WORK).expect("library policy includes MSM work");
+            let msm = limits.class(&MSM_WORK).expect("library policy includes MSM work");
             limits = limits.with_class(
                 MSM_WORK,
                 WorkLimit {
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn optional_overrides_preserve_scope_defaults_and_other_fields() {
         let execution = default_execution_precompile_limits();
-        let hash = execution.class(HASH_WORK).unwrap();
+        let hash = execution.class(&HASH_WORK).unwrap();
         let options = ExecutionOptions::default().with_execution_precompile_limits(
             execution.with_class(HASH_WORK, WorkLimit { max_count: 3, ..hash }),
         );
@@ -114,8 +114,8 @@ mod tests {
                     actual.verification_precompile_limits(),
                 ),
             ] {
-                let hash = base.class(HASH_WORK).unwrap();
-                let msm = base.class(MSM_WORK).unwrap();
+                let hash = base.class(&HASH_WORK).unwrap();
+                let msm = base.class(&MSM_WORK).unwrap();
                 assert_eq!(
                     actual,
                     &base

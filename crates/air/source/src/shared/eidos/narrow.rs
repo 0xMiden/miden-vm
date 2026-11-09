@@ -1,4 +1,4 @@
-//! Shared description of the 36 narrow Eidos lookup slots.
+//! Shared description of the 32 narrow Eidos lookup slots.
 
 /// Source of the three fields encoded by one narrow lookup slot.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -7,8 +7,6 @@ pub enum NarrowSlotFields {
     StoredByte(u8),
     /// The rotation tuple reconstructed from the current and next fused rows.
     MissingRotation,
-    /// A `(message_index, message_word, compression_cycle_id)` tuple for one G lane.
-    MessageWord(u8),
 }
 
 /// Bus selected by a narrow slot in one row family.
@@ -20,8 +18,6 @@ pub enum NarrowSlotBus {
     Rotation(u8),
     /// The 16-bit range-check table.
     RangeCheck,
-    /// The internal Eidos message-word relation.
-    MessageWord,
 }
 
 /// Row-family behavior of one narrow lookup slot.
@@ -55,22 +51,13 @@ const fn missing_rotation(byte: u8) -> NarrowSlotSpec {
     }
 }
 
-const fn message_word(g: u8) -> NarrowSlotSpec {
-    NarrowSlotSpec {
-        fields: NarrowSlotFields::MessageWord(g),
-        fused_bus: NarrowSlotBus::MessageWord,
-        footer_bus: Some(NarrowSlotBus::MessageWord),
-    }
-}
-
 use NarrowSlotBus::{And8, RangeCheck, Rotation};
 
 /// Complete narrow-slot layout shared by the Miden VM and PVM compression AIRs.
 ///
 /// Slots 0 through 15 are And8 tuples. Slots 16 through 31 are rotation tuples on fused rows and
-/// are selectively reused for footer And8 and range checks. Slots 32 through 35 carry message
-/// words.
-pub const NARROW_SLOTS: [NarrowSlotSpec; 36] = [
+/// are selectively reused for footer And8 and range checks.
+pub const NARROW_SLOTS: [NarrowSlotSpec; 32] = [
     stored(0, And8, Some(And8)),
     stored(1, And8, Some(And8)),
     stored(2, And8, Some(And8)),
@@ -103,10 +90,6 @@ pub const NARROW_SLOTS: [NarrowSlotSpec; 36] = [
     stored(29, Rotation(1), Some(RangeCheck)),
     stored(30, Rotation(2), None),
     missing_rotation(3),
-    message_word(0),
-    message_word(1),
-    message_word(2),
-    message_word(3),
 ];
 
 const _: () = assert!(NARROW_SLOTS.len().is_multiple_of(2));

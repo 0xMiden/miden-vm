@@ -80,8 +80,9 @@ where
 ///
 /// The matrix has `main.height()` rows and `aux_width` columns. LogUp columns occupy the prefix
 /// `0..air.column_shape().len()`. Any trailing columns are zero-filled and excluded from the
-/// LogUp recurrence and its normalized sum. The return value, setup trace and challenges
-/// follow [`build_logup_aux_trace_with_preprocessed`].
+/// LogUp recurrence and its normalized sum. The caller fills any trailing registers, and the
+/// owning AIR supplies their constraints. The return value, setup trace and challenges follow
+/// [`build_logup_aux_trace_with_preprocessed`].
 ///
 /// # Panics
 ///

@@ -47,7 +47,7 @@ pub struct ProofSecurityParameters {
     pub air_shape: AirShape,
     /// Number of out-of-domain points opened per committed column.
     pub num_ood_points: u32,
-    /// Lookup fractions consumed once per proof in addition to the per-row fractions.
+    /// Number of lookup fractions contributed by the proof's boundary messages.
     pub num_lookup_boundary_terms: u32,
 }
 
