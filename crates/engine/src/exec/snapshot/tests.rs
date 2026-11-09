@@ -51,7 +51,7 @@ fn replay_snapshot_round_trips() {
         event_log,
     };
 
-    let restored = ReplaySnapshot::read_from_bytes(&snapshot.to_bytes())
+    let restored = ReplaySnapshot::read_from_bytes(&snapshot.to_bytes().unwrap())
         .expect("snapshot failed to deserialize");
 
     assert_eq!(restored.package.commitment(), snapshot.package.commitment());
@@ -87,8 +87,47 @@ fn replay_snapshot_rejects_bad_magic() {
     assert!(err.is_err(), "expected deserialization to fail on bad magic");
 }
 
-/// Version 1 snapshots may contain legacy precompile mutations and opcode semantics, so they
-/// must not be interpreted as version 2 snapshots.
+/// Unsupported policies must be rejected before an existing snapshot file is overwritten.
+#[cfg(feature = "std")]
+#[test]
+fn replay_snapshot_rejects_custom_precompile_limits() {
+    use miden_core::deferred::PrecompileLimits;
+
+    let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program("program", "begin nop end")
+        .map(Arc::<Package>::from)
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("snapshot");
+    let original = b"existing snapshot";
+    std::fs::write(&path, original).unwrap();
+
+    for options in [
+        ExecutionOptions::default().with_execution_precompile_limits(PrecompileLimits::new(0)),
+        ExecutionOptions::default().with_verification_precompile_limits(PrecompileLimits::new(0)),
+    ] {
+        let snapshot = ReplaySnapshot {
+            package: package.clone(),
+            stack_inputs: StackInputs::default(),
+            advice_inputs: AdviceInputs::default(),
+            options,
+            mast_forests: vec![],
+            event_log: vec![],
+        };
+        assert_eq!(
+            snapshot.to_bytes().unwrap_err(),
+            ReplaySnapshotEncodeError::UnsupportedPrecompileLimits,
+        );
+        let mut bytes = b"prefix".to_vec();
+        assert!(snapshot.write_into(&mut bytes).is_err());
+        assert_eq!(bytes, b"prefix");
+        let error = snapshot.write_to_file(&path).expect_err("custom limits must not be lost");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+}
+
+/// Older snapshots may contain incompatible package formats and opcode semantics.
 #[test]
 fn replay_snapshot_rejects_previous_version() {
     let mut bytes = SNAPSHOT_MAGIC.to_vec();

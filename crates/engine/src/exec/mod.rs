@@ -37,8 +37,8 @@ pub use self::{
     query::DebugQuery,
     recording_host::RecordingHost,
     snapshot::{
-        MastForestRecorder, ReplaySnapshot, ReplaySnapshotRecorder, ReplaySnapshotWrite,
-        ReplaySnapshotWriteError,
+        MastForestRecorder, ReplaySnapshot, ReplaySnapshotEncodeError, ReplaySnapshotRecorder,
+        ReplaySnapshotWrite, ReplaySnapshotWriteError,
     },
     state::DebugExecutor,
     stepper::Stepper,

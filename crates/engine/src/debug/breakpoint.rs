@@ -391,7 +391,7 @@ impl FromStr for OperationMatcher {
             ("mstream", _) => MStream,
             ("pipe", _) => Pipe,
             ("crypto_stream", _) => CryptoStream,
-            ("hperm", _) => HPerm,
+            ("compress", _) => Compress,
             ("mpverify", Some(code)) => MpVerify(
                 code.parse::<u32>()
                     .map(miden_core::Felt::from_u32)

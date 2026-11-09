@@ -1362,9 +1362,12 @@ impl DapExecutor {
         // solves this by creating a completely fresh host.
         loop {
             inspection.invalidate();
-            let mut processor =
-                FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options)
-                    .expect("advice inputs should fit advice map limits");
+            let mut processor = FastProcessor::new_with_options(
+                stack_inputs,
+                advice_inputs.clone(),
+                options.clone(),
+            )
+            .expect("advice inputs should fit advice map limits");
 
             let resume_ctx =
                 processor.get_initial_resume_context_for_package(root_package.clone())?;
@@ -2201,6 +2204,7 @@ impl DapExecutor {
                     stack: StackOutputs::new(&[]).expect("empty stack outputs"),
                     advice: Default::default(),
                     memory: Default::default(),
+                    precompile_root: miden_core::deferred::TRUE_DIGEST,
                     precompile_witness: None,
                 });
             }

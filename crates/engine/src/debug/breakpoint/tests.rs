@@ -122,6 +122,7 @@ fn operation_matchers_cover_specialized_operations() {
 
     for (text, expected) in [
         ("add", OperationMatcher::Exact(Operation::Add)),
+        ("compress", OperationMatcher::Exact(Operation::Compress)),
         ("assert.7", OperationMatcher::Exact(Operation::Assert(Felt::from(7u32)))),
         ("u32assert2.8", OperationMatcher::Exact(Operation::U32assert2(Felt::from(8u32)))),
         ("log_deferred", OperationMatcher::Exact(Operation::LogDeferred)),

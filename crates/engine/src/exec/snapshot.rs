@@ -119,7 +119,7 @@ impl ReplaySnapshotRecorder {
 /// Magic bytes identifying a replay snapshot file, followed by a format version. Bumping the
 /// version invalidates older snapshots, whose serialized shape may differ.
 const SNAPSHOT_MAGIC: [u8; 6] = *b"MDNSNP";
-const SNAPSHOT_VERSION: u8 = 3;
+const SNAPSHOT_VERSION: u8 = 4;
 
 /// Everything needed to replay a recorded execution in the debugger.
 pub struct ReplaySnapshot {
@@ -141,9 +141,14 @@ pub struct ReplaySnapshot {
 
 impl ReplaySnapshot {
     /// Serialize the snapshot to `path`.
+    ///
+    /// Returns `InvalidInput` without changing the file when either precompile policy is custom.
     #[cfg(feature = "std")]
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
-        std::fs::write(path, self.to_bytes())
+        let bytes = self
+            .to_bytes()
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        std::fs::write(path, bytes)
     }
 
     /// Read and deserialize a snapshot from `path`.
@@ -154,10 +159,10 @@ impl ReplaySnapshot {
     }
 
     /// Serialize the snapshot to a byte vector.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ReplaySnapshotEncodeError> {
         let mut bytes = Vec::new();
-        self.write_into(&mut bytes);
-        bytes
+        self.write_into(&mut bytes)?;
+        Ok(bytes)
     }
 
     /// Deserialize a snapshot from bytes.
@@ -165,10 +170,23 @@ impl ReplaySnapshot {
         let mut reader = miden_core::serde::SliceReader::new(bytes);
         Self::read_from(&mut reader)
     }
-}
 
-impl Serializable for ReplaySnapshot {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+    /// Serialize the snapshot, rejecting custom precompile policies before writing any bytes.
+    ///
+    /// Miden VM 1.0.0-rc.0 cannot serialize these policies through its public API. Restoring
+    /// defaults for a custom policy would change replay behavior, so only defaults are supported.
+    pub fn write_into<W: ByteWriter>(
+        &self,
+        target: &mut W,
+    ) -> Result<(), ReplaySnapshotEncodeError> {
+        let defaults = ExecutionOptions::default();
+        if self.options.execution_precompile_limits() != defaults.execution_precompile_limits()
+            || self.options.verification_precompile_limits()
+                != defaults.verification_precompile_limits()
+        {
+            return Err(ReplaySnapshotEncodeError::UnsupportedPrecompileLimits);
+        }
+
         target.write_bytes(&SNAPSHOT_MAGIC);
         target.write_u8(SNAPSHOT_VERSION);
         self.package.write_into(target);
@@ -189,6 +207,7 @@ impl Serializable for ReplaySnapshot {
             }
         }
         write_event_log(&self.event_log, target);
+        Ok(())
     }
 }
 
@@ -274,6 +293,13 @@ fn read_execution_options<R: ByteReader>(
                     DeserializationError::InvalidValue(format!("invalid execution options: {err}"))
                 })
         })
+}
+
+/// Error encoding a [ReplaySnapshot].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ReplaySnapshotEncodeError {
+    #[error("replay snapshots do not support custom precompile limits with Miden VM 1.0.0-rc.0")]
+    UnsupportedPrecompileLimits,
 }
 
 /// Error reading a [ReplaySnapshot] from a file.

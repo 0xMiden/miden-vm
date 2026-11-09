@@ -175,7 +175,7 @@ const ALL_OPERATIONS: &[Operation] = &[
     Operation::MStream,
     Operation::Pipe,
     Operation::CryptoStream,
-    Operation::HPerm,
+    Operation::Compress,
     Operation::MpVerify(Felt::ZERO),
     Operation::MrUpdate,
     Operation::FriE2F4,

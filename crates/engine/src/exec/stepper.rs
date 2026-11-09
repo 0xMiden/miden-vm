@@ -2,7 +2,7 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::program::StackOutputs;
+use miden_core::{deferred::TRUE_DIGEST, program::StackOutputs};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
     ExecutionError, ExecutionOutput, FastProcessor, Host, ResumeContext, SyncHost,
@@ -368,18 +368,32 @@ pub(crate) fn execution_output(
     processor: FastProcessor,
     stack: StackOutputs,
 ) -> Result<ExecutionOutput, ExecutionError> {
-    // `into_parts` gives the advice provider and the memory but drops the deferred state, so
-    // the precompile witness is exported from a clone of it first.
-    let precompile_witness = processor
-        .deferred_state()
-        .clone()
-        .into_witness()
-        .map_err(|_| ExecutionError::Internal("failed to export deferred execution witness"))?;
+    // Export the witness before `into_parts` drops the deferred state. An execution without
+    // logged work has no witness, matching the VM's full-execution output.
+    let deferred = processor.deferred_state();
+    let precompile_root = deferred.root();
+    let precompile_witness = if precompile_root == TRUE_DIGEST {
+        None
+    } else {
+        Some(
+            deferred
+                .witness_for(
+                    precompile_root,
+                    processor.execution_options().verification_precompile_limits(),
+                )
+                .map_err(|err| ExecutionError::DeferredError {
+                    label: Default::default(),
+                    source_file: None,
+                    err,
+                })?,
+        )
+    };
     let (advice, memory) = processor.into_parts();
     Ok(ExecutionOutput {
         stack,
         advice,
         memory,
+        precompile_root,
         precompile_witness,
     })
 }

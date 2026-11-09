@@ -181,7 +181,7 @@ fn replays_from_a_serialized_snapshot() {
     let mut executor = Executor::from_config(ExecutionConfig {
         inputs: stack_inputs,
         advice_inputs: advice_inputs.clone(),
-        options,
+        options: options.clone(),
     });
     executor
         .register_event_handler(
@@ -212,7 +212,7 @@ fn replays_from_a_serialized_snapshot() {
         )],
         event_log,
     };
-    let restored = ReplaySnapshot::read_from_bytes(&snapshot.to_bytes())
+    let restored = ReplaySnapshot::read_from_bytes(&snapshot.to_bytes().unwrap())
         .expect("snapshot failed to deserialize");
 
     // Replay from the deserialized snapshot, with no event handlers registered.

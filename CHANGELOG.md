@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Migration and breaking changes
+
+- Upgrade the Miden VM crates from 0.36.2 to 1.0.0-rc.0. Rust integrations exchanging VM, package, or debug-info types with the debugger must use matching dependencies. Recompile packages with the new toolchain, and replace `hperm` operation breakpoints with `compress`.
+- Replay snapshots use format version 4 and reject older snapshots. Snapshot export rejects custom execution or verification precompile limits until the VM exposes a complete serialization API. `ReplaySnapshot::to_bytes` and `write_into` now return `Result`, and `ReplaySnapshot` no longer implements the infallible `Serializable` trait. `write_to_file` reports unsupported policies as `InvalidInput` before modifying the file.
+
 ### Fixed
 
 - Keep DAP source breakpoints pending until dynamically loaded package debug information is available, then verify them with stable breakpoint IDs. Reconsider relocated bindings when another package contributes executable lines for the same source. Source-line validation also reads matching local files when the execution host does not provide source text.

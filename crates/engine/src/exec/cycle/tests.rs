@@ -1336,6 +1336,54 @@ fn stepper_async_step_and_output() {
         .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
         .unwrap();
     assert_eq!(output.stack, expected.stack);
+    assert_eq!(output.precompile_root, expected.precompile_root);
+    assert!(output.precompile_witness.is_none());
+}
+
+/// Stepped execution exports the same deferred root and witness as a full VM execution,
+/// and keeps witness-limit failures available to callers.
+#[test]
+fn stepper_output_preserves_deferred_work_and_verification_limits() {
+    use miden_core::{
+        deferred::{PrecompileError, PrecompileLimitError, PrecompileLimits, TRUE_DIGEST},
+        serde::Serializable,
+    };
+    use miden_processor::ExecutionOptions;
+
+    let package = miden_assembly::Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program("fixture", "begin log_deferred end")
+        .unwrap();
+    let inputs = StackInputs::new(TRUE_DIGEST.as_elements()).unwrap();
+    let expected = FastProcessor::new(inputs)
+        .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
+        .unwrap();
+    assert_ne!(expected.precompile_root, TRUE_DIGEST);
+
+    let mut stepper = program_stepper(&package.unwrap_program(), TRUE_DIGEST.as_elements());
+    stepper.run_sync(&mut DefaultHost::default(), |_| {}).unwrap();
+    let output = stepper.into_output().unwrap();
+    assert_eq!(output.precompile_root, expected.precompile_root);
+    assert_eq!(
+        output.precompile_witness.unwrap().to_bytes(),
+        expected.precompile_witness.unwrap().to_bytes(),
+    );
+
+    let mut processor = FastProcessor::new_with_options(
+        inputs,
+        Default::default(),
+        ExecutionOptions::default().with_verification_precompile_limits(PrecompileLimits::new(0)),
+    )
+    .unwrap();
+    let ctx = processor.get_initial_resume_context(&package.unwrap_program()).unwrap();
+    let mut stepper = Stepper::new(processor, ctx);
+    stepper.run_sync(&mut DefaultHost::default(), |_| {}).unwrap();
+    assert!(matches!(
+        stepper.into_output(),
+        Err(ExecutionError::DeferredError {
+            err: PrecompileError::Limit(PrecompileLimitError::Elements { max: 0, .. }),
+            ..
+        })
+    ));
 }
 
 /// A library without debug info whose trampoline is a bare `dynexec`, and a program that also
