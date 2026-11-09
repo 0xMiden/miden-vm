@@ -596,8 +596,11 @@ where
         let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: LB::Expr = local[COL_IS_NEG].into();
         let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].into();
-        let is_intro_endo =
-            act - is_intro.clone() - is_combine.clone() - is_neg.clone() - is_intro_zero.clone();
+        let is_intro_endo = act.clone()
+            - is_intro.clone()
+            - is_combine.clone()
+            - is_neg.clone()
+            - is_intro_zero.clone();
 
         let expr_ptr: LB::Expr = local[COL_EXPR_PTR].into();
         let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
@@ -647,14 +650,9 @@ where
         let adv_i = take_a + take_both.clone() + is_neg.clone();
         let adv_j = take_b + take_both.clone();
         let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
-        let bnd_b = is_combine.clone() * is_boundary.clone();
+        let bnd_b = is_combine * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
-        let bnd_group = (is_intro.clone()
-            + is_combine
-            + is_neg.clone()
-            + is_intro_endo.clone()
-            + is_intro_zero.clone())
-            * is_boundary.clone();
+        let bnd_group = act * is_boundary.clone();
         let bnd_intro = is_intro.clone() * is_boundary.clone();
         let bnd_endo = is_intro_endo * is_boundary.clone();
         // The b-side limbs are range-checked on combine boundaries and on

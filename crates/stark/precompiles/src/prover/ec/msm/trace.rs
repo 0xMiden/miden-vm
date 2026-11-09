@@ -737,6 +737,11 @@ pub fn generate_trace(
             set(COL_IS_COMBINE, is_combine as u32);
             set(COL_IS_NEG, is_neg as u32);
             set(COL_IS_INTRO_ZERO, is_intro_zero as u32);
+            set(COL_A_PTR, e.a_ptr);
+            set(COL_B_PTR, e.b_ptr);
+            set(COL_BOUND_PTR, e.bound_ptr);
+            set(COL_BETA_PTR, e.beta_ptr);
+            set(COL_LAMBDA_PTR, e.lambda_ptr);
             if is_combine {
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_B_EXPR, e.b_expr);
@@ -748,11 +753,6 @@ pub fn generate_trace(
                 set(COL_S_B, rv.s_b);
                 set(COL_VAL_A, e.val_a);
                 set(COL_VAL_B, e.val_b);
-                set(COL_A_PTR, e.a_ptr);
-                set(COL_B_PTR, e.b_ptr);
-                set(COL_BOUND_PTR, e.bound_ptr);
-                set(COL_BETA_PTR, e.beta_ptr);
-                set(COL_LAMBDA_PTR, e.lambda_ptr);
                 if is_boundary {
                     let a_diff = expr_ptr - e.a_expr - 1;
                     let b_diff = expr_ptr - e.b_expr - 1;
@@ -766,19 +766,12 @@ pub fn generate_trace(
                     bpl.require_range16((b_diff >> 16) as u16);
                 }
             } else if is_neg {
-                // Unary walk over A: cursor i, the consumed term cells, the
-                // operand value, group params, and the ∞ result slot. The
-                // a-side ordering half, plus the b-side limbs for the
-                // certificate ordering when this neg mints `val`.
+                // Negation walks A in order, using the b-side limbs for certificate ordering
+                // when it mints `val`.
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
                 set(COL_S_A, rv.s_a);
                 set(COL_VAL_A, e.val_a);
-                set(COL_A_PTR, e.a_ptr);
-                set(COL_B_PTR, e.b_ptr);
-                set(COL_BOUND_PTR, e.bound_ptr);
-                set(COL_BETA_PTR, e.beta_ptr);
-                set(COL_LAMBDA_PTR, e.lambda_ptr);
                 // These cells alias combine's run-constant B-expression/value cells.
                 set(COL_NEG_X, e.neg_x);
                 set(COL_NEG_YA, e.neg_ya);
@@ -803,15 +796,7 @@ pub fn generate_trace(
                     }
                 }
             } else if is_intro_endo {
-                // The value relation's coordinate cells + the boundary's
-                // `EcGroup` pin (authenticating beta/lambda against the
-                // real group) — the UintMul and EcOnCurveCert demand were
-                // already routed by `require::intro_endo`.
-                set(COL_A_PTR, e.a_ptr);
-                set(COL_B_PTR, e.b_ptr);
-                set(COL_BOUND_PTR, e.bound_ptr);
-                set(COL_BETA_PTR, e.beta_ptr);
-                set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // `require::intro_endo` routes the UintMul and EcOnCurveCert demands.
                 set(COL_ENDO_BASE_X, e.endo_base_x);
                 set(COL_ENDO_Y, e.endo_y);
                 set(COL_ENDO_VAL_X, e.endo_val_x);
@@ -824,27 +809,12 @@ pub fn generate_trace(
                     bpl.require_range16((cert_diff >> 16) as u16);
                 }
             } else if is_intro_zero {
-                // `base`'s own coordinates (reusing the endo cells — see
-                // `COL_ENDO_BASE_X`) + the boundary's `EcGroup` pin
-                // (authenticating the group params against the real
-                // group) — the point-store demand for `base` was already
-                // routed by `require::intro_zero`.
-                set(COL_A_PTR, e.a_ptr);
-                set(COL_B_PTR, e.b_ptr);
-                set(COL_BOUND_PTR, e.bound_ptr);
-                set(COL_BETA_PTR, e.beta_ptr);
-                set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // `require::intro_zero` routes the point-store demand for `base`.
                 set(COL_ENDO_BASE_X, e.endo_base_x);
                 set(COL_ENDO_Y, e.endo_y);
                 store.require_uintval(UintPtr::from_addr(rv.scalar));
             } else {
-                // Plain intro authenticates the same curve and base records as the other
-                // introduction families. Its scalar lookup still fixes the value to one.
-                set(COL_A_PTR, e.a_ptr);
-                set(COL_B_PTR, e.b_ptr);
-                set(COL_BOUND_PTR, e.bound_ptr);
-                set(COL_BETA_PTR, e.beta_ptr);
-                set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // Plain introductions allow an identity base and require a scalar value of one.
                 set(COL_ENDO_BASE_X, e.endo_base_x);
                 set(COL_ENDO_Y, e.endo_y);
                 set(COL_INTRO_IS_PAI, rv.s_a);
