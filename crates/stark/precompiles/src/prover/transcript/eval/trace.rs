@@ -1082,13 +1082,13 @@ fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &EidosDigest, rhs: &Eido
     row[COL_RHS_BEGIN..COL_RHS_END].copy_from_slice(&rhs);
 }
 
-fn write_uint_domain(row: &mut [Felt; NUM_MAIN_COLS], bound_ptr: u32) {
+fn uint_domain_for_bound_ptr(bound_ptr: u32) -> Felt {
     let domain = UintDomain::from_bound_ptr(bound_ptr).expect("known uint bound pointer");
-    row[COL_UINT_DOMAIN_SELECTOR] = Felt::from_u8(match domain {
+    Felt::from_u8(match domain {
         UintDomain::U256 | UintDomain::K1Base | UintDomain::K1Scalar => 0,
         UintDomain::Ed25519Base | UintDomain::Ed25519Scalar | UintDomain::Ed25519Order => 3,
         UintDomain::P256Base | UintDomain::P256Scalar => 8,
-    });
+    })
 }
 
 /// Append one eval row, written by column *constant* so the layout in
@@ -1121,7 +1121,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_MSM_EXPR] = Felt::from(*expr);
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group);
             row[COL_BOUND_PTR] = Felt::from(*bound);
-            write_uint_domain(&mut row, *bound);
+            row[COL_UINT_DOMAIN_SELECTOR] = uint_domain_for_bound_ptr(*bound);
             row[COL_FRAME_PARAM1] = Felt::from(n_pairs);
             if is_last {
                 row[COL_PTR] = Felt::from(*val);
@@ -1162,7 +1162,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
             row[COL_UINT_VALUE_BOUND_PTR] = Felt::from(*bound_ptr);
-            write_uint_domain(&mut row, *bound_ptr);
+            row[COL_UINT_DOMAIN_SELECTOR] = uint_domain_for_bound_ptr(*bound_ptr);
         },
         NodeKind::UintOp {
             op,
@@ -1182,7 +1182,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             }
             row[COL_PTR] = Felt::from(*r_ptr); // result ptr
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
-            write_uint_domain(&mut row, *bound_ptr);
+            row[COL_UINT_DOMAIN_SELECTOR] = uint_domain_for_bound_ptr(*bound_ptr);
             row[COL_A_PTR] = Felt::from(*a_ptr);
             row[COL_B_PTR] = Felt::from(*b_ptr);
             // Frame parameter 1 stays 0: the bound rides the Binding / uint-relation buses.
@@ -1206,7 +1206,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_EC_CREATE_GROUP_PTR] = Felt::from(*group_ptr); // curve VALUE group_ptr
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group_ptr);
             if !is_pai {
-                write_uint_domain(&mut row, *bound_ptr);
+                row[COL_UINT_DOMAIN_SELECTOR] = uint_domain_for_bound_ptr(*bound_ptr);
             }
         },
         NodeKind::EcBinOp {
