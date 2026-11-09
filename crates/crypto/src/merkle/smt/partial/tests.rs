@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     vec::Vec,
 };
 
@@ -13,7 +14,7 @@ use super::{PartialSmt, SMT_DEPTH, serialization::property_tests::arbitrary_vali
 use crate::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
-        EmptySubtreeRoots, MerkleError, NodeIndex,
+        EmptySubtreeRoots, MerkleError, NodeIndex, SparseMerklePath,
         smt::{LeafIndex, Smt, SmtLeaf},
     },
     utils::{Deserializable, Serializable},
@@ -257,6 +258,63 @@ fn partial_smt_root_mismatch_on_non_empty_values() {
     // Adding the stale proof should fail as its root is different.
     let err = partial.add_proof(stale_proof).unwrap_err();
     assert_matches!(err, MerkleError::ConflictingRoots { .. });
+}
+
+/// Tests that a path with a conflicting root leaves the partial SMT unchanged.
+#[test]
+fn partial_smt_add_path_conflicting_root_is_atomic() {
+    let mut rng = ChaCha20Rng::from_seed([20u8; 32]);
+    let key0 = rng.random::<Word>();
+    let key1 = rng.random::<Word>();
+    let key2 = rng.random::<Word>();
+    let value0 = Word::from([ONE, ZERO, ZERO, ZERO]);
+    let value1 = Word::from([ZERO, ONE, ZERO, ZERO]);
+    let value2 = Word::from([ZERO, ZERO, ONE, ZERO]);
+
+    let mut full = Smt::with_entries([(key0, value0), (key1, value1)]).unwrap();
+    let mut partial = PartialSmt::from_proofs([full.open(&key0)]).unwrap();
+    let before = partial.clone();
+
+    // Change the tree so the proof for key1 resolves to a different root.
+    full.insert(key2, value2).unwrap();
+    let stale_proof = full.open(&key1);
+    assert_ne!(stale_proof.compute_root(), partial.root());
+
+    let err = partial.add_proof(stale_proof).unwrap_err();
+    assert_matches!(err, MerkleError::ConflictingRoots { .. });
+    assert_eq!(partial, before);
+}
+
+/// Tests that paths whose depth is not `SMT_DEPTH` are rejected before mutating the tree.
+#[test]
+fn partial_smt_add_path_invalid_depth_is_atomic() {
+    let mut rng = ChaCha20Rng::from_seed([21u8; 32]);
+    let key = rng.random::<Word>();
+    let value = Word::from([ONE, ONE, ZERO, ZERO]);
+    let leaf = SmtLeaf::new_single(key, value);
+
+    // A zero-length path computes the leaf hash as its root, so the root check alone would accept
+    // it when the partial tree has that root.
+    let mut partial = PartialSmt::new(leaf.hash());
+    let before = partial.clone();
+    let err = partial.add_path(leaf, SparseMerklePath::default()).unwrap_err();
+    assert_eq!(err.to_string(), "provided node list should have a minimum length of 64");
+    assert_matches!(err, MerkleError::InvalidPathLength(len) if len == SMT_DEPTH as usize);
+    assert_eq!(partial, before);
+
+    // A path that stops one level below the root must also be rejected before mutation.
+    let full = Smt::with_entries([(key, value)]).unwrap();
+    let proof = full.open(&key);
+    let short_nodes = proof.path().iter().take(SMT_DEPTH as usize - 1).collect::<Vec<_>>();
+    let short_path = SparseMerklePath::from_sized_iter(short_nodes).unwrap();
+    assert_eq!(short_path.depth(), SMT_DEPTH - 1);
+
+    let mut partial = PartialSmt::new(full.root());
+    let before = partial.clone();
+    let err = partial.add_path(proof.leaf().clone(), short_path).unwrap_err();
+    assert_eq!(err.to_string(), "provided node list should have a minimum length of 64");
+    assert_matches!(err, MerkleError::InvalidPathLength(len) if len == SMT_DEPTH as usize);
+    assert_eq!(partial, before);
 }
 
 /// Tests that from_proofs fails when the proofs roots do not match.

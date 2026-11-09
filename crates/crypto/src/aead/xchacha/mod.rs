@@ -42,13 +42,22 @@ const NONCE_SIZE_BYTES: usize = 24;
 /// Size of secret key in bytes
 const SK_SIZE_BYTES: usize = 32;
 
+/// Domain separator for the authenticated XChaCha encrypted-data representation.
+const AAD_DOMAIN: &[u8] = b"miden-crypto/xchacha20poly1305/encrypted-data";
+/// Version of the authenticated XChaCha encrypted-data representation.
+const AAD_VERSION: u8 = 1;
+/// Size of the fixed authenticated header that precedes the caller's associated data.
+const AAD_HEADER_SIZE: usize = AAD_DOMAIN.len() + 2;
+
 // STRUCTS AND IMPLEMENTATIONS
 // ================================================================================================
 
 /// Encrypted data
 #[derive(Debug, PartialEq, Eq)]
 pub struct EncryptedData {
-    /// Indicates the original format of the data before encryption
+    /// Indicates the original format of the data before encryption.
+    ///
+    /// This value is bound into the authentication tag, so changing it invalidates the tag.
     data_type: DataType,
     /// The encrypted ciphertext, including the authentication tag
     ciphertext: Vec<u8>,
@@ -105,6 +114,29 @@ fn read_encrypted_data_strict(ciphertext: &[u8]) -> Result<EncryptedData, Encryp
     Ok(encrypted_data)
 }
 
+/// Builds the authenticated associated data for a ciphertext of the given data type.
+///
+/// The fixed domain tag, version byte, and data type byte form a fixed-length header. The
+/// caller's associated data follows unchanged, so the authenticated input is unambiguous and
+/// binds the data type to the tag.
+fn authenticated_associated_data(
+    data_type: DataType,
+    associated_data: &[u8],
+) -> Result<Vec<u8>, EncryptionError> {
+    let capacity = associated_data
+        .len()
+        .checked_add(AAD_HEADER_SIZE)
+        .ok_or(EncryptionError::InputTooLong)?;
+
+    let mut bound = Vec::with_capacity(capacity);
+    bound.extend_from_slice(AAD_DOMAIN);
+    bound.push(AAD_VERSION);
+    bound.push(data_type as u8);
+    bound.extend_from_slice(associated_data);
+
+    Ok(bound)
+}
+
 impl SecretKey {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
@@ -155,7 +187,19 @@ impl SecretKey {
         associated_data: &[u8],
         nonce: Nonce,
     ) -> Result<EncryptedData, EncryptionError> {
-        let payload = Payload { msg: data, aad: associated_data };
+        self.encrypt_with_data_type(data, associated_data, nonce, DataType::Bytes)
+    }
+
+    /// Encrypts data with the selected data type and binds that type into the tag.
+    fn encrypt_with_data_type(
+        &self,
+        data: &[u8],
+        associated_data: &[u8],
+        nonce: Nonce,
+        data_type: DataType,
+    ) -> Result<EncryptedData, EncryptionError> {
+        let aad = authenticated_associated_data(data_type, associated_data)?;
+        let payload = Payload { msg: data, aad: &aad };
 
         let cipher = XChaCha20Poly1305::new(&self.0.into());
 
@@ -163,11 +207,7 @@ impl SecretKey {
             .encrypt(&nonce.inner, payload)
             .map_err(|_| EncryptionError::FailedOperation)?;
 
-        Ok(EncryptedData {
-            data_type: DataType::Bytes,
-            ciphertext,
-            nonce,
-        })
+        Ok(EncryptedData { data_type, ciphertext, nonce })
     }
 
     // ELEMENT ENCRYPTION
@@ -205,9 +245,7 @@ impl SecretKey {
         let data_bytes = elements_to_bytes(data);
         let ad_bytes = elements_to_bytes(associated_data);
 
-        let mut encrypted_data = self.encrypt_bytes_with_nonce(&data_bytes, &ad_bytes, nonce)?;
-        encrypted_data.data_type = DataType::Elements;
-        Ok(encrypted_data)
+        self.encrypt_with_data_type(&data_bytes, &ad_bytes, nonce, DataType::Elements)
     }
 
     // BYTE DECRYPTION
@@ -250,8 +288,9 @@ impl SecretKey {
         encrypted_data: &EncryptedData,
         associated_data: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
-        let EncryptedData { ciphertext, nonce, data_type: _ } = encrypted_data;
-        let payload = Payload { msg: ciphertext, aad: associated_data };
+        let EncryptedData { ciphertext, nonce, data_type } = encrypted_data;
+        let aad = authenticated_associated_data(*data_type, associated_data)?;
+        let payload = Payload { msg: ciphertext, aad: &aad };
 
         let cipher = XChaCha20Poly1305::new(&self.0.into());
 
