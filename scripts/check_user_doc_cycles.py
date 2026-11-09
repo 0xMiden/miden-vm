@@ -23,6 +23,46 @@ class MissingCycleTextError(ValueError):
     """Raised when a procedure description has no cycle text."""
 
 
+# Only strip tags that appear in generated/user docs. A generic `</?[^>]+>` also
+# matches math comparisons such as `n < 16 … m > 0`, collapsing distinct costs.
+_HTML_TAGS = (
+    "a",
+    "b",
+    "br",
+    "code",
+    "div",
+    "em",
+    "i",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+)
+_HTML_TAG_RE = re.compile(
+    r"</?(?:" + "|".join(_HTML_TAGS) + r")\b[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def strip_doc_html(text: str, *, br_replacement: str = "\n") -> str:
+    """Remove recognized HTML tags; preserve mathematical `<` / `>` comparisons."""
+    text = re.sub(r"<br\s*/?>", br_replacement, text, flags=re.IGNORECASE)
+    text = re.sub(r"</?li\b[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?ul\b[^>]*>", "", text, flags=re.IGNORECASE)
+    return _HTML_TAG_RE.sub("", text)
+
+
 def extract_cycles_from_description(description: str) -> str:
     description = html.unescape(description)
     matches = list(
@@ -40,10 +80,7 @@ def extract_cycles_from_description(description: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
-    block = re.sub(r"<br\s*/?>", "\n", block, flags=re.IGNORECASE)
-    block = re.sub(r"</?li>", "\n", block, flags=re.IGNORECASE)
-    block = re.sub(r"</?ul>", "", block, flags=re.IGNORECASE)
-    block = re.sub(r"</?[^>]+>", "", block)
+    block = strip_doc_html(block, br_replacement="\n")
     block = block.replace("`", "")
     block = re.sub(r"\*\*", "", block)
     block = re.sub(r"\$([^$]+)\$", r"\1", block)
@@ -242,8 +279,7 @@ def check_core_lib_mappings() -> list[str]:
 
 def _normalize_table_cell(cell: str) -> str:
     text = html.unescape(cell)
-    text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?[^>]+>", "", text)
+    text = strip_doc_html(text, br_replacement=" ")
     text = text.replace("`", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -463,6 +499,25 @@ class CheckUserDocCyclesTests(unittest.TestCase):
         self.assertTrue(fixture_expected_matches_cycles("38", "38 cycles"))
         self.assertFalse(fixture_expected_matches_cycles("38", "32"))
         self.assertFalse(fixture_expected_matches_cycles("38 cycles", "32"))
+
+    def test_html_strip_preserves_math_comparisons(self) -> None:
+        # Regression (S1 harness): generic `</?[^>]+>` treated `n < 16 … m > 0` as a
+        # tag, so costs 20 and 99 both collapsed to the same mangled cycle text.
+        low = extract_cycles_from_description(
+            "Cycles: 10 if n < 16 else 20 when m > 0"
+        )
+        high = extract_cycles_from_description(
+            "Cycles: 10 if n < 16 else 99 when m > 0"
+        )
+        self.assertEqual(low, "10 if n < 16 else 20 when m > 0")
+        self.assertEqual(high, "10 if n < 16 else 99 when m > 0")
+        self.assertNotEqual(low, high)
+
+        # Recognized tags are still stripped; inequalities survive beside them.
+        with_br = extract_cycles_from_description(
+            "Cycles: 10 if n < 16<br />else 20"
+        )
+        self.assertEqual(with_br, "10 if n < 16 else 20")
 
     def test_mapping_requires_fixture_or_exemption(self) -> None:
         # Spot-check the live mappings file rather than re-implementing TOML policy here.
