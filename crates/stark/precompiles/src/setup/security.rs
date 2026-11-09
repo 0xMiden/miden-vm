@@ -148,7 +148,7 @@ mod tests {
         );
         assert_eq!(
             metadata.num_deep_terms(1),
-            734,
+            733,
             "unexpected Blake3 (alignment 1) DEEP term count"
         );
         assert_eq!(

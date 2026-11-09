@@ -123,10 +123,10 @@ where
 }
 
 /// LogUp message for the [`MsmClaimTerm`](BusId::MsmClaimTerm) relation:
-/// one **positionless** term `(expr_ptr, base_ptr, scalar_ptr)` of an MSM
-/// expression — the resolve-seam twin of [`MsmTermMsg`] without the `idx`
-/// field. Provided once per term row of a claimed expression
-/// ([`COL_IS_CLAIMED`]); consumed by the eval `EcMsm` absorb seam, which
+/// one **positionless** term `(expr_ptr, base_ptr, scalar_ptr, scalar_bound_ptr)` of an MSM
+/// expression. Relative to [`MsmTermMsg`], it omits `idx` and adds the scalar bound
+/// declared by the transcript's consumed uint binding. Provided once per term row of a
+/// claimed expression ([`COL_IS_CLAIMED`]); consumed by the eval `EcMsm` absorb seam, which
 /// matches the claim's terms as a multiset so the DAG absorb order (and
 /// root) is the caller's, not the chiplet's `idx` storage order.
 #[derive(Debug, Clone)]
@@ -134,6 +134,8 @@ pub struct MsmClaimTermMsg<E> {
     pub expr_ptr: E,
     pub base_ptr: E,
     pub scalar_ptr: E,
+    /// The curve's authenticated scalar bound; must match the consumed uint binding's domain.
+    pub scalar_bound_ptr: E,
 }
 
 impl<E, EF> LookupMessage<E, EF> for MsmClaimTermMsg<E>
@@ -144,7 +146,12 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
             BusId::MsmClaimTerm as usize,
-            [self.expr_ptr.clone(), self.base_ptr.clone(), self.scalar_ptr.clone()],
+            [
+                self.expr_ptr.clone(),
+                self.base_ptr.clone(),
+                self.scalar_ptr.clone(),
+                self.scalar_bound_ptr.clone(),
+            ],
         )
     }
 }
@@ -209,8 +216,8 @@ pub const COL_S_B: usize = 19;
 /// boundary, `EcGroupAdd` asserts `val = val_a + val_b`.
 pub const COL_VAL_A: usize = 20;
 pub const COL_VAL_B: usize = 21;
-/// Group curve parameters used by combine, neg, and intro_endo to close the
-/// boundary's `EcGroup` consume and pin `sbound` to the group.
+/// Curve parameters authenticated on every expression boundary by the `EcGroup` consume,
+/// which pins `sbound` to the group.
 pub const COL_A_PTR: usize = 22;
 pub const COL_B_PTR: usize = 23;
 pub const COL_BOUND_PTR: usize = 24;
@@ -255,19 +262,21 @@ pub const COL_NEG_YR: usize = COL_S_B;
 /// freshly mints its value, gating the common `EcOnCurveCert(group, val)`
 /// provide.
 pub const COL_NEG_MINTED: usize = 31;
-/// The group's GLV endomorphism `β`/`λ` ptrs, used by combine, neg, and
-/// intro_endo to close the boundary's `EcGroup` consume. Both are the
-/// none-sentinel 0 for a group without an endomorphism.
+/// The group's GLV endomorphism `β`/`λ` ptrs, authenticated by every boundary's
+/// `EcGroup` consume. Both are the none-sentinel 0 for a group without an endomorphism.
 pub const COL_BETA_PTR: usize = 32;
 pub const COL_LAMBDA_PTR: usize = 33;
 
 // `intro_endo` is the residual active operation after subtracting the four stored selectors. Its
-// value relation reuses the negation columns; `intro_zero` reuses the base-coordinate pair as
-// well. These operations are mutually exclusive, so each row gives the shared columns one meaning.
+// value relation reuses the negation columns; all introductions reuse the base-coordinate pair.
+// These operations are mutually exclusive, so each row gives the shared columns one meaning.
 /// The introduced base point's x-coordinate pointer.
 pub const COL_ENDO_BASE_X: usize = COL_NEG_X;
 /// The introduced base point's y-coordinate pointer.
 pub const COL_ENDO_Y: usize = COL_NEG_YA;
+/// Identity flag for a plain introduction's base point. The operand scalar slot is unused
+/// on introductions; zero and endomorphism introductions require this flag to be zero.
+pub const COL_INTRO_IS_PAI: usize = COL_S_A;
 /// `φ(P)`'s x ptr (from the `EcPoint(val)` consume; tied to `β·x_P` by the
 /// `UintMul` consume).
 pub const COL_ENDO_VAL_X: usize = COL_NEG_YR;
@@ -281,8 +290,7 @@ pub const COL_ENDO_MINTED: usize = COL_NEG_MINTED;
 /// the point at infinity — and a second EC-point lookup verifies that `base`
 /// is itself a genuine finite point of `group_ptr` (`is_pai = 0`), reusing
 /// [`COL_ENDO_BASE_X`]/[`COL_ENDO_Y`] for its coordinates; the boundary's
-/// `EcGroup` consume (shared with `combine`/`neg`/`intro_endo`) ties
-/// `sbound_ptr` to `group_ptr` the same way. Without both ties, a base that
+/// `EcGroup` consume ties `sbound_ptr` to `group_ptr`. Without both ties, a base that
 /// is off-group or the identity point would still satisfy every other
 /// `intro_zero` constraint.
 ///
@@ -302,11 +310,10 @@ pub const NUM_MAIN_COLS: usize = 35;
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
 //  col 7:  EcGroupAdd (combine value) + EcPoint(val_a) (neg value coord).
-//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin — combine, neg, intro_endo, and
-//          intro_zero).
+//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin on every expression boundary).
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
-//  col 11: EcPoint(base) (intro_endo/intro_zero coord) + EcPoint(val) (intro_endo coord).
+//  col 11: EcPoint(base) (all introductions) + EcPoint(val) (intro_endo coord).
 const NUM_LOGUP_COLS: usize = 12;
 const AUX_WIDTH: usize = NUM_LOGUP_COLS;
 const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [2; NUM_LOGUP_COLS];
@@ -377,6 +384,9 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(is_intro_endo.clone() * (is_intro_endo.clone() - AB::Expr::ONE));
         builder.assert_bool(local[COL_NEG_MINTED]);
         builder.assert_zero((AB::Expr::ONE - is_neg.clone() - is_intro_endo.clone()) * minted);
+        builder.assert_zero(
+            (is_intro_zero.clone() + is_intro_endo.clone()) * local[COL_INTRO_IS_PAI].into(),
+        );
 
         // Activity is sticky-downward (pads are a tail). The residual's
         // Boolean constraint above makes every active row exactly one op and
@@ -586,8 +596,11 @@ where
         let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: LB::Expr = local[COL_IS_NEG].into();
         let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].into();
-        let is_intro_endo =
-            act - is_intro.clone() - is_combine.clone() - is_neg.clone() - is_intro_zero.clone();
+        let is_intro_endo = act.clone()
+            - is_intro.clone()
+            - is_combine.clone()
+            - is_neg.clone()
+            - is_intro_zero.clone();
 
         let expr_ptr: LB::Expr = local[COL_EXPR_PTR].into();
         let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
@@ -632,19 +645,15 @@ where
         // row (no take flags), so `adv_i` carries `is_neg`. The a-side
         // boundary traffic (operand-A head, ordering) fires for combine AND
         // neg; the b-side and the combine value for combine only; the neg
-        // value for neg only. `bnd_group` is the wider `EcGroup`-pin gate:
-        // combine, neg, intro_endo (which has no operand head / ordering of
-        // its own, only the group pin authenticating β/λ), AND intro_zero
-        // (which needs it to tie `sbound_ptr` to `group_ptr`, same as the
-        // other three).
+        // value for neg only. Every expression boundary authenticates its
+        // group's scalar bound, which the claim-term lookup carries to the transcript.
         let adv_i = take_a + take_both.clone() + is_neg.clone();
         let adv_j = take_b + take_both.clone();
         let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
-        let bnd_b = is_combine.clone() * is_boundary.clone();
+        let bnd_b = is_combine * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
-        let bnd_group =
-            (is_combine + is_neg.clone() + is_intro_endo.clone() + is_intro_zero.clone())
-                * is_boundary.clone();
+        let bnd_group = act * is_boundary.clone();
+        let bnd_intro = is_intro.clone() * is_boundary.clone();
         let bnd_endo = is_intro_endo * is_boundary.clone();
         // The b-side limbs are range-checked on combine boundaries and on
         // certificate-minting rows (see `COL_B_DIFF_LO`).
@@ -719,6 +728,7 @@ where
                     expr_ptr: expr_ptr.clone(),
                     base_ptr: base.clone(),
                     scalar_ptr: scalar.clone(),
+                    scalar_bound_ptr: sbound_ptr.clone(),
                 },
                 one_deg
             ),
@@ -916,9 +926,8 @@ where
                 two_deg
             ),
         );
-        // col 8 (paired, lqd-1): neg's cheap value-negation read of R's
-        // coords, paired with the `EcGroup` pin (sbound ↔ group) — both
-        // combine and neg.
+        // col 8: negation reads its result's coordinates; every expression boundary
+        // authenticates its group parameters and scalar bound through `EcGroup`.
         frac_col!(
             builder,
             "ec-msm-heads",
@@ -969,22 +978,22 @@ where
             ("range-b-hi", range_b_gate, Range16Msg { w: b_hi }, two_deg),
         );
 
-        // col 11 (paired, lqd-1): intro_endo's coordinate relation — `P`'s
-        // and `φ(P)`'s `EcPoint` consumes. Both messages use `endo_y`, so their matching store
-        // providers constrain `y_φ = y_P`, analogous to the shared x-coordinate in `neg`.
+        // col 11: every introduction authenticates its base point's group. Endomorphism
+        // introductions also read the image, sharing y with the base. Plain introductions
+        // may use an identity base; the other two families require a finite base.
         frac_col!(
             builder,
             "ec-msm-endo",
             pair_deg,
             (
-                "consume-ecpoint-endo-or-zero-base",
-                bnd_endo.clone() + bnd_intro_zero,
+                "consume-ecpoint-intro-base",
+                bnd_intro + bnd_endo.clone() + bnd_intro_zero,
                 EcPointMsg {
                     point_ptr: base.clone(),
                     group_ptr: group_ptr.clone(),
                     x_ptr: endo_base_x.clone(),
                     y_ptr: endo_y.clone(),
-                    is_pai: LB::Expr::ZERO,
+                    is_pai: local[COL_INTRO_IS_PAI].into(),
                 },
                 two_deg
             ),
