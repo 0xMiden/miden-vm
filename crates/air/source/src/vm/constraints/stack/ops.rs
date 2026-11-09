@@ -375,7 +375,7 @@ mod tests {
     use crate::vm::constraints::{
         columns::CoreCols,
         op_flags::{OpFlags, generate_test_row},
-        stack::test_utils::ConstraintEvalBuilder,
+        test_utils::ConstraintEvalBuilder,
     };
 
     fn eval_stack_ops(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {

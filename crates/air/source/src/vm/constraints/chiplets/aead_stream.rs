@@ -1,23 +1,22 @@
 //! AEAD stream constraints.
 //!
-//! Stream rows live in the bitwise selector region with `stream_mode = 1`. One stream entry spans
-//! eight rows; each row proves one u32 XOR as four AND8 byte lookups. These constraints bind the
-//! row phases and carry the plaintext/ciphertext limbs across the eight-row schedule.
+//! Each stream entry spans eight rows; each row proves one u32 XOR as four AND8 byte lookups.
+//! These constraints bind the row phases and carry the plaintext/ciphertext limbs across the
+//! eight-row schedule.
 
 use core::borrow::Borrow;
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::AirBuilder;
 
 use crate::vm::{
-    ChipletCols, MidenAirBuilder,
+    MidenAirBuilder,
     constraints::{
         chiplets::{
             columns::{AeadStreamCols, PeriodicCols},
             selectors::ChipletSelectors,
         },
         constants::{TWO_POW_32, TWO_POW_32_MINUS_1},
-        utils::{BoolNot, pack_u32_bytes_le},
+        utils::{BoolNot, pack_u32_bytes_le, pack_u32_xor_bytes_le},
     },
 };
 
@@ -25,25 +24,25 @@ use crate::vm::{
 // ================================================================================================
 
 /// Enforce stream-row phase alignment, u32-XOR recomposition, canonical splits, and carries.
+///
+/// The selectors identify current and next AEAD rows, plus entry directly from the controller.
+/// The entry gate is active on the row immediately before the first AEAD row.
 pub fn enforce_aead_stream_constraints<AB>(
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
+    cols: &AeadStreamCols<AB::Var>,
+    cols_next: &AeadStreamCols<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
+    let stream = selectors.aead_stream_active.clone();
+    let stream_next = selectors.aead_stream_next_active.clone();
     let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
     let phases: [AB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
-    let cols = local.aead_stream();
-    let cols_next = next.aead_stream();
-    let stream = selectors.bitwise.aead_stream.clone();
-    let stream_next = aead_stream_active_next::<AB>(next);
-
     // Align stream entry boundaries with the eight-row phase cycle.
     builder
-        .when(selectors.bitwise.region.next_is_first.clone() * stream_next.clone())
+        .when(selectors.aead_stream_entry_next_from_controller.clone())
         .assert_one(phases[7].clone());
 
     builder.when(stream.not() * stream_next.clone()).assert_one(phases[7].clone());
@@ -85,7 +84,9 @@ fn carry_read_to_high_first<AB>(
             curr.plaintext[plaintext_offset + 1],
         ],
     );
-    assert_eq_expr_on(builder, gate.clone(), next.c_prev0, xor_limb_expr::<AB>(curr.bytes));
+    builder
+        .when(gate.clone())
+        .assert_eq(next.c_prev0, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
     enforce_canonical_split(
         builder,
         gate,
@@ -125,7 +126,9 @@ fn carry_high_first_to_low_second<AB>(
             curr.c_prev0,
         ],
     );
-    assert_eq_expr_on(builder, gate, next.c_prev1, xor_limb_expr::<AB>(curr.bytes));
+    builder
+        .when(gate)
+        .assert_eq(next.c_prev1, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
 }
 
 fn carry_low_second_to_high_second<AB>(
@@ -143,7 +146,9 @@ fn carry_low_second_to_high_second<AB>(
         [next.ctx, next.clk, next.dst_ptr, next.lane_base, next.c_prev0, next.c_prev1],
         [curr.ctx, curr.clk, curr.dst_ptr, curr.lane_base, curr.c_prev0, curr.c_prev1],
     );
-    assert_eq_expr_on(builder, gate.clone(), next.c_prev2, xor_limb_expr::<AB>(curr.bytes));
+    builder
+        .when(gate.clone())
+        .assert_eq(next.c_prev2, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
     enforce_canonical_split(
         builder,
         gate,
@@ -156,23 +161,6 @@ fn carry_low_second_to_high_second<AB>(
 
 // HELPERS
 // ================================================================================================
-
-fn aead_stream_active_next<AB>(next: &ChipletCols<AB::Var>) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    let s_ctrl_next: AB::Expr = next.chiplets[0].into();
-    let s1_next: AB::Expr = next.chiplets[1].into();
-    let stream_mode_next: AB::Expr = next.bitwise_stream_mode().into();
-    s_ctrl_next.not() * s1_next.not() * stream_mode_next
-}
-
-fn assert_eq_expr_on<AB>(builder: &mut AB, gate: AB::Expr, next: AB::Var, current: AB::Expr)
-where
-    AB: MidenAirBuilder,
-{
-    builder.when(gate).assert_eq(next, current);
-}
 
 fn enforce_canonical_split<AB>(
     builder: &mut AB,
@@ -198,17 +186,4 @@ where
     AB: MidenAirBuilder,
 {
     pack_u32_bytes_le::<_, AB::Expr>([bytes[0], bytes[1], bytes[2], bytes[3]])
-}
-
-pub(crate) fn xor_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    let xor_bytes: [AB::Expr; 4] = core::array::from_fn(|i| {
-        let lhs: AB::Expr = bytes[i].into();
-        let rhs: AB::Expr = bytes[i + 4].into();
-        let and: AB::Expr = bytes[i + 8].into();
-        lhs + rhs - and.double()
-    });
-    pack_u32_bytes_le::<_, AB::Expr>(xor_bytes)
 }

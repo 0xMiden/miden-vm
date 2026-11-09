@@ -1,12 +1,13 @@
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::{
-    CHIPLETS_CLK_COL, CHIPLETS_WIDTH,
+    CHIPLETS_WIDTH,
+    and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
     chiplets::{
-        KERNEL_ROM_TRACE_WIDTH,
+        KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS,
         ace::ACE_CHIPLET_NUM_COLS,
         bitwise::TRACE_WIDTH as BITWISE_WIDTH,
-        hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
+        hasher::{CONTROLLER_TRACE_ALIGNMENT, HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
     eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
@@ -16,30 +17,30 @@ use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::KernelD
 use crate::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
+    operation::OperationError,
     trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
 };
 
-mod bitwise;
-use bitwise::AEAD_STREAM_FRAGMENT_WIDTH;
-pub(crate) use bitwise::{AEAD_STREAM_CYCLE_LEN, Bitwise};
+mod aead_stream;
+pub(crate) use aead_stream::{AEAD_STREAM_CYCLE_LEN, AeadStream};
 
-const BITWISE_COL_START: usize = 2;
-const BITWISE_FRAGMENT_WIDTH: usize = if BITWISE_WIDTH > AEAD_STREAM_FRAGMENT_WIDTH {
-    BITWISE_WIDTH
-} else {
-    AEAD_STREAM_FRAGMENT_WIDTH
-};
-const _: () = assert!(BITWISE_COL_START + BITWISE_FRAGMENT_WIDTH == CHIPLETS_CLK_COL);
+mod and8_trace;
+pub(crate) use and8_trace::build_and8_lookup_trace;
+
+mod bitwise;
+pub(crate) use bitwise::Bitwise;
+
+const AEAD_PREFIX: [Felt; NUM_BITWISE_SELECTORS] = [ONE, ZERO, ZERO];
+const BITWISE_PREFIX: [Felt; NUM_BITWISE_SELECTORS] = [ONE, ZERO, ONE];
+const _: () = assert!(BITWISE_PREFIX.len() + BITWISE_WIDTH < CHIPLETS_WIDTH);
+const _: () = assert!(AEAD_PREFIX.len() + aead_stream::TRACE_WIDTH == CHIPLETS_WIDTH - 1);
+const _: () = assert!(CONTROLLER_TRACE_ALIGNMENT.is_multiple_of(AEAD_STREAM_CYCLE_LEN));
 
 mod hasher;
 pub(crate) use hasher::Hasher;
 pub use hasher::{
     build_external_eidos_compression_traces, build_ordered_external_eidos_compression_traces,
 };
-
-pub(crate) fn build_and8_lookup_trace(and8_counts: &[u64]) -> Vec<Felt> {
-    hasher::build_and8_lookup_trace(and8_counts)
-}
 
 mod memory;
 pub(crate) use memory::Memory;
@@ -67,67 +68,31 @@ pub struct EidosCompressionTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-// CHIPLETS MODULE OF HASHER, BITWISE, MEMORY, ACE, AND KERNEL ROM CHIPLETS
+// CHIPLET TRACE PACKING
 // ================================================================================================
 
-/// This module manages the VM's hasher, bitwise, memory, arithmetic circuit evaluation (ACE)
-/// and kernel ROM chiplets and is responsible for building a final execution trace from their
-/// stacked execution traces and chiplet selectors.
+/// Packs the hasher controller, AEAD stream, bitwise, memory, ACE, and kernel ROM into the shared
+/// chiplets trace.
 ///
-/// The module's trace can be thought of as 5 stacked segments in the following form.
+/// Sections appear in the order below. Each selector prefix starts at column 0, and payload
+/// ranges are half-open. Cells outside the prefix and payload stay zero.
 ///
-/// The chiplet system uses `s_ctrl = column 0` to select the hasher controller.
-/// Columns 1-4 (`s1..s4`) subdivide the remaining region. The final shared data column is
-/// row-local: bitwise rows use it as normal/AEAD stream mode, while controller rows use it as
-/// the Merkle/padding flag.
+/// | Section          | Selector prefix | Payload columns |
+/// |------------------|-----------------|-----------------|
+/// | Controller       | `0`             | `1..24`         |
+/// | AEAD stream      | `100`           | `3..23`         |
+/// | Ordinary bitwise | `101`           | `3..16`         |
+/// | Memory           | `110`           | `3..20`         |
+/// | ACE              | `1110`          | `4..20`         |
+/// | Kernel ROM       | `11110`         | `5..10`         |
+/// | Padding          | `11111`         |                 |
 ///
-/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
-///   - column 0 (s_ctrl): ONE
-///   - columns 1-19: hasher-controller trace
-///   - column 22: Merkle/padding discriminator
-///
-/// * Bitwise segment: begins at the end of the hasher segment.
-///   - column 0 (s_ctrl): ZERO
-///   - column 1 (s1): ZERO
-///   - columns 2-14: execution trace of bitwise chiplet
-///   - columns 15-21: unused columns padded with ZERO
-///   - column 22: ZERO for normal bitwise rows
-///
-/// * Memory segment: begins at the end of the bitwise segment.
-///   - column 0 (s_ctrl): ZERO
-///   - column 1 (s1): ONE
-///   - column 2 (s2): ZERO
-///   - columns 3-19: execution trace of memory chiplet
-///   - columns 20-21: unused columns padded with ZERO
-///   - column 22: ZERO
-///
-/// * ACE segment: begins at the end of the memory segment.
-///   - column 0 (s_ctrl): ZERO
-///   - column 1-2 (s1, s2): ONE
-///   - column 3 (s3): ZERO
-///   - columns 4-20: execution trace of ACE chiplet
-///   - column 22: ZERO
-///
-/// * Kernel ROM segment: begins at the end of the ACE segment.
-///   - column 0 (s_ctrl): ZERO
-///   - columns 1-3 (s1, s2, s3): ONE
-///   - column 4 (s4): ZERO
-///   - columns 5-9: execution trace of kernel ROM chiplet
-///   - columns 10-21: unused columns padded with ZERO
-///   - column 22: ZERO
-///
-/// * Padding segment: fills the rest of the trace.
-///   - column 0 (s_ctrl): ZERO
-///   - columns 1-4 (s1..s4): ONE
-///   - columns 5-22: ZERO
-///
-/// Column ranges are stable for existing chiplets: controller uses columns 1..20,
-/// normal bitwise uses 2..15, memory uses 3..18, ACE uses 4..20, and kernel ROM
-/// uses 5..10. AEAD stream rows reuse the bitwise region and use columns 2..21 as
-/// payload, with column 22 as the AEAD stream selector.
+/// The controller ends on an eight-row boundary so AEAD starts at phase zero. Controller
+/// columns 22 and 23 hold the Merkle/padding flag and row address, respectively.
 #[derive(Debug)]
 pub struct Chiplets {
     pub hasher: Hasher,
+    pub(crate) aead_stream: AeadStream,
     pub bitwise: Bitwise,
     pub memory: Memory,
     pub ace: Ace,
@@ -142,6 +107,7 @@ impl Chiplets {
     pub fn new(kernel: KernelDescriptor) -> Self {
         Self {
             hasher: Hasher::default(),
+            aead_stream: AeadStream::default(),
             bitwise: Bitwise::default(),
             memory: Memory::default(),
             ace: Ace::default(),
@@ -156,6 +122,7 @@ impl Chiplets {
     /// connector columns that read the memory chiplet.
     pub fn trace_len(&self) -> usize {
         self.hasher.trace_len()
+            + self.aead_stream.trace_len()
             + self.bitwise.trace_len()
             + self.memory.trace_len()
             + self.ace.trace_len()
@@ -168,9 +135,14 @@ impl Chiplets {
         self.hasher.eidos_compression_trace_len()
     }
 
-    /// Returns the index of the first row of `Bitwise` execution trace.
-    pub fn bitwise_start(&self) -> RowIndex {
+    /// Returns the start of the AEAD stream section, at the end of the controller.
+    pub fn aead_stream_start(&self) -> RowIndex {
         self.hasher.trace_len().into()
+    }
+
+    /// Returns the start of the ordinary bitwise section.
+    pub fn bitwise_start(&self) -> RowIndex {
+        self.aead_stream_start() + self.aead_stream.trace_len()
     }
 
     /// Returns the index of the first row of the `Memory` execution trace.
@@ -239,10 +211,7 @@ impl Chiplets {
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Fills the provided trace for the chiplets module with the stacked execution traces of the
-    /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
-    /// to identify each individual chiplet trace in addition to padding to fill the rest of
-    /// the trace.
+    /// Fills the shared trace with each chiplet's payload, selectors, and trailing padding.
     fn fill_trace(
         self,
         trace: &mut [Felt],
@@ -252,78 +221,68 @@ impl Chiplets {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
 
-        let memory_start: usize = self.memory_start().into();
-        let ace_start: usize = self.ace_start().into();
-        let kernel_rom_start: usize = self.kernel_rom_start().into();
-        let padding_start: usize = self.padding_start().into();
+        let Chiplets {
+            hasher,
+            aead_stream,
+            bitwise,
+            memory,
+            ace,
+            kernel_rom,
+        } = self;
 
-        let Chiplets { hasher, bitwise, memory, ace, kernel_rom } = self;
-
-        // Per-chiplet row counts. Chiplets are stacked vertically, so each one's region is a
-        // contiguous band of rows: hasher [0, h), bitwise [h, h+b), and so on.
         let hasher_len = hasher.trace_len();
+        let aead_stream_len = aead_stream.trace_len();
         let bitwise_len = bitwise.trace_len();
         let memory_len = memory.trace_len();
         let ace_len = ace.trace_len();
         let kernel_rom_len = kernel_rom.trace_len();
 
-        // Chiplets are nested as hasher > bitwise > memory > ace > kernel_rom and begin at columns
-        // 1, 2, 3, 4, 5. Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
-        // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, and
-        // padding rows are filled directly below.
-
         // Carve `trace` into the per-chiplet contiguous row bands.
         let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
+        let (aead_stream_band, rest) = rest.split_at_mut(aead_stream_len * W);
         let (bitwise_band, rest) = rest.split_at_mut(bitwise_len * W);
         let (memory_band, rest) = rest.split_at_mut(memory_len * W);
         let (ace_band, rest) = rest.split_at_mut(ace_len * W);
         let (kernel_band, padding_band) = rest.split_at_mut(kernel_rom_len * W);
 
         let mut hasher_fragment =
-            ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
-        let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
-            bitwise_band,
+            ChipletTraceFragment::with_prefix(hasher_band, W, HASHER_WIDTH, &[ZERO]);
+        let mut aead_stream_fragment = ChipletTraceFragment::with_prefix(
+            aead_stream_band,
             W,
-            BITWISE_COL_START,
-            BITWISE_FRAGMENT_WIDTH,
-            hasher_len,
-            &[],
+            aead_stream::TRACE_WIDTH,
+            &AEAD_PREFIX,
         );
-        let mut memory_fragment = ChipletTraceFragment::with_overheads(
-            memory_band,
-            W,
-            3,
-            MEMORY_WIDTH,
-            memory_start,
-            &[1],
-        );
-        let mut ace_fragment = ChipletTraceFragment::with_overheads(
+        let mut bitwise_fragment =
+            ChipletTraceFragment::with_prefix(bitwise_band, W, BITWISE_WIDTH, &BITWISE_PREFIX);
+        let mut memory_fragment =
+            ChipletTraceFragment::with_prefix(memory_band, W, MEMORY_WIDTH, &[ONE, ONE, ZERO]);
+        let mut ace_fragment = ChipletTraceFragment::with_prefix(
             ace_band,
             W,
-            4,
             ACE_CHIPLET_NUM_COLS,
-            ace_start,
-            &[1, 2],
+            &[ONE, ONE, ONE, ZERO],
         );
-        let mut kernel_rom_fragment = ChipletTraceFragment::with_overheads(
+        let mut kernel_rom_fragment = ChipletTraceFragment::with_prefix(
             kernel_band,
             W,
-            5,
             KERNEL_ROM_TRACE_WIDTH,
-            kernel_rom_start,
-            &[1, 2, 3],
+            &[ONE, ONE, ONE, ONE, ZERO],
         );
 
         let mut and8_counts = Vec::new();
-        let mut bitwise_and8_counts = Vec::new();
+        let mut bitwise_region_and8_counts = Vec::new();
         rayon::scope(|s| {
             let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
                 *and8_counts = hasher.fill_trace(&mut hasher_fragment, eidos_compression_trace);
             });
-            let bitwise_and8_counts = &mut bitwise_and8_counts;
+            let bitwise_region_and8_counts = &mut bitwise_region_and8_counts;
             s.spawn(move |_| {
-                *bitwise_and8_counts = bitwise.fill_trace(&mut bitwise_fragment);
+                let mut counts = vec![0; BYTE_LOOKUP_COUNT_LEN];
+                aead_stream.fill_trace(&mut aead_stream_fragment, &mut counts);
+                bitwise.fill_trace(&mut bitwise_fragment, &mut counts);
+                *bitwise_region_and8_counts = counts;
             });
             s.spawn(move |_| {
                 memory.fill_trace(&mut memory_fragment);
@@ -335,11 +294,11 @@ impl Chiplets {
                 kernel_rom.fill_trace(&mut kernel_rom_fragment);
             });
             s.spawn(move |_| {
-                fill_padding_rows(padding_band, padding_start);
+                fill_padding_rows(padding_band);
             });
         });
 
-        for (count, bitwise_count) in and8_counts.iter_mut().zip(bitwise_and8_counts) {
+        for (count, bitwise_count) in and8_counts.iter_mut().zip(bitwise_region_and8_counts) {
             *count += bitwise_count;
         }
 
@@ -347,16 +306,22 @@ impl Chiplets {
     }
 }
 
-/// Fills padding rows after the kernel ROM region: cols 1..=4 = ONE, chip_clk = row + 1.
-fn fill_padding_rows(band: &mut [Felt], row_offset: usize) {
+fn assert_u32(value: Felt) -> Result<u32, OperationError> {
+    u32::try_from(value.as_canonical_u64())
+        .map_err(|_| OperationError::NotU32Values { values: vec![value] })
+}
+
+fn count_and8(counts: &mut [u64], a: u8, b: u8) {
+    let count_index = byte_pair_count_index(BytePairRelation::CanonicalXor, a, b);
+    counts[count_index] += 1;
+}
+
+/// Sets the `11111` selector prefix on trailing padding rows.
+fn fill_padding_rows(band: &mut [Felt]) {
     const W: usize = CHIPLETS_WIDTH;
     let (rows, _) = band.as_chunks_mut::<W>();
-    for (i, row) in rows.iter_mut().enumerate() {
-        row[1] = ONE;
-        row[2] = ONE;
-        row[3] = ONE;
-        row[4] = ONE;
-        row[W - 1] = Felt::from_u32((row_offset + i + 1) as u32);
+    for row in rows {
+        row[..5].fill(ONE);
     }
 }
 

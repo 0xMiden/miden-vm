@@ -22,7 +22,8 @@ const IS_START_COL_IDX: usize = 17;
 const LEVEL_COL_IDX: usize = 18;
 const OP_FINAL_COL_IDX: usize = 19;
 const MRUPDATE_ID_COL_IDX: usize = 20;
-const CONTROLLER_MERKLE_OR_PADDING_COL_IDX: usize = TRACE_WIDTH - 1;
+const CONTROLLER_MERKLE_OR_PADDING_COL_IDX: usize = TRACE_WIDTH - 2;
+const CONTROLLER_ADDR_COL_IDX: usize = TRACE_WIDTH - 1;
 const TEST_TRACE_WIDTH: usize = NUM_EIDOS_COMPRESSION_COLS;
 
 fn controller_len(controller_rows: usize) -> usize {
@@ -543,14 +544,18 @@ fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let mut eidos_compression_trace = Felt::zero_vec(NUM_EIDOS_COMPRESSION_COLS * compression_len);
 
     {
-        let mut fragment =
-            ChipletTraceFragment::row_major(&mut controller_trace, TRACE_WIDTH, 0, TRACE_WIDTH);
+        let mut fragment = ChipletTraceFragment::row_major(&mut controller_trace, TRACE_WIDTH);
         hasher.fill_trace(&mut fragment, &mut eidos_compression_trace);
     }
 
     for row in 0..controller_len {
         let dst = row * TEST_TRACE_WIDTH;
         let src = row * TRACE_WIDTH;
+        assert_eq!(
+            controller_trace[src + CONTROLLER_ADDR_COL_IDX],
+            Felt::new_unchecked(row as u64 + 1),
+            "controller address at row {row}, including alignment padding"
+        );
         band[dst..dst + TRACE_WIDTH].copy_from_slice(&controller_trace[src..src + TRACE_WIDTH]);
     }
 

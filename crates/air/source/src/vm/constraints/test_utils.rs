@@ -81,7 +81,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "stack tests use two-row transition windows");
+        assert_eq!(size, 2, "constraint tests use two-row transition windows");
         self.is_transition()
     }
 

@@ -21,7 +21,7 @@ use crate::vm::constraints::{
             BytePairLookupMsg, MemoryMsg,
         },
     },
-    utils::pack_u32_bytes_le,
+    utils::{pack_u32_bytes_le, pack_u32_xor_bytes_le},
 };
 
 pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
@@ -87,7 +87,7 @@ pub(in crate::vm::constraints::lookup) fn emit_byte_checks<LB, G>(
     LB: ChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
-    let stream = ctx.local.aead_stream();
+    let stream = ctx.local.aead_stream_cols();
     let mut remove_stream_row = |name: &'static str, phase_idx: usize| {
         let gate = ctx.chiplet_active.aead_stream.clone() * aead_phase[phase_idx].clone();
         g.batch(
@@ -134,7 +134,7 @@ pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
     LB: ChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
-    let stream = ctx.local.aead_stream();
+    let stream = ctx.local.aead_stream_cols();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();
     // Both 4-row halves read the same plaintext word, so each half is bound to the
     // memory chiplet. Phases 3 and 7 write the two ciphertext words.
@@ -165,7 +165,7 @@ pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
                     row.c_prev0.into(),
                     row.c_prev1.into(),
                     row.c_prev2.into(),
-                    stream_xor_limb::<LB>(row.bytes),
+                    pack_u32_xor_bytes_le::<_, LB::Expr>(row.bytes),
                 ];
                 MemoryMsg::write_word(row.ctx.into(), row.dst_ptr.into(), row.clk.into(), word)
             },
@@ -184,8 +184,8 @@ pub(in crate::vm::constraints::lookup) fn emit_wiring<LB, G>(
     LB: ChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
-    let stream = ctx.local.aead_stream();
-    let stream_next = ctx.next.aead_stream();
+    let stream = ctx.local.aead_stream_cols();
+    let stream_next = ctx.next.aead_stream_cols();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();
     let mut add_stream_pair = |name: &'static str, phase_idx: usize, first_lane_offset: u16| {
         g.add(
@@ -300,17 +300,4 @@ where
     LB: ChipletLookupBuilder,
 {
     pack_u32_bytes_le::<_, LB::Expr>([bytes[4], bytes[5], bytes[6], bytes[7]])
-}
-
-fn stream_xor_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
-where
-    LB: ChipletLookupBuilder,
-{
-    let xor_bytes: [LB::Expr; 4] = array::from_fn(|i| {
-        let lhs: LB::Expr = bytes[i].into();
-        let rhs: LB::Expr = bytes[i + 4].into();
-        let and: LB::Expr = bytes[i + 8].into();
-        lhs + rhs - and.double()
-    });
-    pack_u32_bytes_le::<_, LB::Expr>(xor_bytes)
 }

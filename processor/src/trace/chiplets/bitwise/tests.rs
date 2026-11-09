@@ -1,31 +1,21 @@
-use alloc::vec::Vec;
-use core::{mem::size_of, ops::Range};
+use alloc::{vec, vec::Vec};
+use core::borrow::Borrow;
 
-use miden_air_definitions::vm::trace::chiplets::bitwise::{
-    BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH,
+use miden_air_definitions::vm::{
+    BitwiseOpCols,
+    trace::{
+        and8_lookup::BYTE_LOOKUP_COUNT_LEN,
+        chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
+    },
 };
-use miden_core::{ONE, chiplets::eidos_compression, field::PrimeCharacteristicRing};
+use miden_core::field::PrimeCharacteristicRing;
 
 use super::{Bitwise, ChipletTraceFragment, Felt};
-
-// Chiplet-local column indices for assertions in the bitwise trace tests.
-const OP_COL_IDX: usize = 0;
-const A_BYTE_RANGE: Range<usize> = 1..5;
-const B_BYTE_RANGE: Range<usize> = 5..9;
-const AND_BYTE_RANGE: Range<usize> = 9..13;
 
 #[test]
 fn bitwise_init() {
     let bitwise = Bitwise::new();
     assert_eq!(0, bitwise.trace_len());
-}
-
-#[test]
-fn entry_does_not_inline_the_aead_stream_payload() {
-    assert!(
-        size_of::<super::Entry>() < size_of::<super::AeadStreamOp>(),
-        "ordinary bitwise entries must not pay for the inline AEAD stream payload",
-    );
 }
 
 #[test]
@@ -39,8 +29,7 @@ fn bitwise_and() {
     assert_eq!(a.as_canonical_u64() & b.as_canonical_u64(), result.as_canonical_u64());
     assert_eq!(bitwise.trace_len(), OP_CYCLE_LEN);
 
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, OP_CYCLE_LEN, TRACE_WIDTH);
+    let (trace, and8_counts) = build_trace_with_counts(bitwise);
     assert_eq!(and8_counts.iter().sum::<u64>(), 4);
     check_bitwise_row(&trace, 0, BITWISE_AND, a, b, result);
 }
@@ -55,8 +44,7 @@ fn bitwise_xor() {
     let result = bitwise.u32xor(a, b).unwrap();
     assert_eq!(a.as_canonical_u64() ^ b.as_canonical_u64(), result.as_canonical_u64());
 
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, OP_CYCLE_LEN, TRACE_WIDTH);
+    let (trace, and8_counts) = build_trace_with_counts(bitwise);
     assert_eq!(and8_counts.iter().sum::<u64>(), 4);
     check_bitwise_row(&trace, 0, BITWISE_XOR, a, b, result);
 }
@@ -80,8 +68,7 @@ fn bitwise_multiple() {
     let result2 = bitwise.u32and(a[2], b[2]).unwrap();
     assert_eq!(a[2].as_canonical_u64() & b[2].as_canonical_u64(), result2.as_canonical_u64());
 
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, 3 * OP_CYCLE_LEN, TRACE_WIDTH);
+    let (trace, and8_counts) = build_trace_with_counts(bitwise);
     assert_eq!(and8_counts.iter().sum::<u64>(), 12);
 
     check_bitwise_row(&trace, 0, BITWISE_AND, a[0], b[0], result0);
@@ -89,174 +76,34 @@ fn bitwise_multiple() {
     check_bitwise_row(&trace, 2 * OP_CYCLE_LEN, BITWISE_AND, a[2], b[2], result2);
 }
 
-#[test]
-fn aead_stream_trace() {
-    let mut bitwise = Bitwise::new();
-
-    let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
-    let plaintext = [
-        eidos_compression::pack(plaintext_limbs[0], plaintext_limbs[1]),
-        eidos_compression::pack(plaintext_limbs[2], plaintext_limbs[3]),
-        eidos_compression::pack(plaintext_limbs[4], plaintext_limbs[5]),
-        eidos_compression::pack(plaintext_limbs[6], plaintext_limbs[7]),
-    ];
-    let keystream = core::array::from_fn(|idx| Felt::from_u32(20 + idx as u32));
-    let ciphertext = core::array::from_fn(|idx| {
-        Felt::from_u32(plaintext_limbs[idx] ^ keystream[idx].as_canonical_u64() as u32)
-    });
-
-    let ctx = Felt::from_u32(3);
-    let clk = Felt::from_u32(11);
-    let src_ptr = Felt::from_u32(100);
-    let dst_ptr = Felt::from_u32(200);
-    let lane_base = Felt::from_u32(40);
-    bitwise
-        .aead_stream(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext)
-        .expect("consistent AEAD stream entry");
-    assert_eq!(bitwise.trace_len(), super::AEAD_STREAM_CYCLE_LEN);
-
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, 8, super::AEAD_STREAM_FRAGMENT_WIDTH);
-    assert_eq!(and8_counts.iter().sum::<u64>(), 32);
-
-    for row in 0..8 {
-        assert_eq!(trace[super::STREAM_MODE_OFFSET][row], ONE);
-    }
-
-    // r0: read + low limb for plaintext[0].
-    assert_eq!(trace[0][0], ctx);
-    assert_eq!(trace[1][0], clk);
-    assert_eq!(trace[2][0], src_ptr);
-    assert_eq!(trace[3][0], lane_base);
-    assert_eq!(trace[4][0], plaintext[0]);
-    assert_eq!(trace[8][0], Felt::from_u8(plaintext_limbs[0] as u8));
-    assert_eq!(trace[12][0], keystream[0]);
-    assert_eq!(
-        trace[16][0],
-        Felt::from_u8((plaintext_limbs[0] as u8) & (keystream[0].as_canonical_u64() as u8)),
-    );
-
-    // r1 carries ciphertext limb 0 and plaintext[1].
-    assert_eq!(trace[4][1], plaintext[1]);
-    assert_eq!(trace[5][1], ciphertext[0]);
-
-    // r4 starts the second word pair at lane_base + 4.
-    assert_eq!(trace[3][4], lane_base + Felt::from_u32(4));
-    assert_eq!(trace[4][4], plaintext[0]);
-}
-
-#[test]
-fn aead_stream_is_phase_aligned_after_bitwise_op() {
-    let mut bitwise = Bitwise::new();
-    let a = Felt::from_u32(0x1234_5678);
-    let b = Felt::from_u32(0xff00_ff00);
-    let result = bitwise.u32and(a, b).unwrap();
-    record_test_aead_stream(&mut bitwise);
-
-    let num_rows = super::AEAD_STREAM_CYCLE_LEN + OP_CYCLE_LEN;
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, num_rows, super::AEAD_STREAM_FRAGMENT_WIDTH);
-
-    assert_eq!(and8_counts.iter().sum::<u64>(), 36);
-    for row in 0..super::AEAD_STREAM_CYCLE_LEN {
-        assert_eq!(trace[super::STREAM_MODE_OFFSET][row], ONE);
-    }
-    assert_eq!(trace[super::STREAM_MODE_OFFSET][super::AEAD_STREAM_CYCLE_LEN], Felt::ZERO);
-    check_bitwise_row(&trace, super::AEAD_STREAM_CYCLE_LEN, BITWISE_AND, a, b, result);
-}
-
-#[test]
-fn aead_stream_is_phase_aligned_after_seven_bitwise_ops() {
-    let mut bitwise = Bitwise::new();
-    let mut expected = Vec::new();
-    for value in 0..7_u32 {
-        let a = Felt::from_u32(value + 1);
-        let b = Felt::from_u32(0xa5a5_0000 | value);
-        let result = bitwise.u32xor(a, b).unwrap();
-        expected.push((a, b, result));
-    }
-    record_test_aead_stream(&mut bitwise);
-
-    let num_rows = super::AEAD_STREAM_CYCLE_LEN + 7 * OP_CYCLE_LEN;
-    let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, num_rows, super::AEAD_STREAM_FRAGMENT_WIDTH);
-
-    assert_eq!(and8_counts.iter().sum::<u64>(), 60);
-    for row in 0..super::AEAD_STREAM_CYCLE_LEN {
-        assert_eq!(trace[super::STREAM_MODE_OFFSET][row], ONE);
-    }
-    for (idx, (a, b, result)) in expected.into_iter().enumerate() {
-        let row = super::AEAD_STREAM_CYCLE_LEN + idx;
-        assert_eq!(trace[super::STREAM_MODE_OFFSET][row], Felt::ZERO);
-        check_bitwise_row(&trace, row, BITWISE_XOR, a, b, result);
-    }
-}
-
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn build_trace_with_width_and_counts(
-    bitwise: Bitwise,
-    num_rows: usize,
-    width: usize,
-) -> (Vec<Vec<Felt>>, Vec<u64>) {
-    let mut band = Felt::zero_vec(width * num_rows);
-    let mut fragment = ChipletTraceFragment::row_major(&mut band, width, 0, width);
-    let and8_counts = bitwise.fill_trace(&mut fragment);
+fn build_trace_with_counts(bitwise: Bitwise) -> (Vec<Felt>, Vec<u64>) {
+    let width = TRACE_WIDTH;
+    let mut band = Felt::zero_vec(width * bitwise.trace_len());
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, width);
+    let mut and8_counts = vec![0; BYTE_LOOKUP_COUNT_LEN];
+    bitwise.fill_trace(&mut fragment, &mut and8_counts);
 
-    let trace = (0..width)
-        .map(|c| (0..num_rows).map(|r| band[r * width + c]).collect())
-        .collect();
-    (trace, and8_counts)
+    (band, and8_counts)
 }
 
-fn record_test_aead_stream(bitwise: &mut Bitwise) {
-    let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
-    let plaintext = [
-        eidos_compression::pack(plaintext_limbs[0], plaintext_limbs[1]),
-        eidos_compression::pack(plaintext_limbs[2], plaintext_limbs[3]),
-        eidos_compression::pack(plaintext_limbs[4], plaintext_limbs[5]),
-        eidos_compression::pack(plaintext_limbs[6], plaintext_limbs[7]),
-    ];
-    let keystream = core::array::from_fn(|idx| Felt::from_u32(20 + idx as u32));
-    let ciphertext = core::array::from_fn(|idx| {
-        Felt::from_u32(plaintext_limbs[idx] ^ keystream[idx].as_canonical_u64() as u32)
-    });
-
-    bitwise
-        .aead_stream(
-            Felt::from_u32(3),
-            Felt::from_u32(11),
-            Felt::from_u32(100),
-            Felt::from_u32(200),
-            Felt::from_u32(40),
-            plaintext,
-            keystream,
-            ciphertext,
-        )
-        .expect("consistent AEAD stream entry");
-}
-
-fn check_bitwise_row(trace: &[Vec<Felt>], row: usize, op: Felt, a: Felt, b: Felt, result: Felt) {
-    assert_eq!(trace[OP_COL_IDX][row], op);
+fn check_bitwise_row(trace: &[Felt], row: usize, op: Felt, a: Felt, b: Felt, result: Felt) {
+    let start = row * TRACE_WIDTH;
+    let cols: &BitwiseOpCols<Felt> = trace[start..start + TRACE_WIDTH].borrow();
+    assert_eq!(cols.op_flag, op);
 
     let a_bytes = felt_u32(a).to_le_bytes();
     let b_bytes = felt_u32(b).to_le_bytes();
-    for idx in 0..4 {
-        assert_eq!(Felt::from_u8(a_bytes[idx]), trace[A_BYTE_RANGE.start + idx][row]);
-        assert_eq!(Felt::from_u8(b_bytes[idx]), trace[B_BYTE_RANGE.start + idx][row]);
-        assert_eq!(
-            Felt::from_u8(a_bytes[idx] & b_bytes[idx]),
-            trace[AND_BYTE_RANGE.start + idx][row],
-        );
-    }
+    assert_eq!(cols.a_bytes, a_bytes.map(Felt::from_u8));
+    assert_eq!(cols.b_bytes, b_bytes.map(Felt::from_u8));
+    assert_eq!(
+        cols.and_bytes,
+        core::array::from_fn(|idx| Felt::from_u8(a_bytes[idx] & b_bytes[idx]))
+    );
 
-    let and = u32_from_bytes([
-        trace[AND_BYTE_RANGE.start][row],
-        trace[AND_BYTE_RANGE.start + 1][row],
-        trace[AND_BYTE_RANGE.start + 2][row],
-        trace[AND_BYTE_RANGE.start + 3][row],
-    ]);
+    let and = u32_from_bytes(cols.and_bytes);
     let xor = a + b - and.double();
     let recomposed = and + op * (xor - and);
     assert_eq!(result, recomposed);

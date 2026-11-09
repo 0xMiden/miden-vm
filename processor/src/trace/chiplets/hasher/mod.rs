@@ -21,15 +21,12 @@ use rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
-    RangeChecker, Word as Digest, ZERO,
+    RangeChecker, Word as Digest, ZERO, build_and8_lookup_trace,
 };
 use crate::{ContextId, RowIndex};
 
 mod trace;
 use trace::HasherTrace;
-mod and8_trace;
-pub(crate) use and8_trace::build_and8_lookup_trace;
-
 #[cfg(test)]
 mod tests;
 

@@ -38,7 +38,7 @@ use crate::{
     errors::MapExecErrNoCtx,
     trace::{
         ChipletsLengths, TraceLenSummary, VmTrace, VmWitness,
-        chiplets::{Ace, Bitwise, Hasher, KernelRom, Memory},
+        chiplets::{Ace, AeadStream, Bitwise, Hasher, KernelRom, Memory},
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
         utils::RowMajorTraceWriter,
@@ -235,11 +235,13 @@ fn build_trace_inner(
         });
     }
 
+    // The reported bitwise region includes the AEAD stream rows.
+    let bitwise_region_start = chiplets.aead_stream_start();
     let trace_len_summary = TraceLenSummary::new(
         core_trace_len,
         ChipletsLengths::from_parts(
-            chiplets.bitwise_start().into(),
-            chiplets.memory_start() - chiplets.bitwise_start(),
+            bitwise_region_start.into(),
+            chiplets.memory_start() - bitwise_region_start,
             chiplets.ace_start() - chiplets.memory_start(),
             chiplets.kernel_rom_start() - chiplets.ace_start(),
             chiplets.padding_start() - chiplets.kernel_rom_start(),
@@ -648,7 +650,7 @@ fn initialize_chiplets(
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
-    let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = rayon::join(
+    let (hasher, (bitwise_chiplets, (memory, (ace, kernel_rom)))) = rayon::join(
         || match prebuilt_hasher {
             Some(hasher) => Ok(hasher),
             None => build_hasher_chiplet(
@@ -665,7 +667,7 @@ fn initialize_chiplets(
         },
         || {
             rayon::join(
-                || build_bitwise_chiplet(bitwise, max_trace_len),
+                || build_bitwise_chiplets(bitwise, max_trace_len),
                 || {
                     rayon::join(
                         || build_memory_chiplet(memory_writes, core_trace_contexts, max_trace_len),
@@ -681,9 +683,12 @@ fn initialize_chiplets(
         },
     );
 
+    let hasher = hasher?;
+    let (bitwise, aead_stream) = bitwise_chiplets?;
     let chiplets = Chiplets {
-        hasher: hasher?,
-        bitwise: bitwise?,
+        hasher,
+        aead_stream,
+        bitwise,
         memory: memory?,
         ace: ace?,
         kernel_rom: kernel_rom?,
@@ -769,11 +774,12 @@ pub(crate) fn build_hasher_chiplet<'a>(
     Ok(hasher)
 }
 
-fn build_bitwise_chiplet(
+fn build_bitwise_chiplets(
     bitwise_replay: BitwiseReplay,
     max_trace_len: usize,
-) -> Result<Bitwise, ExecutionError> {
+) -> Result<(Bitwise, AeadStream), ExecutionError> {
     let mut bitwise = Bitwise::default();
+    let mut aead_stream = AeadStream::default();
     for entry in bitwise_replay {
         match entry {
             BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => {
@@ -783,25 +789,14 @@ fn build_bitwise_chiplet(
                 bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
             },
             BitwiseReplayEntry::AeadStream(entry) => {
-                bitwise
-                    .aead_stream(
-                        entry.ctx,
-                        entry.clk,
-                        entry.src_ptr,
-                        entry.dst_ptr,
-                        entry.lane_base,
-                        entry.plaintext,
-                        entry.keystream,
-                        entry.ciphertext,
-                    )
-                    .map_exec_err_no_ctx()?;
+                aead_stream.record(*entry).map_exec_err_no_ctx()?;
             },
         }
-        if bitwise.trace_len() > max_trace_len {
+        if bitwise.trace_len() + aead_stream.trace_len() > max_trace_len {
             return Err(ExecutionError::TraceLenExceeded(max_trace_len));
         }
     }
-    Ok(bitwise)
+    Ok((bitwise, aead_stream))
 }
 
 fn build_memory_chiplet(

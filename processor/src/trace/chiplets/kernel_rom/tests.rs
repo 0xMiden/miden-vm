@@ -93,12 +93,7 @@ fn build_kernel() -> KernelDescriptor {
 /// instance.
 fn build_trace(kernel_rom: KernelRom, num_rows: usize) -> Vec<Vec<Felt>> {
     let mut band = Felt::zero_vec(KERNEL_ROM_TRACE_WIDTH * num_rows);
-    let mut fragment = ChipletTraceFragment::row_major(
-        &mut band,
-        KERNEL_ROM_TRACE_WIDTH,
-        0,
-        KERNEL_ROM_TRACE_WIDTH,
-    );
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, KERNEL_ROM_TRACE_WIDTH);
     kernel_rom.fill_trace(&mut fragment);
 
     (0..KERNEL_ROM_TRACE_WIDTH)

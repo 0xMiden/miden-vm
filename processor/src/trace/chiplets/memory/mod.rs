@@ -326,8 +326,7 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    let (mem_slice, aux_slice) = out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
-                    let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
+                    let cols: &mut MemoryCols<Felt> = out_rows[row].as_mut_slice().borrow_mut();
 
                     cols.is_read = match memory_access.operation() {
                         MemoryOperation::Read => MEMORY_READ,
@@ -378,8 +377,8 @@ impl Memory {
 
                     // decompose word address into 16-bit limbs of word index
                     let word_index = addr / WORD_SIZE as u32;
-                    aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
-                    aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
+                    cols.word_addr_lo = Felt::from_u16((word_index & 0xffff) as u16);
+                    cols.word_addr_hi = Felt::from_u16((word_index >> 16) as u16);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
@@ -392,7 +391,7 @@ impl Memory {
 
         batch_inversion_allow_zeros(&mut deltas);
         for (r, &inv) in deltas.iter().enumerate() {
-            let cols: &mut MemoryCols<Felt> = out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+            let cols: &mut MemoryCols<Felt> = out_rows[r].as_mut_slice().borrow_mut();
             cols.d_inv = inv;
         }
 

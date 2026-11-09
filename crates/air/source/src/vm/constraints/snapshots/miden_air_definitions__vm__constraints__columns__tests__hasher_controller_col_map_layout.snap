@@ -26,4 +26,8 @@ ControllerCols {
         17,
         18,
     ],
+    op_final: 19,
+    mrupdate_id: 20,
+    merkle_or_padding: 21,
+    addr: 22,
 }

@@ -528,8 +528,7 @@ impl MemoryAccess {
 /// Builds a trace of the specified length and fills it with data from the provided Memory instance.
 fn build_trace(mem: Memory, num_rows: usize) -> Vec<Vec<Felt>> {
     let mut band = Felt::zero_vec(MEMORY_TRACE_WIDTH * num_rows);
-    let mut fragment =
-        ChipletTraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH);
     mem.fill_trace(&mut fragment);
 
     (0..MEMORY_TRACE_WIDTH)

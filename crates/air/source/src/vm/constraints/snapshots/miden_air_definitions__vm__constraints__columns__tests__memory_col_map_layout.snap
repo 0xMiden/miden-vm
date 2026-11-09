@@ -20,4 +20,6 @@ MemoryCols {
     d1: 12,
     d_inv: 13,
     is_same_ctx_and_addr: 14,
+    word_addr_lo: 15,
+    word_addr_hi: 16,
 }
