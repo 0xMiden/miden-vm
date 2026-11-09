@@ -285,7 +285,6 @@ mod tests {
         bitwise_active: Felt::ZERO,
         aead_stream_active: Felt::ZERO,
         aead_stream_next_active: Felt::ZERO,
-        aead_stream_entry_next_from_controller: Felt::ZERO,
         memory_active: Felt::ONE,
         memory_transition: Felt::ZERO,
         memory_entry_next: Felt::ZERO,

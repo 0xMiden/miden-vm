@@ -55,9 +55,6 @@ pub struct ChipletSelectors<E> {
     pub aead_stream_active: E,
     /// 1 when the next row belongs to AEAD, without a transition gate.
     pub aead_stream_next_active: E,
-    /// 1 when the next row enters AEAD directly from the controller section.
-    /// Evaluated on the controller row immediately before that entry.
-    pub aead_stream_entry_next_from_controller: E,
     /// 1 on bitwise AND/XOR rows.
     pub bitwise_active: E,
     /// 1 on memory rows.
@@ -230,8 +227,6 @@ where
         is_transition_flag.clone() * active.controller.clone() * controller_next_active.clone();
     let controller_last = active.controller.clone() * s0_next.clone();
     let aead_stream_next_active = s0_next.clone() * s1_next.not() * not_s2_next.clone();
-    let aead_stream_entry_next_from_controller =
-        active.controller.clone() * aead_stream_next_active.clone();
 
     // Entry gates cover skipped sections. Memory initialization must still zero values that
     // have never been written when the trace goes directly from controller to memory.
@@ -258,7 +253,6 @@ where
         controller_transition,
         aead_stream_active: active.aead_stream,
         aead_stream_next_active,
-        aead_stream_entry_next_from_controller,
         bitwise_active: active.bitwise,
         memory_active: active.memory,
         memory_transition,

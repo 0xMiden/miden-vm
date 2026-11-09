@@ -24,9 +24,6 @@ use crate::vm::{
 // ================================================================================================
 
 /// Enforce stream-row phase alignment, u32-XOR recomposition, canonical splits, and carries.
-///
-/// The selectors identify current and next AEAD rows, plus entry directly from the controller.
-/// The entry gate is active on the row immediately before the first AEAD row.
 pub fn enforce_aead_stream_constraints<AB>(
     builder: &mut AB,
     cols: &AeadStreamCols<AB::Var>,
@@ -40,11 +37,7 @@ pub fn enforce_aead_stream_constraints<AB>(
     let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
     let phases: [AB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
-    // Align stream entry boundaries with the eight-row phase cycle.
-    builder
-        .when(selectors.aead_stream_entry_next_from_controller.clone())
-        .assert_one(phases[7].clone());
-
+    // Any entry into the stream follows phase seven, including entry from the controller.
     builder.when(stream.not() * stream_next.clone()).assert_one(phases[7].clone());
 
     builder.when(stream.clone() * phases[7].clone().not()).assert_one(stream_next);
