@@ -187,6 +187,9 @@ impl CoreLibrary {
 
     /// Returns the default event handlers required by the core library.
     ///
+    /// Configure host support for the [EcGFp5/Eidos sealing events](crate::handlers::ecgfp5_eidos)
+    /// separately.
+    ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
     /// print private values if a program moves witness data onto the operand stack or into memory.
     /// Hosts can replace those handlers to route output to a UI, log, no-op handler, or other sink.

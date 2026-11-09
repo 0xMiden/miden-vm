@@ -4,6 +4,7 @@
 
 #### Features
 
+- [BREAKING] EcGFp5/Eidos `seal` and `seal_preprocessed` require host event handlers, including when advice is preloaded. Added configurable `Ecgfp5SealHandler` for generating fresh key-agreement advice ([#4137](https://github.com/0xMiden/miden-vm/pull/4137)).
 - [BREAKING] Added binary serialization and deserialization for `ExecutionOptions` and `PrecompileLimits`, including arbitrary custom `WorkClass` names. `WorkClass` no longer implements `Copy`, and neither do `WorkItem` and `PrecompileLimitError` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
