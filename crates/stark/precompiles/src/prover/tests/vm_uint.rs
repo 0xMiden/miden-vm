@@ -9,9 +9,8 @@ use crate::prover::{
     transcript::{
         eidos::{EidosDigest, trace::EidosRequires},
         eval::{
-            COL_BOUND_PTR, COL_FRAME_PARAM1, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP,
-            COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_UINT_VALUE_BOUND_PTR,
-            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
+            COL_BOUND_PTR, COL_FRAME_PARAM1, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_OUT_MULT,
+            COL_PTR, COL_UINT_VALUE_BOUND_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
         },
         nodes::UintOpId,
     },
@@ -52,9 +51,7 @@ fn uint_value_hash_matches_vm_node_and_eq_op_context() {
 }
 
 #[test]
-fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
-    const PIN_PTR: u32 = 1000;
-
+fn uint_value_at_fixed_store_pointer_commits_bound_and_shares_uses() {
     let mut session = Session::new();
     let root0 = session.zero();
     assert_eq!(root0.hash(), EidosDigest::default());
@@ -62,39 +59,23 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
     let domain = UintDomain::U256;
     let bound_ptr = domain.bound_ptr();
 
-    let pinned_value = U256::from(9u8);
-    let pin_claim = session.pin_uint(PIN_PTR, pinned_value, bound_ptr);
-    let pinned_value_node = session.uint_leaf(pinned_value, bound_ptr);
-    assert_eq!(pinned_value_node.ptr.addr(), PIN_PTR);
-    assert_ne!(pin_claim.hash(), pinned_value_node.hash());
-
-    let eq = session.uint_is(&pinned_value_node, &pinned_value_node);
-    let root1 = session.assert_and(root0, pin_claim);
-    let root = session.assert_and(root1, eq);
-    let root = session.assert_and(root, pin_claim);
+    let value = session.uint_leaf(U256::MAX, bound_ptr);
+    assert_eq!(value.ptr.addr(), bound_ptr);
+    let eq = session.uint_is(&value, &value);
+    let root = session.assert_and(root0, eq);
 
     let traces = session.finish(root);
     let eval = crate::prover::tests::transcript_eval_main(&traces);
     let row_value = |row: usize, col: usize| eval.values[row * EVAL_NUM_MAIN_COLS + col];
 
-    let pin_row = (0..eval.height())
-        .find(|&row| {
-            row_value(row, COL_IS_UINT_LEAF) == Felt::ONE
-                && row_value(row, COL_IS_PINNED) == Felt::ONE
-                && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
-        })
-        .expect("expected pin row for explicit ptr");
-    assert_eq!(row_value(pin_row, COL_PIN_CLAIM_PIN_PTR), Felt::from(PIN_PTR));
-    assert_eq!(row_value(pin_row, COL_OUT_MULT), Felt::from_u32(2));
-
     let value_row = (0..eval.height())
         .find(|&row| {
             row_value(row, COL_IS_UINT_LEAF) == Felt::ONE
-                && row_value(row, COL_IS_PINNED) == Felt::ZERO
-                && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
+                && row_value(row, COL_PTR) == Felt::from(bound_ptr)
         })
         .expect("expected VM uint value row for explicit ptr");
     assert_eq!(row_value(value_row, COL_UINT_VALUE_BOUND_PTR), Felt::from(bound_ptr));
+    assert_eq!(row_value(value_row, COL_OUT_MULT), Felt::from_u32(2));
 
     let op_row = (0..eval.height())
         .find(|&row| row_value(row, COL_IS_UINT_OP) == Felt::ONE)
