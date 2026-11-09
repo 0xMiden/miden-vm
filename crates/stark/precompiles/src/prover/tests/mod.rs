@@ -34,6 +34,7 @@ mod uint_add;
 mod uint_dag;
 mod uint_mul;
 mod utils;
+mod vm_admission;
 mod vm_uint;
 
 use std::{string::String, vec, vec::Vec};

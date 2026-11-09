@@ -87,6 +87,8 @@ use crate::prover::{
 mod fixed;
 mod prove;
 #[cfg(test)]
+mod uint_value_admission;
+#[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 #[cfg(test)]
 pub mod statements;
@@ -214,29 +216,6 @@ impl Session {
     pub fn sha256(&mut self, input: &[u8]) -> ([u8; 32], Truthy) {
         let out = self.sha256_io.require(input, &mut self.sha256_compression, &mut self.eidos);
         (out.digest, self.eval.issue_sha256(out.h_sha256, out.invocation))
-    }
-
-    /// Record an explicit uint pin claim at protocol address `ptr ∈ [1, 2^16)` under the modulus
-    /// pinned at `bound_ptr`.
-    ///
-    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
-    /// pin-claim frame `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, ptr, 0)`, consumes both
-    /// `UintVal` halves at `ptr`, and returns the foldable [`Truthy`] for
-    /// `Binding(h_pin, True)`. Default fixed domains and curve coefficients are already installed
-    /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use
-    /// [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
-    /// (`bound_ptr == ptr`).
-    #[cfg(test)]
-    pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
-        let handle = if ptr == bound_ptr {
-            self.uint.store.pin_modulus(ptr, value)
-        } else {
-            let bound = self.uint.store.pinned(bound_ptr);
-            self.uint.store.intern_pinned(ptr, value, bound)
-        };
-        let bound = self.uint.store.pinned(bound_ptr);
-        self.eval
-            .pin_uint(handle, bound, to_limbs32(value), &mut self.uint.store, &mut self.eidos)
     }
 
     /// Commit a uint value into the DAG as a *transient* uint leaf —

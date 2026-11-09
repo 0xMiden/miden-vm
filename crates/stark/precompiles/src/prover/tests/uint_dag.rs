@@ -24,13 +24,9 @@ use crate::prover::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces, statements::horner_sign_paths},
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
-    transcript::{
-        eval::{
-            COL_FRAME_PARAM0, COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_SUB,
-            COL_OUT_MULT, COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
-            add_flag,
-        },
-        nodes::UintOpId,
+    transcript::eval::{
+        COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_SUB, COL_OUT_MULT, COL_PTR,
+        NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir, add_flag,
     },
 };
 
@@ -274,13 +270,11 @@ fn forged_result_ptr_unbalances() {
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* frame parameter 0 swapped
-/// consistently from `Add` to `Sub` — passes every local constraint
-/// (the one-hot, the frame materialization, the ptr pins). What rejects it
-/// is the bus: the row's initial-CV message no longer matches the Eidos
-/// compression that produced its hash, and the `UintAdd` consume re-wires to a
-/// tuple no chiplet proved. The op id lives in the *hash*, not in local
-/// algebra.
+/// Switching the op flags from `Add` to `Sub` also changes the derived frame parameter 0.
+/// The row still satisfies the local constraints, but its initial-CV message no longer
+/// matches the Eidos compression that produced its hash. The `UintAdd` consume for
+/// `b + result = a` also has no matching provider. The buses bind the operation to the
+/// hashed frame and computation.
 #[test]
 fn reencoded_op_id_passes_constraints_but_unbalances() {
     let mut rng = StdRng::seed_from_u64(0xf043_0002);
@@ -321,7 +315,6 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_UINT_SUB] = Felt::ONE;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_FRAME_PARAM0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).

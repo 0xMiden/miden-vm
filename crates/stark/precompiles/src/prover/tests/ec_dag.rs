@@ -28,7 +28,7 @@ use crate::prover::{
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::eval::{
         COL_A_PTR, COL_B_PTR, COL_BOUND_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
-        COL_IS_SUB, COL_LHS_BEGIN, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
+        COL_IS_SUB, COL_LHS_BEGIN, COL_PTR, COL_RHS_BEGIN, COL_UINT_DOMAIN_SELECTOR, DIGEST_WIDTH,
         NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
     },
 };
@@ -348,6 +348,7 @@ fn dag_finite_forged_as_pai_unbalances() {
         cells.push((COL_LHS_BEGIN + i, Felt::ZERO));
         cells.push((COL_RHS_BEGIN + i, Felt::ZERO));
     }
+    cells.push((COL_UINT_DOMAIN_SELECTOR, Felt::ZERO));
     let forged = tamper(&eval, row, &cells);
     eval_locally_holds(&traces, &forged);
     assert_ne!(
