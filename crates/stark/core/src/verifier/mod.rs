@@ -241,7 +241,7 @@ where
     // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
     // against the AIRs: it bounds `log_h` within the host's `usize` width
     // (later code dereferences `1usize << log_h` and would otherwise overflow on
-    // a malicious proof) and checks per-AIR periodic-height feasibility.
+    // a malicious proof) and checks per-AIR periodic lengths and fixed preprocessing heights.
     // Statement::new already enforced the input-side contracts before construction.
     let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
         statement.airs(),

@@ -67,6 +67,10 @@ impl BaseAir<Felt> for MidenAir {
     }
 }
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
+    fn preprocessed_height(&self) -> Option<usize> {
+        LiftedAir::<Felt, EF>::preprocessed_height(&self.0)
+    }
+
     fn num_randomness(&self) -> usize {
         LiftedAir::<Felt, EF>::num_randomness(&self.0)
     }

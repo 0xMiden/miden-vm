@@ -45,6 +45,17 @@ use crate::air::{
 /// - `F`: Base field
 /// - `EF`: Extension field (for aux trace challenges and aux values)
 pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
+    /// Fixed native height of this AIR's preprocessed matrix, or `None` if it has none.
+    ///
+    /// Return `None` when [`BaseAir::preprocessed_width`] is zero. Otherwise return
+    /// `Some(height)`, where `height` is a power of two, is at least 2, and equals the height of
+    /// the matrix returned by [`BaseAir::preprocessed_trace`].
+    /// Shape validation requires this AIR's main trace to have this height before deriving
+    /// the committed table order. Return the height without constructing the matrix.
+    fn preprocessed_height(&self) -> Option<usize> {
+        None
+    }
+
     /// Maximum periodic-column length, or `0` if there are none. A trace's height
     /// must be at least this, so it is the per-AIR lower bound on trace height.
     ///

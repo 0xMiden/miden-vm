@@ -242,7 +242,7 @@ where
     let air_inputs = statement.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
-        .expect("ProverStatement::new should reject malformed heights");
+        .expect("prover setup and AIR contracts should ensure valid trace heights");
 
     // Map each AIR to its preprocessed trace index. Only used when a preprocessed
     // tree is present.

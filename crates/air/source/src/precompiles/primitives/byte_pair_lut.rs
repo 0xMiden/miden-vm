@@ -272,6 +272,10 @@ impl BaseAir<Felt> for BytePairLutAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
+    fn preprocessed_height(&self) -> Option<usize> {
+        Some(TRACE_HEIGHT)
+    }
+
     fn num_randomness(&self) -> usize {
         // Single global (α, β) pair shared across all relations; each
         // relation's bus_prefix keeps encodings unambiguous.

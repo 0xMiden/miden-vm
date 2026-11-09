@@ -28,6 +28,7 @@ use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 /// - Each AIR has positive auxiliary width.
 /// - Each AIR's [`crate::air::BaseAir::preprocessed_width`] agrees with
 ///   [`crate::air::BaseAir::preprocessed_trace`] presence and width.
+/// - [`LiftedAir::preprocessed_height`] agrees with the matrix's presence and native height.
 /// - Each periodic column is non-empty and has power-of-two length.
 /// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.
 ///
@@ -56,7 +57,13 @@ where
     assert!(air.aux_width() > 0, "AIR {idx}: aux_width must be positive");
 
     let preprocessed_width = air.preprocessed_width();
-    match air.preprocessed_trace() {
+    let preprocessed = air.preprocessed_trace();
+    assert_eq!(
+        air.preprocessed_height(),
+        preprocessed.as_ref().map(Matrix::height),
+        "AIR {idx}: preprocessed_height disagrees with preprocessed_trace()",
+    );
+    match preprocessed {
         Some(trace) => {
             assert!(
                 preprocessed_width > 0,
@@ -68,8 +75,8 @@ where
                 "AIR {idx}: preprocessed_trace width disagrees with preprocessed_width()",
             );
             assert!(
-                trace.height().is_power_of_two(),
-                "AIR {idx}: preprocessed_trace height must be a positive power of two, got {height}",
+                trace.height() >= 2 && trace.height().is_power_of_two(),
+                "AIR {idx}: preprocessed_trace height must be a power of two and at least 2, got {height}",
                 height = trace.height(),
             );
         },

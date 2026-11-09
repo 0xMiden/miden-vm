@@ -240,9 +240,8 @@ where
         let statement = instance.statement();
         let preprocessed_commitment = instance.preprocessed_commitment();
 
-        // Shape well-formedness and per-AIR periodic-height feasibility, both
-        // against the (untrusted) proof heights — catches malicious
-        // `log_h` > usize::BITS and infeasible heights before any later use.
+        // Validate proof heights against host bounds, periodic lengths, and fixed preprocessing
+        // heights before deriving the table-to-AIR mapping or parsing openings.
         let trace_order = TraceOrder::from_log_heights::<L::F, EF, _>(
             statement.airs(),
             data.log_trace_heights.clone(),

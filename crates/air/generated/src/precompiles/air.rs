@@ -84,6 +84,10 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    fn preprocessed_height(&self) -> Option<usize> {
+        self.0.preprocessed_height()
+    }
+
     fn constraint_degree(&self) -> ConstraintDegrees {
         generated_degrees(*self)
     }

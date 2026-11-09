@@ -125,6 +125,10 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    fn preprocessed_height(&self) -> Option<usize> {
+        delegate!(self, preprocessed_height)
+    }
+
     fn max_periodic_length(&self) -> usize {
         delegate!(self, max_periodic_length)
     }

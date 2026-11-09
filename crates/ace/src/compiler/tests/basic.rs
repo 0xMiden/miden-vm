@@ -178,6 +178,10 @@ impl BaseAir<F> for MockPreprocessedAir {
 }
 
 impl LiftedAir<F, EF> for MockPreprocessedAir {
+    fn preprocessed_height(&self) -> Option<usize> {
+        Some(4)
+    }
+
     fn num_randomness(&self) -> usize {
         2
     }
