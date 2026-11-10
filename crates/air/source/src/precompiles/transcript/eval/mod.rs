@@ -14,9 +14,8 @@
 //! is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act`. The
 //! **Transcript AND-combinator**
 //! hashes `lhs || rhs` with the registered deferred-AND framing, folding two child
-//! `True` bindings; the **uint leaf / pin-claim row**, which hashes a stored uint's
-//! value under either `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`
-//! or `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`; and the **uint ops**
+//! `True` bindings; the **uint leaf row**, which hashes a stored uint's
+//! value under `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`; and the **uint ops**
 //! (`is_add` / `is_sub` / `is_mul` / `is_is`), which hash two child hashes under
 //! `[UintPrecompile::domain(), op_id, 0, 0]` and tie the children's `Uint` bindings
 //! to a [`UintAdd`](crate::precompiles::uint::add) / [`UintMul`](crate::precompiles::uint::mul)
@@ -33,9 +32,8 @@
 //!   nothing, *absorbing* the Binding σ; its `h` is pinned to `public_root` by `when_first_row`. No
 //!   separate flag is needed — `out_mult = 0` is forced by bus balance.
 //! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 8×32-bit limb value → `h` under its
-//!   VALUE or pin frame; consume one complete `UintVal` message; provide `Binding(h, True)` when
-//!   `is_pinned` (folded into the spine) else `Binding(h, Uint, ptr, bound_ptr)` (a transient
-//!   value-binding).
+//!   VALUE frame; consume one complete `UintVal` message; provide `Binding(h, Uint, ptr,
+//!   bound_ptr)` for use by arithmetic and equality nodes.
 //! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the uint operation frame;
 //!   consume the children's `Uint` bindings at the witnessed `a_ptr` / `b_ptr` and row `bound_ptr`
 //!   (`Is` forces `b_ptr = a_ptr` — equality asserted by the bus); consume one relation tuple
@@ -65,11 +63,9 @@ use miden_core::{
     Felt,
     deferred::DEFERRED_AND_DOMAIN,
     field::{PrimeCharacteristicRing, QuadFelt},
-    program::domain::PvmUintPinClaimDomain,
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::EidosDomain;
-use miden_precompiles::{CurvePrecompile, UintPrecompile};
+use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 use miden_stark::{
     air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
     lookup::{
@@ -91,7 +87,6 @@ use crate::precompiles::{
         binding::{BindingMsg, ValueTag},
         eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
         initial_cv_from_frame,
-        nodes::UintOpId,
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
     utils::{current_main, next_main},
@@ -100,13 +95,13 @@ use crate::precompiles::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 39 main witness columns:
+// 38 main witness columns:
 //
 // - Structural (2): act, absorption_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
 // - Node-family and op flags.
-// - Reused pointer/frame cells for uint leaves/ops, EC points, and MSM runs.
-// - Row-kind-aware frame parameter cells and MSM run controls.
+// - Reused pointer/frame cells for uint leaves/ops and EC points.
+// - A uint-domain selector and MSM run controls.
 
 /// Sticky-downward activity flag. Gates the consume / unhash mults; the
 /// `out_mult`-pin keeps padding-row provides at zero.
@@ -150,8 +145,7 @@ pub const COL_OUT_MULT: usize = COL_H_END;
 /// AND-node flag — this row folds two child `True` bindings.
 pub const COL_IS_AND: usize = COL_OUT_MULT + 1;
 /// Uint-leaf flag — this row hashes a stored uint's value (pulled over
-/// `UintVal`) instead of folding two child bindings; the `is_pinned`
-/// fork picks True (pinned → spine) vs Uint (transient).
+/// `UintVal`) and provides a typed uint binding.
 pub const COL_IS_UINT_LEAF: usize = COL_IS_AND + 1;
 /// Uint-op family flag — set on every uint arithmetic / equality node
 /// (add/sub/mul/is). The op itself rides the shared op one-hot; this bit
@@ -177,8 +171,8 @@ pub const COL_IS_EC_OP: usize = COL_IS_EC_PAI + 1;
 // flag-column analogue of the reused ptr columns below). Sums to
 // `is_uint_op + is_ec_op`; Add is derived by `add_flag`.
 // `is_mul` is uint-only (EC has no multiply).
-// Op ids differ per family (uint Is=4, EC Is=3), so frame parameter 0 is the
-// family-gated id-weighted sum.
+// Op ids differ per family (uint Is=4, EC Is=3); `frame_op_id` reconstructs
+// frame parameter 0 linearly using the uint add/sub selectors.
 // ================================================================
 
 /// `Sub` — the rearranged add `b + r = a` (uint) / `R + Q = P` (EC).
@@ -193,36 +187,29 @@ pub const COL_IS_IS: usize = COL_IS_MUL + 1;
 // ptr = leaf uint / op result / created-or-result point / MSM boundary value;
 // bound_ptr = uint modulus / create coord modulus / MSM scalar bound;
 // a_ptr / b_ptr = operands / create coords / MSM base+scalar ptrs;
-// frame_param0 / frame_param1 = domain-defined Eidos frame parameters;
-// ec_context_group_ptr = EC op/MSM group.
-//
-// Note the physical order: frame_param1 appears before frame_param0 because it reuses the
-// heavily shared bound/pin/create-group slot.
+// frame_param1 = domain-defined Eidos frame parameter;
+// uint_domain_selector = membership witness for bound_ptr;
+// ec_context_group_ptr = curve group on create, PAI, EC value ops and MSM.
 //
 // Row-kind map for the polymorphic data cells:
 // - uint VALUE:       ptr=value, bound_ptr=modulus, frame_param1=bound_ptr.
-// - uint PIN claim:   ptr=pin, bound_ptr=modulus, frame_param0=bound_ptr, frame_param1=pin.
-// - uint/EC op:       ptr=result, a_ptr/b_ptr=operands, frame_param0=op_id.
-// - EcCreate / PAI:   ptr=point, bound_ptr=coord modulus, a_ptr/b_ptr=x/y, frame_param1=group; PAI
-//   zeros bound/x/y.
+// - uint/EC op:       ptr=result, a_ptr/b_ptr=operands.
+// - EcCreate / PAI:   ptr=point, bound_ptr=coord modulus, a_ptr/b_ptr=x/y,
+//   frame_param1=ec_context_group_ptr=group; PAI zeros bound/x/y.
 // - EcMsm absorb:     a_ptr=base, b_ptr=scalar, bound_ptr=scalar bound, ec_context_group_ptr=group;
 //   the boundary also sets ptr=value.
 // ================================================================
 
-/// Pin-claim flag for a uint leaf row: 1 = explicit pin claim, 0 = runtime
-/// VM value row. Locally gates the True / Uint binding fork.
-pub const COL_IS_PINNED: usize = COL_IS_IS + 1;
 /// The pointer the row's binding carries: stored uint on uint-leaf rows,
 /// value-op result ptr, created / result point ptr, or the EcMsm boundary's
 /// value point. `Is` rows set this to 0 because they bind `True`, not a value.
-pub const COL_PTR: usize = COL_IS_PINNED + 1;
+pub const COL_PTR: usize = COL_IS_IS + 1;
 /// The bound pointer read by `Uint`-typed bus messages: uint modulus on
 /// uint-leaf / uint-op rows, coordinate-field modulus on finite EcCreate rows,
 /// and scalar-field bound on EcMsm absorb rows. VM uint VALUE frames also commit
 /// it in frame parameter 1.
 pub const COL_BOUND_PTR: usize = COL_PTR + 1;
-/// Physical frame parameter 1. Runtime uint
-/// VALUE rows put `bound_ptr` here, explicit pin rows put `pin_ptr = ptr`, and
+/// Physical frame parameter 1. Uint VALUE rows put `bound_ptr` here, and
 /// EcCreate / PAI rows put the curve `group_ptr` here.
 pub const COL_FRAME_PARAM1: usize = COL_BOUND_PTR + 1;
 /// The lhs-style ptr: uint / EC op lhs operand, finite EcCreate x-coordinate,
@@ -231,15 +218,12 @@ pub const COL_A_PTR: usize = COL_FRAME_PARAM1 + 1;
 /// The rhs-style ptr: binary-op rhs operand, finite EcCreate y-coordinate, or
 /// EcMsm absorb scalar. It is 0 on non-op rows and PAI rows.
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
-/// Physical frame parameter 0. Explicit pin
-/// rows put `bound_ptr` here, op rows put the op id here, and runtime VM uint
-/// VALUE / EcCreate / PAI rows use `VALUE_OP_ID = 0`.
-pub const COL_FRAME_PARAM0: usize = COL_B_PTR + 1;
-/// Witnessed EC-store group handle for EC value-producing binops and EcMsm
-/// absorb runs. Create / PAI rows commit their group selector through
-/// [`COL_FRAME_PARAM1`], so the hash frame and `EcPoint` consume share one physical
-/// cell.
-pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_FRAME_PARAM0 + 1;
+/// Selects a group of supported uint bounds: 0 for {1, 2, 3}, 3 for {4, 5, 6},
+/// or 8 for {1, 14, 15}. Zero outside uint contexts.
+pub const COL_UINT_DOMAIN_SELECTOR: usize = COL_B_PTR + 1;
+/// Curve group on create/PAI, value-producing EC operations and EcMsm absorb rows.
+/// Zero on other rows. Curve VALUE rows also carry it in [`COL_FRAME_PARAM1`].
+pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_UINT_DOMAIN_SELECTOR + 1;
 
 // ================================================================
 // ROW-KIND ALIASES — semantic names for reused physical columns. Use these
@@ -249,10 +233,6 @@ pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_FRAME_PARAM0 + 1;
 
 /// Runtime VM uint VALUE row: `bound_ptr` committed in frame parameter 1.
 pub const COL_UINT_VALUE_BOUND_PTR: usize = COL_FRAME_PARAM1;
-/// Explicit pin-claim row: `bound_ptr` committed in frame parameter 0.
-pub const COL_PIN_CLAIM_BOUND_PTR: usize = COL_FRAME_PARAM0;
-/// Explicit pin-claim row: `pin_ptr = ptr` committed in frame parameter 1.
-pub const COL_PIN_CLAIM_PIN_PTR: usize = COL_FRAME_PARAM1;
 /// EcCreate / PAI row: created point pointer.
 pub const COL_EC_CREATE_POINT_PTR: usize = COL_PTR;
 /// EcCreate / PAI row: curve group pointer committed in the VALUE frame and
@@ -308,6 +288,24 @@ pub const COL_IS_UINT_SUB: usize = COL_IS_UINT_ADD + 1;
 /// Total number of main witness columns.
 pub const NUM_MAIN_COLS: usize = COL_IS_UINT_SUB + 1;
 
+// The cubic membership constraints are specialized to this set of native bound pointers.
+// Changes to the set must update the constraints and witness selector together.
+const _: () = {
+    let bounds = [1, 2, 3, 4, 5, 6, 14, 15];
+    assert!(UintDomain::ALL.len() == bounds.len());
+    let mut index = 0;
+    while index < bounds.len() {
+        let mut found = false;
+        let mut domain = 0;
+        while domain < UintDomain::ALL.len() {
+            found |= UintDomain::ALL[domain].bound_ptr() == bounds[index];
+            domain += 1;
+        }
+        assert!(found);
+        index += 1;
+    }
+};
+
 /// ZERO_HASH is the remaining active family. Its boolean constraint enforces the family one-hot.
 pub fn zero_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
     row[COL_ACT].into()
@@ -326,6 +324,27 @@ pub fn add_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
         - row[COL_IS_SUB].into()
         - row[COL_IS_MUL].into()
         - row[COL_IS_IS].into()
+}
+
+// The constrained uint add/sub flags let us derive frame parameter 0 linearly,
+// avoiding a separate witness column.
+fn frame_op_id<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
+    let uint_add: E = row[COL_IS_UINT_ADD].into();
+    let uint_sub: E = row[COL_IS_UINT_SUB].into();
+    let uint_mul: E = row[COL_IS_MUL].into();
+    let uint_eq =
+        row[COL_IS_UINT_OP].into() - uint_add.clone() - uint_sub.clone() - uint_mul.clone();
+    let ec_add = add_flag::<E, V>(row) - uint_add.clone();
+    let ec_sub = row[COL_IS_SUB].into() - uint_sub.clone();
+    let ec_eq = row[COL_IS_IS].into() - uint_eq.clone();
+    uint_add * E::from_u64(UintPrecompile::ADD_OP_ID)
+        + uint_sub * E::from_u64(UintPrecompile::SUB_OP_ID)
+        + uint_mul * E::from_u64(UintPrecompile::MUL_OP_ID)
+        + uint_eq * E::from_u64(UintPrecompile::EQ_OP_ID)
+        + ec_add * E::from_u64(CurvePrecompile::ADD_OP_ID)
+        + ec_sub * E::from_u64(CurvePrecompile::SUB_OP_ID)
+        + ec_eq * E::from_u64(CurvePrecompile::EQ_OP_ID)
+        + row[COL_IS_EC_MSM].into() * E::from_u64(CurvePrecompile::MSM_OP_ID)
 }
 
 // PUBLIC VALUES LAYOUT
@@ -353,7 +372,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // - col 1: Terminal Eidos output and True binding.
 // - col 2: Eidos block and initial CV.
 // - col 3: UintVal, UintMul, EcPoint, or one uint/EC addition/subtraction relation.
-// - col 4: Uint value binding, with a transient-scaled degree-two message.
+// - col 4: Uint value binding.
 // - col 5: Group value binding.
 // - col 6: EcMsm base and scalar bindings.
 // - col 7: EcMsm claim term and expression.
@@ -456,7 +475,6 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // absorb). is_msm_last is a sub-flag, not in the activity one-hot.
         let is_ec_msm: AB::Expr = local[COL_IS_EC_MSM].into();
         let is_msm_last: AB::Expr = local[COL_IS_MSM_LAST].into();
-        let is_pinned: AB::Expr = local[COL_IS_PINNED].into();
         for col in [
             COL_IS_AND,
             COL_IS_UINT_LEAF,
@@ -466,7 +484,6 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             COL_IS_EC_OP,
             COL_IS_EC_MSM,
             COL_IS_MSM_LAST,
-            COL_IS_PINNED,
         ] {
             builder.assert_bool(local[col]);
         }
@@ -484,21 +501,20 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         for col in [COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
             builder.assert_bool(local[col]);
         }
-        let is_op = is_add.clone() + is_sub.clone() + is_mul.clone() + is_is.clone();
+        let is_op = is_add + is_sub + is_mul.clone() + is_is.clone();
         // The op one-hot sums to "this is an op row" = is_uint_op + is_ec_op,
         // so a set op flag forces exactly one op family (and conversely).
         // EC has no multiply — is_mul only ever rides a uint-op row.
-        builder.assert_zero(is_ec_op.clone() * is_mul.clone());
+        builder.assert_zero(is_ec_op * is_mul);
 
         // Row 0 is the public transcript root and must be a True-binding node.
         // This excludes value rows and EcMsm interior absorbs, whose `h` is not
         // a public assertion digest.
-        let root_truthy = is_zero + is_and + is_is.clone() + is_pinned.clone();
+        let root_truthy = is_zero + is_and + is_is.clone();
         builder.when_first_row().assert_zero(root_truthy - AB::Expr::ONE);
 
         // Both create modes (finite + PAI) carry the group in frame parameter 1 and
-        // consume EcPoint. They do not use COL_EC_CONTEXT_GROUP_PTR. PAI has
-        // no coordinate children, so its VALUE payload is the canonical
+        // consume EcPoint. PAI has no coordinate children, so its VALUE payload is the canonical
         // `(TRUE_DIGEST, TRUE_DIGEST)` pair (zero digest in both block halves).
         let is_create = is_ec_create.clone() + is_ec_pai.clone();
         for i in 0..DIGEST_WIDTH {
@@ -513,42 +529,65 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // sum; spans both families' value-producing ops.
         let is_result_op: AB::Expr = is_op.clone() - is_is.clone();
         // The derived zero flag completes the activity one-hot.
-        // is_pinned is a leaf-only flag; ptr carries a binding ptr only on
-        // uint-leaf / result-op / Ec-create / Ec-pai rows; bound_ptr only
-        // where a Uint-typed message reads it (leaf / uint-op / finite create)
-        // or on EcMsm scalar consumes — zero elsewhere, including AND rows.
+        // ptr carries a binding ptr on uint-leaf / result-op / Ec-create / Ec-pai rows.
+        // bound_ptr is used by Uint messages (leaf / uint-op / finite create) and
+        // EcMsm scalar consumes; it is zero elsewhere, including AND rows.
         let not_uint_leaf: AB::Expr = AB::Expr::ONE - is_uint_leaf.clone();
         let ptr: AB::Expr = local[COL_PTR].into();
         let bound_ptr: AB::Expr = local[COL_BOUND_PTR].into();
-        builder.assert_zero(not_uint_leaf.clone() * is_pinned.clone());
+        // VM admission uses the native fixed catalogue. The uint store and
+        // arithmetic chiplets retain their generic pointer-based relations.
+        let uint_context =
+            is_uint_leaf.clone() + is_uint_op.clone() + is_ec_create.clone() + is_ec_msm.clone();
+        let selector: AB::Expr = local[COL_UINT_DOMAIN_SELECTOR].into();
+        builder.assert_zero(
+            selector.clone()
+                * (selector.clone() - uint_context.clone() * Felt::from_u8(3))
+                * (selector.clone() - uint_context.clone() * Felt::from_u8(8)),
+        );
+        // In uint contexts, set x = bound_ptr - 2 and group the native bounds into triples:
+        // selector 0: 2*(x+1)*x*(x-1)       -> bounds {1, 2, 3}
+        // selector 3: 2*(x-2)*(x-3)*(x-4)   -> bounds {4, 5, 6}
+        // selector 8: 2*(x+1)*(x-12)*(x-13) -> bounds {1, 14, 15}.
+        // Repeating bound 1 completes the triples without adding a domain. Choose the selector
+        // as the mean bound minus 2: the x-roots sum to 3*selector, so their monic cubic's x^2
+        // coefficient is -3*selector. Interpolate the x and constant coefficients quadratically
+        // at selectors 0, 3, 8; the total degree stays three. Scaling by 2 clears denominators.
+        // Outside uint contexts, bound_ptr = 0 and the first cubic forces selector = 0;
+        // shifting by 2*uint_context also makes x = 0, satisfying the second cubic.
+        let x = bound_ptr.clone() - uint_context * Felt::from_u8(2);
+        builder.assert_zero(
+            x.clone()
+                * (x.clone() * (x * Felt::from_u8(2) - selector.clone() * Felt::from_u8(6))
+                    + selector.clone() * (selector.clone() * Felt::from_u8(3) + Felt::from_u8(9))
+                    - Felt::from_u8(2))
+                + selector.clone() * (selector * Felt::from_u8(11) - Felt::from_u8(49)),
+        );
         // ptr also carries the claim's value point on an EcMsm boundary row
         // (the Group binding provide / MsmExpr consume); 0 on the run's
         // earlier absorbs.
         builder.assert_zero(
             (not_uint_leaf.clone()
-                - is_result_op
+                - is_result_op.clone()
                 - is_ec_create.clone()
                 - is_ec_pai
                 - is_msm_last.clone())
-                * ptr.clone(),
+                * ptr,
         );
         // bound_ptr also carries the scalar bound on every EcMsm absorb row
         // (the sᵢ `Uint` binding consume).
         builder.assert_zero(
-            (not_uint_leaf - is_uint_op.clone() - is_ec_create.clone() - is_ec_msm.clone())
+            (not_uint_leaf - is_uint_op - is_ec_create.clone() - is_ec_msm.clone())
                 * bound_ptr.clone(),
         );
-        // Materialize frame param1 without a degree-2 Eidos frame component:
-        // VM uint value rows use `bound_ptr`, explicit pin rows use `ptr`, and
-        // EcCreate / PAI rows use this physical cell as the VALUE frame's `group_ptr`.
-        // On create rows the `EcPoint` consume reads the same cell, tying the
-        // hashed group selector to the point's group with no extra constraint.
+        // Keep frame parameter 1 linear in the Eidos messages. Uint VALUE rows carry the bound,
+        // and curve VALUE rows carry the admitted group. EcMsm carries its term count, checked
+        // at the run's tail below.
         let frame_param1: AB::Expr = local[COL_FRAME_PARAM1].into();
         let expected_frame_param1 =
-            is_uint_leaf * bound_ptr.clone() + is_pinned.clone() * (ptr - bound_ptr.clone());
+            is_uint_leaf * bound_ptr + is_create.clone() * group_ptr.clone();
         builder.assert_zero(
-            (AB::Expr::ONE - is_create - is_ec_msm.clone())
-                * (frame_param1.clone() - expected_frame_param1),
+            (AB::Expr::ONE - is_ec_msm.clone()) * (frame_param1.clone() - expected_frame_param1),
         );
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
@@ -564,35 +603,22 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.assert_zero(
             (AB::Expr::ONE - is_op - is_ec_create - is_ec_msm.clone()) * b_ptr.clone(),
         );
-        builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
+        builder.assert_zero(is_is * (b_ptr - a_ptr));
 
-        // Materialize frame param0: explicit pin rows use
-        // `bound_ptr`, runtime VM uint value and EcCreate rows use
-        // `VALUE_OP_ID = 0`, and op rows use their family op id.
-        let frame_param0: AB::Expr = local[COL_FRAME_PARAM0].into();
-        let uint_op_id: AB::Expr = is_add.clone()
-            + is_sub.clone() * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
-            + is_mul * AB::Expr::from(Felt::from(UintOpId::Mul as u8))
-            + is_is.clone() * AB::Expr::from(Felt::from(UintOpId::Is as u8));
-        let ec_op_id: AB::Expr = is_add
-            * AB::Expr::from(Felt::from_u32(CurvePrecompile::ADD_OP_ID as u32))
-            + is_sub * AB::Expr::from(Felt::from_u32(CurvePrecompile::SUB_OP_ID as u32))
-            + is_is.clone() * AB::Expr::from(Felt::from_u32(CurvePrecompile::EQ_OP_ID as u32));
-        let expected_frame_param0 = is_pinned * bound_ptr
-            + is_uint_op * uint_op_id
-            + is_ec_op.clone() * ec_op_id
-            + is_ec_msm.clone() * AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32));
-        builder.assert_zero(frame_param0 - expected_frame_param0);
-
-        // group_ptr: the witnessed EC-store handle for result-binding ec ops
-        // (add/sub, not Is) and EcMsm absorb runs. Create / PAI rows use the
-        // VALUE frame `[CurvePrecompile::domain(), VALUE_OP_ID, group_ptr, 0]`, with
-        // that group selector carried in COL_EC_CREATE_GROUP_PTR (the physical
-        // COL_FRAME_PARAM1 cell) so the hash frame and EcPoint consume share one cell.
-        // For EcMsm, group_ptr is not in the frame; it remains live in the boundary's MsmExpr and
-        // Group-binding relations on every absorb row.
+        // Subtract the uint value-op selectors to get a linear curve-context flag.
+        // Point equality compares child pointers and carries no group context.
+        // For curve contexts, the roots are the native group pointers; elsewhere the cubic
+        // becomes group_ptr^3 = 0.
+        let uint_result_op = AB::Expr::from(local[COL_IS_UINT_ADD])
+            + AB::Expr::from(local[COL_IS_UINT_SUB])
+            + AB::Expr::from(local[COL_IS_MUL]);
+        let curve_context = is_create + is_result_op - uint_result_op + is_ec_msm.clone();
+        let [first, second, third] =
+            CurveId::ALL.map(|curve| AB::Expr::from(Felt::from(curve.group_ptr())));
         builder.assert_zero(
-            (AB::Expr::ONE - is_ec_op * (AB::Expr::ONE - is_is) - is_ec_msm.clone()) * group_ptr,
+            (group_ptr.clone() - curve_context.clone() * first)
+                * (group_ptr.clone() - curve_context.clone() * second)
+                * (group_ptr - curve_context * third),
         );
 
         // ---- EcMsm chaining run: the head binds the initial frame, continuations are
@@ -698,7 +724,6 @@ where
         let is_and: LB::Expr = local[COL_IS_AND].into();
         let is_zero: LB::Expr = zero_flag(&local);
         let is_uint_leaf: LB::Expr = local[COL_IS_UINT_LEAF].into();
-        let is_pinned: LB::Expr = local[COL_IS_PINNED].into();
         let is_add: LB::Expr = add_flag(&local);
         let is_sub: LB::Expr = local[COL_IS_SUB].into();
         let is_mul: LB::Expr = local[COL_IS_MUL].into();
@@ -710,7 +735,7 @@ where
         let frame_param1: LB::Expr = local[COL_FRAME_PARAM1].into();
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let frame_param0: LB::Expr = local[COL_FRAME_PARAM0].into();
+        let frame_param0: LB::Expr = frame_op_id(&local);
         let is_uint_op: LB::Expr = local[COL_IS_UINT_OP].into();
         let is_ec_create: LB::Expr = local[COL_IS_EC_CREATE].into();
         let is_ec_pai: LB::Expr = local[COL_IS_EC_PAI].into();
@@ -747,22 +772,14 @@ where
             neg_out_mult.clone() * (is_and.clone() + is_zero + is_is.clone());
         let uint_gate: LB::Expr = is_uint_leaf.clone();
         let uint_provide: LB::Expr = neg_out_mult * (is_uint_leaf.clone() + is_value_op);
-        // Value-binding tag fork: a pinned leaf binds True (folded into the
-        // spine, e.g. anchoring the modulus in the public root); a transient
-        // leaf or a value op binds Uint. value_tag / ptr / bound_ptr collapse
-        // to the True form (all 0) when is_pinned = 1 — and is_pinned is 0 on
-        // op rows, so their fields pass through.
-        let transient: LB::Expr = LB::Expr::ONE - is_pinned.clone();
 
         // Node-compression frame, every slot degree 1.
         let uint_domain = LB::Expr::from(UintPrecompile::domain().as_felt());
         let curve_domain = LB::Expr::from(CurvePrecompile::domain().as_felt());
-        let pin_claim_domain_tag = LB::Expr::from(PvmUintPinClaimDomain::TAG.as_felt());
         let uint_family = is_uint_leaf + op_lhs_gate;
         let frame = [
             and_gate * LB::Expr::from(DEFERRED_AND_DOMAIN)
-                + uint_family * uint_domain.clone()
-                + is_pinned * (pin_claim_domain_tag - uint_domain)
+                + uint_family * uint_domain
                 + (is_create.clone() + is_ec_op.clone() + is_ec_msm.clone()) * curve_domain,
             frame_param0,
             frame_param1,
@@ -787,7 +804,7 @@ where
         let linear_deg = Deg { v: 1, u: 1 };
         let selected_mult_deg = Deg { v: 2, u: 1 };
         let selected_relation_deg = Deg { v: 1, u: 2 };
-        let value_provide_deg = Deg { v: 3, u: 2 };
+        let value_provide_deg = Deg { v: 3, u: 1 };
         let group_provide_deg = Deg { v: 3, u: 1 };
         let linear_pair_deg = Deg { v: 2, u: 2 };
         let selected_pair_deg = Deg { v: 3, u: 2 };
@@ -845,6 +862,8 @@ where
         );
 
         // col 2: every hashing row supplies a block; chain heads also supply the initial CV.
+        // Both messages have linear payloads and multiplicities. Batching them keeps the
+        // denominator quadratic and the closing constraint cubic.
         frac_col!(
             builder,
             "unhash-eidos",
@@ -960,9 +979,7 @@ where
             },
             selected_relation_deg,
         );
-        // col 4: provide the row's binding (leaf ∪ value op), alone (heavy
-        // — a transient-scaled degree-2 message): True if pinned (→
-        // spine), else Uint.
+        // Uint leaves and value operations provide the same typed binding.
         frac_col!(
             builder,
             "binding-uint",
@@ -972,9 +989,9 @@ where
                 uint_provide,
                 BindingMsg {
                     h,
-                    value_tag: transient.clone() * LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
-                    ptr: transient.clone() * ptr.clone(),
-                    bound_ptr: transient * bound_ptr.clone(),
+                    value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
+                    ptr: ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
                 },
                 value_provide_deg
             ),
@@ -1013,7 +1030,7 @@ where
 
         // col 6/7: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
-        // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
+        // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ, scalar_bound)`
         // (positionless — tying to the chiplet's term *multiset*, so the absorb
         // order is the caller's). At the boundary: `MsmExpr(expr, group,
         // val, k = idx + 1)` (every term named, the value bound). Fields
@@ -1046,7 +1063,7 @@ where
                     h: m_rhs,
                     value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
                     ptr: m_b.clone(),
-                    bound_ptr: m_bound,
+                    bound_ptr: m_bound.clone(),
                 },
                 linear_deg
             ),
@@ -1063,7 +1080,8 @@ where
                 MsmClaimTermMsg {
                     expr_ptr: m_expr.clone(),
                     base_ptr: m_a,
-                    scalar_ptr: m_b
+                    scalar_ptr: m_b,
+                    scalar_bound_ptr: m_bound,
                 },
                 linear_deg
             ),

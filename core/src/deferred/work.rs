@@ -1,31 +1,49 @@
 //! Declared deferred-precompile workload accounting.
 
-use alloc::collections::BTreeMap;
+use alloc::{borrow::Cow, collections::BTreeMap, string::String, vec::Vec};
 
 use super::{Node, PrecompileError, PrecompileRegistry, precompile_registry::is_framework_domain};
+use crate::serde::{
+    BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+    SliceReader, validate_bounded_len,
+};
 
-/// Stable process-local identifier for one class of precompile work.
+/// Stable identifier for one class of precompile work.
 ///
 /// Returning the same class from multiple frames intentionally combines their accounting. The
-/// identifier is not serialized and does not affect deferred commitments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorkClass(&'static str);
+/// name is serialized in precompile policies but does not affect deferred commitments. Names are
+/// arbitrary UTF-8 and are compared byte for byte.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WorkClass(Cow<'static, str>);
 
 impl WorkClass {
-    /// Creates a work class with the supplied stable display name.
+    /// Creates a work class from a static name. The name is borrowed and not copied.
     pub const fn new(name: &'static str) -> Self {
-        Self(name)
+        Self(Cow::Borrowed(name))
+    }
+
+    /// Creates a work class from an owned name.
+    ///
+    /// Use this for names that are not available as a `&'static str`, such as names decoded from a
+    /// serialized policy. Names have no restrictions beyond valid UTF-8.
+    pub fn from_string(name: String) -> Self {
+        Self(Cow::Owned(name))
+    }
+
+    /// Returns the class name.
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
 impl core::fmt::Display for WorkClass {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(self.0)
+        f.write_str(self.as_str())
     }
 }
 
 /// Work declared by one precompile-owned node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItem {
     class: WorkClass,
     size: u32,
@@ -95,14 +113,14 @@ impl PrecompileWork {
     }
 
     /// Returns the summary for `class`, if this scope contains that class.
-    pub fn class(&self, class: WorkClass) -> Option<WorkSummary> {
-        self.classes.get(&class).copied()
+    pub fn class(&self, class: &WorkClass) -> Option<WorkSummary> {
+        self.classes.get(class).copied()
     }
 
     /// Validates already-accumulated work against `limits` without changing it.
     pub(crate) fn validate(&self, limits: &PrecompileLimits) -> Result<(), PrecompileLimitError> {
         limits.check_elements(self.elements)?;
-        for (&class, &summary) in &self.classes {
+        for (class, &summary) in &self.classes {
             limits.check_class(class, summary)?;
         }
         Ok(())
@@ -142,14 +160,11 @@ impl PrecompileWork {
 
         let next = item
             .map(|item| {
-                let summary = self
-                    .classes
-                    .get(&item.class)
-                    .copied()
-                    .unwrap_or_default()
-                    .checked_with(item.size)?;
-                limits.check_class(item.class, summary)?;
-                Ok((item.class, summary))
+                let WorkItem { class, size } = item;
+                let summary =
+                    self.classes.get(&class).copied().unwrap_or_default().checked_with(size)?;
+                limits.check_class(&class, summary)?;
+                Ok((class, summary))
             })
             .transpose()?;
 
@@ -174,24 +189,24 @@ pub struct WorkLimit {
 }
 
 impl WorkLimit {
-    fn check(self, class: WorkClass, summary: WorkSummary) -> Result<(), PrecompileLimitError> {
+    fn check(self, class: &WorkClass, summary: WorkSummary) -> Result<(), PrecompileLimitError> {
         if summary.count > self.max_count {
             return Err(PrecompileLimitError::Count {
-                class,
+                class: class.clone(),
                 actual: summary.count,
                 max: self.max_count,
             });
         }
         if summary.total_size > self.max_total_size {
             return Err(PrecompileLimitError::TotalSize {
-                class,
+                class: class.clone(),
                 actual: summary.total_size,
                 max: self.max_total_size,
             });
         }
         if summary.max_size > self.max_size {
             return Err(PrecompileLimitError::ItemSize {
-                class,
+                class: class.clone(),
                 actual: summary.max_size,
                 max: self.max_size,
             });
@@ -201,6 +216,15 @@ impl WorkLimit {
 }
 
 /// Admission policy for one execution or verification accounting scope.
+///
+/// # Binary encoding
+///
+/// The encoding starts with the structural element ceiling as a `u64`. It then writes the class
+/// map as a length-prefixed sequence in class-name order. Each entry contains a length-prefixed
+/// UTF-8 class name and three work limits. Decoding requires class names in strictly increasing
+/// order, rejects duplicates, and requires length prefixes to use the shortest vint64 encoding.
+/// The format has no version byte. Both byte entrypoints require the decoded snapshot to consume
+/// the entire input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileLimits {
     max_elements: u64,
@@ -228,8 +252,18 @@ impl PrecompileLimits {
     }
 
     /// Returns the configured bound for `class`, if the policy admits it.
-    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
-        self.classes.get(&class).copied()
+    pub fn class(&self, class: &WorkClass) -> Option<WorkLimit> {
+        self.classes.get(class).copied()
+    }
+
+    /// Returns the structural field-element ceiling.
+    pub const fn max_elements(&self) -> u64 {
+        self.max_elements
+    }
+
+    /// Returns the configured class bounds in class-name order.
+    pub fn classes(&self) -> impl Iterator<Item = (&WorkClass, &WorkLimit)> + '_ {
+        self.classes.iter()
     }
 
     fn check_elements(&self, actual: u64) -> Result<(), PrecompileLimitError> {
@@ -241,19 +275,144 @@ impl PrecompileLimits {
 
     fn check_class(
         &self,
-        class: WorkClass,
+        class: &WorkClass,
         summary: WorkSummary,
     ) -> Result<(), PrecompileLimitError> {
-        self.classes
-            .get(&class)
+        let limit = self
+            .classes
+            .get(class)
             .copied()
-            .ok_or(PrecompileLimitError::MissingClass { class })?
-            .check(class, summary)
+            .ok_or_else(|| PrecompileLimitError::MissingClass { class: class.clone() })?;
+        limit.check(class, summary)
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+fn read_shortest_len<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+    min_element_size: usize,
+) -> Result<usize, DeserializationError> {
+    let encoded_len = source.peek_u8()?.trailing_zeros() as usize + 1;
+    let len = source.read_usize()?;
+    if encoded_len != len.get_size_hint() {
+        return Err(DeserializationError::InvalidValue(format!("noncanonical {label} length")));
+    }
+    validate_bounded_len(source, label, len, min_element_size)?;
+    Ok(len)
+}
+
+impl Serializable for WorkClass {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_str().write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.as_str().get_size_hint()
+    }
+}
+
+impl Deserializable for WorkClass {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let len = read_shortest_len(source, "work class name", 1)?;
+        let bytes = source.read_many_iter::<u8>(len)?.collect::<Result<Vec<_>, _>>()?;
+        let name = String::from_utf8(bytes)
+            .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
+        Ok(Self::from_string(name))
+    }
+
+    fn min_serialized_size() -> usize {
+        1
+    }
+}
+
+impl Serializable for WorkLimit {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.max_count.write_into(target);
+        self.max_total_size.write_into(target);
+        self.max_size.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.max_count.get_size_hint()
+            + self.max_total_size.get_size_hint()
+            + self.max_size.get_size_hint()
+    }
+}
+
+impl Deserializable for WorkLimit {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let max_count = source.read_u64()?;
+        let max_total_size = source.read_u64()?;
+        let max_size = source.read_u32()?;
+        Ok(Self { max_count, max_total_size, max_size })
+    }
+
+    fn min_serialized_size() -> usize {
+        u64::min_serialized_size() + u64::min_serialized_size() + u32::min_serialized_size()
+    }
+}
+
+impl Serializable for PrecompileLimits {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.max_elements.write_into(target);
+        self.classes.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.max_elements.get_size_hint() + self.classes.get_size_hint()
+    }
+}
+
+impl Deserializable for PrecompileLimits {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let max_elements = source.read_u64()?;
+        let min_entry_size = WorkClass::min_serialized_size() + WorkLimit::min_serialized_size();
+        let class_count = read_shortest_len(source, "precompile limits class", min_entry_size)?;
+        let mut classes = BTreeMap::new();
+        for entry in source.read_many_iter::<(WorkClass, WorkLimit)>(class_count)? {
+            let (class, limit) = entry?;
+            if let Some((previous, _)) = classes.last_key_value()
+                && class <= *previous
+            {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "precompile limits class names must be strictly increasing: previous `{previous}`, current `{class}`"
+                )));
+            }
+            classes.insert(class, limit);
+        }
+        Ok(Self { max_elements, classes })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        Self::read_from_bytes_with_budget(bytes, bytes.len())
+    }
+
+    fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let budget = budget.min(bytes.len());
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        let limits = Self::read_from(&mut reader)?;
+        let consumed = budget.saturating_sub(reader.remaining());
+        if consumed != bytes.len() {
+            return Err(DeserializationError::InvalidValue(
+                "trailing bytes after precompile limits".into(),
+            ));
+        }
+        Ok(limits)
+    }
+
+    fn min_serialized_size() -> usize {
+        u64::min_serialized_size() + BTreeMap::<WorkClass, WorkLimit>::min_serialized_size()
     }
 }
 
 /// Work exceeded its configured precompile admission policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrecompileLimitError {
     #[error("precompile work accounting overflowed")]
     Overflow,
@@ -271,6 +430,8 @@ pub enum PrecompileLimitError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::String, vec::Vec};
+
     use super::*;
 
     const TEST: WorkClass = WorkClass::new("test");
@@ -291,7 +452,7 @@ mod tests {
         work.charge(12, Some(WorkItem::new(TEST, 4)), &limits).unwrap();
         assert_eq!(work.nodes(), 2);
         assert_eq!(work.elements(), 24);
-        assert_eq!(work.class(TEST), Some(WorkSummary { count: 2, total_size: 7, max_size: 4 }));
+        assert_eq!(work.class(&TEST), Some(WorkSummary { count: 2, total_size: 7, max_size: 4 }));
 
         assert!(matches!(
             work.charge(1, None, &limits),
@@ -306,7 +467,7 @@ mod tests {
         let mut work = PrecompileWork::default();
         assert!(matches!(
             work.charge(1, Some(WorkItem::new(TEST, 1)), &PrecompileLimits::new(u64::MAX),),
-            Err(PrecompileLimitError::MissingClass { class: TEST })
+            Err(PrecompileLimitError::MissingClass { class }) if class == TEST
         ));
         assert_eq!(work, PrecompileWork::default());
 
@@ -315,5 +476,341 @@ mod tests {
             work.charge(0, None, &PrecompileLimits::new(u64::MAX)),
             Err(PrecompileLimitError::Overflow)
         ));
+    }
+
+    #[test]
+    fn work_class_roundtrip_preserves_arbitrary_names() {
+        let static_class = WorkClass::new("hash");
+        let decoded_static = WorkClass::read_from_bytes(&static_class.to_bytes()).unwrap();
+        assert_eq!(decoded_static, static_class);
+        assert_eq!(decoded_static.as_str(), "hash");
+        assert_eq!(format!("{decoded_static}"), "hash");
+
+        for name in ["", "custom class", "custom/λ", "custom\nname"] {
+            let class = WorkClass::from_string(String::from(name));
+            let bytes = class.to_bytes();
+            let decoded = WorkClass::read_from_bytes(&bytes).unwrap();
+            assert_eq!(decoded, class);
+            assert_eq!(decoded.to_bytes(), bytes);
+            assert_eq!(decoded.as_str(), name);
+            assert_eq!(format!("{decoded}"), name);
+        }
+    }
+
+    #[test]
+    fn work_class_rejects_invalid_utf8_and_truncated_length() {
+        let mut invalid = Vec::new();
+        2usize.write_into(&mut invalid);
+        invalid.extend_from_slice(&[0xff, 0xfe]);
+        assert!(WorkClass::read_from_bytes(&invalid).is_err());
+
+        let mut truncated = Vec::new();
+        3usize.write_into(&mut truncated);
+        truncated.extend_from_slice(b"ab");
+        assert!(WorkClass::read_from_bytes(&truncated).is_err());
+    }
+
+    #[test]
+    fn precompile_limits_roundtrip_preserves_ceiling_and_multiple_custom_classes() {
+        let custom_a = WorkClass::from_string(String::from("custom-a"));
+        let custom_b = WorkClass::from_string(String::from("custom class"));
+        let hash_limit = WorkLimit {
+            max_count: 9,
+            max_total_size: 13,
+            max_size: 5,
+        };
+        let limits = PrecompileLimits::new(123)
+            .with_class(
+                custom_a.clone(),
+                WorkLimit {
+                    max_count: 7,
+                    max_total_size: 11,
+                    max_size: 3,
+                },
+            )
+            .with_class(
+                custom_b.clone(),
+                WorkLimit {
+                    max_count: 0,
+                    max_total_size: 0,
+                    max_size: 0,
+                },
+            )
+            .with_class(WorkClass::new("hash"), hash_limit);
+
+        let bytes = limits.to_bytes();
+        let decoded = PrecompileLimits::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, limits);
+        assert_eq!(decoded.to_bytes(), bytes);
+        assert_eq!(decoded.max_elements(), 123);
+        assert_eq!(
+            decoded.class(&custom_a),
+            Some(WorkLimit {
+                max_count: 7,
+                max_total_size: 11,
+                max_size: 3
+            })
+        );
+        assert_eq!(
+            decoded.class(&custom_b),
+            Some(WorkLimit {
+                max_count: 0,
+                max_total_size: 0,
+                max_size: 0
+            })
+        );
+        assert_eq!(decoded.class(&WorkClass::new("hash")), Some(hash_limit));
+        assert_eq!(decoded.classes().count(), 3);
+        assert!(decoded.classes().any(|(class, _)| class == &custom_a));
+        assert!(decoded.classes().any(|(class, _)| class == &custom_b));
+    }
+
+    #[test]
+    fn empty_precompile_limits_roundtrip() {
+        let limits = PrecompileLimits::new(0);
+        let bytes = limits.to_bytes();
+        let decoded = PrecompileLimits::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, limits);
+        assert_eq!(decoded.to_bytes(), bytes);
+        assert_eq!(decoded.max_elements(), 0);
+        assert_eq!(decoded.classes().count(), 0);
+    }
+
+    #[test]
+    fn precompile_limits_roundtrip_admission_matches_original() {
+        fn assert_same_admission(
+            original: &PrecompileLimits,
+            decoded: &PrecompileLimits,
+            elements: usize,
+            item: Option<WorkItem>,
+        ) {
+            let mut original_work = PrecompileWork::default();
+            let original_result = original_work.charge(elements, item.clone(), original);
+            let mut decoded_work = PrecompileWork::default();
+            let decoded_result = decoded_work.charge(elements, item, decoded);
+            assert_eq!(original_result, decoded_result);
+            assert_eq!(original_work, decoded_work);
+        }
+
+        let custom = WorkClass::from_string(String::from("custom"));
+        let allowed = PrecompileLimits::new(4).with_class(
+            custom.clone(),
+            WorkLimit {
+                max_count: 2,
+                max_total_size: 5,
+                max_size: 3,
+            },
+        );
+        let decoded_allowed = PrecompileLimits::read_from_bytes(&allowed.to_bytes()).unwrap();
+        assert_same_admission(
+            &allowed,
+            &decoded_allowed,
+            1,
+            Some(WorkItem::new(custom.clone(), 1)),
+        );
+        assert_same_admission(&allowed, &decoded_allowed, 5, None);
+
+        let missing = PrecompileLimits::new(4);
+        let decoded_missing = PrecompileLimits::read_from_bytes(&missing.to_bytes()).unwrap();
+        assert_same_admission(
+            &missing,
+            &decoded_missing,
+            1,
+            Some(WorkItem::new(custom.clone(), 1)),
+        );
+
+        let count = PrecompileLimits::new(4).with_class(
+            custom.clone(),
+            WorkLimit {
+                max_count: 0,
+                max_total_size: 5,
+                max_size: 3,
+            },
+        );
+        let decoded_count = PrecompileLimits::read_from_bytes(&count.to_bytes()).unwrap();
+        assert_same_admission(&count, &decoded_count, 1, Some(WorkItem::new(custom.clone(), 1)));
+
+        let total = PrecompileLimits::new(4).with_class(
+            custom.clone(),
+            WorkLimit {
+                max_count: 2,
+                max_total_size: 0,
+                max_size: 3,
+            },
+        );
+        let decoded_total = PrecompileLimits::read_from_bytes(&total.to_bytes()).unwrap();
+        assert_same_admission(&total, &decoded_total, 1, Some(WorkItem::new(custom.clone(), 1)));
+
+        let item_size = PrecompileLimits::new(4).with_class(
+            custom.clone(),
+            WorkLimit {
+                max_count: 2,
+                max_total_size: 5,
+                max_size: 0,
+            },
+        );
+        let decoded_item_size = PrecompileLimits::read_from_bytes(&item_size.to_bytes()).unwrap();
+        assert_same_admission(&item_size, &decoded_item_size, 1, Some(WorkItem::new(custom, 1)));
+    }
+
+    #[test]
+    fn owned_custom_name_matches_static_live_class() {
+        let live = WorkClass::new("hash");
+        let decoded_name = WorkClass::from_string(String::from("hash"));
+        assert_eq!(live, decoded_name);
+        let limit = WorkLimit {
+            max_count: 3,
+            max_total_size: 4,
+            max_size: 2,
+        };
+        let limits = PrecompileLimits::new(1).with_class(live, limit);
+        let decoded = PrecompileLimits::read_from_bytes(&limits.to_bytes()).unwrap();
+        assert_eq!(decoded.class(&decoded_name), Some(limit));
+        // The same owned key can be reused for a lookup against an unrelated policy.
+        assert_eq!(PrecompileLimits::new(0).class(&decoded_name), None);
+    }
+
+    #[test]
+    fn precompile_limits_rejects_duplicate_class_keys() {
+        let custom = WorkClass::from_string(String::from("custom"));
+        let limit = WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        };
+        let mut bytes = Vec::new();
+        42u64.write_into(&mut bytes);
+        2usize.write_into(&mut bytes);
+        custom.write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        custom.write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        assert!(PrecompileLimits::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn precompile_limits_rejects_out_of_order_class_keys() {
+        let limit = WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        };
+        let mut bytes = Vec::new();
+        0u64.write_into(&mut bytes);
+        2usize.write_into(&mut bytes);
+        WorkClass::new("b").write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        WorkClass::new("a").write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        let error = PrecompileLimits::read_from_bytes(&bytes).unwrap_err();
+        assert!(matches!(
+            error,
+            DeserializationError::InvalidValue(ref message)
+                if message.contains("`b`") && message.contains("`a`")
+        ));
+    }
+
+    #[test]
+    fn precompile_limits_fixed_vector_roundtrip() {
+        let expected = vec![
+            5, 0, 0, 0, 0, 0, 0, 0, // max_elements
+            3, // one class
+            9, // four-byte name
+            b'h', b'a', b's', b'h', 7, 0, 0, 0, 0, 0, 0, 0, // max_count
+            9, 0, 0, 0, 0, 0, 0, 0, // max_total_size
+            2, 0, 0, 0, // max_size
+        ];
+        let limits = PrecompileLimits::new(5).with_class(
+            WorkClass::new("hash"),
+            WorkLimit {
+                max_count: 7,
+                max_total_size: 9,
+                max_size: 2,
+            },
+        );
+        assert_eq!(limits.to_bytes(), expected);
+        let decoded = PrecompileLimits::read_from_bytes(&expected).unwrap();
+        assert_eq!(decoded, limits);
+    }
+
+    #[test]
+    fn precompile_limits_rejects_overlong_class_count() {
+        let mut bytes = Vec::new();
+        0u64.write_into(&mut bytes);
+        bytes.extend_from_slice(&[0x02, 0x00]);
+        assert!(PrecompileLimits::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn precompile_limits_rejects_overlong_class_name_length() {
+        let mut bytes = Vec::new();
+        0u64.write_into(&mut bytes);
+        1usize.write_into(&mut bytes);
+        bytes.extend_from_slice(&[0x02, 0x00]);
+        WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        }
+        .write_into(&mut bytes);
+        assert!(PrecompileLimits::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn precompile_limits_rejects_oversized_lengths() {
+        let mut huge_count = Vec::new();
+        0u64.write_into(&mut huge_count);
+        usize::MAX.write_into(&mut huge_count);
+        assert!(PrecompileLimits::read_from_bytes(&huge_count).is_err());
+
+        let mut huge_name = Vec::new();
+        0u64.write_into(&mut huge_name);
+        1usize.write_into(&mut huge_name);
+        usize::MAX.write_into(&mut huge_name);
+        WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        }
+        .write_into(&mut huge_name);
+        assert!(PrecompileLimits::read_from_bytes(&huge_name).is_err());
+
+        let mut valid_name = Vec::new();
+        0u64.write_into(&mut valid_name);
+        1usize.write_into(&mut valid_name);
+        1usize.write_into(&mut valid_name);
+        valid_name.push(b'x');
+        WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        }
+        .write_into(&mut valid_name);
+        assert!(PrecompileLimits::read_from_bytes(&valid_name).is_ok());
+    }
+
+    #[test]
+    fn precompile_limits_rejects_truncated_and_trailing_bytes() {
+        let limits = PrecompileLimits::new(7).with_class(
+            WorkClass::new("hash"),
+            WorkLimit {
+                max_count: 1,
+                max_total_size: 1,
+                max_size: 1,
+            },
+        );
+        let bytes = limits.to_bytes();
+        for len in 0..bytes.len() {
+            assert!(PrecompileLimits::read_from_bytes(&bytes[..len]).is_err());
+        }
+        assert!(PrecompileLimits::read_from_bytes_with_budget(&bytes, bytes.len()).is_ok());
+        assert!(PrecompileLimits::read_from_bytes_with_budget(&bytes, bytes.len() + 1).is_ok());
+
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(PrecompileLimits::read_from_bytes(&trailing).is_err());
+        assert!(PrecompileLimits::read_from_bytes_with_budget(&trailing, trailing.len()).is_err());
+        assert!(PrecompileLimits::read_from_bytes_with_budget(&trailing, bytes.len()).is_err());
+        assert!(PrecompileLimits::read_from_bytes_with_budget(&bytes, bytes.len() - 1).is_err());
     }
 }

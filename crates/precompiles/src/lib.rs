@@ -223,7 +223,7 @@ mod tests {
                 matches!(error.root(), PrecompileError::Limit(actual) if *actual == expected),
                 "unexpected admission error for {class}: {error:?}",
             );
-            if matches!(expected, ItemSize { class: HASH_WORK, .. }) {
+            if matches!(&expected, ItemSize { class, .. } if *class == HASH_WORK) {
                 // A valid input above the default remains supported when the operator raises
                 // only the individual admission allowance.
                 state

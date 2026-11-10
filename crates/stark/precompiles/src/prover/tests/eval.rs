@@ -34,11 +34,11 @@ use crate::prover::{
         eval::{
             COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CONTEXT_GROUP_PTR,
             COL_EC_CREATE_GROUP_PTR, COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR,
-            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0, COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE,
-            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL, COL_IS_PINNED,
-            COL_IS_SUB, COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB,
-            COL_LHS_BEGIN, COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR,
-            COL_RHS_BEGIN, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM1, COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MUL, COL_IS_SUB,
+            COL_IS_UINT_ADD, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN,
+            COL_MSM_IDX, COL_OUT_MULT, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH, NUM_MAIN_COLS,
+            TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
     },
@@ -209,7 +209,7 @@ const TYPED_RELATION_COL: usize = 3;
 fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
-    assert_eq!(air.width(), 39);
+    assert_eq!(air.width(), 38);
     assert_eq!(air.aux_width(), 8);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
@@ -408,7 +408,7 @@ fn check_corrupted(
     );
 }
 
-fn build_pinned_uint_trace(seed: u64) -> (RowMajorMatrix<Felt>, EidosDigest, usize) {
+fn build_uint_value_trace(seed: u64) -> (RowMajorMatrix<Felt>, EidosDigest, usize) {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut eidos = EidosRequires::new();
     let mut req = TranscriptEvalRequires::new();
@@ -416,16 +416,22 @@ fn build_pinned_uint_trace(seed: u64) -> (RowMajorMatrix<Felt>, EidosDigest, usi
     let zero = req.zero();
     let value = core::array::from_fn(|_| rng.random::<u32>());
     let mut scratch = UintStoreRequires::new();
-    let pinned =
-        req.pin_uint(UintPtr::from_addr(7), UintPtr::from_addr(7), value, &mut scratch, &mut eidos);
-    let root = fold_one(&mut req, &mut eidos, zero, pinned);
+    let value_node = req.uint_leaf(
+        UintPtr::from_addr(1000),
+        UintPtr::from_addr(1),
+        value,
+        &mut scratch,
+        &mut eidos,
+    );
+    let equality = req.record_is(&value_node, &value_node, &mut eidos);
+    let root = fold_one(&mut req, &mut eidos, zero, equality);
     let public_root = root.hash();
     let main = generate_trace(req, root);
-    let pin_row = (0..main.height())
-        .find(|&r| main.values[r * NUM_MAIN_COLS + COL_IS_PINNED] == Felt::ONE)
-        .expect("trace has a pinned leaf row");
+    let value_row = (0..main.height())
+        .find(|&r| main.values[r * NUM_MAIN_COLS + COL_IS_UINT_LEAF] == Felt::ONE)
+        .expect("trace has a uint VALUE row");
 
-    (main, public_root, pin_row)
+    (main, public_root, value_row)
 }
 
 #[test]
@@ -437,12 +443,13 @@ fn corruption_non_binary_act() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_zero() {
-    // Two individually boolean families derive is_zero = -1. A pinned leaf also
-    // satisfies the root's True-binding gate, isolating the missing-family boolean check.
+    // Two individually boolean families derive is_zero = -1. Is keeps the root's
+    // truth gate equal to one, isolating the derived family's boolean check.
     let mut row = vec![Felt::ZERO; NUM_MAIN_COLS];
-    for col in [COL_ACT, COL_IS_AND, COL_IS_UINT_LEAF, COL_IS_PINNED] {
+    for col in [COL_ACT, COL_IS_AND, COL_IS_UINT_OP, COL_IS_IS] {
         row[col] = Felt::ONE;
     }
+    row[COL_BOUND_PTR] = Felt::ONE;
     row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
     crate::prover::tests::check_local_inputs(
         TranscriptEvalAir,
@@ -454,13 +461,15 @@ fn corruption_non_binary_is_zero() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_add() {
-    // Sub and Is on a uint-op row derive is_add = -1. Materialize the matching
-    // frame parameter 0 (-1 * Add + Sub + Is = 5) so the derived flag's boolean check rejects it.
+    // Sub and Is on a uint-op row derive is_add = -1. Set the matching uint
+    // selectors so the derived flag's boolean check rejects it.
     let mut row = vec![Felt::ZERO; NUM_MAIN_COLS];
     for col in [COL_ACT, COL_IS_UINT_OP, COL_IS_SUB, COL_IS_IS] {
         row[col] = Felt::ONE;
     }
-    row[COL_FRAME_PARAM0] = Felt::from(5u8);
+    row[COL_IS_UINT_ADD] = -Felt::ONE;
+    row[COL_IS_UINT_SUB] = Felt::ONE;
+    row[COL_BOUND_PTR] = Felt::ONE;
     row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
     crate::prover::tests::check_local_inputs(
         TranscriptEvalAir,
@@ -531,9 +540,9 @@ fn corruption_non_msm_row_has_msm_index() {
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn corruption_pinned_leaf_chain_context_slot_mismatch() {
-    let (mut main, public_root, pin_row) = build_pinned_uint_trace(0xf0_f6_3d);
-    main.values[pin_row * NUM_MAIN_COLS + COL_PIN_CLAIM_PIN_PTR] += Felt::ONE;
+fn corruption_uint_value_bound_frame_mismatch() {
+    let (mut main, public_root, value_row) = build_uint_value_trace(0xf0_f6_3d);
+    main.values[value_row * NUM_MAIN_COLS + COL_FRAME_PARAM1] += Felt::ONE;
 
     crate::prover::tests::check_local_inputs(
         TranscriptEvalAir,
@@ -543,14 +552,41 @@ fn corruption_pinned_leaf_chain_context_slot_mismatch() {
 }
 
 #[test]
-fn packed_relation_selectors_fail_closed_on_overlap() {
-    let (mut main, public_root, pin_row) = build_pinned_uint_trace(0x1412_0bad);
-    assert_eq!(main.values[pin_row * NUM_MAIN_COLS + COL_IS_UINT_LEAF], Felt::ONE);
-    assert_eq!(main.values[pin_row * NUM_MAIN_COLS + COL_IS_UINT_OP], Felt::ZERO);
-    assert_eq!(main.values[pin_row * NUM_MAIN_COLS + COL_IS_MUL], Felt::ZERO);
+fn uint_value_cannot_be_a_truth_root() {
+    let (main, _, value_row) = build_uint_value_trace(0x59_01);
+    let mut values =
+        main.values[value_row * NUM_MAIN_COLS..(value_row + 1) * NUM_MAIN_COLS].to_vec();
+    let public_root = values[COL_H_BEGIN..COL_H_BEGIN + DIGEST_WIDTH].to_vec();
+    values[COL_OUT_MULT] = Felt::ZERO;
+    values.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
+    crate::prover::tests::assert_local_rejects_inputs(
+        TranscriptEvalAir,
+        &RowMajorMatrix::new(values, NUM_MAIN_COLS),
+        public_root,
+    );
+}
 
-    main.values[pin_row * NUM_MAIN_COLS + COL_IS_UINT_OP] = Felt::ONE;
-    main.values[pin_row * NUM_MAIN_COLS + COL_IS_MUL] = Felt::ONE;
+#[test]
+fn uint_value_frame_must_commit_its_bound_below_the_root() {
+    let (mut main, public_root, value_row) = build_uint_value_trace(0x59_02);
+    let offset = value_row * NUM_MAIN_COLS;
+    main.values[offset + COL_FRAME_PARAM1] = main.values[offset + COL_PTR];
+    crate::prover::tests::assert_local_rejects_inputs(
+        TranscriptEvalAir,
+        &main,
+        public_root.as_array().to_vec(),
+    );
+}
+
+#[test]
+fn packed_relation_selectors_fail_closed_on_overlap() {
+    let (mut main, public_root, value_row) = build_uint_value_trace(0x1412_0bad);
+    assert_eq!(main.values[value_row * NUM_MAIN_COLS + COL_IS_UINT_LEAF], Felt::ONE);
+    assert_eq!(main.values[value_row * NUM_MAIN_COLS + COL_IS_UINT_OP], Felt::ZERO);
+    assert_eq!(main.values[value_row * NUM_MAIN_COLS + COL_IS_MUL], Felt::ZERO);
+
+    main.values[value_row * NUM_MAIN_COLS + COL_IS_UINT_OP] = Felt::ONE;
+    main.values[value_row * NUM_MAIN_COLS + COL_IS_MUL] = Felt::ONE;
 
     let rejected = std::panic::catch_unwind(|| {
         crate::prover::tests::check_local_inputs(
