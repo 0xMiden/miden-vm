@@ -69,7 +69,7 @@ fn log_popup_renders_severities_navigates_and_intercepts_keys() {
         .buffer()
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(buffer::Cell::symbol)
         .collect::<String>();
     assert!(text.contains("message ERROR"));
     assert!(text.contains("message TRACE"));

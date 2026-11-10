@@ -17,10 +17,7 @@ pub struct OpHistogram {
 
 impl Default for OpHistogram {
     fn default() -> Self {
-        Self {
-            total_cycles: 0,
-            counts: [0; 256],
-        }
+        Self { total_cycles: 0, counts: [0; 256] }
     }
 }
 
@@ -183,6 +180,7 @@ const ALL_OPERATIONS: &[Operation] = &[
     Operation::HornerExt,
     Operation::EvalCircuit,
     Operation::LogDeferred,
+    Operation::ClearDeferred,
 ];
 
 #[cfg(test)]

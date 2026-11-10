@@ -26,10 +26,7 @@ impl Default for Breakpoint {
 impl Breakpoint {
     /// Create a new default `Breakpoint` of the given type
     pub fn new(ty: BreakpointType) -> Self {
-        Self {
-            ty,
-            ..Default::default()
-        }
+        Self { ty, ..Default::default() }
     }
 
     /// Return the number of cycles remaining, as of `current_cycle`, before this breakpoint
@@ -94,7 +91,7 @@ impl BreakpointType {
             Self::Opcode(matcher) => matcher.should_break_for(current_op),
             Self::Event(event) if matches!(current_op, Operation::Emit) => {
                 state.get_stack_item(0) == event.as_event_id().as_felt()
-            }
+            },
             _ => false,
         }
     }
@@ -186,7 +183,7 @@ impl FromStr for BreakpointType {
                     format!("invalid breakpoint expression: could not parse line: {err}")
                 })?;
                 Ok(BreakpointType::Line { pattern, line })
-            }
+            },
             None => Ok(BreakpointType::File(file_pattern(s)?)),
         }
     }

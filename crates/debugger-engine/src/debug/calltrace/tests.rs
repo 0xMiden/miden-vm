@@ -98,11 +98,7 @@ fn an_unmarked_call_does_not_rename_the_frame_it_runs_in() {
 #[test]
 fn recursive_records_keep_their_selected_callee() {
     fn fib_value(n: u64) -> u64 {
-        if n < 2 {
-            n
-        } else {
-            fib_value(n - 1) + fib_value(n - 2)
-        }
+        if n < 2 { n } else { fib_value(n - 1) + fib_value(n - 2) }
     }
 
     // The collector supplies the selected identity for each recursive invocation.

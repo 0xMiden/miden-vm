@@ -34,7 +34,7 @@ impl ExecutionConfig {
     #[cfg(feature = "std")]
     pub fn parse_file<P>(path: P) -> std::io::Result<Self>
     where
-        P: AsRef<std::path::Path>,
+        P: AsRef<Path>,
     {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;

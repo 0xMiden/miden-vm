@@ -60,33 +60,14 @@ fn syntax_detection_uses_language_extension_and_shebang() {
 
 #[test]
 fn style_conversion_handles_transparency_blending_and_font_modifiers() {
-    let transparent = syntax::Color {
-        r: 0,
-        g: 0,
-        b: 0,
-        a: 0,
-    };
-    let background = syntax::Color {
-        r: 0,
-        g: 100,
-        b: 200,
-        a: 255,
-    };
-    let foreground = syntax::Color {
-        r: 200,
-        g: 100,
-        b: 0,
-        a: 128,
-    };
+    let transparent = syntax::Color { r: 0, g: 0, b: 0, a: 0 };
+    let background = syntax::Color { r: 0, g: 100, b: 200, a: 255 };
+    let foreground = syntax::Color { r: 200, g: 100, b: 0, a: 128 };
     let modifiers = Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED;
     let font_style = convert_to_font_style(modifiers | Modifier::REVERSED);
     assert_eq!(convert_font_style(font_style), modifiers);
     assert!(convert_to_font_style(Modifier::empty()).is_empty());
-    let style = syntax::Style {
-        foreground,
-        background,
-        font_style,
-    };
+    let style = syntax::Style { foreground, background, font_style };
     assert_eq!(
         convert_style(style, true),
         Style::new()
@@ -98,10 +79,7 @@ fn style_conversion_handles_transparency_blending_and_font_modifiers() {
         convert_style(style, false),
         Style::new().fg(Color::Rgb(200, 100, 0)).add_modifier(modifiers)
     );
-    let opaque = syntax::Style {
-        foreground: background,
-        ..style
-    };
+    let opaque = syntax::Style { foreground: background, ..style };
     assert_eq!(blend_fg_color(opaque), Color::Rgb(0, 100, 200));
     let empty = syntax::Style {
         foreground: transparent,
@@ -143,12 +121,7 @@ fn ansi_palette_maps_named_and_indexed_colors_to_the_same_rgb() {
         (14, Color::LightCyan, [0, 255, 255]),
         (15, Color::White, [255, 255, 255]),
     ] {
-        let expected = syntax::Color {
-            r: rgb[0],
-            g: rgb[1],
-            b: rgb[2],
-            a: 255,
-        };
+        let expected = syntax::Color { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 };
         assert_eq!(convert_to_syntect_color(named), expected);
         assert_eq!(convert_to_syntect_color(Color::Indexed(index)), expected);
     }

@@ -17,14 +17,14 @@ use miden_utils_sync::RwLock;
 /// mutations requires reconstructing each variant by hand.
 pub fn clone_advice_mutation(mutation: &AdviceMutation) -> AdviceMutation {
     match mutation {
-        AdviceMutation::ExtendStack { stack } => AdviceMutation::ExtendStack {
-            stack: stack.clone(),
+        AdviceMutation::ExtendStack { stack } => {
+            AdviceMutation::ExtendStack { stack: stack.clone() }
         },
         AdviceMutation::ExtendMap { map: other } => {
             AdviceMutation::ExtendMap { map: other.clone() }
-        }
-        AdviceMutation::ExtendMerkleStore { inner_nodes } => AdviceMutation::ExtendMerkleStore {
-            inner_nodes: inner_nodes.clone(),
+        },
+        AdviceMutation::ExtendMerkleStore { inner_nodes } => {
+            AdviceMutation::ExtendMerkleStore { inner_nodes: inner_nodes.clone() }
         },
     }
 }
@@ -49,11 +49,11 @@ pub fn write_advice_mutation<W: ByteWriter>(mutation: &AdviceMutation, target: &
         AdviceMutation::ExtendStack { stack } => {
             target.write_u8(TAG_EXTEND_STACK);
             stack.iter().copied().collect::<Vec<_>>().write_into(target);
-        }
+        },
         AdviceMutation::ExtendMap { map } => {
             target.write_u8(TAG_EXTEND_MAP);
             map.write_into(target);
-        }
+        },
         AdviceMutation::ExtendMerkleStore { inner_nodes } => {
             target.write_u8(TAG_EXTEND_MERKLE_STORE);
             target.write_usize(inner_nodes.len());
@@ -62,7 +62,7 @@ pub fn write_advice_mutation<W: ByteWriter>(mutation: &AdviceMutation, target: &
                 info.left.write_into(target);
                 info.right.write_into(target);
             }
-        }
+        },
     }
 }
 
@@ -74,9 +74,7 @@ pub fn read_advice_mutation<R: ByteReader>(
         TAG_EXTEND_STACK => Ok(AdviceMutation::ExtendStack {
             stack: AdviceStack::from(Vec::<Felt>::read_from(source)?),
         }),
-        TAG_EXTEND_MAP => Ok(AdviceMutation::ExtendMap {
-            map: AdviceMap::read_from(source)?,
-        }),
+        TAG_EXTEND_MAP => Ok(AdviceMutation::ExtendMap { map: AdviceMap::read_from(source)? }),
         TAG_EXTEND_MERKLE_STORE => {
             let len = source.read_usize()?;
             let mut inner_nodes = Vec::with_capacity(len);
@@ -87,7 +85,7 @@ pub fn read_advice_mutation<R: ByteReader>(
                 inner_nodes.push(InnerNodeInfo { value, left, right });
             }
             Ok(AdviceMutation::ExtendMerkleStore { inner_nodes })
-        }
+        },
         other => Err(DeserializationError::InvalidValue(format!(
             "unknown AdviceMutation variant tag: {other}"
         ))),

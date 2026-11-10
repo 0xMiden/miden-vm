@@ -17,7 +17,7 @@ fn print_ln_event_roundtrips() {
 #[test]
 fn event_metadata_covers_builtin_custom_and_unknown_events() {
     let custom_name = EventName::new("test::custom");
-    let custom = Event::from(custom_name.clone());
+    let custom = Event::from(custom_name);
     let unknown = Event::Unknown(EventId::from_u64(99));
 
     for event in [Event::FrameStart, Event::FrameEnd, Event::PrintLn] {

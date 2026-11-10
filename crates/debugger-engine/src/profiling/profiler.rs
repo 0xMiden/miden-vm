@@ -74,7 +74,7 @@ impl Profiler {
                         path.display()
                     );
                     continue;
-                }
+                },
             };
             if let Err(e) = instrument.write_report_to(&mut file) {
                 log::error!("failed to write `{name}` report to {}: {e}", path.display());

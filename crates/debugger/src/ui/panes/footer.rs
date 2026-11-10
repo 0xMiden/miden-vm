@@ -29,9 +29,7 @@ struct Config {
     max_command_history: usize,
 }
 
-static CONFIG: Config = Config {
-    max_command_history: 20,
-};
+static CONFIG: Config = Config { max_command_history: 20 };
 
 #[derive(Default)]
 pub struct FooterPane {
@@ -46,10 +44,7 @@ pub struct FooterPane {
 
 impl FooterPane {
     pub fn new() -> Self {
-        Self {
-            focused: false,
-            ..Default::default()
-        }
+        Self { focused: false, ..Default::default() }
     }
 
     fn get_status_line(&mut self) -> &String {
@@ -90,11 +85,11 @@ impl Pane for FooterPane {
                             self.command.clone(),
                             Some(command),
                         )))
-                    }
+                    },
                     KeyCode::Esc => {
                         self.command_history_index = None;
                         Some(EventResponse::Stop(Action::FooterResult(self.command.clone(), None)))
-                    }
+                    },
                     KeyCode::Up if !self.command_history.is_empty() => {
                         let history_index = self
                             .command_history_index
@@ -106,7 +101,7 @@ impl Pane for FooterPane {
                             .with_value(self.command_history[history_index].clone());
                         self.command_history_index = Some(history_index);
                         None
-                    }
+                    },
                     KeyCode::Down if !self.command_history.is_empty() => {
                         let history_index = self
                             .command_history_index
@@ -121,11 +116,11 @@ impl Pane for FooterPane {
                             .with_value(self.command_history[history_index].clone());
                         self.command_history_index = Some(history_index);
                         None
-                    }
+                    },
                     _ => None,
                 };
                 Ok(response)
-            }
+            },
             _ => Ok(None),
         }
     }
@@ -142,16 +137,16 @@ impl Pane for FooterPane {
                 }
                 self.command = cmd;
                 Ok(Some(Action::Update))
-            }
+            },
             Action::FooterResult(..) => {
                 state.input_mode = InputMode::Normal;
                 self.focused = false;
                 Ok(Some(Action::Update))
-            }
+            },
             Action::StatusLine(status_line) => {
                 self.status_line = status_line;
                 Ok(None)
-            }
+            },
             Action::TimedStatusLine(status_line, show_time) => {
                 self.timed_status_line = Some(TimedStatusLine {
                     status_line,
@@ -159,7 +154,7 @@ impl Pane for FooterPane {
                     created: Instant::now(),
                 });
                 Ok(None)
-            }
+            },
             _ => Ok(None),
         }
     }

@@ -32,14 +32,8 @@ fn profiler_writes_reports_to_directory() {
 
     let config = ProfilerConfig {
         instruments: vec![
-            Box::new(CountingInstrument {
-                name: "alpha",
-                ops: 0,
-            }),
-            Box::new(CountingInstrument {
-                name: "beta",
-                ops: 0,
-            }),
+            Box::new(CountingInstrument { name: "alpha", ops: 0 }),
+            Box::new(CountingInstrument { name: "beta", ops: 0 }),
         ],
         reports_dir: Some(tmp_dir.path().to_path_buf()),
     };

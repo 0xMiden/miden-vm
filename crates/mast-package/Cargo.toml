@@ -38,7 +38,7 @@ miden-utils-indexing.workspace = true
 hashbrown.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-rustc-hash = { version = "2.1", default-features = false }
+rustc-hash.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 zerocopy.workspace = true

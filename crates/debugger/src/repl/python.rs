@@ -31,23 +31,23 @@ pub(crate) fn execute_line(
             let output = python.execute_snippet(code)?;
             write!(out, "{output}").map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::InteractiveConsole) => {
             python.interact()?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::Import(path)) => {
             python.import_file(path)?;
             writeln!(out, "Imported Python script: {path}")
                 .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::AddCommand { name, function }) => {
             python.add_custom_command(name, function)?;
             writeln!(out, "Added Python command: {name}")
                 .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::ListCommands) => {
             let commands = python.custom_commands();
             if commands.is_empty() {
@@ -62,19 +62,19 @@ pub(crate) fn execute_line(
                 }
             }
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::DeleteCommand(name)) => {
             python.delete_custom_command(name)?;
             writeln!(out, "Deleted Python command: {name}")
                 .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::AddBreakpointCallback { id, function }) => {
             python.add_breakpoint_callback(id, function)?;
             writeln!(out, "Added Python callback for breakpoint {id}")
                 .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::ListBreakpointCallbacks) => {
             let callbacks = python.breakpoint_callbacks();
             if callbacks.is_empty() {
@@ -89,7 +89,7 @@ pub(crate) fn execute_line(
                 }
             }
             Ok(Outcome::Continue)
-        }
+        },
         Some(ScriptCommand::DeleteBreakpointCallback(id)) => {
             python.delete_breakpoint_callback(id)?;
             match id {
@@ -98,7 +98,7 @@ pub(crate) fn execute_line(
             }
             .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(Outcome::Continue)
-        }
+        },
         None if is_resume_command(line) => execute_resume_command(debugger, python, line, out),
         None => match debugger.execute_repl_line(line, out) {
             Err(err) if is_unknown_command_error(line, &err) => {
@@ -108,10 +108,10 @@ pub(crate) fn execute_line(
                         write!(out, "{output}")
                             .map_err(|err| format!("failed to write output: {err}"))?;
                         Ok(Outcome::Continue)
-                    }
+                    },
                     None => Err(err),
                 }
-            }
+            },
             outcome => outcome,
         },
     }

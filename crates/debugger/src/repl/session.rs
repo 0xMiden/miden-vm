@@ -48,6 +48,7 @@ impl ReplSession {
     }
 
     /// Run the main REPL loop.
+    #[expect(clippy::unnecessary_wraps, reason = "Preserve the fallible session API")]
     pub fn run(&mut self) -> Result<(), Report> {
         self.print_welcome();
 
@@ -81,25 +82,25 @@ impl ReplSession {
                         Ok(Outcome::Quit) => {
                             println!("\x1b[36mGoodbye!\x1b[0m");
                             break;
-                        }
-                        Ok(Outcome::Continue) => {}
+                        },
+                        Ok(Outcome::Continue) => {},
                         Err(e) => {
                             eprintln!("\x1b[31mError:\x1b[0m {e}");
-                        }
+                        },
                     }
-                }
+                },
                 Err(ReadlineError::Interrupted) => {
                     println!("^C");
                     continue;
-                }
+                },
                 Err(ReadlineError::Eof) => {
                     println!("\x1b[36mGoodbye!\x1b[0m");
                     break;
-                }
+                },
                 Err(e) => {
                     eprintln!("\x1b[31mError reading line:\x1b[0m {e}");
                     break;
-                }
+                },
             }
         }
 

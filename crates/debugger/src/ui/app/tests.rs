@@ -30,7 +30,7 @@ fn application_renders_execution_and_popups_without_a_real_terminal() {
             .buffer()
             .content
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect::<std::string::String>();
         assert!(text.contains("ready"));
         assert!(text.contains("Operand Stack"));

@@ -34,7 +34,7 @@ fn test_server_restart_request() {
 
     assert!(matches!(
         req.command,
-        Command::Restart(None) | Command::Restart(Some(RestartArguments { arguments: None }))
+        Command::Restart(None | Some(RestartArguments { arguments: None }))
     ));
 
     // Restarting a launch request
@@ -45,10 +45,7 @@ fn test_server_restart_request() {
     assert!(matches!(
         req.command,
         Command::Restart(Some(RestartArguments {
-            arguments: Some(AttachOrLaunchArguments {
-                no_debug: Some(_),
-                ..
-            })
+            arguments: Some(AttachOrLaunchArguments { no_debug: Some(_), .. })
         }))
     ));
 

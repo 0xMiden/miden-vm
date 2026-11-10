@@ -54,14 +54,16 @@ impl FlamegraphProfile {
                 Ok(_) if executor.cycle > previous_cycle => {
                     let cycle_delta = executor.cycle - previous_cycle;
                     let frames = executor.callstack.logical_frames("");
-                    profile
-                        .record_stack(frames.iter().map(|frame| frame.display_name()), cycle_delta);
-                }
+                    profile.record_stack(
+                        frames.iter().map(miden_debug_engine::LogicalStackFrame::display_name),
+                        cycle_delta,
+                    );
+                },
                 Ok(_) => {
                     if executor.stopped {
                         break;
                     }
-                }
+                },
                 Err(err) => return Err(err),
             }
         }
@@ -183,23 +185,13 @@ pub struct FlamegraphArgs {
     #[arg(long, value_name = "DIR", help_heading = "Execution")]
     pub working_dir: Option<PathBuf>,
     /// The path to the root directory of the current Miden toolchain.
-    #[arg(
-        long,
-        value_name = "DIR",
-        env = "MIDEN_SYSROOT",
-        help_heading = "Linker"
-    )]
+    #[arg(long, value_name = "DIR", env = "MIDEN_SYSROOT", help_heading = "Linker")]
     pub sysroot: Option<PathBuf>,
     /// Specify the function to call as the entrypoint for the program.
     #[arg(long, help_heading = "Execution")]
     pub entrypoint: Option<String>,
     /// Specify one or more search paths for link libraries requested via `-l`.
-    #[arg(
-        long = "search-path",
-        short = 'L',
-        value_name = "PATH",
-        help_heading = "Linker"
-    )]
+    #[arg(long = "search-path", short = 'L', value_name = "PATH", help_heading = "Linker")]
     pub search_path: Vec<PathBuf>,
     /// Load the compiled library package NAME.
     ///
@@ -270,7 +262,7 @@ pub fn run(args: FlamegraphArgs) -> Result<(), Report> {
                 "program execution failed at cycle {}: {err}",
                 executor.cycle
             )));
-        }
+        },
     };
 
     report_and_write_profile(&profile, &output)?;
@@ -313,11 +305,7 @@ where
         append_frame(&mut path, frame.as_ref());
     }
 
-    if path.is_empty() {
-        "[unknown]".to_string()
-    } else {
-        path
-    }
+    if path.is_empty() { "[unknown]".to_string() } else { path }
 }
 
 fn append_frame(path: &mut String, name: &str) {

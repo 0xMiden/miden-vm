@@ -85,10 +85,7 @@ fn state_with_entry_variables(source: &str) -> State {
 
     fn inject_variables(block: &mut Block) {
         for operation in block.iter_mut() {
-            if let Op::If {
-                then_blk, else_blk, ..
-            } = operation
-            {
+            if let Op::If { then_blk, else_blk, .. } = operation {
                 inject_variables(then_blk);
                 inject_variables(else_blk);
             }

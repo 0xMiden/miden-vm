@@ -33,7 +33,7 @@ fn rendering_source_preserves_text_selection_focus_and_navigation() {
         .buffer()
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(buffer::Cell::symbol)
         .collect::<String>();
     assert!(text.contains("line one"));
     assert!(text.contains("line two"));
@@ -115,13 +115,5 @@ fn test_location(test_name: &str) -> (ResolvedLocation, PathBuf) {
     let source_manager = DefaultSourceManager::default();
     let source_file = source_manager.load_file(&path).expect("source should load");
     let span = SourceSpan::new(source_file.id(), ByteIndex::new(0)..ByteIndex::new(4));
-    (
-        ResolvedLocation {
-            source_file,
-            line: 1,
-            col: 1,
-            span,
-        },
-        path,
-    )
+    (ResolvedLocation { source_file, line: 1, col: 1, span }, path)
 }

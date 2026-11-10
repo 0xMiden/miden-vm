@@ -104,7 +104,7 @@ impl ScriptDebugger {
     pub fn handle_command(&self, command: &str) -> Result<String, String> {
         let mut output = Vec::new();
         match self.engine.borrow_mut().execute_line(command, &mut output)? {
-            Outcome::Continue => {}
+            Outcome::Continue => {},
             Outcome::Quit => return Err("quit requested".into()),
         }
 
@@ -134,7 +134,7 @@ impl ScriptDebugger {
             .executor()
             .current_stack
             .iter()
-            .map(|felt| felt.as_canonical_u64())
+            .map(miden_assembly_syntax::Felt::as_canonical_u64)
             .collect()
     }
 
@@ -267,10 +267,10 @@ impl ScriptDebugger {
                 if state.breakpoints.len() == before {
                     return Err(format!("no breakpoint with id {id}"));
                 }
-            }
+            },
             None => {
                 state.breakpoints.retain(|bp| bp.is_internal());
-            }
+            },
         }
         Ok(())
     }

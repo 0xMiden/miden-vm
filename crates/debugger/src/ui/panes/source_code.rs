@@ -139,11 +139,11 @@ impl SourceCodePane {
                 self.current_span = loc.span;
                 self.current_line = loc.line;
                 self.current_col = loc.col;
-            }
+            },
             None if selected_stack_frame != self.last_selected_stack_frame => {
                 self.clear_location();
-            }
-            None => {}
+            },
+            None => {},
         }
         self.last_selected_stack_frame = selected_stack_frame;
     }
@@ -255,33 +255,33 @@ impl Pane for SourceCodePane {
                         core::cmp::min(self.selected_line.saturating_add(1), self.num_lines);
                 }
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Up => {
                 if self.num_lines > 0 {
                     self.selected_line =
                         core::cmp::min(self.selected_line.saturating_sub(1), self.num_lines);
                 }
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Focus => {
                 self.focused = true;
                 static STATUS_LINE: &str = "[j,k → movement]";
                 return Ok(Some(Action::TimedStatusLine(STATUS_LINE.into(), 3)));
-            }
+            },
             Action::UnFocus => {
                 self.focused = false;
-            }
-            Action::Submit => {}
+            },
+            Action::Submit => {},
             Action::Update => {
                 self.update_location(
                     state.selected_display_location(),
                     state.selected_stack_frame(),
                 );
-            }
+            },
             Action::Reload => {
                 self.reload(state);
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         Ok(None)

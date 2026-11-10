@@ -49,8 +49,8 @@ pub trait ToMidenRepr {
     ///
     /// * The field elements within each word is in little-endian order, i.e. the least significant
     ///   bytes of come first.
-    /// * Each word, if pushed on the operand stack element-by-element, would leave the element
-    ///   with the most significant bytes on top of the stack (including padding)
+    /// * Each word, if pushed on the operand stack element-by-element, would leave the element with
+    ///   the most significant bytes on top of the stack (including padding)
     fn to_words(&self) -> SmallVec<[Word; 1]> {
         let felts = self.to_felts();
         let num_words = felts.len().div_ceil(4);
@@ -119,13 +119,13 @@ pub trait FromMidenRepr: Sized {
     }
     /// Extract a value of this type as encoded in a vector of words, where:
     ///
-    /// * The order of the words is little-endian, i.e. the word holding the least significant
-    ///   bytes comes first.
-    /// * The order of the field elements in each word is in big-endian order, i.e. the element
-    ///   with the most significant byte is at the start of the word, and the element with the
-    ///   least significant byte is at the end of the word. This corresponds to the order in
-    ///   which elements are placed on the operand stack when preparing to read or write them
-    ///   from Miden's memory.
+    /// * The order of the words is little-endian, i.e. the word holding the least significant bytes
+    ///   comes first.
+    /// * The order of the field elements in each word is in big-endian order, i.e. the element with
+    ///   the most significant byte is at the start of the word, and the element with the least
+    ///   significant byte is at the end of the word. This corresponds to the order in which
+    ///   elements are placed on the operand stack when preparing to read or write them from Miden's
+    ///   memory.
     fn from_words(words: &[Word]) -> Self {
         let mut felts = SmallVec::<[RawFelt; 4]>::with_capacity(words.len() * 4);
         for word in words {
@@ -901,7 +901,7 @@ pub fn push_wasm_ty_to_operand_stack<T>(value: T, stack: &mut Vec<RawFelt>)
 where
     T: ToMidenRepr + num_traits::PrimInt,
 {
-    let ty_size = core::mem::size_of::<T>();
+    let ty_size = size_of::<T>();
     if ty_size > 2 {
         value.push_to_operand_stack(stack);
         return;

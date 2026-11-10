@@ -109,10 +109,8 @@ impl ReplaySnapshotRecorder {
 
     #[cfg(feature = "dap")]
     pub(crate) fn record_error(&self, path: Uri, err: impl ToString) {
-        *self.status.write() = Some(Err(ReplaySnapshotWriteError {
-            path,
-            message: err.to_string(),
-        }));
+        *self.status.write() =
+            Some(Err(ReplaySnapshotWriteError { path, message: err.to_string() }));
     }
 }
 
@@ -200,10 +198,10 @@ impl ReplaySnapshot {
                 Some(debug_info) => {
                     target.write_bool(true);
                     debug_info.as_ref().write_into(target);
-                }
+                },
                 None => {
                     target.write_bool(false);
-                }
+                },
             }
         }
         write_event_log(&self.event_log, target);

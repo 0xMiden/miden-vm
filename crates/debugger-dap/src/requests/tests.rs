@@ -39,21 +39,14 @@ fn acknowledgements_preserve_request_sequence_and_command() {
         assert_eq!(wire["command"], name);
     }
     assert!(matches!(
-        Request {
-            seq: 1,
-            command: Command::Threads
-        }
-        .ack(),
+        Request { seq: 1, command: Command::Threads }.ack(),
         Err(ServerError::ResponseConstructError)
     ));
 }
 
 #[test]
 fn explicit_responses_distinguish_success_error_and_cancellation() {
-    let request = Request {
-        seq: 23,
-        command: Command::Threads,
-    };
+    let request = Request { seq: 23, command: Command::Threads };
     let success = request
         .clone()
         .success(ResponseBody::Threads(crate::responses::ThreadsResponse { threads: vec![] }));

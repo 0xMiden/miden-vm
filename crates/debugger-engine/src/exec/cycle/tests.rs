@@ -564,10 +564,7 @@ struct YieldingHost {
 impl YieldingHost {
     /// A host over `inner` that has not yielded yet.
     fn new(inner: DefaultHost) -> Self {
-        Self {
-            inner,
-            yielded: Cell::new(false),
-        }
+        Self { inner, yielded: Cell::new(false) }
     }
 
     /// A future of `value` that is pending on its first poll if the host has not yielded yet.
@@ -648,7 +645,7 @@ fn a_dropped_step_is_not_a_finished_program() {
     match stepper.step_sync(&mut host.inner, |_| {}) {
         Err(ExecutionError::Internal(message)) => {
             assert!(message.contains("did not complete"), "{message}")
-        }
+        },
         other => panic!("expected the lost execution to be reported: {other:?}"),
     }
     // A stepper left stepping would keep a caller looping on `stopped` forever.
@@ -656,13 +653,13 @@ fn a_dropped_step_is_not_a_finished_program() {
     match stepper.step_sync(&mut host.inner, |_| {}) {
         Err(ExecutionError::Internal(message)) => {
             assert!(message.contains("cannot be stepped"), "{message}")
-        }
+        },
         other => panic!("expected a failed program to be refused: {other:?}"),
     }
     match stepper.into_output() {
         Err(ExecutionError::Internal(message)) => {
             assert_eq!(message, "the program failed and has no output")
-        }
+        },
         Err(other) => panic!("expected the failed program to be refused: {other:?}"),
         Ok(_) => panic!("a failed program has no output"),
     }
@@ -802,7 +799,7 @@ fn a_step_after_a_panic_in_the_callback_reports_the_lost_execution_once() {
     match exec.step() {
         Err(ExecutionError::Internal(message)) => {
             assert!(message.contains("did not complete"), "{message}")
-        }
+        },
         Err(other) => panic!("expected the lost execution to be reported: {other:?}"),
         Ok(_) => panic!("a step after a lost execution must fail"),
     }
@@ -1045,7 +1042,7 @@ fn dynamic_entries_in_the_same_forest_name_the_dynamic_node() {
     // `f` gets the counter on top of its own hash, stores the hash in its context, and
     // re-enters itself dynamically while the counter is not zero: one entry through `call`,
     // two through `dynexec`.
-    let package = miden_assembly::Assembler::new(source_manager.clone())
+    let package = miden_assembly::Assembler::new(source_manager)
         .assemble_program(
             "program",
             "proc f movdn.4 mem_storew_le.100 movup.4 dup neq.0 if.true sub.1 push.100 dynexec \
@@ -1107,11 +1104,7 @@ fn a_callback_through_a_trampoline_does_not_pop_the_boundary_early() {
     for trampoline in ["dynexec", "push.100 dynexec"] {
         let source_manager = Arc::new(DefaultSourceManager::default());
         // The first variant takes the address from the caller's stack.
-        let address = if trampoline == "dynexec" {
-            "push.100 "
-        } else {
-            ""
-        };
+        let address = if trampoline == "dynexec" { "push.100 " } else { "" };
         let (library, package) = trampoline_packages(
             &source_manager,
             trampoline,
@@ -1263,7 +1256,7 @@ fn inline_frames_name_the_inlined_procedure() {
             match cycle.op {
                 Some(Operation::Mul) => inside_double.push(frames),
                 Some(Operation::Push(_)) if frames.is_empty() => at_top_level.push(frames),
-                _ => {}
+                _ => {},
             }
         })
         .unwrap();
@@ -1510,7 +1503,7 @@ fn a_dynamic_root_without_a_source_node_in_a_loop_stays_bounded() {
         match dynamic {
             Some(true) => before_calls.push(before),
             Some(false) => after_returns.push(stepper.open_source_nodes()),
-            None => {}
+            None => {},
         }
         if !running {
             break before;

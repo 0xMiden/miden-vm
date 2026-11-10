@@ -30,13 +30,7 @@ fn trace_handler_errors_preserve_the_registered_name() {
             .execute(&package.unwrap_program(), &mut recording),
     )
     .expect_err("the trace handler must reject execution");
-    let ExecutionError::EventError {
-        event_id,
-        event_name,
-        error,
-        ..
-    } = error
-    else {
+    let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
         panic!("unexpected execution error: {error:?}");
     };
     assert_eq!(event_id, name.to_event_id());

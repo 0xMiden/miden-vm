@@ -169,10 +169,10 @@ impl DebugVarTracker {
                 match captured.get(info.name()) {
                     Some(values) => {
                         frame.captured.insert(name.clone(), values.clone());
-                    }
+                    },
                     None => {
                         frame.captured.remove(&name);
-                    }
+                    },
                 }
                 frame.variables.insert(name, DebugVarSnapshot { clk, info });
             }
@@ -230,11 +230,7 @@ impl DebugVarTracker {
         let value = typed
             .or_else(|| raw.map(|value| value.as_canonical_u64().to_string()))
             .unwrap_or_else(|| "<unavailable>".into());
-        Some(ResolvedDebugVariable {
-            raw,
-            value,
-            type_name,
-        })
+        Some(ResolvedDebugVariable { raw, value, type_name })
     }
 
     /// Record debug variable events at the given clock cycle.
@@ -277,18 +273,15 @@ impl DebugVarTracker {
                     self.current_captured_values.remove(info.name().as_ref());
                     continue;
                 }
-                let snapshot = DebugVarSnapshot {
-                    clk: *event_clk,
-                    info: info.clone(),
-                };
+                let snapshot = DebugVarSnapshot { clk: *event_clk, info: info.clone() };
                 let name = info.name().to_string();
                 match captured_values.get(&(*event_clk, info.name().clone())) {
                     Some(values) => {
                         self.current_captured_values.insert(name.clone(), values.clone());
-                    }
+                    },
                     None => {
                         self.current_captured_values.remove(&name);
-                    }
+                    },
                 }
                 self.current_vars.insert(name, snapshot);
             }
@@ -376,7 +369,7 @@ fn anchor_frame_bases(
                         read_memory,
                         read_local,
                     )?))
-                }
+                },
                 operation => Some(*operation),
             })
             .collect::<Option<Vec<_>>>()?,
@@ -417,7 +410,7 @@ pub fn snapshot_transient_debug_values(
                     captured_values.insert(info.name().clone(), values);
                 }
                 info.set_value_location(location);
-            }
+            },
             DebugVarLocation::Expression(expression) => {
                 let operations = expression
                     .operations()
@@ -437,8 +430,8 @@ pub fn snapshot_transient_debug_values(
                     .map(DebugVarLocation::Expression)
                     .unwrap_or(DebugVarLocation::Unavailable);
                 info.set_value_location(location);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -476,7 +469,7 @@ pub fn resolve_variable_values(
             let start = *pos as usize;
             let end = start.checked_add(count)?;
             Some(stack.get(start..end)?.to_vec())
-        }
+        },
         DebugVarLocation::Memory(addr) => resolve_consecutive_memory(*addr, count, &get_memory),
         DebugVarLocation::Const(felt) => (count == 1).then_some(vec![*felt]),
         DebugVarLocation::Local(offset) => {
@@ -486,21 +479,21 @@ pub fn resolve_variable_values(
                 values.push(get_local(offset.checked_add(index)?)?);
             }
             Some(values)
-        }
+        },
         DebugVarLocation::ResolvedFrameBase { base, byte_offset } => {
             resolve_frame_base_values(*base, *byte_offset, count, &get_memory, &get_local)
-        }
+        },
         DebugVarLocation::Expression(expression) => {
             match resolve_expression(expression.operations(), stack, &get_memory, &get_local)? {
                 ResolvedExpression::Scalar(value) => {
                     (count == 1).then(|| integer_to_felt(value)).flatten().map(|value| vec![value])
-                }
+                },
                 ResolvedExpression::ByteAddress(address) => {
                     let element_address = u32::try_from(address / 4).ok()?;
                     resolve_consecutive_memory(element_address, count, &get_memory)
-                }
+                },
             }
-        }
+        },
         DebugVarLocation::Unavailable => None,
     }
 }
@@ -523,17 +516,17 @@ pub fn resolve_typed_variable_values(
             let byte_address =
                 resolve_frame_base_address(*base, *byte_offset, &get_memory, &get_local)?;
             resolve_typed_memory_value(ty, byte_address, count, &get_memory)
-        }
+        },
         DebugVarLocation::Expression(expression) => {
             match resolve_expression(expression.operations(), stack, &get_memory, &get_local)? {
                 ResolvedExpression::ByteAddress(byte_address) => {
                     resolve_typed_memory_value(ty, byte_address, count, &get_memory)
-                }
+                },
                 ResolvedExpression::Scalar(value) => {
                     (count == 1).then(|| integer_to_felt(value)).flatten().map(|value| vec![value])
-                }
+                },
             }
-        }
+        },
         _ => resolve_variable_values(location, count, stack, get_memory, get_local),
     }
 }
@@ -569,33 +562,33 @@ fn resolve_expression(
         match op {
             DebugLocationExpressionOp::ReadStack(index) => {
                 values.push(i128::from(stack.get(*index as usize)?.as_canonical_u64()));
-            }
+            },
             DebugLocationExpressionOp::ReadMemory(index) => {
                 values.push(i128::from(get_memory(*index)?.as_canonical_u64()));
-            }
+            },
             DebugLocationExpressionOp::ReadLocal(index) => {
                 values.push(i128::from(get_local(*index)?.as_canonical_u64()));
-            }
+            },
             DebugLocationExpressionOp::ConstU64(value) => {
                 values.push(i128::from(*value));
-            }
+            },
             DebugLocationExpressionOp::ConstI64(value) => {
                 values.push(i128::from(*value));
-            }
+            },
             DebugLocationExpressionOp::AddUnsigned(value) => {
                 let lhs = values.pop()?;
                 values.push(lhs.checked_add(i128::from(*value))?);
-            }
+            },
             DebugLocationExpressionOp::Add => {
                 let rhs = values.pop()?;
                 let lhs = values.pop()?;
                 values.push(lhs.checked_add(rhs)?);
-            }
+            },
             DebugLocationExpressionOp::Sub => {
                 let rhs = values.pop()?;
                 let lhs = values.pop()?;
                 values.push(lhs.checked_sub(rhs)?);
-            }
+            },
             DebugLocationExpressionOp::DerefBytes => {
                 let byte_address = u64::try_from(values.pop()?).ok()?;
                 if index + 1 == ops.len() {
@@ -603,7 +596,7 @@ fn resolve_expression(
                 }
                 let element_address = u32::try_from(byte_address / 4).ok()?;
                 values.push(i128::from(get_memory(element_address)?.as_canonical_u64()));
-            }
+            },
             DebugLocationExpressionOp::FrameBaseAddress { base, byte_offset } => {
                 values.push(i128::from(resolve_frame_base_address(
                     *base,
@@ -611,7 +604,7 @@ fn resolve_expression(
                     get_memory,
                     get_local,
                 )?));
-            }
+            },
         }
     }
 
@@ -705,11 +698,11 @@ fn append_typed_memory_value(
                 return None;
             }
             values.push(get_memory(u32::try_from(byte_address / 4).ok()?)?);
-        }
+        },
         Type::I1 => {
             let byte = *read_memory_bytes(byte_address, 1, get_memory)?.first()?;
             values.push(Felt::from_u32(u32::from(byte & 1)));
-        }
+        },
         Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128 => {
             let value = read_unsigned_integer(ty, byte_address, get_memory)?;
             let bit_width = u32::try_from(ty.size_in_bits()).ok()?;
@@ -718,17 +711,17 @@ fn append_typed_memory_value(
             let slot_bits = u32::try_from(ty.size_in_felts().checked_mul(32)?).ok()?;
             let canonical = (signed as u128) & low_bits_mask(slot_bits);
             append_u128_limbs(canonical, ty.size_in_felts(), values);
-        }
+        },
         Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::F64 => {
             let value = read_unsigned_integer(ty, byte_address, get_memory)?;
             append_u128_limbs(value, ty.size_in_felts(), values);
-        }
+        },
         Type::Struct(struct_ty) => {
             for field in struct_ty.get().fields() {
                 let field_address = byte_address.checked_add(u64::from(field.offset))?;
                 append_typed_memory_value(&field.ty, field_address, get_memory, values)?;
             }
-        }
+        },
         Type::Array(array_ty) => {
             let element_size = array_ty.ty.size_in_bytes();
             let alignment = array_ty.ty.min_alignment();
@@ -738,7 +731,7 @@ fn append_typed_memory_value(
                 let element_address = byte_address.checked_add(u64::try_from(offset).ok()?)?;
                 append_typed_memory_value(&array_ty.ty, element_address, get_memory, values)?;
             }
-        }
+        },
         Type::U256
         | Type::List(_)
         | Type::Ptr(_)
@@ -770,11 +763,7 @@ fn append_u128_limbs(value: u128, count: usize, values: &mut Vec<Felt>) {
 }
 
 fn low_bits_mask(bits: u32) -> u128 {
-    if bits == 128 {
-        u128::MAX
-    } else {
-        (1_u128 << bits) - 1
-    }
+    if bits == 128 { u128::MAX } else { (1_u128 << bits) - 1 }
 }
 
 fn align_up(size: usize, alignment: usize) -> Option<usize> {

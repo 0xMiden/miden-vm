@@ -55,19 +55,15 @@ impl Pane for DebugPane {
         match state.input_mode {
             InputMode::Normal => {
                 let response = match key.code {
-                    KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
-                        EventResponse::Stop(Action::Down)
-                    }
-                    KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
-                        EventResponse::Stop(Action::Up)
-                    }
+                    KeyCode::Down | KeyCode::Char('j' | 'J') => EventResponse::Stop(Action::Down),
+                    KeyCode::Up | KeyCode::Char('k' | 'K') => EventResponse::Stop(Action::Up),
                     KeyCode::Esc => EventResponse::Stop(Action::ClosePopup),
                     _ => {
                         return Ok(Some(EventResponse::Stop(Action::Noop)));
-                    }
+                    },
                 };
                 Ok(Some(response))
-            }
+            },
             InputMode::Insert => Ok(Some(EventResponse::Stop(Action::Noop))),
             InputMode::Command => Ok(Some(EventResponse::Stop(Action::Noop))),
         }
@@ -80,21 +76,21 @@ impl Pane for DebugPane {
             Action::Down | Action::Up if self.entries.is_empty() => {
                 self.selected_entry = None;
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Down => {
                 let len = self.entries.len();
                 let selected_entry = self.selected_entry.map(|s| (s + 1) % len).unwrap_or(len - 1);
                 self.selected_entry = Some(selected_entry);
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Up => {
                 let len = self.entries.len();
                 let selected_entry =
                     self.selected_entry.map(|s| (s + len - 1) % len).unwrap_or(len - 1);
                 self.selected_entry = Some(selected_entry);
                 return Ok(Some(Action::Update));
-            }
-            _ => {}
+            },
+            _ => {},
         }
         Ok(None)
     }

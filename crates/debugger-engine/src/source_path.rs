@@ -22,14 +22,14 @@ pub fn normalize_source_path(path: &str) -> String {
     let mut parts = Vec::new();
     for part in path.split('/') {
         match part {
-            "" | "." => {}
+            "" | "." => {},
             ".." => {
                 if parts.last().is_some_and(|last| *last != "..") {
                     parts.pop();
                 } else {
                     parts.push(part);
                 }
-            }
+            },
             _ => parts.push(part),
         }
     }

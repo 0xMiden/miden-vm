@@ -152,15 +152,15 @@ impl HybridPackageRegistry {
                                 version,
                             });
                         }
-                    }
+                    },
                     BTreeMapEntry::Vacant(entry) => {
                         entry.insert(record);
-                    }
+                    },
                 }
-            }
+            },
             Entry::Vacant(entry) => {
                 entry.insert([(package.version.clone(), record)].into_iter().collect());
-            }
+            },
         }
 
         log::trace!(target: "package-registry", "installed {}@{version}", package.name);
@@ -217,7 +217,7 @@ impl PackageProvider for HybridPackageRegistry {
                     "cannot load {package}@{version}: a specific digest was requested, but \
                      differs from the available version"
                 )))
-            }
+            },
             Some(artifact) => Ok(Arc::clone(artifact)),
             None => Err(Report::msg(format!(
                 "cannot load {package}@{version}: no such package available",

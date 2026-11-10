@@ -29,12 +29,14 @@ pub struct ReplEngine {
     state: State,
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Command handlers share a fallible interface"
+)]
 impl ReplEngine {
     /// Create an engine from a debugger configuration (loads a program package).
     pub fn new(config: Box<DebuggerConfig>) -> Result<Self, Report> {
-        Ok(Self {
-            state: State::new(config)?,
-        })
+        Ok(Self { state: State::new(config)? })
     }
 
     /// Create an engine from a debugger configuration.
@@ -94,9 +96,9 @@ impl ReplEngine {
         if let Some(frame) = frames.iter().rev().nth(self.state.selected_stack_frame()) {
             let name = frame.display_name();
             if let Some(resolved) = frame.resolved(&*self.state.source_manager) {
-                let _ = writeln!(out, "at {} in {}", resolved, name);
+                let _ = writeln!(out, "at {resolved} in {name}");
             } else {
-                let _ = writeln!(out, "in {}", name);
+                let _ = writeln!(out, "in {name}");
             }
         }
     }
@@ -149,11 +151,11 @@ impl ReplEngine {
                 break;
             }
             match self.state.executor_mut().step() {
-                Ok(_) => {}
+                Ok(_) => {},
                 Err(err) => {
                     self.state.set_execution_failed(err);
                     break;
-                }
+                },
             }
         }
 
@@ -206,7 +208,7 @@ impl ReplEngine {
         }
 
         if let Some(err) = self.state.execution_failed() {
-            let _ = writeln!(out, "Program terminated with error: {}", err);
+            let _ = writeln!(out, "Program terminated with error: {err}");
             return;
         }
 
@@ -214,11 +216,11 @@ impl ReplEngine {
         match self.state.typed_result() {
             Ok(Some(result)) => {
                 let _ = writeln!(out, "Result: {result}");
-            }
-            Ok(None) => {}
+            },
+            Ok(None) => {},
             Err(err) => {
                 let _ = writeln!(out, "Result unavailable: {err}");
-            }
+            },
         }
     }
 
@@ -258,16 +260,16 @@ impl ReplEngine {
                 let count_before = self.state.breakpoints.len();
                 self.state.breakpoints.retain(|bp| bp.id != id);
                 if self.state.breakpoints.len() < count_before {
-                    let _ = writeln!(out, "Deleted breakpoint {}", id);
+                    let _ = writeln!(out, "Deleted breakpoint {id}");
                 } else {
-                    return Err(format!("no breakpoint with id {}", id));
+                    return Err(format!("no breakpoint with id {id}"));
                 }
-            }
+            },
             None => {
                 // Delete only user-created (non-internal) breakpoints
                 self.state.breakpoints.retain(|bp| bp.is_internal());
                 let _ = writeln!(out, "Deleted all breakpoints");
-            }
+            },
         }
         Ok(())
     }
@@ -284,7 +286,7 @@ impl ReplEngine {
         for (i, elem) in stack.iter().enumerate() {
             let val = elem.as_canonical_u64();
             let marker = if i == 0 { ">" } else { " " };
-            let _ = writeln!(out, "  {} [{}] {} (0x{:x})", marker, i, val, val);
+            let _ = writeln!(out, "  {marker} [{i}] {val} (0x{val:x})");
         }
         Ok(())
     }
@@ -295,19 +297,19 @@ impl ReplEngine {
         out: &mut dyn Write,
     ) -> Result<(), String> {
         let result = self.state.read_memory(expr)?;
-        let _ = writeln!(out, "{}", result);
+        let _ = writeln!(out, "{result}");
         Ok(())
     }
 
     fn cmd_locals(&mut self, out: &mut dyn Write) -> Result<(), String> {
         let output = self.state.format_variables(false);
-        let _ = writeln!(out, "{}", output);
+        let _ = writeln!(out, "{output}");
         Ok(())
     }
 
     fn cmd_vars(&mut self, show_all: bool, out: &mut dyn Write) -> Result<(), String> {
         let output = self.state.format_variables(show_all);
-        let _ = writeln!(out, "{}", output);
+        let _ = writeln!(out, "{output}");
         Ok(())
     }
 
@@ -325,7 +327,7 @@ impl ReplEngine {
                     name
                 );
             } else {
-                let _ = writeln!(out, "in {} (no source location available)", name);
+                let _ = writeln!(out, "in {name} (no source location available)");
             }
         } else {
             let _ = writeln!(out, "No current frame");
@@ -363,7 +365,7 @@ impl ReplEngine {
         for (i, frame) in frames.iter().rev().enumerate() {
             let loc_str = frame
                 .resolved(&*self.state.source_manager)
-                .map(|r| format!(" at {}", r))
+                .map(|r| format!(" at {r}"))
                 .unwrap_or_default();
             let marker = if i == self.state.selected_stack_frame() {
                 "*"
@@ -399,8 +401,8 @@ impl ReplEngine {
 pub(crate) fn format_bp_type(ty: &BreakpointType) -> String {
     match ty {
         BreakpointType::Step => "next cycle".into(),
-        BreakpointType::StepN(n) => format!("after {} cycles", n),
-        BreakpointType::StepTo(c) => format!("at cycle {}", c),
+        BreakpointType::StepN(n) => format!("after {n} cycles"),
+        BreakpointType::StepTo(c) => format!("at cycle {c}"),
         BreakpointType::Next => "next instruction".into(),
         BreakpointType::NextLine => "next source line".into(),
         BreakpointType::Finish => "function return".into(),

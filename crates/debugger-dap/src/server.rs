@@ -98,27 +98,27 @@ impl<R: Read, W: Write> Server<R, W> {
                                                     ),
                                                     line: buffer,
                                                 });
-                                            }
+                                            },
                                             Err(_) => {
                                                 return Err(ServerError::HeaderParseError {
                                                     line: buffer,
                                                 });
-                                            }
+                                            },
                                         };
                                         buffer.clear();
                                         buffer.reserve(content_length);
                                         state = ServerState::Content;
-                                    }
+                                    },
                                     other => {
                                         return Err(ServerError::UnknownHeader {
                                             header: other.to_string(),
                                         });
-                                    }
+                                    },
                                 }
                             } else {
                                 return Err(ServerError::HeaderParseError { line: buffer });
                             }
-                        }
+                        },
                         ServerState::Content => {
                             buffer.clear();
                             let mut content = vec![0; content_length];
@@ -140,23 +140,29 @@ impl<R: Read, W: Write> Server<R, W> {
                                     eprintln!("[DAP-RS] JSON parse error: {e}");
                                     ServerError::ParseError(DeserializationError::SerdeError(e))
                                 })?;
-                            let seq = raw.get("seq").and_then(|v| v.as_i64()).ok_or_else(|| {
-                                eprintln!("[DAP-RS] Missing seq field");
-                                ServerError::ParseError(DeserializationError::SerdeError(
-                                    serde_json::from_str::<()>("\"missing seq field\"")
-                                        .unwrap_err(),
-                                ))
-                            })?;
+                            let seq = raw
+                                .get("seq")
+                                .and_then(serde_json::Value::as_i64)
+                                .ok_or_else(|| {
+                                    eprintln!("[DAP-RS] Missing seq field");
+                                    ServerError::ParseError(DeserializationError::SerdeError(
+                                        serde_json::from_str::<()>("\"missing seq field\"")
+                                            .unwrap_err(),
+                                    ))
+                                })?;
                             // Handle the conflict between unit variants (e.g. ConfigurationDone)
                             // and struct variants with all-optional fields (e.g. Launch):
-                            // - Unit variants fail with "arguments": {} ("invalid type: map, expected unit variant")
-                            // - Struct variants fail without "arguments" ("missing field `arguments`")
-                            // When arguments is an empty object, try without it first (unit variant),
-                            // then fall back to keeping it (struct variant with optional fields).
+                            // - Unit variants fail with "arguments": {} ("invalid type: map,
+                            //   expected unit variant")
+                            // - Struct variants fail without "arguments" ("missing field
+                            //   `arguments`")
+                            // When arguments is an empty object, try without it first (unit
+                            // variant), then fall back to keeping it
+                            // (struct variant with optional fields).
                             let command: crate::requests::Command = if raw
                                 .get("arguments")
                                 .and_then(|v| v.as_object())
-                                .is_some_and(|m| m.is_empty())
+                                .is_some_and(serde_json::Map::is_empty)
                             {
                                 let mut without_args = raw.clone();
                                 without_args.as_object_mut().unwrap().remove("arguments");
@@ -164,13 +170,13 @@ impl<R: Read, W: Write> Server<R, W> {
                                     without_args,
                                 ) {
                                     Ok(cmd) => cmd,
-                                    Err(_) => serde_json::from_value(raw.clone()).map_err(|e| {
+                                    Err(_) => serde_json::from_value(raw).map_err(|e| {
                                         eprintln!("[DAP-RS] Command deserialize error: {e}");
                                         ServerError::ParseError(DeserializationError::SerdeError(e))
                                     })?,
                                 }
                             } else {
-                                serde_json::from_value(raw.clone()).map_err(|e| {
+                                serde_json::from_value(raw).map_err(|e| {
                                     eprintln!("[DAP-RS] Command deserialize error: {e}");
                                     ServerError::ParseError(DeserializationError::SerdeError(e))
                                 })?
@@ -178,9 +184,9 @@ impl<R: Read, W: Write> Server<R, W> {
                             eprintln!("[DAP-RS] Successfully parsed request seq={seq}");
                             let request = Request { seq, command };
                             return Ok(Some(request));
-                        }
+                        },
                     }
-                }
+                },
                 Err(e) => return Err(ServerError::IoError(e)),
             }
         }
@@ -208,16 +214,13 @@ impl<W: Write> ServerOutput<W> {
     pub fn send(&mut self, body: Sendable) -> Result<(), ServerError> {
         self.sequence_number += 1;
 
-        let message = BaseMessage {
-            seq: self.sequence_number,
-            message: body,
-        };
+        let message = BaseMessage { seq: self.sequence_number, message: body };
 
         let resp_json = serde_json::to_string(&message).map_err(ServerError::SerializationError)?;
         write!(self.output_buffer, "Content-Length: {}\r\n\r\n", resp_json.len())
             .map_err(ServerError::IoError)?;
 
-        write!(self.output_buffer, "{}\r\n", resp_json).map_err(ServerError::IoError)?;
+        write!(self.output_buffer, "{resp_json}\r\n").map_err(ServerError::IoError)?;
         self.output_buffer.flush().map_err(ServerError::IoError)?;
         Ok(())
     }

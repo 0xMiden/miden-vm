@@ -296,12 +296,7 @@ pub fn convert_to_syntect_style(style: Style, _use_bg_color: bool) -> syntax::St
     // Use transparent (alpha=0) fallbacks so that convert_style will skip
     // setting explicit colors, letting the terminal's native colors show through.
     // This avoids hardcoded White/Black that break on light/dark terminals.
-    let transparent = syntax::Color {
-        r: 0,
-        g: 0,
-        b: 0,
-        a: 0,
-    };
+    let transparent = syntax::Color { r: 0, g: 0, b: 0, a: 0 };
     syntax::Style {
         foreground: fg.unwrap_or(transparent),
         background: bg.unwrap_or(transparent),
@@ -388,105 +383,25 @@ pub fn convert_to_syntect_color(color: Color) -> syntax::Color {
             15 => Color::White,
             code => panic!("unrecognized ansi color index: {code}"),
         }),
-        Color::Black => syntax::Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::Green => syntax::Color {
-            r: 0,
-            g: 128,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::LightGreen => syntax::Color {
-            r: 0,
-            g: 255,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::Red => syntax::Color {
-            r: 128,
-            g: 0,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::LightRed => syntax::Color {
-            r: 255,
-            g: 0,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::Yellow => syntax::Color {
-            r: 128,
-            g: 128,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::LightYellow => syntax::Color {
-            r: 255,
-            g: 255,
-            b: 0,
-            a: u8::MAX,
-        },
-        Color::Blue => syntax::Color {
-            r: 0,
-            g: 0,
-            b: 128,
-            a: u8::MAX,
-        },
-        Color::LightBlue => syntax::Color {
-            r: 0,
-            g: 0,
-            b: 255,
-            a: u8::MAX,
-        },
-        Color::DarkGray => syntax::Color {
-            r: 128,
-            g: 128,
-            b: 128,
-            a: u8::MAX,
-        },
-        Color::Gray => syntax::Color {
-            r: 192,
-            g: 192,
-            b: 192,
-            a: u8::MAX,
-        },
-        Color::White => syntax::Color {
-            r: 255,
-            g: 255,
-            b: 255,
-            a: u8::MAX,
-        },
-        Color::Magenta => syntax::Color {
-            r: 128,
-            g: 0,
-            b: 128,
-            a: u8::MAX,
-        },
-        Color::LightMagenta => syntax::Color {
-            r: 255,
-            g: 0,
-            b: 255,
-            a: u8::MAX,
-        },
-        Color::Cyan => syntax::Color {
-            r: 0,
-            g: 128,
-            b: 128,
-            a: u8::MAX,
-        },
-        Color::LightCyan => syntax::Color {
-            r: 0,
-            g: 255,
-            b: 255,
-            a: u8::MAX,
-        },
+        Color::Black => syntax::Color { r: 0, g: 0, b: 0, a: u8::MAX },
+        Color::Green => syntax::Color { r: 0, g: 128, b: 0, a: u8::MAX },
+        Color::LightGreen => syntax::Color { r: 0, g: 255, b: 0, a: u8::MAX },
+        Color::Red => syntax::Color { r: 128, g: 0, b: 0, a: u8::MAX },
+        Color::LightRed => syntax::Color { r: 255, g: 0, b: 0, a: u8::MAX },
+        Color::Yellow => syntax::Color { r: 128, g: 128, b: 0, a: u8::MAX },
+        Color::LightYellow => syntax::Color { r: 255, g: 255, b: 0, a: u8::MAX },
+        Color::Blue => syntax::Color { r: 0, g: 0, b: 128, a: u8::MAX },
+        Color::LightBlue => syntax::Color { r: 0, g: 0, b: 255, a: u8::MAX },
+        Color::DarkGray => syntax::Color { r: 128, g: 128, b: 128, a: u8::MAX },
+        Color::Gray => syntax::Color { r: 192, g: 192, b: 192, a: u8::MAX },
+        Color::White => syntax::Color { r: 255, g: 255, b: 255, a: u8::MAX },
+        Color::Magenta => syntax::Color { r: 128, g: 0, b: 128, a: u8::MAX },
+        Color::LightMagenta => syntax::Color { r: 255, g: 0, b: 255, a: u8::MAX },
+        Color::Cyan => syntax::Color { r: 0, g: 128, b: 128, a: u8::MAX },
+        Color::LightCyan => syntax::Color { r: 0, g: 255, b: 255, a: u8::MAX },
         Color::Reset => {
             panic!("invalid syntax color: reset cannot be used for syntax highlighting")
-        }
+        },
     }
 }
 

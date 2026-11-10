@@ -415,7 +415,8 @@ pub enum ResponseBody {
     ///
     /// Specification: [Attach request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Attach)
     Attach,
-    /// Response to breakpointLocations request.  Contains possible locations for source breakpoints.
+    /// Response to breakpointLocations request.  Contains possible locations for source
+    /// breakpoints.
     ///
     /// Specification: [BreakpointLocations request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_BreakpointLocations)
     BreakpointLocations(BreakpointLocationsResponse),
@@ -423,8 +424,8 @@ pub enum ResponseBody {
     ///
     /// Specification: [Completions request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Completions)
     Completions(CompletionsResponse),
-    /// Response to `configurationDone` request. This is just an acknowledgement, so no body field is
-    /// required.
+    /// Response to `configurationDone` request. This is just an acknowledgement, so no body field
+    /// is required.
     ///
     /// Specification: [ConfigurationDone request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ConfigurationDone)
     ConfigurationDone,
@@ -445,7 +446,8 @@ pub enum ResponseBody {
     ///
     /// Specification: [Disassembly request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Disassemble)
     Disassemble(DisassembleResponse),
-    /// Response to disconnect request. This is just an acknowledgement, so no body field is required.
+    /// Response to disconnect request. This is just an acknowledgement, so no body field is
+    /// required.
     ///
     /// Specification: [Disconnect request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Disconnect)
     Disconnect,
@@ -503,7 +505,8 @@ pub enum ResponseBody {
     ///
     /// Specification: [ReadMemory request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ReadMemory)
     ReadMemory(ReadMemoryResponse),
-    /// Response to `restart` request. This is just an acknowledgement, so no body field is required.
+    /// Response to `restart` request. This is just an acknowledgement, so no body field is
+    /// required.
     ///
     /// Specification: [Restart request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Restart)
     Restart,
@@ -531,8 +534,8 @@ pub enum ResponseBody {
     SetBreakpoints(SetBreakpointsResponse),
     /// Replaces all existing data breakpoints with new data breakpoints.
     /// To clear all data breakpoints, specify an empty array.
-    /// When a data breakpoint is hit, a `stopped` event (with reason `date breakpoint`) is generated.
-    /// Clients should only call this request if the corresponding capability
+    /// When a data breakpoint is hit, a `stopped` event (with reason `date breakpoint`) is
+    /// generated. Clients should only call this request if the corresponding capability
     /// `supportsDataBreakpoints` is true.
     ///
     /// Specification: [SetDataBreakpoints request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetDataBreakpoints)
@@ -585,7 +588,8 @@ pub enum ResponseBody {
     ///
     /// Specification: [StackTrace request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StackTrace)
     StackTrace(StackTraceResponse),
-    /// Response to `stepBack` request. This is just an acknowledgement, so no body field is required.
+    /// Response to `stepBack` request. This is just an acknowledgement, so no body field is
+    /// required.
     ///
     /// Specification: [StepBack request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepBack)
     StepBack,
@@ -593,11 +597,13 @@ pub enum ResponseBody {
     ///
     /// Specification: [StepIn request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepIn)
     StepIn,
-    /// Response to `stepOut` request. This is just an acknowledgement, so no body field is required.
+    /// Response to `stepOut` request. This is just an acknowledgement, so no body field is
+    /// required.
     ///
     /// Specification: [StepOut request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepOut)
     StepOut,
-    /// Response to `terminate` request. This is just an acknowledgement, so no body field is required.
+    /// Response to `terminate` request. This is just an acknowledgement, so no body field is
+    /// required.
     ///
     /// Specification: [Terminate request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Terminate)
     Terminate,

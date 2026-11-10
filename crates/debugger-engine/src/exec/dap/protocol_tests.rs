@@ -127,7 +127,7 @@ impl Session {
             match message["event"].as_str() {
                 Some("miden/uiState") => snapshot = Some(message["body"].clone()),
                 Some("stopped" | "terminated") => return (message, snapshot),
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -174,7 +174,7 @@ impl Drop for Session {
     }
 }
 
-fn session_with_dynamic_source(path: &std::path::Path) -> Session {
+fn session_with_dynamic_source(path: &Path) -> Session {
     use miden_assembly_syntax::ast::{ModuleKind, Path as AssemblyPath};
 
     let source_manager = Arc::new(DefaultSourceManager::default());
@@ -507,8 +507,7 @@ fn dap_session_steps_breaks_restarts_and_records_a_snapshot() {
     );
     for command in ["stepIn", "next", "stepOut"] {
         assert_eq!(
-            session.request(command, json!({"threadId": 1, "granularity": "instruction"}))
-                ["success"],
+            session.request(command, json!({"threadId": 1, "granularity": "instruction"}))["success"],
             true
         );
         let (event, _) = session.stop();
@@ -524,7 +523,7 @@ fn dap_session_steps_breaks_restarts_and_records_a_snapshot() {
     session.stop();
     let output = session.disconnect();
     assert_eq!(output.stack[0], Felt::from_u32(8));
-    let snapshot = crate::exec::ReplaySnapshot::read_from_file(&path).unwrap();
+    let snapshot = ReplaySnapshot::read_from_file(&path).unwrap();
     assert!(snapshot.event_log.is_empty());
     assert_eq!(recorder.take().unwrap().unwrap().path, Uri::from(path.as_path()));
 }
@@ -557,8 +556,7 @@ fn dap_locals_scope_reports_a_live_debug_variable() {
     let mut variable = None;
     for _ in 0..20 {
         assert_eq!(
-            session.request("stepIn", json!({"threadId": 1, "granularity": "instruction"}))
-                ["success"],
+            session.request("stepIn", json!({"threadId": 1, "granularity": "instruction"}))["success"],
             true
         );
         let (event, _) = session.stop();
@@ -608,7 +606,7 @@ fn dap_reports_execution_failure_and_writes_the_failed_snapshot() {
     assert_eq!(session.request("continue", json!({"threadId": 1}))["success"], true);
     assert_eq!(session.stop().0["event"], "terminated");
     assert!(session.join().is_err());
-    assert!(crate::exec::ReplaySnapshot::read_from_file(&path).is_ok());
+    assert!(ReplaySnapshot::read_from_file(&path).is_ok());
 }
 
 fn session_with_stack_local(source: &str, name: &str) -> Session {
@@ -793,8 +791,8 @@ fn dap_other_locals_scope_preserves_compiler_variables() {
             assert_eq!(all[0], json!({"name": "local0", "value": "5", "raw": 5}));
             let reference = scopes["body"]["scopes"][1]["variablesReference"].clone();
             assert_eq!(
-                session.request("variables", json!({"variablesReference": reference}))["body"]
-                    ["variables"][0]["value"],
+                session.request("variables", json!({"variablesReference": reference}))["body"]["variables"]
+                    [0]["value"],
                 "5"
             );
             session.disconnect();
@@ -851,8 +849,7 @@ fn dap_inline_frames_do_not_claim_invocation_locals() {
             let scopes = session.request("scopes", json!({"frameId": inline["id"]}));
             assert!(scopes["body"]["scopes"].as_array().unwrap().is_empty());
             assert_eq!(
-                session.request("evaluate", json!({"expression": "x", "frameId": inline["id"]}))
-                    ["success"],
+                session.request("evaluate", json!({"expression": "x", "frameId": inline["id"]}))["success"],
                 false
             );
             assert_eq!(

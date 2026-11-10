@@ -67,7 +67,7 @@ fn run_lines(
 
         match outcome {
             Ok(Outcome::Quit) => break,
-            Ok(Outcome::Continue) => {}
+            Ok(Outcome::Continue) => {},
             Err(e) => eprintln!("error: {e}"),
         }
     }
@@ -83,7 +83,7 @@ fn run_lines(debugger: &ScriptDebugger, script: &str, out: &mut dyn Write) {
 
         match debugger.execute_repl_line(line, out) {
             Ok(Outcome::Quit) => break,
-            Ok(Outcome::Continue) => {}
+            Ok(Outcome::Continue) => {},
             Err(e) => eprintln!("error: {e}"),
         }
     }

@@ -47,7 +47,7 @@ impl ReturnTarget {
         match self.invocation.as_ref() {
             Some(invocation) => {
                 !stack.frames.iter().any(|frame| frame.identity.is_same_frame(invocation))
-            }
+            },
             None => event_depth < self.event_depth,
         }
     }

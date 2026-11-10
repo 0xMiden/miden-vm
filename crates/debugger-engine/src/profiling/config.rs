@@ -15,11 +15,7 @@ pub struct ProfilerCliArgs {
     /// instruments need to be enabled separately.
     #[arg(long = "profiling-reports-dir", value_name = "DIRECTORY")]
     pub reports_dir: Option<PathBuf>,
-    #[arg(
-        long = "profiling-instruments",
-        value_name = "VALUE",
-        value_delimiter = ','
-    )]
+    #[arg(long = "profiling-instruments", value_name = "VALUE", value_delimiter = ',')]
     pub instruments: Vec<alloc::string::String>,
 }
 

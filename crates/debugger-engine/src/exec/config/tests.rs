@@ -99,7 +99,7 @@ fn execution_config_with_advice() {
         ]
     );
     assert_eq!(
-        file.advice_inputs.map().get(&digest).map(|value| value.as_ref()),
+        file.advice_inputs.map().get(&digest).map(AsRef::as_ref),
         Some(
             [
                 RawFelt::new(1).expect("value exceeds field modulus"),

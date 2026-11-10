@@ -275,20 +275,19 @@ pub struct StoppedEventBody {
     /// If `allThreadsStopped` is true, a debug adapter can announce that all
     /// threads have stopped.
     ///
-    /// - The client should use this information to enable that all threads can
-    ///   be expanded to access their stacktraces.
-    /// - If the attribute is missing or false, only the thread with the given
-    ///   `threadId` can be expanded.
+    /// - The client should use this information to enable that all threads can be expanded to
+    ///   access their stacktraces.
+    /// - If the attribute is missing or false, only the thread with the given `threadId` can be
+    ///   expanded.
     pub all_threads_stopped: Option<bool>,
     /// Ids of the breakpoints that triggered the event. In most cases there is
     /// only a single breakpoint but here are some examples for multiple
     /// breakpoints:
     ///
     /// - Different types of breakpoints map to the same location.
-    /// - Multiple source breakpoints get collapsed to the same instruction by
-    ///   the compiler/runtime.
-    /// - Multiple function breakpoints with different function names map to the
-    ///   same location.
+    /// - Multiple source breakpoints get collapsed to the same instruction by the
+    ///   compiler/runtime.
+    /// - Multiple function breakpoints with different function names map to the same location.
     pub hit_breakpoint_ids: Option<Vec<i64>>,
 }
 
@@ -341,9 +340,10 @@ pub enum Event {
     /// Specification: [Breakpoint event](https://microsoft.github.io/debug-adapter-protocol/specification#Events_Breakpoint)
     Breakpoint(BreakpointEventBody),
     /// The event indicates that the execution of the debuggee has continued.
-    /// Please note: a debug adapter is not expected to send this event in response to a request that
-    ///  implies that execution continues, e.g. launch or continue.
-    /// It is only necessary to send a continued event if there was no previous request that implied this.
+    /// Please note: a debug adapter is not expected to send this event in response to a request
+    /// that  implies that execution continues, e.g. launch or continue.
+    /// It is only necessary to send a continued event if there was no previous request that implied
+    /// this.
     ///
     /// Specification: [Continued event](https://microsoft.github.io/debug-adapter-protocol/specification#Events_Continued)
     Continued(ContinuedEventBody),
@@ -355,7 +355,8 @@ pub enum Event {
     /// client needs to re-render the data snapshot previously requested.
     /// Debug adapters do not have to emit this event for runtime changes like stopped or thread
     /// events because in that case the client refetches the new state anyway. But the event can be
-    /// used for example to refresh the UI after rendering formatting has changed in the debug adapter.
+    /// used for example to refresh the UI after rendering formatting has changed in the debug
+    /// adapter.
     ///
     /// Specification: [Invalidated event](https://microsoft.github.io/debug-adapter-protocol/specification#Events_Invalidated)
     Invalidated(InvalidatedEventBody),
@@ -396,15 +397,15 @@ pub enum Event {
     /// The event signals that a long running operation is about to start and provides additional
     /// information for the client to set up a corresponding progress and cancellation UI.
     /// The client is free to delay the showing of the UI in order to reduce flicker.
-    /// This event should only be sent if the corresponding capability `supportsProgressReporting` is
-    /// true.
+    /// This event should only be sent if the corresponding capability `supportsProgressReporting`
+    /// is true.
     ///
     /// Specification: [ProgressStart event](https://microsoft.github.io/debug-adapter-protocol/specification#Events_ProgressStart)
     ProgressStart(ProgressStartEventBody),
     /// The event signals that the progress reporting needs to be updated with a new message and/or
     /// percentage.
-    /// The client does not have to update the UI immediately, but the clients needs to keep track of
-    /// the message and/or percentage values.
+    /// The client does not have to update the UI immediately, but the clients needs to keep track
+    /// of the message and/or percentage values.
     /// This event should only be sent if the corresponding capability supportsProgressReporting is
     /// true.
     ///

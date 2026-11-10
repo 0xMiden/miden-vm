@@ -108,8 +108,8 @@ impl Tui {
     }
 
     pub fn start(&mut self) {
-        let tick_delay = std::time::Duration::from_secs_f64(1.0 / self.tick_rate);
-        let render_delay = std::time::Duration::from_secs_f64(1.0 / self.frame_rate);
+        let tick_delay = Duration::from_secs_f64(1.0 / self.tick_rate);
+        let render_delay = Duration::from_secs_f64(1.0 / self.frame_rate);
         self.cancel();
         self.cancellation_token = CancellationToken::new();
         let _cancellation_token = self.cancellation_token.clone();
@@ -170,6 +170,10 @@ impl Tui {
         });
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Preserve the fallible terminal lifecycle API"
+    )]
     pub fn stop(&self) -> Result<(), Report> {
         self.cancel();
         let mut counter = 0;

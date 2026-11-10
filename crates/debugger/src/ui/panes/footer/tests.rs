@@ -85,7 +85,7 @@ fn footer_renders_input_modes_and_expires_temporary_status() {
             .buffer()
             .content
             .iter()
-            .map(|cell| cell.symbol())
+            .map(buffer::Cell::symbol)
             .collect::<String>();
         assert!(text.contains("ready"));
         assert!(text.contains(label));
@@ -100,7 +100,7 @@ fn footer_renders_input_modes_and_expires_temporary_status() {
         .buffer()
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(buffer::Cell::symbol)
         .collect::<String>();
     assert!(text.contains(":break main"));
     assert!(text.contains("[C]"));

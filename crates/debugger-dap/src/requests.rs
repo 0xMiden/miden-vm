@@ -679,8 +679,8 @@ pub struct WriteMemoryArguments {
 pub enum Command {
     /// The attach request is sent from the client to the debug adapter to attach to a debuggee that
     /// is already running.
-    /// kSince attaching is debugger/runtime specific, the arguments for this request are not part of
-    /// this specification.
+    /// kSince attaching is debugger/runtime specific, the arguments for this request are not part
+    /// of this specification.
     ///
     /// Specification: [Attach request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Attach)
     Attach(AttachRequestArguments),
@@ -695,11 +695,12 @@ pub enum Command {
     /// Clients should only call this request if the corresponding capability
     /// `supportsCompletionsRequest` is true.
     ///
-    /// Specification: [Completions request]: https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Completions
+    /// Specification: [Completions request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Completions)
     Completions(CompletionsArguments),
     /// This request indicates that the client has finished initialization of the debug adapter.
-    /// So it is the last request in the sequence of configuration requests (which was started by the initialized event).
-    /// Clients should only call this request if the corresponding capability supportsConfigurationDoneRequest is true.
+    /// So it is the last request in the sequence of configuration requests (which was started by
+    /// the initialized event). Clients should only call this request if the corresponding
+    /// capability supportsConfigurationDoneRequest is true.
     ///
     /// Specification: [ConfigurationDone](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ConfigurationDone)
     ConfigurationDone,
@@ -712,8 +713,8 @@ pub enum Command {
     Continue(ContinueArguments),
     /// Obtains information on a possible data breakpoint that could be set on an expression or
     /// variable.
-    /// Clients should only call this request if the corresponding capability supportsDataBreakpoints
-    /// is true.
+    /// Clients should only call this request if the corresponding capability
+    /// supportsDataBreakpoints is true.
     ///
     /// Specification: [DataBreakpointInfo request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_DataBreakpointInfo)
     DataBreakpointInfo(DataBreakpointInfoArguments),
@@ -725,12 +726,12 @@ pub enum Command {
     Disassemble(DisassembleArguments),
     /// The `disconnect` request asks the debug adapter to disconnect from the debuggee (thus ending
     /// the debug session) and then to shut down itself (the debug adapter).
-    /// In addition, the debug adapter must terminate the debuggee if it was started with the `launch`
-    /// request. If an `attach` request was used to connect to the debuggee, then the debug adapter
-    /// must not terminate the debuggee.
+    /// In addition, the debug adapter must terminate the debuggee if it was started with the
+    /// `launch` request. If an `attach` request was used to connect to the debuggee, then the
+    /// debug adapter must not terminate the debuggee.
     /// This implicit behavior of when to terminate the debuggee can be overridden with the
-    /// `terminateDebuggee` argument (which is only supported by a debug adapter if the corresponding
-    /// capability `supportTerminateDebuggee` is true).
+    /// `terminateDebuggee` argument (which is only supported by a debug adapter if the
+    /// corresponding capability `supportTerminateDebuggee` is true).
     ///
     /// Specification: [Disconnect request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Disconnect)
     Disconnect(DisconnectArguments),
@@ -750,8 +751,8 @@ pub enum Command {
     /// The code between the current location and the goto target is not executed but skipped.
     /// The debug adapter first sends the response and then a stopped event with reason goto.
     /// Clients should only call this request if the corresponding capability
-    /// `supportsGotoTargetsRequest` is true (because only then goto targets exist that can be passed
-    /// as arguments).
+    /// `supportsGotoTargetsRequest` is true (because only then goto targets exist that can be
+    /// passed as arguments).
     ///
     /// Specification: [Goto request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Goto)
     Goto(GotoArguments),
@@ -766,11 +767,11 @@ pub enum Command {
     /// order to configure it with client capabilities and to retrieve capabilities from the debug
     /// adapter.
     ///
-    /// Until the debug adapter has responded with an initialize response, the client must not send any
-    /// additional requests or events to the debug adapter.
+    /// Until the debug adapter has responded with an initialize response, the client must not send
+    /// any additional requests or events to the debug adapter.
     ///
-    /// In addition the debug adapter is not allowed to send any requests or events to the client until
-    ///  it has responded with an initialize response.
+    /// In addition the debug adapter is not allowed to send any requests or events to the client
+    /// until  it has responded with an initialize response.
     ///
     /// The initialize request may only be sent once.
     ///
@@ -784,7 +785,8 @@ pub enum Command {
     /// Specification: [Launch request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Launch)
     Launch(LaunchRequestArguments),
     /// Retrieves the set of all sources currently loaded by the debugged process.
-    /// Clients should only call this request if the corresponding capability supportsLoadedSourcesRequest is true.
+    /// Clients should only call this request if the corresponding capability
+    /// supportsLoadedSourcesRequest is true.
     ///
     /// Specification: [LoadedSources request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_LoadedSources)
     LoadedSources,
@@ -829,8 +831,8 @@ pub enum Command {
     /// Specification: [Restart request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Restart)
     Restart(Option<RestartArguments>),
     /// The request restarts execution of the specified stackframe.
-    /// The debug adapter first sends the response and then a `stopped` event (with reason `restart`)
-    /// after the restart has completed.
+    /// The debug adapter first sends the response and then a `stopped` event (with reason
+    /// `restart`) after the restart has completed.
     /// Clients should only call this request if the corresponding capability `supportsRestartFrame`
     /// is true.
     ///
@@ -840,7 +842,8 @@ pub enum Command {
     /// thread execution (see capability `supportsSingleThreadExecutionRequests`), setting the
     /// singleThread argument to true resumes only the specified thread. If not all threads were
     /// resumed, the `allThreadsContinued` attribute of the response should be set to false.
-    /// Clients should only call this request if the corresponding capability supportsStepBack is true.
+    /// Clients should only call this request if the corresponding capability supportsStepBack is
+    /// true.
     ///
     /// Specification: [ReverseContinue request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ReverseContinue)
     ReverseContinue(ReverseContinueArguments),
@@ -848,7 +851,8 @@ pub enum Command {
     ///
     /// Specification: [Scopes request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Scopes)
     Scopes(ScopesArguments),
-    /// Sets multiple breakpoints for a single source and clears all previous breakpoints in that source.
+    /// Sets multiple breakpoints for a single source and clears all previous breakpoints in that
+    /// source.
     ///
     /// To clear all breakpoint for a source, specify an empty array.
     ///
@@ -858,24 +862,25 @@ pub enum Command {
     SetBreakpoints(SetBreakpointsArguments),
     /// Replaces all existing data breakpoints with new data breakpoints.
     /// To clear all data breakpoints, specify an empty array.
-    /// When a data breakpoint is hit, a `stopped` event (with reason `data breakpoint`) is generated.
-    /// Clients should only call this request if the corresponding capability
+    /// When a data breakpoint is hit, a `stopped` event (with reason `data breakpoint`) is
+    /// generated. Clients should only call this request if the corresponding capability
     /// `supportsDataBreakpoints` is true.
     ///
     /// Specification: [SetDataBreakpoints request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetDataBreakpoints)
     SetDataBreakpoints(SetDataBreakpointsArguments),
     /// The request configures the debugger’s response to thrown exceptions.
     /// If an exception is configured to break, a stopped event is fired (with reason exception).
-    /// Clients should only call this request if the corresponding capability exceptionBreakpointFilters returns one or more filters.
+    /// Clients should only call this request if the corresponding capability
+    /// exceptionBreakpointFilters returns one or more filters.
     ///
     /// Specification: [SetExceptionBreakpoints](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetExceptionBreakpoints)
     SetExceptionBreakpoints(SetExceptionBreakpointsArguments),
     /// Evaluates the given `value` expression and assigns it to the `expression` which must be a
     /// modifiable l-value.
-    /// The expressions have access to any variables and arguments that are in scope of the specified
-    /// frame.
-    /// Clients should only call this request if the corresponding capability `supportsSetExpression`
-    /// is true.
+    /// The expressions have access to any variables and arguments that are in scope of the
+    /// specified frame.
+    /// Clients should only call this request if the corresponding capability
+    /// `supportsSetExpression` is true.
     /// If a debug adapter implements both `setExpression` and `setVariable`, a client uses
     /// `setExpression` if the variable has an `evaluateName` property.
     ///
@@ -890,19 +895,19 @@ pub enum Command {
     ///
     /// Specification: [SetFunctionBreakpointsArguments](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetFunctionBreakpoints)
     SetFunctionBreakpoints(SetFunctionBreakpointsArguments),
-    /// Replaces all existing instruction breakpoints. Typically, instruction breakpoints would be set from a disassembly window.
-    /// To clear all instruction breakpoints, specify an empty array.
-    /// When an instruction breakpoint is hit, a `stopped` event (with reason
+    /// Replaces all existing instruction breakpoints. Typically, instruction breakpoints would be
+    /// set from a disassembly window. To clear all instruction breakpoints, specify an empty
+    /// array. When an instruction breakpoint is hit, a `stopped` event (with reason
     /// `instruction breakpoint`) is generated.
     /// Clients should only call this request if the corresponding capability
     /// `supportsInstructionBreakpoints` is true.
     ///
     /// Specification: [SetInstructionBreakpoints request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetInstructionBreakpoints)
     SetInstructionBreakpoints(SetInstructionBreakpointsArguments),
-    /// Set the variable with the given name in the variable container to a new value. Clients should
-    /// only call this request if the corresponding capability `supportsSetVariable` is true.
-    /// If a debug adapter implements both `setVariable` and `setExpression`, a client will only use
-    /// `setExpression` if the variable has an `evaluateName` property.
+    /// Set the variable with the given name in the variable container to a new value. Clients
+    /// should only call this request if the corresponding capability `supportsSetVariable` is
+    /// true. If a debug adapter implements both `setVariable` and `setExpression`, a client
+    /// will only use `setExpression` if the variable has an `evaluateName` property.
     ///
     /// Specification: [SetVariable request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetVariable)
     SetVariable(SetVariableArguments),
@@ -926,8 +931,8 @@ pub enum Command {
     /// The request executes one backward step (in the given granularity) for the specified thread
     /// and allows all other threads to run backward freely by resuming them.
     /// If the debug adapter supports single thread execution (see capability
-    /// `supportsSingleThreadExecutionRequests`), setting the `singleThread` argument to true prevents
-    /// other suspended threads from resuming.
+    /// `supportsSingleThreadExecutionRequests`), setting the `singleThread` argument to true
+    /// prevents other suspended threads from resuming.
     /// The debug adapter first sends the response and then a stopped event (with reason step) after
     /// the step has completed.
     /// Clients should only call this request if the corresponding capability `supportsStepBack` is

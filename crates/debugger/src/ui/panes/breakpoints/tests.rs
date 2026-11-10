@@ -51,7 +51,7 @@ fn navigation_wraps_deletion_selects_the_next_breakpoint_and_reload_clears_hits(
             .buffer()
             .content
             .iter()
-            .map(|cell| cell.symbol())
+            .map(buffer::Cell::symbol)
             .collect::<String>();
         assert!(text.contains("Breakpoints"));
         assert!(text.contains("cycle:10"));

@@ -35,7 +35,7 @@ pub struct DebugExecutor {
     /// describes every cycle before it runs
     stepper: Stepper,
     /// The host providing debugging callbacks
-    pub host: DebuggerHost<dyn miden_assembly_syntax::debuginfo::SourceManager>,
+    pub host: DebuggerHost<dyn SourceManager>,
 
     // State from last step (replaces VmState fields)
     /// The current operand stack state
@@ -95,7 +95,8 @@ impl super::query::DebugQuery for DebugExecutor {
 }
 
 impl DebugExecutor {
-    /// Get the current operand stack as a slice - the top of the stack is the last item in the slice
+    /// Get the current operand stack as a slice - the top of the stack is the last item in the
+    /// slice
     ///
     /// This returns the entire stack, not just the top 16 elements
     pub fn stack(&self) -> &[Felt] {
@@ -122,7 +123,7 @@ impl DebugExecutor {
     /// declarations start empty, so `stepper` must not have stepped unless it is stopped.
     pub fn new(
         stepper: Stepper,
-        host: DebuggerHost<dyn miden_assembly_syntax::debuginfo::SourceManager>,
+        host: DebuggerHost<dyn SourceManager>,
         events: Arc<miden_utils_sync::RwLock<alloc::collections::BTreeMap<RowIndex, Event>>>,
         profiler: Profiler,
     ) -> Self {
@@ -251,11 +252,7 @@ impl DebugExecutor {
         // leaves behind.
         let step_result = self.stepper.step_sync_described(&mut self.host, |step| {
             let source = step.source;
-            let CurrentCycleInfo {
-                op,
-                control_flow_kind,
-                ..
-            } = source.cycle;
+            let CurrentCycleInfo { op, control_flow_kind, .. } = source.cycle;
             let debug_var_infos = source.debug_vars();
             let asmop = source.asmop();
             self.callstack.observe_source_context(
@@ -344,7 +341,7 @@ impl DebugExecutor {
                 self.last_debug_var_count = debug_var_count;
 
                 Ok(exited)
-            }
+            },
             // The stepper comes back empty only when it was already stopped, which the guard
             // above catches before the step.
             Ok(None) => unreachable!("a stopped stepper is caught before the step"),
@@ -368,14 +365,14 @@ impl DebugExecutor {
                     self.profiler.write_reports();
                 }
                 Ok(None)
-            }
+            },
             Err(err) => {
                 // A cycle that completes and then trips a limit is on the clock.
                 self.cycle = self.stepper.cycle();
                 self.stopped = true;
                 self.last_debug_var_count = 0;
                 Err(err)
-            }
+            },
         }
     }
 
@@ -422,7 +419,7 @@ impl DebugExecutor {
                             .and_then(|detail| detail.resolve(source_manager))
                             .cloned();
                         (frame.procedure(""), loc)
-                    }
+                    },
                     None => (None, None),
                 };
                 (op, is_boundary, proc, loc)

@@ -206,7 +206,7 @@ impl<'a, H> DapHostWrapper<'a, H> {
 impl<H: Host> BaseHost for DapHostWrapper<'_, H> {
     fn get_label_and_source_file(
         &self,
-        location: &miden_debug_types::Location,
+        location: &Location,
     ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
         self.inner.get_label_and_source_file(location)
     }
@@ -249,11 +249,11 @@ impl<H: Host> Host for DapHostWrapper<'_, H> {
                     column: 0,
                     inline_frames: Vec::new(),
                 });
-            }
+            },
             crate::Event::FrameEnd => {
                 self.call_depth = self.call_depth.saturating_sub(1);
                 self.frames.pop();
-            }
+            },
             _ => (),
         }
         self.inner.on_event(process)
@@ -385,10 +385,10 @@ fn read_memory_at_current_state(
         Type::U8 => write_with_format_type!(output, expr, bytes[0]),
         Type::I16 => {
             write_with_format_type!(output, expr, i16::from_le_bytes([bytes[0], bytes[1]]))
-        }
+        },
         Type::U16 => {
             write_with_format_type!(output, expr, u16::from_le_bytes([bytes[0], bytes[1]]))
-        }
+        },
         Type::I32 => write_with_format_type!(
             output,
             expr,
@@ -406,7 +406,7 @@ fn read_memory_at_current_state(
             } else {
                 write_with_format_type!(output, expr, val);
             }
-        }
+        },
         ty => return Err(format!("support for reads of type '{ty}' are not implemented yet")),
     }
 
@@ -434,14 +434,10 @@ fn build_ui_state<H: Host>(
         .state()
         .get_stack_state()
         .iter()
-        .map(|felt| felt.as_canonical_u64())
+        .map(miden_assembly_syntax::Felt::as_canonical_u64)
         .collect();
 
-    crate::exec::DapUiState {
-        cycle,
-        current_stack,
-        callstack,
-    }
+    crate::exec::DapUiState { cycle, current_stack, callstack }
 }
 
 fn presented_frames<H: Host>(
@@ -478,7 +474,7 @@ fn presented_frames<H: Host>(
                 let (source_path, line, column) =
                     loc.map_or((None, 0, 0), |(path, line, column)| (Some(path), line, column));
                 (asmop.context_name().clone(), source_path, line, column)
-            }
+            },
             None => (Arc::from(format!("cycle {cycle}")), None, 0, 0),
         };
         return vec![DapPresentedFrame {
@@ -553,7 +549,7 @@ impl StoredBreakpoint {
             message: match self.line {
                 Some(line) if line != self.requested_line => {
                     Some(format!("Moved to executable line {line}."))
-                }
+                },
                 Some(_) => None,
                 None => Some(
                     "Pending until executable debug information for this source is loaded.".into(),
@@ -709,9 +705,7 @@ fn resolve_location_with_column<H: Host>(
 
 fn should_defer_function_breakpoint(resolved: Option<&(String, i64)>, context_name: &str) -> bool {
     !is_internal_procedure(context_name)
-        && resolved.is_none_or(|(path, _)| {
-            crate::debug::is_internal_source_uri(&miden_debug_types::Uri::new(path))
-        })
+        && resolved.is_none_or(|(path, _)| crate::debug::is_internal_source_uri(&Uri::new(path)))
 }
 
 fn is_internal_procedure(context_name: &str) -> bool {
@@ -800,7 +794,7 @@ fn breakable_source_lines<H: Host>(
                 return lines;
             };
             bytes
-        }
+        },
     };
     let line_starts = core::iter::once(0)
         .chain(
@@ -1060,7 +1054,7 @@ fn update_top_frame<H: Host>(host: &mut DapHostWrapper<'_, H>, current_asmop: Op
             let (source_path, line, column) =
                 loc.map_or((None, 0, 0), |(path, line, column)| (Some(path), line, column));
             (asmop.context_name().clone(), source_path, line, column)
-        }
+        },
         None => (Arc::default(), None, 0, 0),
     };
 
@@ -1096,7 +1090,7 @@ fn update_top_frame_with_debug<H: Host>(
                         (Some(source_path), line, column)
                     });
             DapInlineFrame {
-                name: frame.display_name().to_string(),
+                name: frame.display_name(),
                 source_path,
                 line,
                 column,
@@ -1112,7 +1106,7 @@ fn update_top_frame_with_debug<H: Host>(
 // DAP EXECUTOR
 // ================================================================================================
 
-/// A [`ProgramExecutor`] that starts a DAP TCP server and steps through the program
+/// Starts a DAP TCP server and steps through the program
 /// interactively.
 ///
 /// When used with `TransactionExecutor`, instead of running to completion, `execute()` binds a TCP
@@ -1138,10 +1132,7 @@ struct DapInspection {
 
 #[derive(Clone)]
 enum DapScope {
-    Locals {
-        frame: DapPresentedFrame,
-        other: bool,
-    },
+    Locals { frame: DapPresentedFrame, other: bool },
     Stack,
     Memory,
 }
@@ -1287,7 +1278,7 @@ impl DapExecutor {
             Err(err) => {
                 log::error!("{err}");
                 return Err(ExecutionError::Internal("failed to start DAP server"));
-            }
+            },
         };
         self.execute_on_listener(root_package, host, listener)
     }
@@ -1326,7 +1317,7 @@ impl DapExecutor {
             Err(err) => {
                 log::error!("DAP server accept failed: {err}");
                 return Err(ExecutionError::Internal("DAP server accept failed"));
-            }
+            },
         };
         log::info!("DAP client connected from {addr}");
 
@@ -1335,7 +1326,7 @@ impl DapExecutor {
             Err(err) => {
                 log::error!("failed to clone TCP stream: {err}");
                 return Err(ExecutionError::Internal("failed to clone TCP stream"));
-            }
+            },
         });
         let writer = BufWriter::new(stream);
 
@@ -1446,7 +1437,7 @@ impl DapExecutor {
                     Err(e) => {
                         log::error!("DAP protocol error: {e:#?}");
                         break;
-                    }
+                    },
                 };
 
                 let evaluation_frame = if let Command::Evaluate(ref args) = req.command {
@@ -1479,7 +1470,7 @@ impl DapExecutor {
                         let resp = req.success(ResponseBody::Initialize(caps));
                         server.respond(resp).ok();
                         server.send_event(Event::Initialized).ok();
-                    }
+                    },
 
                     Command::Launch(_) => {
                         server.respond(req.success(ResponseBody::Launch)).ok();
@@ -1495,7 +1486,7 @@ impl DapExecutor {
                             cycle,
                             &mut entry_announced,
                         );
-                    }
+                    },
 
                     // VS Code's default flow issues `attach` when launch.json uses
                     // `request: "attach"`. The server is already bound to a TCP port and
@@ -1517,7 +1508,7 @@ impl DapExecutor {
                             cycle,
                             &mut entry_announced,
                         );
-                    }
+                    },
 
                     Command::ConfigurationDone => {
                         if let Ok(resp) = req.ack() {
@@ -1531,7 +1522,7 @@ impl DapExecutor {
                             cycle,
                             &mut entry_announced,
                         );
-                    }
+                    },
 
                     Command::Restart(ref args) => {
                         // `args.is_some()` means the client sent a non-null
@@ -1556,14 +1547,14 @@ impl DapExecutor {
                             restart_requested = true;
                             break;
                         }
-                    }
+                    },
 
                     Command::Disconnect(_) => {
                         if let Ok(resp) = req.ack() {
                             server.respond(resp).ok();
                         }
                         break;
-                    }
+                    },
 
                     // --- Execution Control ---
                     Command::Continue(_) => {
@@ -1608,10 +1599,10 @@ impl DapExecutor {
                                         hit_breakpoint_ids: None,
                                     }))
                                     .ok();
-                            }
+                            },
                             StepResult::Terminated => {
                                 server.send_event(Event::Terminated(None)).ok();
-                            }
+                            },
                             StepResult::Error(e) => {
                                 server.send_event(Event::Terminated(None)).ok();
                                 // Capture the failed run so it can still be replayed offline.
@@ -1621,16 +1612,16 @@ impl DapExecutor {
                                         snapshot_recorder: config.snapshot_recorder.as_ref(),
                                         event_recorder: self.event_recorder.as_ref(),
                                         forest_recorder: self.forest_recorder.as_ref(),
-                                        program: root_package.clone(),
+                                        program: root_package,
                                         stack_inputs,
                                         advice_inputs: &advice_inputs,
                                         options,
                                     });
                                 }
                                 return Err(e);
-                            }
+                            },
                         }
-                    }
+                    },
 
                     Command::Next(ref args) => {
                         inspection.invalidate();
@@ -1677,10 +1668,10 @@ impl DapExecutor {
                                     );
                                     send_stopped_step(&mut server);
                                 }
-                            }
+                            },
                             StepResult::Terminated => {
                                 server.send_event(Event::Terminated(None)).ok();
-                            }
+                            },
                             StepResult::Error(e) => {
                                 server.send_event(Event::Terminated(None)).ok();
                                 // Capture the failed run so it can still be replayed offline.
@@ -1690,16 +1681,16 @@ impl DapExecutor {
                                         snapshot_recorder: config.snapshot_recorder.as_ref(),
                                         event_recorder: self.event_recorder.as_ref(),
                                         forest_recorder: self.forest_recorder.as_ref(),
-                                        program: root_package.clone(),
+                                        program: root_package,
                                         stack_inputs,
                                         advice_inputs: &advice_inputs,
                                         options,
                                     });
                                 }
                                 return Err(e);
-                            }
+                            },
                         }
-                    }
+                    },
 
                     Command::StepIn(_) => {
                         inspection.invalidate();
@@ -1729,10 +1720,10 @@ impl DapExecutor {
                                     );
                                     send_stopped_step(&mut server);
                                 }
-                            }
+                            },
                             StepResult::Terminated => {
                                 server.send_event(Event::Terminated(None)).ok();
-                            }
+                            },
                             StepResult::Error(e) => {
                                 server.send_event(Event::Terminated(None)).ok();
                                 // Capture the failed run so it can still be replayed offline.
@@ -1742,16 +1733,16 @@ impl DapExecutor {
                                         snapshot_recorder: config.snapshot_recorder.as_ref(),
                                         event_recorder: self.event_recorder.as_ref(),
                                         forest_recorder: self.forest_recorder.as_ref(),
-                                        program: root_package.clone(),
+                                        program: root_package,
                                         stack_inputs,
                                         advice_inputs: &advice_inputs,
                                         options,
                                     });
                                 }
                                 return Err(e);
-                            }
+                            },
                         }
-                    }
+                    },
 
                     Command::StepOut(_) => {
                         inspection.invalidate();
@@ -1781,10 +1772,10 @@ impl DapExecutor {
                                     );
                                     send_stopped_step(&mut server);
                                 }
-                            }
+                            },
                             StepResult::Terminated => {
                                 server.send_event(Event::Terminated(None)).ok();
-                            }
+                            },
                             StepResult::Error(e) => {
                                 server.send_event(Event::Terminated(None)).ok();
                                 // Capture the failed run so it can still be replayed offline.
@@ -1794,27 +1785,24 @@ impl DapExecutor {
                                         snapshot_recorder: config.snapshot_recorder.as_ref(),
                                         event_recorder: self.event_recorder.as_ref(),
                                         forest_recorder: self.forest_recorder.as_ref(),
-                                        program: root_package.clone(),
+                                        program: root_package,
                                         stack_inputs,
                                         advice_inputs: &advice_inputs,
                                         options,
                                     });
                                 }
                                 return Err(e);
-                            }
+                            },
                         }
-                    }
+                    },
 
                     // --- State Inspection ---
                     Command::Threads => {
                         let resp = req.success(ResponseBody::Threads(responses::ThreadsResponse {
-                            threads: vec![types::Thread {
-                                id: 1,
-                                name: "main".into(),
-                            }],
+                            threads: vec![types::Thread { id: 1, name: "main".into() }],
                         }));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     Command::StackTrace(ref _args) => {
                         inspection.ensure_frames(&wrapper, current_asmop.as_ref(), cycle);
@@ -1848,7 +1836,7 @@ impl DapExecutor {
                                 total_frames: Some(total),
                             }));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     Command::Scopes(ref args) => {
                         let Some(frame) = inspection.frame(args.frame_id).cloned() else {
@@ -1885,10 +1873,8 @@ impl DapExecutor {
                                 }
                                 scopes.push(types::Scope {
                                     name: name.into(),
-                                    variables_reference: inspection.scope(DapScope::Locals {
-                                        frame: frame.clone(),
-                                        other,
-                                    }),
+                                    variables_reference: inspection
+                                        .scope(DapScope::Locals { frame: frame.clone(), other }),
                                     presentation_hint: Some(types::ScopePresentationhint::Locals),
                                     named_variables: Some(count as i64),
                                     expensive: false,
@@ -1919,7 +1905,7 @@ impl DapExecutor {
                                 scopes,
                             })))
                             .ok();
-                    }
+                    },
 
                     Command::Variables(ref args) => {
                         let Some(scope) = inspection.scopes.get(&args.variables_reference) else {
@@ -1950,7 +1936,7 @@ impl DapExecutor {
                                     });
                                 }
                                 variables
-                            }
+                            },
                             DapScope::Stack => {
                                 let state = processor.state();
                                 let stack = state.get_stack_state();
@@ -1965,7 +1951,7 @@ impl DapExecutor {
                                         ..Default::default()
                                     })
                                     .collect()
-                            }
+                            },
                             DapScope::Memory => {
                                 let state = processor.state();
                                 let ctx = state.ctx();
@@ -1982,7 +1968,7 @@ impl DapExecutor {
                                         }
                                     })
                                     .collect()
-                            }
+                            },
                         };
 
                         let resp =
@@ -1990,7 +1976,7 @@ impl DapExecutor {
                                 variables,
                             }));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     // --- Breakpoints ---
                     Command::SetBreakpoints(ref args) => {
@@ -2002,12 +1988,10 @@ impl DapExecutor {
                         );
 
                         let resp = req.success(ResponseBody::SetBreakpoints(
-                            responses::SetBreakpointsResponse {
-                                breakpoints: confirmed,
-                            },
+                            responses::SetBreakpointsResponse { breakpoints: confirmed },
                         ));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     Command::SetFunctionBreakpoints(ref args) => {
                         function_breakpoints.clear();
@@ -2022,22 +2006,17 @@ impl DapExecutor {
                                         source_pattern: source_pattern.compile_matcher(),
                                     });
                                     true
-                                }
+                                },
                                 _ => false,
                             };
-                            confirmed.push(types::Breakpoint {
-                                verified,
-                                ..Default::default()
-                            });
+                            confirmed.push(types::Breakpoint { verified, ..Default::default() });
                         }
 
                         let resp = req.success(ResponseBody::SetFunctionBreakpoints(
-                            responses::SetFunctionBreakpointsResponse {
-                                breakpoints: confirmed,
-                            },
+                            responses::SetFunctionBreakpointsResponse { breakpoints: confirmed },
                         ));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     // --- Evaluate (custom state query) ---
                     Command::Evaluate(ref args) if args.expression == "__miden_ui_state" => {
@@ -2059,7 +2038,7 @@ impl DapExecutor {
                                 memory_reference: None,
                             }));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     Command::Evaluate(ref args)
                         if matches!(
@@ -2098,7 +2077,7 @@ impl DapExecutor {
                                 })),
                             )
                             .ok();
-                    }
+                    },
 
                     Command::Evaluate(ref args)
                         if args.expression.starts_with("__miden_read_memory ") =>
@@ -2124,12 +2103,12 @@ impl DapExecutor {
                                     },
                                 ));
                                 server.respond(resp).ok();
-                            }
+                            },
                             Err(err) => {
                                 server.respond(req.error(&err)).ok();
-                            }
+                            },
                         }
-                    }
+                    },
 
                     Command::Evaluate(ref args)
                         if matches!(
@@ -2158,7 +2137,7 @@ impl DapExecutor {
                                 memory_reference: None,
                             }));
                         server.respond(resp).ok();
-                    }
+                    },
 
                     Command::Evaluate(ref args) => {
                         if let Some(variable) = debug_variables(
@@ -2188,12 +2167,12 @@ impl DapExecutor {
                         } else {
                             server.respond(req.error("Unsupported expression")).ok();
                         }
-                    }
+                    },
 
                     // --- Unhandled ---
                     _ => {
                         server.respond(req.error("Unsupported command")).ok();
-                    }
+                    },
                 }
                 debug_state.source_breakpoints.send_updates(&mut server);
             }
@@ -2237,7 +2216,7 @@ impl DapExecutor {
                     match step_result {
                         Ok(Some(new_ctx)) => {
                             ctx = Some(new_ctx);
-                        }
+                        },
                         Ok(None) => break,
                         Err(e) => {
                             // Capture the run up to the failure so it can still be replayed.
@@ -2247,14 +2226,14 @@ impl DapExecutor {
                                     snapshot_recorder: config.snapshot_recorder.as_ref(),
                                     event_recorder: self.event_recorder.as_ref(),
                                     forest_recorder: self.forest_recorder.as_ref(),
-                                    program: root_package.clone(),
+                                    program: root_package,
                                     stack_inputs,
                                     advice_inputs: &advice_inputs,
                                     options,
                                 });
                             }
                             return Err(e);
-                        }
+                        },
                     }
                 }
             }
@@ -2267,7 +2246,7 @@ impl DapExecutor {
                     snapshot_recorder: config.snapshot_recorder.as_ref(),
                     event_recorder: self.event_recorder.as_ref(),
                     forest_recorder: self.forest_recorder.as_ref(),
-                    program: root_package.clone(),
+                    program: root_package,
                     stack_inputs,
                     advice_inputs: &advice_inputs,
                     options,
@@ -2327,13 +2306,13 @@ fn write_replay_snapshot(context: ReplaySnapshotWriteContext<'_>) {
                 "Wrote replay snapshot ({} event(s), {} forest(s)) to {}",
                 write.event_count, write.forest_count, write.path
             );
-        }
+        },
         Err(err) => {
             if let Some(recorder) = context.snapshot_recorder {
                 recorder.record_error(Uri::from(context.path.to_path_buf()), err.to_string());
             }
             eprintln!("Failed to write replay snapshot to {}: {err}", context.path.display());
-        }
+        },
     }
 }
 
@@ -2374,13 +2353,13 @@ fn advance_one<H: Host>(
             *current_asmop = executed_asmop;
             update_top_frame_with_debug(host, current_asmop.as_ref(), source.inline_frames());
             Ok(Some(new_ctx))
-        }
+        },
         Ok(None) => {
             *cycle += 1;
             *current_asmop = None;
             debug_state.debug_vars.reset();
             Ok(None)
-        }
+        },
         Err(e) => Err(e),
     }
 }
@@ -2411,7 +2390,7 @@ fn is_next_source_line(
     match (start_loc, current_loc) {
         (Some(start), Some(current)) => {
             source_paths_match(&start.0, &current.0, source_path_prefixes) && start.1 != current.1
-        }
+        },
         (None, Some(_)) => true,
         _ => false,
     }
@@ -2436,7 +2415,7 @@ fn step_one<H: Host>(
             *resume_ctx = Some(new_ctx);
             update_top_frame(host, current_asmop.as_ref());
             StepResult::Stepped
-        }
+        },
         Ok(None) => StepResult::Terminated,
         Err(e) => StepResult::Error(e),
     }
@@ -2467,7 +2446,7 @@ fn step_over<H: Host>(
                     update_top_frame(host, current_asmop.as_ref());
                     return StepResult::Stepped;
                 }
-            }
+            },
             Ok(None) => return StepResult::Terminated,
             Err(e) => return StepResult::Error(e),
         }
@@ -2534,7 +2513,7 @@ fn step_next_line<H: Host>(
                     update_top_frame(host, current_asmop.as_ref());
                     return StepResult::Stepped;
                 }
-            }
+            },
             Ok(None) => return StepResult::Terminated,
             Err(e) => return StepResult::Error(e),
         }
@@ -2572,7 +2551,7 @@ fn step_out<H: Host>(
                     update_top_frame(host, current_asmop.as_ref());
                     return StepResult::Stepped;
                 }
-            }
+            },
             Ok(None) => return StepResult::Terminated,
             Err(e) => return StepResult::Error(e),
         }
@@ -2648,7 +2627,7 @@ fn step_until_breakpoint<H: Host>(
                         }
                     }
                 }
-            }
+            },
             Ok(None) => return StepResult::Terminated,
             Err(e) => return StepResult::Error(e),
         }

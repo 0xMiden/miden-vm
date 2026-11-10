@@ -34,13 +34,7 @@ fn trace_handler_errors_preserve_the_registered_name_through_dap() {
         FastProcessor::new(StackInputs::default()).execute(&package.unwrap_program(), &mut wrapper),
     )
     .expect_err("the trace handler must reject execution");
-    let ExecutionError::EventError {
-        event_id,
-        event_name,
-        error,
-        ..
-    } = error
-    else {
+    let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
         panic!("unexpected execution error: {error:?}");
     };
     assert_eq!(event_id, name.to_event_id());
@@ -220,7 +214,7 @@ fn dap_host_wrapper_records_event_mutations() {
     match batches[0].as_slice() {
         [AdviceMutation::ExtendStack { stack }] => {
             assert_eq!(stack.iter().copied().collect::<Vec<_>>(), [Felt::from(7u32)]);
-        }
+        },
         _ => panic!("unexpected mutations recorded"),
     }
     assert!(recorder.is_empty(), "take() should leave the recorder empty");
@@ -594,7 +588,10 @@ fn assert_serialized_dap_stacktraces(
 #[test]
 fn dap_stacktrace_preserves_inline_tail_context_without_inventing_physical_wrappers() {
     assert_serialized_dap_stacktraces(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/lit/call_frames_tail.masm")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../debugger/tests/lit/call_frames_tail.masm"
+        )),
         &[
             &["[inferred] $exec::inner", "[inlined] ::$exec::outer", "$exec::$main"],
             &["$exec::$main"],
@@ -608,7 +605,7 @@ fn dap_stacktrace_distinguishes_adjacent_invocations_from_package_metadata() {
     assert_serialized_dap_stacktraces(
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/lit/call_frames_siblings.masm"
+            "/../debugger/tests/lit/call_frames_siblings.masm"
         )),
         &[
             &["[inferred] $exec::leaf", "$exec::$main"],
@@ -624,7 +621,7 @@ fn dap_stacktrace_tracks_dynamic_calls_from_package_metadata() {
     assert_serialized_dap_stacktraces(
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/lit/call_frames_dyncall.masm"
+            "/../debugger/tests/lit/call_frames_dyncall.masm"
         )),
         &[
             &["$exec::inner", "[inferred] $exec::outer", "$exec::$main"],
@@ -761,7 +758,7 @@ fn dap_step_out_skips_tail_only_recursive_callers_until_a_caller_operation() {
             "program",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../tests/lit/call_frames_recursive.masm"
+                "/../debugger/tests/lit/call_frames_recursive.masm"
             )),
         )
         .unwrap();

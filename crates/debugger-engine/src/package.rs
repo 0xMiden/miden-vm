@@ -87,10 +87,7 @@ pub fn read_package_from_bytes(bytes: &[u8], input: &Uri) -> Result<Arc<Package>
                 help: TOOLCHAIN_HELP.into(),
             })
         } else {
-            Report::new(PackageLoadError::DecodePackage {
-                input: input.clone(),
-                cause,
-            })
+            Report::new(PackageLoadError::DecodePackage { input: input.clone(), cause })
         }
     })?;
 
@@ -102,10 +99,7 @@ pub fn read_package_from_bytes(bytes: &[u8], input: &Uri) -> Result<Arc<Package>
                 help: TOOLCHAIN_HELP.into(),
             }
         } else {
-            PackageLoadError::DecodeDebugInfo {
-                input: input.clone(),
-                cause,
-            }
+            PackageLoadError::DecodeDebugInfo { input: input.clone(), cause }
         };
         return Err(Report::new(error));
     }

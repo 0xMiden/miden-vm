@@ -1,9 +1,4 @@
-#![cfg(all(
-    feature = "std",
-    feature = "script",
-    feature = "flamegraph",
-    feature = "repl"
-))]
+#![cfg(all(feature = "std", feature = "script", feature = "flamegraph", feature = "repl"))]
 
 use std::{
     io::Write,

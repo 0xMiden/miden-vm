@@ -50,10 +50,10 @@ pub(crate) fn write_scalar_bytes(
         Type::U16 => write_with_format_type!(u16::from_le_bytes([bytes[0], bytes[1]])),
         Type::I32 => {
             write_with_format_type!(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        }
+        },
         Type::U32 => {
             write_with_format_type!(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        }
+        },
         Type::I64 => write_with_format_type!(i64::from_le_bytes(bytes[..8].try_into().unwrap())),
         Type::U64 => write_with_format_type!(u64::from_le_bytes(bytes[..8].try_into().unwrap())),
         _ => return Err(format!("support for reads of type '{ty}' are not implemented yet")),

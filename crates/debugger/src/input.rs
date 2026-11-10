@@ -16,7 +16,7 @@ impl core::fmt::Debug for InputFile {
             None => "None".to_string(),
             Some(content) => {
                 format!("Some({{ length: {}, data: .. }})", content.len())
-            }
+            },
         };
         f.debug_struct("InputFile")
             .field("path", &self.path)
@@ -75,7 +75,7 @@ impl InputFile {
                     .to_path()
                     .ok_or_else(|| InvalidInputError::InvalidPath(self.path.clone()))?;
                 std::fs::read(path).map(Cow::Owned).map_err(InvalidInputError::Io)
-            }
+            },
             Some(_) => Err(InvalidInputError::UnsupportedScheme(self.path.clone())),
         }
     }
@@ -91,10 +91,7 @@ impl InputFile {
     /// feature. If you are not building with the `std` feature enabled, then you should provide
     /// the content here, or the input file will be useless.
     pub fn new(path: impl Into<Uri>, content: Option<Box<[u8]>>) -> Self {
-        Self {
-            path: path.into(),
-            content,
-        }
+        Self { path: path.into(), content }
     }
 
     /// Get an [InputFile] representing the contents of `path`.
@@ -103,10 +100,7 @@ impl InputFile {
     #[cfg(feature = "std")]
     pub fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
         let path = path.as_ref();
-        Self {
-            path: Uri::from(path),
-            content: None,
-        }
+        Self { path: Uri::from(path), content: None }
     }
 
     /// Get an [InputFile] representing the contents received from standard input.
@@ -177,7 +171,7 @@ impl clap::builder::TypedValueParser for InputFileParser {
                     ));
                 }
                 Ok(InputFile::from_path(path))
-            }
+            },
         }
     }
 }

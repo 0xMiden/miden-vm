@@ -21,11 +21,7 @@ impl Connection {
         client.reader.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let peer_reader = BufReader::new(peer.try_clone().unwrap());
-        Self {
-            client,
-            peer,
-            peer_reader,
-        }
+        Self { client, peer, peer_reader }
     }
 
     fn send(&mut self, messages: &[Value]) {

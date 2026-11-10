@@ -49,11 +49,7 @@ pub fn replay_call_trace(recording: ReplaySnapshot) -> CallTraceReplay {
 
     let (trace, error) = collect_call_trace(&mut executor);
 
-    CallTraceReplay {
-        trace,
-        cycles: executor.cycle,
-        error,
-    }
+    CallTraceReplay { trace, cycles: executor.cycle, error }
 }
 
 /// Run `executor` to completion and collect its call trace.
@@ -91,8 +87,8 @@ fn collect_call_trace(executor: &mut DebugExecutor) -> (CallTrace, Option<Execut
             // On the entry cycle execution is still in the caller, so the callee is named later.
             Some(FrameTransition::Entered) => {
                 recorder.enter(clk, executor.callstack.logical_frames(""));
-            }
-            None => {}
+            },
+            None => {},
         }
     }
 

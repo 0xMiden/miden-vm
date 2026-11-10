@@ -220,7 +220,7 @@ impl Stepper {
         let next = match debug_info {
             Some(debug_info) => {
                 self.processor.step_with_package_debug_info_sync(host, ctx, &debug_info)
-            }
+            },
             None => self.processor.step_sync(host, ctx),
         };
         let running = self.after_step(next)?;
@@ -246,7 +246,7 @@ impl Stepper {
         let next = match debug_info {
             Some(debug_info) => {
                 self.processor.step_with_package_debug_info(host, ctx, &debug_info).await
-            }
+            },
             None => self.processor.step(host, ctx).await,
         };
         self.after_step(next)
@@ -279,13 +279,13 @@ impl Stepper {
     /// complete.
     pub fn into_output(self) -> Result<ExecutionOutput, ExecutionError> {
         match self.state {
-            State::Finished => {}
+            State::Finished => {},
             State::Ready(_) | State::Stepping => {
                 return Err(ExecutionError::Internal("the program has not terminated"));
-            }
+            },
             State::Failed => {
                 return Err(ExecutionError::Internal("the program failed and has no output"));
-            }
+            },
         }
         // The processor keeps the stack bottom first and the outputs want the top first. The
         // last step already rejected a final stack deeper than the output width.
@@ -306,11 +306,11 @@ impl Stepper {
             State::Finished => {
                 self.state = State::Finished;
                 return Ok(None);
-            }
+            },
             State::Failed => {
                 self.state = State::Failed;
                 return Err(ExecutionError::Internal("the program failed; it cannot be stepped"));
-            }
+            },
             // The execution is lost; the program counts as failed from here on, so that a
             // caller looping until the program stops is not kept waiting.
             State::Stepping => {
@@ -318,7 +318,7 @@ impl Stepper {
                 return Err(ExecutionError::Internal(
                     "a step did not complete; the execution is lost",
                 ));
-            }
+            },
         };
         // The pending debug info is consumed by the first step whatever the context carries:
         // a later context without debug info belongs to a library and must not inherit it.
@@ -345,11 +345,11 @@ impl Stepper {
                 let running = next.is_some();
                 self.state = next.map_or(State::Finished, State::Ready);
                 Ok(running)
-            }
+            },
             Err(error) => {
                 self.state = State::Failed;
                 Err(error)
-            }
+            },
         }
     }
 }

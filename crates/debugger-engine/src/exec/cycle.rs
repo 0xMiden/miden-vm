@@ -221,15 +221,15 @@ impl SourceTracker {
                             self.push_node(forest, node, depth);
                         }
                         self.push_boundary(Leaving::Dynamic(node), depth);
-                    }
+                    },
                     _ => {
                         if let Some(node) = node {
                             self.push_node(forest, node, depth);
                         }
-                    }
+                    },
                 }
                 start
-            }
+            },
             Continuation::FinishJoin(_)
             | Continuation::FinishSplit(_)
             | Continuation::FinishCall(_)
@@ -239,7 +239,7 @@ impl SourceTracker {
                     self.close(forest, node, false);
                 }
                 None
-            }
+            },
             // A loop's finish runs once per iteration and rechecks the condition, so the loop
             // stays open; its body, done with this iteration, is popped. The loop itself is
             // popped by the finish of the node that holds it, by a boundary, or at the end.
@@ -248,7 +248,7 @@ impl SourceTracker {
                     self.close(forest, node, true);
                 }
                 None
-            }
+            },
             // Operations and `RESPAN` neither open nor close a node; a forest switch is never
             // the next continuation, as asserted above.
             Continuation::ResumeBasicBlock { .. }
@@ -272,11 +272,7 @@ impl SourceTracker {
 
     /// Opens `node` of `forest`, started with the continuation stack `depth` deep.
     fn push_node(&mut self, forest: &Arc<MastForest>, node: DebugSourceNodeId, depth: usize) {
-        self.open.push(Entry::Node {
-            forest: forest.clone(),
-            node,
-            depth,
-        });
+        self.open.push(Entry::Node { forest: forest.clone(), node, depth });
     }
 
     /// Pops the nodes of the current frame whose start was deeper than the continuation stack
@@ -308,10 +304,7 @@ impl SourceTracker {
             Leaving::Dynamic(node) => (node, depth + 1),
         };
         self.boundaries.push(self.open.len());
-        self.open.push(Entry::Boundary {
-            dynamic,
-            unwound_at,
-        });
+        self.open.push(Entry::Boundary { dynamic, unwound_at });
     }
 
     /// Position of the first entry above the innermost boundary: the start of the current
@@ -344,11 +337,7 @@ impl SourceTracker {
     fn return_to(&mut self, depth: usize) -> Option<DebugSourceNodeId> {
         let mut handed_over = None;
         while let Some(position) = self.boundaries.last().copied() {
-            let Entry::Boundary {
-                dynamic,
-                unwound_at,
-            } = &self.open[position]
-            else {
+            let Entry::Boundary { dynamic, unwound_at } = &self.open[position] else {
                 unreachable!("boundary positions point at boundaries")
             };
             if depth > *unwound_at {
@@ -380,9 +369,7 @@ impl SourceTracker {
     ) -> Option<DebugSourceNodeId> {
         let same_forest =
             self.open[self.frame_start()..].iter().rev().filter_map(|entry| match entry {
-                Entry::Node {
-                    forest: open, node, ..
-                } if Arc::ptr_eq(open, forest) => Some(*node),
+                Entry::Node { forest: open, node, .. } if Arc::ptr_eq(open, forest) => Some(*node),
                 _ => None,
             });
         let lists_child = |node: &DebugSourceNodeId| {

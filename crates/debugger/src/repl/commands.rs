@@ -68,7 +68,7 @@ impl FromStr for ReplCommand {
                 Some(n) => {
                     let n = n.parse::<usize>().map_err(|e| format!("invalid step count: {e}"))?;
                     Ok(ReplCommand::StepN(n))
-                }
+                },
                 None => Ok(ReplCommand::Step),
             },
             "n" | "next" => Ok(ReplCommand::Next),
@@ -81,13 +81,13 @@ impl FromStr for ReplCommand {
                 let args = args.ok_or("breakpoint requires a specification")?;
                 let bp_type = args.parse::<BreakpointType>()?;
                 Ok(ReplCommand::Break(bp_type))
-            }
+            },
             "bp" | "breakpoints" => Ok(ReplCommand::Breakpoints),
             "d" | "delete" => match args {
                 Some(id) => {
                     let id = id.parse::<u8>().map_err(|e| format!("invalid breakpoint id: {e}"))?;
                     Ok(ReplCommand::Delete(Some(id)))
-                }
+                },
                 None => Ok(ReplCommand::Delete(None)),
             },
 
@@ -97,7 +97,7 @@ impl FromStr for ReplCommand {
                 let args = args.ok_or("memory command requires an address")?;
                 let expr = args.parse::<ReadMemoryExpr>()?;
                 Ok(ReplCommand::Memory(expr))
-            }
+            },
             "locals" => Ok(ReplCommand::Locals),
             "vars" | "variables" => Ok(ReplCommand::Vars(args == Some("all"))),
             "where" | "w" => Ok(ReplCommand::Where),
@@ -109,7 +109,7 @@ impl FromStr for ReplCommand {
                     .parse::<usize>()
                     .map_err(|e| format!("invalid frame index: {e}"))?;
                 Ok(ReplCommand::Frame(index))
-            }
+            },
 
             // Control commands
             "reload" => Ok(ReplCommand::Reload),

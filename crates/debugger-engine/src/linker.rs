@@ -60,7 +60,7 @@ impl LinkLibrary {
         }
 
         let bytes = std::fs::read(path).into_diagnostic()?;
-        miden_mast_package::Package::read_from_bytes_trusted(&bytes)
+        Package::read_from_bytes_trusted(&bytes)
             .map_err(|e| {
                 Report::msg(format!("failed to load Miden package from {}: {e}", path.display()))
             })
@@ -167,14 +167,14 @@ impl clap::builder::TypedValueParser for LinkLibraryParser {
                         ErrorKind::ValueValidation,
                         format!("unrecognized linkage modifier '{other}'"),
                     ));
-                }
+                },
                 None if kind == "masp" => Linkage::Dynamic,
                 Some(_) | None => {
                     return Err(Error::raw(
                         ErrorKind::ValueValidation,
                         "invalid link library kind: supported values are 'masp'",
                     ));
-                }
+                },
             },
             None => Linkage::Dynamic,
         };
@@ -196,16 +196,12 @@ impl clap::builder::TypedValueParser for LinkLibraryParser {
                         format!("invalid link library '{}': {err}", maybe_path.display()),
                     )
                 })?
-            }
+            },
             1 => {
                 // A single component with no extension that is not a directory is a package name.
                 let name = maybe_path.file_name().unwrap().to_str().unwrap();
-                return Ok(LinkLibrary {
-                    name: name.into(),
-                    path: None,
-                    linkage,
-                });
-            }
+                return Ok(LinkLibrary { name: name.into(), path: None, linkage });
+            },
             _ => {
                 // A multi-component path is always treated as a path
                 maybe_path.canonicalize().map_err(|err| {
@@ -214,7 +210,7 @@ impl clap::builder::TypedValueParser for LinkLibraryParser {
                         format!("invalid link library: '{}': {err}", maybe_path.display()),
                     )
                 })?
-            }
+            },
         };
 
         if path.extension().is_none_or(|ext| !ext.eq_ignore_ascii_case("masp")) {

@@ -61,10 +61,10 @@ impl Pane for BreakpointsPane {
         match action {
             Action::Focus => {
                 self.focused = true;
-            }
+            },
             Action::UnFocus => {
                 self.focused = false;
-            }
+            },
             Action::Down => {
                 if let Some(prev) = self.breakpoint_selected.take() {
                     self.breakpoint_selected = state
@@ -76,7 +76,7 @@ impl Pane for BreakpointsPane {
                     self.breakpoint_selected = state.breakpoints.first().map(|bp| bp.id);
                 }
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Up => {
                 if let Some(prev) = self.breakpoint_selected.take() {
                     self.breakpoint_selected = state
@@ -89,7 +89,7 @@ impl Pane for BreakpointsPane {
                     self.breakpoint_selected = state.breakpoints.last().map(|bp| bp.id);
                 }
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Delete => {
                 if let Some(prev) = self.breakpoint_selected.take() {
                     state.breakpoints.retain(|bp| bp.id != prev);
@@ -100,10 +100,10 @@ impl Pane for BreakpointsPane {
                         .or_else(|| state.breakpoints.first().map(|bp| bp.id));
                     self.breakpoint_selected = select_next;
                 }
-            }
+            },
             Action::Reload => {
                 self.init(state)?;
-            }
+            },
             Action::Update => {
                 if self.breakpoint_cycle < state.executor().cycle {
                     self.breakpoints_hit.clear();
@@ -115,8 +115,8 @@ impl Pane for BreakpointsPane {
                     }
                 }
                 self.breakpoint_cycle = state.executor().cycle;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         Ok(None)

@@ -70,10 +70,7 @@ struct StandaloneDapHost {
 impl StandaloneDapHost {
     fn new(source_manager: Arc<DefaultSourceManager>) -> Self {
         let inner = DefaultHost::default().with_source_manager(source_manager.clone());
-        Self {
-            inner,
-            source_manager,
-        }
+        Self { inner, source_manager }
     }
 
     fn load_library(

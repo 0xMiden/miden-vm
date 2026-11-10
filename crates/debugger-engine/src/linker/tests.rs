@@ -95,7 +95,7 @@ fn loading_reports_invalid_packages_and_search_paths() {
 
     let from_path = LinkLibrary {
         name: "invalid".into(),
-        path: Some(invalid.clone()),
+        path: Some(invalid),
         linkage: Linkage::Dynamic,
     };
     assert!(

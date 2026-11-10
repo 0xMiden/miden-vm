@@ -18,7 +18,7 @@ const UNKNOWN_PROCEDURE: &str = "<unknown>";
 ///
 /// At each cycle, it records the current operation into the histogram of the most recent live
 /// procedure. Operations that cannot be attributed to a procedure are collected into a separate
-/// histogram, reported under [`UNKNOWN_PROCEDURE`].
+/// histogram, reported under `UNKNOWN_PROCEDURE`.
 ///
 /// The report contains one section per procedure, sorted by the number of cycles spent
 /// in that procedure (highest first).
@@ -52,7 +52,7 @@ impl Instrument for OpHistogramProc {
                 let mut hist = OpHistogram::default();
                 hist.record(op);
                 self.histograms.insert(key.to_owned(), hist);
-            }
+            },
         }
     }
 

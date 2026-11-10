@@ -74,11 +74,7 @@ impl Executor {
     ///
     /// NOTE: The execution options for tracing/debugging will be set to true for you
     pub fn from_config(config: ExecutionConfig) -> Self {
-        let ExecutionConfig {
-            inputs,
-            advice_inputs,
-            options,
-        } = config;
+        let ExecutionConfig { inputs, advice_inputs, options } = config;
 
         Self {
             stack: inputs,
@@ -199,11 +195,7 @@ impl Executor {
     /// options' advice budget, as every conversion of the executor does.
     fn stepper(self, package: Arc<Package>) -> Result<(Stepper, ProfilerConfig), ExecutionError> {
         let Self {
-            stack,
-            advice,
-            options,
-            profiler_config,
-            ..
+            stack, advice, options, profiler_config, ..
         } = self;
         let processor = FastProcessor::new_with_options(stack, advice, options)
             .expect("advice inputs should fit the options' advice budget");
@@ -303,7 +295,7 @@ impl Executor {
                         executor.cycle,
                     );
                     break;
-                }
+                },
             }
         }
         executor.into_execution_trace()
@@ -323,7 +315,7 @@ impl Executor {
             }
             match executor.step() {
                 Ok(_) => {
-                    if log::log_enabled!(target: "executor", log::Level::Trace)
+                    if log::log_enabled!(target: "executor", Level::Trace)
                         && let (Some(op), Some(asmop)) =
                             (executor.current_op, executor.current_asmop.as_ref())
                     {
@@ -340,10 +332,10 @@ impl Executor {
                         log::trace!(target: "executor", "  executed `{op:?}` of `{}` ({} cycles)", asmop.op(), asmop.num_cycles());
                         log::trace!(target: "executor", "  stack state: {:#?}", executor.current_stack);
                     }
-                }
+                },
                 Err(err) => {
                     render_execution_error(err, &executor, &source_manager);
-                }
+                },
             }
         }
 
@@ -406,14 +398,14 @@ fn register_builtin_event_handlers(
         match decode_println(process) {
             Ok(content) => {
                 log::log!(target: "stdout", Level::Info, "{content}");
-            }
+            },
             Err(err) => {
                 log::warn!(
                     target: "executor",
                     "emit.{PRINTLN_EVENT} failed at cycle {}: {err}",
                     process.clock(),
                 );
-            }
+            },
         }
 
         Ok(vec![])
@@ -464,10 +456,7 @@ fn decode_println(process: &ProcessorState<'_>) -> Result<String, PrintLnError> 
     let len = usize::try_from(process.get_stack_item(2).as_canonical_u64())
         .map_err(|_| PrintLnError::InvalidLength)?;
     if len > MAX_PRINTLN_BYTES {
-        return Err(PrintLnError::LengthExceeded {
-            requested: len,
-            max: MAX_PRINTLN_BYTES,
-        });
+        return Err(PrintLnError::LengthExceeded { requested: len, max: MAX_PRINTLN_BYTES });
     }
     let ptr = NativePtr::from_ptr(addr);
     let ctx = process.ctx();
@@ -495,7 +484,7 @@ fn render_execution_error(
     eprintln!("{stacktrace}");
 
     if !execution_state.current_stack.is_empty() {
-        let stack = execution_state.current_stack.iter().map(|elem| elem.as_canonical_u64());
+        let stack = execution_state.current_stack.iter().map(Felt::as_canonical_u64);
         let stack = DisplayValues::new(stack);
         eprintln!(
             "\nLast Known State (at most recent instruction which succeeded):

@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     boxed::Box,
     collections::VecDeque,
-    string::{String, ToString},
+    string::String,
     sync::{Arc, LazyLock, Mutex},
     vec::Vec,
 };
@@ -51,7 +51,7 @@ impl Log for DebugLogger {
         let file = record
             .file_static()
             .map(Cow::Borrowed)
-            .or_else(|| record.file().map(|f| f.to_string()).map(Cow::Owned));
+            .or_else(|| record.file().map(alloc::string::ToString::to_string).map(Cow::Owned));
         let entry = LogEntry {
             target,
             level: record.level(),
@@ -121,13 +121,7 @@ impl DebugLogger {
         guard
             .captured
             .iter()
-            .filter_map(move |entry| {
-                if predicate(entry) {
-                    Some(entry.clone())
-                } else {
-                    None
-                }
-            })
+            .filter_map(move |entry| if predicate(entry) { Some(entry.clone()) } else { None })
             .collect()
     }
 

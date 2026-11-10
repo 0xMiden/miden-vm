@@ -33,7 +33,7 @@ fn test_invalidated_areas_serde() {
 fn stack_frame_dummy_supports_arc_str_name() {
     use fake::Fake as _;
 
-    let _: StackFrame = fake::Faker.fake();
+    let _: StackFrame = Faker.fake();
 }
 
 #[cfg(feature = "integration_testing")]
@@ -44,7 +44,7 @@ fn source_dummy_generates_leaf_sources() {
 
     let mut rng = StdRng::seed_from_u64(0);
     for _ in 0..64 {
-        let source: Source = fake::Faker.fake_with_rng(&mut rng);
+        let source: Source = Faker.fake_with_rng(&mut rng);
         assert!(source.sources.is_none());
     }
 }
@@ -57,7 +57,7 @@ fn exception_details_dummy_generates_leaf_exceptions() {
 
     let mut rng = StdRng::seed_from_u64(0);
     for _ in 0..64 {
-        let details: ExceptionDetails = fake::Faker.fake_with_rng(&mut rng);
+        let details: ExceptionDetails = Faker.fake_with_rng(&mut rng);
         assert!(details.inner_exception.is_none());
     }
 }

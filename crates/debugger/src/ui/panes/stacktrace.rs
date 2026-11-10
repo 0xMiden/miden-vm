@@ -12,10 +12,7 @@ pub struct StackTracePane {
 
 impl StackTracePane {
     pub fn new(focused: bool, focused_border_style: Style) -> Self {
-        Self {
-            focused,
-            focused_border_style,
-        }
+        Self { focused, focused_border_style }
     }
 
     fn border_style(&self) -> Style {
@@ -46,19 +43,19 @@ impl Pane for StackTracePane {
             Action::Up => {
                 state.select_older_stack_frame();
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Down => {
                 state.select_newer_stack_frame();
                 return Ok(Some(Action::Update));
-            }
+            },
             Action::Focus => {
                 self.focused = true;
                 return Ok(Some(Action::TimedStatusLine("[j,k → frame selection]".into(), 3)));
-            }
+            },
             Action::UnFocus => {
                 self.focused = false;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         Ok(None)
@@ -113,7 +110,7 @@ impl Pane for StackTracePane {
                             Some(std::path::Component::Normal(c)) => {
                                 let c = c.to_string_lossy();
                                 taken += c.chars().count();
-                            }
+                            },
                             None => break,
                         }
                     }

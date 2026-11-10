@@ -123,10 +123,7 @@ pub struct InstrumentRegistrationInfo {
 impl InstrumentRegistrationInfo {
     pub const fn new<T: InstrumentRegistration>() -> Self {
         let name = <T as InstrumentRegistration>::NAME;
-        Self {
-            name,
-            builder: build_instrument::<T>,
-        }
+        Self { name, builder: build_instrument::<T> }
     }
 }
 

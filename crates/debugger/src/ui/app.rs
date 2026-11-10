@@ -99,11 +99,11 @@ impl App {
                         Some(tui::EventResponse::Continue(action)) => {
                             action_tx.send(action).ok();
                             false
-                        }
+                        },
                         Some(tui::EventResponse::Stop(action)) => {
                             action_tx.send(action).ok();
                             true
-                        }
+                        },
                         _ => false,
                     })
                     .unwrap_or(false);
@@ -116,11 +116,11 @@ impl App {
                             Some(tui::EventResponse::Continue(action)) => {
                                 action_tx.send(action).ok();
                                 false
-                            }
+                            },
                             Some(tui::EventResponse::Stop(action)) => {
                                 action_tx.send(action).ok();
                                 true
-                            }
+                            },
                             _ => false,
                         })
                         .unwrap_or(false);
@@ -132,11 +132,11 @@ impl App {
                             Some(tui::EventResponse::Continue(action)) => {
                                 action_tx.send(action).ok();
                                 false
-                            }
+                            },
                             Some(tui::EventResponse::Stop(action)) => {
                                 action_tx.send(action).ok();
                                 true
-                            }
+                            },
                             _ => false,
                         })
                         .unwrap_or(false);
@@ -145,12 +145,12 @@ impl App {
                     match evt {
                         tui::Event::Quit if self.state.input_mode == InputMode::Normal => {
                             action_tx.send(Action::Quit).into_diagnostic()?
-                        }
+                        },
                         tui::Event::Tick => action_tx.send(Action::Tick).into_diagnostic()?,
                         tui::Event::Render => action_tx.send(Action::Render).into_diagnostic()?,
                         tui::Event::Resize(x, y) => {
                             action_tx.send(Action::Resize(x, y)).into_diagnostic()?
-                        }
+                        },
                         tui::Event::Key(key) => {
                             if let Some(keymap) = self.keybindings.get(&self.mode) {
                                 if let Some(action) = keymap.get(&vec![key]) {
@@ -165,7 +165,7 @@ impl App {
                                     }
                                 }
                             }
-                        }
+                        },
                         _ => (),
                     }
                 }
@@ -178,10 +178,10 @@ impl App {
                 match action {
                     Action::Tick => {
                         self.last_tick_key_events.clear();
-                    }
+                    },
                     Action::Quit if self.state.input_mode == InputMode::Normal => {
                         self.should_quit = true
-                    }
+                    },
                     Action::Suspend => self.should_suspend = true,
                     Action::Resume => self.should_suspend = false,
                     Action::Resize(w, h) => {
@@ -194,7 +194,7 @@ impl App {
                             })
                         })
                         .into_diagnostic()?;
-                    }
+                    },
                     Action::Render => {
                         tui.draw(|f| {
                             self.draw(f).unwrap_or_else(|err| {
@@ -204,17 +204,17 @@ impl App {
                             })
                         })
                         .into_diagnostic()?;
-                    }
+                    },
                     Action::ShowDebug => {
                         let debug_popup = DebugPane::default();
                         self.popup = Some(Box::new(debug_popup));
-                    }
+                    },
                     Action::Error(ref message) => {
                         self.popup = Some(Box::new(ErrorPane::new(message.clone())));
-                    }
+                    },
                     Action::ClosePopup => {
                         let _ = self.popup.take();
-                    }
+                    },
                     _ => (),
                 }
 

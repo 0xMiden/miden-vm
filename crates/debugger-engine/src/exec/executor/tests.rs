@@ -46,9 +46,7 @@ fn records_event_mutations_and_replays_them() {
     executor
         .register_event_handler(
             EventName::from_string(event_name.to_string()),
-            Arc::new(CountingHandler {
-                calls: AtomicU64::new(0),
-            }),
+            Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
         )
         .expect("failed to register event handler");
     executor.with_event_advice_mutations_recording();
@@ -72,7 +70,7 @@ fn records_event_mutations_and_replays_them() {
                     stack.iter().copied().collect::<Vec<_>>(),
                     [Felt::from(100u32 + index as u32)],
                 );
-            }
+            },
             _ => panic!("unexpected mutations recorded for event {index}"),
         }
     }
@@ -186,9 +184,7 @@ fn replays_from_a_serialized_snapshot() {
     executor
         .register_event_handler(
             EventName::from_string(event_name.to_string()),
-            Arc::new(CountingHandler {
-                calls: AtomicU64::new(0),
-            }),
+            Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
         )
         .expect("failed to register event handler");
     executor.with_event_advice_mutations_recording();
@@ -319,11 +315,7 @@ fn into_stepper_returns_the_initial_context_error() {
     };
     // The size of the empty advice inputs, the empty Merkle store's, is read off the
     // processor's refusal of a budget of nothing.
-    let ExecutionConfig {
-        inputs,
-        advice_inputs,
-        options,
-    } = budget(0);
+    let ExecutionConfig { inputs, advice_inputs, options } = budget(0);
     let Err(AdviceError::SizeBudgetExceeded { current: size, .. }) =
         FastProcessor::new_with_options(inputs, advice_inputs, options)
     else {

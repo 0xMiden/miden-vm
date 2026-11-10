@@ -31,11 +31,7 @@ impl<'a, H> RecordingHost<'a, H> {
         event_recorder: Option<EventMutationRecorder>,
         forest_recorder: Option<MastForestRecorder>,
     ) -> Self {
-        Self {
-            inner,
-            event_recorder,
-            forest_recorder,
-        }
+        Self { inner, event_recorder, forest_recorder }
     }
 }
 

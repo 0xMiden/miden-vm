@@ -8,7 +8,7 @@
 extern crate alloc;
 
 #[cfg(any(test, feature = "std"))]
-#[macro_use]
+#[cfg_attr(feature = "std", macro_use)]
 extern crate std;
 
 pub mod debug;

@@ -118,31 +118,19 @@ macro_rules! nmatches {
 }
 
 fn class(s: char, e: char) -> Token {
-    Class {
-        negated: false,
-        ranges: vec![(s, e)],
-    }
+    Class { negated: false, ranges: vec![(s, e)] }
 }
 
 fn classn(s: char, e: char) -> Token {
-    Class {
-        negated: true,
-        ranges: vec![(s, e)],
-    }
+    Class { negated: true, ranges: vec![(s, e)] }
 }
 
 fn rclass(ranges: &[(char, char)]) -> Token {
-    Class {
-        negated: false,
-        ranges: ranges.to_vec(),
-    }
+    Class { negated: false, ranges: ranges.to_vec() }
 }
 
 fn rclassn(ranges: &[(char, char)]) -> Token {
-    Class {
-        negated: true,
-        ranges: ranges.to_vec(),
-    }
+    Class { negated: true, ranges: ranges.to_vec() }
 }
 
 syntax!(literal1, "a", vec![Literal('a')]);

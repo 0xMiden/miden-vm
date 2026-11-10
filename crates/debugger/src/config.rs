@@ -41,22 +41,15 @@ pub struct DebuggerConfig {
     /// The working directory for the debugger
     ///
     /// By default this will be the working directory the debugger is executed from
-    #[cfg_attr(
-        feature = "std",
-        arg(long, value_name = "DIR", help_heading = "Execution")
-    )]
+    #[cfg_attr(feature = "std", arg(long, value_name = "DIR", help_heading = "Execution"))]
     pub working_dir: Option<PathBuf>,
     /// The path to the root directory of the current Miden toolchain
     ///
-    /// By default this is assumed to be `$(midenup show home)/toolchains/$(midenup show active-toolchain)
+    /// By default this is assumed to be `$(midenup show home)/toolchains/$(midenup show
+    /// active-toolchain)
     #[cfg_attr(
         feature = "std",
-        arg(
-            long,
-            value_name = "DIR",
-            env = "MIDEN_SYSROOT",
-            help_heading = "Linker"
-        )
+        arg(long, value_name = "DIR", env = "MIDEN_SYSROOT", help_heading = "Linker")
     )]
     pub sysroot: Option<PathBuf>,
     /// Whether, and how, to color terminal output
@@ -78,19 +71,13 @@ pub struct DebuggerConfig {
     /// Specify the address of the DAP server (e.g. "127.0.0.1:4711").
     /// When this flag is set, the debugger connects to an existing remote session.
     #[cfg(all(feature = "dap", feature = "tui"))]
-    #[cfg_attr(
-        feature = "std",
-        arg(long, value_name = "ADDR", help_heading = "Execution")
-    )]
+    #[cfg_attr(feature = "std", arg(long, value_name = "ADDR", help_heading = "Execution"))]
     pub dap_connect: Option<String>,
     /// Start a DAP debug server for the local program and wait for a client to connect.
     ///
     /// Specify the address to listen on (e.g. "127.0.0.1:4711").
     #[cfg(feature = "dap")]
-    #[cfg_attr(
-        feature = "std",
-        arg(long, value_name = "ADDR", help_heading = "Execution")
-    )]
+    #[cfg_attr(feature = "std", arg(long, value_name = "ADDR", help_heading = "Execution"))]
     pub start_debug_adapter: Option<String>,
     /// Source path prefixes used by the compiler's `-Zremap-path-prefix` option.
     ///
@@ -114,20 +101,12 @@ pub struct DebuggerConfig {
     /// inputs, resolved code, and event log are replayed so the same execution can be stepped
     /// through offline, without the original host.
     #[cfg(feature = "tui")]
-    #[cfg_attr(
-        feature = "std",
-        arg(long, value_name = "FILE", help_heading = "Execution")
-    )]
+    #[cfg_attr(feature = "std", arg(long, value_name = "FILE", help_heading = "Execution"))]
     pub replay: Option<PathBuf>,
     /// Specify one or more search paths for link libraries requested via `-l`
     #[cfg_attr(
         feature = "std",
-        arg(
-            long = "search-path",
-            short = 'L',
-            value_name = "PATH",
-            help_heading = "Linker"
-        )
+        arg(long = "search-path", short = 'L', value_name = "PATH", help_heading = "Linker")
     )]
     pub search_path: Vec<PathBuf>,
     /// Load the compiled library package NAME.
@@ -208,7 +187,7 @@ pub enum ColorChoice {
 
 #[derive(Debug, thiserror::Error)]
 #[error("invalid color choice: {0}")]
-pub struct ColorChoiceParseError(alloc::borrow::Cow<'static, str>);
+pub struct ColorChoiceParseError(Cow<'static, str>);
 
 impl FromStr for ColorChoice {
     type Err = ColorChoiceParseError;
@@ -245,7 +224,7 @@ impl ColorChoice {
                 if k == "dumb" {
                     return false;
                 }
-            }
+            },
         }
         // If TERM != dumb, then the only way we don't allow colors at this
         // point is if NO_COLOR is set.
@@ -296,7 +275,7 @@ impl ColorChoice {
                     // console API may be available.
                     Ok(k) => k != "dumb" && k != "cygwin",
                 }
-            }
+            },
             #[cfg(not(all(feature = "std", feature = "tui", windows)))]
             ColorChoice::Auto => false,
         }

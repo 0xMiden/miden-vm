@@ -72,8 +72,8 @@ pub enum ReverseCommand {
     ///
     /// Specification: [RunInTerminal](https://microsoft.github.io/debug-adapter-protocol/specification#Reverse_Requests_RunInTerminal)
     RunInTerminal(RunInTerminalRequestArguments),
-    /// This request is sent from the debug adapter to the client to start a new debug session of the
-    /// same type as the caller.
+    /// This request is sent from the debug adapter to the client to start a new debug session of
+    /// the same type as the caller.
     ///
     /// This request should only be sent if the corresponding client capability
     /// `supportsStartDebuggingRequest` is true.

@@ -130,10 +130,7 @@ fn return_felt_counts() {
     let mut builder = PackageDebugInfoBuilder::default();
     let felt = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
     // A `Word` is emitted as `[Felt; 4]`
-    let word = builder.add_type(DebugTypeInfo::Array {
-        element_type_idx: felt,
-        count: Some(4),
-    });
+    let word = builder.add_type(DebugTypeInfo::Array { element_type_idx: felt, count: Some(4) });
     let void = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void));
     add_function(&mut builder, "felt_fn", None, Some(felt));
     add_function(&mut builder, "word_fn", None, Some(word));

@@ -47,7 +47,7 @@ impl<'a, H: Host> DiagnosticHostWrapper<'a, H> {
 
         if !self.last_stack_state.is_empty() {
             let stack_display: Vec<_> =
-                self.last_stack_state.iter().take(16).map(|f| f.as_canonical_u64()).collect();
+                self.last_stack_state.iter().take(16).map(Felt::as_canonical_u64).collect();
             eprintln!("Last known stack state (top 16): {stack_display:?}");
         }
 
@@ -71,17 +71,11 @@ impl<H: Host> BaseHost for DiagnosticHostWrapper<'_, H> {
         self.inner.get_label_and_source_file(location)
     }
 
-    fn resolve_event(
-        &self,
-        event_id: miden_core::events::EventId,
-    ) -> Option<&miden_core::events::EventName> {
+    fn resolve_event(&self, event_id: EventId) -> Option<&miden_core::events::EventName> {
         self.inner.resolve_event(event_id)
     }
 
-    fn resolve_trace(
-        &self,
-        trace_id: miden_core::events::EventId,
-    ) -> Option<&miden_core::events::EventName> {
+    fn resolve_trace(&self, trace_id: EventId) -> Option<&miden_core::events::EventName> {
         self.inner.resolve_trace(trace_id)
     }
 }
@@ -120,14 +114,14 @@ impl<H: Host> Host for DiagnosticHostWrapper<'_, H> {
 // DIAGNOSTIC EXECUTOR
 // ================================================================================================
 
-/// A [`ProgramExecutor`] that wraps [`FastProcessor`] with diagnostic capabilities.
+/// Wraps [`FastProcessor`] with diagnostic capabilities.
 ///
 /// When execution fails, it captures and reports rich diagnostic information including:
 /// - The clock cycle at failure
 /// - The call depth (from trace events)
 /// - The last known operand stack state
 ///
-/// This executor is intended for use with [`TransactionExecutor`] to provide better error
+/// This executor is intended for use with transaction executors to provide better error
 /// diagnostics when transactions fail during testing or development.
 ///
 /// # Usage
@@ -153,11 +147,7 @@ impl DiagnosticExecutor {
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
     ) -> Self {
-        DiagnosticExecutor {
-            stack_inputs,
-            advice_inputs,
-            options,
-        }
+        DiagnosticExecutor { stack_inputs, advice_inputs, options }
     }
 
     pub fn execute_async<H: Host + Send>(
@@ -181,7 +171,7 @@ impl DiagnosticExecutor {
                 Err(err) => {
                     wrapper.report_diagnostics(&err);
                     Err(err)
-                }
+                },
             }
         }
     }

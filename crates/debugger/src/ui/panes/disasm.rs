@@ -12,10 +12,7 @@ pub struct DisassemblyPane {
 
 impl DisassemblyPane {
     pub fn new(focused: bool, focused_border_style: Style) -> Self {
-        Self {
-            focused,
-            focused_border_style,
-        }
+        Self { focused, focused_border_style }
     }
 
     fn border_style(&self) -> Style {
@@ -45,11 +42,11 @@ impl Pane for DisassemblyPane {
         match action {
             Action::Focus => {
                 self.focused = true;
-            }
+            },
             Action::UnFocus => {
                 self.focused = false;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         Ok(None)
@@ -80,10 +77,10 @@ impl Pane for DisassemblyPane {
                         .map(|op| Line::from(vec![Span::styled(format!(" | {op}"), Color::Gray)]))
                         .collect::<Vec<_>>(),
                 )
-            }
+            },
             Some(frame) => {
                 let proc_name =
-                    live_proc_name.clone().or_else(|| frame.procedure("").map(|p| p.to_string()));
+                    live_proc_name.or_else(|| frame.procedure("").map(|p| p.to_string()));
                 let proc = proc_name
                     .map(|p| Line::from(format!("in {p}")))
                     .unwrap_or_else(|| Line::from("in <unknown>"))
@@ -101,7 +98,7 @@ impl Pane for DisassemblyPane {
                         })
                         .collect::<Vec<_>>(),
                 )
-            }
+            },
         };
         let selected_line = lines.len().saturating_sub(1);
 

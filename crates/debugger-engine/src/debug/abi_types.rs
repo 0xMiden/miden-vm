@@ -27,10 +27,7 @@ pub struct TypedProcedure {
 
 impl TypedProcedure {
     pub fn new(name: impl Into<String>, signature: FunctionType) -> Result<Self, TypedError> {
-        let procedure = Self {
-            name: name.into(),
-            signature,
-        };
+        let procedure = Self { name: name.into(), signature };
         procedure.info()?;
         Ok(procedure)
     }
@@ -89,10 +86,7 @@ pub(crate) fn return_felt_count(
     function: &DebugFunctionInfo,
 ) -> Option<usize> {
     let type_idx = function.type_idx.into_option()?;
-    let DebugTypeInfo::Function {
-        return_type_idx, ..
-    } = info.get_type(type_idx)?
-    else {
+    let DebugTypeInfo::Function { return_type_idx, .. } = info.get_type(type_idx)? else {
         return None;
     };
     // No return value: no return type, or `Void`.
@@ -164,10 +158,8 @@ impl WitScalarCodec for AccountIdCodec {
                 reason: "an account ID occupies exactly two felts",
             });
         };
-        Self::validate_felts(*prefix, *suffix).map_err(|reason| TypedError::MalformedResult {
-            ty: self.wit_name().into(),
-            reason,
-        })?;
+        Self::validate_felts(*prefix, *suffix)
+            .map_err(|reason| TypedError::MalformedResult { ty: self.wit_name().into(), reason })?;
         let hex =
             format!("0x{:016x}{:014x}", prefix.as_canonical_u64(), suffix.as_canonical_u64() >> 8);
         Ok(format!("account-id({hex})"))

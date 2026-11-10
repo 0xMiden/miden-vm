@@ -18,7 +18,7 @@ use miden_processor::{
 use super::advice::clone_advice_mutations;
 use crate::Event;
 
-/// This is an implementation of [Host] which is essentially [miden_processor::DefaultHost],
+/// This is an implementation of [miden_processor::Host] based on [miden_processor::DefaultHost],
 /// but extended with additional functionality for debugging, in particular it manages trace
 /// events that record the entry or exit of a procedure call frame.
 pub struct DebuggerHost<S: SourceManager + ?Sized> {
@@ -95,7 +95,7 @@ where
         err_code: Option<NonZeroU32>,
     ) {
         if let Some(handler) = self.on_assert_failed.as_mut() {
-            handler(process, err_code.map(|nz| nz.get()).unwrap_or_default());
+            handler(process, err_code.map(core::num::NonZero::get).unwrap_or_default());
         }
     }
 
@@ -181,7 +181,7 @@ where
                 struct UnhandledEvent;
 
                 Err(UnhandledEvent.into())
-            }
+            },
             Err(err) => Err(err),
         };
 

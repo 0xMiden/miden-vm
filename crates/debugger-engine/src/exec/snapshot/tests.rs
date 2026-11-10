@@ -34,7 +34,7 @@ fn replay_snapshot_round_trips() {
     ];
 
     let snapshot = ReplaySnapshot {
-        package: program.clone(),
+        package: program,
         stack_inputs: StackInputs::new(&[Felt::from(42u32), Felt::from(43u32)]).unwrap(),
         advice_inputs: AdviceInputs::default()
             .with_stack([Felt::from(99u32)].into_iter().collect()),
@@ -67,7 +67,7 @@ fn replay_snapshot_round_trips() {
                 stack.iter().copied().collect::<Vec<_>>(),
                 [Felt::from(7u32), Felt::from(8u32)],
             );
-        }
+        },
         _ => panic!("unexpected first event batch"),
     }
     match restored.event_log[2].as_slice() {
@@ -75,7 +75,7 @@ fn replay_snapshot_round_trips() {
             assert_eq!(inner_nodes.len(), 1);
             assert_eq!(inner_nodes[0].value, word([1, 2, 3, 4]));
             assert_eq!(inner_nodes[0].right, word([9, 10, 11, 12]));
-        }
+        },
         _ => panic!("unexpected merkle-store event batch"),
     }
 }

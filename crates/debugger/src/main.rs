@@ -59,7 +59,7 @@ pub fn main() -> Result<(), Report> {
                     "invalid MIDENC_TRACE_TIMING precision, expected one of [s, ms, us, ns], got \
                      '{other}'"
                 )));
-            }
+            },
         };
     } else {
         builder.format_timestamp(None);
@@ -78,7 +78,7 @@ pub fn main() -> Result<(), Report> {
                     .map_err(|err| Report::msg(format!("failed to install logger: {err}")))?;
                 log::set_max_level(log_level);
                 miden_debug::flamegraph::run(args)
-            }
+            },
         };
     }
 

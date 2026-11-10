@@ -205,12 +205,7 @@ fn remote_logical_frames_preserve_pre_resolved_locations() {
     let source_manager = DefaultSourceManager::default();
     let source_file = source_manager.load_file(&path).expect("source should load");
     let span = SourceSpan::new(source_file.id(), ByteIndex::new(11)..ByteIndex::new(17));
-    let remote = ResolvedLocation {
-        source_file,
-        line: 77,
-        col: 13,
-        span,
-    };
+    let remote = ResolvedLocation { source_file, line: 77, col: 13, span };
     let callstack = CallStack::from_remote_frames(vec![CallFrame::from_remote(
         Some(Arc::from("remote::procedure")),
         Some(remote.clone()),
@@ -248,10 +243,7 @@ fn test_source_path(test_name: &str) -> PathBuf {
 impl InlineCallFrame {
     #[cfg(feature = "dap")]
     pub(crate) fn new_for_test(name: impl Into<Arc<str>>, call_site: Location) -> Self {
-        Self {
-            name: name.into(),
-            call_site,
-        }
+        Self { name: name.into(), call_site }
     }
 }
 

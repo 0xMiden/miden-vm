@@ -96,7 +96,7 @@ impl PythonScriptSession {
                     Err(err) if err.is_instance_of::<PySyntaxError>(py) => {
                         py.run(code.as_c_str(), Some(globals), Some(globals))?;
                         Ok(String::new())
-                    }
+                    },
                     Err(err) => Err(err),
                 }
             })
@@ -249,11 +249,11 @@ impl PythonScriptSession {
                 } else {
                     Err(format!("no Python callback registered for breakpoint {id}"))
                 }
-            }
+            },
             None => {
                 self.breakpoint_callbacks.borrow_mut().clear();
                 Ok(())
-            }
+            },
         }
     }
 
@@ -331,11 +331,7 @@ fn module_alias_for_path(path: &Path) -> String {
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect::<String>();
-    if alias.is_empty() {
-        "script".into()
-    } else {
-        alias
-    }
+    if alias.is_empty() { "script".into() } else { alias }
 }
 
 fn validate_custom_command_name(name: &str) -> Result<(), String> {
@@ -392,7 +388,7 @@ fn create_miden_debugger_module(
     module.add("target", PyTarget::new(debugger.clone()))?;
     module.add("process", PyProcess::new(debugger.clone()))?;
     module.add("thread", PyThread::new(debugger.clone()))?;
-    module.add("frame", PyFrame::new(debugger.clone()))?;
+    module.add("frame", PyFrame::new(debugger))?;
 
     py.import("sys")?.getattr("modules")?.set_item("miden_debugger", &module)?;
 
@@ -412,7 +408,7 @@ fn find_breakpoint(debugger: &SharedDebugger, id: u8) -> PyResult<ScriptBreakpoi
         .ok_or_else(|| PyKeyError::new_err(format!("no breakpoint with id {id}")))
 }
 
-#[pyclass(name = "Debugger", unsendable, skip_from_py_object)]
+#[pyclass(name = "Debugger", unsendable)]
 #[derive(Clone)]
 pub struct PyDebugger {
     debugger: SharedDebugger,
@@ -461,7 +457,7 @@ impl PyDebugger {
     }
 }
 
-#[pyclass(name = "Target", unsendable, skip_from_py_object)]
+#[pyclass(name = "Target", unsendable)]
 #[derive(Clone)]
 pub struct PyTarget {
     debugger: SharedDebugger,
@@ -488,7 +484,7 @@ impl PyTarget {
     }
 }
 
-#[pyclass(name = "Process", unsendable, skip_from_py_object)]
+#[pyclass(name = "Process", unsendable)]
 #[derive(Clone)]
 pub struct PyProcess {
     debugger: SharedDebugger,
@@ -543,7 +539,7 @@ impl PyProcess {
     }
 }
 
-#[pyclass(name = "Thread", unsendable, skip_from_py_object)]
+#[pyclass(name = "Thread", unsendable)]
 #[derive(Clone)]
 pub struct PyThread {
     debugger: SharedDebugger,
@@ -575,7 +571,7 @@ impl PyThread {
     }
 }
 
-#[pyclass(name = "ExecutionContext", unsendable, skip_from_py_object)]
+#[pyclass(name = "ExecutionContext", unsendable)]
 #[derive(Clone)]
 pub struct PyExecutionContext {
     debugger: SharedDebugger,
@@ -614,7 +610,7 @@ impl PyExecutionContext {
     }
 }
 
-#[pyclass(name = "CommandResult", unsendable, skip_from_py_object)]
+#[pyclass(name = "CommandResult", unsendable)]
 #[derive(Default)]
 pub struct PyCommandResult {
     output: RefCell<String>,
@@ -660,7 +656,7 @@ impl PyCommandResult {
     }
 }
 
-#[pyclass(name = "Frame", unsendable, skip_from_py_object)]
+#[pyclass(name = "Frame", unsendable)]
 #[derive(Clone)]
 pub struct PyFrame {
     debugger: SharedDebugger,
@@ -670,19 +666,13 @@ pub struct PyFrame {
 
 impl PyFrame {
     fn new(debugger: SharedDebugger) -> Self {
-        Self {
-            debugger,
-            snapshot: None,
-        }
+        Self { debugger, snapshot: None }
     }
 
     fn snapshot(debugger: SharedDebugger, index: usize) -> Option<Self> {
         let frame = debugger.borrow().frame_at(index, false)?;
         let all = debugger.borrow().frame_at(index, true)?.variables;
-        Some(Self {
-            debugger,
-            snapshot: Some((frame, all)),
-        })
+        Some(Self { debugger, snapshot: Some((frame, all)) })
     }
 }
 
@@ -710,11 +700,7 @@ impl PyFrame {
         let values = self.snapshot.as_ref().map_or_else(
             || self.debugger.borrow().frame_with_variables(show_all).variables,
             |(frame, all)| {
-                if show_all {
-                    all.clone()
-                } else {
-                    frame.variables.clone()
-                }
+                if show_all { all.clone() } else { frame.variables.clone() }
             },
         );
         let variables = PyDict::new(py);
@@ -732,7 +718,7 @@ impl PyFrame {
     }
 }
 
-#[pyclass(name = "Breakpoint", unsendable, skip_from_py_object)]
+#[pyclass(name = "Breakpoint", unsendable)]
 #[derive(Clone)]
 pub struct PyBreakpoint {
     debugger: SharedDebugger,
@@ -780,7 +766,7 @@ impl PyBreakpoint {
     }
 }
 
-#[pyclass(name = "Value", unsendable, skip_from_py_object)]
+#[pyclass(name = "Value", unsendable)]
 #[derive(Clone)]
 pub struct PyValue {
     name: String,
@@ -837,7 +823,7 @@ impl PyValue {
     }
 }
 
-#[pyclass(name = "SourceLocation", unsendable, skip_from_py_object)]
+#[pyclass(name = "SourceLocation", unsendable)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PySourceLocation {
     path: String,

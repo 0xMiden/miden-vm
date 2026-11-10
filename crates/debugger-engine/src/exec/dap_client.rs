@@ -286,17 +286,17 @@ impl DapClient {
                         pending_events: VecDeque::new(),
                         seq: 0,
                     });
-                }
+                },
                 Err(_) if start.elapsed() < timeout => {
                     std::thread::sleep(delay);
                     delay = (delay * 2).min(std::time::Duration::from_secs(1));
-                }
+                },
                 Err(e) => {
                     return Err(format!(
                         "failed to reconnect to {addr} after {:.1}s: {e}",
                         timeout.as_secs_f64()
                     ));
-                }
+                },
             }
         }
     }
@@ -379,12 +379,12 @@ impl DapClient {
                 let resp: Response = serde_json::from_value(raw)
                     .map_err(|e| format!("response parse error: {e}"))?;
                 Ok(DapMessage::Response(resp))
-            }
+            },
             Some("event") => {
                 let event: Event =
                     serde_json::from_value(raw).map_err(|e| format!("event parse error: {e}"))?;
                 Ok(DapMessage::Event(event))
-            }
+            },
             other => Err(format!("unexpected message type: {other:?}")),
         }
     }
@@ -412,14 +412,14 @@ impl DapClient {
                         return Err(format!("DAP error: {msg}"));
                     }
                     return Ok(resp);
-                }
+                },
                 DapMessage::Event(event) => {
                     // The adapter may emit meaningful state events before the response
                     // we are waiting for. Preserve them so the following wait_for_stopped
                     // call can consume the stop/UI-state pair instead of hanging.
                     self.pending_events.push_back(event);
                     continue;
-                }
+                },
             }
         }
     }
@@ -440,24 +440,24 @@ impl DapClient {
                             .to_string()
                     })?;
                     return Ok(DapStopReason::Stopped(snapshot));
-                }
+                },
                 DapMessage::Event(Event::Terminated(body)) => {
                     let is_restart = body
                         .as_ref()
                         .and_then(|b| b.restart.as_ref())
-                        .and_then(|v| v.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
                     if is_restart {
                         return Ok(DapStopReason::Restarting);
                     }
                     return Ok(DapStopReason::Terminated);
-                }
+                },
                 DapMessage::Event(Event::MidenUiState(value)) => {
                     snapshot = Some(
                         serde_json::from_value::<DapUiState>(value)
                             .map_err(|e| format!("invalid miden/uiState payload: {e}"))?,
                     );
-                }
+                },
                 _ => continue,
             }
         }

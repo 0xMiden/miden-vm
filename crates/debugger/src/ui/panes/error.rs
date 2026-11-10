@@ -17,9 +17,7 @@ pub struct ErrorPane {
 
 impl ErrorPane {
     pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
+        Self { message: message.into() }
     }
 }
 

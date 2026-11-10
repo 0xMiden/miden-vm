@@ -30,6 +30,7 @@ pub struct Home {
 }
 
 impl Home {
+    #[expect(clippy::unnecessary_wraps, reason = "Preserve the fallible page constructor API")]
     pub fn new() -> Result<Self, Report> {
         let focused_border_style = Style::default().fg(Color::LightGreen);
 
@@ -75,7 +76,7 @@ impl Page for Home {
     fn update(&mut self, action: Action, state: &mut State) -> Result<Option<Action>, Report> {
         let mut actions: Vec<Option<Action>> = vec![];
         match action {
-            Action::Tick => {}
+            Action::Tick => {},
             Action::FocusNext => {
                 let next_index = self.focused_pane_index.saturating_add(1) % self.panes.len();
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
@@ -85,7 +86,7 @@ impl Page for Home {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     actions.push(pane.update(Action::Focus, state)?);
                 }
-            }
+            },
             Action::FocusPrev => {
                 let prev_index =
                     self.focused_pane_index.saturating_add(self.panes.len() - 1) % self.panes.len();
@@ -96,21 +97,21 @@ impl Page for Home {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     actions.push(pane.update(Action::Focus, state)?);
                 }
-            }
+            },
             Action::Update => {
                 for pane in self.panes.iter_mut() {
                     actions.push(pane.update(action.clone(), state)?);
                 }
-            }
+            },
             Action::ToggleFullScreen => {
                 self.fullscreen_pane_index =
                     self.fullscreen_pane_index.map_or(Some(self.focused_pane_index), |_| None);
-            }
+            },
             Action::FocusFooter(..) => {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     actions.push(pane.update(Action::UnFocus, state)?);
                 }
-            }
+            },
             Action::FooterResult(cmd, Some(args)) if cmd.eq(":") => {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     pane.update(Action::Focus, state)?;
@@ -125,10 +126,10 @@ impl Page for Home {
                                     "breakpoint created".to_string(),
                                     1,
                                 )));
-                            }
+                            },
                             Err(err) => {
                                 actions.push(Some(Action::TimedStatusLine(err, 5)));
-                            }
+                            },
                         },
                         "r" | "read" => match rest.parse::<ReadMemoryExpr>() {
                             Ok(expr) => match state.read_memory(&expr) {
@@ -141,17 +142,17 @@ impl Page for Home {
                             let show_all = rest.trim() == "all";
                             let result = state.format_variables(show_all);
                             actions.push(Some(Action::StatusLine(result)));
-                        }
+                        },
                         _ => {
                             log::debug!("unknown command with arguments: '{cmd} {args}'");
                             actions.push(Some(Action::TimedStatusLine("unknown command".into(), 1)))
-                        }
+                        },
                     },
                     None => match args.trim() {
                         "q" | "quit" => actions.push(Some(Action::Quit)),
                         "r" | "reload" | "restart" => {
                             actions.push(Some(Action::Reload));
-                        }
+                        },
                         "nl" | "next-line" | "nextline" => {
                             if state.stopped && !state.executor().stopped {
                                 state.create_breakpoint(BreakpointType::NextLine);
@@ -163,14 +164,14 @@ impl Page for Home {
                                     3,
                                 )));
                             }
-                        }
+                        },
                         "debug" => {
                             actions.push(Some(Action::ShowDebug));
-                        }
+                        },
                         "vars" | "variables" | "locals" => {
                             let result = state.format_variables(false);
                             actions.push(Some(Action::StatusLine(result)));
-                        }
+                        },
                         "p" | "proc" | "where" => {
                             // Show the current procedure name so users can craft
                             // `b in <pattern>` breakpoints.
@@ -188,28 +189,28 @@ impl Page for Home {
                             let msg = match (live, frame) {
                                 (Some(l), Some(f)) if l == f => {
                                     format!("proc: {l}")
-                                }
+                                },
                                 (Some(l), Some(f)) => {
                                     format!("proc (live): {l} / (frame): {f}")
-                                }
+                                },
                                 (Some(l), None) => format!("proc (live): {l}"),
                                 (None, Some(f)) => format!("proc (frame): {f}"),
                                 (None, None) => "proc: <unknown>".to_string(),
                             };
                             actions.push(Some(Action::StatusLine(msg)));
-                        }
+                        },
                         invalid => {
                             log::debug!("unknown command: '{invalid}'");
                             actions.push(Some(Action::TimedStatusLine("unknown command".into(), 1)))
-                        }
+                        },
                     },
                 }
-            }
+            },
             Action::FooterResult(_cmd, None) => {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     actions.push(pane.update(Action::Focus, state)?);
                 }
-            }
+            },
             Action::Continue => {
                 // DAP client mode: send step commands over the network
                 #[cfg(feature = "dap")]
@@ -244,7 +245,7 @@ impl Page for Home {
                         let status = match state.typed_result() {
                             Ok(Some(result)) => {
                                 format!("program terminated successfully: {result}")
-                            }
+                            },
                             Ok(None) => "program terminated successfully".to_string(),
                             Err(err) => format!("program terminated successfully; {err}"),
                         };
@@ -256,22 +257,22 @@ impl Page for Home {
                 for pane in self.panes.iter_mut() {
                     actions.push(pane.update(Action::Update, state)?);
                 }
-            }
+            },
             Action::Reload => match state.reload() {
                 Ok(_) => {
                     for pane in self.panes.iter_mut() {
                         actions.push(pane.update(Action::Reload, state)?);
                     }
-                }
+                },
                 Err(err) => {
                     actions.push(Some(Action::TimedStatusLine(err.to_string(), 5)));
-                }
+                },
             },
             _ => {
                 if let Some(pane) = self.panes.get_mut(self.focused_pane_index) {
                     actions.push(pane.update(action, state)?);
                 }
-            }
+            },
         }
 
         if let Some(tx) = &mut self.command_tx {
@@ -290,70 +291,64 @@ impl Page for Home {
         match state.input_mode {
             InputMode::Normal => {
                 let response = match key.code {
-                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
+                    KeyCode::Right | KeyCode::Char('l' | 'L') => {
                         EventResponse::Stop(Action::FocusNext)
-                    }
-                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
+                    },
+                    KeyCode::Left | KeyCode::Char('h' | 'H') => {
                         EventResponse::Stop(Action::FocusPrev)
-                    }
-                    KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
-                        EventResponse::Stop(Action::Down)
-                    }
-                    KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
-                        EventResponse::Stop(Action::Up)
-                    }
-                    KeyCode::Char('g') | KeyCode::Char('G') => EventResponse::Stop(Action::Go),
-                    KeyCode::Backspace | KeyCode::Char('b') | KeyCode::Char('B') => {
+                    },
+                    KeyCode::Down | KeyCode::Char('j' | 'J') => EventResponse::Stop(Action::Down),
+                    KeyCode::Up | KeyCode::Char('k' | 'K') => EventResponse::Stop(Action::Up),
+                    KeyCode::Char('g' | 'G') => EventResponse::Stop(Action::Go),
+                    KeyCode::Backspace | KeyCode::Char('b' | 'B') => {
                         EventResponse::Stop(Action::Back)
-                    }
-                    KeyCode::Char('f') | KeyCode::Char('F') => {
-                        EventResponse::Stop(Action::ToggleFullScreen)
-                    }
+                    },
+                    KeyCode::Char('f' | 'F') => EventResponse::Stop(Action::ToggleFullScreen),
                     KeyCode::Char(c) if ('1'..='9').contains(&c) => {
                         EventResponse::Stop(Action::Tab(c.to_digit(10).unwrap_or(0) - 1))
-                    }
+                    },
                     KeyCode::Char(']') => EventResponse::Stop(Action::TabNext),
                     KeyCode::Char('[') => EventResponse::Stop(Action::TabPrev),
                     KeyCode::Char(':') => {
                         EventResponse::Stop(Action::FocusFooter(":".into(), None))
-                    }
+                    },
                     KeyCode::Char('q') => EventResponse::Stop(Action::Quit),
                     KeyCode::Char('e') => {
                         state.create_breakpoint(BreakpointType::Finish);
                         state.stopped = false;
                         EventResponse::Stop(Action::Continue)
-                    }
+                    },
                     // Only step if we're stopped, and execution has not terminated
                     KeyCode::Char('s') if state.stopped && !state.executor().stopped => {
                         state.create_breakpoint(BreakpointType::Step);
                         state.stopped = false;
                         EventResponse::Stop(Action::Continue)
-                    }
+                    },
                     // Only step-next if we're stopped, and execution has not terminated
                     KeyCode::Char('n') if state.stopped && !state.executor().stopped => {
                         state.create_breakpoint(BreakpointType::Next);
                         state.stopped = false;
                         EventResponse::Stop(Action::Continue)
-                    }
+                    },
                     // Only resume execution if we're stopped, and execution has not terminated
                     KeyCode::Char('c') if state.stopped && !state.executor().stopped => {
                         state.stopped = false;
                         EventResponse::Stop(Action::Continue)
-                    }
+                    },
                     // Do not try to continue if execution has terminated, but warn user
                     KeyCode::Char('c' | 's' | 'n') if state.stopped && state.executor().stopped => {
                         EventResponse::Stop(Action::TimedStatusLine(
                             "program has terminated, cannot continue".to_string(),
                             3,
                         ))
-                    }
+                    },
                     KeyCode::Char('d') => EventResponse::Stop(Action::Delete),
                     _ => {
                         return Ok(None);
-                    }
+                    },
                 };
                 Ok(Some(response))
-            }
+            },
             InputMode::Insert => Ok(None),
             InputMode::Command => Ok(None),
         }
@@ -414,18 +409,18 @@ impl Home {
                 state.executor_mut().stopped = true;
                 state.stopped = true;
                 actions.push(Some(Action::StatusLine("program terminated successfully".into())));
-            }
+            },
             Ok(DapStopReason::Restarting) => {
                 state.stopped = true;
                 actions.push(Some(Action::StatusLine(
                     "server signaled Phase 2 restart during step".into(),
                 )));
-            }
+            },
             Err(e) => {
                 state.executor_mut().stopped = true;
                 state.stopped = true;
                 actions.push(Some(Action::StatusLine(format!("DAP error: {e}"))));
-            }
+            },
         }
 
         // Update panes with latest state

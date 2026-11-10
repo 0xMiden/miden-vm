@@ -122,10 +122,7 @@ fn resolves_explicit_frame_bases() {
         [(DebugFrameBase::Local(-7), false), (DebugFrameBase::Memory(9), true)]
     {
         let value = resolve_variable_value(
-            &DebugVarLocation::ResolvedFrameBase {
-                base,
-                byte_offset: 28,
-            },
+            &DebugVarLocation::ResolvedFrameBase { base, byte_offset: 28 },
             &[],
             |address| {
                 if memory_base && address == 9 {

@@ -101,7 +101,7 @@ fn recovered_backtrace_preserves_exec_callers_without_duplicate_inline_frames() 
             .is_some_and(|op| op.context_name().ends_with("::inner"))
         {
             let frames = executor.callstack.logical_frames("");
-            let names = frames.iter().map(|frame| frame.name()).collect::<Vec<_>>();
+            let names = frames.iter().map(crate::LogicalStackFrame::name).collect::<Vec<_>>();
             assert_eq!(names, ["$exec::$main", "$exec::outer", "$exec::inner"]);
             assert!(frames[1].display_name().starts_with("[inferred] "));
             assert!(frames[2].display_name().starts_with("[inferred] "));
@@ -158,7 +158,7 @@ fn recovered_backtrace_does_not_duplicate_explicit_event_frames() {
         if executor.current_asmop.as_ref().is_some_and(|op| op.op().as_ref() == "push.7") {
             let frames = executor.callstack.logical_frames("");
             assert_eq!(
-                frames.iter().map(|frame| frame.name()).collect::<Vec<_>>(),
+                frames.iter().map(crate::LogicalStackFrame::name).collect::<Vec<_>>(),
                 ["$exec::$main", "$exec::inner"]
             );
             assert!(
@@ -484,11 +484,14 @@ fn recursive_locals_belong_to_distinct_invocations_and_retire_on_return() {
     );
     let mut deepest = Vec::new();
     let mut returned = false;
-    let mut identities = alloc::collections::BTreeSet::new();
+    let mut identities = BTreeSet::new();
     while !executor.stopped {
         executor.step().unwrap();
         let frames = executor.callstack.logical_frames("");
-        let ids = frames.iter().filter_map(|frame| frame.invocation_id()).collect::<Vec<_>>();
+        let ids = frames
+            .iter()
+            .filter_map(crate::LogicalStackFrame::invocation_id)
+            .collect::<Vec<_>>();
         identities.extend(ids.iter().copied());
         let values = ids
             .iter()
@@ -545,14 +548,14 @@ fn suspended_locals_use_their_own_context_and_post_prologue_frame_pointer() {
                     .find(|frame| {
                         frame.name().ends_with("::outer") && frame.invocation_id().is_some()
                     })
-                    .and_then(|frame| frame.invocation_id())
+                    .and_then(crate::LogicalStackFrame::invocation_id)
                     .unwrap_or_else(|| panic!("{invocation}: {frames:?}"));
                 let inner = frames
                     .iter()
                     .find(|frame| {
                         frame.name().ends_with("::inner") && frame.invocation_id().is_some()
                     })
-                    .and_then(|frame| frame.invocation_id())
+                    .and_then(crate::LogicalStackFrame::invocation_id)
                     .unwrap_or_else(|| panic!("{invocation}: {frames:?}"));
                 assert_eq!(
                     executor.debug_vars.resolve(outer, "x", executor.processor()).unwrap().raw,
@@ -615,7 +618,7 @@ fn frame_base_anchors_refresh_while_active_and_freeze_while_suspended() {
             .callstack
             .logical_frames("")
             .first()
-            .and_then(|frame| frame.invocation_id())
+            .and_then(crate::LogicalStackFrame::invocation_id)
         else {
             continue;
         };
@@ -1002,7 +1005,7 @@ fn source_inlining_with_the_physical_procedure_name_is_preserved() {
     let mut checked = false;
     while !executor.stopped {
         executor.step().unwrap();
-        if executor.current_op != Some(miden_processor::operation::Operation::Mul) {
+        if executor.current_op != Some(Operation::Mul) {
             continue;
         }
         let logical = executor.callstack.logical_frames("");

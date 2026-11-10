@@ -17,7 +17,7 @@ fn all_operations_covers_every_valid_opcode() {
         .filter(|&op| Operation::read_from_bytes(&[op, 0, 0, 0, 0, 0, 0, 0, 0]).is_ok())
         .collect();
 
-    let ours: BTreeSet<u8> = ALL_OPERATIONS.iter().map(|op| op.op_code()).collect();
+    let ours: BTreeSet<u8> = ALL_OPERATIONS.iter().map(Operation::op_code).collect();
 
     // `ALL_OPERATIONS` holds real `Operation` values, so  `ours ⊆ valid`. The list can
     // therefore only fall out of sync by *missing* a variant.

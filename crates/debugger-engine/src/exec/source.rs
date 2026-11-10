@@ -38,11 +38,7 @@ impl SourceContext {
                 .map(|(info, source)| (info, source, cycle.op_idx.unwrap_or_default() as u32)),
             context.inherited_inline_call_contexts(),
         );
-        Self {
-            cycle,
-            debug_info,
-            inline_frames,
-        }
+        Self { cycle, debug_info, inline_frames }
     }
 
     pub fn debug_info(&self) -> Option<&Arc<PackageDebugInfo>> {
@@ -133,11 +129,7 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
         });
         let source_node_inferred = tracked.is_none() && source_node_id.is_some();
         match cont {
-            Continuation::ResumeBasicBlock {
-                node_id,
-                batch_index,
-                op_idx_in_batch,
-            } => {
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let MastNode::Block(block) = &forest[*node_id] else {
                     unreachable!()
                 };
@@ -156,11 +148,8 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
                     op_idx: Some(global_idx),
                     control_flow_kind: None,
                 };
-            }
-            Continuation::Respan {
-                node_id,
-                batch_index,
-            } => {
+            },
+            Continuation::Respan { node_id, batch_index } => {
                 let node = &forest[*node_id];
                 if let MastNode::Block(block) = node {
                     let mut global_idx = 0;
@@ -176,7 +165,7 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
                         control_flow_kind: Some(ControlFlowOp::Respan),
                     };
                 }
-            }
+            },
             Continuation::StartNode(node_id) => {
                 let control_flow_kind = match &forest[*node_id] {
                     MastNode::Block(_) => Some(ControlFlowOp::Span),
@@ -192,7 +181,7 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
                     op_idx: None,
                     control_flow_kind,
                 };
-            }
+            },
             Continuation::FinishBasicBlock(_)
             | Continuation::FinishJoin(_)
             | Continuation::FinishSplit(_)
@@ -207,7 +196,7 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
                     op_idx: None,
                     control_flow_kind: Some(ControlFlowOp::End),
                 };
-            }
+            },
             Continuation::EnterForest { .. } => {
                 return CurrentCycleInfo {
                     op: None,
@@ -217,7 +206,7 @@ fn extract_cycle(ctx: &ResumeContext, debug_info: Option<&PackageDebugInfo>) -> 
                     op_idx: None,
                     control_flow_kind: None,
                 };
-            }
+            },
         }
     }
     CurrentCycleInfo {

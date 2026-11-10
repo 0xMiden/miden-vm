@@ -150,7 +150,7 @@ end
         assert_eq!(frame.args[0].felt_count, Some(1));
         assert_eq!(
             frame.args[0].values.as_deref(),
-            expected.as_ref().map(|values| values.as_slice()),
+            expected.as_ref().map(<[u64; 1]>::as_slice),
             "base={base}, offset={offset}"
         );
     }

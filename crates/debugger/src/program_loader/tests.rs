@@ -46,9 +46,7 @@ pub(crate) fn test_package_input() -> crate::InputFile {
 }
 
 #[cfg(any(feature = "script", feature = "dap"))]
-pub(crate) fn invocation_test_package(
-    ty: Option<miden_assembly_syntax::ast::types::Type>,
-) -> Arc<miden_mast_package::Package> {
+pub(crate) fn invocation_test_package(ty: Option<Type>) -> Arc<Package> {
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_assembly_syntax::{
         Parse,

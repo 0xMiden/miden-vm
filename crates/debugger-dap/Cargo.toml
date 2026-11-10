@@ -6,10 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
-categories.workspace = true
-keywords.workspace = true
-license.workspace = true
+documentation = "https://docs.rs/miden-debug-dap"
+categories = ["development-tools"]
+keywords = ["miden", "debugger"]
+license = "MIT"
 edition.workspace = true
 
 [lib]
@@ -20,8 +20,8 @@ integration_testing = ["dep:fake", "dep:rand"]
 client = []
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 fake = { version = "5.*", features = ["derive"], optional = true }
-rand = { version = "0.10", optional = true }
+rand = { workspace = true, optional = true, features = ["std", "thread_rng"] }

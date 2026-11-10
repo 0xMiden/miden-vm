@@ -121,7 +121,7 @@ impl LogicalStackFrame {
                     && Arc::ptr_eq(left_info, right_info)
                     && left_function == right_function
                     && left_site == right_site
-            }
+            },
             _ => false,
         }
     }
@@ -136,9 +136,9 @@ impl LogicalStackFrame {
     pub(crate) fn function(&self) -> Option<&DebugFunctionInfo> {
         match self.source.as_ref()? {
             LogicalFrameSource::Physical(frame) => Some(frame.function()),
-            LogicalFrameSource::Inline {
-                info, function_idx, ..
-            } => info.get_function(*function_idx),
+            LogicalFrameSource::Inline { info, function_idx, .. } => {
+                info.get_function(*function_idx)
+            },
         }
     }
 
@@ -187,7 +187,7 @@ impl LogicalStackFrame {
         match self.location.as_ref()? {
             LogicalFrameLocation::Assembly(location) => {
                 resolve_assembly_location(source_manager, location)
-            }
+            },
             LogicalFrameLocation::Resolved(resolved) => Some(resolved.clone()),
         }
     }
@@ -389,8 +389,8 @@ impl CallStack {
             }
         };
         log::trace!("handling {:?}/{:?} at cycle {}: {:?}", info.control, info.op, info.clk, event);
-        let is_frame_start = event.as_ref().is_some_and(|event| event.is_frame_start());
-        let is_frame_end = event.as_ref().is_some_and(|event| event.is_frame_end());
+        let is_frame_start = event.as_ref().is_some_and(Event::is_frame_start);
+        let is_frame_end = event.as_ref().is_some_and(Event::is_frame_end);
         self.frame_transition = match (is_frame_start, is_frame_end) {
             (true, _) => Some(FrameTransition::Entered),
             (_, true) => Some(FrameTransition::Exited),
@@ -409,14 +409,14 @@ impl CallStack {
                 } else {
                     self.block_stack.push(None);
                 }
-            }
+            },
             Some(ControlFlowOp::Join | ControlFlowOp::Split) => {
                 self.block_stack.push(None);
-            }
+            },
             Some(ControlFlowOp::End) => {
                 self.block_stack.pop();
-            }
-            Some(ControlFlowOp::Respan) | None => {}
+            },
+            Some(ControlFlowOp::Respan) | None => {},
         }
 
         if !is_frame_end {
@@ -454,7 +454,7 @@ impl CallStack {
                         Some(Cow::Owned(raw_asmop))
                     });
                     (proc, asmop_cow)
-                }
+                },
                 _ => (None, info.asmop.map(Cow::Borrowed)),
             },
         };
@@ -470,7 +470,7 @@ impl CallStack {
 
         // Push op into call frame if this is any op other than `nop` or frame setup
         if !matches!(op, Operation::Noop) {
-            let cycle_idx = info.asmop.map(|a| a.num_cycles()).unwrap_or(1);
+            let cycle_idx = info.asmop.map(AssemblyOp::num_cycles).unwrap_or(1);
             current_frame.push(op, cycle_idx, asmop.as_deref());
         }
 
@@ -501,7 +501,7 @@ impl CallStack {
                 let name = Arc::from(context_name.to_string().into_boxed_str());
                 self.contexts.insert(Arc::clone(&name));
                 name
-            }
+            },
         }
     }
 
@@ -525,11 +525,11 @@ impl CallStack {
                     frame.push(op, 0, asmop);
                 }
                 self.frames.push(frame);
-            }
+            },
             Event::Unknown(code) => log::debug!("unknown trace event: {code}"),
             Event::FrameEnd => {
                 return self.frames.pop();
-            }
+            },
             _ => (),
         }
         None
@@ -566,7 +566,7 @@ impl CallFrame {
             let cell = OnceCell::new();
             cell.set(Some(loc)).ok();
             context.push_back(OpDetail::Full {
-                op: miden_processor::operation::Operation::Noop,
+                op: Operation::Noop,
                 location: None,
                 resolved: cell,
             });
@@ -639,7 +639,7 @@ impl CallFrame {
                     location,
                     resolved: Default::default(),
                 });
-            }
+            },
             None => {
                 // If this instruction does not have a location, inherit the location
                 // of the previous op in the frame, if one is present
@@ -652,7 +652,7 @@ impl CallFrame {
                 } else {
                     self.context.push_back(OpDetail::Basic { op: opcode });
                 }
-            }
+            },
         }
     }
 
@@ -714,15 +714,13 @@ impl OpDetail {
     pub fn callee(&self, strip_prefix: &str) -> Option<Box<str>> {
         match self {
             Self::Exec { callee: None } => Some(Box::from("<unknown>")),
-            Self::Exec {
-                callee: Some(callee),
-            } => {
+            Self::Exec { callee: Some(callee) } => {
                 let name = match callee.split_once("::") {
                     Some((module, rest)) if module == strip_prefix => demangle(rest),
                     _ => demangle(callee),
                 };
                 Some(name.into_boxed_str())
-            }
+            },
             _ => None,
         }
     }
@@ -730,9 +728,7 @@ impl OpDetail {
     pub fn display(&self) -> String {
         match self {
             Self::Full { op, .. } | Self::Basic { op } => format!("{op}"),
-            Self::Exec {
-                callee: Some(callee),
-            } => format!("exec.{callee}"),
+            Self::Exec { callee: Some(callee) } => format!("exec.{callee}"),
             Self::Exec { callee: None } => "exec.<unavailable>".to_string(),
         }
     }
@@ -753,9 +749,7 @@ impl OpDetail {
 
     pub fn resolve(&self, source_manager: &dyn SourceManager) -> Option<&ResolvedLocation> {
         match self {
-            Self::Full {
-                location, resolved, ..
-            } => {
+            Self::Full { location, resolved, .. } => {
                 if let Some(cached) = resolved.get() {
                     return cached.as_ref();
                 }
@@ -773,7 +767,7 @@ impl OpDetail {
                         })
                     })
                     .as_ref()
-            }
+            },
             _ => None,
         }
     }
@@ -886,10 +880,7 @@ impl<'a> StackTrace<'a> {
         let current_frame = callstack.logical_frames("").last().map(|frame| {
             let location = frame.resolved(source_manager);
             let procedure = Some(Arc::from(frame.display_name().into_boxed_str()));
-            CurrentFrame {
-                procedure,
-                location,
-            }
+            CurrentFrame { procedure, location }
         });
         Self {
             callstack,
@@ -950,10 +941,10 @@ impl fmt::Display for StackTrace<'_> {
                 for (i, op) in self.recent.iter().enumerate() {
                     let is_last = i + 1 == context_size;
                     if is_last {
-                        writeln!(f, " |   {}", op)?;
+                        writeln!(f, " |   {op}")?;
                         writeln!(f, " `-> <error occurred here>")?;
                     } else {
-                        writeln!(f, " |   {}", op)?;
+                        writeln!(f, " |   {op}")?;
                     }
                 }
             } else {

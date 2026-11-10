@@ -90,7 +90,7 @@ impl ReadMemoryExpr {
                 if array_ty.element_type() == &Type::Felt && array_ty.len() == 4 =>
             {
                 "word"
-            }
+            },
             Type::Ptr(_) => "ptr",
             ty => panic!("unsupported memory read type serialization: {ty}"),
         }
@@ -105,12 +105,7 @@ pub struct Read {
     #[arg(required(true), value_name = "ADDR", value_parser(parse_address))]
     pub addr: u32,
     /// The type of value to read from ADDR, defaults to 'word'
-    #[arg(
-        short = 't',
-        long = "type",
-        value_name = "TYPE",
-        value_parser(TypeParser)
-    )]
+    #[arg(short = 't', long = "type", value_name = "TYPE", value_parser(TypeParser))]
     pub ty: Option<Type>,
     /// The number of values to read
     #[arg(short = 'c', long = "count", value_name = "N", default_value_t = 1)]
@@ -203,11 +198,12 @@ impl clap::builder::TypedValueParser for TypeParser {
                     ErrorKind::InvalidValue,
                     format!("invalid/unsupported type '{value}'"),
                 ));
-            }
+            },
         })
     }
 }
 
+#[cfg(feature = "std")]
 fn parse_address(s: &str) -> Result<u32, String> {
     if let Some(s) = s.strip_prefix("0x") {
         u32::from_str_radix(s, 16).map_err(|err| format!("invalid memory address: {err}"))

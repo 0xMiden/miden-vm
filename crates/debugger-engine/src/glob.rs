@@ -215,10 +215,10 @@ pub(crate) fn normalize_path(uri: &Uri) -> Cow<'_, str> {
                 "" => "stdin",
                 other => other,
             });
-        }
+        },
         Some(scheme) if scheme == "file" || scheme.chars().count() == 1 => {
             uri.as_str().split_once("://").unwrap().1
-        }
+        },
         Some(_) => return Cow::Borrowed(uri.as_str().split_once("://").unwrap().1),
         None => uri.as_str(),
     };
@@ -304,10 +304,7 @@ enum Token {
     RecursivePrefix,
     RecursiveSuffix,
     RecursiveZeroOrMore,
-    Class {
-        negated: bool,
-        ranges: Vec<(char, char)>,
-    },
+    Class { negated: bool, ranges: Vec<(char, char)> },
     Alternates(Vec<Tokens>),
 }
 
@@ -323,10 +320,7 @@ impl Glob {
         re.unicode(false).dot_matches_new_line(true);
 
         let re = re.build().expect("regex compilation shouldn't fail");
-        GlobMatcher {
-            pat: self.clone(),
-            re,
-        }
+        GlobMatcher { pat: self.clone(), re }
     }
 
     /// Returns the original glob pattern used to build this pattern.
@@ -358,10 +352,7 @@ impl<'a> GlobBuilder<'a> {
     ///
     /// The pattern is not compiled until `build` is called.
     pub fn new(glob: &'a str) -> GlobBuilder<'a> {
-        GlobBuilder {
-            glob,
-            opts: GlobOptions::default(),
-        }
+        GlobBuilder { glob, opts: GlobOptions::default() }
     }
 
     /// Parses and builds the pattern.
@@ -391,7 +382,7 @@ impl<'a> GlobBuilder<'a> {
             let tokens = p.branches.pop().unwrap();
             Ok(Glob {
                 glob: self.glob.to_string(),
-                re: tokens.to_regex_with(&self.opts),
+                re: tokens.to_regex_with(self.opts),
                 opts: self.opts,
                 tokens,
             })
@@ -459,7 +450,7 @@ impl Tokens {
     /// Convert this pattern to a string that is guaranteed to be a valid
     /// regular expression and will represent the matching semantics of this
     /// glob pattern and the options given.
-    fn to_regex_with(&self, options: &GlobOptions) -> String {
+    fn to_regex_with(&self, options: GlobOptions) -> String {
         let mut re = String::new();
         re.push_str("(?-u)");
         if options.case_insensitive {
@@ -478,39 +469,36 @@ impl Tokens {
         re
     }
 
-    fn tokens_to_regex(&self, options: &GlobOptions, tokens: &[Token], re: &mut String) {
+    fn tokens_to_regex(&self, options: GlobOptions, tokens: &[Token], re: &mut String) {
         for tok in tokens.iter() {
             match *tok {
                 Token::Literal(c) => {
                     re.push_str(&char_to_escaped_literal(c));
-                }
+                },
                 Token::Any => {
                     if options.literal_separator {
                         re.push_str("[^/]");
                     } else {
                         re.push('.');
                     }
-                }
+                },
                 Token::ZeroOrMore => {
                     if options.literal_separator {
                         re.push_str("[^/]*");
                     } else {
                         re.push_str(".*");
                     }
-                }
+                },
                 Token::RecursivePrefix => {
                     re.push_str("(?:/?|.*/)");
-                }
+                },
                 Token::RecursiveSuffix => {
                     re.push_str("/.*");
-                }
+                },
                 Token::RecursiveZeroOrMore => {
                     re.push_str("(?:/|/.*/)");
-                }
-                Token::Class {
-                    negated,
-                    ref ranges,
-                } => {
+                },
+                Token::Class { negated, ref ranges } => {
                     re.push('[');
                     if negated {
                         re.push('^');
@@ -526,7 +514,7 @@ impl Tokens {
                         }
                     }
                     re.push(']');
-                }
+                },
                 Token::Alternates(ref patterns) => {
                     let mut parts = vec![];
                     for pat in patterns {
@@ -544,7 +532,7 @@ impl Tokens {
                         re.push_str(&parts.join("|"));
                         re.push(')');
                     }
-                }
+                },
             }
         }
     }
@@ -566,7 +554,7 @@ fn bytes_to_escaped_literal(bs: &[u8]) -> String {
         if b <= 0x7f {
             regex_syntax::escape_into(char::from(b).encode_utf8(&mut [0; 4]), &mut s);
         } else {
-            write!(&mut s, "\\x{:02x}", b).unwrap();
+            write!(&mut s, "\\x{b:02x}").unwrap();
         }
     }
     s
@@ -601,10 +589,7 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn error(&self, kind: ErrorKind) -> Error {
-        Error {
-            glob: Some(self.glob.to_string()),
-            kind,
-        }
+        Error { glob: Some(self.glob.to_string()), kind }
     }
 
     fn parse(&mut self) -> Result<(), Error> {
@@ -623,6 +608,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    #[expect(clippy::unnecessary_wraps, reason = "Parser actions share a fallible interface")]
     fn push_alternate(&mut self) -> Result<(), Error> {
         self.alternates_stack.push(self.branches.len());
         self.branches.push(Tokens::default());
@@ -716,32 +702,32 @@ impl<'a> Parser<'a> {
             None => {
                 assert!(self.bump().is_none());
                 true
-            }
-            Some(',') | Some('}') if self.branches.len() >= 2 => true,
+            },
+            Some(',' | '}') if self.branches.len() >= 2 => true,
             Some(c) if is_separator(c) => {
                 assert!(self.bump().map(is_separator).unwrap_or(false));
                 false
-            }
+            },
             _ => {
                 self.push_token(Token::ZeroOrMore)?;
                 self.push_token(Token::ZeroOrMore)?;
                 return Ok(());
-            }
+            },
         };
         match self.pop_token()? {
             Token::RecursivePrefix => {
                 self.push_token(Token::RecursivePrefix)?;
-            }
+            },
             Token::RecursiveSuffix => {
                 self.push_token(Token::RecursiveSuffix)?;
-            }
+            },
             _ => {
                 if is_suffix {
                     self.push_token(Token::RecursiveSuffix)?;
                 } else {
                     self.push_token(Token::RecursiveZeroOrMore)?;
                 }
-            }
+            },
         }
         Ok(())
     }
@@ -765,11 +751,11 @@ impl<'a> Parser<'a> {
         }
         let mut ranges = vec![];
         let negated = match self.chars.peek() {
-            Some(&'!') | Some(&'^') => {
+            Some(&'!' | &'^') => {
                 let bump = self.bump();
                 assert!(bump == Some('!') || bump == Some('^'));
                 true
-            }
+            },
             _ => false,
         };
         let mut first = true;
@@ -794,7 +780,7 @@ impl<'a> Parser<'a> {
                     } else {
                         break;
                     }
-                }
+                },
                 '-' => {
                     if first {
                         ranges.push(('-', '-'));
@@ -808,7 +794,7 @@ impl<'a> Parser<'a> {
                         assert!(!ranges.is_empty());
                         in_range = true;
                     }
-                }
+                },
                 c => {
                     if in_range {
                         // invariant: in_range is only set when there is
@@ -818,7 +804,7 @@ impl<'a> Parser<'a> {
                         ranges.push((c, c));
                     }
                     in_range = false;
-                }
+                },
             }
             first = false;
         }

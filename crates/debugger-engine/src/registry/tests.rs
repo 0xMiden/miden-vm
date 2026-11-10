@@ -81,7 +81,7 @@ fn registration_rejects_duplicates_without_replacing_records() {
     let error = registry.register(original.name.clone(), record).unwrap_err();
     assert!(error.to_string().contains("already registered"));
     assert_eq!(registry.available_versions(&original.name).unwrap().len(), 1);
-    assert_eq!(registry.cache_package(original.clone()).unwrap(), version);
+    assert_eq!(registry.cache_package(original).unwrap(), version);
     assert_eq!(registry.all().into_iter().count(), 1);
 }
 

@@ -30,7 +30,7 @@ impl NativePtr {
     }
 
     /// Translates a raw pointer (assumed to be in a byte-addressable address space) to a native
-    /// pointer value, in the default [hir::AddressSpace].
+    /// pointer value, in the default address space.
     pub fn from_ptr(addr: u32) -> Self {
         // The native word address for `addr` is derived by splitting the byte-addressable space
         // into 32-bit chunks, each chunk belonging to a single field element, i.e. each element

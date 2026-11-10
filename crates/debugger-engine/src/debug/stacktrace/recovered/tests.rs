@@ -94,7 +94,7 @@ fn caller_source_inline_frames_survive_calls_and_clear_on_return() {
                         location.clone(),
                         location,
                     ))
-                }
+                },
                 None => Instruction::DebugInlineCallClear,
             };
             *op = Op::Inst(Span::new(span, replacement));

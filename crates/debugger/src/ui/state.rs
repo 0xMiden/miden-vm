@@ -99,7 +99,7 @@ struct RemoteState {
     addr: String,
     /// Tracks which source files have had breakpoints synced to the DAP server,
     /// so we can send empty breakpoint lists when all breakpoints for a file are removed.
-    synced_bp_files: std::collections::BTreeSet<String>,
+    synced_bp_files: BTreeSet<String>,
 }
 
 enum SessionState {
@@ -183,7 +183,7 @@ impl RemoteState {
             client: std::cell::RefCell::new(client),
             executor,
             addr: addr.to_string(),
-            synced_bp_files: std::collections::BTreeSet::new(),
+            synced_bp_files: BTreeSet::new(),
         })
     }
 
@@ -203,11 +203,11 @@ impl RemoteState {
             match &bp.ty {
                 BreakpointType::Line { pattern, line } => {
                     by_file.entry(pattern.glob().to_string()).or_default().push(*line as i64);
-                }
+                },
                 BreakpointType::Called(pattern) | BreakpointType::File(pattern) => {
                     func_names.push(pattern.glob().to_string());
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -370,14 +370,14 @@ impl State {
                 match result {
                     crate::exec::DapStopReason::Restarting => {
                         remote.reconnect(&source_manager)?;
-                    }
+                    },
                     crate::exec::DapStopReason::Stopped(snapshot) => {
                         // Fallback: server treated it as Phase 1.
                         remote.refresh_executor(&source_manager, &snapshot);
-                    }
+                    },
                     crate::exec::DapStopReason::Terminated => {
                         return Err(Report::msg("server terminated without restart signal"));
-                    }
+                    },
                 }
             }
             #[cfg(not(feature = "dap"))]
@@ -451,7 +451,7 @@ impl State {
                 Err(err) => {
                     self.set_execution_failed(err);
                     break true;
-                }
+                },
             }
 
             if breakpoints.is_empty() {
@@ -653,11 +653,7 @@ impl State {
             let target = self.executor().callstack.return_target();
             self.finish_targets.insert((id, creation_cycle), target);
         }
-        self.breakpoints.push(Breakpoint {
-            id,
-            creation_cycle,
-            ty,
-        });
+        self.breakpoints.push(Breakpoint { id, creation_cycle, ty });
     }
 
     fn next_breakpoint_id(&mut self) -> u8 {
@@ -834,7 +830,7 @@ impl State {
                     current.source_file.uri().as_str(),
                     source_path_prefixes,
                 ) && start.line != current.line
-            }
+            },
             (None, Some(_)) => true,
             _ => false,
         }
@@ -995,7 +991,7 @@ impl State {
             #[cfg(feature = "dap")]
             SessionState::Remote(_) => {
                 panic!("cannot record local execution failure while in remote mode")
-            }
+            },
         }
     }
 }
@@ -1099,19 +1095,19 @@ impl State {
                     FormatType::Decimal => write!(&mut output, "{}", bytes[0] != 0).unwrap(),
                     FormatType::Hex => {
                         write!(&mut output, "{:#0x}", (bytes[0] != 0) as u8).unwrap()
-                    }
+                    },
                     FormatType::Binary => {
                         write!(&mut output, "{:#0b}", (bytes[0] != 0) as u8).unwrap()
-                    }
+                    },
                 },
                 Type::I8 => write_with_format_type!(output, expr, bytes[0] as i8),
                 Type::U8 => write_with_format_type!(output, expr, bytes[0]),
                 Type::I16 => {
                     write_with_format_type!(output, expr, i16::from_le_bytes([bytes[0], bytes[1]]))
-                }
+                },
                 Type::U16 => {
                     write_with_format_type!(output, expr, u16::from_le_bytes([bytes[0], bytes[1]]))
-                }
+                },
                 Type::I32 => write_with_format_type!(
                     output,
                     expr,
@@ -1129,12 +1125,12 @@ impl State {
                     } else {
                         write_with_format_type!(output, expr, val)
                     }
-                }
+                },
                 ty => {
                     return Err(format!(
                         "support for reads of type '{ty}' are not implemented yet"
                     ));
-                }
+                },
             }
         }
 
@@ -1277,10 +1273,10 @@ impl State {
                     Some(felt) => {
                         write!(&mut output, "{}={}", variable.name, felt.as_canonical_u64())
                             .unwrap();
-                    }
+                    },
                     None => {
                         write!(&mut output, "{}={}", variable.name, variable.location).unwrap();
-                    }
+                    },
                 }
             }
             output
@@ -1402,14 +1398,14 @@ impl State {
                 remote.refresh_executor(&source_manager, snapshot);
                 self.selected_stack_frame = 0;
                 self.stopped = true;
-            }
+            },
             crate::exec::DapStopReason::Terminated => {
                 remote.executor.stopped = true;
                 self.stopped = true;
-            }
+            },
             crate::exec::DapStopReason::Restarting => {
                 return Err(Report::msg("unexpected Phase 2 restart signal during step"));
-            }
+            },
         }
 
         Ok(result)
@@ -1454,7 +1450,7 @@ fn convert_ui_state(
 fn resolve_remote_frame(
     frame: &crate::exec::DapUiFrame,
     source_manager: &Arc<dyn SourceManager>,
-) -> Option<crate::debug::ResolvedLocation> {
+) -> Option<ResolvedLocation> {
     use std::path::Path;
 
     use miden_debug_types::{SourceManagerExt, SourceSpan, Uri};
@@ -1472,12 +1468,7 @@ fn resolve_remote_frame(
     let range = content.line_range(line_index)?;
     let span = SourceSpan::new(source_file.id(), range);
 
-    Some(crate::debug::ResolvedLocation {
-        source_file,
-        line,
-        col,
-        span,
-    })
+    Some(ResolvedLocation { source_file, line, col, span })
 }
 
 fn create_local_state(

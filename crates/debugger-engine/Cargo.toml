@@ -6,10 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
-categories.workspace = true
-keywords.workspace = true
-license.workspace = true
+documentation = "https://docs.rs/miden-debug-engine"
+categories = ["development-tools"]
+keywords = ["miden", "debugger"]
+license = "MIT"
 edition.workspace = true
 
 [lib]
@@ -35,8 +35,8 @@ std = [
 proptest = ["std", "dep:proptest"]
 
 [dependencies]
-clap = { workspace = true, optional = true }
-hashbrown = { version = "0.17", default-features = false }
+clap = { workspace = true, optional = true, features = ["env"] }
+hashbrown.workspace = true
 inventory = { workspace = true, optional = true }
 log.workspace = true
 miden-assembly-syntax.workspace = true
@@ -44,27 +44,22 @@ miden-core.workspace = true
 miden-debug-dap = { workspace = true, optional = true, features = ["client"] }
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
-miden-package-registry.workspace = true
+miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 num-traits = { version = "0.2", default-features = false }
-proptest = { version = "1.4", optional = true }
-regex = { version = "1.13.1", default-features = false, features = ["unicode"] }
+proptest = { workspace = true, optional = true, features = ["std"] }
+regex = { workspace = true, features = ["unicode"] }
 regex-syntax = { version = "0.8.11", default-features = false, features = ["unicode"] }
 rustc-demangle = { version = "0.1", features = ["std"] }
 rustc-hash.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 socket2 = { version = "0.6", optional = true }
-smallvec = { version = "1.14", default-features = false, features = [
-    "union",
-    "const_generics",
-    "const_new",
-    "drain_filter",
-] }
+smallvec = { workspace = true, features = ["drain_filter"] }
 thiserror.workspace = true
-toml = { version = "1.1.2", default-features = false, features = ["parse", "serde"] }
+toml = { workspace = true, features = ["parse", "serde"] }
 
 [dev-dependencies]
-miden-assembly.workspace = true
-tempfile = "3"
+miden-assembly = { workspace = true, features = ["std"] }
+tempfile.workspace = true
