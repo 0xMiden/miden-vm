@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
@@ -36,6 +36,8 @@ impl BaseAir<Felt> for PowerAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for PowerAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -59,7 +61,7 @@ impl LiftedAir<Felt, QuadFelt> for PowerAir {
         (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
 
@@ -103,6 +105,8 @@ impl BaseAir<Felt> for PeriodicPowerAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -126,7 +130,7 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
         (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
         let periodic = builder.periodic_values().to_vec();

@@ -3,7 +3,7 @@
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
@@ -71,6 +71,8 @@ impl BaseAir<Felt> for TinyAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for TinyAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -98,7 +100,7 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         (trace, values)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let public_sum = builder
             .public_values()
