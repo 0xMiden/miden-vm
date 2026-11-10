@@ -89,7 +89,7 @@ impl Options {
             }
             let mut seen = BTreeSet::new();
             for (class, limit) in self.precompile_work_limit {
-                if !seen.insert(class) {
+                if !seen.insert(class.clone()) {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("duplicate precompile work class: {class}"),
