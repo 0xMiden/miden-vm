@@ -10,11 +10,12 @@ pub const MAX_CONTENT_LENGTH: usize = 16 * 1024 * 1024;
 /// Read one message body, or `None` when the peer closes between messages.
 pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, ServerError> {
     let mut content_length = None;
+    let mut headers_started = false;
     let mut line = String::new();
     loop {
         line.clear();
         if reader.read_line(&mut line).map_err(ServerError::IoError)? == 0 {
-            return if content_length.is_none() {
+            return if !headers_started {
                 Ok(None)
             } else {
                 Err(ServerError::IoError(std::io::ErrorKind::UnexpectedEof.into()))
@@ -22,12 +23,13 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, ServerEr
         }
         let header = line.trim_end();
         if header.is_empty() {
-            if content_length.is_some() {
+            if headers_started {
                 break;
             }
             // Older adapters append a blank line after each body.
             continue;
         }
+        headers_started = true;
         let Some((name, value)) = header.split_once(':') else {
             return Err(ServerError::HeaderParseError { line });
         };
@@ -37,6 +39,14 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, ServerEr
                     .trim()
                     .parse()
                     .map_err(|_| ServerError::HeaderParseError { line: line.clone() })?;
+                if let Some(previous) = content_length {
+                    return Err(ServerError::ProtocolError {
+                        reason: format!(
+                            "duplicate Content-Length headers: {previous} and {length}"
+                        ),
+                        line,
+                    });
+                }
                 if length > MAX_CONTENT_LENGTH {
                     return Err(ServerError::ProtocolError {
                         reason: format!(
@@ -51,7 +61,11 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, ServerEr
             _ => return Err(ServerError::UnknownHeader { header: name.into() }),
         }
     }
-    let mut body = vec![0; content_length.unwrap()];
+    let length = content_length.ok_or_else(|| ServerError::ProtocolError {
+        reason: "missing Content-Length header".into(),
+        line,
+    })?;
+    let mut body = vec![0; length];
     reader.read_exact(&mut body).map_err(ServerError::IoError)?;
     Ok(Some(body))
 }

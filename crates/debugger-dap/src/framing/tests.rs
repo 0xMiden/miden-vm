@@ -29,10 +29,39 @@ fn rejects_bad_lengths_before_reading_a_body() {
 #[test]
 fn distinguishes_clean_eof_from_truncated_header_and_body() {
     assert!(read_frame(&mut Cursor::new(b"")).unwrap().is_none());
-    for wire in [b"Content-Length: 3\r\n".as_slice(), b"Content-Length: 3\r\n\r\nx"] {
+    for wire in [
+        b"Content-Length: 3\r\n".as_slice(),
+        b"Content-Length: 3\r\n\r\nx",
+        b"Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n",
+    ] {
         assert!(matches!(
             read_frame(&mut Cursor::new(wire)),
             Err(ServerError::IoError(error)) if error.kind() == ErrorKind::UnexpectedEof
         ));
+    }
+}
+
+#[test]
+fn rejects_duplicate_lengths_and_missing_length_after_content_type() {
+    for length in [1, 2] {
+        let wire = format!("Content-Length: 1\r\nContent-Length: {length}\r\n\r\n{{}}");
+        assert!(matches!(read_frame(&mut Cursor::new(wire)),
+            Err(ServerError::ProtocolError { reason, .. })
+                if reason == format!("duplicate Content-Length headers: 1 and {length}")));
+    }
+    assert!(matches!(
+        read_frame(&mut Cursor::new(b"Content-Type: application/vscode-jsonrpc\r\n\r\n")),
+        Err(ServerError::ProtocolError { reason, .. }) if reason == "missing Content-Length header"
+    ));
+}
+
+#[test]
+fn accepts_content_type_before_or_after_content_length() {
+    for headers in [
+        "Content-Type: application/vscode-jsonrpc\r\nContent-Length: 2",
+        "Content-Length: 2\r\nContent-Type: application/vscode-jsonrpc",
+    ] {
+        let wire = format!("{headers}\r\n\r\n{{}}");
+        assert_eq!(read_frame(&mut Cursor::new(wire)).unwrap().unwrap(), b"{}");
     }
 }

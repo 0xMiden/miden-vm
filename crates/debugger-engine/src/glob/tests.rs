@@ -236,11 +236,6 @@ matches!(matchalt18, "{a,b{c,d}}", "bd");
 matches!(matchalt19, "{a,b{c,d}}", "a");
 
 #[cfg(unix)]
-#[cfg(not(unix))]
-// differs
-#[cfg(unix)]
-#[cfg(not(unix))]
-#[cfg(unix)]
 matches!(matchbackslash7, "\\a", "a");
 #[cfg(not(unix))]
 matches!(matchbackslash8, "\\a", "/a");
