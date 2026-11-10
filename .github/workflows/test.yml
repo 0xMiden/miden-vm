@@ -142,6 +142,11 @@ jobs:
           PYO3_PYTHON: python3
           RUST_MIN_STACK: "16777216"
         run: make test-debugger-lit
+      - name: Test Python bindings
+        env:
+          PYO3_PYTHON: python3
+          RUST_MIN_STACK: "16777216"
+        run: cargo test --locked -p miden-debug --lib --features miden-debug/python script::python::tests
 
   crypto-test:
     name: crypto test on warpbuild
