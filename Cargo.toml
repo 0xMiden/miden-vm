@@ -153,7 +153,6 @@ hashbrown       = { version = "0.17", default-features = false, features = ["def
 hex             = { version = "0.4", default-features = false }
 hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
-inventory       = "0.3"
 itertools       = { version = "0.15", default-features = false, features = ["use_alloc"] }
 k256            = { version = "0.14", default-features = false }
 log             = { version = "0.4", default-features = false }

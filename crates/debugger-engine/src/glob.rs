@@ -83,7 +83,6 @@ pub enum ErrorKind {
 pub struct Glob {
     glob: String,
     re: String,
-    opts: GlobOptions,
     tokens: Tokens,
 }
 
@@ -95,7 +94,7 @@ impl AsRef<Glob> for Glob {
 
 impl PartialEq for Glob {
     fn eq(&self, other: &Glob) -> bool {
-        self.glob == other.glob && self.opts == other.opts
+        self.glob == other.glob
     }
 }
 
@@ -103,7 +102,6 @@ impl PartialEq for Glob {
 impl std::hash::Hash for Glob {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.glob.hash(state);
-        self.opts.hash(state);
     }
 }
 
@@ -113,7 +111,6 @@ impl core::fmt::Debug for Glob {
             f.debug_struct("Glob")
                 .field("glob", &self.glob)
                 .field("re", &self.re)
-                .field("opts", &self.opts)
                 .field("tokens", &self.tokens)
                 .finish()
         } else {
@@ -233,52 +230,6 @@ pub(crate) fn normalize_path(uri: &Uri) -> Cow<'_, str> {
     Cow::Owned(output)
 }
 
-/// A builder for a pattern.
-///
-/// This builder enables configuring the match semantics of a pattern. For
-/// example, one can make matching case insensitive.
-///
-/// The lifetime `'a` refers to the lifetime of the pattern string.
-#[derive(Clone, Debug)]
-pub struct GlobBuilder<'a> {
-    /// The glob pattern to compile.
-    glob: &'a str,
-    /// Options for the pattern.
-    opts: GlobOptions,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct GlobOptions {
-    /// Whether to match case insensitively.
-    case_insensitive: bool,
-    /// Whether to require a literal separator to match a separator in a file
-    /// path. e.g., when enabled, `*` won't match `/`.
-    literal_separator: bool,
-    /// Whether or not to use `\` to escape special characters.
-    /// e.g., when enabled, `\*` will match a literal `*`.
-    backslash_escape: bool,
-    /// Whether or not an empty case in an alternate will be removed.
-    /// e.g., when enabled, `{,a}` will match "" and "a".
-    empty_alternates: bool,
-    /// Whether or not an unclosed character class is allowed. When an unclosed
-    /// character class is found, the opening `[` is treated as a literal `[`.
-    /// When this isn't enabled, an opening `[` without a corresponding `]` is
-    /// treated as an error.
-    allow_unclosed_class: bool,
-}
-
-impl GlobOptions {
-    fn default() -> GlobOptions {
-        GlobOptions {
-            case_insensitive: false,
-            literal_separator: false,
-            backslash_escape: !is_separator('\\'),
-            empty_alternates: false,
-            allow_unclosed_class: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct Tokens(Vec<Token>);
 
@@ -309,9 +260,35 @@ enum Token {
 }
 
 impl Glob {
-    /// Builds a new pattern with default options.
+    /// Builds a case-sensitive pattern with wildcards that may cross path separators.
     pub fn new(glob: &str) -> Result<Glob, Error> {
-        GlobBuilder::new(glob).build()
+        let mut p = Parser {
+            glob,
+            alternates_stack: Vec::new(),
+            branches: vec![Tokens::default()],
+            chars: glob.chars().peekable(),
+            prev: None,
+            cur: None,
+        };
+        p.parse()?;
+        if p.branches.is_empty() {
+            // OK because of how the the branches/alternate_stack are managed.
+            // If we end up here, then there *must* be a bug in the parser
+            // somewhere.
+            unreachable!()
+        } else if p.branches.len() > 1 {
+            Err(Error {
+                glob: Some(glob.to_string()),
+                kind: ErrorKind::UnclosedAlternates,
+            })
+        } else {
+            let tokens = p.branches.pop().unwrap();
+            Ok(Glob {
+                glob: glob.to_string(),
+                re: tokens.to_regex(),
+                tokens,
+            })
+        }
     }
 
     /// Returns a matcher for this pattern.
@@ -347,115 +324,13 @@ impl Glob {
     }
 }
 
-impl<'a> GlobBuilder<'a> {
-    /// Create a new builder for the pattern given.
-    ///
-    /// The pattern is not compiled until `build` is called.
-    pub fn new(glob: &'a str) -> GlobBuilder<'a> {
-        GlobBuilder { glob, opts: GlobOptions::default() }
-    }
-
-    /// Parses and builds the pattern.
-    pub fn build(&self) -> Result<Glob, Error> {
-        let mut p = Parser {
-            glob: self.glob,
-            alternates_stack: Vec::new(),
-            branches: vec![Tokens::default()],
-            chars: self.glob.chars().peekable(),
-            prev: None,
-            cur: None,
-            found_unclosed_class: false,
-            opts: &self.opts,
-        };
-        p.parse()?;
-        if p.branches.is_empty() {
-            // OK because of how the the branches/alternate_stack are managed.
-            // If we end up here, then there *must* be a bug in the parser
-            // somewhere.
-            unreachable!()
-        } else if p.branches.len() > 1 {
-            Err(Error {
-                glob: Some(self.glob.to_string()),
-                kind: ErrorKind::UnclosedAlternates,
-            })
-        } else {
-            let tokens = p.branches.pop().unwrap();
-            Ok(Glob {
-                glob: self.glob.to_string(),
-                re: tokens.to_regex_with(self.opts),
-                opts: self.opts,
-                tokens,
-            })
-        }
-    }
-
-    /// Toggle whether the pattern matches case insensitively or not.
-    ///
-    /// This is disabled by default.
-    pub fn case_insensitive(&mut self, yes: bool) -> &mut GlobBuilder<'a> {
-        self.opts.case_insensitive = yes;
-        self
-    }
-
-    /// Toggle whether a literal `/` is required to match a path separator.
-    ///
-    /// By default this is false: `*` and `?` will match `/`.
-    pub fn literal_separator(&mut self, yes: bool) -> &mut GlobBuilder<'a> {
-        self.opts.literal_separator = yes;
-        self
-    }
-
-    /// When enabled, a back slash (`\`) may be used to escape
-    /// special characters in a glob pattern. Additionally, this will
-    /// prevent `\` from being interpreted as a path separator on all
-    /// platforms.
-    ///
-    /// This is enabled by default on platforms where `\` is not a
-    /// path separator and disabled by default on platforms where `\`
-    /// is a path separator.
-    pub fn backslash_escape(&mut self, yes: bool) -> &mut GlobBuilder<'a> {
-        self.opts.backslash_escape = yes;
-        self
-    }
-
-    /// Toggle whether an empty pattern in a list of alternates is accepted.
-    ///
-    /// For example, if this is set then the glob `foo{,.txt}` will match both
-    /// `foo` and `foo.txt`.
-    ///
-    /// By default this is false.
-    pub fn empty_alternates(&mut self, yes: bool) -> &mut GlobBuilder<'a> {
-        self.opts.empty_alternates = yes;
-        self
-    }
-
-    /// Toggle whether unclosed character classes are allowed. When allowed,
-    /// a `[` without a matching `]` is treated literally instead of resulting
-    /// in a parse error.
-    ///
-    /// For example, if this is set then the glob `[abc` will be treated as the
-    /// literal string `[abc` instead of returning an error.
-    ///
-    /// By default, this is false. Generally speaking, enabling this leads to
-    /// worse failure modes since the glob parser becomes more permissive. You
-    /// might want to enable this when compatibility (e.g., with POSIX glob
-    /// implementations) is more important than good error messages.
-    pub fn allow_unclosed_class(&mut self, yes: bool) -> &mut GlobBuilder<'a> {
-        self.opts.allow_unclosed_class = yes;
-        self
-    }
-}
-
 impl Tokens {
     /// Convert this pattern to a string that is guaranteed to be a valid
     /// regular expression and will represent the matching semantics of this
-    /// glob pattern and the options given.
-    fn to_regex_with(&self, options: GlobOptions) -> String {
+    /// glob pattern.
+    fn to_regex(&self) -> String {
         let mut re = String::new();
         re.push_str("(?-u)");
-        if options.case_insensitive {
-            re.push_str("(?i)");
-        }
         re.push('^');
         // Special case. If the entire glob is just `**`, then it should match
         // everything.
@@ -464,30 +339,22 @@ impl Tokens {
             re.push('$');
             return re;
         }
-        self.tokens_to_regex(options, self, &mut re);
+        Self::tokens_to_regex(self, &mut re);
         re.push('$');
         re
     }
 
-    fn tokens_to_regex(&self, options: GlobOptions, tokens: &[Token], re: &mut String) {
+    fn tokens_to_regex(tokens: &[Token], re: &mut String) {
         for tok in tokens.iter() {
             match *tok {
                 Token::Literal(c) => {
                     re.push_str(&char_to_escaped_literal(c));
                 },
                 Token::Any => {
-                    if options.literal_separator {
-                        re.push_str("[^/]");
-                    } else {
-                        re.push('.');
-                    }
+                    re.push('.');
                 },
                 Token::ZeroOrMore => {
-                    if options.literal_separator {
-                        re.push_str("[^/]*");
-                    } else {
-                        re.push_str(".*");
-                    }
+                    re.push_str(".*");
                 },
                 Token::RecursivePrefix => {
                     re.push_str("(?:/?|.*/)");
@@ -519,8 +386,8 @@ impl Tokens {
                     let mut parts = vec![];
                     for pat in patterns {
                         let mut altre = String::new();
-                        self.tokens_to_regex(options, pat, &mut altre);
-                        if !altre.is_empty() || options.empty_alternates {
+                        Self::tokens_to_regex(pat, &mut altre);
+                        if !altre.is_empty() {
                             parts.push(altre);
                         }
                     }
@@ -574,17 +441,6 @@ struct Parser<'a> {
     prev: Option<char>,
     /// The current character.
     cur: Option<char>,
-    /// Whether we failed to find a closing `]` for a character
-    /// class. This can only be true when `GlobOptions::allow_unclosed_class`
-    /// is enabled. When enabled, it is impossible to ever parse another
-    /// character class with this glob. That's because classes cannot be
-    /// nested *and* the only way this happens is when there is never a `]`.
-    ///
-    /// We track this state so that we don't end up spending quadratic time
-    /// trying to parse something like `[[[[[[[[[[[[[[[[[[[[[[[...`.
-    found_unclosed_class: bool,
-    /// Glob options, which may influence parsing.
-    opts: &'a GlobOptions,
 }
 
 impl<'a> Parser<'a> {
@@ -597,7 +453,7 @@ impl<'a> Parser<'a> {
             match c {
                 '?' => self.push_token(Token::Any)?,
                 '*' => self.parse_star()?,
-                '[' if !self.found_unclosed_class => self.parse_class()?,
+                '[' => self.parse_class()?,
                 '{' => self.push_alternate()?,
                 '}' => self.pop_alternate()?,
                 ',' => self.parse_comma()?,
@@ -660,16 +516,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_backslash(&mut self) -> Result<(), Error> {
-        if self.opts.backslash_escape {
+        if !is_separator('\\') {
             match self.bump() {
                 None => Err(self.error(ErrorKind::DanglingEscape)),
                 Some(c) => self.push_token(Token::Literal(c)),
             }
-        } else if is_separator('\\') {
+        } else {
             // Normalize all patterns to use / as a separator.
             self.push_token(Token::Literal('/'))
-        } else {
-            self.push_token(Token::Literal('\\'))
         }
     }
 
@@ -733,11 +587,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class(&mut self) -> Result<(), Error> {
-        // Save parser state for potential rollback to literal '[' parsing.
-        let saved_chars = self.chars.clone();
-        let saved_prev = self.prev;
-        let saved_cur = self.cur;
-
         fn add_to_last_range(glob: &str, r: &mut (char, char), add: char) -> Result<(), Error> {
             r.1 = add;
             if r.1 < r.0 {
@@ -762,16 +611,7 @@ impl<'a> Parser<'a> {
         let mut in_range = false;
         loop {
             let Some(c) = self.bump() else {
-                return if self.opts.allow_unclosed_class {
-                    self.chars = saved_chars;
-                    self.cur = saved_cur;
-                    self.prev = saved_prev;
-                    self.found_unclosed_class = true;
-
-                    self.push_token(Token::Literal('['))
-                } else {
-                    Err(self.error(ErrorKind::UnclosedClass))
-                };
+                return Err(self.error(ErrorKind::UnclosedClass));
             };
             match c {
                 ']' => {

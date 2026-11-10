@@ -1,6 +1,6 @@
 use miden_core::operations::Operation;
 
-use super::{Instrument, InstrumentRegistration};
+use super::Instrument;
 use crate::profiling::{OutputResult, OutputWriter, helpers::op_histogram::OpHistogram};
 
 /// An [`Instrument`] to create global operation histograms.
@@ -15,16 +15,9 @@ pub struct OpHistogramGlobal {
     hist: OpHistogram,
 }
 
-impl InstrumentRegistration for OpHistogramGlobal {
-    const NAME: &'static str = "op-histogram-global";
-
-    fn build(_config: &crate::profiling::ProfilerConfig) -> Result<Self, super::InstrumentError> {
-        Ok(Self::default())
-    }
+impl OpHistogramGlobal {
+    pub const NAME: &'static str = "op-histogram-global";
 }
-
-#[cfg(feature = "std")]
-crate::register_instrument!(OpHistogramGlobal);
 
 impl Instrument for OpHistogramGlobal {
     fn name(&self) -> &'static str {

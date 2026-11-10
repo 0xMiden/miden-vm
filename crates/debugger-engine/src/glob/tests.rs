@@ -1,15 +1,6 @@
 use miden_debug_types::Uri;
 
-use super::{ErrorKind, Glob, GlobBuilder, Token, Token::*};
-
-#[derive(Clone, Copy, Debug, Default)]
-struct Options {
-    casei: Option<bool>,
-    litsep: Option<bool>,
-    bsesc: Option<bool>,
-    ealtre: Option<bool>,
-    unccls: Option<bool>,
-}
+use super::{ErrorKind, Glob, Token, Token::*};
 
 macro_rules! syntax {
     ($name:ident, $pat:expr, $tokens:expr) => {
@@ -33,86 +24,27 @@ macro_rules! syntaxerr {
 
 macro_rules! toregex {
     ($name:ident, $pat:expr, $re:expr) => {
-        toregex!($name, $pat, $re, Options::default());
-    };
-    ($name:ident, $pat:expr, $re:expr, $options:expr) => {
         #[test]
         fn $name() {
-            let mut builder = GlobBuilder::new($pat);
-            if let Some(casei) = $options.casei {
-                builder.case_insensitive(casei);
-            }
-            if let Some(litsep) = $options.litsep {
-                builder.literal_separator(litsep);
-            }
-            if let Some(bsesc) = $options.bsesc {
-                builder.backslash_escape(bsesc);
-            }
-            if let Some(ealtre) = $options.ealtre {
-                builder.empty_alternates(ealtre);
-            }
-            if let Some(unccls) = $options.unccls {
-                builder.allow_unclosed_class(unccls);
-            }
-
-            let pat = builder.build().unwrap();
-            assert_eq!(format!("(?-u){}", $re), pat.regex());
+            assert_eq!(format!("(?-u){}", $re), Glob::new($pat).unwrap().regex());
         }
     };
 }
 
 macro_rules! matches {
     ($name:ident, $pat:expr, $path:expr) => {
-        matches!($name, $pat, $path, Options::default());
-    };
-    ($name:ident, $pat:expr, $path:expr, $options:expr) => {
         #[test]
         fn $name() {
-            let mut builder = GlobBuilder::new($pat);
-            if let Some(casei) = $options.casei {
-                builder.case_insensitive(casei);
-            }
-            if let Some(litsep) = $options.litsep {
-                builder.literal_separator(litsep);
-            }
-            if let Some(bsesc) = $options.bsesc {
-                builder.backslash_escape(bsesc);
-            }
-            if let Some(ealtre) = $options.ealtre {
-                builder.empty_alternates(ealtre);
-            }
-            let pat = builder.build().unwrap();
-            let matcher = pat.compile_matcher();
-            let path = Uri::from($path);
-            assert!(matcher.is_match(&path));
+            assert!(Glob::new($pat).unwrap().compile_matcher().is_match(&Uri::from($path)));
         }
     };
 }
 
 macro_rules! nmatches {
     ($name:ident, $pat:expr, $path:expr) => {
-        nmatches!($name, $pat, $path, Options::default());
-    };
-    ($name:ident, $pat:expr, $path:expr, $options:expr) => {
         #[test]
         fn $name() {
-            let mut builder = GlobBuilder::new($pat);
-            if let Some(casei) = $options.casei {
-                builder.case_insensitive(casei);
-            }
-            if let Some(litsep) = $options.litsep {
-                builder.literal_separator(litsep);
-            }
-            if let Some(bsesc) = $options.bsesc {
-                builder.backslash_escape(bsesc);
-            }
-            if let Some(ealtre) = $options.ealtre {
-                builder.empty_alternates(ealtre);
-            }
-            let pat = builder.build().unwrap();
-            let matcher = pat.compile_matcher();
-            let path = Uri::from($path);
-            assert!(!matcher.is_match(&path));
+            assert!(!Glob::new($pat).unwrap().compile_matcher().is_match(&Uri::from($path)));
         }
     };
 }
@@ -182,65 +114,7 @@ syntaxerr!(err_alt2, "{a,{b,c}", ErrorKind::UnclosedAlternates);
 syntaxerr!(err_alt3, "a,b}", ErrorKind::UnopenedAlternates);
 syntaxerr!(err_alt4, "{a,b}}", ErrorKind::UnopenedAlternates);
 
-const CASEI: Options = Options {
-    casei: Some(true),
-    litsep: None,
-    bsesc: None,
-    ealtre: None,
-    unccls: None,
-};
-const SLASHLIT: Options = Options {
-    casei: None,
-    litsep: Some(true),
-    bsesc: None,
-    ealtre: None,
-    unccls: None,
-};
-const NOBSESC: Options = Options {
-    casei: None,
-    litsep: None,
-    bsesc: Some(false),
-    ealtre: None,
-    unccls: None,
-};
-const BSESC: Options = Options {
-    casei: None,
-    litsep: None,
-    bsesc: Some(true),
-    ealtre: None,
-    unccls: None,
-};
-const EALTRE: Options = Options {
-    casei: None,
-    litsep: None,
-    bsesc: Some(true),
-    ealtre: Some(true),
-    unccls: None,
-};
-const UNCCLS: Options = Options {
-    casei: None,
-    litsep: None,
-    bsesc: None,
-    ealtre: None,
-    unccls: Some(true),
-};
-
-toregex!(allow_unclosed_class_single, r"[", r"^\[$", &UNCCLS);
-toregex!(allow_unclosed_class_many, r"[abc", r"^\[abc$", &UNCCLS);
-toregex!(allow_unclosed_class_empty1, r"[]", r"^\[\]$", &UNCCLS);
-toregex!(allow_unclosed_class_empty2, r"[][", r"^\[\]\[$", &UNCCLS);
-toregex!(allow_unclosed_class_negated_unclosed, r"[!", r"^\[!$", &UNCCLS);
-toregex!(allow_unclosed_class_negated_empty, r"[!]", r"^\[!\]$", &UNCCLS);
-toregex!(allow_unclosed_class_brace1, r"{[abc,xyz}", r"^(?:\[abc|xyz)$", &UNCCLS);
-toregex!(allow_unclosed_class_brace2, r"{[abc,[xyz}", r"^(?:\[abc|\[xyz)$", &UNCCLS);
-toregex!(allow_unclosed_class_brace3, r"{[abc],[xyz}", r"^(?:[abc]|\[xyz)$", &UNCCLS);
-
 toregex!(re_empty, "", "^$");
-
-toregex!(re_casei, "a", "(?i)^a$", &CASEI);
-
-toregex!(re_slash1, "?", r"^[^/]$", SLASHLIT);
-toregex!(re_slash2, "*", r"^[^/]*$", SLASHLIT);
 
 toregex!(re1, "a", "^a$");
 toregex!(re2, "?", "^.$");
@@ -341,11 +215,6 @@ matches!(matchpat7, "*some/path/to/hello.txt", "a/bigger/some/path/to/hello.txt"
 
 matches!(matchescape, "_[[]_[]]_[?]_[*]_!_", "_[_]_?_*_!_");
 
-matches!(matchcasei1, "aBcDeFg", "aBcDeFg", CASEI);
-matches!(matchcasei2, "aBcDeFg", "abcdefg", CASEI);
-matches!(matchcasei3, "aBcDeFg", "ABCDEFG", CASEI);
-matches!(matchcasei4, "aBcDeFg", "AbCdEfG", CASEI);
-
 matches!(matchalt1, "a,b", "a,b");
 matches!(matchalt2, ",", ",");
 matches!(matchalt3, "{a,b}", "a");
@@ -361,29 +230,16 @@ matches!(matchalt12, "{*.foo,*.bar,*.wat}", "test.bar");
 matches!(matchalt13, "{*.foo,*.bar,*.wat}", "test.wat");
 matches!(matchalt14, "foo{,.txt}", "foo.txt");
 nmatches!(matchalt15, "foo{,.txt}", "foo");
-matches!(matchalt16, "foo{,.txt}", "foo", EALTRE);
+
 matches!(matchalt17, "{a,b{c,d}}", "bc");
 matches!(matchalt18, "{a,b{c,d}}", "bd");
 matches!(matchalt19, "{a,b{c,d}}", "a");
 
-matches!(matchslash1, "abc/def", "abc/def", SLASHLIT);
 #[cfg(unix)]
-nmatches!(matchslash2, "abc?def", "abc/def", SLASHLIT);
 #[cfg(not(unix))]
-nmatches!(matchslash2, "abc?def", "abc\\def", SLASHLIT);
-nmatches!(matchslash3, "abc*def", "abc/def", SLASHLIT);
-matches!(matchslash4, "abc[/]def", "abc/def", SLASHLIT); // differs
+// differs
 #[cfg(unix)]
-nmatches!(matchslash5, "abc\\def", "abc/def", SLASHLIT);
 #[cfg(not(unix))]
-matches!(matchslash5, "abc\\def", "abc/def", SLASHLIT);
-
-matches!(matchbackslash1, "\\[", "[", BSESC);
-matches!(matchbackslash2, "\\?", "?", BSESC);
-matches!(matchbackslash3, "\\*", "*", BSESC);
-matches!(matchbackslash4, "\\[a-z]", "\\a", NOBSESC);
-matches!(matchbackslash5, "\\?", "\\a", NOBSESC);
-matches!(matchbackslash6, "\\*", "\\\\", NOBSESC);
 #[cfg(unix)]
 matches!(matchbackslash7, "\\a", "a");
 #[cfg(not(unix))]
@@ -413,18 +269,13 @@ nmatches!(matchnot21, "./foo", "foo");
 nmatches!(matchnot22, "**/foo", "foofoo");
 nmatches!(matchnot23, "**/foo/bar", "foofoo/bar");
 nmatches!(matchnot24, "/*.c", "mozilla-sha1/sha1.c");
-nmatches!(matchnot25, "*.c", "mozilla-sha1/sha1.c", SLASHLIT);
-nmatches!(
-    matchnot26,
-    "**/m4/ltoptions.m4",
-    "csharp/src/packages/repositories.config",
-    SLASHLIT
-);
+
 nmatches!(matchnot27, "a[^0-9]b", "a0b");
 nmatches!(matchnot28, "a[^0-9]b", "a9b");
 nmatches!(matchnot29, "[^-]", "-");
 nmatches!(matchnot30, "some/*/needle.txt", "some/needle.txt");
-nmatches!(matchrec31, "some/*/needle.txt", "some/one/two/needle.txt", SLASHLIT);
-nmatches!(matchrec32, "some/*/needle.txt", "some/one/two/three/needle.txt", SLASHLIT);
+
 nmatches!(matchrec33, ".*/**", ".abc");
 nmatches!(matchrec34, "foo/**", "foo");
+
+nmatches!(case_sensitive, "aBc", "abc");

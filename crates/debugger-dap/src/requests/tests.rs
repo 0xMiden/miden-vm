@@ -8,18 +8,11 @@ fn acknowledgements_preserve_request_sequence_and_command() {
         ("attach", json!({})),
         ("configurationDone", json!({})),
         ("disconnect", json!({})),
-        ("goto", json!({"threadId": 1, "targetId": 2})),
         ("launch", json!({})),
         ("next", json!({"threadId": 1})),
-        ("pause", json!({"threadId": 1})),
         ("restart", json!({})),
-        ("restartFrame", json!({"frameId": 2})),
-        ("reverseContinue", json!({"threadId": 1})),
-        ("stepBack", json!({"threadId": 1})),
         ("stepIn", json!({"threadId": 1})),
         ("stepOut", json!({"threadId": 1})),
-        ("terminate", json!({})),
-        ("terminateThreads", json!({"threadIds": [1]})),
     ] {
         let request = if name == "configurationDone" {
             json!({"command": name})

@@ -20,7 +20,6 @@ default = ["std"]
 dap = ["std", "dep:miden-debug-dap", "dep:serde_json", "dep:socket2"]
 std = [
     "dep:clap",
-    "dep:inventory",
     "miden-assembly-syntax/std",
     "miden-core/std",
     "miden-debug-types/std",
@@ -37,7 +36,6 @@ proptest = ["std", "dep:proptest"]
 [dependencies]
 clap = { workspace = true, optional = true, features = ["env"] }
 hashbrown.workspace = true
-inventory = { workspace = true, optional = true }
 log.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true

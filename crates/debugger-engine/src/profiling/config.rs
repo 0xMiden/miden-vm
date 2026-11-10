@@ -64,7 +64,7 @@ impl TryFrom<ProfilerCliArgs> for ProfilerConfig {
         args.instruments.sort();
         args.instruments.dedup();
         for name in &args.instruments {
-            let instrument = instrument_from_name(name, &config).map_err(Report::msg)?;
+            let instrument = instrument_from_name(name).map_err(Report::msg)?;
             config.instruments.push(instrument);
         }
 

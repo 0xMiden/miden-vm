@@ -38,8 +38,6 @@ fn validates_report_directory_and_instrument_dependencies() {
 
 #[test]
 fn builds_known_instruments_once_in_sorted_order() {
-    use crate::profiling::InstrumentRegistration;
-
     let global = crate::profiling::OpHistogramGlobal::NAME;
     let procedure = crate::profiling::OpHistogramProc::NAME;
     let directory = tempfile::tempdir().unwrap();
