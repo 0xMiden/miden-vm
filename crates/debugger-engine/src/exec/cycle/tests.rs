@@ -613,7 +613,7 @@ fn drop_a_pending_step(stepper: &mut Stepper, host: &mut YieldingHost) {
         let mut step = pin!(stepper.step(host, |_| {}));
         match step.as_mut().poll(&mut cx) {
             Poll::Pending => break,
-            Poll::Ready(Ok(true)) => continue,
+            Poll::Ready(Ok(true)) => (),
             other => panic!("the program ended before yielding: {other:?}"),
         }
     }

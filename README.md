@@ -124,6 +124,9 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | Packages and tools | [package-registry](crates/package-registry) | Defines package registry and dependency resolution interfaces. |
 | Packages and tools | [package-registry-local](crates/package-registry-local) | Provides a local package registry and its command line interface. |
 | Packages and tools | [miden-format](crates/miden-format) | Formats Miden Assembly source files. |
+| Packages and tools | [miden-debug](crates/debugger) | Debugs Miden programs through a terminal UI or command prompt. |
+| Packages and tools | [miden-debug-engine](crates/debugger-engine) | Provides debugger execution and inspection APIs. |
+| Packages and tools | [miden-debug-dap](crates/debugger-dap) | Implements Debug Adapter Protocol messages. |
 
 ## Documentation
 

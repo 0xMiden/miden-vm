@@ -72,10 +72,7 @@ fn inject_frame_base_test_vars_into(
         ("local_frame", DebugFrameBase::Local(-4)),
         ("memory_frame", DebugFrameBase::Memory(100)),
     ] {
-        let location = DebugVarLocation::ResolvedFrameBase {
-            base,
-            byte_offset: 4,
-        };
+        let location = DebugVarLocation::ResolvedFrameBase { base, byte_offset: 4 };
         let debug_var = DebugVarInfo::new(name, location);
         procedure
             .body_mut()
@@ -105,13 +102,13 @@ fn parse_args() -> Result<CompileOptions, Box<dyn std::error::Error>> {
                     .next()
                     .ok_or_else(|| invalid_argument(format!("{arg} requires a path")))?;
                 output_path = Some(PathBuf::from(output));
-            }
+            },
             "--inline-call" => {
                 let spec = args
                     .next()
                     .ok_or_else(|| invalid_argument("--inline-call requires name,line,column"))?;
                 inline_calls.push(parse_inline_call(&spec)?);
-            }
+            },
             "--inject-frame-base-test-vars" => inject_frame_base_test_vars = true,
             _ => return Err(invalid_argument(format!("unrecognized argument '{arg}'")).into()),
         }

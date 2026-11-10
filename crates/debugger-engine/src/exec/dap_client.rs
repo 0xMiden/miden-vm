@@ -418,7 +418,6 @@ impl DapClient {
                     // we are waiting for. Preserve them so the following wait_for_stopped
                     // call can consume the stop/UI-state pair instead of hanging.
                     self.pending_events.push_back(event);
-                    continue;
                 },
             }
         }
@@ -458,7 +457,7 @@ impl DapClient {
                             .map_err(|e| format!("invalid miden/uiState payload: {e}"))?,
                     );
                 },
-                _ => continue,
+                _ => (),
             }
         }
     }

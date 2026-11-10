@@ -287,7 +287,7 @@ impl Executor {
                 break;
             }
             match executor.step() {
-                Ok(_) => continue,
+                Ok(_) => (),
                 Err(err) => {
                     log::warn!(
                         target: "executor",

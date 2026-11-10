@@ -8,5 +8,5 @@ working_dir = "."
 
 [substitutions]
 # The debugger and private fixture builders resolve via the directory passed to
-# `litcheck lit run --path` (see the `test-lit` task in Makefile.toml).
+# `litcheck lit run --path` (see `make test-debugger-lit` in the workspace).
 # `filecheck` is provided by litcheck itself.

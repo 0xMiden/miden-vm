@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added the debugger to the VM workspace with its Git history. `miden-debug`, `miden-debug-engine`, and `miden-debug-dap` now follow the VM release cycle. VM releases also include debugger executable archives.
 - [BREAKING] EcGFp5/Eidos `seal` and `seal_preprocessed` require host event handlers, including when advice is preloaded. Added configurable `Ecgfp5SealHandler` for generating fresh key-agreement advice ([#4137](https://github.com/0xMiden/miden-vm/pull/4137)).
 - [BREAKING] Added binary serialization and deserialization for `ExecutionOptions` and `PrecompileLimits`, including arbitrary custom `WorkClass` names. `WorkClass` no longer implements `Copy`, and neither do `WorkItem` and `PrecompileLimitError` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).

@@ -117,6 +117,32 @@ jobs:
             echo "No documentation changes in crates/lib/core/docs/ - OK"
           fi
 
+  debugger-test:
+    name: debugger fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cleanup-runner
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install Rust
+        run: rustup toolchain install --no-self-update
+      - name: Install litcheck
+        run: cargo install litcheck --version 0.4.6 --locked
+      - name: Check engine without default features
+        run: cargo check --locked -p miden-debug-engine --no-default-features
+      - name: Run debugger fixtures
+        env:
+          PYO3_PYTHON: python3
+          RUST_MIN_STACK: "16777216"
+        run: make test-debugger-lit
+
   crypto-test:
     name: crypto test on warpbuild
     runs-on: warp-ubuntu-latest-x64-8x

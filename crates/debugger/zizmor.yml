@@ -1,3 +1,0 @@
-rules:
-  unpinned-uses:
-    disable: true # We're using GitHub Actions lockfiles

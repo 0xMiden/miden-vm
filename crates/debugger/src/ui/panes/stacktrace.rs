@@ -106,7 +106,7 @@ impl Pane for StackTracePane {
                                 std::path::Component::ParentDir
                                 | std::path::Component::Prefix(_)
                                 | std::path::Component::RootDir,
-                            ) => continue,
+                            ) => (),
                             Some(std::path::Component::Normal(c)) => {
                                 let c = c.to_string_lossy();
                                 taken += c.chars().count();

@@ -31,7 +31,7 @@ fn parse_args() -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
     match args.as_slice() {
         [_, input, flag, output] if flag == "-o" || flag == "--output" => {
             Ok((PathBuf::from(input), PathBuf::from(output)))
-        }
+        },
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "usage: compile-abi-fixture <file.masm> -o <file.masp>",

@@ -91,7 +91,6 @@ impl ReplSession {
                 },
                 Err(ReadlineError::Interrupted) => {
                     println!("^C");
-                    continue;
                 },
                 Err(ReadlineError::Eof) => {
                     println!("\x1b[36mGoodbye!\x1b[0m");
