@@ -7,7 +7,13 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 // SEALED MESSAGE
 // ================================================================================================
 
-/// A sealed message containing encrypted data
+/// A sealed message containing encrypted data.
+///
+/// For untrusted encodings, use [`Deserializable::read_from_bytes_with_budget`] with an
+/// application-chosen size limit. This method permits trailing bytes. To require exactly one sealed
+/// message, decode through a [`BudgetedReader`](crate::utils::BudgetedReader) over a
+/// [`SliceReader`](crate::utils::SliceReader) using [`Deserializable::read_from`], then reject
+/// remaining bytes using [`ByteReader::has_more_bytes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),

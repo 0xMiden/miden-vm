@@ -101,6 +101,59 @@ macro_rules! test_basic_roundtrip {
 // IES SCHEME TESTS
 // ================================================================================================
 
+#[test]
+fn test_rejects_cross_type_messages() {
+    use crate::{Felt, dsa::ecdsa_k256_keccak::KeyExchangeKey, utils::elements_to_bytes};
+
+    let mut rng = test_rng(4135);
+    let k256_key = KeyExchangeKey::with_rng(&mut rng);
+    let x25519_key = KeyExchangeKey25519::with_rng(&mut rng);
+    let ecgfp5_key = crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng);
+    let keys = [
+        (
+            SealingKey::K256XChaCha20Poly1305(k256_key.public_key()),
+            UnsealingKey::K256XChaCha20Poly1305(k256_key.clone()),
+        ),
+        (
+            SealingKey::X25519XChaCha20Poly1305(x25519_key.public_key()),
+            UnsealingKey::X25519XChaCha20Poly1305(x25519_key.clone()),
+        ),
+        (
+            SealingKey::K256AeadEidos(k256_key.public_key()),
+            UnsealingKey::K256AeadEidos(k256_key),
+        ),
+        (
+            SealingKey::X25519AeadEidos(x25519_key.public_key()),
+            UnsealingKey::X25519AeadEidos(x25519_key),
+        ),
+        (
+            SealingKey::Ecgfp5Eidos(ecgfp5_key.public_key()),
+            UnsealingKey::Ecgfp5Eidos(ecgfp5_key),
+        ),
+    ];
+    let elements = [Felt::from_u32(42), Felt::from_u32(1337)];
+    let bytes = elements_to_bytes(&elements);
+
+    for (sealing, unsealing) in keys {
+        for associated_data in [&[][..], &[Felt::ONE][..]] {
+            let ad_bytes = elements_to_bytes(associated_data);
+            let sealed = sealing
+                .seal_elements_with_associated_data(&mut rng, &elements, associated_data)
+                .unwrap();
+            assert!(matches!(
+                unsealing.unseal_bytes_with_associated_data(sealed, &ad_bytes),
+                Err(IesError::DecryptionFailed)
+            ));
+            let sealed =
+                sealing.seal_bytes_with_associated_data(&mut rng, &bytes, &ad_bytes).unwrap();
+            assert!(matches!(
+                unsealing.unseal_elements_with_associated_data(sealed, associated_data),
+                Err(IesError::DecryptionFailed)
+            ));
+        }
+    }
+}
+
 /// K256 + XChaCha20-Poly1305 test suite
 mod k256_xchacha_tests {
     use super::*;

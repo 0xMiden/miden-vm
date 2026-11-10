@@ -404,6 +404,28 @@ impl AeadScheme for XChaCha {
         key.decrypt_bytes_with_associated_data(&encrypted_data, associated_data)
             .map_err(|_| EncryptionError::FailedOperation)
     }
+
+    fn encrypt_elements<R: CryptoRng>(
+        key: &Self::Key,
+        rng: &mut R,
+        plaintext: &[Felt],
+        associated_data: &[Felt],
+    ) -> Result<Vec<u8>, EncryptionError> {
+        let encrypted_data = key
+            .encrypt_elements_with_nonce(plaintext, associated_data, Nonce::with_rng(rng))
+            .map_err(|_| EncryptionError::FailedOperation)?;
+        Ok(encrypted_data.to_bytes())
+    }
+
+    fn decrypt_elements_with_associated_data(
+        key: &Self::Key,
+        ciphertext: &[u8],
+        associated_data: &[Felt],
+    ) -> Result<Vec<Felt>, EncryptionError> {
+        let encrypted_data = read_encrypted_data_strict(ciphertext)?;
+        key.decrypt_elements_with_associated_data(&encrypted_data, associated_data)
+            .map_err(|_| EncryptionError::FailedOperation)
+    }
 }
 
 // SERIALIZATION / DESERIALIZATION
