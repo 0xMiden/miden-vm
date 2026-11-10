@@ -26,9 +26,10 @@ mod data;
 
 /// Generates the deterministic seed corpus used by `tools/miden-crypto-fuzz/signatures`.
 ///
-/// The coefficient seeds are written as raw little-endian `i16` pairs so that generation does not
-/// call `SignaturePoly::to_bytes` on a value the old constructor accepted but the encoder could
-/// not represent. These seeds reproduce the former panic and now verify rejection without one.
+/// Each coefficient seed is a little-endian signed-magnitude word. Bit 15 stores the sign, and bits
+/// 0 through 10 store the magnitude. Bits 11 through 14 remain zero. This format lets generation
+/// avoid calling `SignaturePoly::to_bytes` on a value that the old constructor accepted but the
+/// encoder could not represent. These seeds reproduce the former panic and now verify rejection.
 #[cfg(feature = "std")]
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]

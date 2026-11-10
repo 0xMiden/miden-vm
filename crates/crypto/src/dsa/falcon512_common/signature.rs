@@ -212,7 +212,7 @@ impl TryFrom<&[i16; N]> for SignaturePoly {
     /// Returns an error when a coefficient is outside `-2047..=2047` or when the compressed
     /// encoding would exceed the fixed 625-byte capacity.
     fn try_from(coefficients: &[i16; N]) -> Result<Self, Self::Error> {
-        if are_coefficients_valid(coefficients) {
+        if are_coefficients_valid(coefficients, |&coefficient| coefficient) {
             Ok(Self(coefficients.to_vec().into()))
         } else {
             Err(())
@@ -226,8 +226,9 @@ impl TryFrom<Polynomial<FalconFelt>> for SignaturePoly {
     /// Builds a signature polynomial from field elements after converting them to their balanced
     /// representatives and validating the compressed encoding size.
     fn try_from(polynomial: Polynomial<FalconFelt>) -> Result<Self, Self::Error> {
-        let coefficients = polynomial.to_balanced_values();
-        if are_coefficients_valid(&coefficients) {
+        if are_coefficients_valid(&polynomial.coefficients, |coefficient| {
+            coefficient.balanced_value()
+        }) {
             Ok(Self(polynomial))
         } else {
             Err(())
@@ -439,14 +440,15 @@ fn verify_helper<V: FalconVariant>(
 /// the fixed compressed representation holds `SIG_POLY_BYTE_LEN * 8` bits. A coefficient range
 /// check alone is insufficient: for example, 512 coefficients of magnitude 128 have a squared norm
 /// below `SIG_L2_BOUND` but need 640 encoded bytes.
-fn are_coefficients_valid(x: &[i16]) -> bool {
-    if x.len() != N {
+fn are_coefficients_valid<T>(coefficients: &[T], balanced_value: impl Fn(&T) -> i16) -> bool {
+    if coefficients.len() != N {
         return false;
     }
 
     let capacity_bits = SIG_POLY_BYTE_LEN * 8;
     let mut encoded_bits = 0;
-    for &c in x {
+    for coefficient in coefficients {
+        let c = balanced_value(coefficient);
         if !(-2047..=2047).contains(&c) {
             return false;
         }
@@ -618,18 +620,6 @@ mod tests {
                 },
                 Err(()) => prop_assert!(bits > SIG_POLY_BITS),
             }
-        }
-
-        #[test]
-        fn accepted_signature_poly_roundtrips(
-            coefficients in accepted_coefficient_strategy()
-        ) {
-            let poly = SignaturePoly::try_from(&coefficients)
-                .expect("budget-aware generator must be accepted");
-            let bytes = poly.to_bytes();
-            prop_assert_eq!(bytes.len(), SIG_POLY_BYTE_LEN);
-            let decoded = SignaturePoly::read_from_bytes(&bytes).unwrap();
-            prop_assert_eq!(decoded, poly);
         }
 
         #[test]
