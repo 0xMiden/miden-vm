@@ -148,7 +148,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // Hash continuation: the next hash row's input CV equals this row's output CV.
     {
-        let gate = is_active.clone() * rows.is_hash * op_final.not();
+        let gate = is_active * rows.is_hash * op_final.not();
         let cv_next = cols_next.state_tail();
         let cv_out = cols.hash_cv();
         let builder = &mut builder.when(gate);

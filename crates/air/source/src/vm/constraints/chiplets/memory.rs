@@ -401,7 +401,7 @@ mod tests {
         let next = MemoryCols {
             is_read: next_access.is_read(),
             is_same_ctx_and_addr: Felt::ONE,
-            ..local.clone()
+            ..local
         };
 
         (local, next)

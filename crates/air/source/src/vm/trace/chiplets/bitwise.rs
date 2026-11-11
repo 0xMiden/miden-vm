@@ -10,7 +10,7 @@ pub const NUM_SELECTORS: usize = 1;
 pub const NUM_U32_BYTES: usize = 4;
 
 /// Number of columns in the ordinary bitwise operation payload.
-pub const TRACE_WIDTH: usize = core::mem::size_of::<crate::vm::BitwiseOpCols<u8>>();
+pub const TRACE_WIDTH: usize = size_of::<crate::vm::BitwiseOpCols<u8>>();
 
 /// The number of rows required to compute an operation in the Bitwise chiplet.
 pub const OP_CYCLE_LEN: usize = 1;
