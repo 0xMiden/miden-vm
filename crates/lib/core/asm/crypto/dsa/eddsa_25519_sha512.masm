@@ -55,8 +55,7 @@ const PUBLIC_KEY_INIT_CV = [
 #! matching miden-crypto's PublicKey::to_commitment. The procedure proves SHA-512(R || A || M)
 #! and [s]B = R + [k]A with k reduced modulo l. It rejects noncanonical encodings/scalars,
 #! small-order A or R, and invalid signatures. This is ordinary Ed25519, not Ed25519ph.
-#! Its acceptance policy is stricter than miden-crypto's PublicKey::verify: MASM rejects
-#! noncanonical encodings and small-order A/R, while that API uses dalek's non-strict verification.
+#! These verification requirements match miden-crypto's PublicKey::verify.
 #! The configured max_hash_len_bytes must be at least 96 for the R || A || M preimage.
 #! The signature is an uncommitted advice witness; callers needing exact signature binding must
 #! commit to its encoding separately. No result is pushed; failed verification traps.

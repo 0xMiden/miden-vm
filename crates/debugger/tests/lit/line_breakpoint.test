@@ -1,0 +1,18 @@
+# Set a source-line breakpoint using a bare file name (no directory prefix),
+# verify it resolves via suffix matching and stops on the requested line, then
+# run to the end. Reuses the breakpoint.masm fixture: (10 + 20) * 5 = 150.
+#
+# RUN: compile-masm %S/breakpoint.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break breakpoint.masm:6
+continue
+where
+continue
+stack
+
+# CHECK: Breakpoint 0 set: **/breakpoint.masm:6
+# CHECK: at {{.*}}breakpoint.masm:6:5
+# CHECK: breakpoint.masm:6:5 in $exec::$main
+# CHECK: Program terminated successfully
+# CHECK: [0] 150

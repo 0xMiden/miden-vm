@@ -1,0 +1,31 @@
+# Only the selected branch belongs in the backtrace.
+# RUN: compile-masm %S/call_frames_branches.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 5 1 2>&1 | filecheck %s --check-prefixes LEFT --implicit-check-not '\$exec::right' --implicit-check-not 'error:'
+# RUN: miden-debug --commands %s %t.masp -- 5 0 2>&1 | filecheck %s --check-prefixes RIGHT --implicit-check-not '\$exec::left' --implicit-check-not 'error:'
+
+break for mul
+continue
+backtrace
+delete 0
+finish
+backtrace
+continue
+stack
+
+# LEFT: Backtrace (2 frames):
+# LEFT-NEXT: * #0 [inferred] $exec::left at {{.*}}call_frames_branches.masm:2:12
+# LEFT-NEXT: #1 $exec::$main
+# LEFT: Backtrace (1 frames):
+# LEFT-NEXT: * #0 $exec::$main
+# LEFT: Program terminated successfully
+# LEFT-NEXT: Operand Stack (16 elements):
+# LEFT-NEXT: > [0] 16 (0x10)
+
+# RIGHT: Backtrace (2 frames):
+# RIGHT-NEXT: * #0 [inferred] $exec::right at {{.*}}call_frames_branches.masm:6:12
+# RIGHT-NEXT: #1 $exec::$main
+# RIGHT: Backtrace (1 frames):
+# RIGHT-NEXT: * #0 $exec::$main
+# RIGHT: Program terminated successfully
+# RIGHT-NEXT: Operand Stack (16 elements):
+# RIGHT-NEXT: > [0] 21 (0x15)

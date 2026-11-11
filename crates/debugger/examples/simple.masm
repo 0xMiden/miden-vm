@@ -1,0 +1,8 @@
+begin
+    push.1
+    push.2
+    add
+    push.10
+    mul
+    swap drop
+end

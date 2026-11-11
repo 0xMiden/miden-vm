@@ -1,0 +1,7 @@
+proc _ZN3foo5inner17h0123456789abcdefE
+    push.3 mul
+end
+
+begin
+    exec._ZN3foo5inner17h0123456789abcdefE push.1 add
+end

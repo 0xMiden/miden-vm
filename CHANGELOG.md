@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added the debugger to the VM workspace with its Git history. `miden-debug`, `miden-debug-engine`, and `miden-debug-dap` now follow the VM release cycle. VM releases also include debugger executable archives.
 - [BREAKING] EcGFp5/Eidos `seal` and `seal_preprocessed` require host event handlers, including when advice is preloaded. Added configurable `Ecgfp5SealHandler` for generating fresh key-agreement advice ([#4137](https://github.com/0xMiden/miden-vm/pull/4137)).
 - [BREAKING] Added binary serialization and deserialization for `ExecutionOptions` and `PrecompileLimits`, including arbitrary custom `WorkClass` names. `WorkClass` no longer implements `Copy`, and neither do `WorkItem` and `PrecompileLimitError` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
@@ -45,6 +46,9 @@
 
 #### Fixes
 
+- [BREAKING] Both XChaCha IES schemes preserve plaintext types and reject byte/element mismatches when unsealing. Existing IES messages sealed as elements must be regenerated ([#4161](https://github.com/0xMiden/miden-vm/pull/4161)).
+- [BREAKING] Bind recipient public-key encodings into IES HKDF contexts for both K256 and X25519, separating recipient contexts even when their DH secrets agree. Existing ciphertexts for the four HKDF-based IES schemes must be regenerated ([#4162](https://github.com/0xMiden/miden-vm/pull/4162)).
+- [BREAKING] Align Rust Ed25519 verification with MASM by rejecting small-order public keys and signature points. Ed25519 public-key deserialization rejects noncanonical encodings, including keys used for X25519 key exchange and IES ([#4160](https://github.com/0xMiden/miden-vm/pull/4160), fixes [#4133](https://github.com/0xMiden/miden-vm/issues/4133)).
 - [BREAKING] Enforce curve scalar domains for MSM claims ([#4142](https://github.com/0xMiden/miden-vm/pull/4142)).
 - [BREAKING] Fixed PVM acceptance of PIN claims, uint domains, and curves rejected by native execution. Regenerate PVM proofs; the recursive verifier root changes ([#4143](https://github.com/0xMiden/miden-vm/pull/4143)).
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4114](https://github.com/0xMiden/miden-vm/pull/4114)).

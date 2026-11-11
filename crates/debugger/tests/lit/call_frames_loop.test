@@ -1,0 +1,40 @@
+# Each loop iteration enters worker, then returns to outer without retaining it.
+# RUN: compile-masm %S/call_frames_loop.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 5 2>&1 | filecheck %s --implicit-check-not 'error:'
+
+break for mul
+continue
+backtrace
+finish
+backtrace
+continue
+backtrace
+delete 0
+finish
+backtrace
+finish
+backtrace
+continue
+stack
+
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::worker at {{.*}}call_frames_loop.masm:2:12
+# CHECK-NEXT: #1 [inferred] $exec::outer
+# CHECK-NEXT: #2 $exec::$main
+# CHECK: at {{.*}}call_frames_loop.masm:11:9 in [inferred] $exec::outer
+# CHECK-NEXT: Backtrace (2 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::outer
+# CHECK-NEXT: #1 $exec::$main
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::worker at {{.*}}call_frames_loop.masm:2:12
+# CHECK-NEXT: #1 [inferred] $exec::outer
+# CHECK-NEXT: #2 $exec::$main
+# CHECK: at {{.*}}call_frames_loop.masm:11:9 in [inferred] $exec::outer
+# CHECK-NEXT: Backtrace (2 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::outer
+# CHECK-NEXT: #1 $exec::$main
+# CHECK: Backtrace (1 frames):
+# CHECK-NEXT: * #0 $exec::$main
+# CHECK: Program terminated successfully
+# CHECK-NEXT: Operand Stack (16 elements):
+# CHECK-NEXT: > [0] 24 (0x18)

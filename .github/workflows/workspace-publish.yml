@@ -198,6 +198,8 @@ jobs:
           mv target/${{ matrix.target }}/optimized/miden-vm release-assets/miden-vm-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-format release-assets/miden-format-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-registry release-assets/miden-registry-${{ matrix.target }}
+          tar -czf release-assets/miden-debug-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/optimized miden-debug
       # Since the MASM packages are triplet independent, we only build them once.
       - name: Build MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
