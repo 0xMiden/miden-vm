@@ -5,7 +5,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::Field;
+use p3_field::{Algebra, Field};
 use p3_goldilocks::{GenericPoseidon2LinearLayersGoldilocks, Goldilocks};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_poseidon2_air::{Poseidon2Air, RoundConstants, num_cols};
@@ -56,6 +56,8 @@ impl<F> BaseAir<F> for LiftedPoseidon2Air {
 }
 
 impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
+    type EvalData<B: Algebra<Goldilocks>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -79,7 +81,7 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
         (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB, _data: &()) {
         Air::eval(&self.inner, builder);
     }
 }

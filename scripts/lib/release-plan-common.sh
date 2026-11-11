@@ -152,6 +152,30 @@ crate_version_exists() {
     published_version_info "$package" "$version" >/dev/null
 }
 
+# A matching version tag can belong to another project after a subtree import.
+# Require the requested crate and version before building baseline rustdoc, which
+# would fail if the crate were missing. Rejecting an unrelated checkout lets the
+# release check fall back to the published crate on crates.io.
+commit_has_package_version() {
+    local commit="$1" package="$2" version="$3"
+    local source_dir="$RELEASE_PLAN_TMPDIR/baseline-source/$commit"
+    local metadata_file="$RELEASE_PLAN_TMPDIR/$commit.metadata.json"
+
+    if [[ ! -f "$metadata_file" ]]; then
+        mkdir -p "$source_dir"
+        git archive "$commit" | tar -x -C "$source_dir" || return 1
+        cargo metadata --manifest-path "$source_dir/Cargo.toml" --no-deps --format-version 1 \
+            > "$metadata_file.tmp" 2>/dev/null || return 1
+        mv "$metadata_file.tmp" "$metadata_file"
+    fi
+
+    jq -e --arg package "$package" --arg version "$version" '
+        . as $m | .packages[]
+        | select((.id as $id | $m.workspace_members | index($id))
+                 and .name == $package and .version == $version)
+    ' "$metadata_file" >/dev/null
+}
+
 baseline_commit_for() {
     local package="$1"
     local version="$2"
@@ -159,7 +183,8 @@ baseline_commit_for() {
 
     if body_file="$(published_version_info "$package" "$version")"; then
         sha="$(jq -r '.version.trustpub_data.sha // empty' "$body_file")"
-        if [[ -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+        if [[ -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null &&
+            commit_has_package_version "$sha" "$package" "$version"; then
             printf '%s\n' "$sha"
             return 0
         fi
@@ -167,20 +192,30 @@ baseline_commit_for() {
 
     tag="v$version"
     if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
-        git rev-parse "${tag}^{commit}"
-        return 0
+        sha="$(git rev-parse "${tag}^{commit}")"
+        if commit_has_package_version "$sha" "$package" "$version"; then
+            printf '%s\n' "$sha"
+            return 0
+        fi
+        # A tag imported from another project can have the same version. Use
+        # the published crate baseline rather than replacing the existing tag.
+        return 1
     fi
 
     git fetch --no-tags origin "+refs/tags/${tag}:refs/tags/${tag}" >/dev/null 2>&1 || true
 
-    if [[ -n "${sha:-}" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+    if [[ -n "${sha:-}" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null &&
+        commit_has_package_version "$sha" "$package" "$version"; then
         printf '%s\n' "$sha"
         return 0
     fi
 
     if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
-        git rev-parse "${tag}^{commit}"
-        return 0
+        sha="$(git rev-parse "${tag}^{commit}")"
+        if commit_has_package_version "$sha" "$package" "$version"; then
+            printf '%s\n' "$sha"
+            return 0
+        fi
     fi
 
     return 1

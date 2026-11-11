@@ -39,9 +39,7 @@ compressed-public-key limbs, matching `miden-crypto::PublicKey::to_commitment`. 
 uncommitted witness; callers needing to bind a particular signature must commit to its encoding.
 Successful verification consumes the inputs and pushes no result; invalid input traps.
 
-The MASM verifier has a stricter acceptance policy than `miden-crypto::PublicKey::verify`: it
-rejects noncanonical point encodings and small-order `A` or `R`, while that API uses dalek's
-non-strict verification. A signature accepted off-chain by the latter may therefore trap in MASM.
+These signature verification requirements match `miden-crypto::PublicKey::verify`.
 
 For `verify_bytes`, both pointers must be word-aligned. Pack message bytes four per felt as
 little-endian `u32` values, with zero unused bytes and felts through the final 32-byte chunk. Scratch

@@ -9,7 +9,7 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use miden_stark::air::symbolic::{
     BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-    SymbolicExpressionExt,
+    SymbolicExpressionExt, eval_air,
 };
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
@@ -32,7 +32,7 @@ pub fn eval_multi_air_constraints<A>(
 where
     A: miden_stark::air::LiftedAir<Felt, QuadFelt>,
 {
-    use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+    use miden_stark::air::symbolic::SymbolicAirBuilder;
 
     let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
     let shared_period =
@@ -74,16 +74,8 @@ where
         ] {
             values[local.index(dst).unwrap()] = inputs[layout.index(src).unwrap()];
         }
-        let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(AirLayout {
-            preprocessed_width: counts.preprocessed_width,
-            main_width: counts.width,
-            num_public_values: counts.num_public,
-            permutation_width: counts.aux_width,
-            num_permutation_challenges: counts.num_randomness,
-            num_permutation_values: counts.num_aux_boundary,
-            num_periodic_columns: periods[i].len(),
-        });
-        air.eval(&mut builder);
+        let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air.air_layout());
+        eval_air(air, &mut builder);
         let period = periods[i].iter().map(Vec::len).max().unwrap_or(1);
         let periodic_values =
             eval_periodic_values(&periods[i], z_k.exp_u64((shared_period / period) as u64));

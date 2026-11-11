@@ -1,0 +1,16 @@
+# Execute snippets through the Python-enabled non-interactive REPL. Assignments and imported
+# globals persist for the entire command script, while expression results print their repr.
+#
+# RUN: compile-masm %S/add.masm -o %t.masp
+# RUN: miden-debug-python --no-user-python-init --commands %s %t.masp 2>&1 | filecheck %s
+
+script value = 40
+script value + 2
+script debugger.get_cycle()
+script miden_debugger.debugger.get_cycle()
+script process.is_terminated()
+
+# CHECK: 42
+# CHECK-NEXT: 0
+# CHECK-NEXT: 0
+# CHECK-NEXT: False

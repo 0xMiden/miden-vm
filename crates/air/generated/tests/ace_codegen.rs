@@ -43,7 +43,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&periodic_columns, z_k);
 
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &layout));
-    <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder);
+    <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder, &());
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -266,7 +266,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
         // Anchor: the original symbolic-tree lowering over the same constraints.
         let mut builder =
             SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &artifacts.layout));
-        <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder);
+        <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder, &());
         let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
         let periodic_data = (!periodic_columns.is_empty())
             .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));

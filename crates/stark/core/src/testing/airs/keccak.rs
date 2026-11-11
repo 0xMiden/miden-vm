@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{Field, PrimeField64};
+use p3_field::{Algebra, Field, PrimeField64};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
@@ -26,6 +26,8 @@ impl<F> BaseAir<F> for LiftedKeccakAir {
 }
 
 impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedKeccakAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -49,7 +51,7 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedKeccakAir {
         (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         Air::eval(&KeccakAir {}, builder);
     }
 }

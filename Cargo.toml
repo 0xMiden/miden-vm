@@ -15,6 +15,10 @@ members = [
     "crates/crypto",
     "crates/crypto-derive",
     "crates/debug-types",
+    "crates/debugger",
+    "crates/debugger-dap",
+    "crates/debugger-engine",
+    "crates/debugger/tests/lit/support",
     "crates/event-handler-abi",
     "crates/event-handler-macros",
     "crates/event-handler-sdk",
@@ -99,6 +103,8 @@ miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "1.0.0
 miden-crypto            = { path = "./crates/crypto", version = "1.0.0-rc.1", default-features = false }
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "1.0.0-rc.1", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "1.0.0-rc.1", default-features = false }
+miden-debug-dap         = { path = "./crates/debugger-dap", version = "1.0.0-rc.1", default-features = false }
+miden-debug-engine      = { path = "./crates/debugger-engine", version = "1.0.0-rc.1", default-features = false }
 miden-event-handler-abi = { path = "./crates/event-handler-abi", version = "1.0.0-rc.1", default-features = false }
 miden-field             = { path = "./crates/field", version = "1.0.0-rc.1", default-features = false }
 miden-stark            = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
@@ -147,6 +153,7 @@ hashbrown       = { version = "0.17", default-features = false, features = ["def
 hex             = { version = "0.4", default-features = false }
 hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
+inventory       = "0.3"
 itertools       = { version = "0.15", default-features = false, features = ["use_alloc"] }
 k256            = { version = "0.14", default-features = false }
 log             = { version = "0.4", default-features = false }
@@ -158,9 +165,11 @@ paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.8", default-features = false }
 rand            = { version = "0.10", default-features = false }
+regex           = { version = "1.13.1", default-features = false }
 rayon           = { version = "1.11", default-features = false }
 rocksdb         = { version = "0.24", default-features = false }
 rustix          = { version = "1.1", default-features = false, features = ["fs", "std"] }
+rustc-hash      = { version = "2.1", default-features = false }
 seq-macro       = "0.3"
 semver          = { version = "1.0", default-features = false }
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }

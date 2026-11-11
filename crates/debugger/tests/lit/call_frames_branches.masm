@@ -1,0 +1,16 @@
+proc left
+    push.3 mul
+end
+
+proc right
+    push.4 mul
+end
+
+begin
+    if.true
+        exec.left
+    else
+        exec.right
+    end
+    push.1 add
+end

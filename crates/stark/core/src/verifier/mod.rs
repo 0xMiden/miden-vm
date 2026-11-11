@@ -478,7 +478,14 @@ where
 
         #[cfg(debug_assertions)]
         crate::air::debug::check_builder_shape(*air, &folder);
-        air.eval(&mut folder);
+        let public_values: Vec<EF> =
+            air_inputs[instance_idx].iter().copied().map(EF::from).collect();
+        let data = air.prepare(crate::air::EvalInputs {
+            public_values: &public_values,
+            challenges: &randomness[..num_rand],
+            aux_values: aux_values_j,
+        });
+        air.eval(&mut folder, &data);
 
         // Accumulate: acc = acc * beta + folded_j
         accumulated = accumulated * beta + folder.accumulator;
