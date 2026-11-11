@@ -159,7 +159,10 @@ where
     pub fn prove(
         self,
         challenger: SC::Challenger,
-    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError> {
+    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
+    where
+        <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
+    {
         prove(self, challenger)
     }
 
@@ -236,6 +239,7 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
+    <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
 {
     let ProverInstance { config, statement, traces, preprocessed } = instance;
     let airs = statement.airs();

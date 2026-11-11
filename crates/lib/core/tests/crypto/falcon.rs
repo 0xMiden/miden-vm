@@ -78,14 +78,19 @@ fn falcon_advice_encodes_centered_product_and_shifted_signature() {
     h[0] = 1;
     let public_key = falcon512_eidos::PublicKey::from(Polynomial::from(&h));
     let mut s2 = vec![0i16; N];
-    s2[0] = -(M_HALF as i16);
+    // Use the largest valid signature coefficients; M_HALF is larger than the signature range.
+    s2[0] = -2047;
     s2[1] = -1;
     s2[N / 2] = 1;
-    s2[N - 1] = M_HALF as i16;
+    s2[N - 1] = 2047;
     let nonce = Nonce::deterministic();
     let nonce_elements = nonce.to_elements();
-    let signature =
-        falcon512_eidos::Signature::new(nonce, public_key.clone(), Polynomial::from(&s2).into());
+    let signature = falcon512_eidos::Signature::new(
+        nonce,
+        public_key.clone(),
+        miden_crypto::dsa::falcon512_eidos::SignaturePoly::try_from(Polynomial::from(&s2))
+            .expect("test signature polynomial must fit the fixed encoding"),
+    );
 
     // With h = 1, the unreduced product is s2 followed by 512 zero coefficients.
     let mut product = vec![Felt::ZERO; 2 * N];

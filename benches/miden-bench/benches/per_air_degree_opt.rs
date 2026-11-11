@@ -33,7 +33,7 @@ use miden_stark::{
     air::{AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess},
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -85,6 +85,8 @@ impl BaseAir<Felt> for BenchAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BenchAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -108,7 +110,7 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
         let log2_hi = self.kind.log2_hi();
@@ -169,6 +171,8 @@ impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
 }
 
 impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = A::EvalData<B, E>;
+
     fn num_randomness(&self) -> usize {
         self.inner.num_randomness()
     }
@@ -187,8 +191,18 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstra
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.inner.eval(builder)
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        inputs: miden_stark::air::EvalInputs<'_, B, E>,
+    ) -> Self::EvalData<B, E> {
+        self.inner.prepare(inputs)
+    }
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+    ) {
+        self.inner.eval(builder, data)
     }
     fn constraint_degree(&self) -> ConstraintDegrees
     where

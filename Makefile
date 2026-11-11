@@ -37,6 +37,7 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
+FUZZ_ARGS                ?= -max_total_time=60
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
 
@@ -305,10 +306,21 @@ test-wasm-threadless: ## Runs the overlapped trace-build tests on a threadless w
 	exit "$$status"
 
 .PHONY: check-fuzz
-check-fuzz: ## Checks standalone fuzz workspaces
+check-fuzz: ## Checks standalone fuzz workspaces and the crypto harness tests
 	cd tools/miden-core-fuzz && cargo check --locked
 	cd tools/miden-crypto-fuzz && cargo check --locked
+	cd tools/miden-crypto-fuzz && cargo test --locked
+	$(MAKE) fuzz-format-check
 	cd tools/miden-serde-utils-fuzz && cargo check --locked
+
+FUZZ_CRYPTO_FORMAT_FILES := fuzz_targets/signatures.rs src/lib.rs tests/falcon_paths.rs
+
+.PHONY: fuzz-format fuzz-format-check
+fuzz-format: ## Formats the modified standalone crypto fuzz sources
+	cd tools/miden-crypto-fuzz && rustfmt --edition 2024 $(FUZZ_CRYPTO_FORMAT_FILES)
+
+fuzz-format-check: ## Checks the modified standalone crypto fuzz sources
+	cd tools/miden-crypto-fuzz && rustfmt --edition 2024 --check $(FUZZ_CRYPTO_FORMAT_FILES)
 
 .PHONY: fuzz-build-crypto
 fuzz-build-crypto: ## Builds imported crypto fuzz targets
@@ -487,8 +499,12 @@ fuzz-mast-forest-wire-view: fuzz-seeds ## Run fuzzing for MastForestWireView str
 fuzz-execution-proof: fuzz-seeds ## Run bounded ExecutionProof deserialization fuzzing
 	@$(FUZZ_CARGO) fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) $(FUZZ_ARGS)
 
+.PHONY: fuzz-signatures
+fuzz-signatures: fuzz-seeds-crypto ## Run bounded Falcon signature and constructor fuzzing
+	@$(FUZZ_CARGO) fuzz run signatures --release --fuzz-dir tools/miden-crypto-fuzz -- $(FUZZ_ARGS)
+
 .PHONY: fuzz-all
-fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
+fuzz-all: fuzz-seeds fuzz-seeds-crypto ## Run all fuzz targets (in sequence)
 	FAILED=0; \
 	$(FUZZ_CARGO) fuzz run sparse_mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
@@ -519,11 +535,19 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	$(FUZZ_CARGO) fuzz run event_handler_section_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run wasm_handler_manifest --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	$(FUZZ_CARGO) fuzz run wasm_section_walk_differential --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	for target in $(MIDEN_CRYPTO_FUZZ_TARGETS); do \
+		$(FUZZ_CARGO) fuzz run $$target --release --fuzz-dir tools/miden-crypto-fuzz -- -max_total_time=300 || FAILED=1; \
+	done; \
+	for target in $(MIDEN_SERDE_UTILS_FUZZ_TARGETS); do \
+		$(FUZZ_CARGO) fuzz run $$target --release --fuzz-dir tools/miden-serde-utils-fuzz -- -max_total_time=300 || FAILED=1; \
+	done; \
 	exit $$FAILED
 
 .PHONY: fuzz-list
-fuzz-list: ## List available fuzz targets
+fuzz-list: ## List available fuzz targets in all standalone workspaces
 	$(FUZZ_CARGO) fuzz list --fuzz-dir tools/miden-core-fuzz
+	$(FUZZ_CARGO) fuzz list --fuzz-dir tools/miden-crypto-fuzz
+	$(FUZZ_CARGO) fuzz list --fuzz-dir tools/miden-serde-utils-fuzz
 
 .PHONY: fuzz-coverage
 fuzz-coverage: ## Generate coverage report for fuzz targets
@@ -531,7 +555,11 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 	$(FUZZ_CARGO) fuzz coverage mast_forest_validate --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-seeds
-fuzz-seeds: ## Generate seed corpus files for fuzzing
+fuzz-seeds: ## Generate core seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-vm --features internal --test miden-cli generate_execution_witness_fuzz_seeds -- --ignored --nocapture
+
+.PHONY: fuzz-seeds-crypto
+fuzz-seeds-crypto: ## Generate crypto fuzz seed corpus
+	cargo test -p miden-crypto --lib generate_fuzz_seeds -- --ignored --nocapture

@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::{Algebra, QuadFelt},
+};
 use miden_crypto::field::PrimeCharacteristicRing;
 use miden_stark::air::{
     AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
@@ -82,6 +85,8 @@ impl BaseAir<F> for TestAir {
 }
 
 impl LiftedAir<F, EF> for TestAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -104,7 +109,7 @@ impl LiftedAir<F, EF> for TestAir {
         unreachable!("ACE codegen tests do not build concrete traces")
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         let mut expression: AB::Expr = {
             let main = builder.main();
             main.current_slice()[self.main - 1].into()
@@ -178,6 +183,8 @@ impl BaseAir<F> for MockPreprocessedAir {
 }
 
 impl LiftedAir<F, EF> for MockPreprocessedAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -200,7 +207,7 @@ impl LiftedAir<F, EF> for MockPreprocessedAir {
         (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), Vec::new())
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         let preprocessed = builder.preprocessed();
         let curr = preprocessed.current_slice()[0];
         let next = preprocessed.next_slice()[0];
@@ -209,6 +216,8 @@ impl LiftedAir<F, EF> for MockPreprocessedAir {
 }
 
 impl LiftedAir<F, EF> for MockAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -231,7 +240,7 @@ impl LiftedAir<F, EF> for MockAir {
         (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let a = main.current_slice()[0];
         let b = main.next_slice()[0];
@@ -277,6 +286,8 @@ impl BaseAir<F> for MockPeriodicAir {
 }
 
 impl LiftedAir<F, EF> for MockPeriodicAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -299,7 +310,7 @@ impl LiftedAir<F, EF> for MockPeriodicAir {
         (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let a = main.current_slice()[0];
         let pub0 = builder.public_values()[0];
@@ -358,6 +369,8 @@ impl BaseAir<F> for MockSharedBasisAir {
 }
 
 impl LiftedAir<F, EF> for MockSharedBasisAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         2
     }
@@ -380,7 +393,7 @@ impl LiftedAir<F, EF> for MockSharedBasisAir {
         (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let a = main.current_slice()[0];
         let pub0 = builder.public_values()[0];
@@ -713,7 +726,7 @@ fn test_verifier_dag_matches_manual_eval() {
         num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
+    air.eval(&mut builder, &());
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -760,7 +773,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
+    air.eval(&mut builder, &());
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -824,7 +837,7 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
         num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
+    air.eval(&mut builder, &());
 
     let acc = eval_folded_constraints(
         &builder.base_constraints(),
@@ -1048,6 +1061,8 @@ impl BaseAir<F> for CountedCubicAir {
 }
 
 impl LiftedAir<F, EF> for CountedCubicAir {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn aux_width(&self) -> usize {
         0
     }
@@ -1070,7 +1085,7 @@ impl LiftedAir<F, EF> for CountedCubicAir {
         unreachable!("capture-only AIR")
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         self.eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let x: AB::Expr = builder.main().current_slice()[0].into();
         builder.assert_zero(x.clone() * x.clone() * x);

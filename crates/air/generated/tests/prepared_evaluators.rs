@@ -2,17 +2,14 @@
 
 use miden_constraint_compiler::{
     backend::rust_eval::{AirEvaluator, emit_optimized_module},
-    ir::capture,
-    testing::assert_prepared_evaluator_dispatch,
+    ir::{Graph, capture, capture_into, capture_into_with},
 };
-use miden_core::{
-    Felt,
-    field::{Algebra, QuadFelt},
-    utils::RowMajorMatrix,
-};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::air::{
-    BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess, symbolic::SymbolicAirBuilder,
+    BaseAir, LiftedAir, LiftedAirBuilder, PermutationAirBuilder, WindowAccess,
+    symbolic::{SymbolicExpression, SymbolicExpressionExt},
 };
+use p3_field::Algebra;
 
 mod preparation_fixture {
     include!("fixtures/prepared_evaluators.rs");
@@ -28,6 +25,8 @@ impl BaseAir<Felt> for PreparationFixture {
 }
 
 impl LiftedAir<Felt, QuadFelt> for PreparationFixture {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn aux_width(&self) -> usize {
         1
     }
@@ -46,28 +45,7 @@ impl LiftedAir<Felt, QuadFelt> for PreparationFixture {
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         unreachable!("this fixture only evaluates constraints")
     }
-    fn precompute_challenge_terms<B: Algebra<Felt>, E: Algebra<B>>(
-        &self,
-        challenges: &[E],
-    ) -> Vec<E> {
-        if self.0 {
-            preparation_fixture::precompute_cached::<B, E>(challenges).into()
-        } else {
-            preparation_fixture::precompute_uncached::<B, E>(challenges).into()
-        }
-    }
-    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(
-        &self,
-        builder: &mut AB,
-        terms: &[AB::ExprEF],
-    ) {
-        if self.0 {
-            preparation_fixture::eval_cached_with_challenge_terms(builder, terms);
-        } else {
-            preparation_fixture::eval_uncached_with_challenge_terms(builder, terms);
-        }
-    }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main().current_slice()[0];
         if self.0 {
             let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
@@ -106,11 +84,28 @@ fn prepared_emitter_matches_compiled_golden() {
     // Value equivalence alone would accept recomputing either term in the row evaluator.
     assert_eq!(output, include_str!("fixtures/prepared_evaluators.rs"));
 
-    let mut builder =
-        SymbolicAirBuilder::<Felt, QuadFelt>::new(PreparationFixture(true).air_layout());
-    preparation_fixture::eval_cached(&mut builder);
-    preparation_fixture::eval_uncached(&mut builder);
     for cached in [false, true] {
-        assert_prepared_evaluator_dispatch(&PreparationFixture(cached));
+        let air = PreparationFixture(cached);
+        let mut graph = Graph::builder();
+        let authored = capture_into(&air, &mut graph);
+        let generated = capture_into_with(&air, &mut graph, |builder| {
+            let challenges: Vec<SymbolicExpressionExt<Felt, QuadFelt>> =
+                builder.permutation_randomness().iter().copied().map(Into::into).collect();
+            if cached {
+                let terms = preparation_fixture::precompute_cached::<SymbolicExpression<Felt>, _>(
+                    &challenges,
+                );
+                preparation_fixture::eval_cached(builder, &terms);
+            } else {
+                let terms = preparation_fixture::precompute_uncached::<SymbolicExpression<Felt>, _>(
+                    &challenges,
+                );
+                preparation_fixture::eval_uncached(builder, &terms);
+            }
+        });
+        assert_eq!(authored.base_roots, generated.base_roots);
+        assert_eq!(authored.ext_roots, generated.ext_roots);
+        assert_eq!(authored.base_global_indices, generated.base_global_indices);
+        assert_eq!(authored.ext_global_indices, generated.ext_global_indices);
     }
 }
