@@ -1,0 +1,19 @@
+# Native Eidos compression is recognized by operation breakpoints and profiling reports.
+# RUN: compile-masm %S/compress.masm -o %t.masp
+# RUN: (miden-debug \
+# RUN:   --profiling-reports-dir %t_reports \
+# RUN:   --profiling-instruments op-histogram-global \
+# RUN:   --commands %s %t.masp 2>&1; \
+# RUN:  cat %t_reports/op-histogram-global) | filecheck %s
+
+break for compress
+continue
+list
+continue
+
+# CHECK: Breakpoint 0 set: opcode compress
+# CHECK: at {{.*}}compress.masm:2:5
+# CHECK: Recent instructions:
+# CHECK: > compress
+# CHECK: Program terminated successfully
+# CHECK: {{compress +[0-9.]+% 1}}

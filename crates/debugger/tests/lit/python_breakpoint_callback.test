@@ -1,0 +1,23 @@
+# A false breakpoint callback suppresses the stop and resumes execution automatically.
+#
+# RUN: compile-masm %S/add.masm -o %t.masp
+# RUN: miden-debug-python --no-user-python-init --commands %s %t.masp 2>&1 | filecheck %s
+
+break after 1
+command script import python_scripting.py
+breakpoint command add 0 -f python_scripting.never_stop
+breakpoint command list
+continue
+script internal_dict['callback_count']
+breakpoint command delete 0
+breakpoint command list
+
+# CHECK: Breakpoint 0 set: after 1 cycles
+# CHECK-NEXT: Imported Python script:
+# CHECK-NEXT: Added Python callback for breakpoint 0
+# CHECK-NEXT: Python breakpoint callbacks:
+# CHECK-NEXT:   breakpoint 0
+# CHECK-NEXT: Program terminated successfully
+# CHECK-NEXT: 1
+# CHECK-NEXT: Deleted Python callback for breakpoint 0
+# CHECK-NEXT: No Python breakpoint callbacks registered

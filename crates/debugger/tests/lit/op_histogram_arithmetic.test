@@ -1,0 +1,26 @@
+# Final stack of the program: [0] 20.
+#
+# RUN: compile-masm %S/op_histogram_arithmetic.masm -o %t.masp
+# RUN: (miden-debug \
+# RUN:   --profiling-reports-dir %t_reports \
+# RUN:   --profiling-instruments op-histogram-global \
+# RUN:   --commands %s %t.masp 2>&1; \
+# RUN:  cat %t_reports/op-histogram-global) | filecheck %s
+
+continue
+stack
+
+# CHECK: Program terminated successfully
+# CHECK: [0] 20
+# The program executes 30 cycles across 10 distinct operations.
+# CHECK: total_cycles        100% 30
+# CHECK-NEXT: push              30.00% 9
+# CHECK-NEXT: drop              23.33% 7
+# CHECK-NEXT: noop              13.33% 4
+# CHECK-NEXT: add                6.67% 2
+# CHECK-NEXT: mstore             6.67% 2
+# CHECK-NEXT: pad                6.67% 2
+# CHECK-NEXT: mload              3.33% 1
+# CHECK-NEXT: eq                 3.33% 1
+# CHECK-NEXT: mul                3.33% 1
+# CHECK-NEXT: u32and             3.33% 1

@@ -1,0 +1,13 @@
+proc first
+    push.3 mul
+end
+
+proc second
+    push.3 mul
+end
+
+begin
+    exec.first
+    exec.second
+    push.1 add
+end

@@ -1,0 +1,15 @@
+proc recurse
+    dup neq.0
+    if.true
+        sub.1
+        push.100 dynexec
+    else
+        push.7 drop
+    end
+end
+
+begin
+    procref.recurse mem_storew_le.100 dropw
+    push.100 dynexec
+    push.1 add
+end

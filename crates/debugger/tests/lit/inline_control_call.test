@@ -1,0 +1,15 @@
+# Verify that inline-call metadata on a structured control occurrence is presented as logical
+# frames even though control nodes do not have a basic-block operation index.
+#
+# RUN: compile-masm %S/inline_control_call.masm -o %t.masp \
+# RUN:   --inline-call fixture::inner,2,1 \
+# RUN:   --inline-call fixture::outer,1,1
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+step 3
+backtrace
+
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: * #0 [inlined] fixture::inner
+# CHECK-NEXT:   #1 [inlined] fixture::outer at {{.*}}inline_control_call.masm:2:1
+# CHECK-NEXT:   #2 $exec::$main at {{.*}}inline_control_call.masm:1:1
