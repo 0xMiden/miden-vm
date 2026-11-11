@@ -42,14 +42,14 @@ fn formats_account_id_struct() {
 fn rejects_structurally_invalid_account_ids() {
     let codec = AccountIdCodec;
 
-    for account_id in [
+    for (case, account_id) in [
         // Only version 1 is supported by the current core-types ABI.
-        "0xa591009a3022e800788f9ed177dcdb",
-        "0xa591009a3022e802788f9ed177dcdb",
+        ("unsupported version 0", "0xa591009a3022e800788f9ed177dcdb"),
+        ("unsupported version 2", "0xa591009a3022e802788f9ed177dcdb"),
         // The suffix must fit in 63 bits before its padding byte is removed.
-        "0xa591009a3022e801f88f9ed177dcdb",
+        ("suffix exceeds 63 bits", "0xa591009a3022e801f88f9ed177dcdb"),
     ] {
-        assert!(codec.encode(account_id).is_err(), "accepted invalid account ID {account_id}");
+        assert!(codec.encode(account_id).is_err(), "accepted invalid account ID: {case}");
     }
 
     let valid_prefix = felt(0xa591_009a_3022_e801);
