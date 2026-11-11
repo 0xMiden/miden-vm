@@ -25,17 +25,25 @@ pub(super) struct CryptoBox<K: KeyAgreementScheme, A: AeadScheme> {
 }
 
 impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
-    const KDF_CONTEXT: &'static [u8] = b"miden-crypto/ies/hkdf-v1";
+    const KDF_CONTEXT: &'static [u8] = b"miden-crypto/ies/hkdf-v2";
 
     /// Builds the HKDF `info` used for IES key derivation.
-    /// Layout: `[KDF_CONTEXT || scheme_id || ephemeral_public_key]` where `scheme_id = scheme as
-    /// u8`.
-    fn build_kdf_info(scheme: IesScheme, ephemeral_public_key: &K::EphemeralPublicKey) -> Vec<u8> {
-        let mut info =
-            Vec::with_capacity(Self::KDF_CONTEXT.len() + 1 + ephemeral_public_key.to_bytes().len());
+    /// Layout: `[KDF_CONTEXT || scheme_id || ephemeral_public_key || recipient_public_key]`.
+    /// Each supported scheme uses fixed-size key encodings, with `scheme_id = scheme as u8`.
+    fn build_kdf_info(
+        scheme: IesScheme,
+        ephemeral_public_key: &K::EphemeralPublicKey,
+        recipient_public_key: &K::PublicKey,
+    ) -> Vec<u8> {
+        let ephemeral_bytes = ephemeral_public_key.to_bytes();
+        let recipient_bytes = recipient_public_key.to_bytes();
+        let mut info = Vec::with_capacity(
+            Self::KDF_CONTEXT.len() + 1 + ephemeral_bytes.len() + recipient_bytes.len(),
+        );
         info.extend_from_slice(Self::KDF_CONTEXT);
         info.push(scheme as u8);
-        info.extend_from_slice(&ephemeral_public_key.to_bytes());
+        info.extend_from_slice(&ephemeral_bytes);
+        info.extend_from_slice(&recipient_bytes);
         info
     }
 
@@ -56,7 +64,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
                 .map_err(|_| IesError::KeyAgreementFailed)?,
         );
 
-        let kdf_info = Self::build_kdf_info(scheme, &ephemeral_public);
+        let kdf_info = Self::build_kdf_info(scheme, &ephemeral_public, recipient_public_key);
         let encryption_key_bytes = Zeroizing::new(
             K::extract_key_material(&shared_secret, <A as AeadScheme>::KEY_SIZE, &kdf_info)
                 .map_err(|_| IesError::FailedExtractKeyMaterial)?,
@@ -85,7 +93,8 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
                 .map_err(|_| IesError::KeyAgreementFailed)?,
         );
 
-        let kdf_info = Self::build_kdf_info(scheme, ephemeral_public_key);
+        let recipient_public_key = K::public_key(recipient_private_key);
+        let kdf_info = Self::build_kdf_info(scheme, ephemeral_public_key, &recipient_public_key);
         let decryption_key_bytes = Zeroizing::new(
             K::extract_key_material(&shared_secret, <A as AeadScheme>::KEY_SIZE, &kdf_info)
                 .map_err(|_| IesError::FailedExtractKeyMaterial)?,
@@ -117,7 +126,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
                 .map_err(|_| IesError::KeyAgreementFailed)?,
         );
 
-        let kdf_info = Self::build_kdf_info(scheme, &ephemeral_public);
+        let kdf_info = Self::build_kdf_info(scheme, &ephemeral_public, recipient_public_key);
         let encryption_key_bytes = Zeroizing::new(
             K::extract_key_material(&shared_secret, <A as AeadScheme>::KEY_SIZE, &kdf_info)
                 .map_err(|_| IesError::FailedExtractKeyMaterial)?,
@@ -146,7 +155,8 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
                 .map_err(|_| IesError::KeyAgreementFailed)?,
         );
 
-        let kdf_info = Self::build_kdf_info(scheme, ephemeral_public_key);
+        let recipient_public_key = K::public_key(recipient_private_key);
+        let kdf_info = Self::build_kdf_info(scheme, ephemeral_public_key, &recipient_public_key);
         let decryption_key_bytes = Zeroizing::new(
             K::extract_key_material(&shared_secret, <A as AeadScheme>::KEY_SIZE, &kdf_info)
                 .map_err(|_| IesError::FailedExtractKeyMaterial)?,
@@ -159,5 +169,37 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
 
         A::decrypt_elements_with_associated_data(&decryption_key, ciphertext, associated_data)
             .map_err(|_| IesError::DecryptionFailed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        aead::xchacha::XChaCha,
+        dsa::eddsa_25519_sha512::PublicKey,
+        ecdh::x25519::{EphemeralPublicKey, X25519},
+        utils::Deserializable,
+    };
+
+    #[test]
+    fn kdf_v2_known_answer() {
+        let mut recipient = [0x66; 32];
+        recipient[0] = 0x58; // Ed25519 basepoint encoding.
+        let recipient = PublicKey::read_from_bytes(&recipient).unwrap();
+        let mut ephemeral = [0; 32];
+        ephemeral[0] = 9; // X25519 basepoint encoding.
+        let ephemeral = EphemeralPublicKey::read_from_bytes(&ephemeral).unwrap();
+        let info = CryptoBox::<X25519, XChaCha>::build_kdf_info(
+            IesScheme::X25519XChaCha20Poly1305,
+            &ephemeral,
+            &recipient,
+        );
+        // Independently computed with HKDF-Extract and one HKDF-Expand block (RFC 5869).
+        let key = crate::ecdh::extract_key_material(&[0x42; 32], None, 32, &info).unwrap();
+        assert_eq!(
+            hex::encode(key),
+            "9a40b0d74ef91c20291e196482bea49d3ce7d1fd8203f1a75d37b4f60d51686d"
+        );
     }
 }

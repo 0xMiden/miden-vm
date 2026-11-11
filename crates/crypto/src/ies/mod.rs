@@ -5,6 +5,9 @@
 //! It exposes a simple API via [`SealingKey`], [`UnsealingKey`], [`SealedMessage`], and
 //! [`IesError`].
 //!
+//! Every profile binds the ephemeral and recipient public keys into its key derivation. Unsealing
+//! derives the recipient public key from the recipient's secret key.
+//!
 //! [`IesScheme::Ecgfp5Eidos`] uses EcGFp5 agreement and Eidos extract/expand. Its
 //! [`ecgfp5_eidos`] module also provides the Felt envelope used by the core library's MASM
 //! procedures. Convert that envelope into [`SealedMessage`] to open it with [`UnsealingKey`].
