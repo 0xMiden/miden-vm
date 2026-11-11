@@ -1,0 +1,7 @@
+begin
+    # Leaves 17 elements on the stack (the result plus 16 padding zeros), which
+    # the VM rejects at program end.
+    push.3
+    push.4
+    add
+end

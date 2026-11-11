@@ -7,6 +7,7 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use p3_field::Algebra;
 
 use crate::precompiles::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
@@ -61,10 +62,10 @@ macro_rules! delegate {
 
 fn eval_lifted<A, AB>(air: &A, builder: &mut AB)
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: LiftedAir<Felt, QuadFelt, EvalData<AB::Expr, AB::ExprEF> = ()>,
     AB: LiftedAirBuilder<F = Felt>,
 {
-    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder);
+    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder, &());
 }
 
 impl ChipletAir {
@@ -125,6 +126,8 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn preprocessed_height(&self) -> Option<usize> {
         delegate!(self, preprocessed_height)
     }
@@ -169,7 +172,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             challenges
         )
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         match self {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
             ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),

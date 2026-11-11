@@ -272,6 +272,8 @@ impl BaseAir<Felt> for BytePairLutAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn preprocessed_height(&self) -> Option<usize> {
         Some(TRACE_HEIGHT)
     }
@@ -311,7 +313,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();

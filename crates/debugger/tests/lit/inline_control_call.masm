@@ -1,0 +1,10 @@
+begin
+    push.1
+    if.true
+        push.10
+        push.20
+        add
+    else
+        push.30
+    end
+end

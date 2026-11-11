@@ -110,9 +110,9 @@ where
 /// Assert a concrete builder's accessor dimensions match `air` — preprocessed,
 /// main and aux trace, public values, randomness, aux values, and periodic values.
 ///
-/// Guards the invariant that makes [`LiftedAir::eval`] panic-free: if symbolic
-/// evaluation in `constraint_degree` succeeds and this check passes, `eval()`
-/// cannot panic from out-of-bounds accessor access.
+/// Under the [`LiftedAir`] evaluation contract, successful symbolic evaluation and this shape
+/// check establish that `eval`'s input accesses are in bounds. Prepared data must also satisfy
+/// [`LiftedAir::eval`]'s contract.
 pub fn check_builder_shape<F, EF, A, AB>(air: &A, builder: &AB)
 where
     F: Field,

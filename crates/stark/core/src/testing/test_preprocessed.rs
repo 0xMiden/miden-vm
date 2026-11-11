@@ -24,7 +24,7 @@ use crate::{
     pcs::params::PcsParams,
     proof::{StarkOutput, StarkProof},
     testing::configs::goldilocks_poseidon2::{
-        Felt, Lmcs, QuadFelt, TestConfig, test_challenger, test_config,
+        Felt, Lmcs, PackedFelt, PackedQuadFelt, QuadFelt, TestConfig, test_challenger, test_config,
     },
 };
 
@@ -71,6 +71,8 @@ impl BaseAir<Felt> for RowCounterAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn preprocessed_height(&self) -> Option<usize> {
         self.declared_height
     }
@@ -95,7 +97,7 @@ impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
         build_aux(main.height(), challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let local_main: AB::Expr = main.current_slice()[0].into();
         let next_main: AB::Expr = main.next_slice()[0].into();
@@ -130,6 +132,8 @@ impl BaseAir<Felt> for ConstantAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ConstantAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn aux_width(&self) -> usize {
         1
     }
@@ -150,7 +154,7 @@ impl LiftedAir<Felt, QuadFelt> for ConstantAir {
         build_aux(main.height(), challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let local: AB::Expr = main.current_slice()[0].into();
         let next: AB::Expr = main.next_slice()[0].into();
@@ -193,6 +197,8 @@ impl BaseAir<Felt> for MixedAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for MixedAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn preprocessed_height(&self) -> Option<usize> {
         match self {
             Self::Constant(a) => a.preprocessed_height(),
@@ -223,10 +229,10 @@ impl LiftedAir<Felt, QuadFelt> for MixedAir {
         }
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         match self {
-            Self::Constant(a) => a.eval(builder),
-            Self::RowCounter(a) => a.eval(builder),
+            Self::Constant(a) => a.eval(builder, &()),
+            Self::RowCounter(a) => a.eval(builder, &()),
         }
     }
 }
@@ -273,12 +279,18 @@ fn build_aux(height: usize, challenges: &[QuadFelt]) -> (RowMajorMatrix<QuadFelt
     (RowMajorMatrix::new(vec![challenges[0]; height], 1), Vec::new())
 }
 
-/// Build a no-public-input prover statement for `airs` + `traces`.
+/// Build a prover statement with fixed public inputs for the fixture AIRs.
 fn prover_statement<A: LiftedAir<Felt, QuadFelt>>(
     airs: Vec<A>,
     traces: Vec<RowMajorMatrix<Felt>>,
 ) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<A>> {
-    let statement = Statement::new(PreprocMultiAir { airs }, vec![], vec![]).expect("statement");
+    let inputs = airs
+        .iter()
+        .enumerate()
+        .filter(|(_, air)| air.num_public_values() != 0)
+        .map(|(i, air)| (i, vec![Felt::from_usize(i + 3); air.num_public_values()]))
+        .collect();
+    let statement = Statement::new(PreprocMultiAir { airs }, inputs, vec![]).expect("statement");
     ProverStatement::new(statement, traces).expect("prover statement")
 }
 
@@ -298,6 +310,7 @@ fn prove_with_preprocessed<MA>(
 ) -> (TestOutput, TestPreprocessed, Statement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
+    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config).expect("has preprocessed");
     let prover_instance =
@@ -331,6 +344,7 @@ fn verify_and_reparse<MA>(
 fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
+    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let config = test_config();
     let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
@@ -632,6 +646,7 @@ struct CountedAir {
     borrowed_address: Arc<AtomicUsize>,
     preparations: Arc<AtomicUsize>,
     prepared_evaluations: Arc<AtomicUsize>,
+    max_batch_evaluations: Arc<AtomicUsize>,
 }
 
 impl CountedAir {
@@ -643,11 +658,21 @@ impl CountedAir {
             borrowed_address: Arc::new(AtomicUsize::new(0)),
             preparations: Arc::new(AtomicUsize::new(0)),
             prepared_evaluations: Arc::new(AtomicUsize::new(0)),
+            max_batch_evaluations: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
 
+#[derive(Default)]
+struct CountedEvalData<E> {
+    value: E,
+    evaluations: AtomicUsize,
+}
+
 impl BaseAir<Felt> for CountedAir {
+    fn num_public_values(&self) -> usize {
+        1
+    }
     fn width(&self) -> usize {
         self.inner.width()
     }
@@ -661,6 +686,8 @@ impl BaseAir<Felt> for CountedAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for CountedAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = CountedEvalData<E>;
+
     fn preprocessed_height(&self) -> Option<usize> {
         self.inner.preprocessed_height()
     }
@@ -672,7 +699,7 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
         self.inner.num_randomness()
     }
     fn num_aux_values(&self) -> usize {
-        self.inner.num_aux_values()
+        1
     }
     fn build_aux_trace(
         &self,
@@ -701,34 +728,42 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
             Ordering::Relaxed,
         );
         self.aux_calls.fetch_add(1, Ordering::Relaxed);
-        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+        let (trace, _) = self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges);
+        (trace, vec![challenges[0].double() + QuadFelt::from_usize(main.height())])
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.inner.eval(builder)
-    }
-
-    fn precompute_challenge_terms<B: Algebra<Felt>, E: Algebra<B>>(
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
         &self,
-        challenges: &[E],
-    ) -> Vec<E> {
+        inputs: crate::air::EvalInputs<'_, B, E>,
+    ) -> Self::EvalData<B, E> {
         self.preparations.fetch_add(1, Ordering::Relaxed);
-        vec![challenges[0].square()]
+        CountedEvalData {
+            value: inputs.challenges[0].square()
+                + inputs.aux_values[0].clone() * inputs.public_values[0].clone(),
+            evaluations: AtomicUsize::new(0),
+        }
     }
 
-    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
         &self,
         builder: &mut AB,
-        terms: &[AB::ExprEF],
+        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
     ) {
-        assert_eq!(terms.len(), 1);
         self.prepared_evaluations.fetch_add(1, Ordering::Relaxed);
-        self.inner.eval(builder);
+        let count = data.evaluations.fetch_add(1, Ordering::Relaxed) + 1;
+        self.max_batch_evaluations.fetch_max(count, Ordering::Relaxed);
+        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
+        let public: AB::Expr = builder.public_values()[0].into();
+        let aux: AB::ExprEF = builder.permutation_values()[0].clone().into();
+        // Compare cached inputs with the builder's values independently of preparation.
+        builder.assert_eq_ext(data.value.clone(), challenge.square() + aux * public);
+        self.inner.eval(builder, &());
     }
 }
 
 #[test]
-fn prover_reuses_setup_and_prepares_terms_once_per_air() {
+fn prover_reuses_setup_and_evaluation_data() {
     // Include a missing table and different heights in an instance order unlike proof order.
+    // The largest trace spans multiple parallel row batches.
     let airs: Vec<_> = [
         MixedAir::Constant(ConstantAir),
         MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))),
@@ -740,7 +775,7 @@ fn prover_reuses_setup_and_prepares_terms_once_per_air() {
     let make_statement = || {
         prover_statement(
             airs.clone(),
-            vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
+            vec![squaring_trace(1024), row_index_trace(4), row_index_trace(2)],
         )
     };
     let config = test_config();
@@ -763,16 +798,15 @@ fn prover_reuses_setup_and_prepares_terms_once_per_air() {
             );
         }
     }
-    for (air, height) in airs.iter().zip([8usize, 4, 2]) {
+    for (air, height) in airs.iter().zip([1024usize, 4, 2]) {
         assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "generate only during setup");
         assert_eq!(air.aux_calls.load(Ordering::Relaxed), 2, "both proofs build auxiliary traces");
-        assert_eq!(air.preparations.load(Ordering::Relaxed), 2, "prepare once per AIR per proof");
         let quotient_rows = height << crate::log_quotient_degree(air);
         let packed_rows = quotient_rows.div_ceil(<Felt as Field>::Packing::WIDTH);
         assert_eq!(
-            air.prepared_evaluations.load(Ordering::Relaxed),
-            2 * packed_rows,
-            "every packed row must use the prepared evaluator",
+            air.max_batch_evaluations.load(Ordering::Relaxed),
+            packed_rows,
+            "all packed rows must share one prepared value",
         );
     }
 }

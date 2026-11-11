@@ -108,6 +108,8 @@ impl BaseAir<Felt> for Sha512Air {
 }
 
 impl LiftedAir<Felt, QuadFelt> for Sha512Air {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         <compression::Sha512CompressionAir as LiftedAir<Felt, QuadFelt>>::max_periodic_length(
             &compression::Sha512CompressionAir,
@@ -136,7 +138,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha512Air {
         miden_stark::lookup::build_logup_aux_trace(self, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
         let periods = builder.periodic_values();

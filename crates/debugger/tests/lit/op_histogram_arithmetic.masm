@@ -1,0 +1,34 @@
+# Exercises a variety of operations: arithmetic, comparison, bitwise, memory,
+# and stack manipulation. The final result (20) is left on top of the stack.
+begin
+    # arithmetic: (7 + 3) * 2 = 20
+    push.7
+    push.3
+    add
+    push.2
+    mul
+
+    # save result to memory before comparison (which consumes both operands)
+    push.0
+    mem_store
+
+    # comparison: 10 == 10 -> 1 (true)
+    push.10
+    push.10
+    eq
+    drop
+    drop
+    drop
+
+    # bitwise: 0xFF & 0x0F = 0x0F = 15
+    push.0xFF
+    push.0x0F
+    u32and
+    drop
+    drop
+
+    # load the saved result and `add` intto padding 0 on stack to keep final stack size in bounds
+    push.0
+    mem_load
+    add
+end

@@ -365,6 +365,7 @@ mod tests {
     }
 
     impl LiftedAir<TF, TF> for OrderTestAir {
+        type EvalData<B: p3_field::Algebra<TF>, E: p3_field::Algebra<B>> = ();
         fn preprocessed_height(&self) -> Option<usize> {
             self.preprocessed_height
         }
@@ -388,7 +389,7 @@ mod tests {
             // Unused: these tests only exercise the height permutation.
             (RowMajorMatrix::new(Vec::new(), 1), Vec::new())
         }
-        fn eval<AB: LiftedAirBuilder<F = TF>>(&self, _builder: &mut AB) {}
+        fn eval<AB: LiftedAirBuilder<F = TF>>(&self, _builder: &mut AB, _data: &()) {}
     }
 
     fn airs(n: usize) -> Vec<OrderTestAir> {
