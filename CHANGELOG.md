@@ -46,6 +46,7 @@
 
 #### Fixes
 
+- [BREAKING] Align Rust Ed25519 verification with MASM by rejecting small-order public keys and signature points. Ed25519 public-key deserialization rejects noncanonical encodings, including keys used for X25519 key exchange and IES ([#4160](https://github.com/0xMiden/miden-vm/pull/4160), fixes [#4133](https://github.com/0xMiden/miden-vm/issues/4133)).
 - [BREAKING] Enforce curve scalar domains for MSM claims ([#4142](https://github.com/0xMiden/miden-vm/pull/4142)).
 - [BREAKING] Fixed PVM acceptance of PIN claims, uint domains, and curves rejected by native execution. Regenerate PVM proofs; the recursive verifier root changes ([#4143](https://github.com/0xMiden/miden-vm/pull/4143)).
 - Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4114](https://github.com/0xMiden/miden-vm/pull/4114)).

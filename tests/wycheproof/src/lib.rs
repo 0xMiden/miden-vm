@@ -5,7 +5,6 @@ mod p256_masm;
 
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::Verifier;
     use k256::{elliptic_curve::sec1::ToSec1Point, pkcs8::DecodePublicKey};
     use miden_crypto::{
         Word,
@@ -156,8 +155,9 @@ mod tests {
                     continue;
                 },
             };
-            let public_key = eddsa_25519_sha512::PublicKey::read_from_bytes(&public_key_bytes)
-                .expect("valid Ed25519 public key should parse");
+            let public_key = eddsa_25519_sha512::PublicKey::read_from_bytes(&public_key_bytes);
+            let canonical_key = miden_precompiles::ed25519_decompress_x(public_key_bytes).is_ok();
+            assert_eq!(public_key.is_ok(), canonical_key, "public key encoding policy");
 
             for test in group.tests {
                 let id = test.tc_id;
@@ -166,7 +166,8 @@ mod tests {
                     continue;
                 };
                 let signature = ed25519_dalek::Signature::from_bytes(&signature_bytes);
-                let verified = verifying_key.verify(test.msg.as_ref(), &signature).is_ok();
+                let verified = canonical_key
+                    && verifying_key.verify_strict(test.msg.as_ref(), &signature).is_ok();
 
                 if is_invalid(test.result) {
                     assert!(!verified, "tcId {id}: invalid signature verified");
@@ -183,7 +184,8 @@ mod tests {
                     };
                     let signature = eddsa_25519_sha512::Signature::from_der(&signature_bytes)
                         .expect("raw Ed25519 signature should parse");
-                    let wrapper_verified = public_key.verify(message, &signature);
+                    let wrapper_verified =
+                        public_key.as_ref().is_ok_and(|key| key.verify(message, &signature));
                     assert_eq!(wrapper_verified, verified, "tcId {id}: wrapper verification");
                 }
             }
