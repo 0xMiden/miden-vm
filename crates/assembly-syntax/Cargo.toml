@@ -42,7 +42,7 @@ env_logger = { workspace = true, optional = true }
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
+regex = { workspace = true, features = ["unicode", "perf"] }
 semver.workspace = true
 serde = { workspace = true, optional = true }
 smallvec.workspace = true

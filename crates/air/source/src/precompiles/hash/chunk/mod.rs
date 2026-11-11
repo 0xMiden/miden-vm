@@ -27,6 +27,7 @@ use miden_stark::{
         LookupGroup,
     },
 };
+use p3_field::Algebra;
 
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
@@ -112,6 +113,8 @@ impl BaseAir<Felt> for ChunkAir {
 // ================================================================================================
 
 impl LiftedAir<Felt, QuadFelt> for ChunkAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -134,7 +137,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         miden_stark::lookup::build_logup_aux_trace(&ChunkAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         // Phase 1: local row constraints.
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);

@@ -15,7 +15,7 @@ export MIDEN_BUILD_LIB_DOCS=1
 cargo hack check \
     --workspace \
     --each-feature \
-    --exclude-features default \
+    --exclude-features default,python \
     --all-targets
 
 echo "All feature combinations compiled successfully!"

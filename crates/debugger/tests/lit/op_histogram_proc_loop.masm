@@ -1,0 +1,13 @@
+# Per-procedure histogram with a procedure called in a loop.
+proc double
+    dup
+    add
+end
+
+begin
+    push.5
+    repeat.3
+        exec.double
+    end
+    drop
+end

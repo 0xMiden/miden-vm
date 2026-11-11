@@ -108,6 +108,8 @@ impl BaseAir<Felt> for EidosCompressionAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -138,7 +140,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
         (aux, sums)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         {
             let main = builder.main();
             let local = &main.current_slice()[..NUM_EIDOS_COMPRESSION_COLS];
@@ -213,6 +215,8 @@ impl BaseAir<Felt> for EidosCompressionInterfaceAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -235,7 +239,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
         build_logup_aux_trace(self, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         enforce_interface_constraints(builder);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
@@ -640,7 +644,7 @@ mod tests {
                 .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
             builder.randomness = challenges.to_vec();
             builder.permutation_values = sums.clone();
-            LiftedAir::eval(&air, &mut builder);
+            LiftedAir::eval(&air, &mut builder, &());
             assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
             assert!(
                 builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),
@@ -671,6 +675,7 @@ mod tests {
         <EidosCompressionAir as LiftedAir<Felt, QuadFelt>>::eval(
             &EidosCompressionAir,
             &mut builder,
+            &(),
         );
         assert_eq!(builder.extension_evaluations[0], QuadFelt::ONE);
         assert_eq!(builder.extension_evaluations.last(), Some(&QuadFelt::ONE));

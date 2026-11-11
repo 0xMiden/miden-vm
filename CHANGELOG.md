@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added the debugger to the VM workspace with its Git history. `miden-debug`, `miden-debug-engine`, and `miden-debug-dap` now follow the VM release cycle. VM releases also include debugger executable archives.
 - [BREAKING] EcGFp5/Eidos `seal` and `seal_preprocessed` require host event handlers, including when advice is preloaded. Added configurable `Ecgfp5SealHandler` for generating fresh key-agreement advice ([#4137](https://github.com/0xMiden/miden-vm/pull/4137)).
 - [BREAKING] Added binary serialization and deserialization for `ExecutionOptions` and `PrecompileLimits`, including arbitrary custom `WorkClass` names. `WorkClass` no longer implements `Copy`, and neither do `WorkItem` and `PrecompileLimitError` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
@@ -33,6 +34,7 @@
 - [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, security metadata, and canonical ACE circuits from one capture without adding compiler tooling to runtime dependencies. The recursive-verifier parameter generators consume the same capture and check the pinned relation identities instead of rewriting them. Removed the `regenerate-evaluator` tool. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 - [BREAKING] Reduced the full aligned MVM and PVM widths from 280/768 to 272/760. Both proof relations and recursive verifier roots change ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
 - Added per-AIR precomputation of challenge-only terms to native MVM and PVM constraint evaluation ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
+- [BREAKING] Added AIR-owned `LiftedAir::EvalData` and `prepare(EvalInputs)`; `eval` requires the prepared data. Removed `precompute_challenge_terms` and `eval_with_challenge_terms` ([#4141](https://github.com/0xMiden/miden-vm/pull/4141)).
 - Improved native VM and PVM proving through interleaved LogUp batch inversion and quotient-buffer reuse. PVM STORE/MUL auxiliary traces are allocated at their final width to avoid copying lookup columns. Parallelized PVM integer and Keccak trace packing in concurrent builds ([#4095](https://github.com/0xMiden/miden-vm/pull/4095)).
 - Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
 - Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
@@ -51,6 +53,12 @@
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387) ([#4086](https://github.com/0xMiden/miden-vm/pull/4086)).
 - The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/pull/4111)).
 - Fixed `DebugInfoBuilder` deduplication of file and error-message rows being quadratic when debug info tables are merged during static linking. The builder now keeps hash indices for these tables ([#4124](https://github.com/0xMiden/miden-vm/pull/4124)).
+- [BREAKING] `SignaturePoly` now rejects coefficients whose Falcon compressed encoding exceeds the fixed 625-byte signature polynomial size, so serialization cannot panic on a `TryFrom`-accepted polynomial. The coefficient vector is private, and `From<Polynomial<FalconFelt>>` is replaced by a fallible `TryFrom`. Valid signature bytes and Falcon signing output are unchanged.
+- [BREAKING] `SignaturePoly` now rejects coefficients whose Falcon compressed encoding exceeds the fixed 625-byte signature polynomial size, so serialization cannot panic on a `TryFrom`-accepted polynomial. The coefficient vector is private, and `From<Polynomial<FalconFelt>>` is replaced by a fallible `TryFrom`. Valid signature bytes and Falcon signing output are unchanged ([#4150](https://github.com/0xMiden/miden-vm/pull/4150)).
+- Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
+- Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
+- The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
+- Fixed `DebugInfoBuilder` deduplication of file and error-message rows being quadratic when debug info tables are merged during static linking. The builder now keeps hash indices for these tables ([#4112](https://github.com/0xMiden/miden-vm/issues/4112)).
 
 ## v1.0.0-rc.0 (2026-10-21)
 

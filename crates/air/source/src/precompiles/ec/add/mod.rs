@@ -290,6 +290,8 @@ impl BaseAir<Felt> for EcGroupAddAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         PERIOD
     }
@@ -316,7 +318,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         miden_stark::lookup::build_logup_aux_trace(&EcGroupAddAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 

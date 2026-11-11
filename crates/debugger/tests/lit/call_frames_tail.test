@@ -1,0 +1,20 @@
+# RUN: compile-masm %S/call_frames_tail.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 5 2>&1 | filecheck %s --implicit-check-not 'error:'
+
+break for mul
+continue
+backtrace
+delete 0
+finish
+backtrace
+continue
+stack
+
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: {{.*}}#0 [inferred] $exec::inner at {{.*}}call_frames_tail.masm:2:
+# CHECK-NEXT: {{.*}}#1 [inlined] ::$exec::outer
+# CHECK-NEXT: {{.*}}#2 $exec::$main
+# CHECK: Backtrace (1 frames):
+# CHECK-NEXT: {{.*}}#0 $exec::$main
+# CHECK: Program terminated successfully
+# CHECK: [0] 16 (0x10)

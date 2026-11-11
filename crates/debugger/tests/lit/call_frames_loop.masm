@@ -1,0 +1,21 @@
+proc worker
+    push.2 mul
+end
+
+proc outer
+    push.2
+    dup neq.0
+    while.true
+        swap
+        exec.worker
+        swap sub.1
+        dup neq.0
+    end
+    drop
+    push.3 add
+end
+
+begin
+    exec.outer
+    push.1 add
+end

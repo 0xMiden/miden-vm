@@ -1,0 +1,18 @@
+# Set an opcode breakpoint, verify the debugger stops on the matching op,
+# then run to the end. Reuses the breakpoint.masm fixture: (10 + 20) * 5 = 150.
+#
+# RUN: compile-masm %S/breakpoint.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break for mul
+continue
+list
+continue
+stack
+
+# CHECK: Breakpoint 0 set: opcode mul
+# CHECK: at {{.*}}breakpoint.masm:6:5
+# CHECK: Recent instructions:
+# CHECK: > mul
+# CHECK: Program terminated successfully
+# CHECK: [0] 150
