@@ -1,0 +1,25 @@
+# octocov (https://github.com/k1LoW/octocov) configuration, see the `coverage-report` CI job.
+coverage:
+  paths:
+    - rust-coverage.xml
+  # Below this the report carries a warning. octocov also exits with an error, which the
+  # `coverage-report` CI job does not fail on.
+  acceptable: 75%
+# The report job only publishes the coverage, its own duration says nothing about the tests.
+testExecutionTime:
+  if: false
+# Compare against the report stored for the base branch of the pull request.
+diff:
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+# The separate publishers post the captured summary with their write tokens.
+comment:
+  if: false
+# Capture this native report for both the job summary and the coverage comment artifact.
+summary:
+  if: true
+# Store the report of the default branch as the baseline for pull requests.
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}

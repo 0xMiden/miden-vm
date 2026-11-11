@@ -1,0 +1,158 @@
+[workspace]
+members = [".", "crates/dap", "crates/engine", "tests/lit/support"]
+resolver = "2"
+
+[workspace.package]
+version = "0.19.0"
+rust-version = "1.96"
+authors = ["Miden contributors"]
+repository = "https://github.com/0xMiden/miden-debug"
+homepage = "https://github.com/0xMiden/miden-debug"
+documentation = "https://github.com/0xMiden/miden-debug"
+categories = ["development-tools"]
+keywords = ["miden", "debugger"]
+license = "MIT"
+readme = "README.md"
+edition = "2024"
+
+[workspace.dependencies]
+clap = { version = "4.5", default-features = false, features = ["derive", "std", "env", "help", "suggestions", "error-context"]}
+log = "0.4"
+inventory = "0.3"
+miden-debug-dap = { version = "0.19.0", path = "crates/dap", features = ["client"] }
+miden-debug-engine = { version = "0.19.0", path = "crates/engine", default-features = false }
+miden-assembly = { version = "1.0.0-rc.0" }
+miden-assembly-syntax = { version = "1.0.0-rc.0", default-features = false }
+miden-core = { version = "1.0.0-rc.0", default-features = false }
+miden-debug-types = { version = "1.0.0-rc.0", default-features = false }
+miden-mast-package = { version = "1.0.0-rc.0", default-features = false }
+miden-processor = { version = "1.0.0-rc.0", default-features = false }
+miden-package-registry = { version = "1.0.0-rc.0", features = ["resolver"] }
+miden-project = { version = "1.0.0-rc.0" }
+miden-utils-sync = { version = "1.0.0-rc.0", default-features = false }
+rustc-hash = { version = "2.1" }
+serde = { version = "1.0", default-features = false, features = [
+    "serde_derive",
+    "alloc",
+    "rc",
+] }
+serde_json = "1"
+thiserror = { version = "2.0", default-features = false }
+
+[profile.dev]
+# Needed for 'inventory' to work
+codegen-units = 1
+
+[profile.release]
+# Needed for 'inventory' to work
+codegen-units = 1
+
+[package]
+name = "miden-debug"
+description = "An interactive debugger for Miden VM programs"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "miden-debug"
+path = "src/main.rs"
+test = false
+bench = false
+required-features = ["std"]
+
+[[bin]]
+name = "miden-debug-python"
+path = "src/main.rs"
+test = false
+bench = false
+required-features = ["python", "repl"]
+
+[[test]]
+name = "println_smoke_test"
+required-features = ["std"]
+
+[[test]]
+name = "println_empty_string"
+required-features = ["std"]
+
+[[test]]
+name = "println_invalid_utf8"
+required-features = ["std"]
+
+[[test]]
+name = "println_oversized_length"
+required-features = ["std"]
+
+[[test]]
+name = "println_uninitialized_memory"
+required-features = ["std"]
+
+[[test]]
+name = "println_multiple_prints"
+required-features = ["std"]
+
+[[test]]
+name = "flamegraph_profile"
+required-features = ["flamegraph"]
+
+[features]
+default = ["std", "tui", "dap", "repl", "flamegraph"]
+flamegraph = ["std", "dep:inferno"]
+tui = ["std", "dep:crossterm", "dep:futures-util", "dep:ratatui", "dep:signal-hook", "dep:syntect", "dep:tokio", "dep:tokio-util", "dep:tui-input"]
+script = ["std"]
+repl = ["script", "dep:rustyline"]
+dap = ["std", "dep:futures-executor", "miden-debug-engine/dap"]
+python = ["script", "dep:pyo3", "dep:pyo3-build-config"]
+std = ["dep:env_logger", "clap/std", "clap/env", "compact_str/std", "miden-assembly-syntax/std", "miden-debug-engine/std"]
+proptest = ["miden-debug-engine/proptest"]
+
+[dependencies]
+clap.workspace = true
+crossterm = { version = "0.29.0", optional = true, features = ["event-stream"] }
+compact_str = { version = "0.10", optional = true, default-features = false }
+miden-debug-engine.workspace = true
+env_logger = { version = "0.11", optional = true }
+inferno = { version = "0.12", optional = true, default-features = false }
+log.workspace = true
+miden-assembly.workspace = true
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+miden-debug-types.workspace = true
+miden-mast-package.workspace = true
+miden-package-registry.workspace = true
+miden-processor.workspace = true
+miden-project.workspace = true
+pyo3 = { version = "0.30.1", optional = true, features = ["auto-initialize"] }
+ratatui = { version = "0.30.0", optional = true }
+signal-hook = { version = "0.4.4", optional = true, default-features = false }
+syntect = { version = "5.2.0", optional = true, default-features = false, features = [
+    "parsing",
+    "default-syntaxes",
+    "default-themes",
+    "yaml-load",
+    "regex-onig",
+] }
+thiserror.workspace = true
+tui-input = { version = "0.15", optional = true }
+rustyline = { version = "19.0", optional = true, default-features = false }
+tokio = { version = "1.39.2", optional = true, features = ["rt", "time", "macros"] }
+tokio-util = { version = "0.7.11", optional = true }
+futures-executor = { version = "0.3.30", optional = true }
+futures-util = { version = "0.3.30", optional = true, default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+pyo3-build-config = { version = "0.30.1", optional = true, features = ["resolve-config"] }

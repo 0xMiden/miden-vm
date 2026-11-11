@@ -1,0 +1,17 @@
+{
+  "name": "@miden/miden-debug-docs-dev",
+  "private": true,
+  "scripts": {
+    "start:dev": "docusaurus start --port 3000 --host 0.0.0.0",
+    "build:dev": "docusaurus build",
+    "serve:dev": "docusaurus serve build"
+  },
+  "devDependencies": {
+    "@docusaurus/core": "^3",
+    "@docusaurus/preset-classic": "^3",
+    "@docusaurus/tsconfig": "^3",
+    "prism-react-renderer": "^2.4.0",
+    "rehype-katex": "^7",
+    "remark-math": "^6"
+  }
+}

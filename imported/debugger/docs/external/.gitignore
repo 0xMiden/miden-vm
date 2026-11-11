@@ -1,0 +1,6 @@
+# Build artifacts
+build
+.docusaurus
+
+# Dependencies
+node_modules

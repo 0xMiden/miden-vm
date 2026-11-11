@@ -1,0 +1,27 @@
+[package]
+name = "miden-debug-dap"
+description = "In-repo Debug Adapter Protocol support for miden-debug"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+name = "dap"
+
+[features]
+integration_testing = ["dep:fake", "dep:rand"]
+client = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+fake = { version = "5.*", features = ["derive"], optional = true }
+rand = { version = "0.10", optional = true }

@@ -1,0 +1,34 @@
+name: Publish fork coverage
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions: {}
+
+# Serialize reconciliation so two runs cannot create the same comment.
+concurrency:
+  group: fork-coverage-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: reconcile coverage report comments on open PRs
+    if: github.repository == '0xMiden/miden-debug'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # read the trusted publisher from the default branch
+      actions: read # discover CI runs and download their coverage artifacts
+      issues: write # create/update the bot's coverage comment
+      pull-requests: write # comment on PRs, including those from forks
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reconcile coverage comments
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const { publishForkCoverage } = require(process.env.GITHUB_WORKSPACE + '/.github/scripts/coverage-comment.js');
+            await publishForkCoverage({ github, context, core });

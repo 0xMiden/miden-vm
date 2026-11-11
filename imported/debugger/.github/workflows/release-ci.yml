@@ -1,0 +1,97 @@
+# The required `release / gate` check.
+#
+# Always runs, with no top-level path filters, so that a required status check
+# can never be satisfied by being skipped. Change impact is computed inside the
+# workflow instead.
+name: release
+
+on:
+  pull_request:
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: release-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  impact:
+    name: change impact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      full: ${{ steps.classify.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Tiered rather than binary: ordinary dependency work should not pay for
+      # the full closure build, but anything that changes what gets published,
+      # or how, must.
+      - name: Classify
+        id: classify
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "${BASE}" "${HEAD}")
+          echo "changed files:"; echo "${changed}"
+
+          full=false
+          while read -r file; do
+            case "${file}" in
+              .release/*|Makefile.toml|.github/workflows/*|Cargo.lock|*/Cargo.toml|Cargo.toml)
+                full=true ;;
+            esac
+          done <<< "${changed}"
+
+          echo "full=${full}" >> "${GITHUB_OUTPUT}"
+          echo "full closure verification: ${full}"
+
+  verify:
+    name: verify
+    needs: impact
+    # A called workflow can only *downgrade* the calling job's token, so this
+    # grant is the ceiling for every job in `release-verify.yml`. Without it the
+    # job inherits the top-level `{}` and the call is rejected as an escalation
+    # when the run graph is built -- which fails the whole run before any job
+    # starts, rather than failing this one.
+    permissions:
+      contents: read
+    uses: $/.github/workflows/release-verify.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      full: ${{ needs.impact.outputs.full == 'true' }}
+
+  gate:
+    name: gate
+    # The single required check. Runs unconditionally and fails if any required
+    # job failed *or was unexpectedly skipped*, so that a misconfigured
+    # dependency cannot turn a red build green.
+    if: always()
+    needs: [impact, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        # Results arrive through the environment rather than by interpolation
+        # into the script, which is the rule regardless of whether a particular
+        # value could carry anything interesting.
+        env:
+          IMPACT: ${{ needs.impact.result }}
+          VERIFY: ${{ needs.verify.result }}
+        run: |
+          set -euo pipefail
+          echo "impact: ${IMPACT}"
+          echo "verify: ${VERIFY}"
+          for result in "${IMPACT}" "${VERIFY}"; do
+            case "${result}" in
+              success) ;;
+              *) echo "a required release check did not succeed" >&2; exit 1 ;;
+            esac
+          done
+          echo "release gate: ok"

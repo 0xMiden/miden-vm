@@ -1,0 +1,12 @@
+name: 'Cleanup Runner'
+description: 'Remove unused tools in the runner image to free disk space'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Remove unused tools in the runner image
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force || true
+        sudo docker builder prune -a --force || true

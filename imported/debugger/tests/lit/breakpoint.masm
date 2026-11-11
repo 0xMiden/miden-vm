@@ -1,0 +1,10 @@
+begin
+    push.10
+    push.20
+    add
+    push.5
+    mul
+    # Fold the result into a padding zero so the program ends with <= 16 stack
+    # elements.
+    add
+end

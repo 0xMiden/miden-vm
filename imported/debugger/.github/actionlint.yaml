@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - warp-ubuntu-latest-x64-8x
+
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'not following the format "owner/repo/path/to/workflow\.yml@ref" nor "\./path/to/workflow\.yml"'

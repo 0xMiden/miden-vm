@@ -1,0 +1,21 @@
+[package]
+name = "miden-debug-lit-support"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "compile-masm"
+path = "src/compile_masm.rs"
+
+[[bin]]
+name = "compile-abi-fixture"
+path = "src/compile_abi_fixture.rs"
+
+[dependencies]
+miden-assembly.workspace = true
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+miden-debug-types.workspace = true
+miden-mast-package.workspace = true

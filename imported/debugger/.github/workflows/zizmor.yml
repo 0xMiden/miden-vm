@@ -1,0 +1,72 @@
+name: GitHub Actions Security Analysis
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "zizmor.yml"
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "zizmor.yml"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  actions-lock:
+    name: Verify GitHub Actions lockfile
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify lockfile
+        run: |
+          gh extension install github/gh-actions-lock
+          gh actions-lock --verify
+
+  zizmor:
+    name: Run zizmor
+    runs-on: ubuntu-latest
+    # Nothing is needed here for a public repository auditing itself:
+    # `security-events: write` only with `advanced-security: true`, and
+    # `contents: read` / `actions: read` only for private or internal repos.
+    #
+    # Spelled `{}` rather than left blank: a `permissions:` key with only
+    # comments beneath it is empty, which is a schema error, and it made both
+    # actionlint and zizmor reject this file instead of checking it.
+    permissions: {}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor 🌈
+        uses: zizmorcore/zizmor-action@v0.6.4
+        with:
+          advanced-security: false
+          config: zizmor.yml
+          version: 1.30.1
+          # Audit this repository's own automation, not the workflows it ships.
+          # `extra/templates` contains CI for generated projects: those run in a
+          # user's repository with a user's token, and zizmor's remedies would
+          # make the scaffold worse rather than safer -- a new project should
+          # start with a readable `actions/checkout@v4`, not a hash its author
+          # cannot evaluate and will never update.
+          inputs: .github

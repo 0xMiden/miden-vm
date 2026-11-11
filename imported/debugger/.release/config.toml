@@ -1,0 +1,49 @@
+# Authoritative release policy for this repository.
+#
+# Every workspace package must appear here exactly once. Classification is
+# explicit rather than inferred from directory layout, so that adding a package
+# forces a deliberate decision about whether it is published.
+#
+# See tools/release/README.md for the schema, and docs/release-process.md for
+# this repository's process.
+
+schema-version = 2
+
+# Private packages are frozen here. A private crate carrying a plausible
+# version invites the reader to assume it ships with the release.
+private-version = "0.1.0"
+
+# --- units --------------------------------------------------------------------
+
+[units.debugger]
+kind = "crates"
+version-source = "workspace"
+tag = "v{version}"
+changelog = "CHANGELOG.md"
+changelog-headings = ["Added", "Changed", "Fixed", "Migration and breaking changes"]
+latest = true
+# The release workflow's matrix builds `${binary}-${target}.tar.gz` for the midenup binary
+# across two targets. They route here.
+assets = ["miden-debug-*.tar.gz"]
+required-assets = ["miden-debug-*.tar.gz"]
+
+[units.private]
+kind = "private"
+
+# --- debugger unit ------------------------------------------------------------
+
+[[packages]]
+name = "miden-debug"
+unit = "debugger"
+
+[[packages]]
+name = "miden-debug-engine"
+unit = "debugger"
+
+[[packages]]
+name = "miden-debug-dap"
+unit = "debugger"
+
+[[packages]]
+name = "miden-debug-lit-support"
+unit = "private"

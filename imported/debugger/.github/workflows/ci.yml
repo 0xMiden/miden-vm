@@ -1,0 +1,275 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - next
+    paths-ignore:
+      - "**.md"
+      - "**.txt"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "**.txt"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Set the new value when the cache grows too much and we hit the runner's disk space limit
+  # via https://github.com/rust-lang/docs.rs/pull/2433
+  RUST_CACHE_KEY: rust-cache-20251006
+  # Needed until p3-* crates compile under nightly again
+  NIGHTLY_TOOLCHAIN: nightly-2026-10-09
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - &checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - &install-rust
+        name: Install Rust
+        run: |
+          rustup update --no-self-update
+          rustup toolchain install "${NIGHTLY_TOOLCHAIN}" --profile minimal --component rustfmt
+          rustc --version
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # Use a common cache for the basic compilation/formatter/clippy checks
+          shared-key: ${{ github.workflow }}-shared
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - &install-cargo-make
+        name: Install cargo-make
+        run: |
+          if ! cargo make --version 2>/dev/null; then
+            cargo install cargo-make --force
+          fi
+      - name: Clippy
+        run: |
+          cargo make clippy
+
+  feature_combinations:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: ${{ github.workflow }}-shared-feature-combinations
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - *install-cargo-make
+      - uses: taiki-e/install-action@v2.87.22
+        with:
+          tool: cargo-hack@0.6.44
+      - name: Check feature combinations
+        run: |
+          cargo make check-feature-combinations
+
+  check_format:
+    name: check formatting
+    runs-on: ubuntu-latest
+    # Run this job after the linter, so the cache is hot
+    needs: [lint]
+    # But run this check even if the lint check failed
+    if: ${{ always() }}
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # Use a common cache for the basic compilation/formatter/clippy checks
+          shared-key: ${{ github.workflow }}-shared
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          # But do not save this cache, just use it
+          save-if: false
+      - *install-cargo-make
+      - name: Check Formatting
+        run: |
+          cargo make check-format
+
+  unit_tests:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # NOTE: We use a different cache for the tests, so they can be run in parallel, but we
+          # also share the cache for the tests for efficiency
+          shared-key: ${{ github.workflow }}-shared-tests
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - *install-cargo-make
+      - uses: taiki-e/install-action@v2.87.22
+        with:
+          tool: cargo-nextest@0.9
+      - name: Check
+        # We run `cargo check` to verify that the workspace compiles correctly before attempting
+        # to execute the tests. This produces easier to read output if a compilation error occurs
+        run: |
+          cargo make check --tests
+      - name: Test
+        run: |
+          cargo make test
+
+  lit_tests:
+    name: lit/filecheck tests
+    runs-on: ubuntu-latest
+    # Run after the unit tests so we can reuse a warm cache
+    needs: [unit_tests]
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # Dedicated cache for the lit job
+          shared-key: ${{ github.workflow }}-shared-lit-tests
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - *install-cargo-make
+      - name: Install nightly toolchain
+        run: rustup toolchain install nightly --profile minimal
+      - name: Install litcheck
+        run: |
+          if ! litcheck --help >/dev/null 2>&1; then
+            cargo install litcheck --locked
+          fi
+      - name: Test
+        # The lit harness compiles `.masm` fixtures into `.masp` packages, then
+        # checks debugger output with FileCheck.
+        run: |
+          cargo make test-lit
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: ${{ github.workflow }}-shared-coverage
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - *install-cargo-make
+      - name: Install LLVM tools
+        run: rustup component add llvm-tools-preview
+      - name: Run Rust coverage
+        run: cargo make coverage
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ always() }}
+        with:
+          name: rust-coverage
+          path: rust-coverage.xml
+          if-no-files-found: warn
+
+  coverage-report:
+    name: coverage report
+    # Render with a read-only token, including on fork pull requests.
+    needs: [coverage]
+    outputs:
+      has_report: ${{ steps.octocov.outputs.has_report }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # Read the base branch report stored as an artifact
+    steps:
+      # octocov maps the report to the sources checked out at the same path as in the
+      # `coverage` job
+      - *checkout
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: rust-coverage
+      # Install the same CLI used by octocov-action, then capture its native summary.
+      - uses: k1LoW/gh-setup@v1.11.9
+        with:
+          repo: github.com/k1LoW/octocov
+          version: v0.83.1
+          bin-match: octocov
+          strict: true
+      - name: Render coverage report
+        id: octocov
+        # Preserve the report even when coverage.acceptable makes octocov exit with an error.
+        continue-on-error: true
+        env:
+          OCTOCOV_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        # A JavaScript action provides the runtime credentials Octocov needs for
+        # baseline and coverage-viewer artifacts, just like octocov-action.
+        uses: actions/github-script@v9.0.0
+        with:
+          script: await exec.exec('bash', ['.github/scripts/coverage-report.sh']);
+      - name: Warn about octocov failure
+        if: ${{ steps.octocov.outcome == 'failure' }}
+        run: echo "::warning title=Coverage::octocov failed, the coverage is below the acceptable threshold or the report could not be published. See the octocov step log."
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ always() && github.event_name == 'pull_request' && steps.octocov.outputs.has_report == 'true' }}
+        with:
+          name: coverage-comment
+          path: ${{ runner.temp }}/coverage-comment/
+          if-no-files-found: error
+
+  coverage-comment:
+    name: attach coverage report
+    needs: [coverage-report]
+    # Forks and Dependabot have read-only tokens; the scheduled publisher handles them.
+    if: >-
+      needs.coverage-report.outputs.has_report == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    permissions:
+      contents: read
+      actions: read # Read report artifact
+      issues: write # Needed by GitHub to write comment to PR
+      pull-requests: write # Write comment to PR
+    uses: $/.github/workflows/coverage-comment.yml
+    with:
+      run_id: ${{ github.run_id }}
+
+  coverage-publisher-tests:
+    name: run tests for coverage reporting scripts
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - name: Test coverage reporting and publishing
+        run: node --test .github/scripts/tests/*.test.js
+
+  check_release:
+    name: release checks
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # NOTE: We use a different cache for the these release checks
+          shared-key: ${{ github.workflow }}-shared-release-checks
+          prefix-key: ${{ env.RUST_CACHE_KEY }}
+          save-if: ${{ github.ref == 'refs/heads/next' }}
+      - *install-cargo-make
+      - name: Build all targets in release configuration
+        run: |
+          cargo make build --release --all-targets

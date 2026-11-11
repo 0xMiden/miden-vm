@@ -1,0 +1,376 @@
+# The production release workflow.
+#
+# This is the only workflow that may enter the `release` environment,
+# and the only one configured as a crates.io Trusted Publisher. Its scope comes
+# entirely from the reviewed `.release/release.toml` at the commit being
+# released; there is deliberately no version, unit, or scope input, so a
+# dispatch cannot widen or narrow what was reviewed.
+#
+# The phases exist to put every reversible action before every irreversible one:
+#
+#   B  plan and validate      nothing has happened yet
+#   C  build, stage drafts    drafts can be deleted; no tag, no publication
+#   -- approval gate --       the point of no return
+#   D  tag and publish        irreversible from the first uploaded crate
+#   E  finalize               releases become immutable
+name: release
+
+# No inputs, deliberately. The scope comes from the reviewed
+# `.release/release.toml` at the commit being released, so a dispatch cannot
+# widen or narrow what was reviewed.
+#
+# There is no "resume" input either: resuming *is* re-dispatching. Every attempt
+# reconciles against live registry and release state first and does only what is
+# missing, so a first attempt and a resume are the same run. An input offering a
+# mode that behaves no differently would be a control that does nothing.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+# One release at a time, repository-wide. Note that this is a convenience, not
+# the guard: GitHub cancels a *pending* run when a newer one enters the group,
+# so correctness rests on the executor's own overlap check against live state.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------- Phase B --
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      subject: ${{ steps.subject.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - &install-rust
+        name: Install Rust
+        run: |
+          rustup update --no-self-update
+          rustc --version
+
+      - &install-release-tool
+        name: Build release-tool
+        run: cargo install --locked --force miden-release-tool
+
+      # The subject is GITHUB_SHA -- the commit this run checked out -- and it
+      # must be main's tip. Attestations are built from the run's own claims, so
+      # defining the subject as anything else would attest the wrong commit.
+      - name: Validate the subject
+        id: subject
+        run: |
+          set -euo pipefail
+          tip=$(git rev-parse origin/main)
+          if [ "${GITHUB_SHA}" != "${tip}" ]; then
+            echo "subject ${GITHUB_SHA} is not main's tip (${tip}); refresh the candidate" >&2
+            exit 1
+          fi
+
+          # Nothing may have landed since the reviewed candidate. --first-parent
+          # asks the question that matters -- which commit on main changed this
+          # file -- rather than following into merged branches.
+          declared=$(git log --first-parent -1 --format=%H -- .release/release.toml)
+          if [ "${declared}" != "${GITHUB_SHA}" ]; then
+            echo "the release declaration was last changed in ${declared}, not ${GITHUB_SHA};" >&2
+            echo "something landed on main after the candidate merged" >&2
+            exit 1
+          fi
+          echo "sha=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Lint the candidate
+        run: release-tool lint
+
+      - name: Generate the intent
+        run: |
+          release-tool plan \
+            --subject "${GITHUB_SHA}" --output "${RUNNER_TEMP}/intent.json"
+          cat "${RUNNER_TEMP}/intent.json"
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-intent
+          path: ${{ runner.temp }}/intent.json
+          if-no-files-found: error
+
+  verify:
+    name: verify
+    needs: plan
+    # The ceiling for every job in the called workflow; see release-ci.yml.
+    permissions:
+      contents: read
+    uses: $/.github/workflows/release-verify.yml
+    with:
+      ref: ${{ needs.plan.outputs.subject }}
+      full: true
+
+  # ---------------------------------------------------------------- Phase C --
+  stage:
+    name: seal and stage
+    needs: [plan, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.subject }}
+          persist-credentials: false
+
+      - *install-rust
+      - *install-release-tool
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-intent
+          path: ${{ runner.temp }}
+
+      # Packages every selected crate and seals their digests into the plan.
+      # This job holds no credentials: packaging runs subject build scripts, and
+      # they must never run beside a token.
+      - name: Seal the plan
+        run: |
+          release-tool seal \
+            --intent "${RUNNER_TEMP}/intent.json" \
+            --output "${RUNNER_TEMP}/plan.json" \
+            --cache-dir "${RUNNER_TEMP}/index-cache"
+
+      #- name: Build the template bundle
+      #  run: |
+      #    release-tool bundle \
+      #      --output "${RUNNER_TEMP}/templates.tar.gz"
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-plan
+          path: |
+            ${{ runner.temp }}/plan.json
+          #  ${{ runner.temp }}/templates.tar.gz
+          if-no-files-found: error
+
+  # Build each executable on its own native runner. These jobs hold no
+  # credentials and no OIDC: they run subject build scripts, which must never
+  # happen beside a token or a token-minting capability.
+  artifacts:
+    name: build ${{ matrix.binary }} (${{ matrix.target }})
+    needs: [plan, verify]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Explicit runner labels rather than `*-latest`, so an image rotation
+        # does not silently change what the released bytes were built on.
+        include:
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, binary: miden-debug }
+          - { runner: macos-15, target: aarch64-apple-darwin, binary: miden-debug }
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.subject }}
+          persist-credentials: false
+
+      - name: Install Rust
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: |
+          rustup update --no-self-update
+          rustup target add "$MATRIX_TARGET"
+          rustc --version
+
+      - *install-release-tool
+
+      - name: Build
+        env:
+          # Incremental output is not reproducible and is pointless for a
+          # one-shot build.
+          CARGO_INCREMENTAL: "0"
+          MATRIX_TARGET: ${{ matrix.target }}
+          MATRIX_BINARY: ${{ matrix.binary }}
+        run: cargo build --release --locked --target "${MATRIX_TARGET}" -p "${MATRIX_BINARY}" --bin "${MATRIX_BINARY}"
+
+      - name: Smoke test
+        # Only meaningful when the host can run what was built.
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' || matrix.runner == 'macos-15' }}
+        env:
+          MATRIX_BINARY: ${{ matrix.binary }}
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          "./target/${MATRIX_TARGET}/release/${MATRIX_BINARY}" --version
+
+      - name: Archive
+        env:
+          MATRIX_BINARY: ${{ matrix.binary }}
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: |
+          release-tool archive-binary \
+            --binary "target/${MATRIX_TARGET}/release/${MATRIX_BINARY}" \
+            --name "${MATRIX_BINARY}" \
+            --output "${RUNNER_TEMP}/${MATRIX_BINARY}-${MATRIX_TARGET}.tar.gz"
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: artifact-${{ matrix.binary }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ matrix.binary }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  # Attestation is separated from building on purpose: this job needs
+  # `id-token: write`, and it must not be a job that has executed subject code.
+  # It only downloads bytes and attests them.
+  attest:
+    name: attest artifacts
+    # Depends on the build, not on staging: attestation needs the bytes, and
+    # coupling it to draft creation would serialize two independent things.
+    needs: [artifacts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Needed for artifacts
+      id-token: write # Needed for attestation
+      attestations: write # Needed for attestation
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: artifact-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/artifacts
+
+      - uses: actions/attest-build-provenance@v3.0.0
+        with:
+          subject-path: ${{ runner.temp }}/artifacts/*.tar.gz
+
+  # Collect the artifacts and populate the drafts. Still reversible: the drafts
+  # can be deleted, no tag exists, and nothing has been published.
+  stage-artifacts:
+    name: stage drafts
+    needs: [plan, stage, artifacts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # draft creation and asset upload
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.subject }}
+          persist-credentials: false
+
+      - *install-rust
+      - *install-release-tool
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: artifact-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/artifacts
+
+      #- name: Collect the template bundle
+      #  run: cp "${RUNNER_TEMP}/templates.tar.gz" "${RUNNER_TEMP}/artifacts/"
+
+      # Uploads every asset and reads each one back, while the release is still
+      # a draft and a mismatch can still be fixed.
+      - name: Create and populate drafts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release-tool stage \
+            --plan "${RUNNER_TEMP}/plan.json" \
+            --artifacts "${RUNNER_TEMP}/artifacts"
+
+  # ---------------------------------------------------------------- Phase D --
+  publish:
+    name: publish
+    needs: [plan, stage, stage-artifacts, attest]
+    runs-on: ubuntu-latest
+    # The approval gate. Everything before this is reversible; nothing after it
+    # is. Deployment is restricted to protected main by the environment itself.
+    environment: release
+    permissions:
+      contents: write # tag creation
+      id-token: write # Trusted Publishing
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.subject }}
+          persist-credentials: false
+
+      - *install-rust
+      - *install-release-tool
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}
+
+      # Exchanged immediately before publication and revoked by the action's
+      # post-step, because the token lives 30 minutes and Cargo spends most of a
+      # stage waiting for index confirmation.
+      - name: Obtain a Trusted Publishing token
+        uses: rust-lang/crates-io-auth-action@v1.0.5
+        id: auth
+
+      # Tokens are passed through the environment, never as arguments: process
+      # arguments are readable by every other process on the machine.
+      #
+      # GITHUB_TOKEN is here because each unit's tag is created immediately
+      # before that unit's crates are published -- not for all units up front,
+      # which would let a permanent failure in the SDK stage burn the compiler's
+      # tag as well.
+      - name: Tag and publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release-tool publish \
+            --plan "${RUNNER_TEMP}/plan.json" \
+            --journal "${RUNNER_TEMP}/journal.json"
+
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: release-journal
+          path: ${{ runner.temp }}/journal.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- Phase E --
+  # Verify every staged draft and publish it. A published release is immutable,
+  # so this is the one step that cannot be undone even in principle -- every
+  # unit is verified before any unit is published.
+  #
+  # No crates.io credential and no OIDC: nothing here touches the registry.
+  finalize:
+    name: finalize
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # publishing a release
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.subject }}
+          persist-credentials: false
+
+      - *install-rust
+      - *install-release-tool
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}
+
+      - name: Verify and publish the drafts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release-tool finalize --plan "${RUNNER_TEMP}/plan.json"

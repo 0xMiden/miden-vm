@@ -1,0 +1,21 @@
+# Import a Python module, verify its initializer, and exercise a custom command's lifecycle.
+#
+# RUN: compile-masm %S/add.masm -o %t.masp
+# RUN: miden-debug-python --no-user-python-init --commands %s %t.masp 2>&1 | filecheck %s
+
+command script import python_scripting.py
+script internal_dict['loaded_cycle']
+command script add py-cycle -f python_scripting.cycle
+py-cycle hello world
+command script list
+command script delete py-cycle
+command script list
+
+# CHECK: Imported Python script:
+# CHECK-NEXT: 0
+# CHECK-NEXT: Added Python command: py-cycle
+# CHECK-NEXT: cycle=0 args=hello world
+# CHECK-NEXT: Python commands:
+# CHECK-NEXT:   py-cycle
+# CHECK-NEXT: Deleted Python command: py-cycle
+# CHECK-NEXT: No Python commands registered
