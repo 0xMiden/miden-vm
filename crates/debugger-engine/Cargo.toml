@@ -28,6 +28,8 @@ std = [
     "miden-processor/std",
     "num-traits/std",
     "regex/std",
+    "rustc-demangle/std",
+    "miden-package-registry/resolver",
     "serde/std",
     "thiserror/std",
     "toml/preserve_order",
@@ -44,14 +46,14 @@ miden-core.workspace = true
 miden-debug-dap = { workspace = true, optional = true, features = ["client"] }
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
-miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-package-registry.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true, features = ["std"] }
 regex = { workspace = true, features = ["unicode"] }
 regex-syntax = { version = "0.8.11", default-features = false, features = ["unicode"] }
-rustc-demangle = { version = "0.1", features = ["std"] }
+rustc-demangle = { version = "0.1", default-features = false }
 rustc-hash.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, optional = true }

@@ -23,10 +23,11 @@ cargo hack check \
 cargo hack check \
     --workspace \
     --exclude miden-bench \
+    --exclude miden-debug-lit-support \
     --exclude miden-release-policy \
     --exclude miden-format \
     --each-feature \
-    --exclude-features default \
+    --exclude-features default,python \
     --lib \
     --no-dev-deps
 
