@@ -57,7 +57,7 @@ use crate::{
 /// any auxiliary information they need by accessing the processor state before or after each clock
 /// cycle. However, experiments show that this requires redoing too much work in the tracer already
 /// performed by the processor, which degrades performance.
-pub trait Tracer {
+pub(crate) trait Tracer {
     type Processor;
 
     /// The forest representation passed to this tracer's [`start_clock_cycle`] /

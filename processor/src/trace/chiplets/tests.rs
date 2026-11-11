@@ -81,7 +81,14 @@ fn bitwise_chiplet_trace() {
 #[test]
 fn aead_stream_packs_before_ordinary_bitwise_rows() {
     let with_controller = || {
-        let mut chiplets = Chiplets::new(KernelDescriptor::default());
+        let mut chiplets = Chiplets {
+            hasher: Default::default(),
+            aead_stream: Default::default(),
+            bitwise: Default::default(),
+            memory: Default::default(),
+            ace: Default::default(),
+            kernel_rom: super::KernelRom::new(KernelDescriptor::default()),
+        };
         chiplets.hasher.compress([ZERO; STATE_WIDTH]);
         chiplets
     };

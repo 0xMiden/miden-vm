@@ -936,7 +936,7 @@ impl IntoIterator for KernelReplay {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
-pub struct AceReplay {
+pub(crate) struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
 

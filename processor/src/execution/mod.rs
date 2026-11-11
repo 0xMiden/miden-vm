@@ -627,7 +627,7 @@ where
 /// After the MAST forest has been loaded, the processor *must* call
 /// [`finish_load_mast_forest_from_external`] to complete the execution of the operation and resume
 /// execution with the first operation of the called procedure.
-pub enum InternalBreakReason<F> {
+pub(crate) enum InternalBreakReason<F> {
     User(BreakReason<F>),
     Emit {
         op_idx: usize,

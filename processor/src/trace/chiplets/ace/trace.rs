@@ -58,7 +58,7 @@ struct EvalNode {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
-pub struct CircuitEvaluation {
+pub(crate) struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
     wire_bus: WireBus,
@@ -92,18 +92,6 @@ impl CircuitEvaluation {
 
     pub fn clk(&self) -> u32 {
         self.clk.into()
-    }
-
-    pub fn ctx(&self) -> u32 {
-        self.ctx.into()
-    }
-
-    pub fn num_read_rows(&self) -> u32 {
-        self.read_nodes.len() as u32
-    }
-
-    pub fn num_eval_rows(&self) -> u32 {
-        self.eval_nodes.len() as u32
     }
 
     /// Reads the word from memory at `ptr`, interpreting it as `[v_00, v_01, v_10, v_11]`, and
