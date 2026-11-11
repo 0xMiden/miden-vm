@@ -152,6 +152,10 @@ crate_version_exists() {
     published_version_info "$package" "$version" >/dev/null
 }
 
+# A matching version tag can belong to another project after a subtree import.
+# Require the requested crate and version before building baseline rustdoc, which
+# would fail if the crate were missing. Rejecting an unrelated checkout lets the
+# release check fall back to the published crate on crates.io.
 commit_has_package_version() {
     local commit="$1" package="$2" version="$3"
     local source_dir="$RELEASE_PLAN_TMPDIR/baseline-source/$commit"

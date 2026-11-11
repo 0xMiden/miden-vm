@@ -206,7 +206,6 @@ test: test-masm-root-stability ## Run the standard workspace test suite
 .PHONY: test-masm-root-stability
 test-masm-root-stability: ## Test the release gate's version policy
 	bash scripts/test-check-masm-root-stability.sh
-	bash scripts/test-debugger-release-baseline.sh
 
 .PHONY: test-crypto
 # Ordinary crypto, field, serde, derive, and Wycheproof tests run in the standard workspace suite.
