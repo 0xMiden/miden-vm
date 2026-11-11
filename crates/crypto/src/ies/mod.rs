@@ -12,6 +12,15 @@
 //! [`ecgfp5_eidos`] module also provides the Felt envelope used by the core library's MASM
 //! procedures. Convert that envelope into [`SealedMessage`] to open it with [`UnsealingKey`].
 //!
+//! # Usage limits
+//!
+//! Schemes using Eidos require applications to enforce the
+//! [Eidos AEAD usage limits](crate::aead::aead_eidos::MAX_VERIFICATION_DEGREE_BUDGET_PER_KEY),
+//! including the budget for failed and pending tag checks under each derived key. Opening methods
+//! do not track this budget. Repeated or modified submissions can reuse a derived key even though
+//! sealing generates a fresh ephemeral key. Applications may conservatively share one budget across
+//! all messages opened with the same unsealing key.
+//!
 //! # Examples
 //!
 //! ```
