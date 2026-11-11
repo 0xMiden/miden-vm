@@ -218,6 +218,19 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		--features miden-crypto/persistent-forest
 	$(MAKE) test-stark
 
+.PHONY: test-debugger test-debugger-lit
+test-debugger: ## Run debugger Rust tests
+	RUST_MIN_STACK=$(TEST_RUST_MIN_STACK) cargo nextest run --cargo-profile $(CARGO_PROFILE) \
+		-p miden-debug -p miden-debug-engine -p miden-debug-dap
+
+test-debugger-lit: ## Run debugger fixtures, including Python scripting
+	cargo build --locked -p miden-debug --bin miden-debug
+	cargo build --locked -p miden-debug --bin miden-debug-python --features miden-debug/python
+	cargo build --locked -p miden-debug-lit-support --bins
+	litcheck lit run --verbose --path \
+		"$$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)/debug" \
+		crates/debugger/tests/lit
+
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES)
@@ -267,7 +280,11 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
 		--exclude miden-bench \
-		--exclude miden-crypto-wycheproof-tests
+		--exclude miden-crypto-wycheproof-tests \
+		--exclude miden-debug \
+		--exclude miden-debug-dap \
+		--exclude miden-debug-engine \
+		--exclude miden-debug-lit-support
 
 .PHONY: build-target-miden
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
@@ -418,7 +435,7 @@ exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
 
 .PHONY: exec-dist
-exec-dist: miden-vm-dist miden-format-dist miden-registry-dist ## Builds CLIs for $(BUILD_TARGET) with --locked (for release artifact uploads)
+exec-dist: miden-vm-dist miden-format-dist miden-registry-dist miden-debug-dist ## Builds CLIs for $(BUILD_TARGET) with --locked (for release artifact uploads)
 # NOTE: the resulting binaries are stored in target/<$(BUILD_TARGET)>/optimized/
 
 .PHONY: miden-vm-dist
@@ -428,6 +445,10 @@ miden-vm-dist:
 .PHONY: miden-format-dist
 miden-format-dist:
 	cargo build -p miden-format --bin miden-format --profile optimized --target $(BUILD_TARGET) --locked
+
+.PHONY: miden-debug-dist
+miden-debug-dist:
+	cargo build -p miden-debug --bin miden-debug --profile optimized --target $(BUILD_TARGET) --locked
 
 .PHONY: miden-registry-dist
 miden-registry-dist:

@@ -1,0 +1,23 @@
+target/
+bin/
+rust-coverage.xml
+.crates.toml
+.crates2.json
+
+# Docs platform ignores
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+.code
+.idea
+site/
+venv/
+env/
+*.out
+*.masp
+node_modules/
+*DS_Store
+._*
+*.iml
+book/
+__pycache__

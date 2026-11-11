@@ -17,6 +17,7 @@ yanked = "warn"
 ignore = [
     "RUSTSEC-2024-0436", # paste is unmaintained but no alternative available
     "RUSTSEC-2021-0139", # ansi_term is pulled by tracing-forest; no patched release exists
+    "RUSTSEC-2025-0141", # syntect uses bincode 1 for its bundled syntax and theme caches
 ]
 
 # License configuration
@@ -27,6 +28,8 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0", # rustyline's Windows clipboard support
+    "CDDL-1.0", # inferno's flamegraph renderer
     "CC0-1.0",
     "ISC",
     "Unicode-3.0",
