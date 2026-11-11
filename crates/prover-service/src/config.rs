@@ -11,7 +11,17 @@ use tokio::sync::Semaphore;
 const REQUEST_ENVELOPE_BYTES: usize = 12;
 const RESPONSE_ENVELOPE_BYTES: usize = 6;
 
-/// Resource settings for either service input policy.
+/// Controls whether the service proves precompile work or returns it for later proving.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProofMode {
+    /// Prove the VM execution and its precompile work.
+    #[default]
+    Complete,
+    /// Prove the VM execution and return raw precompile witnesses for batch proving.
+    Deferred,
+}
+
+/// Proof mode and resource settings for either service input policy.
 ///
 /// Message limits apply to the serialized witness and proof. The service adds
 /// protobuf-envelope space when configuring its transport limits.
@@ -25,6 +35,7 @@ pub struct ServerConfig {
     vm_memory_bytes: u64,
     precompile_memory_bytes: u64,
     verification_precompile_limits: Option<PrecompileLimits>,
+    proof_mode: ProofMode,
 }
 
 impl ServerConfig {
@@ -63,6 +74,7 @@ impl ServerConfig {
             vm_memory_bytes,
             precompile_memory_bytes,
             verification_precompile_limits: None,
+            proof_mode: ProofMode::Complete,
         })
     }
 
@@ -91,6 +103,22 @@ impl ServerConfig {
     pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
         self.verification_precompile_limits = Some(limits);
         self
+    }
+
+    /// Sets whether to prove precompile work or return it for later proving.
+    ///
+    /// Deferred proofs can contain private inputs in their raw precompile witnesses. Precompile
+    /// proving memory and work limits apply only in complete mode. VM and byte limits apply in
+    /// both modes.
+    #[must_use]
+    pub const fn with_proof_mode(mut self, proof_mode: ProofMode) -> Self {
+        self.proof_mode = proof_mode;
+        self
+    }
+
+    /// Returns the proof mode, which defaults to [`ProofMode::Complete`].
+    pub const fn proof_mode(&self) -> ProofMode {
+        self.proof_mode
     }
 
     /// Returns the address to bind when no listener is supplied by the caller.

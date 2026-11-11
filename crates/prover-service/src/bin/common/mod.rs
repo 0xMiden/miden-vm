@@ -11,7 +11,7 @@ use miden_core::deferred::{WorkClass, WorkLimit};
 use miden_precompiles::{
     CURVE_WORK, HASH_WORK, MSM_WORK, UINT_WORK, default_verification_precompile_limits,
 };
-use miden_prover_service::{InputPolicy, ProvingService, ServerConfig};
+use miden_prover_service::{InputPolicy, ProofMode, ProvingService, ServerConfig};
 use tracing_subscriber::EnvFilter;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -30,7 +30,7 @@ pub fn exit(result: Result<(), Error>) -> std::process::ExitCode {
 #[command(
     name = env!("CARGO_BIN_NAME"),
     version,
-    about = "Serve complete proofs for serialized Miden VM execution witnesses"
+    about = "Serve proofs for serialized Miden VM execution witnesses"
 )]
 pub struct Options {
     /// Listener address. Restrict the trusted binary to trusted producers.
@@ -40,6 +40,10 @@ pub struct Options {
     /// Maximum number of active and queued proof requests.
     #[arg(long, default_value_t = 1)]
     capacity: usize,
+
+    /// Return raw precompile witnesses for batch proving. They may contain private inputs.
+    #[arg(long)]
+    deferred: bool,
 
     /// Maximum serialized witness bytes, excluding protobuf framing.
     #[arg(long)]
@@ -57,15 +61,15 @@ pub struct Options {
     #[arg(long)]
     vm_memory_bytes: u64,
 
-    /// Precompile prover memory budget in bytes.
+    /// Precompile prover memory budget in bytes. Used only for complete proofs.
     #[arg(long)]
     precompile_memory_bytes: u64,
 
-    /// Override the canonical precompile structural element limit. Zero denies all elements.
+    /// Override the precompile structural element limit for complete proofs. Zero denies elements.
     #[arg(long)]
     precompile_max_elements: Option<u64>,
 
-    /// Override a canonical work class: hash, uint, curve, or msm. Zero denies work.
+    /// Override a work class for complete proofs: hash, uint, curve, or msm. Zero denies work.
     #[arg(long, value_name = "CLASS:COUNT:TOTAL_SIZE:ITEM_SIZE", value_parser = parse_work_limit)]
     precompile_work_limit: Vec<(WorkClass, WorkLimit)>,
 }
@@ -81,6 +85,10 @@ impl Options {
         )?
         .with_listen_addr(self.listen)
         .with_capacity(self.capacity)?;
+
+        if self.deferred {
+            config = config.with_proof_mode(ProofMode::Deferred);
+        }
 
         if self.precompile_max_elements.is_some() || !self.precompile_work_limit.is_empty() {
             let mut limits = default_verification_precompile_limits();
@@ -160,7 +168,7 @@ pub async fn run<P: InputPolicy>(service: ProvingService<P>) -> Result<(), Error
         #[cfg(not(unix))]
         tokio::signal::ctrl_c().await
     };
-    tracing::info!(address = %service.config().listen_addr(), capacity = service.config().capacity().get(), "starting listener");
+    tracing::info!(address = %service.config().listen_addr(), capacity = service.config().capacity().get(), proof_mode = ?service.config().proof_mode(), "starting listener");
     let serving = service.clone().serve();
     tokio::pin!(serving);
     tokio::select! {

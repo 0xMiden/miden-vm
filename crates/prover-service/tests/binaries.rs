@@ -189,6 +189,44 @@ async fn cli_binaries_choose_their_reader_policy() {
 }
 
 #[tokio::test]
+async fn cli_deferred_mode_retains_precompile_work_for_batch_proving() {
+    let execution = witness(Some(1));
+    let claim = execution.claim();
+    let bytes = execution.to_bytes();
+    let expected_precompile = execution.into_parts().1.unwrap();
+    let plain = witness(None);
+    let plain_claim = plain.claim();
+    let plain_bytes = plain.to_bytes();
+    let mut limits = LIMITS;
+    // Deferred mode omits the precompile STARK, so its proving budget is unused.
+    limits[9] = "1";
+
+    for binary in [UNTRUSTED, TRUSTED] {
+        let mut process = Process::with_limits(binary, &limits, &["--deferred"]).await;
+        let proof =
+            ExecutionProof::read_from_bytes(&process.prove(bytes.clone()).await.unwrap()).unwrap();
+        let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
+            panic!("batch proving needs the raw precompile witness");
+        };
+        assert_eq!(precompile, &expected_precompile);
+        let outcome = miden_verifier::Verifier::new().verify(&claim, &proof).unwrap();
+        assert!(!outcome.is_complete());
+
+        let proof =
+            ExecutionProof::read_from_bytes(&process.prove(plain_bytes.clone()).await.unwrap())
+                .unwrap();
+        assert!(matches!(proof.precompile(), PrecompileStatus::Empty));
+        assert!(
+            miden_verifier::Verifier::new()
+                .verify(&plain_claim, &proof)
+                .unwrap()
+                .is_complete()
+        );
+        process.stop().await;
+    }
+}
+
+#[tokio::test]
 async fn cli_resource_options_reach_the_prover() {
     let mut vm = LIMITS;
     vm[7] = "1";
@@ -198,6 +236,7 @@ async fn cli_resource_options_reach_the_prover() {
     let precompile = witness(Some(1)).to_bytes();
     for (limits, args, input) in [
         (vm, &[][..], &plain),
+        (vm, &["--deferred"][..], &plain),
         (precompile_memory, &[][..], &precompile),
         (LIMITS, &["--precompile-max-elements", "0"][..], &precompile),
     ] {

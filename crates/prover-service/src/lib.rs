@@ -13,7 +13,7 @@ mod service;
 mod transport;
 
 #[cfg(feature = "server")]
-pub use config::{ConfigError, ServerConfig};
+pub use config::{ConfigError, ProofMode, ServerConfig};
 #[cfg(feature = "server")]
 pub use service::{InputPolicy, ProvingService, Trusted, Untrusted};
 #[cfg(feature = "server")]

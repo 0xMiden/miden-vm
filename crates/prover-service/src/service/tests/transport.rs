@@ -220,6 +220,53 @@ async fn native_precompile_round_trip_over_grpc_for_both_policies() {
 }
 
 #[tokio::test]
+async fn deferred_precompile_round_trip_retains_final_advice_for_both_policies() {
+    let library = miden_core_lib::CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler.link_package(library.package(), Linkage::Dynamic).unwrap();
+    let program = assembler
+        .assemble_program(
+            "deferred",
+            "begin
+                push.42 mem_store.0
+                push.1.0 padw adv.insert_mem dropw drop drop
+                push.256 push.1 push.128
+                exec.::miden::core::precompiles::hashes::keccak256::hash_bytes_mem
+            end",
+        )
+        .unwrap()
+        .unwrap_program();
+    let mut host = DefaultHost::default().with_library(&library).unwrap();
+    let (witness, final_advice) = FastProcessor::new(StackInputs::default())
+        .execute_for_proving_with_advice_sync(&program, &mut host)
+        .unwrap();
+    let claim = witness.claim();
+    let bytes = witness.to_bytes();
+    let expected_precompile = witness.into_parts().1.unwrap();
+    let deferred = config().with_proof_mode(ProofMode::Deferred);
+    let untrusted = Running::start(ProvingService::new(deferred.clone())).await;
+    let trusted = Running::start(ProvingService::<Trusted>::new_trusted(deferred)).await;
+
+    for mut client in [untrusted.client().await, trusted.client().await] {
+        let response = client.prove(request(bytes.clone())).await.unwrap().into_inner();
+        let proof = ExecutionProof::read_from_bytes(&response.execution_proof).unwrap();
+        let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
+            panic!("batch proving needs the raw precompile witness");
+        };
+        assert_eq!(precompile, &expected_precompile);
+        let outcome = miden_verifier::Verifier::new().verify(&claim, &proof).unwrap();
+        assert!(!outcome.is_complete());
+        assert!(outcome.precompile_security_parameters().is_none());
+    }
+    assert_eq!(
+        final_advice.get_mapped_values(&miden_core::Word::empty()),
+        Some([miden_core::Felt::from_u32(42)].as_slice())
+    );
+    untrusted.stop().await;
+    trusted.stop().await;
+}
+
+#[tokio::test]
 async fn grpc_field_boundary_and_raw_oversized_frame() {
     let bytes = bytes();
     let config = ServerConfig::new(bytes.len(), 1, WAIT, 1, 1).unwrap();

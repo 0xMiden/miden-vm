@@ -1,10 +1,9 @@
 # Miden prover service
 
 This crate runs a persistent gRPC service that accepts serialized `ExecutionWitness`
-values and returns serialized `ExecutionProof` values. Every successful response
-contains a complete proof from `Prover::prove_full`, including a precompile STARK
-when the execution has native precompile work. Generated Tonic client and server
-bindings are available in `protocol`.
+values and returns serialized `ExecutionProof` values. By default, `Prover::prove_full`
+builds a complete proof, including a precompile STARK when execution has native
+precompile work. Generated Tonic client and server bindings are available in `protocol`.
 
 ## Build and start
 
@@ -38,6 +37,11 @@ Each instance has exactly one worker and keeps queued witnesses serialized.
 All byte, timeout, and memory options above are required and must be nonzero.
 Size validation includes protobuf framing before a listener starts.
 
+Add `--deferred` when a batch will prove the precompile claims. The service then
+calls `Prover::prove` and returns the raw precompile witness with the VM proof.
+The raw witness can contain private inputs. Executions without precompile work
+still produce complete proofs.
+
 Use `miden-prover-service-trusted` with the same resource options for witnesses
 from trusted producers. Restrict access to that endpoint accordingly. Each binary
 constructs its corresponding Rust service type. Both are built together, and
@@ -70,9 +74,12 @@ is an error. Zero is a valid restrictive work limit, for example
 `--precompile-work-limit hash:0:0:0` denies hash work. Structural limits count
 deferred field elements.
 
+VM and byte limits apply in both modes. Precompile proving memory and work limits
+apply only to complete proofs because deferred mode omits that stage.
+
 The VM memory budget models prover allocations and excludes some allocations and
-cached preprocessing. Precompile preparation happens before the precompile
-prover's memory check. Witness decoding and transport buffers also consume memory.
+cached preprocessing. The precompile budget also covers preparation and import.
+Witness decoding and transport buffers also consume memory.
 The service bounds concurrent proof ingress before protobuf decoding and retains
 that allowance through response delivery, including bytes buffered by HTTP/2.
 It applies separate witness-field and response-proof limits. Health `Check` and
@@ -107,8 +114,9 @@ witness contents and private replay values.
 
 `ProvingService::new(config)` constructs `ProvingService<Untrusted>`.
 `ProvingService::<Trusted>::new_trusted(config)` explicitly constructs the trusted
-type. `ServerConfig` contains only resource settings. A sealed policy trait
-prevents callers from adding an unchecked decoder policy.
+type. Set `ServerConfig::with_proof_mode(ProofMode::Deferred)` to leave precompile
+claims for batch proving. The default is `ProofMode::Complete`. A sealed policy
+trait prevents callers from adding an unchecked decoder policy.
 
 Each instance owns independent admission and shutdown state. Both types can run
 in the same process on different listeners. `serve()` binds the configured address.
@@ -135,10 +143,16 @@ Each RPC accepts exactly one gRPC request message. Extra messages and trailing
 data are rejected before proving. The aggregate upload is bounded by its message
 limit plus the five-byte gRPC header, including fragmented HTTP/2 uploads.
 
+Use `FastProcessor::execute_for_proving_with_advice` or its sync variant to keep
+the final advice needed to build transaction outputs. Send only the witness to
+the service and retain the advice locally.
+
 This function submits a witness and verifies the returned proof against a claim
 chosen by the caller. Its client limits match the 8 MiB server example above.
 The extra bytes allow for protobuf framing. The caller supplies the expected
-claim independently of the proving service.
+claim independently of the proving service. Set `require_complete` to reject
+deferred proofs. Callers accepting deferred proofs must retain their precompile
+witnesses for batch proving.
 
 ```rust
 use std::time::Duration;
@@ -154,6 +168,7 @@ use miden_verifier::Verifier;
 async fn prove_and_verify(
     witness: &ExecutionWitness,
     expected_claim: &ExecutionClaim,
+    require_complete: bool,
 ) -> Result<ExecutionProof, Box<dyn std::error::Error + Send + Sync>> {
     let mut client = tokio::time::timeout(
         Duration::from_secs(10),
@@ -170,7 +185,7 @@ async fn prove_and_verify(
     ).await??.into_inner();
     let proof = ExecutionProof::read_from_bytes(&response.execution_proof)?;
     let outcome = Verifier::new().verify(expected_claim, &proof)?;
-    if !outcome.is_complete() {
+    if require_complete && !outcome.is_complete() {
         return Err(std::io::Error::other("incomplete execution proof").into());
     }
     Ok(proof)
@@ -204,9 +219,9 @@ integration tests. The crate owns its network and protobuf dependencies, and
 existing VM libraries retain their independent `no_std` builds.
 
 The binary tests also serve as deployment smoke tests for the documented startup
-options. They run both executables as child processes and verify complete proofs
-over gRPC. Under active proof load, SIGINT and SIGTERM stop queued requests and
-close health watches while the active proof finishes before successful exit.
+options. They run both executables as child processes and verify complete and
+deferred proofs over gRPC. Under active proof load, SIGINT and SIGTERM stop queued
+requests and close health watches while the active proof finishes before successful exit.
 Debug logging reports admission and proof-job start/finish without witness data.
 The ordinary workspace test target runs these tests. `test-fast` excludes CLI
 tests, so pair it with `make test-prover-service` when checking this behavior.

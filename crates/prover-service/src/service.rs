@@ -15,7 +15,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    PROTOCOL_VERSION, ServerConfig,
+    PROTOCOL_VERSION, ProofMode, ServerConfig,
     failure::{prover_error, status},
     protocol::{
         ErrorCode, ProveRequest, ProveResponse, prover_service_server::ProverService as Rpc,
@@ -57,7 +57,7 @@ impl InputPolicy for Trusted {}
 
 /// A proving service whose input policy is fixed by its type.
 ///
-/// Each instance owns immutable resource configuration. Cloning an instance retains
+/// Each instance owns immutable resource limits and a proof mode. Cloning an instance retains
 /// its input policy and shares its worker, admission capacity, and shutdown state.
 pub struct ProvingService<P: InputPolicy = Untrusted> {
     pub(crate) state: Arc<State>,
@@ -94,7 +94,7 @@ impl ProvingService<Trusted> {
 }
 
 impl<P: InputPolicy> ProvingService<P> {
-    /// Returns the resource settings shared by this instance and its clones.
+    /// Returns the proof mode and resource settings shared by this instance and its clones.
     pub fn config(&self) -> &ServerConfig {
         &self.state.config
     }
@@ -219,7 +219,11 @@ impl State {
         if let Some(prove) = &self.test_prover {
             return prove(witness);
         }
-        Ok(self.prover.prove_full(witness).map_err(prover_error)?.to_bytes())
+        let proof = match self.config.proof_mode() {
+            ProofMode::Complete => self.prover.prove_full(witness),
+            ProofMode::Deferred => self.prover.prove(witness),
+        };
+        Ok(proof.map_err(prover_error)?.to_bytes())
     }
 }
 
