@@ -1,5 +1,7 @@
 //! Selects challenge-only results to share across native row evaluations.
 
+use alloc::{vec, vec::Vec};
+
 use crate::ir::{CapturedConstraints, ChallengeDependencies, Class, Graph, Leaf, Node, NodeId};
 
 /// One cache layout shared by preparation and row emission for a captured AIR.
