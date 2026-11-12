@@ -193,209 +193,74 @@ impl FromMidenRepr for bool {
     }
 }
 
-impl ToMidenRepr for u8 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        smallvec![*self]
-    }
+macro_rules! impl_small_unsigned_repr {
+    ($($ty:ty),* $(,)?) => {$(
+        impl ToMidenRepr for $ty {
+            fn to_bytes(&self) -> SmallVec<[u8; 16]> {
+                SmallVec::from_slice(&self.to_ne_bytes())
+            }
 
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u64).expect("value exceeds field modulus")]
-    }
+            fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
+                smallvec![RawFelt::new(u64::from(*self)).expect("value exceeds field modulus")]
+            }
+        }
 
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u64).expect("value exceeds field modulus"));
-    }
+        impl FromMidenRepr for $ty {
+            #[inline(always)]
+            fn size_in_felts() -> usize { 1 }
+
+            fn from_bytes(bytes: &[u8]) -> Self {
+                Self::from_ne_bytes(bytes[..size_of::<Self>()].try_into().unwrap())
+            }
+
+            fn from_felts(felts: &[RawFelt]) -> Self {
+                felts[0].as_canonical_u64() as Self
+            }
+
+            fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
+                stack.pop().unwrap().as_canonical_u64() as Self
+            }
+        }
+    )*};
 }
 
-impl FromMidenRepr for u8 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
+impl_small_unsigned_repr!(u8, u16, u32);
 
-    #[inline(always)]
-    fn from_bytes(bytes: &[u8]) -> Self {
-        bytes[0]
-    }
+// Signed integers use the corresponding unsigned representation on the operand stack.
+macro_rules! impl_signed_repr {
+    ($($ty:ty => $unsigned:ty),* $(,)?) => {$(
+        impl ToMidenRepr for $ty {
+            fn to_bytes(&self) -> SmallVec<[u8; 16]> {
+                (*self as $unsigned).to_bytes()
+            }
 
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u8
-    }
+            fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
+                (*self as $unsigned).to_felts()
+            }
+        }
 
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u8
-    }
+        impl FromMidenRepr for $ty {
+            #[inline(always)]
+            fn size_in_felts() -> usize {
+                <$unsigned>::size_in_felts()
+            }
+
+            fn from_bytes(bytes: &[u8]) -> Self {
+                <$unsigned>::from_bytes(bytes) as Self
+            }
+
+            fn from_felts(felts: &[RawFelt]) -> Self {
+                <$unsigned>::from_felts(felts) as Self
+            }
+
+            fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
+                <$unsigned>::pop_from_stack(stack) as Self
+            }
+        }
+    )*};
 }
 
-impl ToMidenRepr for i8 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        smallvec![*self as u8]
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u8 as u64).expect("value exceeds field modulus")]
-    }
-
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u8 as u64).expect("value exceeds field modulus"));
-    }
-}
-
-impl FromMidenRepr for i8 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
-
-    #[inline(always)]
-    fn from_bytes(bytes: &[u8]) -> Self {
-        bytes[0] as i8
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u8 as i8
-    }
-
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u8 as i8
-    }
-}
-
-impl ToMidenRepr for u16 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_ne_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u64).expect("value exceeds field modulus")]
-    }
-
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u64).expect("value exceeds field modulus"));
-    }
-}
-
-impl FromMidenRepr for u16 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert!(bytes.len() >= 2);
-        u16::from_ne_bytes([bytes[0], bytes[1]])
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u16
-    }
-
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u16
-    }
-}
-
-impl ToMidenRepr for i16 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_ne_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u16 as u64).expect("value exceeds field modulus")]
-    }
-
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u16 as u64).expect("value exceeds field modulus"));
-    }
-}
-
-impl FromMidenRepr for i16 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert!(bytes.len() >= 2);
-        i16::from_ne_bytes([bytes[0], bytes[1]])
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u16 as i16
-    }
-
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u16 as i16
-    }
-}
-
-impl ToMidenRepr for u32 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_ne_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u64).expect("value exceeds field modulus")]
-    }
-
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u64).expect("value exceeds field modulus"));
-    }
-}
-
-impl FromMidenRepr for u32 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert!(bytes.len() >= 4);
-        u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u32
-    }
-
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u32
-    }
-}
-
-impl ToMidenRepr for i32 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_ne_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        smallvec![RawFelt::new(*self as u32 as u64).expect("value exceeds field modulus")]
-    }
-
-    fn push_to_operand_stack(&self, stack: &mut Vec<RawFelt>) {
-        stack.push(RawFelt::new(*self as u32 as u64).expect("value exceeds field modulus"));
-    }
-}
-
-impl FromMidenRepr for i32 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        1
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert!(bytes.len() >= 4);
-        i32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        felts[0].as_canonical_u64() as u32 as i32
-    }
-
-    fn pop_from_stack(stack: &mut Vec<RawFelt>) -> Self {
-        stack.pop().unwrap().as_canonical_u64() as u32 as i32
-    }
-}
+impl_signed_repr!(i8 => u8, i16 => u16, i32 => u32, i64 => u64, i128 => u128);
 
 impl ToMidenRepr for u64 {
     fn to_bytes(&self) -> SmallVec<[u8; 16]> {
@@ -430,31 +295,6 @@ impl FromMidenRepr for u64 {
         let lo = felts[0].as_canonical_u64() as u32 as u64;
         let hi = felts[1].as_canonical_u64() as u32 as u64;
         lo | (hi << 32)
-    }
-}
-
-impl ToMidenRepr for i64 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_le_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        (*self as u64).to_felts()
-    }
-}
-
-impl FromMidenRepr for i64 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        2
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        u64::from_bytes(bytes) as i64
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        u64::from_felts(felts) as i64
     }
 }
 
@@ -496,31 +336,6 @@ impl FromMidenRepr for u128 {
         let hi_lo = felts[2].as_canonical_u64() as u32 as u128;
         let hi_hi = felts[3].as_canonical_u64() as u32 as u128;
         lo_lo | (lo_hi << 32) | (hi_lo << 64) | (hi_hi << 96)
-    }
-}
-
-impl ToMidenRepr for i128 {
-    fn to_bytes(&self) -> SmallVec<[u8; 16]> {
-        SmallVec::from_slice(&self.to_le_bytes())
-    }
-
-    fn to_felts(&self) -> SmallVec<[RawFelt; 4]> {
-        (*self as u128).to_felts()
-    }
-}
-
-impl FromMidenRepr for i128 {
-    #[inline(always)]
-    fn size_in_felts() -> usize {
-        4
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        u128::from_bytes(bytes) as i128
-    }
-
-    fn from_felts(felts: &[RawFelt]) -> Self {
-        u128::from_felts(felts) as i128
     }
 }
 

@@ -2,7 +2,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::{events::Event, responses::Response, reverse_requests::ReverseRequest};
+use crate::{events::Event, responses::Response};
 
 /// Represents the base protocol message, in which all other messages are wrapped.
 ///
@@ -25,7 +25,6 @@ pub struct BaseMessage {
 pub enum Sendable {
     Response(Response),
     Event(Event),
-    ReverseRequest(ReverseRequest),
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ pub(crate) trait KeyAgreementScheme {
     type EphemeralPublicKey: Serializable + Deserializable;
 
     type SecretKey;
-    type PublicKey: Clone;
+    type PublicKey: Clone + Serializable;
 
     type SharedSecret: AsRef<[u8]> + Zeroize + ZeroizeOnDrop;
 
@@ -32,6 +32,9 @@ pub(crate) trait KeyAgreementScheme {
     fn generate_ephemeral_keypair<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::EphemeralSecretKey, Self::EphemeralPublicKey);
+
+    /// Returns the recipient public key associated with this static secret key.
+    fn public_key(static_sk: &Self::SecretKey) -> Self::PublicKey;
 
     /// Performs key exchange between ephemeral secret and static public key.
     fn exchange_ephemeral_static(
@@ -48,7 +51,7 @@ pub(crate) trait KeyAgreementScheme {
     /// Extracts key material from shared secret.
     ///
     /// `info` is the HKDF context string for domain separation and binding to the IES scheme and
-    /// ephemeral public key (see `CryptoBox::build_kdf_info`).
+    /// ephemeral and recipient public keys (see `CryptoBox::build_kdf_info`).
     fn extract_key_material(
         shared_secret: &Self::SharedSecret,
         length: usize,

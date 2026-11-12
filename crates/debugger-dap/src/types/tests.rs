@@ -48,16 +48,3 @@ fn source_dummy_generates_leaf_sources() {
         assert!(source.sources.is_none());
     }
 }
-
-#[cfg(feature = "integration_testing")]
-#[test]
-fn exception_details_dummy_generates_leaf_exceptions() {
-    use fake::Fake as _;
-    use rand::{SeedableRng as _, rngs::StdRng};
-
-    let mut rng = StdRng::seed_from_u64(0);
-    for _ in 0..64 {
-        let details: ExceptionDetails = Faker.fake_with_rng(&mut rng);
-        assert!(details.inner_exception.is_none());
-    }
-}

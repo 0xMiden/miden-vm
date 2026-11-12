@@ -33,6 +33,7 @@ members = [
     "crates/package-registry-local",
     "crates/miden-format",
     "crates/project",
+    "crates/prover-service",
     "crates/serde-utils",
     "crates/test-serialization-macros",
     "crates/test-utils",
@@ -153,7 +154,6 @@ hashbrown       = { version = "0.17", default-features = false, features = ["def
 hex             = { version = "0.4", default-features = false }
 hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
-inventory       = "0.3"
 itertools       = { version = "0.15", default-features = false, features = ["use_alloc"] }
 k256            = { version = "0.14", default-features = false }
 log             = { version = "0.4", default-features = false }
@@ -185,6 +185,7 @@ syn2            = { package = "syn", version = "2.0", features = ["full"] }
 tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
+tokio-util      = { version = "0.7.11", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"] }
 trybuild        = { version = "1.0" }
@@ -228,10 +229,10 @@ ruint = { version = "1.18", default-features = false }
 toml = { version = "1.0", default-features = false }
 tracing-forest = "0.3.1"
 walkdir = "2.5"
-wycheproof-ng-core = { version = "0.2.0", default-features = false }
-wycheproof-ng-dh = { version = "0.2.0", default-features = false }
-wycheproof-ng-ecdsa = { version = "0.2.0", default-features = false }
-wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
+wycheproof-ng-core = { version = "0.4.0", default-features = false }
+wycheproof-ng-dh = { version = "0.4.0", default-features = false }
+wycheproof-ng-ecdsa = { version = "0.4.0", default-features = false }
+wycheproof-ng-eddsa = { version = "0.4.0", default-features = false }
 wasmi = { version = "1.1", default-features = false }
 # Keep the version in sync with wasmi's own wasmparser dependency: the handler loader's static
 # analysis must read Wasm binaries exactly the way wasmi validates them. The

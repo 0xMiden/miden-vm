@@ -54,6 +54,18 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Data shared by row evaluations with the same inputs. Use `()` when no preparation is needed.
     type EvalData<B: Algebra<F>, E: Algebra<B>>: Default;
 
+    /// Log2 of the fixed native height of this AIR's preprocessed matrix, or `None` if it has none.
+    ///
+    /// Return `None` when [`BaseAir::preprocessed_width`] is zero. Otherwise return
+    /// `Some(log_height)`, where `log_height` is at least 1 and `2^log_height` equals the height of
+    /// the matrix returned by [`BaseAir::preprocessed_trace`].
+    /// This AIR's main and preprocessed traces must have the same native height. Shape validation
+    /// enforces this equality before deriving the committed table order. Return the log height
+    /// without constructing the matrix.
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        None
+    }
+
     /// Maximum periodic-column length, or `0` if there are none. A trace's height
     /// must be at least this, so it is the per-AIR lower bound on trace height.
     ///

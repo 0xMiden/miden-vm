@@ -79,7 +79,8 @@ impl TraceOrder {
     /// (untrusted) proof as `u8`s. Power-of-two-ness is automatic (heights are
     /// stored as log₂). Checks: non-emptiness, at least 2 rows per trace,
     /// host-`usize` bound, the u8 instance-count limit, `airs.len()` matches the
-    /// height count, and per AIR `(1 << log_h) >= air.max_periodic_length()`.
+    /// height count, per AIR `(1 << log_h) >= air.max_periodic_length()`, and equality with
+    /// the AIR-declared preprocessing height where present.
     /// Holding a `TraceOrder` thus guarantees the proof's heights are feasible
     /// for the AIRs.
     pub(crate) fn from_log_heights<F, EF, A>(
@@ -113,6 +114,25 @@ impl TraceOrder {
         }
         for (idx, (air, &log_h)) in airs.iter().zip(log_heights.iter()).enumerate() {
             let trace_height = 1usize << log_h as usize;
+            match (air.preprocessed_width(), air.log_preprocessed_height()) {
+                (0, None) => {},
+                (1.., Some(log_preprocessed_height)) => {
+                    if log_h != log_preprocessed_height {
+                        return Err(ShapeError::PreprocessedHeightMismatch {
+                            air: idx,
+                            log_trace_height: log_h,
+                            log_preprocessed_height,
+                        });
+                    }
+                },
+                (width, log_height) => {
+                    return Err(ShapeError::InvalidPreprocessedDimensions {
+                        air: idx,
+                        width,
+                        log_height,
+                    });
+                },
+            }
             let max_period = air.max_periodic_length();
             if trace_height < max_period {
                 return Err(ShapeError::TraceHeightBelowPeriod {
@@ -291,6 +311,21 @@ pub enum ShapeError {
     TooManyInstances { count: usize },
     #[error("airs().len() = {airs} does not match log trace heights length {heights}")]
     TraceCountMismatch { airs: usize, heights: usize },
+    #[error("AIR {air}: invalid preprocessed dimensions: width {width}, log height {log_height:?}")]
+    InvalidPreprocessedDimensions {
+        air: usize,
+        width: usize,
+        log_height: Option<u8>,
+    },
+    #[error(
+        "AIR {air}: log trace height {log_trace_height} does not match log preprocessed height \
+         {log_preprocessed_height}"
+    )]
+    PreprocessedHeightMismatch {
+        air: usize,
+        log_trace_height: u8,
+        log_preprocessed_height: u8,
+    },
     #[error(
         "AIR {air}: trace height = {trace_height} is less than max periodic column \
          length {max_period}"
@@ -314,19 +349,28 @@ mod tests {
 
     type TF = Goldilocks;
 
-    /// Minimal AIR with no periodic columns, for the ordering tests (which only
-    /// exercise the height permutation, not the periodic-feasibility check).
-    #[derive(Clone)]
-    struct OrderTestAir;
+    /// Minimal AIR with no periodic columns, for shape and ordering tests.
+    #[derive(Clone, Default)]
+    struct OrderTestAir {
+        preprocessed_width: usize,
+        log_preprocessed_height: Option<u8>,
+    }
 
     impl BaseAir<TF> for OrderTestAir {
         fn width(&self) -> usize {
             1
         }
+        fn preprocessed_width(&self) -> usize {
+            self.preprocessed_width
+        }
     }
 
     impl LiftedAir<TF, TF> for OrderTestAir {
         type EvalData<B: p3_field::Algebra<TF>, E: p3_field::Algebra<B>> = ();
+        fn log_preprocessed_height(&self) -> Option<u8> {
+            self.log_preprocessed_height
+        }
+
         fn num_randomness(&self) -> usize {
             0
         }
@@ -350,7 +394,42 @@ mod tests {
     }
 
     fn airs(n: usize) -> Vec<OrderTestAir> {
-        vec![OrderTestAir; n]
+        vec![OrderTestAir::default(); n]
+    }
+
+    #[test]
+    fn rejects_invalid_preprocessed_dimensions() {
+        for (width, log_height) in [(1, None), (0, Some(2))] {
+            let air = OrderTestAir {
+                preprocessed_width: width,
+                log_preprocessed_height: log_height,
+            };
+            assert!(matches!(
+                TraceOrder::from_log_heights::<TF, TF, _>(&[air], vec![2]),
+                Err(ShapeError::InvalidPreprocessedDimensions { air: 0, .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn checks_preprocessed_height_in_instance_order() {
+        for (log_trace_height, log_preprocessed_height) in [(1, 2), (3, 2), (2, 0), (2, u8::MAX)] {
+            let airs = [
+                OrderTestAir::default(),
+                OrderTestAir {
+                    preprocessed_width: 1,
+                    log_preprocessed_height: Some(log_preprocessed_height),
+                },
+            ];
+            assert!(matches!(
+                TraceOrder::from_trace_heights::<TF, TF, _>(&airs, &[4, 1usize << log_trace_height]),
+                Err(ShapeError::PreprocessedHeightMismatch {
+                    air: 1,
+                    log_trace_height: actual_trace,
+                    log_preprocessed_height: actual_preprocessed,
+                }) if actual_trace == log_trace_height && actual_preprocessed == log_preprocessed_height
+            ));
+        }
     }
 
     #[test]

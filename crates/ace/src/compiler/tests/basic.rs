@@ -185,6 +185,10 @@ impl BaseAir<F> for MockPreprocessedAir {
 impl LiftedAir<F, EF> for MockPreprocessedAir {
     type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
 
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        Some(2)
+    }
+
     fn num_randomness(&self) -> usize {
         2
     }
