@@ -4,7 +4,7 @@ use alloc::{
     sync::Arc,
     vec,
 };
-use core::{assert_matches, cell::Cell, str::FromStr};
+use core::{assert_matches, cell::Cell, error::Error, str::FromStr};
 
 use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_assembly::{
@@ -38,8 +38,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
-    SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, FallibleHost, FallibleSyncHost, LoadedMastForest,
+    MastForestLoadResult, ProcessorState, ProgramExecutor, SyncHost,
     advice::{AdviceMap, AdviceMutation},
     event::EventError,
     operation::OperationError,
@@ -2133,6 +2133,238 @@ impl SyncHost for MalformedExternalHost {
 
     fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("test MAST forest load failure")]
+struct TestMastForestLoadError;
+
+struct FailingMastForestHost {
+    result: Result<Option<LoadedMastForest>, TestMastForestLoadError>,
+    source_manager: Arc<DefaultSourceManager>,
+}
+
+impl FailingMastForestHost {
+    fn new() -> Self {
+        Self {
+            result: Err(TestMastForestLoadError),
+            source_manager: Arc::default(),
+        }
+    }
+}
+
+impl BaseHost for FailingMastForestHost {
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
+    }
+}
+
+impl SyncHost for FailingMastForestHost {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
+        None
+    }
+
+    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
+}
+
+impl FallibleSyncHost for FailingMastForestHost {
+    fn try_get_mast_forest(&self, _: &Word) -> MastForestLoadResult {
+        self.result.clone().map_err(Into::into)
+    }
+}
+
+impl FallibleHost for FailingMastForestHost {
+    fn try_get_mast_forest(
+        &self,
+        root: &Word,
+    ) -> impl crate::FutureMaybeSend<MastForestLoadResult> {
+        let result = FallibleSyncHost::try_get_mast_forest(self, root);
+        async move { result }
+    }
+}
+
+#[test]
+fn external_mast_forest_load_error_is_propagated_sync() {
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let program = program_calling_external_procedures([missing_digest, Word::default()]);
+    let mut host = FailingMastForestHost::new();
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_fallible_sync(&program, &mut host)
+        .unwrap_err();
+
+    let ExecutionError::MastForestError { root_digest, error, .. } = &err else {
+        panic!("expected a MAST forest load error, got {err:?}");
+    };
+    assert_eq!(*root_digest, missing_digest);
+    assert!(error.downcast_ref::<TestMastForestLoadError>().is_some());
+    assert!(
+        err.source()
+            .and_then(|source| source.downcast_ref::<TestMastForestLoadError>())
+            .is_some(),
+        "the original host error must remain the source"
+    );
+}
+
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn external_mast_forest_absence_reports_procedure_not_found(
+    #[values(false, true)] run_async: bool,
+    #[values(false, true)] proving: bool,
+) {
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let program = program_calling_external_procedures([missing_digest, Word::default()]);
+    let mut host = FailingMastForestHost::new();
+    host.result = Ok(None);
+
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = if proving {
+        if run_async {
+            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap_err()
+        } else {
+            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap_err()
+        }
+    } else if run_async {
+        processor.execute_fallible(&program, &mut host).await.unwrap_err()
+    } else {
+        processor.execute_fallible_sync(&program, &mut host).unwrap_err()
+    };
+
+    assert_matches!(
+        err,
+        ExecutionError::ProcedureNotFound { root_digest, .. } if root_digest == missing_digest
+    );
+}
+
+fn dynamic_forest_call(
+    root: Word,
+    opcode: &str,
+) -> (
+    Program,
+    PackageDebugInfo,
+    Arc<DefaultSourceManager>,
+    SourceSpan,
+    Arc<SourceFile>,
+) {
+    let [a, b, c, d] = [root[0], root[1], root[2], root[3]];
+    let source = format!(
+        "begin push.[{a},{b},{c},{d}] mem_storew_le.100 dropw push.100 {opcode} push.100 {opcode} end"
+    );
+    let start = source.find(opcode).unwrap() as u32;
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let uri = Uri::new("file://pkg/dynamic-fallible.masm");
+    let source_file =
+        source_manager.load_from_raw_parts(uri.clone(), SourceContent::new("masm", uri, source));
+    let expected_span = SourceSpan::new(source_file.id(), start..start + opcode.len() as u32);
+    let package = Assembler::new(source_manager.clone())
+        .assemble_program("program", source_file.clone())
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    (package.unwrap_program(), debug_info, source_manager, expected_span, source_file)
+}
+
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn fallible_loader_can_supply_a_forest(
+    #[values(false, true)] run_async: bool,
+    #[values(false, true)] proving: bool,
+) {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root);
+    let digest = forest[root].digest();
+    let program = program_calling_external_procedures([digest; 2]);
+    let mut host = FailingMastForestHost::new();
+    host.result = Ok(Some(LoadedMastForest::new(Arc::new(forest))));
+    let processor = FastProcessor::new(StackInputs::default());
+    let stack = if proving {
+        let witness = if run_async {
+            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap()
+        } else {
+            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap()
+        };
+        *witness.claim().stack_outputs()
+    } else if run_async {
+        processor.execute_fallible(&program, &mut host).await.unwrap().stack
+    } else {
+        processor.execute_fallible_sync(&program, &mut host).unwrap().stack
+    };
+    assert_eq!(stack.get_element(0), Some(Felt::from_u32(2)));
+}
+
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn package_source_debug_load_error_preserves_source_span(
+    #[values("external", "dynexec", "dyncall")] invocation: &str,
+    #[values(false, true)] run_async: bool,
+    #[values(false, true)] proving: bool,
+) {
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let (program, package_debug_info, source_manager, expected_span, source_file) =
+        if invocation == "external" {
+            let (program, debug_info, _, manager, span, file) =
+                missing_external_package_source_debug_fixture();
+            (program, debug_info, manager, span, file)
+        } else {
+            dynamic_forest_call(missing_digest, invocation)
+        };
+    let mut host = FailingMastForestHost::new();
+    host.source_manager = source_manager;
+
+    let processor = FastProcessor::new(StackInputs::default()).with_debug_info(package_debug_info);
+    let err = if proving {
+        if run_async {
+            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap_err()
+        } else {
+            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap_err()
+        }
+    } else if run_async {
+        crate::FallibleProgramExecutor::execute_fallible(processor, &program, &mut host)
+            .await
+            .unwrap_err()
+    } else {
+        processor.execute_fallible_sync(&program, &mut host).unwrap_err()
+    };
+
+    assert!(err.source().unwrap().downcast_ref::<TestMastForestLoadError>().is_some());
+
+    assert_matches!(
+        err,
+        ExecutionError::MastForestError {
+            label,
+            source_file: Some(actual_source_file),
+            root_digest,
+            ..
+        } if label == expected_span
+            && actual_source_file.id() == source_file.id()
+            && root_digest == missing_digest
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn legacy_execution_does_not_query_opted_in_loaders() {
+    let root = Word::from([ONE, ONE, ONE, ONE]);
+    let program = program_calling_external_procedures([root, Word::default()]);
+    let mut host = FailingMastForestHost::new();
+    let sync_error = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .unwrap_err();
+    let async_error = FastProcessor::new(StackInputs::default())
+        .execute(&program, &mut host)
+        .await
+        .unwrap_err();
+    for error in [sync_error, async_error] {
+        assert_matches!(error, ExecutionError::ProcedureNotFound { root_digest, .. } if root_digest == root);
     }
 }
 
