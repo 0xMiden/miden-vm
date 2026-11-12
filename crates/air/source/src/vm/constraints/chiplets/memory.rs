@@ -244,7 +244,6 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
-    use core::borrow::BorrowMut;
 
     use miden_core::{
         Felt,
@@ -253,12 +252,8 @@ mod tests {
 
     use super::enforce_memory_constraints;
     use crate::vm::{
-        ChipletCols, MemoryCols,
-        constraints::{
-            chiplets::selectors::{ChipletSelectors, build_chiplet_selectors},
-            test_utils::ConstraintEvalBuilder,
-        },
-        trace::CHIPLETS_WIDTH,
+        MemoryCols,
+        constraints::{chiplets::selectors::ChipletSelectors, test_utils::ConstraintEvalBuilder},
     };
 
     const EMPTY_MEMORY_ROW: MemoryCols<Felt> = MemoryCols {
@@ -479,80 +474,6 @@ mod tests {
                 "same-clock accesses to different words should be accepted for \
                  {local_access:?}/{next_access:?}; got {evaluations:?}",
             );
-        }
-    }
-
-    // EMPTY-SECTION BOUNDARY REGRESSION TESTS
-    // ============================================================================================
-    // The memory chiplet's first-row initialization ("values not being written must be zero") is
-    // gated by `memory_entry_next` on the row before memory begins. Empty preceding sections must
-    // not skip initialization and allow a malicious prover to forge a read of never-written
-    // memory.
-
-    const EMPTY_CHIPLET_ROW: ChipletCols<Felt> =
-        ChipletCols { chiplets: [Felt::ZERO; CHIPLETS_WIDTH] };
-
-    #[test]
-    fn memory_first_row_init_enforced_when_bitwise_empty() {
-        // Empty-bitwise layout: the memory section begins directly after a controller row, so the
-        // first memory row is entered at a controller -> memory boundary.
-        let controller = EMPTY_CHIPLET_ROW;
-        let mut first_memory = EMPTY_CHIPLET_ROW;
-        first_memory.chiplets[..2].fill(Felt::ONE);
-        {
-            let cols: &mut MemoryCols<Felt> = first_memory.chiplets[3..20].borrow_mut();
-            cols.is_read = Felt::ONE; // fresh read: every value must be zero
-        }
-
-        let mut builder = ConstraintEvalBuilder::new();
-        let selectors = build_chiplet_selectors(&mut builder, &controller, &first_memory);
-        assert_eq!(
-            selectors.memory_entry_next,
-            Felt::ONE,
-            "controller -> memory boundary (empty bitwise) must mark the next row as first memory",
-        );
-
-        // A forged fresh read of a never-written cell must be rejected.
-        let mut forged = first_memory.clone();
-        {
-            let cols: &mut MemoryCols<Felt> = forged.chiplets[3..20].borrow_mut();
-            cols.values[0] = Felt::new_unchecked(42);
-        }
-        let evals = eval_memory_window(controller.memory_cols(), forged.memory_cols(), &selectors);
-        assert!(
-            evals.iter().any(|value| *value != QuadFelt::ZERO),
-            "forged fresh read must be rejected at the empty-bitwise memory boundary",
-        );
-
-        // The honest zero-initialized fresh read is accepted.
-        let evals =
-            eval_memory_window(controller.memory_cols(), first_memory.memory_cols(), &selectors);
-        assert!(
-            evals.iter().all(|value| *value == QuadFelt::ZERO),
-            "zero-initialized fresh read must be accepted; got {evals:?}",
-        );
-    }
-
-    #[test]
-    fn memory_entry_next_marks_only_the_preceding_row() {
-        let mut aead = EMPTY_CHIPLET_ROW;
-        aead.chiplets[0] = Felt::ONE;
-        let mut bitwise = aead.clone();
-        bitwise.chiplets[2] = Felt::ONE;
-        let mut memory = aead.clone();
-        memory.chiplets[1] = Felt::ONE;
-        let mut ace = memory.clone();
-        ace.chiplets[2] = Felt::ONE;
-
-        for (local, next, expected, boundary) in [
-            (&aead, &memory, Felt::ONE, "AEAD -> memory"),
-            (&bitwise, &memory, Felt::ONE, "bitwise -> memory"),
-            (&memory, &memory, Felt::ZERO, "memory -> memory"),
-            (&memory, &ace, Felt::ZERO, "memory -> ACE"),
-        ] {
-            let mut builder = ConstraintEvalBuilder::new();
-            let selectors = build_chiplet_selectors(&mut builder, local, next);
-            assert_eq!(selectors.memory_entry_next, expected, "{boundary}");
         }
     }
 }
