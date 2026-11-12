@@ -88,7 +88,7 @@ fn diagnostics_delegate_events_capture_state_and_preserve_execution_results() {
 fn diagnostic_executor_returns_success_and_reports_failures() {
     for (source, success) in [("begin push.9 add end", true), ("begin push.0 assert end", false)] {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        let package = Assembler::new(source_manager.clone())
+        let package = Assembler::new(source_manager)
             .assemble_program("diagnostic-test", source)
             .unwrap();
         let mut host = miden_processor::DefaultHost::default();

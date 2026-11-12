@@ -1,5 +1,10 @@
 //! Serialization and deserialization for the debug_info section.
 
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 

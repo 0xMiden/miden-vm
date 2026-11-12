@@ -107,11 +107,14 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         }
         response_rows_seen += 1;
 
-        let op = main.chiplet_cols(idx).bitwise().op_flag;
-        let a = main.chiplet_bitwise_a(idx);
-        let b = main.chiplet_bitwise_b(idx);
-        let z = main.chiplet_bitwise_z(idx);
-        exp.add(row, &BitwiseMsg { op, a, b, result: z });
+        let cols = main.chiplet_cols(idx).bitwise_cols();
+        let op = cols.op_flag;
+        let a = u32_from_bitwise_bytes(cols.a_bytes);
+        let b = u32_from_bitwise_bytes(cols.b_bytes);
+        let and = u32_from_bitwise_bytes(cols.and_bytes);
+        let xor = a + b - and.double();
+        let result = and + op * (xor - and);
+        exp.add(row, &BitwiseMsg { op, a, b, result });
     }
     let expected_responses = and_expected.len() + xor_expected.len();
     assert_eq!(
@@ -123,19 +126,31 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     log.assert_contains(&exp);
 }
 
-/// Regression test for split-trace projection: the bitwise classifier must return `false` past the
-/// chiplets-AIR height. The bitwise active pattern is all-zero selectors
-/// (`s_ctrl=0, stream_mode=0, s1=0`), so it must not alias rows outside the chiplets segment.
+fn u32_from_bitwise_bytes(bytes: [Felt; 4]) -> Felt {
+    let bytes = bytes.map(|byte| {
+        u8::try_from(byte.as_canonical_u64()).expect("bitwise byte witness should fit in u8")
+    });
+    Felt::from_u32(u32::from_le_bytes(bytes))
+}
+
+/// Regression test for split-trace projection: every chiplet classifier must return `false` past
+/// the chiplets-AIR height, including the ordinary bitwise and AEAD stream classifiers.
 #[test]
-fn rows_past_chiplets_height_are_not_classified_as_bitwise() {
+fn rows_past_chiplets_height_are_not_classified_as_chiplets() {
     let trace = build_trace_from_ops(vec![Operation::Noop; 128], &[]);
     let main = trace.main_trace();
 
     for row in main.chiplets_height()..main.num_rows() {
         let idx = RowIndex::from(row);
-        assert!(
-            !main.is_bitwise_row(idx),
-            "row {row} (past chiplets height) classified as bitwise",
-        );
+        for (chiplet, is_active) in [
+            ("controller", main.is_controller_row(idx)),
+            ("bitwise", main.is_bitwise_row(idx)),
+            ("AEAD stream", main.is_aead_stream_row(idx)),
+            ("memory", main.is_memory_row(idx)),
+            ("ACE", main.is_ace_row(idx)),
+            ("kernel ROM", main.is_kernel_row(idx)),
+        ] {
+            assert!(!is_active, "row {row} (past chiplets height) classified as {chiplet}");
+        }
     }
 }

@@ -375,7 +375,7 @@ mod tests {
     use crate::vm::constraints::{
         columns::CoreCols,
         op_flags::{OpFlags, generate_test_row},
-        stack::test_utils::ConstraintEvalBuilder,
+        test_utils::ConstraintEvalBuilder,
     };
 
     fn eval_stack_ops(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
@@ -392,8 +392,8 @@ mod tests {
     }
 
     fn base_setup(local: &mut CoreCols<Felt>) {
-        for i in 0..16 {
-            local.stack.top[i] = sentinel(i);
+        for (i, value) in local.stack.top.iter_mut().enumerate() {
+            *value = sentinel(i);
         }
     }
 

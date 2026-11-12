@@ -121,7 +121,7 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         for _ in 0..CONSTRAINTS_PER_COLUMN {
             for c in 0..WIDTH {
                 let x: AB::Expr = local[c].into();
-                let x_hi: AB::Expr = x.clone().exp_power_of_2(log2_hi);
+                let x_hi: AB::Expr = x.exp_power_of_2(log2_hi);
                 builder.when_transition().assert_eq(next[c].into(), x_hi * x);
             }
         }

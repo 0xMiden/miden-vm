@@ -73,14 +73,14 @@ fn build_first_row_repeat_trace() -> ForgedTrace {
     let honest_trace = execute(&program, &[1, 5, 7]);
     let popped_trace = execute(&program, &[5, 7]);
 
-    let (honest_core, ..) = honest_trace.main_trace().clone_air_matrices();
+    let (honest_core, ..) = honest_trace.main_trace().clone().into_air_matrices();
     let (popped_core, chiplets, eidos_compression, and8) =
-        popped_trace.main_trace().clone_air_matrices();
+        popped_trace.main_trace().clone().into_air_matrices();
     assert_eq!(honest_core.height(), popped_core.height());
     assert_eq!(core_row(&honest_core, 0).stack.top[0], Felt::ONE);
 
     let loop_trace = execute(&build_loop_program(vec![Operation::Not]), &[0, 1]);
-    let (loop_core, ..) = loop_trace.main_trace().clone_air_matrices();
+    let (loop_core, ..) = loop_trace.into_air_matrices();
     let repeat_row = (0..loop_core.height())
         .find(|&row| opcode(core_row(&loop_core, row)) == opcodes::REPEAT)
         .expect("the two-iteration loop executes REPEAT");

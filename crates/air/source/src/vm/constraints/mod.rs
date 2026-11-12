@@ -28,6 +28,9 @@ pub mod stack;
 pub mod system;
 pub mod utils;
 
+#[cfg(test)]
+mod test_utils;
+
 // ENTRY POINTS
 // ================================================================================================
 //

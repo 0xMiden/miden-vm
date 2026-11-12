@@ -4,7 +4,7 @@ use super::{Felt, ONE, ZERO};
 // ================================================================================================
 
 /// Number of columns needed to record an execution trace of the memory chiplet.
-pub const TRACE_WIDTH: usize = 17;
+pub const TRACE_WIDTH: usize = size_of::<crate::vm::MemoryCols<u8>>();
 
 // --- OPERATION SELECTORS ------------------------------------------------------------------------
 

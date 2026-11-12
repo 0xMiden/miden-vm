@@ -30,11 +30,10 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::AirBuilder;
 
-use super::selectors::ChipletFlags;
 use crate::vm::{
-    ChipletCols, MidenAirBuilder,
+    MidenAirBuilder,
     constraints::{
-        chiplets::columns::MemoryCols,
+        chiplets::{columns::MemoryCols, selectors::ChipletSelectors},
         constants::{F_4, TWO_POW_16},
         utils::BoolNot,
     },
@@ -52,29 +51,24 @@ use crate::vm::{
 /// precedence over clock change.
 pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
-    flags: &ChipletFlags<AB::Expr>,
+    cols: &MemoryCols<AB::Var>,
+    cols_next: &MemoryCols<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let cols = local.memory();
-    let cols_next = next.memory();
-
     // ==========================================================================
     // BINARY CONSTRAINTS (all rows)
     // ==========================================================================
     // Selectors and indices must be binary.
     {
-        let builder = &mut builder.when(flags.is_active.clone());
+        let builder = &mut builder.when(selectors.memory_active.clone());
         builder.assert_bool(cols.is_read);
         builder.assert_bool(cols.is_word);
         builder.assert_bool(cols.idx0);
         builder.assert_bool(cols.idx1);
 
-        let word_addr_lo = local.memory_word_addr_lo();
-        let word_addr_hi = local.memory_word_addr_hi();
-        let word_addr = (word_addr_hi * TWO_POW_16 + word_addr_lo) * F_4;
+        let word_addr = (cols.word_addr_hi * TWO_POW_16 + cols.word_addr_lo) * F_4;
         builder.assert_eq(cols.word_addr, word_addr);
 
         // For word access, idx bits must be zero (only element accesses use idx0/idx1).
@@ -93,12 +87,10 @@ pub fn enforce_memory_constraints<AB>(
     // FIRST-ROW INITIALIZATION
     // ==========================================================================
     // On the first row of the memory section, every value that is not being written must be zero,
-    // so that a read of a never-written cell returns zero. `next_is_first` marks the row before the
-    // first memory row and is derived from the section boundary directly, so this holds whether the
-    // memory section follows a bitwise section or, when bitwise is empty, follows the controller
-    // directly. (See `next_is_memory_first` in `selectors.rs`.)
+    // so that a read of a never-written cell returns zero. The memory entry gate is active on the
+    // row immediately before memory begins, including when preceding sections are empty.
     {
-        let builder = &mut builder.when(flags.next_is_first.clone());
+        let builder = &mut builder.when(selectors.memory_entry_next.clone());
         for (i, nw) in not_written.iter().enumerate() {
             builder.when(nw.clone()).assert_zero(cols_next.values[i]);
         }
@@ -109,7 +101,7 @@ pub fn enforce_memory_constraints<AB>(
     // ==========================================================================
     // Enforces: delta inverse, monotonicity, same-context/addr flag, read-only,
     // and value consistency.
-    let builder = &mut builder.when(flags.is_transition.clone());
+    let builder = &mut builder.when(selectors.memory_transition.clone());
 
     // --- delta inverse ---
     // d_inv (docs: column `t`) is shared across all three delta levels (ctx, addr, clk).
@@ -252,201 +244,92 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
-    use core::borrow::BorrowMut;
 
     use miden_core::{
         Felt,
         field::{Field, PrimeCharacteristicRing, QuadFelt},
     };
-    use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
-    use p3_matrix::dense::RowMajorMatrix;
 
     use super::enforce_memory_constraints;
     use crate::vm::{
-        ChipletCols, MemoryCols,
-        constraints::chiplets::selectors::{ChipletFlags, build_chiplet_selectors},
-        trace::{
-            AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, CHIPLETS_DATA_WIDTH, CHIPLETS_MODE_COL,
-            TRACE_WIDTH,
-        },
+        MemoryCols,
+        constraints::{chiplets::selectors::ChipletSelectors, test_utils::ConstraintEvalBuilder},
     };
 
-    struct ConstraintEvalBuilder {
-        main: RowMajorMatrix<Felt>,
-        aux: RowMajorMatrix<QuadFelt>,
-        randomness: Vec<QuadFelt>,
-        permutation_values: Vec<QuadFelt>,
-        periodic_values: Vec<Felt>,
-        preprocessed: RowWindow<'static, Felt>,
-        evaluations: Vec<QuadFelt>,
-    }
+    const EMPTY_MEMORY_ROW: MemoryCols<Felt> = MemoryCols {
+        is_read: Felt::ZERO,
+        is_word: Felt::ZERO,
+        ctx: Felt::ZERO,
+        word_addr: Felt::ZERO,
+        idx0: Felt::ZERO,
+        idx1: Felt::ZERO,
+        clk: Felt::ZERO,
+        values: [Felt::ZERO; 4],
+        d0: Felt::ZERO,
+        d1: Felt::ZERO,
+        d_inv: Felt::ZERO,
+        is_same_ctx_and_addr: Felt::ZERO,
+        word_addr_lo: Felt::ZERO,
+        word_addr_hi: Felt::ZERO,
+    };
 
-    impl ConstraintEvalBuilder {
-        fn new() -> Self {
-            Self {
-                main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
-                aux: RowMajorMatrix::new(
-                    vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2],
-                    AUX_TRACE_WIDTH,
-                ),
-                randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
-                permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
-                periodic_values: Vec::new(),
-                preprocessed: RowWindow::from_two_rows(&[], &[]),
-                evaluations: Vec::new(),
-            }
-        }
-    }
+    const MEMORY_SELECTORS: ChipletSelectors<Felt> = ChipletSelectors {
+        controller_active: Felt::ZERO,
+        controller_next_active: Felt::ZERO,
+        controller_transition: Felt::ZERO,
+        bitwise_active: Felt::ZERO,
+        aead_stream_active: Felt::ZERO,
+        aead_stream_next_active: Felt::ZERO,
+        memory_active: Felt::ONE,
+        memory_transition: Felt::ZERO,
+        memory_entry_next: Felt::ZERO,
+        ace_active: Felt::ZERO,
+        ace_transition: Felt::ZERO,
+        ace_last: Felt::ZERO,
+        ace_entry_next: Felt::ZERO,
+    };
 
-    impl AirBuilder for ConstraintEvalBuilder {
-        type F = Felt;
-        type Expr = Felt;
-        type Var = Felt;
-        type PreprocessedWindow = RowWindow<'static, Felt>;
-        type MainWindow = RowMajorMatrix<Felt>;
-        type PublicVar = Felt;
-        type PeriodicVar = Felt;
-
-        fn main(&self) -> Self::MainWindow {
-            self.main.clone()
-        }
-
-        fn preprocessed(&self) -> &Self::PreprocessedWindow {
-            &self.preprocessed
-        }
-
-        fn is_first_row(&self) -> Self::Expr {
-            Felt::ZERO
-        }
-
-        fn is_last_row(&self) -> Self::Expr {
-            Felt::ZERO
-        }
-
-        fn is_transition(&self) -> Self::Expr {
-            Felt::ONE
-        }
-
-        fn is_transition_window(&self, size: usize) -> Self::Expr {
-            assert_eq!(size, 2, "memory tests use two-row transition windows");
-            self.is_transition()
-        }
-
-        fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-            self.evaluations.push(QuadFelt::from(x.into()));
-        }
-
-        fn public_values(&self) -> &[Self::PublicVar] {
-            &[]
-        }
-
-        fn periodic_values(&self) -> &[Self::PeriodicVar] {
-            &self.periodic_values
-        }
-    }
-
-    impl ExtensionBuilder for ConstraintEvalBuilder {
-        type EF = QuadFelt;
-        type ExprEF = QuadFelt;
-        type VarEF = QuadFelt;
-
-        fn assert_zero_ext<I>(&mut self, x: I)
-        where
-            I: Into<Self::ExprEF>,
-        {
-            self.evaluations.push(x.into());
-        }
-    }
-
-    impl PermutationAirBuilder for ConstraintEvalBuilder {
-        type MP = RowMajorMatrix<QuadFelt>;
-        type RandomVar = QuadFelt;
-        type PermutationVar = QuadFelt;
-
-        fn permutation(&self) -> Self::MP {
-            self.aux.clone()
-        }
-
-        fn permutation_randomness(&self) -> &[Self::RandomVar] {
-            &self.randomness
-        }
-
-        fn permutation_values(&self) -> &[Self::PermutationVar] {
-            &self.permutation_values
-        }
-    }
-
-    fn memory_flags() -> ChipletFlags<Felt> {
-        ChipletFlags {
-            is_active: Felt::ONE,
-            is_transition: Felt::ZERO,
-            is_last: Felt::ZERO,
-            next_is_first: Felt::ZERO,
-        }
-    }
-
-    fn memory_row() -> ChipletCols<Felt> {
-        ChipletCols {
-            chip_clk: Felt::ONE,
-            chiplets: [Felt::ZERO; CHIPLETS_DATA_WIDTH],
-        }
-    }
-
-    fn memory_cols(row: &mut ChipletCols<Felt>) -> &mut MemoryCols<Felt> {
-        row.chiplets[3..18].borrow_mut()
-    }
-
-    fn set_word_addr_limbs(row: &mut ChipletCols<Felt>, lo: u64, hi: u64) {
-        row.chiplets[18] = Felt::new_unchecked(lo);
-        row.chiplets[19] = Felt::new_unchecked(hi);
-    }
+    const MEMORY_TRANSITION_SELECTORS: ChipletSelectors<Felt> = ChipletSelectors {
+        memory_transition: Felt::ONE,
+        ..MEMORY_SELECTORS
+    };
 
     fn eval_memory_window(
-        local: &ChipletCols<Felt>,
-        next: &ChipletCols<Felt>,
-        flags: &ChipletFlags<Felt>,
+        local: &MemoryCols<Felt>,
+        next: &MemoryCols<Felt>,
+        selectors: &ChipletSelectors<Felt>,
     ) -> Vec<QuadFelt> {
         let mut builder = ConstraintEvalBuilder::new();
-        enforce_memory_constraints(&mut builder, local, next, flags);
+        enforce_memory_constraints(&mut builder, local, next, selectors);
         builder.evaluations
-    }
-
-    fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {
-        let next = memory_row();
-        eval_memory_window(row, &next, &memory_flags())
-    }
-
-    fn assert_constraints_accept(row: &ChipletCols<Felt>) {
-        let evaluations = eval_memory_constraints(row);
-        assert!(
-            evaluations.iter().all(|value| *value == QuadFelt::ZERO),
-            "expected all memory constraints to evaluate to zero; got {evaluations:?}",
-        );
-    }
-
-    fn assert_constraints_reject(row: &ChipletCols<Felt>) {
-        let evaluations = eval_memory_constraints(row);
-        assert!(
-            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-            "expected at least one nonzero memory constraint evaluation",
-        );
     }
 
     #[test]
     fn memory_constraints_bind_word_addr_to_range_checked_limbs() {
-        let mut valid = memory_row();
-        {
-            let cols = memory_cols(&mut valid);
-            cols.is_read = Felt::ONE;
-            cols.is_word = Felt::ONE;
-            cols.word_addr = Felt::new_unchecked(4 * (7 + (3 << 16)));
-        }
-        set_word_addr_limbs(&mut valid, 7, 3);
-        assert_constraints_accept(&valid);
+        let valid = MemoryCols {
+            is_read: Felt::ONE,
+            is_word: Felt::ONE,
+            word_addr: Felt::new_unchecked(4 * (7 + (3 << 16))),
+            word_addr_lo: Felt::new_unchecked(7),
+            word_addr_hi: Felt::new_unchecked(3),
+            ..EMPTY_MEMORY_ROW
+        };
+        let evaluations = eval_memory_window(&valid, &EMPTY_MEMORY_ROW, &MEMORY_SELECTORS);
+        assert!(
+            evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+            "valid address decomposition should be accepted; got {evaluations:?}",
+        );
 
-        let mut invalid = valid.clone();
-        set_word_addr_limbs(&mut invalid, 0, 0);
-        assert_constraints_reject(&invalid);
+        let invalid = MemoryCols {
+            word_addr_lo: Felt::ZERO,
+            word_addr_hi: Felt::ZERO,
+            ..valid
+        };
+        let evaluations = eval_memory_window(&invalid, &EMPTY_MEMORY_ROW, &MEMORY_SELECTORS);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "inconsistent address limbs must be rejected",
+        );
     }
 
     // SAME-CLOCK ACCESS TESTS
@@ -473,8 +356,7 @@ mod tests {
         Word,
     }
 
-    fn set_access_size(row: &mut ChipletCols<Felt>, size: AccessSize) {
-        let cols = memory_cols(row);
+    fn set_access_size(cols: &mut MemoryCols<Felt>, size: AccessSize) {
         match size {
             AccessSize::Element(index) => {
                 assert!(index < 4, "element index must be in the range 0..4");
@@ -493,9 +375,7 @@ mod tests {
     fn same_key_memory_rows(
         local_access: AccessType,
         next_access: AccessType,
-    ) -> (ChipletCols<Felt>, ChipletCols<Felt>) {
-        let mut local = memory_row();
-        let mut next = memory_row();
+    ) -> (MemoryCols<Felt>, MemoryCols<Felt>) {
         let values = [
             Felt::new_unchecked(1),
             Felt::new_unchecked(2),
@@ -503,34 +383,23 @@ mod tests {
             Felt::new_unchecked(4),
         ];
 
-        for (row, access) in [(&mut local, local_access), (&mut next, next_access)] {
-            let cols = memory_cols(row);
-            cols.is_read = access.is_read();
-            cols.is_word = Felt::ONE;
-            cols.word_addr = Felt::new_unchecked(4);
-            cols.clk = Felt::new_unchecked(7);
-            cols.values = values;
-        }
-        memory_cols(&mut next).is_same_ctx_and_addr = Felt::ONE;
-
-        // word_addr = 4 * (w0 + 2^16 * w1), with (w0, w1) = (1, 0).
-        set_word_addr_limbs(&mut local, 1, 0);
-        set_word_addr_limbs(&mut next, 1, 0);
+        let local = MemoryCols {
+            is_read: local_access.is_read(),
+            is_word: Felt::ONE,
+            word_addr: Felt::new_unchecked(4),
+            word_addr_lo: Felt::ONE,
+            word_addr_hi: Felt::ZERO,
+            clk: Felt::new_unchecked(7),
+            values,
+            ..EMPTY_MEMORY_ROW
+        };
+        let next = MemoryCols {
+            is_read: next_access.is_read(),
+            is_same_ctx_and_addr: Felt::ONE,
+            ..local
+        };
 
         (local, next)
-    }
-
-    fn eval_memory_transition(
-        local: &ChipletCols<Felt>,
-        next: &ChipletCols<Felt>,
-    ) -> Vec<QuadFelt> {
-        let flags = ChipletFlags {
-            is_active: Felt::ONE,
-            is_transition: Felt::ONE,
-            is_last: Felt::ZERO,
-            next_is_first: Felt::ZERO,
-        };
-        eval_memory_window(local, next, &flags)
     }
 
     /// Ensures that repeating `(ctx, word_addr, clk)` is valid only when both accesses are reads.
@@ -545,7 +414,7 @@ mod tests {
             (AccessType::Write, AccessType::Write),
         ] {
             let (local, next) = same_key_memory_rows(local_access, next_access);
-            let evaluations = eval_memory_transition(&local, &next);
+            let evaluations = eval_memory_window(&local, &next, &MEMORY_TRANSITION_SELECTORS);
             let accepted = evaluations.iter().all(|value| *value == QuadFelt::ZERO);
             let should_accept =
                 matches!((local_access, next_access), (AccessType::Read, AccessType::Read));
@@ -571,7 +440,7 @@ mod tests {
             set_access_size(&mut local, local_size);
             set_access_size(&mut next, next_size);
 
-            let evaluations = eval_memory_transition(&local, &next);
+            let evaluations = eval_memory_window(&local, &next, &MEMORY_TRANSITION_SELECTORS);
             assert!(
                 evaluations.iter().all(|value| *value == QuadFelt::ZERO),
                 "same-clock {local_size:?}/{next_size:?} reads should be accepted; got \
@@ -591,100 +460,20 @@ mod tests {
             (AccessType::Write, AccessType::Write),
         ] {
             let (local, mut next) = same_key_memory_rows(local_access, next_access);
-            {
-                let next = memory_cols(&mut next);
-                next.word_addr = Felt::new_unchecked(8);
-                next.values = [Felt::ZERO; 4];
-                next.d0 = Felt::new_unchecked(4);
-                next.d_inv = Felt::new_unchecked(4).inverse();
-                next.is_same_ctx_and_addr = Felt::ZERO;
-            }
-            set_word_addr_limbs(&mut next, 2, 0);
+            next.word_addr = Felt::new_unchecked(8);
+            next.word_addr_lo = Felt::new_unchecked(2);
+            next.word_addr_hi = Felt::ZERO;
+            next.values = [Felt::ZERO; 4];
+            next.d0 = Felt::new_unchecked(4);
+            next.d_inv = Felt::new_unchecked(4).inverse();
+            next.is_same_ctx_and_addr = Felt::ZERO;
 
-            let evaluations = eval_memory_transition(&local, &next);
+            let evaluations = eval_memory_window(&local, &next, &MEMORY_TRANSITION_SELECTORS);
             assert!(
                 evaluations.iter().all(|value| *value == QuadFelt::ZERO),
                 "same-clock accesses to different words should be accepted for \
                  {local_access:?}/{next_access:?}; got {evaluations:?}",
             );
         }
-    }
-
-    // EMPTY-SECTION BOUNDARY REGRESSION TESTS
-    // ============================================================================================
-    // The memory chiplet's first-row initialization ("values not being written must be zero") is
-    // gated by `next_is_first`. That flag must fire on the row preceding the first memory row even
-    // when the bitwise section is empty, which is the case for any program that touches memory but
-    // performs no `u32and`/`u32xor` operations. The earlier definition gated it on a non-empty
-    // bitwise section, so an empty bitwise section skipped the initialization and let a malicious
-    // prover forge a read of never-written memory.
-
-    /// Builds a `ChipletCols` row with `[s_ctrl, stream_mode, s1, s2, s3, s4]`.
-    fn row_with_selectors(selectors: [u64; 6]) -> ChipletCols<Felt> {
-        let mut row = memory_row();
-        let [s_ctrl, stream_mode, s1, s2, s3, s4] = selectors;
-        for (slot, value) in row.chiplets[..5].iter_mut().zip([s_ctrl, s1, s2, s3, s4]) {
-            *slot = Felt::new_unchecked(value);
-        }
-        row.chiplets[CHIPLETS_MODE_COL] = Felt::new_unchecked(stream_mode);
-        row
-    }
-
-    /// Runs `build_chiplet_selectors` over the `(local, next)` window and returns the memory flags
-    /// the AIR would actually derive for that boundary.
-    fn memory_flags_for_window(
-        local: &ChipletCols<Felt>,
-        next: &ChipletCols<Felt>,
-    ) -> ChipletFlags<Felt> {
-        let mut builder = ConstraintEvalBuilder::new();
-        build_chiplet_selectors(&mut builder, local, next).memory
-    }
-
-    #[test]
-    fn memory_first_row_init_enforced_when_bitwise_empty() {
-        // Empty-bitwise layout: the memory section begins directly after a controller row, so the
-        // first memory row is entered at a controller -> memory boundary.
-        let controller = row_with_selectors([1, 0, 0, 0, 0, 0]);
-        let mut first_memory = row_with_selectors([0, 0, 1, 0, 0, 0]);
-        memory_cols(&mut first_memory).is_read = Felt::ONE; // fresh read: every value must be zero
-
-        let flags = memory_flags_for_window(&controller, &first_memory);
-        assert_eq!(
-            flags.next_is_first,
-            Felt::ONE,
-            "controller -> memory boundary (empty bitwise) must mark the next row as first memory",
-        );
-
-        // A forged fresh read of a never-written cell must be rejected.
-        let mut forged = first_memory.clone();
-        memory_cols(&mut forged).values[0] = Felt::new_unchecked(42);
-        let evals = eval_memory_window(&controller, &forged, &flags);
-        assert!(
-            evals.iter().any(|value| *value != QuadFelt::ZERO),
-            "forged fresh read must be rejected at the empty-bitwise memory boundary",
-        );
-
-        // The honest zero-initialized fresh read is accepted.
-        let evals = eval_memory_window(&controller, &first_memory, &flags);
-        assert!(
-            evals.iter().all(|value| *value == QuadFelt::ZERO),
-            "zero-initialized fresh read must be accepted; got {evals:?}",
-        );
-    }
-
-    #[test]
-    fn memory_next_is_first_marks_only_the_entry_row() {
-        // Non-empty bitwise: the bitwise -> memory boundary still fires.
-        let bitwise = row_with_selectors([0, 0, 0, 0, 0, 0]);
-        let memory = row_with_selectors([0, 0, 1, 0, 0, 0]);
-        assert_eq!(memory_flags_for_window(&bitwise, &memory).next_is_first, Felt::ONE);
-
-        // An interior memory -> memory transition is not a section start.
-        let memory_next = row_with_selectors([0, 0, 1, 0, 0, 0]);
-        assert_eq!(memory_flags_for_window(&memory, &memory_next).next_is_first, Felt::ZERO);
-
-        // A memory -> ACE transition is not a memory section start.
-        let ace = row_with_selectors([0, 0, 1, 1, 0, 0]);
-        assert_eq!(memory_flags_for_window(&memory, &ace).next_is_first, Felt::ZERO);
     }
 }

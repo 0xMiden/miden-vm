@@ -45,7 +45,7 @@ impl ReproTrace {
     /// Captures the matrices and public inputs needed to prove mutations of `trace`.
     pub fn new(trace: &VmTrace) -> Self {
         let main = trace.main_trace();
-        let (core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
+        let (core, chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
         Self {
             core,
             chiplets,

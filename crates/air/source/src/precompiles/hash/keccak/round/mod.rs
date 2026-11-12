@@ -213,9 +213,8 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] to the iota row, whose `act` equals the round's through this constraint.
-            builder.assert_zero(
-                (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
-            );
+            builder
+                .assert_zero((AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act));
 
             // Active pure-ROL rows range-check both vectors through BytePairLut. Each
             // packed u32 embeds injectively in the field, so two equalities bind all eight
@@ -354,7 +353,7 @@ where
             // Periodic rotation selectors also fire in the inactive tail. Activity gating lets
             // those zero-filled rows omit the masked-byte witnesses.
             let rol_act = act.clone() * is_rol.clone();
-            let dst_mult_act = act.clone() * dst_mult.clone();
+            let dst_mult_act = act * dst_mult.clone();
 
             // The destination denominator has degree two; each source denominator is affine.
             // Packing all three gives denominator degree four and closing-constraint degree five.

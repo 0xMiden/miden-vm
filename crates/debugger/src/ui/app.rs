@@ -232,7 +232,7 @@ impl App {
                     action_tx.send(action).into_diagnostic()?;
                 }
 
-                if let Some(action) = self.footer.update(action.clone(), &mut self.state)? {
+                if let Some(action) = self.footer.update(action, &mut self.state)? {
                     action_tx.send(action).into_diagnostic()?;
                 }
             }

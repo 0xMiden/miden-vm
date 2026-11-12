@@ -4,112 +4,167 @@
 //! active at any given row, and provides precomputed flags for gating chiplet-specific
 //! constraints.
 //!
-//! ## Selector Hierarchy
+//! [`ChipletCols`] exposes typed row overlays, [`ChipletSelectors`] names the gates used by main
+//! constraints, and [`ChipletActiveFlags`] decodes single-row membership for lookup buses and
+//! native trace readers. The packed selector encoding is owned by this module.
 //!
-//! The chiplet system uses `s_ctrl = chiplets[0]` for hasher-controller rows and
-//! the virtual selector `s0 = 1 - s_ctrl` for all remaining chiplets. The `stream_mode`
-//! column is a local mode bit inside the bitwise selector region. The remaining
-//! selectors `s1..s4` subdivide the `s0` region.
+//! ## Packed Encoding
 //!
-//! | Chiplet     | Active when                    |
-//! |-------------|--------------------------------|
-//! | Controller  | `s_ctrl`                       |
-//! | Bitwise     | `s0 * !s1`                     |
-//! | Memory      | `s0 * s1 * !s2`                |
-//! | ACE         | `s0 * s1 * s2 * !s3`           |
-//! | Kernel ROM  | `s0 * s1 * s2 * s3 * !s4`      |
+//! Read the selector prefix from column zero. After the prefix, each section can use the
+//! remaining columns for its payload. The trace producer writes the prefixes in this order.
 //!
-//! ## Selector Transition Rules
+//! | Section     | Prefix  |
+//! |-------------|---------|
+//! | Controller  | `0`     |
+//! | AEAD stream | `100`   |
+//! | Bitwise     | `101`   |
+//! | Memory      | `110`   |
+//! | ACE         | `1110`  |
+//! | Kernel ROM  | `11110` |
+//! | Padding     | `11111` |
 //!
-//! - `s_ctrl` is boolean.
-//! - `stream_mode` is boolean under `s0` and zero after the bitwise region.
-//! - `s0 = 1` forces `s_ctrl' = 0` (once in the non-controller region, stay there).
+//! A leading run of ones can only grow as the trace advances. This leaves the third bit free
+//! under the `10` prefix, where the AIR permits switching between AEAD and bitwise at complete
+//! AEAD cycle boundaries.
 //!
-//! These force the trace ordering: controller rows first, then non-controller chiplets.
-//!
-//! ## Main-Constraint Flags
-//!
-//! The chiplets with main-trace constraints get a [`ChipletFlags`] struct with four flags:
-//! - `is_active`: 1 when this chiplet owns the current row
-//! - `is_transition`: active on both current and next row, including `is_transition()`
-//! - `is_last`: current row belongs to this chiplet and the next row has advanced past it
-//! - `next_is_first`: the next row is the first row of this chiplet's section (equivalently, the
-//!   current row is the last row before that section). This flag is derived from the section
-//!   boundary itself, so it still fires when the preceding chiplet section is empty.
-//!
-//! For the controller, `is_active` is the direct physical selector `s_ctrl`. For
-//! the remaining chiplets under `s0`, `is_active` uses the subtraction trick
-//! (`prefix - prefix * s_n`).
-//!
-//! ## Constraints
-//!
-//! 1. **Top-level partition**: `s_ctrl` is boolean and `stream_mode` is bitwise-local.
-//! 2. **Transition rules**: ctrl to ctrl-or-s0, s0 to s0
-//! 3. **Binary constraints**: `s1..s4` are binary when their prefix is active
-//! 4. **Stability constraints**: Once `s1..s4` become 1, they stay 1
-//! 5. **Last-row invariant**: `s_ctrl = 0`, `s1 = s2 = s3 = s4 = 1` on the final row
-//!
-//! The last-row invariant ensures every chiplet's `is_active` flag is zero on the last
-//! row. The precomputed flags also check that the next row has not advanced past the
-//! selected chiplet, so chiplet-gated constraints automatically vanish on the last row without
-//! needing explicit `when_transition()` guards.
+//! The final row has prefix `11111`, so every chiplet's current-row activity is zero
+//! on the last row. Gates that include current-row activity therefore vanish there. Next-row
+//! activity is raw membership and can be nonzero on the cyclic last-to-first opening.
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::field::{Algebra, PrimeCharacteristicRing};
 use miden_stark::air::AirBuilder;
 
-use crate::vm::{ChipletCols, MidenAirBuilder, constraints::utils::BoolNot};
+use crate::vm::{ChipletCols, Felt, MidenAirBuilder, constraints::utils::BoolNot};
 
 // CHIPLET FLAGS
 // ================================================================================================
 
-/// Precomputed flags for a single chiplet.
-#[derive(Clone)]
-pub struct ChipletFlags<E> {
-    /// 1 when this chiplet owns the current row.
-    pub is_active: E,
-    /// 1 on transitions where both the current row and next row belong to this chiplet.
-    pub is_transition: E,
-    /// 1 on the last row of this chiplet's section.
-    pub is_last: E,
-    /// 1 when the next row is the first row of this chiplet's section.
-    pub next_is_first: E,
-}
-
 /// Precomputed flags for chiplets with main-trace constraints.
 ///
 /// Kernel ROM is enforced through lookup-bus constraints, so its active flag lives in
-/// `ChipletActiveFlags` instead.
+/// [`ChipletActiveFlags`] instead.
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
-    pub controller: ChipletFlags<E>,
-    pub bitwise: BitwiseFlags<E>,
-    pub memory: ChipletFlags<E>,
-    pub ace: ChipletFlags<E>,
+    /// 1 on controller rows.
+    pub controller_active: E,
+    /// 1 when the next row belongs to the controller, without a transition gate.
+    pub controller_next_active: E,
+    /// Controller-to-controller transitions, including the trace transition selector.
+    pub controller_transition: E,
+    /// 1 on AEAD stream rows.
+    pub aead_stream_active: E,
+    /// 1 when the next row belongs to AEAD, without a transition gate.
+    pub aead_stream_next_active: E,
+    /// 1 on bitwise AND/XOR rows.
+    pub bitwise_active: E,
+    /// 1 on memory rows.
+    pub memory_active: E,
+    /// Memory-to-memory transitions, including the trace transition selector.
+    pub memory_transition: E,
+    /// 1 when the next row starts memory, including when preceding sections are empty.
+    /// Evaluated on the row immediately before the memory section.
+    pub memory_entry_next: E,
+    /// 1 on ACE rows.
+    pub ace_active: E,
+    /// ACE-to-ACE transitions, including the trace transition selector.
+    pub ace_transition: E,
+    /// 1 when the current row ends the ACE section.
+    pub ace_last: E,
+    /// 1 when the next row starts ACE, including when preceding sections are empty.
+    /// Evaluated on the row immediately before the ACE section.
+    pub ace_entry_next: E,
 }
 
-/// Selector flags for the bitwise region and its two row modes.
-#[derive(Clone)]
-pub struct BitwiseFlags<E> {
-    /// Flags for the complete bitwise selector region.
-    pub region: ChipletFlags<E>,
-    /// Normal `u32and`/`u32xor` rows.
-    pub normal: E,
+// SINGLE-ROW CHIPLET ACTIVITY
+// ================================================================================================
+
+/// Semantic chiplet membership for a single row.
+///
+/// Main constraints and lookup buses share the polynomial decoder. Native trace readers use
+/// exact selector-value comparisons through [`Self::from_trace_row`]. Main constraints also
+/// use transition, exit, and section-entry gates from their two-row selector context.
+///
+/// Both constructors are pure: neither emits selector constraints.
+pub struct ChipletActiveFlags<E> {
+    /// Controller rows.
+    pub controller: E,
     /// AEAD stream rows.
     pub aead_stream: E,
+    /// Bitwise AND/XOR rows.
+    pub bitwise: E,
+    /// Memory rows.
+    pub memory: E,
+    /// ACE rows.
+    pub ace: E,
+    /// Kernel ROM rows.
+    pub kernel_rom: E,
+}
+
+impl<E> ChipletActiveFlags<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+{
+    /// Builds the polynomial chiplet membership expressions from a typed shared row.
+    pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
+    where
+        V: Copy,
+        E: Algebra<V>,
+    {
+        let s0: E = local.chiplets[0].into();
+        let s1: E = local.chiplets[1].into();
+        let s2: E = local.chiplets[2].into();
+        let s3: E = local.chiplets[3].into();
+        let s4: E = local.chiplets[4].into();
+
+        let s01 = s0.clone() * s1;
+        let s012 = s01.clone() * s2.clone();
+        let s0123 = s012.clone() * s3;
+        let s01234 = s0123.clone() * s4;
+
+        // For prefix p and selector s, the 0 branch is p - p * s and the 1 branch is p * s.
+        let bitwise_region = s0.clone() - s01.clone();
+        let bitwise = bitwise_region.clone() * s2;
+
+        Self {
+            controller: E::ONE - s0,
+            aead_stream: bitwise_region - bitwise.clone(),
+            bitwise,
+            memory: s01 - s012.clone(),
+            ace: s012 - s0123.clone(),
+            kernel_rom: s0123 - s01234,
+        }
+    }
+}
+
+impl ChipletActiveFlags<bool> {
+    /// Classifies a native trace row using exact selector-prefix comparisons.
+    pub fn from_trace_row(local: &ChipletCols<Felt>) -> Self {
+        let s0 = local.chiplets[0];
+        let s1 = local.chiplets[1];
+        let s2 = local.chiplets[2];
+        let s3 = local.chiplets[3];
+        let s4 = local.chiplets[4];
+
+        let non_controller = s0 == Felt::ONE;
+        let bitwise_region = non_controller && s1 == Felt::ZERO;
+        let memory_prefix = non_controller && s1 == Felt::ONE;
+        let ace_prefix = memory_prefix && s2 == Felt::ONE;
+
+        Self {
+            controller: s0 == Felt::ZERO,
+            aead_stream: bitwise_region && s2 == Felt::ZERO,
+            bitwise: bitwise_region && s2 == Felt::ONE,
+            memory: memory_prefix && s2 == Felt::ZERO,
+            ace: ace_prefix && s3 == Felt::ZERO,
+            kernel_rom: ace_prefix && s3 == Felt::ONE && s4 == Felt::ZERO,
+        }
+    }
 }
 
 // ENTRY POINT
 // ================================================================================================
 
-/// Enforce chiplet selector constraints and build precomputed flags.
-///
-/// This enforces:
-/// 1. Top-level partition constraints for `s_ctrl`, bitwise-local `stream_mode`, virtual `s0`
-/// 2. Transition rules (ctrl to ctrl-or-s0, s0 to s0)
-/// 3. Binary and stability constraints for `s1..s4` under `s0`
-/// 4. Last-row invariant (`s_ctrl = 0`, `s1..s4 = 1`)
-///
-/// Returns [`ChipletSelectors`] with precomputed flags for gating chiplet constraints.
+/// Enforces the selector prefixes and section order and builds the chiplet gates.
 pub fn build_chiplet_selectors<AB>(
     builder: &mut AB,
     local: &ChipletCols<AB::Var>,
@@ -118,215 +173,93 @@ pub fn build_chiplet_selectors<AB>(
 where
     AB: MidenAirBuilder,
 {
-    // =========================================================================
-    // LOAD SELECTOR COLUMNS
-    // =========================================================================
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s3: AB::Expr = local.chiplets[3].into();
+    let s4: AB::Expr = local.chiplets[4].into();
 
-    // [s_ctrl, s1, s2, s3, s4]
-    let sel = local.chiplet_selectors();
-    let sel_next = next.chiplet_selectors();
+    let s0_next: AB::Expr = next.chiplets[0].into();
+    let s1_next: AB::Expr = next.chiplets[1].into();
+    let s2_next: AB::Expr = next.chiplets[2].into();
+    let s3_next: AB::Expr = next.chiplets[3].into();
+    let s4_next: AB::Expr = next.chiplets[4].into();
 
-    // s_ctrl = chiplets[0]: 1 on hasher-controller rows, 0 on all other chiplet rows.
-    let s_ctrl: AB::Expr = sel[0].into();
-    let s_ctrl_next: AB::Expr = sel_next[0].into();
-
-    // AEAD stream mode slot. It is used only inside the bitwise selector region.
-    let stream_mode: AB::Expr = local.bitwise_stream_mode().into();
-
-    // s1..s4: remaining chiplet selectors.
-    let s1: AB::Expr = sel[1].into();
-    let s2: AB::Expr = sel[2].into();
-    let s3: AB::Expr = sel[3].into();
-    let s4: AB::Expr = sel[4].into();
-
-    let s1_next: AB::Expr = sel_next[1].into();
-    let s2_next: AB::Expr = sel_next[2].into();
-    let s3_next: AB::Expr = sel_next[3].into();
-    let s4_next: AB::Expr = sel_next[4].into();
-
-    // Virtual s0 = 1 - s_ctrl: 0 on controller rows, 1 on all other chiplet rows.
-    let s0: AB::Expr = s_ctrl.not();
-
-    // =========================================================================
-    // TOP-LEVEL SELECTOR CONSTRAINTS
-    // =========================================================================
-
-    builder.assert_bool(s_ctrl.clone());
-
-    // Transition rules: enforce the trace ordering ctrl...ctrl, s0...s0.
-    {
-        let builder = &mut builder.when_transition();
-
-        // Once in the s0 region, controller rows cannot appear again.
-        builder.when(s0.clone()).assert_zero(s_ctrl_next.clone());
-    }
-
-    // =========================================================================
-    // REMAINING CHIPLET SELECTOR CONSTRAINTS (s1..s4 under s0)
-    // =========================================================================
-
-    // Cumulative products gate each selector on its prefix being active.
     let s01 = s0.clone() * s1.clone();
     let s012 = s01.clone() * s2.clone();
     let s0123 = s012.clone() * s3.clone();
+    let s01234 = s0123.clone() * s4.clone();
 
-    // `stream_mode` only refines the bitwise region (`s0 = 1, s1 = 0`). Once `s1 = 1`,
-    // the trace has moved past bitwise rows and stream mode must be zero.
-    builder.when(s0.clone()).assert_bool(stream_mode.clone());
-    builder.when(s01.clone()).assert_zero(stream_mode.clone());
-
-    // s1..s4 booleanity, gated by their prefix under s0.
-    builder.when(s0.clone()).assert_bool(s1.clone());
-    builder.when(s01.clone()).assert_bool(s2.clone());
+    // A column is binary whenever it is part of the row's selector prefix.
+    builder.assert_bool(s0.clone());
+    builder.when(s0.clone()).assert_bools([s1.clone(), s2.clone()]);
     builder.when(s012.clone()).assert_bool(s3.clone());
     builder.when(s0123.clone()).assert_bool(s4.clone());
 
-    // s1..s4 stability: once set to 1, they stay 1 (forbids 1 -> 0 transitions).
-    // Gated by the cumulative product including the target selector, so the gate
-    // is only active when the selector is already 1, permitting the 0 -> 1
-    // transition at section boundaries while forbidding 1 -> 0.
-    let s01234 = s0123.clone() * s4.clone();
+    // Once the trace reaches an all-ones prefix, subsequent rows retain it. This leaves s2
+    // free to distinguish AEAD and bitwise under `10`.
     {
         let builder = &mut builder.when_transition();
-        builder.when(s01.clone()).assert_eq(s1_next.clone(), s1.clone());
-        builder.when(s012.clone()).assert_eq(s2_next.clone(), s2.clone());
-        builder.when(s0123.clone()).assert_eq(s3_next.clone(), s3.clone());
-        builder.when(s01234).assert_eq(s4_next, s4.clone());
+        builder.when(s0.clone()).assert_one(s0_next.clone());
+        builder.when(s01.clone()).assert_one(s1_next.clone());
+        builder.when(s012.clone()).assert_one(s2_next.clone());
+        builder.when(s0123).assert_one(s3_next.clone());
+        builder.when(s01234).assert_one(s4_next);
     }
 
-    // =========================================================================
-    // LAST-ROW INVARIANT
-    // =========================================================================
-    // On the last row: s_ctrl = 0 and s1 = s2 = s3 = s4 = 1 (kernel_rom
-    // section). Virtual s0 = 1 follows from s_ctrl = 0.
-    // This ensures every chiplet's is_active flag is zero on the last row.
-    // The precomputed flags also check that the next row has not advanced past the selected
-    // chiplet, so chiplet-gated constraints vanish without explicit when_transition() guards.
+    // Padding on the last row makes all current-row chiplet activity vanish.
     {
         let builder = &mut builder.when_last_row();
-        builder.assert_zero(s_ctrl.clone());
+        builder.assert_one(s0.clone());
         builder.assert_one(s1);
         builder.assert_one(s2);
         builder.assert_one(s3);
         builder.assert_one(s4);
     }
 
-    // =========================================================================
-    // PRECOMPUTE FLAGS
-    // =========================================================================
-
-    let not_s1_next = s1_next.not();
     let not_s2_next = s2_next.not();
     let not_s3_next = s3_next.not();
 
     let is_transition_flag: AB::Expr = builder.is_transition();
+    let active = ChipletActiveFlags::<AB::Expr>::from_chiplet_cols(local);
+    let controller_next_active = s0_next.not();
+    let controller_transition =
+        is_transition_flag.clone() * active.controller.clone() * controller_next_active.clone();
+    let controller_last = active.controller.clone() * s0_next.clone();
+    let aead_stream_next_active = s0_next.clone() * s1_next.not() * not_s2_next.clone();
 
-    // --- Controller flags (direct physical selector s_ctrl) ---
-    // is_active = s_ctrl (deg 1)
-    // is_transition = is_transition_flag * s_ctrl * s_ctrl' (deg 3)
-    // is_last = s_ctrl * (1 - s_ctrl') (deg 2)
-    let ctrl_is_active = s_ctrl.clone();
-    let ctrl_is_transition = is_transition_flag.clone() * s_ctrl.clone() * s_ctrl_next.clone();
-    let ctrl_is_last = s_ctrl * s_ctrl_next.not();
-    let ctrl_next_is_first = AB::Expr::ZERO; // controller is first section
+    // Entry gates cover skipped sections. Memory initialization must still zero values that
+    // have never been written when the trace goes directly from controller to memory.
+    // Both predecessors already imply s0' = 1, so the entry gate can omit that factor and stay
+    // within the degree budget.
+    let bitwise_region_active = s0 - s01.clone();
+    let precedes_first_memory_row = bitwise_region_active + controller_last;
+    let memory_entry_next = precedes_first_memory_row * s1_next.clone() * not_s2_next.clone();
 
-    // --- Remaining chiplet active flags (subtraction trick: prefix - prefix * s_n) ---
-    let is_bitwise = s0.clone() - s01.clone();
-    let aead_stream_active = is_bitwise.clone() * stream_mode;
-    let is_memory = s01.clone() - s012.clone();
-    let is_ace = s012.clone() - s0123;
-    let normal_bitwise = is_bitwise.clone() - aead_stream_active.clone();
-
-    // --- Non-controller last-row flags ---
-    // A section ends when the current row is active and the next selector advances past it.
-    let is_bitwise_last = is_bitwise.clone() * s1_next.clone();
-    let is_memory_last = is_memory.clone() * s2_next.clone();
-    let is_ace_last = is_ace.clone() * s3_next;
-
-    // --- Non-controller next-is-first flags ---
-    //
-    // Each `next_is_first` flag marks the row that immediately precedes a chiplet section's first
-    // row, and it gates that section's first-row initialization. Because any chiplet section other
-    // than the controller can be empty, these flags must be derived from the section boundary
-    // itself rather than from "the previous chiplet's last row". A predecessor-based definition
-    // silently fails when the predecessor is empty: it has no last row, so the flag never fires and
-    // the initialization is skipped. For the memory chiplet, that initialization is the "values not
-    // being written must be zero" reset, and skipping it would let a malicious prover forge a read
-    // of never-written memory.
-    //
-    // The bitwise flag is the exception that needs no boundary rewrite. Bitwise is preceded only by
-    // the controller, and the controller is always non-empty because a boundary constraint pins the
-    // first trace row to a controller row. (Even a hypothetical empty controller would be safe:
-    // bitwise rows are self-contained single-row operations with no first-row initialization to
-    // skip.)
-    let next_is_bitwise_first = ctrl_is_last.clone() * not_s1_next.clone();
-
-    // The boundary detection below works on the virtual `s0' = 1 - s_ctrl'` and the named chain
-    // selectors.
-    let s0_next_virtual: AB::Expr = s_ctrl_next.not();
-    let s1_next_raw: AB::Expr = s1_next;
-    let s2_next_raw: AB::Expr = s2_next;
-
-    // The memory section is entered from the last bitwise row (when bitwise is non-empty) or
-    // from the last controller row (when bitwise is empty). `s1' = 1` with `s2' = 0` confirms
-    // the next row is the first memory row; `is_bitwise` selects the last bitwise row (via that
-    // same `s1'` factor) and `ctrl_is_last` selects the last controller row, covering both paths.
-    let precedes_first_memory_row = is_bitwise.clone() + ctrl_is_last.clone();
-    let next_is_memory_first =
-        precedes_first_memory_row * s1_next_raw.clone() * not_s2_next.clone();
-
-    // The ACE section is entered from the memory section, or from an earlier section when the
-    // sections in between are empty. Instead of enumerating those cases, we detect the boundary
-    // directly: the next row is the first ACE row (`s0' = s1' = s2' = 1` and `s3' = 0`) while the
-    // current row has not yet reached the ACE section or beyond (`s0 * s1 * s2 = 0`).
-    //
-    // Direct detection is affordable here because the ACE first-row constraint gates only a single
-    // column, so even this degree-7 flag stays within the AIR's degree-9 cap. The memory boundary
-    // above cannot afford it: its first-row init is degree-heavy, so the degree-5 direct form would
-    // overflow the cap, which is why memory uses the lower-degree two-term form instead.
-    let next_row_is_ace = s0_next_virtual * s1_next_raw * s2_next_raw * not_s3_next.clone();
+    // ACE initialization is linear, so it can use a degree-7 gate that directly detects the
+    // boundary. The next row is ACE while the current row is before the `111` prefix.
+    let next_row_is_ace = s0_next * s1_next * s2_next * not_s3_next.clone();
     let current_row_before_ace = AB::Expr::ONE - s012.clone();
-    let next_is_ace_first = next_row_is_ace * current_row_before_ace;
+    let ace_entry_next = next_row_is_ace * current_row_before_ace;
 
-    // --- Non-controller transition flags ---
-    // Each non-controller chiplet fires its transition flag when the current row is in that
-    // chiplet's section (the prefix product) and the next row hasn't yet advanced
-    // past it (the `1 - s_n'` factor). We don't need an explicit `(1 - s_ctrl')`
-    // factor because the top-level transition rule already enforces
-    // `s0 = 1` forces `s_ctrl' = 0`, so on valid traces that factor is
-    // always 1 whenever the prefix is active.
-    let bitwise_transition = is_transition_flag.clone() * s0 * not_s1_next;
+    // A stable prefix and a zero in the next split bit imply both rows are in the same section.
     let memory_transition = is_transition_flag.clone() * s01 * not_s2_next;
     let ace_transition = is_transition_flag * s012 * not_s3_next;
+    let ace_last = active.ace.clone() * s3_next;
 
     ChipletSelectors {
-        controller: ChipletFlags {
-            is_active: ctrl_is_active,
-            is_transition: ctrl_is_transition,
-            is_last: ctrl_is_last,
-            next_is_first: ctrl_next_is_first,
-        },
-        bitwise: BitwiseFlags {
-            region: ChipletFlags {
-                is_active: is_bitwise,
-                is_transition: bitwise_transition,
-                is_last: is_bitwise_last,
-                next_is_first: next_is_bitwise_first,
-            },
-            normal: normal_bitwise,
-            aead_stream: aead_stream_active,
-        },
-        memory: ChipletFlags {
-            is_active: is_memory,
-            is_transition: memory_transition,
-            is_last: is_memory_last,
-            next_is_first: next_is_memory_first,
-        },
-        ace: ChipletFlags {
-            is_active: is_ace,
-            is_transition: ace_transition,
-            is_last: is_ace_last,
-            next_is_first: next_is_ace_first,
-        },
+        controller_active: active.controller,
+        controller_next_active,
+        controller_transition,
+        aead_stream_active: active.aead_stream,
+        aead_stream_next_active,
+        bitwise_active: active.bitwise,
+        memory_active: active.memory,
+        memory_transition,
+        memory_entry_next,
+        ace_active: active.ace,
+        ace_transition,
+        ace_last,
+        ace_entry_next,
     }
 }

@@ -1,8 +1,9 @@
 //! Chiplets trace constraints.
 //!
 //! This module enforces:
-//! - chiplet selector constraints (including hasher internal selectors)
+//! - chiplet selector constraints
 //! - controller sub-chiplet main-trace constraints
+//! - AEAD stream main-trace constraints
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
@@ -23,8 +24,9 @@ pub mod hasher_control;
 pub mod memory;
 pub mod selectors;
 
-use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+#[cfg(test)]
+mod transition_tests;
+
 use selectors::ChipletSelectors;
 
 use crate::vm::{ChipletCols, MidenAirBuilder};
@@ -41,21 +43,19 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Selector constraints (including hasher internal selectors) are enforced in
-    // build_chiplet_selectors (called from lib.rs).
+    // Each evaluator sees its own payload and the gates derived from the shared selectors.
+    let controller = local.controller_cols();
+    let controller_next = next.controller_cols();
+    hasher_control::enforce_controller_constraints(builder, controller, controller_next, selectors);
 
-    // Chiplet-trace row counter `chip_clk`: starts at 1 and increments by 1 each row.
-    builder.when_first_row().assert_eq(local.chip_clk, AB::Expr::ONE);
-    builder
-        .when_transition()
-        .assert_eq(next.chip_clk.into(), local.chip_clk.into() + AB::Expr::ONE);
-
-    // Hasher controller.
-    hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
-
-    aead_stream::enforce_aead_stream_constraints(builder, local, next, selectors);
-    bitwise::enforce_bitwise_constraints(builder, local, next, selectors.bitwise.normal.clone());
-    memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
-    ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
-    hasher_control::enforce_merkle_level_constraints(builder, local, next);
+    aead_stream::enforce_aead_stream_constraints(
+        builder,
+        local.aead_stream_cols(),
+        next.aead_stream_cols(),
+        selectors,
+    );
+    bitwise::enforce_bitwise_constraints(builder, local.bitwise_cols(), selectors);
+    memory::enforce_memory_constraints(builder, local.memory_cols(), next.memory_cols(), selectors);
+    ace::enforce_ace_constraints_all_rows(builder, local.ace_cols(), next.ace_cols(), selectors);
+    hasher_control::enforce_merkle_level_constraints(builder, controller, controller_next);
 }

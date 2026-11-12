@@ -164,7 +164,7 @@ where
             let tree = info_span!("FRI round commit", round, domain_size)
                 .in_scope(|| lmcs.build_tree(alloc::vec![natural_view]));
             let commitment = tree.root();
-            channel.send_commitment(commitment.clone());
+            channel.send_commitment(commitment);
 
             // ─────────────────────────────────────────────────────────────────────
             // Grind and sample folding challenge beta

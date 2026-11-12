@@ -18,6 +18,7 @@
 
 #### Changes
 
+- [BREAKING] Repacked chiplet selector prefixes and localized chiplet payloads, changing the VM proof relation and recursive verifier root ([#4158](https://github.com/0xMiden/miden-vm/pull/4158)).
 - [BREAKING] Removed unsupported debugger DAP message types and profiler registration APIs. Simplified glob matching and field formatting ([#4164](https://github.com/0xMiden/miden-vm/pull/4164)).
 - [BREAKING] `PrecompileWork::class` and `PrecompileLimits::class` now take `&WorkClass` instead of `WorkClass`. Callers must pass `&WorkClass` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
 - [BREAKING] XChaCha AEAD now authenticates the encrypted-data type byte with a versioned domain separator, so flipping the type of a serialized ciphertext fails tag verification. Ciphertexts serialized by earlier versions no longer verify ([#4138](https://github.com/0xMiden/miden-vm/pull/4138)).

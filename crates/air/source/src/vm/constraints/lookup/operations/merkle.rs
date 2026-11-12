@@ -245,11 +245,11 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_inits<LB, G>(
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let local = ctx.local;
-    let ctrl = local.controller();
+    let ctrl = local.controller_cols();
     let hs0: LB::Expr = ctrl.s0.into();
     let hs1: LB::Expr = ctrl.s1.into();
     let hs2: LB::Expr = ctrl.s2.into();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
     // The controller skeleton makes this product zero off controller rows. Avoiding an
     // additional controller selector keeps the response gate within the degree bound.
     let merkle_gate = merkle_or_padding * hs0;
@@ -257,7 +257,7 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_inits<LB, G>(
     let f_mp: LB::Expr = merkle_gate.clone() * hs1.not() * hs2.clone() * merkle_start.clone();
     let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * hs2.not() * merkle_start.clone();
     let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
-    let row_addr: LB::Expr = local.chip_clk.into();
+    let row_addr: LB::Expr = ctrl.addr.into();
     let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
@@ -299,7 +299,7 @@ pub(in crate::vm::constraints::lookup) fn emit_siblings<LB, G>(
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let local = ctx.local;
-    let ctrl = local.controller();
+    let ctrl = local.controller_cols();
     let hs0: LB::Expr = ctrl.s0.into();
     let hs1: LB::Expr = ctrl.s1.into();
     let hs2: LB::Expr = ctrl.s2.into();
@@ -308,7 +308,7 @@ pub(in crate::vm::constraints::lookup) fn emit_siblings<LB, G>(
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
     let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
-    let mrupdate_id = local.controller_mrupdate_id();
+    let mrupdate_id = ctrl.mrupdate_id;
     let node_index = ctrl.merkle_node_index();
     let level = ctrl.merkle_level();
     let node_index_next: LB::Expr = ctrl.merkle_node_index_next().into();
@@ -357,9 +357,9 @@ pub(in crate::vm::constraints::lookup) fn emit_compression<LB, G>(
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let local = ctx.local;
-    let ctrl = local.controller();
+    let ctrl = local.controller_cols();
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
     let ctrl_s0: LB::Expr = ctrl.s0.into();
     let f_merkle_compression = controller_flag * merkle_or_padding * ctrl_s0;
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
@@ -384,13 +384,13 @@ where
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let local = ctx.local;
-    let ctrl = local.controller();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let ctrl = local.controller_cols();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
     let ctrl_s0: LB::Expr = ctrl.s0.into();
-    let op_final: LB::Expr = local.controller_op_final().into();
+    let op_final: LB::Expr = ctrl.op_final.into();
     // The controller skeleton makes this product zero off controller rows.
     let merkle_return = merkle_or_padding * ctrl_s0 * op_final;
-    let addr: LB::Expr = local.chip_clk.into();
+    let addr: LB::Expr = ctrl.addr.into();
     let merkle_digest = ctrl.merkle_digest();
     g.add(
         "merkle_return",
