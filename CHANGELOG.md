@@ -85,6 +85,7 @@
 
 #### Changes
 
+- Updated the crypto test vectors to `wycheproof-ng` 0.4.0.
 - Release all workspace crates, including `midenc-hir-type`, as `1.0.0-rc.0` and inherit their versions from the workspace.
 - [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).

@@ -6761,9 +6761,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-core"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f13924807c25b13120af84edee4ed19157ca06d33ee0401deb97af29ce81f7ba"
+checksum = "857ab9a49276f16274acce0a6ae3ef394538513c162ac9c3ecee23207af78196"
 dependencies = [
  "data-encoding",
  "serde",
@@ -6772,9 +6772,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-dh"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e204f2f9f01a3b93dfaa7cf63466bdc88beb629f8216b869ff7400cf0c53fddd"
+checksum = "c80ee7a430bbccc3cf1c2f10c5433aa733316a9c68903ccd955a4a61a9dea92f"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6784,9 +6784,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-ecdsa"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a42460081707a5c4186407a5a46ae1a477e3adbb0e93a72a98ec9a01062a50"
+checksum = "7af2e32c5641100608c2acea5c1934c5a8d26c7dbfe609e8ec271d26b0883a4e"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6796,9 +6796,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-eddsa"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52552287bfe2f6804dfa0d44cfa7f63e77e52eb81f64e62092bfda3ed6ad781f"
+checksum = "b3c6a4365f65432699f8ea9430850083d70a2c51704edce6d86e11402471fd5a"
 dependencies = [
  "serde",
  "serde_derive",
