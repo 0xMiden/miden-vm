@@ -354,25 +354,17 @@ fn same_file_identity(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, sync::Arc};
+
+    use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+    use miden_vm::{ProverError, default_verification_precompile_limits};
 
     use super::*;
 
     fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
-        ProveCmd {
-            program_file: PathBuf::from(program_file),
-            expected_cycles: 64,
-            input_file: None,
-            library_paths: Vec::new(),
-            max_cycles: ExecutionOptions::MAX_CYCLES,
-            max_prover_memory: Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
-            num_outputs: 16,
-            output_file: None,
-            proof_file: proof_file.map(PathBuf::from),
-            hasher: "blake3-256".to_string(),
-            security: "96bits".to_string(),
-            kernel_file: None,
-        }
+        let mut command = ProveCmd::try_parse_from(["prove", program_file]).unwrap();
+        command.proof_file = proof_file.map(PathBuf::from);
+        command
     }
 
     #[test]
@@ -502,16 +494,6 @@ mod tests {
 
         assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path).unwrap());
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
-    use miden_vm::{ProverError, default_verification_precompile_limits};
-
-    use super::*;
 
     #[test]
     fn memory_budget_preserves_defaults_or_overrides_both_stages() {

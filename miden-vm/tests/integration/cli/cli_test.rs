@@ -318,15 +318,18 @@ fn prove_keeps_the_proof_when_an_explicit_output_repeats_its_path_in_absolute_fo
 
 #[cfg(unix)]
 #[test]
-fn prove_keeps_the_proof_when_an_explicit_output_is_reached_through_a_symlinked_proof_path() {
+fn prove_keeps_the_proof_when_atomic_write_separates_a_symlink_alias() {
     let (working_dir, mut cmd) = prove_command();
-    let proof_path = working_dir.path().join("same.proof");
-    std::os::unix::fs::symlink(&proof_path, working_dir.path().join("alias.proof")).unwrap();
+    let output_path = working_dir.path().join("same.proof");
+    let proof_path = working_dir.path().join("alias.proof");
+    std::os::unix::fs::symlink(&output_path, &proof_path).unwrap();
 
-    cmd.arg("--proof").arg("alias.proof").arg("--output").arg(&proof_path);
-    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&output_path);
+    cmd.assert().success();
 
     assert_proof_survived(&proof_path);
+    assert!(!proof_path.is_symlink(), "the proof replaces the symlink atomically");
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
 }
 
 #[cfg(unix)]
@@ -364,24 +367,24 @@ fn prove_keeps_the_proof_when_an_explicit_output_crosses_a_symlink_with_dot_dot(
 }
 
 #[test]
-fn prove_keeps_the_proof_when_the_default_output_is_a_hard_link_to_it() {
+fn prove_keeps_the_proof_when_atomic_write_separates_a_hard_link() {
     let (working_dir, mut cmd) = prove_command();
     let proof_path = working_dir.path().join("custom.proof");
     let output_path = working_dir.path().join("custom.outputs");
-    // A hard link needs an existing target, so start from a stale proof. The new proof is written
-    // over it in place, which keeps both names on the one file.
+    // Replacing the proof atomically leaves the outputs name on the stale inode.
     fs::write(&proof_path, "stale proof").unwrap();
     fs::hard_link(&proof_path, &output_path).unwrap();
 
     cmd.arg("--proof").arg(&proof_path);
-    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+    cmd.assert().success();
 
     assert_proof_survived(&proof_path);
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
 }
 
 #[cfg(unix)]
 #[test]
-fn prove_keeps_a_write_only_proof_when_the_default_output_is_a_hard_link_to_it() {
+fn prove_keeps_a_write_only_proof_when_atomic_write_separates_a_hard_link() {
     use std::os::unix::fs::PermissionsExt;
 
     let (working_dir, mut cmd) = prove_command();
@@ -392,10 +395,11 @@ fn prove_keeps_a_write_only_proof_when_the_default_output_is_a_hard_link_to_it()
     fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
 
     cmd.arg("--proof").arg(&proof_path);
-    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+    cmd.assert().success();
 
     fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o600)).unwrap();
     assert_proof_survived(&proof_path);
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
 }
 
 #[cfg(unix)]
@@ -419,23 +423,19 @@ fn prove_writes_outputs_into_a_distinct_write_only_file() {
 
 #[cfg(unix)]
 #[test]
-fn prove_writes_outputs_into_a_fifo_without_blocking_on_it() {
+fn prove_rejects_a_fifo_output_without_blocking_or_losing_the_proof() {
     let (working_dir, cmd) = prove_command();
     let proof_path = working_dir.path().join("custom.proof");
     let fifo_path = working_dir.path().join("custom.fifo");
     assert!(Command::new("mkfifo").arg(&fifo_path).status().unwrap().success());
 
-    let reader = {
-        let fifo_path = fifo_path.clone();
-        std::thread::spawn(move || fs::read_to_string(fifo_path).unwrap())
-    };
-
-    // a regression hangs rather than fails, so bound the run
     let mut cmd = assert_cmd::Command::from_std(cmd);
     cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&fifo_path);
-    cmd.timeout(std::time::Duration::from_secs(60)).assert().success();
+    cmd.timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("regular"));
 
-    assert!(reader.join().unwrap().contains("\"stack\""));
     assert_proof_survived(&proof_path);
 }
 
