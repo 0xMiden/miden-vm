@@ -20,6 +20,7 @@ mod linker;
 mod package;
 pub mod profiling;
 mod registry;
+#[cfg(feature = "std")]
 mod source_path;
 #[cfg(test)]
 #[path = "tests/utils.rs"]
@@ -31,11 +32,12 @@ pub use miden_processor as processor;
 
 #[cfg(feature = "std")]
 pub use self::linker::{LinkLibrary, Linkage};
+#[cfg(feature = "std")]
+pub use self::source_path::normalize_source_path;
 pub use self::{
     debug::*,
     exec::*,
     felt::{Felt, FromMidenRepr, ToMidenRepr, bytes_to_words, push_wasm_ty_to_operand_stack},
     package::read_package_from_bytes,
     registry::HybridPackageRegistry,
-    source_path::normalize_source_path,
 };

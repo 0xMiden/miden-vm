@@ -15,9 +15,12 @@ edition.workspace = true
 
 [features]
 testing = ["dep:p3-field"]
+default = ["std"]
+std = ["miden-core/std", "miden-crypto/std", "miden-stark/std"]
 
 [dependencies]
 p3-field = { workspace = true, optional = true }
+hashbrown.workspace = true
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
 miden-stark = { workspace = true }

@@ -1,5 +1,7 @@
 //! Analyses over the constraint graph.
 
+use alloc::{vec, vec::Vec};
+
 use super::graph::{Class, Graph, Leaf, Node, NodeId, OpKind};
 
 /// Classifies expressions whose inputs are limited to constants and challenges.
