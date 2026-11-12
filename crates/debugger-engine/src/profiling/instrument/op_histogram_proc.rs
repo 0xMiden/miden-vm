@@ -7,7 +7,7 @@ type Map<K, V> = alloc::collections::BTreeMap<K, V>;
 
 use miden_core::operations::Operation;
 
-use super::{Instrument, InstrumentRegistration};
+use super::Instrument;
 use crate::profiling::{OutputResult, OutputWriter, helpers::op_histogram::OpHistogram};
 
 /// Map key under which operations that cannot be attributed to a procedure are collected. The
@@ -27,16 +27,9 @@ pub struct OpHistogramProc {
     histograms: Map<String, OpHistogram>,
 }
 
-impl InstrumentRegistration for OpHistogramProc {
-    const NAME: &'static str = "op-histogram-proc";
-
-    fn build(_config: &crate::profiling::ProfilerConfig) -> Result<Self, super::InstrumentError> {
-        Ok(Self::default())
-    }
+impl OpHistogramProc {
+    pub const NAME: &'static str = "op-histogram-proc";
 }
-
-#[cfg(feature = "std")]
-crate::register_instrument!(OpHistogramProc);
 
 impl Instrument for OpHistogramProc {
     fn name(&self) -> &'static str {

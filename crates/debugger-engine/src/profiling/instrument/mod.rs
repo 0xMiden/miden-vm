@@ -18,8 +18,6 @@ pub use op_histogram_proc::OpHistogramProc;
 /// The functionality required for an instrument to be plugged in to `Profiler`.
 pub trait Instrument {
     /// The human readable name of this instrument used in CLI arguments and user output
-    ///
-    /// This should be the same name as the corresponding `InstrumentRegistration::NAME` constant
     fn name(&self) -> &'static str;
     /// To be called each vm cycle an `Operation` is executed.
     ///
@@ -74,74 +72,17 @@ impl OutputWriter for alloc::vec::Vec<u8> {
     }
 }
 
-/// Represents the information needed to construct an [Instrument] dynamically
-pub trait InstrumentRegistration: Sized + Instrument + 'static {
-    /// The human readable name of this instrument used in CLI arguments and user output
-    const NAME: &'static str;
-
-    /// Create an instance of this instrument with the provided configuration
-    fn build(config: &super::ProfilerConfig) -> Result<Self, InstrumentError>;
-}
-
+/// An instrument name that is not supported by the debugger.
 #[derive(Debug, thiserror::Error)]
-pub enum InstrumentError {
-    /// The given instrument name is not registered to any known instrument
-    #[error("unknown profiling instrument '{0}'")]
-    Undefined(String),
-    /// We failed to construct the named instrument
-    #[error("failed to construct instrument '{name}': {reason}")]
-    Build { name: String, reason: String },
-}
+#[error("unknown profiling instrument '{0}'")]
+pub struct InstrumentError(pub String);
 
-/// Get an instance of instrument `name`, if one has been registered by that name.
-///
-/// Returns `Err` if no such instrument is registered, or the instrument constructor returned an
-/// error
+/// Construct one of the debugger's built-in profiling instruments.
 #[cfg(feature = "std")]
-pub fn instrument_from_name(
-    name: &str,
-    config: &super::ProfilerConfig,
-) -> Result<Box<dyn Instrument>, InstrumentError> {
-    use alloc::string::ToString;
-
-    for instrument in inventory::iter::<InstrumentRegistrationInfo>() {
-        if instrument.name == name {
-            return (instrument.builder)(config);
-        }
+pub fn instrument_from_name(name: &str) -> Result<Box<dyn Instrument>, InstrumentError> {
+    match name {
+        OpHistogramGlobal::NAME => Ok(Box::new(OpHistogramGlobal::default())),
+        OpHistogramProc::NAME => Ok(Box::new(OpHistogramProc::default())),
+        _ => Err(InstrumentError(name.into())),
     }
-    Err(InstrumentError::Undefined(name.to_string()))
-}
-
-#[cfg(feature = "std")]
-#[doc(hidden)]
-pub struct InstrumentRegistrationInfo {
-    name: &'static str,
-    builder: fn(&super::ProfilerConfig) -> Result<Box<dyn Instrument>, InstrumentError>,
-}
-
-#[cfg(feature = "std")]
-impl InstrumentRegistrationInfo {
-    pub const fn new<T: InstrumentRegistration>() -> Self {
-        let name = <T as InstrumentRegistration>::NAME;
-        Self { name, builder: build_instrument::<T> }
-    }
-}
-
-#[cfg(feature = "std")]
-#[macro_export]
-macro_rules! register_instrument {
-    ($t:ty) => {
-        inventory::submit!($crate::profiling::instrument::InstrumentRegistrationInfo::new::<$t>());
-    };
-}
-
-#[cfg(feature = "std")]
-inventory::collect!(InstrumentRegistrationInfo);
-
-#[cfg(feature = "std")]
-#[inline]
-fn build_instrument<T: InstrumentRegistration>(
-    config: &super::ProfilerConfig,
-) -> Result<Box<dyn Instrument>, InstrumentError> {
-    <T as InstrumentRegistration>::build(config).map(|inst| Box::new(inst) as Box<dyn Instrument>)
 }

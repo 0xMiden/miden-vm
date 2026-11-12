@@ -1,9 +1,10 @@
-//! # miden-debug-dap, a Rust implementation of the Debug Adapter Protocol
+//! # Debug Adapter Protocol support for miden-debug
 //!
 //! ## Introduction
 //!
-//! This crate is a Rust implementation of the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)
-//! (or DAP for short).
+//! This crate contains the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)
+//! wire types and framing used by miden-debug. It models the requests implemented by the adapter.
+//! Unsupported requests and extension events retain their JSON payloads.
 //!
 //! The best way to think of DAP is to compare it to [LSP](https://microsoft.github.io/language-server-protocol/)
 //! (Language Server Protocol) but for debuggers. The core idea is the same: a protocol that serves
@@ -100,10 +101,10 @@
 pub mod base_message;
 pub mod errors;
 pub mod events;
+pub mod framing;
 pub mod prelude;
 pub mod requests;
 pub mod responses;
-pub mod reverse_requests;
 pub mod server;
 pub mod types;
 pub mod utils;

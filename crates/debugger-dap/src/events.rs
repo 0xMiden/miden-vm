@@ -432,4 +432,7 @@ pub enum Event {
     /// update its UI from the snapshot without an extra evaluate round-trip.
     #[serde(rename = "miden/uiState")]
     MidenUiState(Value),
+    /// An extension event that this client can ignore.
+    #[serde(untagged)]
+    Unsupported { event: String, body: Option<Value> },
 }

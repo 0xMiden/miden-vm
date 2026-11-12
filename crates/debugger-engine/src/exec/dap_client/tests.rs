@@ -1,4 +1,5 @@
 use std::{
+    io::{BufRead, Read, Write},
     net::{Shutdown, TcpListener},
     time::Duration,
 };
@@ -287,4 +288,21 @@ fn bundled_variables_preserve_raw_values_and_requested_frame() {
             .unwrap_err()
             .contains("invalid DAP variable snapshot")
     );
+}
+
+#[test]
+fn unknown_events_do_not_interrupt_a_response() {
+    let mut connection = Connection::new();
+    connection.send(&[
+        json!({"type": "event", "event": "futureEvent", "body": {"extension": true}}),
+        response("evaluate", json!({"result": "42", "variablesReference": 0})),
+    ]);
+    assert_eq!(connection.client.evaluate("answer").unwrap(), "42");
+}
+
+#[test]
+fn closed_connection_returns_without_waiting_for_another_header() {
+    let mut connection = Connection::new();
+    connection.peer.shutdown(Shutdown::Write).unwrap();
+    assert!(connection.client.read_message().unwrap_err().contains("connection closed"));
 }

@@ -10,7 +10,7 @@ use alloc::{
 };
 use std::{
     collections::VecDeque,
-    io::{BufRead, BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter},
     net::TcpStream,
 };
 
@@ -320,53 +320,22 @@ impl DapClient {
             "arguments": arguments,
         });
         let body = serde_json::to_string(&msg).map_err(|e| format!("serialize error: {e}"))?;
-        write!(self.writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)
+        dap::framing::write_frame(&mut self.writer, &body)
             .map_err(|e| format!("write error: {e}"))?;
-        self.writer.flush().map_err(|e| format!("flush error: {e}"))?;
         Ok(())
     }
 
     /// Read a single DAP message from the stream (Content-Length framing).
     fn read_message(&mut self) -> Result<DapMessage, String> {
-        // Read headers. Skip any blank lines before the header (the server
-        // appends `\r\n` after each JSON body, which may appear before the
-        // next message's Content-Length header).
-        let mut content_length: usize = 0;
-        loop {
-            let mut line = String::new();
-            self.reader.read_line(&mut line).map_err(|e| format!("read error: {e}"))?;
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                if content_length > 0 {
-                    // Empty line after a header — end of headers
-                    break;
-                }
-                // Empty line before any header — skip (trailing \r\n from previous message)
-                continue;
-            }
-            if let Some(val) = trimmed.strip_prefix("Content-Length:") {
-                content_length = val
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|e| format!("invalid Content-Length: {e}"))?;
-            }
-        }
-
-        if content_length == 0 {
-            return Err("missing or zero Content-Length header".into());
-        }
-        // The length comes from whatever this client is connected to, and feeds the allocation
-        // below directly, so an unbounded value would end the process rather than the read.
-        if content_length > dap::server::MAX_CONTENT_LENGTH {
-            return Err(format!(
-                "Content-Length {content_length} exceeds the maximum of {}",
-                dap::server::MAX_CONTENT_LENGTH
-            ));
-        }
-
-        // Read content body
-        let mut buf = vec![0u8; content_length];
-        self.reader.read_exact(&mut buf).map_err(|e| format!("read body error: {e}"))?;
+        let buf = dap::framing::read_frame(&mut self.reader)
+            .map_err(|e| match e {
+                dap::errors::ServerError::IoError(error) => format!("read error: {error}"),
+                dap::errors::ServerError::HeaderParseError { line } => {
+                    format!("invalid Content-Length header: {line}")
+                },
+                e => e.to_string(),
+            })?
+            .ok_or_else(|| "DAP connection closed".to_string())?;
         let content = std::str::from_utf8(&buf).map_err(|e| format!("invalid utf-8: {e}"))?;
 
         // The server wraps everything in a BaseMessage: { seq, type, ... }

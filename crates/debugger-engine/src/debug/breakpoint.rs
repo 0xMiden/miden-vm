@@ -206,8 +206,7 @@ pub(crate) fn procedure_pattern(spec: &str) -> Result<GlobMatcher, String> {
         anchored = format!("*::{spec}");
         &anchored
     };
-    crate::glob::GlobBuilder::new(spec)
-        .build()
+    crate::glob::Glob::new(spec)
         .map(|glob| glob.compile_matcher())
         .map_err(|err| format!("invalid breakpoint pattern: {err}"))
 }
@@ -237,8 +236,7 @@ fn file_pattern(spec: &str) -> Result<GlobMatcher, String> {
         anchored = format!("**/{spec}");
         &anchored
     };
-    crate::glob::GlobBuilder::new(spec)
-        .build()
+    crate::glob::Glob::new(spec)
         .map(|glob| glob.compile_matcher())
         .map_err(|err| format!("invalid breakpoint pattern: {err}"))
 }

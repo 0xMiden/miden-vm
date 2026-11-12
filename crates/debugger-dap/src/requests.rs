@@ -8,8 +8,7 @@ use crate::{
     prelude::{Response, ResponseBody},
     responses::ResponseMessage,
     types::{
-        DataBreakpoint, EvaluateArgumentsContext, ExceptionFilterOptions, ExceptionOptions,
-        FunctionBreakpoint, InstructionBreakpoint, Source, SourceBreakpoint, StackFrameFormat,
+        EvaluateArgumentsContext, FunctionBreakpoint, Source, SourceBreakpoint, StackFrameFormat,
         SteppingGranularity, ValueFormat, VariablesArgumentsFilter,
     },
 };
@@ -89,40 +88,6 @@ pub struct SetBreakpointsArguments {
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct CancelArguments {
-    /// The ID (attribute `seq`) of the request to cancel. If missing no request is
-    /// cancelled.
-    /// Both a `requestId` and a `progressId` can be specified in one request.
-    pub request_id: Option<i64>,
-    /// The ID (attribute `progressId`) of the progress to cancel. If missing no
-    /// progress is cancelled.
-    /// Both a `requestId` and a `progressId` can be specified in one request.
-    pub progress_id: Option<String>,
-}
-
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SetExceptionBreakpointsArguments {
-    /// Set of exception filters specified by their ID. The set of all possible
-    /// exception filters is defined by the `exceptionBreakpointFilters`
-    /// capability. The `filter` and `filterOptions` sets are additive.
-    pub filters: Vec<String>,
-    /// Set of exception filters and their options. The set of all possible
-    /// exception filters is defined by the `exceptionBreakpointFilters`
-    /// capability. This attribute is only honored by a debug adapter if the
-    /// corresponding capability `supportsExceptionFilterOptions` is true. The
-    /// `filter` and `filterOptions` sets are additive.
-    pub filter_options: Option<Vec<ExceptionFilterOptions>>,
-    /// Configuration options for selected exceptions.
-    /// The attribute is only honored by a debug adapter if the corresponding
-    /// capability `supportsExceptionOptions` is true.
-    pub exception_options: Option<Vec<ExceptionOptions>>,
-}
-
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct SetFunctionBreakpointsArguments {
     /// The function names of the breakpoints.
     pub breakpoints: Vec<FunctionBreakpoint>,
@@ -186,52 +151,6 @@ pub struct AttachOrLaunchArguments {
     pub additional_data: Option<Value>,
 }
 
-/// Arguments for a BreakpointLocations request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct BreakpointLocationsArguments {
-    /// The source location of the breakpoints, either `source.path` or
-    /// `source.reference` must be specified.
-    pub source: Source,
-    /// Start line of range to search possible breakpoint locations in. If only the
-    /// line is specified, the request returns all possible locations in that line.
-    pub line: i64,
-    /// Start position within `line` to search possible breakpoint locations in. It
-    /// is measured in UTF-16 code units and the client capability
-    /// `columnsStartAt1` determines whether it is 0- or 1-based. If no column is
-    /// given, the first position in the start line is assumed.
-    pub column: Option<i64>,
-    /// End line of range to search possible breakpoint locations in. If no end
-    /// line is given, then the end line is assumed to be the start line.
-    pub end_line: Option<i64>,
-    /// End position within `endLine` to search possible breakpoint locations in.
-    /// It is measured in UTF-16 code units and the client capability
-    /// `columnsStartAt1` determines whether it is 0- or 1-based. If no end column
-    /// is given, the last position in the end line is assumed.
-    pub end_column: Option<i64>,
-}
-
-/// Arguments for a Completions request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionsArguments {
-    /// Returns completions in the scope of this stack frame. If not specified, the
-    /// completions are returned for the global scope.
-    pub frame_id: Option<i64>,
-    /// One or more source lines. Typically this is the text users have typed into
-    /// the debug console before they asked for completion.
-    pub text: String,
-    /// The position within `text` for which to determine the completion proposals.
-    /// It is measured in UTF-16 code units and the client capability
-    /// `columnsStartAt1` determines whether it is 0- or 1-based.
-    pub column: i64,
-    /// A line for which to determine the completion proposals. If missing the
-    /// first line of the text is assumed.
-    pub line: Option<i64>,
-}
-
 /// Arguments for a Continue request.
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -244,51 +163,6 @@ pub struct ContinueArguments {
     /// If this flag is true, execution is resumed only for the thread with given
     /// `threadId`.
     pub single_thread: Option<bool>,
-}
-
-/// Arguments for a DataBreakpointInfo request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct DataBreakpointInfoArguments {
-    /// Reference to the variable container if the data breakpoint is requested for
-    /// a child of the container. The `variablesReference` must have been obtained
-    /// in the current suspended state.
-    /// See [Lifetime of Object References](https://microsoft.github.io/debug-adapter-protocol/overview#lifetime-of-objects-references)
-    /// in the Overview section of the specification for details.
-    pub variables_reference: Option<i64>,
-    /// The name of the variable's child to obtain data breakpoint information for.
-    /// If `variablesReference` isn't specified, this can be an expression.
-    pub name: String,
-    /// When `name` is an expression, evaluate it in the scope of this stack frame.
-    /// If not specified, the expression is evaluated in the global scope. When
-    /// `variablesReference` is specified, this property has no effect.
-    pub frame_id: Option<i64>,
-}
-
-/// Arguments for a Disassemble request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct DisassembleArguments {
-    /// Memory reference to the base location containing the instructions to
-    /// disassemble.
-    pub memory_reference: String,
-    /// Offset (in bytes) to be applied to the reference location before
-    /// disassembling. Can be negative.
-    pub offset: Option<i64>,
-    /// Offset (in instructions) to be applied after the byte offset (if any)
-    /// before disassembling. Can be negative.
-    pub instruction_offset: Option<i64>,
-    /// Number of instructions to disassemble starting at the specified location
-    /// and offset.
-    /// An adapter must return exactly this i64 of instructions - any
-    /// unavailable instructions should be replaced with an implementation-defined
-    /// 'invalid instruction' value.
-    pub instruction_count: i64,
-    /// If true, the adapter should attempt to resolve memory addresses and other
-    /// values to symbolic names.
-    pub resolve_symbols: Option<bool>,
 }
 
 /// Arguments for a Disconnect request.
@@ -342,53 +216,6 @@ pub struct EvaluateArguments {
     pub format: Option<ValueFormat>,
 }
 
-/// Arguments for a ExceptionInfo request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExceptionInfoArguments {
-    /// Thread for which exception information should be retrieved.
-    pub thread_id: i64,
-}
-
-/// Arguments for a Goto request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct GotoArguments {
-    /// Set the goto target for this thread.
-    pub thread_id: i64,
-    /// The location where the debuggee will continue to run.
-    pub target_id: i64,
-}
-
-/// Arguments for a GotoTargets request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct GotoTargetsArguments {
-    /// The source location for which the goto targets are determined.
-    pub source: Source,
-    /// The line location for which the goto targets are determined.
-    pub line: i64,
-    /// The position within `line` for which the goto targets are determined. It is
-    /// measured in UTF-16 code units and the client capability `columnsStartAt1`
-    /// determines whether it is 0- or 1-based.
-    pub column: Option<i64>,
-}
-
-/// Arguments for a Modules request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ModulesArguments {
-    /// The index of the first module to return, if omitted modules start at 0.
-    pub start_module: Option<i64>,
-    /// The i64 of modules to return. If `moduleCount` is not specified or 0,
-    /// all modules are returned.
-    pub module_count: Option<i64>,
-}
-
 /// Arguments for a Next request.
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -404,58 +231,12 @@ pub struct NextArguments {
     pub granularity: Option<SteppingGranularity>,
 }
 
-/// Arguments for a Pause request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PauseArguments {
-    /// Pause execution for this thread.
-    pub thread_id: i64,
-}
-
-/// Arguments for a ReadMemory request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ReadMemoryArguments {
-    /// Memory reference to the base location from which data should be read.
-    pub memory_reference: String,
-    /// Offset (in bytes) to be applied to the reference location before reading
-    /// data. Can be negative.
-    pub offset: Option<i64>,
-    /// Number of bytes to read at the specified location and offset.
-    pub count: i64,
-}
-
 /// Arguments for a ReadMemory request.
 #[derive(Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct RestartArguments {
     pub arguments: Option<AttachOrLaunchArguments>,
-}
-
-/// Arguments for a RestartFrame request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct RestartFrameArguments {
-    /// Restart this stackframe.
-    pub frame_id: i64,
-}
-
-/// Arguments for a ReverseContinue request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ReverseContinueArguments {
-    /// Specifies the active thread. If the debug adapter supports single thread
-    /// execution (see `supportsSingleThreadExecutionRequests`) and the
-    /// `singleThread` argument is true, only the thread with this ID is resumed.
-    pub thread_id: i64,
-    /// If this flag is true, backward execution is resumed only for the thread
-    /// with given `threadId`.
-    pub single_thread: Option<bool>,
 }
 
 /// Arguments for a Scopes request.
@@ -465,72 +246,6 @@ pub struct ReverseContinueArguments {
 pub struct ScopesArguments {
     /// Retrieve the scopes for this stackframe.
     pub frame_id: i64,
-}
-
-/// Arguments for a SetDataBreakpoints request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SetDataBreakpointsArguments {
-    /// The contents of this array replaces all existing data breakpoints. An empty
-    /// array clears all data breakpoints.
-    pub breakpoints: Vec<DataBreakpoint>,
-}
-
-/// Arguments for a SetExpression request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SetExpressionArguments {
-    /// The l-value expression to assign to.
-    pub expression: String,
-    /// The value expression to assign to the l-value expression.
-    pub value: String,
-    /// Evaluate the expressions in the scope of this stack frame. If not
-    /// specified, the expressions are evaluated in the global scope.
-    pub frame_id: Option<i64>,
-    /// Specifies how the resulting value should be formatted.
-    pub format: Option<ValueFormat>,
-}
-
-/// Arguments for a SetExpression request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SetInstructionBreakpointsArguments {
-    /// The instruction references of the breakpoints
-    pub breakpoints: Vec<InstructionBreakpoint>,
-}
-
-/// Arguments for a SetVariable request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SetVariableArguments {
-    /// The reference of the variable container.
-    /// See [Lifetime of Object References](https://microsoft.github.io/debug-adapter-protocol/overview#lifetime-of-objects-references)
-    /// in the Overview section of the specification for details.
-    pub variables_reference: i64,
-    /// The name of the variable in the container.
-    pub name: String,
-    /// The value of the variable.
-    pub value: String,
-    /// Specifies details on how to format the response value.
-    pub format: Option<ValueFormat>,
-}
-
-/// Arguments for a Source request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceArguments {
-    /// Specifies the source content to load. Either `source.path` or
-    /// `source.sourceReference` must be specified.
-    pub source: Option<Source>,
-    /// The reference to the source. This is the same as `source.sourceReference`.
-    /// This is provided for backward compatibility since old clients do not
-    /// understand the `source` attribute.
-    pub source_reference: i64,
 }
 
 /// Arguments for a StackTrace request.
@@ -551,21 +266,6 @@ pub struct StackTraceArguments {
     pub format: Option<StackFrameFormat>,
 }
 
-/// Arguments for a StepBack request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct StepBackArguments {
-    /// Specifies the thread for which to resume execution for one step backwards
-    /// (of the given granularity).
-    pub thread_id: i64,
-    /// If this flag is true, all other suspended threads are not resumed.
-    pub single_thread: Option<bool>,
-    /// Stepping granularity to step. If no granularity is specified, a granularity
-    /// of `statement` is assumed.
-    pub granularity: Option<SteppingGranularity>,
-}
-
 /// Arguments for a StepIn request.
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -583,15 +283,6 @@ pub struct StepInArguments {
     pub granularity: Option<SteppingGranularity>,
 }
 
-/// Arguments for a StepInTargets request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct StepInTargetsArguments {
-    /// The stack frame for which to retrieve the possible step-in targets.
-    pub frame_id: i64,
-}
-
 /// Arguments for a StepOut request.
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -605,25 +296,6 @@ pub struct StepOutArguments {
     /// Stepping granularity. If no granularity is specified, a granularity of
     /// `statement` is assumed.
     pub granularity: Option<SteppingGranularity>,
-}
-
-/// Arguments for a Terminate request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminateArguments {
-    /// A value of true indicates that this `terminate` request is part of a
-    /// restart sequence.
-    pub restart: Option<bool>,
-}
-
-/// Arguments for a TerminateThreads request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminateThreadsArguments {
-    /// Ids of threads to be terminated.
-    pub thread_ids: Option<Vec<i64>>,
 }
 
 /// Arguments for a Variables request.
@@ -651,28 +323,6 @@ pub struct VariablesArguments {
     pub format: Option<ValueFormat>,
 }
 
-/// Arguments for a WriteMemory request.
-#[cfg_attr(feature = "client", derive(Serialize))]
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct WriteMemoryArguments {
-    /// Memory reference to the base location to which data should be written.
-    pub memory_reference: String,
-    /// Offset (in bytes) to be applied to the reference location before writing
-    /// data. Can be negative.
-    pub offset: Option<i64>,
-    /// Property to control partial writes. If true, the debug adapter should
-    /// attempt to write memory even if the entire memory region is not writable.
-    /// In such a case the debug adapter should stop after hitting the first byte
-    /// of memory that cannot be written and return the i64 of bytes written in
-    /// the response via the `offset` and `bytesWritten` properties.
-    /// If false or missing, a debug adapter should attempt to verify the region is
-    /// writable before writing, and fail the response if it is not.
-    pub allow_partial: Option<bool>,
-    /// Bytes to write, encoded using base64.
-    pub data: String,
-}
-
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "command", content = "arguments", rename_all = "camelCase")]
@@ -684,19 +334,6 @@ pub enum Command {
     ///
     /// Specification: [Attach request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Attach)
     Attach(AttachRequestArguments),
-    /// The `breakpointLocations` request returns all possible locations for source breakpoints in a
-    /// given range.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsBreakpointLocationsRequest` is true.
-    ///
-    /// Specification: [BreakpointLocations request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_BreakpointLocations)
-    BreakpointLocations(BreakpointLocationsArguments),
-    /// Returns a list of possible completions for a given caret position and text.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsCompletionsRequest` is true.
-    ///
-    /// Specification: [Completions request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Completions)
-    Completions(CompletionsArguments),
     /// This request indicates that the client has finished initialization of the debug adapter.
     /// So it is the last request in the sequence of configuration requests (which was started by
     /// the initialized event). Clients should only call this request if the corresponding
@@ -711,19 +348,6 @@ pub enum Command {
     ///
     /// Specification: [Continue request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Continue)
     Continue(ContinueArguments),
-    /// Obtains information on a possible data breakpoint that could be set on an expression or
-    /// variable.
-    /// Clients should only call this request if the corresponding capability
-    /// supportsDataBreakpoints is true.
-    ///
-    /// Specification: [DataBreakpointInfo request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_DataBreakpointInfo)
-    DataBreakpointInfo(DataBreakpointInfoArguments),
-    /// Disassembles code stored at the provided location.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsDisassembleRequest` is true.
-    ///
-    /// Specification: [Disassemble request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Disassemble)
-    Disassemble(DisassembleArguments),
     /// The `disconnect` request asks the debug adapter to disconnect from the debuggee (thus ending
     /// the debug session) and then to shut down itself (the debug adapter).
     /// In addition, the debug adapter must terminate the debuggee if it was started with the
@@ -740,29 +364,6 @@ pub enum Command {
     ///
     /// Specification: [Evaluate arguments](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Evaluate)
     Evaluate(EvaluateArguments),
-    /// Retrieves the details of the exception that caused this event to be raised.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsExceptionInfoRequest` is true.
-    ///
-    /// Specification: [ExceptionInfo request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ExceptionInfo)
-    ExceptionInfo(ExceptionInfoArguments),
-    /// The request sets the location where the debuggee will continue to run.
-    /// This makes it possible to skip the execution of code or to execute code again.
-    /// The code between the current location and the goto target is not executed but skipped.
-    /// The debug adapter first sends the response and then a stopped event with reason goto.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsGotoTargetsRequest` is true (because only then goto targets exist that can be
-    /// passed as arguments).
-    ///
-    /// Specification: [Goto request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Goto)
-    Goto(GotoArguments),
-    /// This request retrieves the possible goto targets for the specified source location.
-    /// These targets can be used in the goto request.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsGotoTargetsRequest` is true.
-    ///
-    /// Specification: [GotoTargets request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_GotoTargets)
-    GotoTargets(GotoTargetsArguments),
     /// The initialize request is sent as the first request from the client to the debug adapter in
     /// order to configure it with client capabilities and to retrieve capabilities from the debug
     /// adapter.
@@ -784,19 +385,6 @@ pub enum Command {
     ///
     /// Specification: [Launch request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Launch)
     Launch(LaunchRequestArguments),
-    /// Retrieves the set of all sources currently loaded by the debugged process.
-    /// Clients should only call this request if the corresponding capability
-    /// supportsLoadedSourcesRequest is true.
-    ///
-    /// Specification: [LoadedSources request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_LoadedSources)
-    LoadedSources,
-    /// Modules can be retrieved from the debug adapter with this request which can either return
-    /// all modules or a range of modules to support paging.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsModulesRequest` is true.
-    ///
-    /// Specification: [Modules request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Modules)
-    Modules(ModulesArguments),
     /// The request executes one step (in the given granularity) for the specified thread and allows
     /// all other threads to run freely by resuming them.
     /// If the debug adapter supports single thread execution (see capability
@@ -807,18 +395,6 @@ pub enum Command {
     ///
     /// Specification: [Next request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Next)
     Next(NextArguments),
-    /// The request suspends the debuggee.
-    /// The debug adapter first sends the response and then a `stopped` event (with reason pause)
-    /// after the thread has been paused successfully.
-    ///
-    /// Specification: [Pause request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Pause)
-    Pause(PauseArguments),
-    /// Reads bytes from memory at the provided location.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsReadMemoryRequest` is true.
-    ///
-    /// Specification: [ReadMemory request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ReadMemory)
-    ReadMemory(ReadMemoryArguments),
     /// Restarts a debug session. Clients should only call this request if the corresponding
     /// capability supportsRestartRequest is true.
     /// If the capability is missing or has the value false, a typical client emulates restart by
@@ -830,23 +406,6 @@ pub enum Command {
     ///
     /// Specification: [Restart request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Restart)
     Restart(Option<RestartArguments>),
-    /// The request restarts execution of the specified stackframe.
-    /// The debug adapter first sends the response and then a `stopped` event (with reason
-    /// `restart`) after the restart has completed.
-    /// Clients should only call this request if the corresponding capability `supportsRestartFrame`
-    /// is true.
-    ///
-    /// Specification: [RestartFrame request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_RestartFrame)
-    RestartFrame(RestartFrameArguments),
-    /// The request resumes backward execution of all threads. If the debug adapter supports single
-    /// thread execution (see capability `supportsSingleThreadExecutionRequests`), setting the
-    /// singleThread argument to true resumes only the specified thread. If not all threads were
-    /// resumed, the `allThreadsContinued` attribute of the response should be set to false.
-    /// Clients should only call this request if the corresponding capability supportsStepBack is
-    /// true.
-    ///
-    /// Specification: [ReverseContinue request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_ReverseContinue)
-    ReverseContinue(ReverseContinueArguments),
     /// The request returns the variable scopes for a given stackframe ID.
     ///
     /// Specification: [Scopes request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Scopes)
@@ -860,32 +419,6 @@ pub enum Command {
     ///
     /// Specification: [SetBreakpointsRequest](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetBreakpoints)
     SetBreakpoints(SetBreakpointsArguments),
-    /// Replaces all existing data breakpoints with new data breakpoints.
-    /// To clear all data breakpoints, specify an empty array.
-    /// When a data breakpoint is hit, a `stopped` event (with reason `data breakpoint`) is
-    /// generated. Clients should only call this request if the corresponding capability
-    /// `supportsDataBreakpoints` is true.
-    ///
-    /// Specification: [SetDataBreakpoints request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetDataBreakpoints)
-    SetDataBreakpoints(SetDataBreakpointsArguments),
-    /// The request configures the debugger’s response to thrown exceptions.
-    /// If an exception is configured to break, a stopped event is fired (with reason exception).
-    /// Clients should only call this request if the corresponding capability
-    /// exceptionBreakpointFilters returns one or more filters.
-    ///
-    /// Specification: [SetExceptionBreakpoints](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetExceptionBreakpoints)
-    SetExceptionBreakpoints(SetExceptionBreakpointsArguments),
-    /// Evaluates the given `value` expression and assigns it to the `expression` which must be a
-    /// modifiable l-value.
-    /// The expressions have access to any variables and arguments that are in scope of the
-    /// specified frame.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsSetExpression` is true.
-    /// If a debug adapter implements both `setExpression` and `setVariable`, a client uses
-    /// `setExpression` if the variable has an `evaluateName` property.
-    ///
-    /// Specification: [SetExpression request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetExpression)
-    SetExpression(SetExpressionArguments),
     /// Replaces all existing function breakpoints with new function breakpoints.
     /// To clear all function breakpoints, specify an empty array.
     /// When a function breakpoint is hit, a stopped event (with reason function breakpoint) is
@@ -895,26 +428,6 @@ pub enum Command {
     ///
     /// Specification: [SetFunctionBreakpointsArguments](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetFunctionBreakpoints)
     SetFunctionBreakpoints(SetFunctionBreakpointsArguments),
-    /// Replaces all existing instruction breakpoints. Typically, instruction breakpoints would be
-    /// set from a disassembly window. To clear all instruction breakpoints, specify an empty
-    /// array. When an instruction breakpoint is hit, a `stopped` event (with reason
-    /// `instruction breakpoint`) is generated.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsInstructionBreakpoints` is true.
-    ///
-    /// Specification: [SetInstructionBreakpoints request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetInstructionBreakpoints)
-    SetInstructionBreakpoints(SetInstructionBreakpointsArguments),
-    /// Set the variable with the given name in the variable container to a new value. Clients
-    /// should only call this request if the corresponding capability `supportsSetVariable` is
-    /// true. If a debug adapter implements both `setVariable` and `setExpression`, a client
-    /// will only use `setExpression` if the variable has an `evaluateName` property.
-    ///
-    /// Specification: [SetVariable request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetVariable)
-    SetVariable(SetVariableArguments),
-    /// The request retrieves the source code for a given source reference.
-    ///
-    /// Specification: [Sources request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Source)
-    Source(SourceArguments),
     /// The request returns a stacktrace from the current execution state of a given thread.
     /// A client can request all stack frames by omitting the startFrame and levels arguments. For
     /// performance-conscious clients and if the corresponding capability
@@ -928,18 +441,6 @@ pub enum Command {
     ///
     /// Specification: [StackTrace request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StackTrace)
     StackTrace(StackTraceArguments),
-    /// The request executes one backward step (in the given granularity) for the specified thread
-    /// and allows all other threads to run backward freely by resuming them.
-    /// If the debug adapter supports single thread execution (see capability
-    /// `supportsSingleThreadExecutionRequests`), setting the `singleThread` argument to true
-    /// prevents other suspended threads from resuming.
-    /// The debug adapter first sends the response and then a stopped event (with reason step) after
-    /// the step has completed.
-    /// Clients should only call this request if the corresponding capability `supportsStepBack` is
-    /// true.
-    ///
-    /// Specification: [StepBack request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepBack)
-    StepBack(StepBackArguments),
     /// The request resumes the given thread to step into a function/method and allows all other
     /// threads to run freely by resuming them.
     /// If the debug adapter supports single thread execution (see capability
@@ -948,13 +449,6 @@ pub enum Command {
     ///
     /// Specification: [StepIn request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepIn)
     StepIn(StepInArguments),
-    /// This request retrieves the possible step-in targets for the specified stack frame.
-    /// These targets can be used in the `stepIn` request.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsStepInTargetsRequest` is true.
-    ///
-    /// Specification: [StepInTargets request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepInTargets)
-    StepInTargets(StepInTargetsArguments),
     /// The request resumes the given thread to step out (return) from a function/method and allows
     /// all other threads to run freely by resuming them.
     /// If the debug adapter supports single thread execution (see capability
@@ -965,18 +459,6 @@ pub enum Command {
     ///
     /// Specification: [StepOut request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepOut)
     StepOut(StepOutArguments),
-    /// The terminate request is sent from the client to the debug adapter in order to shut down the
-    /// debuggee gracefully. Clients should only call this request if the capability
-    /// `supportsTerminateRequest` is true.
-    ///
-    /// Specification: [Terminate request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Terminate)
-    Terminate(TerminateArguments),
-    /// The request terminates the threads with the given ids.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsTerminateThreadsRequest` is true.
-    ///
-    /// Specification: [TerminateThreads request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_TerminateThreads)
-    TerminateThreads(TerminateThreadsArguments),
     /// The request retrieves a list of all threads.
     ///
     /// Specification: [Threads request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Threads)
@@ -986,20 +468,12 @@ pub enum Command {
     ///
     /// Specification: [Variables request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Variables)
     Variables(VariablesArguments),
-    /// Writes bytes to memory at the provided location.
-    /// Clients should only call this request if the corresponding capability
-    /// `supportsWriteMemoryRequest` is true.
-    ///
-    /// Specification: [WriteMemory request](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_WriteMemory)
-    WriteMemory(WriteMemoryArguments),
-    /// The cancel request is used by the client in two situations:
-    ///
-    /// to indicate that it is no longer interested in the result produced by a specific request
-    /// issued earlier to cancel a progress sequence. Clients should only call this request if the
-    /// corresponding capability supportsCancelRequest is true.
-    ///
-    /// Specification: [CancelRequest](https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_Cancel)
-    Cancel(CancelArguments),
+    /// A request the Miden adapter does not implement.
+    #[serde(untagged)]
+    Unsupported {
+        command: String,
+        arguments: Option<Value>,
+    },
 }
 
 /// Represents a request from a client.
@@ -1079,114 +553,18 @@ impl Request {
     /// Create an acknowledgement response. This is a shorthand for responding to requests
     /// where the response does not require a body.
     pub fn ack(self) -> Result<Response, ServerError> {
-        match self.command {
-            Command::Attach(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Attach),
-                error: None,
-            }),
-            Command::ConfigurationDone => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::ConfigurationDone),
-                error: None,
-            }),
-            Command::Disconnect(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Disconnect),
-                error: None,
-            }),
-            Command::Goto(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Goto),
-                error: None,
-            }),
-            Command::Launch(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Launch),
-                error: None,
-            }),
-            Command::Next(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Next),
-                error: None,
-            }),
-            Command::Pause(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Pause),
-                error: None,
-            }),
-            Command::Restart(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Restart),
-                error: None,
-            }),
-            Command::RestartFrame(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::RestartFrame),
-                error: None,
-            }),
-            Command::ReverseContinue(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::ReverseContinue),
-                error: None,
-            }),
-            Command::StepBack(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::StepBack),
-                error: None,
-            }),
-            Command::StepIn(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::StepIn),
-                error: None,
-            }),
-            Command::StepOut(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::StepOut),
-                error: None,
-            }),
-            Command::Terminate(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Terminate),
-                error: None,
-            }),
-            Command::TerminateThreads(_) => Ok(Response {
-                request_seq: self.seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::TerminateThreads),
-                error: None,
-            }),
-            _ => Err(ServerError::ResponseConstructError),
-        }
+        let body = match self.command {
+            Command::Attach(_) => ResponseBody::Attach,
+            Command::ConfigurationDone => ResponseBody::ConfigurationDone,
+            Command::Disconnect(_) => ResponseBody::Disconnect,
+            Command::Launch(_) => ResponseBody::Launch,
+            Command::Next(_) => ResponseBody::Next,
+            Command::Restart(_) => ResponseBody::Restart,
+            Command::StepIn(_) => ResponseBody::StepIn,
+            Command::StepOut(_) => ResponseBody::StepOut,
+            _ => return Err(ServerError::ResponseConstructError),
+        };
+        Ok(self.success(body))
     }
 }
 

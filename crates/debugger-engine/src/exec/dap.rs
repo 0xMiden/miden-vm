@@ -1998,7 +1998,7 @@ impl DapExecutor {
                         let mut confirmed = Vec::new();
                         for fbp in &args.breakpoints {
                             let procedure_pattern = procedure_pattern(&fbp.name);
-                            let source_pattern = crate::glob::GlobBuilder::new(&fbp.name).build();
+                            let source_pattern = crate::glob::Glob::new(&fbp.name);
                             let verified = match (procedure_pattern, source_pattern) {
                                 (Ok(procedure_pattern), Ok(source_pattern)) => {
                                     function_breakpoints.push(StoredFunctionBreakpoint {
@@ -2396,6 +2396,24 @@ fn is_next_source_line(
     }
 }
 
+/// Advance the current execution and retain its continuation for the next step.
+fn advance_current<H: Host>(
+    processor: &mut FastProcessor,
+    host: &mut DapHostWrapper<'_, H>,
+    resume_ctx: &mut Option<ResumeContext>,
+    cycle: &mut usize,
+    current_asmop: &mut Option<AssemblyOp>,
+    debug_state: &mut DapDebugVarState,
+) -> Result<(), StepResult> {
+    let ctx = resume_ctx.take().ok_or(StepResult::Terminated)?;
+    *resume_ctx = advance_one(processor, host, ctx, cycle, current_asmop, debug_state)
+        .map_err(StepResult::Error)?;
+    if resume_ctx.is_none() {
+        return Err(StepResult::Terminated);
+    }
+    Ok(())
+}
+
 /// Execute a single VM step.
 fn step_one<H: Host>(
     processor: &mut FastProcessor,
@@ -2405,20 +2423,13 @@ fn step_one<H: Host>(
     current_asmop: &mut Option<AssemblyOp>,
     debug_state: &mut DapDebugVarState,
 ) -> StepResult {
-    let ctx = match resume_ctx.take() {
-        Some(ctx) => ctx,
-        None => return StepResult::Terminated,
-    };
-
-    match advance_one(processor, host, ctx, cycle, current_asmop, debug_state) {
-        Ok(Some(new_ctx)) => {
-            *resume_ctx = Some(new_ctx);
-            update_top_frame(host, current_asmop.as_ref());
-            StepResult::Stepped
-        },
-        Ok(None) => StepResult::Terminated,
-        Err(e) => StepResult::Error(e),
+    if let Err(result) =
+        advance_current(processor, host, resume_ctx, cycle, current_asmop, debug_state)
+    {
+        return result;
     }
+    update_top_frame(host, current_asmop.as_ref());
+    StepResult::Stepped
 }
 
 /// Step over: advance until the current assembly operation changes.
@@ -2433,22 +2444,15 @@ fn step_over<H: Host>(
     let original_asmop = current_asmop.clone();
 
     loop {
-        let ctx = match resume_ctx.take() {
-            Some(ctx) => ctx,
-            None => return StepResult::Terminated,
-        };
+        if let Err(result) =
+            advance_current(processor, host, resume_ctx, cycle, current_asmop, debug_state)
+        {
+            return result;
+        }
 
-        match advance_one(processor, host, ctx, cycle, current_asmop, debug_state) {
-            Ok(Some(new_ctx)) => {
-                *resume_ctx = Some(new_ctx);
-
-                if *current_asmop != original_asmop {
-                    update_top_frame(host, current_asmop.as_ref());
-                    return StepResult::Stepped;
-                }
-            },
-            Ok(None) => return StepResult::Terminated,
-            Err(e) => return StepResult::Error(e),
+        if *current_asmop != original_asmop {
+            update_top_frame(host, current_asmop.as_ref());
+            return StepResult::Stepped;
         }
     }
 }
@@ -2483,39 +2487,32 @@ fn step_next_line<H: Host>(
     };
 
     loop {
-        let ctx = match resume_ctx.take() {
-            Some(ctx) => ctx,
-            None => return StepResult::Terminated,
+        if let Err(result) =
+            advance_current(processor, host, resume_ctx, cycle, current_asmop, debug_state)
+        {
+            return result;
+        }
+
+        let current_proc = current_asmop.as_ref().map(|asmop| asmop.context_name().clone());
+        let current_loc =
+            current_asmop.as_ref().and_then(|asmop| resolve_asmop_location(asmop, host));
+        let has_source_context = start_loc.is_some() || current_loc.is_some();
+        let reached_next = if has_source_context {
+            is_next_source_line(
+                start_proc.as_deref(),
+                start_loc.as_ref(),
+                current_proc.as_deref(),
+                current_loc.as_ref(),
+                source_path_prefixes,
+                minimum_source_line,
+            )
+        } else {
+            *current_asmop != original_asmop
         };
 
-        match advance_one(processor, host, ctx, cycle, current_asmop, debug_state) {
-            Ok(Some(new_ctx)) => {
-                *resume_ctx = Some(new_ctx);
-
-                let current_proc = current_asmop.as_ref().map(|asmop| asmop.context_name().clone());
-                let current_loc =
-                    current_asmop.as_ref().and_then(|asmop| resolve_asmop_location(asmop, host));
-                let has_source_context = start_loc.is_some() || current_loc.is_some();
-                let reached_next = if has_source_context {
-                    is_next_source_line(
-                        start_proc.as_deref(),
-                        start_loc.as_ref(),
-                        current_proc.as_deref(),
-                        current_loc.as_ref(),
-                        source_path_prefixes,
-                        minimum_source_line,
-                    )
-                } else {
-                    *current_asmop != original_asmop
-                };
-
-                if reached_next {
-                    update_top_frame(host, current_asmop.as_ref());
-                    return StepResult::Stepped;
-                }
-            },
-            Ok(None) => return StepResult::Terminated,
-            Err(e) => return StepResult::Error(e),
+        if reached_next {
+            update_top_frame(host, current_asmop.as_ref());
+            return StepResult::Stepped;
         }
     }
 }
@@ -2532,28 +2529,21 @@ fn step_out<H: Host>(
     let target = host.recovered.return_target(host.call_depth);
 
     loop {
-        let ctx = match resume_ctx.take() {
-            Some(ctx) => ctx,
-            None => return StepResult::Terminated,
-        };
+        if let Err(result) =
+            advance_current(processor, host, resume_ctx, cycle, current_asmop, debug_state)
+        {
+            return result;
+        }
 
-        match advance_one(processor, host, ctx, cycle, current_asmop, debug_state) {
-            Ok(Some(new_ctx)) => {
-                *resume_ctx = Some(new_ctx);
-
-                // A recovered return can first appear on a control cycle. Stop at the
-                // caller's next assembly operation so source stepping has a usable location.
-                if target.has_returned(&host.recovered, host.call_depth)
-                    && (!target.is_recovered()
-                        || !host.recovered.has_current_frame()
-                        || current_asmop.is_some())
-                {
-                    update_top_frame(host, current_asmop.as_ref());
-                    return StepResult::Stepped;
-                }
-            },
-            Ok(None) => return StepResult::Terminated,
-            Err(e) => return StepResult::Error(e),
+        // A recovered return can first appear on a control cycle. Stop at the
+        // caller's next assembly operation so source stepping has a usable location.
+        if target.has_returned(&host.recovered, host.call_depth)
+            && (!target.is_recovered()
+                || !host.recovered.has_current_frame()
+                || current_asmop.is_some())
+        {
+            update_top_frame(host, current_asmop.as_ref());
+            return StepResult::Stepped;
         }
     }
 }
@@ -2569,67 +2559,56 @@ fn step_until_breakpoint<H: Host>(
     debug_state: &mut DapDebugVarState,
 ) -> StepResult {
     loop {
-        let ctx = match resume_ctx.take() {
-            Some(ctx) => ctx,
-            None => return StepResult::Terminated,
-        };
+        if let Err(result) =
+            advance_current(processor, host, resume_ctx, cycle, current_asmop, debug_state)
+        {
+            return result;
+        }
 
-        match advance_one(processor, host, ctx, cycle, current_asmop, debug_state) {
-            Ok(Some(new_ctx)) => {
-                *resume_ctx = Some(new_ctx);
+        if let Some(asmop) = current_asmop.as_ref() {
+            let resolved = resolve_asmop_location(asmop, host);
 
-                if let Some(asmop) = current_asmop.as_ref() {
-                    let resolved = resolve_asmop_location(asmop, host);
-
-                    // Check line breakpoints
-                    if let Some((ref path, line)) = resolved {
-                        for bp in &debug_state.source_breakpoints.entries {
-                            if bp.line == Some(line)
-                                && source_paths_match(
-                                    path,
-                                    &bp.path,
-                                    breakpoints.source_path_prefixes,
-                                )
-                            {
-                                update_top_frame(host, current_asmop.as_ref());
-                                return StepResult::Breakpoint(line);
-                            }
-                        }
-                    }
-
-                    // Check function breakpoints against procedure names and source paths.
-                    if !breakpoints.function.is_empty() {
-                        let context_name = asmop.context_name();
-                        for fbp in breakpoints.function {
-                            if procedure_matches(&fbp.procedure_pattern, context_name) {
-                                if should_defer_function_breakpoint(resolved.as_ref(), context_name)
-                                    || resume_ctx.as_ref().is_some_and(|resume_ctx| {
-                                        should_wait_for_entry_variables(
-                                            resume_ctx,
-                                            context_name,
-                                            &debug_state.debug_vars,
-                                            *cycle,
-                                        )
-                                    })
-                                {
-                                    continue;
-                                }
-                                update_top_frame(host, current_asmop.as_ref());
-                                let line = resolved.as_ref().map_or(0, |(_, l)| *l);
-                                return StepResult::Breakpoint(line);
-                            }
-                            if let Some((ref path, line)) = resolved
-                                && fbp.source_pattern.is_match(&Uri::new(path))
-                            {
-                                update_top_frame(host, current_asmop.as_ref());
-                                return StepResult::Breakpoint(line);
-                            }
-                        }
+            // Check line breakpoints
+            if let Some((ref path, line)) = resolved {
+                for bp in &debug_state.source_breakpoints.entries {
+                    if bp.line == Some(line)
+                        && source_paths_match(path, &bp.path, breakpoints.source_path_prefixes)
+                    {
+                        update_top_frame(host, current_asmop.as_ref());
+                        return StepResult::Breakpoint(line);
                     }
                 }
-            },
-            Ok(None) => return StepResult::Terminated,
-            Err(e) => return StepResult::Error(e),
+            }
+
+            // Check function breakpoints against procedure names and source paths.
+            if !breakpoints.function.is_empty() {
+                let context_name = asmop.context_name();
+                for fbp in breakpoints.function {
+                    if procedure_matches(&fbp.procedure_pattern, context_name) {
+                        if should_defer_function_breakpoint(resolved.as_ref(), context_name)
+                            || resume_ctx.as_ref().is_some_and(|resume_ctx| {
+                                should_wait_for_entry_variables(
+                                    resume_ctx,
+                                    context_name,
+                                    &debug_state.debug_vars,
+                                    *cycle,
+                                )
+                            })
+                        {
+                            continue;
+                        }
+                        update_top_frame(host, current_asmop.as_ref());
+                        let line = resolved.as_ref().map_or(0, |(_, l)| *l);
+                        return StepResult::Breakpoint(line);
+                    }
+                    if let Some((ref path, line)) = resolved
+                        && fbp.source_pattern.is_match(&Uri::new(path))
+                    {
+                        update_top_frame(host, current_asmop.as_ref());
+                        return StepResult::Breakpoint(line);
+                    }
+                }
+            }
         }
     }
 }
