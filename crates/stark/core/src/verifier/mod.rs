@@ -18,13 +18,15 @@
 //! observes the derived instance count and those heights at the protocol layer.
 //! Callers must not pre-observe them.
 //!
-//! # Statement-bound trace heights
+//! # Trace heights
 //!
-//! The verifier accepts whatever trace heights the proof carries; it never
-//! compares them against a caller-supplied expectation. If your statement
-//! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
-//! [`VerifierInstance`], and check `proof.log_trace_heights()` yourself.
+//! All trace heights must satisfy the protocol's shape checks. An AIR's main trace must also match
+//! the fixed native height of its preprocessed trace, when present, as declared by
+//! [`LiftedAir::log_preprocessed_height`].
+//!
+//! Applications that additionally require a specific trace size must check
+//! [`StarkProofData::log_trace_heights`] against that requirement alongside successful
+//! verification.
 //!
 //! # Transcript boundaries (strict consumption)
 //!
@@ -241,7 +243,7 @@ where
     // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
     // against the AIRs: it bounds `log_h` within the host's `usize` width
     // (later code dereferences `1usize << log_h` and would otherwise overflow on
-    // a malicious proof) and checks per-AIR periodic-height feasibility.
+    // a malicious proof) and checks per-AIR periodic lengths and fixed preprocessing heights.
     // Statement::new already enforced the input-side contracts before construction.
     let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
         statement.airs(),

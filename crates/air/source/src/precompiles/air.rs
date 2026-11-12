@@ -15,7 +15,7 @@ use crate::precompiles::{
         chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
         sha512::Sha512Air,
     },
-    primitives::byte_pair_lut::{self, BytePairLutAir},
+    primitives::byte_pair_lut::BytePairLutAir,
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
@@ -93,18 +93,6 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         crate::precompiles::relation::AIRS
     }
-
-    /// The fixed log2 trace height of this instance, if the relation pins one.
-    ///
-    /// `BytePairLut` commits its main and preprocessed traces at
-    /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
-    /// every other instance ranges above its derived minimum.
-    pub fn fixed_log_height(&self) -> Option<u32> {
-        match self {
-            ChipletAir::BytePairLut => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
-            _ => None,
-        }
-    }
 }
 
 impl BaseAir<Felt> for ChipletAir {
@@ -127,6 +115,10 @@ impl BaseAir<Felt> for ChipletAir {
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        delegate!(self, log_preprocessed_height)
+    }
 
     fn max_periodic_length(&self) -> usize {
         delegate!(self, max_periodic_length)

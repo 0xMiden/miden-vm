@@ -46,6 +46,7 @@
 
 #### Fixes
 
+- [BREAKING] Require preprocessed AIRs to declare `LiftedAir::log_preprocessed_height` and reject proofs whose per-AIR heights differ, preserving table ownership during verification and proof parsing ([#4157](https://github.com/0xMiden/miden-vm/pull/4157)).
 - [BREAKING] Both XChaCha IES schemes preserve plaintext types and reject byte/element mismatches when unsealing. Existing IES messages sealed as elements must be regenerated ([#4161](https://github.com/0xMiden/miden-vm/pull/4161)).
 - [BREAKING] Bind recipient public-key encodings into IES HKDF contexts for both K256 and X25519, separating recipient contexts even when their DH secrets agree. Existing ciphertexts for the four HKDF-based IES schemes must be regenerated ([#4162](https://github.com/0xMiden/miden-vm/pull/4162)).
 - [BREAKING] Align Rust Ed25519 verification with MASM by rejecting small-order public keys and signature points. Ed25519 public-key deserialization rejects noncanonical encodings, including keys used for X25519 key exchange and IES ([#4160](https://github.com/0xMiden/miden-vm/pull/4160), fixes [#4133](https://github.com/0xMiden/miden-vm/issues/4133)).

@@ -53,16 +53,6 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         definitions::ChipletAir::all().map(Self)
     }
-
-    /// The fixed log2 trace height of this instance, if the relation pins one.
-    ///
-    /// `BytePairLut` commits its main and preprocessed traces at
-    /// [`miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT`], so its
-    /// proof shapes must carry exactly that height; every other instance ranges above its
-    /// derived minimum.
-    pub fn fixed_log_height(&self) -> Option<u32> {
-        self.0.fixed_log_height()
-    }
 }
 
 impl BaseAir<Felt> for ChipletAir {
@@ -85,6 +75,10 @@ impl BaseAir<Felt> for ChipletAir {
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.0.log_preprocessed_height()
+    }
 
     fn constraint_degree(&self) -> ConstraintDegrees {
         generated_degrees(*self)

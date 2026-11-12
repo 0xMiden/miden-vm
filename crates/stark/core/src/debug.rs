@@ -95,7 +95,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
     // Do not observe setup/trace commitments or replay the prover transcript here.
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
-        .expect("ProverStatement::new should reject malformed heights");
+        .expect("trace heights must satisfy the AIR contracts");
     statement.observe(&mut challenger, trace_order.log_heights());
     trace_order.observe_shape::<F, _>(&mut challenger);
     let max_num_randomness = airs.iter().map(LiftedAir::num_randomness).max().unwrap_or(0);
