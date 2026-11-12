@@ -65,7 +65,7 @@ prost = { version = "0.14", default-features = false, features = ["derive", "std
 thiserror = { workspace = true, features = ["std"], optional = true }
 tokio = { workspace = true, features = ["macros", "net", "rt", "signal", "sync", "time"], optional = true }
 tokio-stream = { version = "0.1", default-features = false, features = ["net"], optional = true }
-tokio-util = { version = "0.7", default-features = false, features = ["rt"], optional = true }
+tokio-util = { workspace = true, features = ["rt"], optional = true }
 tonic = { version = "0.14", default-features = false, features = ["channel", "codegen"] }
 tonic-health = { version = "0.14", optional = true }
 tonic-prost = "0.14"

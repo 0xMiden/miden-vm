@@ -3,7 +3,8 @@
 This crate runs a persistent gRPC service that accepts serialized `ExecutionWitness`
 values and returns serialized `ExecutionProof` values. By default, `Prover::prove_full`
 builds a complete proof, including a precompile STARK when execution has native
-precompile work. Generated Tonic client and server bindings are available in `protocol`.
+precompile work. Generated Tonic client and server bindings are available in
+[`protocol`](src/lib.rs).
 
 ## Build and start
 
