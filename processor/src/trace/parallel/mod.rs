@@ -578,8 +578,8 @@ fn push_halt_opcode_row(
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for bit_idx in 0..NUM_OP_BITS {
-            row.decoder.op_bits[bit_idx] = Felt::from_u8((halt_opcode >> bit_idx) & 1);
+        for (bit_idx, bit) in row.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         }
 
         // Pad hasher state columns (8 columns)
@@ -933,8 +933,8 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, core_height: usize) {
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for i in 0..NUM_OP_BITS {
-            template.decoder.op_bits[i] = Felt::from_u8((halt_opcode >> i) & 1);
+        for (i, bit) in template.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> i) & 1);
         }
         // Pad hasher state columns (8 columns)
         // - First 4 columns: copy the last value (to propagate program hash)

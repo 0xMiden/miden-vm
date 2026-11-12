@@ -55,8 +55,7 @@ impl LineageId {
 impl core::fmt::Display for LineageId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "[")?;
-        for i in 0..4 {
-            let byte = self.0[i];
+        for byte in &self.0[..4] {
             write!(f, "{byte:x}, ")?;
         }
         write!(f, "...]")

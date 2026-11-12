@@ -1231,9 +1231,9 @@ impl Assembler {
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        path.clone(),
+                        path,
                         proc.visibility(),
-                        signature.clone(),
+                        signature,
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )

@@ -145,6 +145,7 @@ const ALL_KINDS: [SyntaxKind; SyntaxKind::Star as usize + 1] = [
 
 /// The rowan language marker for MASM CST nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(clippy::empty_enums, reason = "type-level marker with no runtime values")]
 pub enum MasmLanguage {}
 
 impl Language for MasmLanguage {

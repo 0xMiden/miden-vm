@@ -2126,7 +2126,7 @@ fn test_parameter_names_roundtrip_formatting() {
             signature.to_pretty_string()
         );
 
-        let source = source_file!(&context, expected.clone());
+        let source = source_file!(&context, expected);
         let module = context
             .parse_program_source_file(source)
             .unwrap_or_else(|err| panic!("{name}: {err}"));

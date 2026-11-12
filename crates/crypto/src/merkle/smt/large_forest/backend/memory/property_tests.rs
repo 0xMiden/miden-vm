@@ -185,7 +185,7 @@ proptest! {
 
         // Each lineage should be able to be added to the backend.
         for (lineage, entries) in pairs {
-            backend.add_lineage(lineage, version, entries.clone()).map_err(to_fail)?;
+            backend.add_lineage(lineage, version, entries).map_err(to_fail)?;
         }
 
         // And then construct an auxiliary tree to mirror it.
@@ -213,7 +213,7 @@ proptest! {
 
         // Each lineage should be able to be added to the backend.
         for (lineage, entries) in pairs {
-            backend.add_lineage(lineage, version, entries.clone()).map_err(to_fail)?;
+            backend.add_lineage(lineage, version, entries).map_err(to_fail)?;
         }
 
         // And then construct an auxiliary tree to mirror it.

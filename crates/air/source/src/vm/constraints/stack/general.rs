@@ -139,8 +139,8 @@ mod tests {
         }
 
         // The opcode replaces the top word with the new deferred root.
-        for i in 0..4 {
-            next.stack.top[i] = Felt::new_unchecked(200 + i as u64);
+        for (i, value) in next.stack.top[..4].iter_mut().enumerate() {
+            *value = Felt::new_unchecked(200 + i as u64);
         }
 
         let evaluations = eval_stack_general(&local, &next);

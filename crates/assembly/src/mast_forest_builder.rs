@@ -2259,7 +2259,7 @@ mod tests {
                     0 => {
                         let asm_op = add_test_asm_op(
                             &mut builder,
-                            test_asm_op(context.clone(), "add"),
+                            test_asm_op(context, "add"),
                         );
                         builder
                             .ensure_block_ref(
@@ -2274,14 +2274,14 @@ mod tests {
                     1 => builder
                         .ensure_split_node_ref(
                             [first_ref, second_ref],
-                            test_asm_op(context.clone(), "if.true"),
+                            test_asm_op(context, "if.true"),
                             vec![],
                         )
                         .unwrap(),
                     2 => builder
                         .ensure_loop_node_ref(
                             first_ref,
-                            test_asm_op(context.clone(), "begin"),
+                            test_asm_op(context, "begin"),
                             vec![],
                         )
                         .unwrap(),
@@ -2289,14 +2289,14 @@ mod tests {
                         .ensure_call_node_ref(
                             first_ref,
                             step.flags & 1 == 1,
-                            test_asm_op(context.clone(), "call"),
+                            test_asm_op(context, "call"),
                             vec![],
                         )
                         .unwrap(),
                     _ => builder
                         .join_node_refs(
                             vec![first_ref, second_ref],
-                            Some(test_asm_op(context.clone(), "begin")),
+                            Some(test_asm_op(context, "begin")),
                         )
                         .unwrap(),
                 };
