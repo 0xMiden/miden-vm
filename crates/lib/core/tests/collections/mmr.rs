@@ -38,6 +38,94 @@ fn test_num_leaves_to_num_peaks() {
     build_test!(hash_size, &[0b0001_1111_1111_1111_1111]).expect_stack(&[17]);
 }
 
+/// Reads `expected` for `id` from the shared assembly cycle fixture TOML.
+fn fixture_expected_cycles(fixture_id: &str) -> u64 {
+    // Shared with scripts/check_user_doc_cycles.py and processor assembly fixtures.
+    const FIXTURES: &str =
+        include_str!("../../../../../processor/src/tests/assembly-cycle-fixtures.toml");
+
+    let id_line = format!("id = \"{fixture_id}\"");
+    let mut in_matching_case = false;
+    for line in FIXTURES.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[case]]" {
+            in_matching_case = false;
+            continue;
+        }
+        if trimmed == id_line {
+            in_matching_case = true;
+            continue;
+        }
+        if !in_matching_case {
+            continue;
+        }
+        if let Some(raw) = trimmed.strip_prefix("expected = ") {
+            let text = raw.trim().trim_matches('"');
+            return text
+                .split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| {
+                    panic!("could not parse cycle count from fixture {fixture_id}: {raw}")
+                });
+        }
+    }
+    panic!(
+        "fixture id {fixture_id:?} with an `expected` field not found in assembly-cycle-fixtures.toml"
+    );
+}
+
+/// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
+///
+/// Expected count comes from `processor/src/tests/assembly-cycle-fixtures.toml`
+/// (`id = "num_leaves_to_num_peaks"`), which the user-doc cycle checker also uses.
+#[test]
+fn test_num_leaves_to_num_peaks_cycle_count() {
+    let expected_cycles = fixture_expected_cycles("num_leaves_to_num_peaks");
+
+    // Same wrap as processor `measure_program_cycles`: clk leaves one stack value,
+    // so truncate to stay within the 16-element end-of-program limit.
+    let program = format!(
+        "
+    use miden::core::collections::mmr
+
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 exec.mmr::num_leaves_to_num_peaks drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+    let baseline = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+
+    let measured = build_test!(&program)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("program should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let base = build_test!(&baseline)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("baseline should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let delta = measured.saturating_sub(base);
+    assert_eq!(
+        delta, expected_cycles,
+        "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base}); \
+         update assembly-cycle-fixtures.toml and the matching MASM/user docs together"
+    );
+}
+
 #[test]
 fn test_num_peaks_to_message_size() {
     let hash_size = "
