@@ -2,8 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::utils::Matrix;
-use miden_stark::air::{BaseAir, LiftedAir};
+use miden_stark::air::LiftedAir;
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
 
@@ -29,13 +28,11 @@ pub fn protocol() -> RelationProtocol {
         heights: airs
             .iter()
             .map(|air| {
-                air.fixed_log_height().map(HeightRule::Fixed).unwrap_or_else(|| {
-                    let preprocessed_height =
-                        air.preprocessed_trace().map_or(0, |trace| trace.height());
-                    HeightRule::Minimum(
-                        air.max_periodic_length().max(preprocessed_height).max(2).ilog2(),
-                    )
-                })
+                air.log_preprocessed_height()
+                    .map(|log_height| HeightRule::Fixed(u32::from(log_height)))
+                    .unwrap_or_else(|| {
+                        HeightRule::Minimum(air.max_periodic_length().max(2).ilog2())
+                    })
             })
             .collect(),
         max_periodic_log: airs

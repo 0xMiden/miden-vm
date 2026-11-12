@@ -48,9 +48,8 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 /// opening widths. The proof therefore commits to the instance-order heights,
 /// not an explicit ordering permutation.
 ///
-/// The heights themselves are not exposed as a direct accessor: parse the
-/// proof through [`StarkProof::from_data`] and read them via
-/// [`StarkProof::log_trace_heights`].
+/// [`Self::log_trace_heights`] exposes the proof-supplied heights. Verification validates their
+/// shape against the AIRs and binds them into the Fiat-Shamir transcript.
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]

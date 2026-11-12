@@ -18,14 +18,15 @@
 //! observes the derived instance count and those heights at the protocol layer.
 //! Callers must not pre-observe them.
 //!
-//! # Statement-bound trace heights
+//! # Trace heights
 //!
-//! AIRs with preprocessing must use the height declared by [`LiftedAir::log_preprocessed_height`].
-//! For other AIRs, the verifier checks shape constraints but does not compare trace heights against
-//! a caller-supplied expectation. If your statement fixes their trace sizes (e.g. a proof for a
-//! 2^16-row execution), parse it with
-//! [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
-//! [`VerifierInstance`], and check `proof.log_trace_heights()` yourself.
+//! All trace heights must satisfy the protocol's shape checks. An AIR's main trace must also match
+//! the fixed native height of its preprocessed trace, when present, as declared by
+//! [`LiftedAir::log_preprocessed_height`].
+//!
+//! Applications that additionally require a specific trace size must check
+//! [`StarkProofData::log_trace_heights`] against that requirement alongside successful
+//! verification.
 //!
 //! # Transcript boundaries (strict consumption)
 //!

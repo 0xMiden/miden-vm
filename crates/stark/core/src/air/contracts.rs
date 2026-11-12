@@ -59,8 +59,9 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Return `None` when [`BaseAir::preprocessed_width`] is zero. Otherwise return
     /// `Some(log_height)`, where `log_height` is at least 1 and `2^log_height` equals the height of
     /// the matrix returned by [`BaseAir::preprocessed_trace`].
-    /// Shape validation requires this AIR's main trace to have this log height before deriving
-    /// the committed table order. Return the log height without constructing the matrix.
+    /// This AIR's main and preprocessed traces must have the same native height. Shape validation
+    /// enforces this equality before deriving the committed table order. Return the log height
+    /// without constructing the matrix.
     fn log_preprocessed_height(&self) -> Option<u8> {
         None
     }
