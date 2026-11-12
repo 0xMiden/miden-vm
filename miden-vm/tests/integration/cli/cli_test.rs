@@ -350,6 +350,22 @@ fn prove_keeps_the_proof_when_the_default_output_is_a_symlink_to_it() {
 
 #[cfg(unix)]
 #[test]
+fn prove_replaces_an_unresolvable_output_symlink_without_losing_the_proof() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    std::os::unix::fs::symlink("custom.outputs", &output_path).unwrap();
+
+    cmd.arg("--proof").arg(&proof_path);
+    cmd.assert().success();
+
+    assert_proof_survived(&proof_path);
+    assert!(!output_path.is_symlink());
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
+}
+
+#[cfg(unix)]
+#[test]
 fn prove_keeps_the_proof_when_an_explicit_output_crosses_a_symlink_with_dot_dot() {
     let (working_dir, mut cmd) = prove_command();
     let real_dir = working_dir.path().join("real");

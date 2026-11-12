@@ -319,6 +319,10 @@ fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<boo
     let output_metadata = match fs::metadata(output_path) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        // Atomic writes replace a final symlink even when its target cannot be resolved.
+        Err(_) if fs::symlink_metadata(output_path).is_ok_and(|metadata| metadata.is_symlink()) => {
+            return Ok(false);
+        },
         Err(err) => return Err(err),
     };
     let proof_metadata = fs::metadata(proof_path)?;
@@ -484,6 +488,22 @@ mod tests {
         std::thread::spawn(move || tx.send(resolve_to_same_file(&fifo_path, &proof_path).unwrap()));
         let same = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the check blocked");
         assert!(!same);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_distinguishes_final_and_parent_symlink_loops() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        let output_path = dir.path().join("same.outputs");
+        std::os::unix::fs::symlink("same.outputs", &output_path).unwrap();
+        assert!(!resolve_to_same_file(&output_path, &proof_path).unwrap());
+
+        let parent_path = dir.path().join("parent");
+        std::os::unix::fs::symlink("parent", &parent_path).unwrap();
+        assert!(resolve_to_same_file(&parent_path.join("same.outputs"), &proof_path).is_err());
     }
 
     #[test]
