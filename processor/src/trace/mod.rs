@@ -9,7 +9,7 @@ use miden_core::{
     },
 };
 
-use crate::{ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
+use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -62,10 +62,10 @@ impl ExecutionWitness {
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         trace: TraceReplay,
-    ) -> Self {
+    ) -> (Self, AdviceProvider) {
         let ExecutionOutput {
             stack: stack_outputs,
-            advice: _,
+            advice,
             memory: _,
             precompile_root,
             precompile_witness: precompile,
@@ -78,7 +78,7 @@ impl ExecutionWitness {
             precompile_root,
         };
 
-        Self { vm, precompile }
+        (Self { vm, precompile }, advice)
     }
 
     /// Returns the public claim associated with this witness.

@@ -19,7 +19,8 @@ use super::{
 #[cfg(feature = "std")]
 use crate::PrecompileWitness;
 use crate::{
-    ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
+    AdviceProvider, ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest,
+    Stopper, SyncHost,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
@@ -207,6 +208,7 @@ impl FastProcessor {
                 Ok(output) => {
                     let (mut vm_witness, precompiles_witness) =
                         Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
+                            .0
                             .into_parts();
                     // End the stream before this scope waits for the builder.
                     drop(vm_witness.take_hasher_replay());
@@ -272,6 +274,20 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_advice_sync(program, host)
+            .map(|(witness, _)| witness)
+    }
+
+    /// Executes the program synchronously and returns its witness and final advice provider.
+    ///
+    /// The advice provider retains the final advice stack, map, and Merkle store. It is returned
+    /// separately from the witness and is not included in the witness's serialized form.
+    #[instrument(name = "execute_for_proving_with_advice_sync", skip_all)]
+    pub fn execute_for_proving_with_advice_sync(
+        self,
+        program: &Program,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -295,6 +311,23 @@ impl FastProcessor {
         package_debug_info: &PackageDebugInfo,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_and_advice_sync(
+            program,
+            package_debug_info,
+            host,
+        )
+        .map(|(witness, _)| witness)
+    }
+
+    /// Executes synchronously with package debug information and returns the witness and final
+    /// advice provider.
+    #[instrument(name = "execute_for_proving_with_package_debug_info_and_advice_sync", skip_all)]
+    pub fn execute_for_proving_with_package_debug_info_and_advice_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -328,6 +361,28 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+            host,
+        )
+        .map(|(witness, _)| witness)
+    }
+
+    /// Executes synchronously with package debug information rooted at `entrypoint_source_node_id`
+    /// and returns the witness and final advice provider.
+    #[instrument(
+        name = "execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync",
+        skip_all
+    )]
+    pub fn execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -356,6 +411,19 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_advice(program, host)
+            .await
+            .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of [`Self::execute_for_proving_with_advice_sync`].
+    #[inline(always)]
+    #[instrument(name = "execute_for_proving_with_advice", skip_all)]
+    pub async fn execute_for_proving_with_advice(
+        self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -371,7 +439,6 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_for_proving_with_package_debug_info_sync`].
-    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     #[instrument(name = "execute_for_proving_with_package_debug_info", skip_all)]
     pub async fn execute_for_proving_with_package_debug_info(
@@ -380,6 +447,24 @@ impl FastProcessor {
         package_debug_info: &PackageDebugInfo,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_and_advice(
+            program,
+            package_debug_info,
+            host,
+        )
+        .await
+        .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of [`Self::execute_for_proving_with_package_debug_info_and_advice_sync`].
+    #[inline(always)]
+    #[instrument(name = "execute_for_proving_with_package_debug_info_and_advice", skip_all)]
+    pub async fn execute_for_proving_with_package_debug_info_and_advice(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -404,7 +489,6 @@ impl FastProcessor {
 
     /// Async variant of
     /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_sync`].
-    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     #[instrument(name = "execute_for_proving_with_package_debug_info_at_source_node", skip_all)]
     pub async fn execute_for_proving_with_package_debug_info_at_source_node(
@@ -414,6 +498,30 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_at_source_node_and_advice(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+            host,
+        )
+        .await
+        .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of
+    /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync`].
+    #[inline(always)]
+    #[instrument(
+        name = "execute_for_proving_with_package_debug_info_at_source_node_and_advice",
+        skip_all
+    )]
+    pub async fn execute_for_proving_with_package_debug_info_at_source_node_and_advice(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -731,7 +839,7 @@ impl FastProcessor {
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
-    ) -> ExecutionWitness {
+    ) -> (ExecutionWitness, AdviceProvider) {
         ExecutionWitness::from_execution(
             program.to_info(),
             stack_inputs,
