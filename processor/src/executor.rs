@@ -45,6 +45,29 @@ pub trait ProgramExecutor {
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>;
 }
 
+/// An executor that accepts hosts with fallible MAST forest loading.
+///
+/// This companion interface leaves existing [`ProgramExecutor`] implementations unchanged.
+pub trait FallibleProgramExecutor: ProgramExecutor {
+    /// Executes with fallible loading and configured package debug information.
+    /// For [`FastProcessor`]'s cancellation behavior, see [`FastProcessor::execute_fallible`].
+    fn execute_fallible<H: crate::FallibleHost + Send>(
+        self,
+        program: &Program,
+        host: &mut H,
+    ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>;
+}
+
+impl FallibleProgramExecutor for FastProcessor {
+    fn execute_fallible<H: crate::FallibleHost + Send>(
+        self,
+        program: &Program,
+        host: &mut H,
+    ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>> {
+        FastProcessor::execute_fallible(self, program, host)
+    }
+}
+
 impl ProgramExecutor for FastProcessor {
     fn new(
         stack_inputs: StackInputs,
