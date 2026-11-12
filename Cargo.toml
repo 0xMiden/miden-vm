@@ -227,10 +227,10 @@ ruint = { version = "1.18", default-features = false }
 toml = { version = "1.0", default-features = false }
 tracing-forest = "0.3.1"
 walkdir = "2.5"
-wycheproof-ng-core = { version = "0.2.0", default-features = false }
-wycheproof-ng-dh = { version = "0.2.0", default-features = false }
-wycheproof-ng-ecdsa = { version = "0.2.0", default-features = false }
-wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
+wycheproof-ng-core = { version = "0.4.0", default-features = false }
+wycheproof-ng-dh = { version = "0.4.0", default-features = false }
+wycheproof-ng-ecdsa = { version = "0.4.0", default-features = false }
+wycheproof-ng-eddsa = { version = "0.4.0", default-features = false }
 wasmi = { version = "1.1", default-features = false }
 # Keep the version in sync with wasmi's own wasmparser dependency: the handler loader's static
 # analysis must read Wasm binaries exactly the way wasmi validates them. The
