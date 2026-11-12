@@ -19,7 +19,7 @@
 use p3_field::{ExtensionField, Field};
 use p3_matrix::Matrix;
 
-use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
+use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess, log2_strict_u8};
 
 /// Assert a [`MultiAir`] is structurally well-formed.
 ///
@@ -28,6 +28,7 @@ use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 /// - Each AIR has positive auxiliary width.
 /// - Each AIR's [`crate::air::BaseAir::preprocessed_width`] agrees with
 ///   [`crate::air::BaseAir::preprocessed_trace`] presence and width.
+/// - [`LiftedAir::log_preprocessed_height`] agrees with the matrix's presence and native height.
 /// - Each periodic column is non-empty and has power-of-two length.
 /// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.
 ///
@@ -56,7 +57,8 @@ where
     assert!(air.aux_width() > 0, "AIR {idx}: aux_width must be positive");
 
     let preprocessed_width = air.preprocessed_width();
-    match air.preprocessed_trace() {
+    let preprocessed = air.preprocessed_trace();
+    match preprocessed {
         Some(trace) => {
             assert!(
                 preprocessed_width > 0,
@@ -68,15 +70,25 @@ where
                 "AIR {idx}: preprocessed_trace width disagrees with preprocessed_width()",
             );
             assert!(
-                trace.height().is_power_of_two(),
-                "AIR {idx}: preprocessed_trace height must be a positive power of two, got {height}",
+                trace.height() >= 2 && trace.height().is_power_of_two(),
+                "AIR {idx}: preprocessed_trace height must be a power of two and at least 2, got {height}",
                 height = trace.height(),
+            );
+            assert_eq!(
+                air.log_preprocessed_height(),
+                Some(log2_strict_u8(trace.height())),
+                "AIR {idx}: log_preprocessed_height disagrees with preprocessed_trace()",
             );
         },
         None => {
             assert_eq!(
                 preprocessed_width, 0,
                 "AIR {idx}: preprocessed_width() is {preprocessed_width} but preprocessed_trace returned None",
+            );
+            assert_eq!(
+                air.log_preprocessed_height(),
+                None,
+                "AIR {idx}: log_preprocessed_height disagrees with preprocessed_trace()",
             );
         },
     }
@@ -103,9 +115,9 @@ where
 /// Assert a concrete builder's accessor dimensions match `air` — preprocessed,
 /// main and aux trace, public values, randomness, aux values, and periodic values.
 ///
-/// Guards the invariant that makes [`LiftedAir::eval`] panic-free: if symbolic
-/// evaluation in `constraint_degree` succeeds and this check passes, `eval()`
-/// cannot panic from out-of-bounds accessor access.
+/// Under the [`LiftedAir`] evaluation contract, successful symbolic evaluation and this shape
+/// check establish that `eval`'s input accesses are in bounds. Prepared data must also satisfy
+/// [`LiftedAir::eval`]'s contract.
 pub fn check_builder_shape<F, EF, A, AB>(air: &A, builder: &AB)
 where
     F: Field,

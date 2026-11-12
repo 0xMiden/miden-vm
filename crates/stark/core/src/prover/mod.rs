@@ -159,7 +159,10 @@ where
     pub fn prove(
         self,
         challenger: SC::Challenger,
-    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError> {
+    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
+    where
+        <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
+    {
         prove(self, challenger)
     }
 
@@ -236,13 +239,14 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
+    <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
 {
     let ProverInstance { config, statement, traces, preprocessed } = instance;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
-        .expect("ProverStatement::new should reject malformed heights");
+        .expect("prover setup and AIR contracts should ensure valid trace heights");
 
     // Map each AIR to its preprocessed trace index. Only used when a preprocessed
     // tree is present.

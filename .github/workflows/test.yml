@@ -80,7 +80,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -88,6 +88,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Build tests
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
@@ -117,6 +118,37 @@ jobs:
             echo "No documentation changes in crates/lib/core/docs/ - OK"
           fi
 
+  debugger-test:
+    name: debugger fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cleanup-runner
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install Rust
+        run: rustup toolchain install --no-self-update
+      - name: Install litcheck
+        run: cargo install litcheck --version 0.4.6 --locked
+      - name: Check engine without default features
+        run: cargo check --locked -p miden-debug-engine --no-default-features
+      - name: Run debugger fixtures
+        env:
+          PYO3_PYTHON: python3
+          RUST_MIN_STACK: "16777216"
+        run: make test-debugger-lit
+      - name: Test Python bindings
+        env:
+          PYO3_PYTHON: python3
+          RUST_MIN_STACK: "16777216"
+        run: cargo test --locked -p miden-debug --lib --features miden-debug/python script::python::tests
+
   crypto-test:
     name: crypto test on warpbuild
     runs-on: warp-ubuntu-latest-x64-8x
@@ -127,7 +159,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -165,7 +197,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -250,6 +282,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Run doc-tests
         run: make test-docs
 
@@ -316,6 +349,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - uses: ./.github/actions/setup-protoc
       - name: Run masm examples
         run: make run-examples
 
@@ -336,9 +370,10 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-hack
+      - uses: ./.github/actions/setup-protoc
       - name: Check all feature combinations
         run: make check-features
 
@@ -361,7 +396,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install wasmtime
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: wasmtime-cli@45.0.2
       - name: Run the Wasm event handler tests inside a wasm32 host

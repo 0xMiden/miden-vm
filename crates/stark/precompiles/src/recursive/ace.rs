@@ -551,8 +551,12 @@ mod tests {
                 let min_height = periodic_min.max(preprocessed_min);
                 assert!(min_height.is_power_of_two());
                 let log_height = min_height.ilog2();
-                if let Some(fixed) = air.fixed_log_height() {
-                    assert_eq!(fixed, log_height, "fixed AIR height drifted from its trace");
+                if let Some(fixed) = air.log_preprocessed_height() {
+                    assert_eq!(
+                        u32::from(fixed),
+                        log_height,
+                        "fixed AIR height drifted from its trace"
+                    );
                 }
                 u64::from(log_height)
             })
@@ -564,7 +568,7 @@ mod tests {
                 let wrapper_checks_equality =
                     matches!(air.0, miden_air_definitions::precompiles::ChipletAir::BytePairLut);
                 assert_eq!(
-                    air.fixed_log_height().is_some(),
+                    air.log_preprocessed_height().is_some(),
                     wrapper_checks_equality,
                     "the PVM wrapper's height check for {air:?} differs from its native policy"
                 );

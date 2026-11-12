@@ -34,6 +34,9 @@
 //!   height is at least 2 rows, trace height ≥ max periodic column length, trace width matches
 //!   `width()` (prover-only), raw height is a power of two (prover-only), `aux_inputs.len() ≤
 //!   max_aux_inputs`.
+//! - **Preprocessed table ownership** — each preprocessed AIR's log trace height equals its
+//!   declared [`log_preprocessed_height`](air::LiftedAir::log_preprocessed_height) before deriving
+//!   proof order.
 //!
 //! ## Trusted AIR contracts
 //!

@@ -1,0 +1,12 @@
+proc inner
+    push.3 mul
+end
+
+proc outer
+    exec.inner
+end
+
+begin
+    exec.outer
+    push.1 add
+end

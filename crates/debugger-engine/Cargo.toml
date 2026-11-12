@@ -1,0 +1,63 @@
+[package]
+name = "miden-debug-engine"
+description = "Core debugger engine for miden-debug"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/miden-debug-engine"
+categories = ["development-tools"]
+keywords = ["miden", "debugger"]
+license = "MIT"
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+default = ["std"]
+dap = ["std", "dep:miden-debug-dap", "dep:serde_json", "dep:socket2"]
+std = [
+    "dep:clap",
+    "miden-assembly-syntax/std",
+    "miden-core/std",
+    "miden-debug-types/std",
+    "miden-mast-package/std",
+    "miden-processor/std",
+    "num-traits/std",
+    "regex/std",
+    "serde/std",
+    "thiserror/std",
+    "toml/preserve_order",
+]
+proptest = ["std", "dep:proptest"]
+
+[dependencies]
+clap = { workspace = true, optional = true, features = ["env"] }
+hashbrown.workspace = true
+log.workspace = true
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+miden-debug-dap = { workspace = true, optional = true, features = ["client"] }
+miden-debug-types.workspace = true
+miden-mast-package.workspace = true
+miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-processor.workspace = true
+miden-utils-sync.workspace = true
+num-traits = { version = "0.2", default-features = false }
+proptest = { workspace = true, optional = true, features = ["std"] }
+regex = { workspace = true, features = ["unicode"] }
+regex-syntax = { version = "0.8.11", default-features = false, features = ["unicode"] }
+rustc-demangle = { version = "0.1", features = ["std"] }
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+socket2 = { version = "0.6", optional = true }
+smallvec = { workspace = true, features = ["drain_filter"] }
+thiserror.workspace = true
+toml = { workspace = true, features = ["parse", "serde"] }
+
+[dev-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+tempfile.workspace = true

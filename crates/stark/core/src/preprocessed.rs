@@ -4,8 +4,8 @@
 //! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed at
 //! setup. The prover holds the raw matrices plus their LDE tree (the
 //! [`Preprocessed`] bundle, which can be borrowed across proofs); the
-//! verifier holds only the commitment (a root hash, trusted like the AIR list
-//! itself).
+//! verifier holds the commitment together with AIR definitions that declare each table's
+//! width and native height. Both the root and the AIR definitions are trusted setup inputs.
 //!
 //! [`Preprocessed::build`] caches the by-value [`BaseAir::preprocessed_trace`]
 //! evals and builds the aligned LDE tree using the supplied STARK config. The
@@ -24,10 +24,10 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8},
+    air::{BaseAir, LiftedAir, MultiAir, ProverStatement, Statement, log2_strict_u8},
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
-    order::TraceOrder,
+    order::{ShapeError, TraceOrder},
     prover::commit::Committed,
 };
 
@@ -76,30 +76,45 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if a declared preprocessed matrix has non-power-of-two height or
-    /// its LDE order exceeds the field's two-adicity — programmer errors at
-    /// setup, not untrusted input.
+    /// Panics if a preprocessed matrix's height is less than 2 or not a power of two, its presence
+    /// or log height differs from [`LiftedAir::log_preprocessed_height`], or its LDE order exceeds
+    /// the field's two-adicity. These are AIR setup errors.
     pub fn build<EF, MA, C>(statement: &Statement<F, EF, MA>, config: &C) -> Option<Self>
     where
         EF: ExtensionField<F>,
         MA: MultiAir<F, EF>,
         C: StarkConfig<F, EF, Lmcs = L>,
     {
-        let traces: Vec<Option<RowMajorMatrix<F>>> =
-            statement.airs().iter().map(BaseAir::preprocessed_trace).collect();
+        let traces: Vec<Option<RowMajorMatrix<F>>> = statement
+            .airs()
+            .iter()
+            .enumerate()
+            .map(|(air_idx, air)| {
+                let trace = air.preprocessed_trace();
+                let log_height = trace.as_ref().map(|trace| {
+                    let height = trace.height();
+                    assert!(
+                        height >= 2 && height.is_power_of_two(),
+                        "preprocessed matrix for AIR {air_idx} must have power-of-two height at least 2, got {height}",
+                    );
+                    log2_strict_u8(height)
+                });
+                assert_eq!(
+                    log_height,
+                    air.log_preprocessed_height(),
+                    "preprocessed matrix height for AIR {air_idx} differs from its declaration",
+                );
+                trace
+            })
+            .collect();
         if traces.iter().all(Option::is_none) {
             return None;
         }
 
-        // Committed trace order: preprocessed AIRs sorted by `(height, air_idx)`. This must
-        // match the trace↔AIR mapping the prover/verifier reconstruct via
-        // `TraceOrder::preprocessed_air_for_trace_index` (preprocessed AIRs in proof
-        // order, i.e. sorted by `(main_trace_height, air_idx)`). The two
-        // coincide because `validate_preprocessed` rejects any bundle whose
-        // preprocessed height differs from the main trace height — so sorting by
-        // the preprocessed matrix height here yields the same order. `build`
-        // sees only the AIR list (fixed circuit data), not the witness traces,
-        // so it cannot call `TraceOrder` directly.
+        // Sort by (native height, AIR index), matching the preprocessed subset of proof order.
+        // TraceOrder requires each preprocessed AIR's main trace height to equal the declared
+        // height checked above. AIRs without preprocessing can vary in height without changing
+        // this subset's order.
         let mut pairs: Vec<(usize, &RowMajorMatrix<F>)> = traces
             .iter()
             .enumerate()
@@ -111,12 +126,7 @@ where
         let ldes: Vec<_> = pairs
             .into_iter()
             .map(|(air_idx, trace)| {
-                let height = trace.height();
-                assert!(
-                    height.is_power_of_two(),
-                    "preprocessed matrix for AIR {air_idx} has non-power-of-two height {height}",
-                );
-                let log_h = log2_strict_u8(height);
+                let log_h = log2_strict_u8(trace.height());
                 let coset_shift = LiftedDomain::<F>::canonical_lde_shift(log_h + log_blowup)
                     .expect("preprocessed LDE order exceeds field two-adicity");
                 let width = trace.width();
@@ -210,11 +220,9 @@ where
         });
     }
 
-    // Reconstruct the trace↔AIR mapping the prover/verifier use.
-    // Heights are already validated by `ProverStatement::new`, so this cannot fail.
+    // Validate fixed preprocessing heights before reconstructing the table-to-AIR mapping.
     let heights: Vec<usize> = main_traces.iter().map(Matrix::height).collect();
-    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &heights)
-        .expect("ProverStatement guarantees valid trace shapes");
+    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &heights)?;
     let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index::<F, EF, _>(airs);
     let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air::<F, EF, _>(airs);
 
@@ -247,6 +255,7 @@ where
             });
         }
 
+        // The borrowed setup may have been built for an AIR with a different native height.
         let main = main_traces[air_idx].height();
         if raw_preprocessed.height() != main {
             return Err(PreprocessedValidationError::HeightMismatch {
@@ -265,12 +274,8 @@ where
         });
     }
 
-    // Validate the committed leaves directly against the AIRs and config, not by
-    // trusting them to be the LDE of `traces`. A `Preprocessed` need not have come
-    // from `build` (e.g. a deserialized bundle), so its raw and committed halves are
-    // checked independently: width against the declared AIR, and LDE height against
-    // this proving config's blowup applied to the main trace height (catching a
-    // bundle built under a different blowup).
+    // A cached setup may have been built for different AIRs or PCS parameters. Check committed
+    // widths against the current AIRs and LDE heights against the current main traces and blowup.
     for (preprocessed_trace_idx, &air_idx_u8) in preprocessed_trace_to_air.iter().enumerate() {
         let air_idx = air_idx_u8 as usize;
         let expected_width = airs[air_idx].preprocessed_width();
@@ -312,6 +317,8 @@ where
 /// parity and (prover side) the bundle's shape against the AIR declarations.
 #[derive(Debug, Error)]
 pub enum PreprocessedValidationError {
+    #[error(transparent)]
+    Shape(#[from] ShapeError),
     #[error(
         "preprocessed setup presence mismatch: AIRs declare preprocessed columns = {expected}, setup supplied = {actual}"
     )]

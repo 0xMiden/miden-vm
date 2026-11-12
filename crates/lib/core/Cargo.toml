@@ -60,6 +60,7 @@ miden-stark = { workspace = true, optional = true }
 
 # External dependencies
 p256 = { workspace = true, features = ["ecdsa"] }
+rand.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

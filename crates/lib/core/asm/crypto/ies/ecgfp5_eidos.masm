@@ -5,9 +5,8 @@
 #! Extract a secret from S, R, and Q, then expand it with the context digest into the AEAD key
 #! and nonce. Encrypt plaintext and authenticate the ciphertext together with the full context.
 #!
-#! Supply a fresh random scalar for each encryption through private advice. This module checks
-#! its range but does not generate it. Keep the scalar, plaintext, and execution witness private;
-#! witness privacy also requires zero-knowledge.
+#! The host supplies a fresh random scalar and agreement witnesses as private advice.
+#! Keep the scalar, plaintext, and execution witness private, and use zero-knowledge proving.
 #!
 #! Matches `miden_crypto::ies::ecgfp5_eidos`. Sender authentication and replay protection belong
 #! to the application.
@@ -15,6 +14,9 @@
 use miden::core::crypto::aead_eidos
 use miden::core::crypto::ecdh::ecgfp5
 use miden::core::crypto::hashes::eidos
+
+const SEAL_EVENT = event("miden::core::crypto::ies::ecgfp5_eidos::seal")
+const SEAL_PREPROCESSED_EVENT = event("miden::core::crypto::ies::ecgfp5_eidos::seal_preprocessed")
 
 # Eidos::init_chaining_word(ECGFP5_SEAL_EXTRACT, 24).
 const EXTRACT_INIT_CV = [
@@ -60,14 +62,15 @@ const PREPROCESSED_LOC = 33
 #! Output: [...]
 #!
 #! `public_key` is the commitment returned by Rust's `PublicKey::to_commitment`.
-#! The DH procedure reads Q from advice and checks it against that commitment.
-#! Prepare the advice with `PublicKey::advise`.
+#! The host must handle the `miden::core::crypto::ies::ecgfp5_eidos::seal` event and supply private
+#! agreement advice. The procedure checks the supplied key against this commitment.
+#! Rust hosts can use `Ecgfp5SealHandler` with a cryptographic RNG and registered recipient keys.
 #!
 #! Pointers must be word-aligned u32 values, and lengths must fit in u32. Non-empty ranges must
 #! end below the local frame without overflowing u32. The destination spans `8 + 2*plaintext_len`
 #! Felts and must not overlap either input. Plaintext and context may overlap each other.
 #! The padded MAC stream `nonce(4) || context || ciphertext || lengths(2)` must fit in 2^28 Felts.
-#! These conditions are checked before writing memory or consuming advice.
+#! These conditions are checked before writing memory or requesting advice from the host.
 #!
 #! Writes only the envelope below the local frame. On successful return, this frame's shared-point
 #! locals, the MAC locals, and encryption-tail scratch are cleared. The key and nonce are removed
@@ -96,8 +99,9 @@ end
 #! The DH procedure authenticates Q and the selected entries supplied through advice against
 #! this commitment. It assumes the issuer generated the tables correctly.
 #!
-#! Prepare the advice with Rust's `PreparedPublicKey::advise`. The memory and length requirements,
-#! range checks, and cleanup are the same as `seal`.
+#! Uses the `miden::core::crypto::ies::ecgfp5_eidos::seal_preprocessed` host event.
+#! With `Ecgfp5SealHandler`, register the key using `with_preprocessed_public_key`.
+#! The memory and length requirements, range checks, and cleanup are the same as `seal`.
 #! Invalid scalar or DH witnesses fail execution.
 #!
 #! Invocation: exec
@@ -155,8 +159,10 @@ proc seal_inner(
     padw loc_loadw_le.RECIPIENT_POINT_LOC
     loc_load.PREPROCESSED_LOC
     if.true
+        emit.SEAL_PREPROCESSED_EVENT
         exec.ecgfp5::agree_preprocessed
     else
+        emit.SEAL_EVENT
         exec.ecgfp5::agree
     end
     # => [R(5), S(5), Q(5), ...]

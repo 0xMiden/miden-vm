@@ -18,7 +18,7 @@ use miden_stark::air::{
     BaseAir, LiftedAir,
     symbolic::{
         AirLayout, BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpression,
-        SymbolicExpressionExt,
+        SymbolicExpressionExt, eval_air,
     },
 };
 
@@ -75,7 +75,7 @@ pub fn capture_into<A>(air: &A, builder: &mut GraphBuilder) -> CapturedConstrain
 where
     A: LiftedAir<Felt, EF>,
 {
-    capture_into_with(air, builder, |symbolic| air.eval(symbolic))
+    capture_into_with(air, builder, |symbolic| eval_air(air, symbolic))
 }
 
 /// Capture a selected part of an AIR into an existing graph using the AIR's input layout.

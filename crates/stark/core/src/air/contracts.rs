@@ -1,26 +1,5 @@
 //! AIR traits for the lifted STARK system: [`LiftedAir`] (a single AIR) and
 //! [`MultiAir`] (the AIR collection plus the cross-AIR behavior on it).
-//!
-//! # Panic safety of `eval()`
-//!
-//! [`LiftedAir::eval`] is generic over `AB: LiftedAirBuilder`, so it cannot branch
-//! on the concrete builder type. All builders expose data through the same trait
-//! methods — [`preprocessed()`](crate::air::AirBuilder::preprocessed),
-//! [`main()`](crate::air::AirBuilder::main),
-//! [`permutation()`](crate::air::PermutationAirBuilder::permutation),
-//! [`public_values()`](crate::air::AirBuilder::public_values),
-//! [`permutation_randomness()`](crate::air::PermutationAirBuilder::permutation_randomness),
-//! [`permutation_values()`](crate::air::PermutationAirBuilder::permutation_values), and
-//! [`periodic_values()`](crate::air::AirBuilder::periodic_values) — which return
-//! matrices or slices.
-//!
-//! If the symbolic evaluation in [`LiftedAir::constraint_degree`] succeeds (i.e.
-//! does not panic), it proves that the AIR's `eval()` only accesses indices within
-//! the declared dimensions. Any concrete builder constructed with matching dimensions
-//! is therefore safe from out-of-bounds panics.
-//!
-//! Use [`crate::air::debug::check_builder_shape`] to verify a concrete builder's
-//! dimensions match the AIR before calling `eval()`.
 
 use alloc::{boxed::Box, vec::Vec};
 
@@ -31,8 +10,23 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::{
     LiftedAirBuilder,
-    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
+    symbolic::{
+        AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt, eval_air,
+    },
 };
+
+/// Inputs that stay fixed throughout one AIR evaluation pass.
+///
+/// Values use the evaluator's base and extension expression types. Symbolic callers supply
+/// expressions, while concrete callers supply scalar or packed field values.
+pub struct EvalInputs<'a, B, E> {
+    /// This AIR's public inputs, in the order returned by `builder.public_values()`.
+    pub public_values: &'a [B],
+    /// Auxiliary-trace challenges, in the order returned by `builder.permutation_randomness()`.
+    pub challenges: &'a [E],
+    /// Auxiliary boundary values returned by `builder.permutation_values()`.
+    pub aux_values: &'a [E],
+}
 
 /// Super-trait for AIR definitions used by the lifted STARK prover/verifier.
 ///
@@ -41,10 +35,37 @@ use crate::air::{
 /// Every `LiftedAir` must provide an auxiliary trace (even if it is a minimal
 /// 1-column dummy).
 ///
+/// # Evaluation
+///
+/// Constraint structure and input indexing must depend only on the AIR configuration and declared
+/// dimensions. Preparation and evaluation must preserve the constraints and their order across
+/// scalar, packed, and symbolic expression types. Symbolic preparation must retain input
+/// dependencies in its expressions so degree analysis and constraint capture see the complete
+/// relation.
+///
+/// The default [`constraint_degree`](Self::constraint_degree) evaluates symbolically with the
+/// declared dimensions. Use [`crate::air::debug::check_builder_shape`] to check that a concrete
+/// builder has matching dimensions before evaluation.
+///
 /// # Type Parameters
 /// - `F`: Base field
 /// - `EF`: Extension field (for aux trace challenges and aux values)
 pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
+    /// Data shared by row evaluations with the same inputs. Use `()` when no preparation is needed.
+    type EvalData<B: Algebra<F>, E: Algebra<B>>: Default;
+
+    /// Log2 of the fixed native height of this AIR's preprocessed matrix, or `None` if it has none.
+    ///
+    /// Return `None` when [`BaseAir::preprocessed_width`] is zero. Otherwise return
+    /// `Some(log_height)`, where `log_height` is at least 1 and `2^log_height` equals the height of
+    /// the matrix returned by [`BaseAir::preprocessed_trace`].
+    /// This AIR's main and preprocessed traces must have the same native height. Shape validation
+    /// enforces this equality before deriving the committed table order. Return the log height
+    /// without constructing the matrix.
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        None
+    }
+
     /// Maximum periodic-column length, or `0` if there are none. A trace's height
     /// must be at least this, so it is the per-AIR lower bound on trace height.
     ///
@@ -129,35 +150,29 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         }
     }
 
-    /// Evaluate all AIR constraints using the provided builder.
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB);
-
-    /// Compute expressions that depend only on the auxiliary-trace challenges.
+    /// Prepare data for a pass over this AIR's constraints.
     ///
-    /// `challenges` contains [`num_randomness`](Self::num_randomness) values for this AIR, in the
-    /// order used by `builder.permutation_randomness()`.
-    /// The prover calls this once per AIR evaluation batch and shares the results across rows.
-    /// `B` and `E` represent the base and extension expression types, respectively. The default
-    /// returns no terms and requires no preparation.
-    fn precompute_challenge_terms<B: Algebra<F>, E: Algebra<B>>(
+    /// The input lengths are [`num_public_values`](BaseAir::num_public_values),
+    /// [`num_randomness`](Self::num_randomness), and [`num_aux_values`](Self::num_aux_values).
+    /// Call once per evaluation batch, using the same expression types as its builders. The data
+    /// can be reused while the AIR configuration and all input values remain unchanged.
+    /// The parallel prover requires its packed `EvalData` to be `Sync`.
+    fn prepare<B: Algebra<F>, E: Algebra<B>>(
         &self,
-        _challenges: &[E],
-    ) -> Vec<E> {
-        Vec::new()
+        _inputs: EvalInputs<'_, B, E>,
+    ) -> Self::EvalData<B, E> {
+        Default::default()
     }
 
-    /// Evaluate constraints using terms prepared for this AIR and these challenges.
+    /// Evaluate all constraints using data from [`prepare`](Self::prepare).
     ///
-    /// `terms` must come from [`Self::precompute_challenge_terms`] for the same AIR configuration
-    /// and `builder.permutation_randomness()`. An override must emit the same constraints, in the
-    /// same order, as [`Self::eval`]. The default delegates to `eval`.
-    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = F>>(
+    /// The data must have been prepared for this AIR configuration and the public values,
+    /// auxiliary challenges, and auxiliary values exposed by `builder`.
+    fn eval<AB: LiftedAirBuilder<F = F>>(
         &self,
         builder: &mut AB,
-        _terms: &[AB::ExprEF],
-    ) {
-        self.eval(builder);
-    }
+        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+    );
 
     /// Symbolic constraint degree multiples, split into base-field and
     /// extension-field maxima (see [`ConstraintDegrees`]).
@@ -195,7 +210,7 @@ impl ConstraintDegrees {
         A: LiftedAir<F, EF>,
     {
         let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
-        air.eval(&mut builder);
+        eval_air(air, &mut builder);
 
         let base = builder
             .base_constraints()
@@ -240,7 +255,7 @@ impl ConstraintCounts {
         A: LiftedAir<F, EF>,
     {
         let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
-        air.eval(&mut builder);
+        eval_air(air, &mut builder);
 
         Self {
             base: builder.base_constraints().len(),

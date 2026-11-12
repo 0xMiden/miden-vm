@@ -88,7 +88,7 @@ miden_crypto::eidos_domain_registry! {
                 local_id: 0x0009,
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
-                description: "Precompile VM uint pin claim.",
+                description: "Reserved legacy precompile VM uint pin claim.",
                 schema: "param0 = uint bound pointer; param1 = pin pointer; param2 = 0; payload = exactly one uint value block",
             }
             pub FALCON_PRODUCT_CHECK: FalconProductCheckDomain {

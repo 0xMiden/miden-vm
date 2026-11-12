@@ -17,6 +17,7 @@ yanked = "warn"
 ignore = [
     "RUSTSEC-2024-0436", # paste is unmaintained but no alternative available
     "RUSTSEC-2021-0139", # ansi_term is pulled by tracing-forest; no patched release exists
+    "RUSTSEC-2025-0141", # syntect uses bincode 1 for its bundled syntax and theme caches
 ]
 
 # License configuration
@@ -27,6 +28,8 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0", # rustyline's Windows clipboard support
+    "CDDL-1.0", # inferno's flamegraph renderer
     "CC0-1.0",
     "ISC",
     "Unicode-3.0",
@@ -65,6 +68,11 @@ skip = [
     { name = "num-bigint" },
     # Allow duplicate shlex versions from bindgen/librocksdb-sys and cc
     { name = "shlex" },
+    # prost-build -> petgraph 0.8 requires these older build dependencies.
+    # Remove both exceptions when prost-build upgrades petgraph and no longer
+    # needs separate hashbrown/foldhash versions.
+    { name = "hashbrown", version = "=0.15.5" },
+    { name = "foldhash", version = "=0.1.5" },
 ]
 skip-tree = [
     # Allow getrandom v0.3.x for now - will be updated when miden-crypto upgrades

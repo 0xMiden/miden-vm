@@ -1,0 +1,8 @@
+# A VM error reached through stepping uses the same termination report as continue.
+#
+# RUN: compile-masm %S/error.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+step 1000
+
+# CHECK: Program terminated with error: stack should have at most 16 elements

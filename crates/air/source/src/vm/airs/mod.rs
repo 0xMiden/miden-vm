@@ -10,6 +10,7 @@ use miden_stark::{
         build_logup_aux_trace_with_width,
     },
 };
+use p3_field::Algebra;
 
 use crate::vm::{
     constraints::{
@@ -179,6 +180,15 @@ impl BaseAir<Felt> for MidenAir {
 }
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        match self {
+            Self::And8Lookup => Some(trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT),
+            Self::Core | Self::Chiplets | Self::EidosCompression => None,
+        }
+    }
+
     fn num_randomness(&self) -> usize {
         // Instance-level: every AIR shares the same LogUp challenge set.
         trace::AUX_TRACE_RAND_CHALLENGES
@@ -253,7 +263,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         ConstraintDegrees::from_air::<Felt, EF, _>(self)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         match self {
             Self::Core => CoreAir.eval(builder),
             Self::Chiplets => ChipletsAir.eval(builder),

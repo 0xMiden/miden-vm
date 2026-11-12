@@ -1,0 +1,23 @@
+# RUN: compile-masm %S/call_frames_recursive.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 3 2>&1 | filecheck %s --implicit-check-not 'error:'
+
+break call_frames_recursive.masm:7
+continue
+backtrace
+delete 0
+finish
+backtrace
+continue
+stack
+
+# CHECK: Backtrace (5 frames):
+# CHECK-NEXT: {{.*}}#0 $exec::recurse
+# CHECK-NEXT: {{.*}}#1 $exec::recurse
+# CHECK-NEXT: {{.*}}#2 $exec::recurse
+# CHECK-NEXT: {{.*}}#3 $exec::recurse
+# CHECK-NEXT: {{.*}}#4 $exec::$main
+# finish skips control-only recursive callers to the next caller instruction.
+# CHECK: Backtrace (1 frames):
+# CHECK-NEXT: {{.*}}#0 $exec::$main
+# CHECK: Program terminated successfully
+# CHECK: [0] 1 (0x1)

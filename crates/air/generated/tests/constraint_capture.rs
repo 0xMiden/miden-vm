@@ -9,6 +9,8 @@
 
 use miden_air_definitions::vm::{AIRS, BaseAir, Felt};
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
+use miden_core::field::QuadFelt;
+use miden_stark::air::LiftedAir;
 
 #[test]
 fn generated_adapter_preserves_authored_air_layout() {
@@ -17,6 +19,10 @@ fn generated_adapter_preserves_authored_air_layout() {
         assert_eq!(
             BaseAir::<Felt>::preprocessed_width(&handwritten),
             BaseAir::<Felt>::preprocessed_width(&air),
+        );
+        assert_eq!(
+            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&handwritten),
+            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&air),
         );
         assert_eq!(
             BaseAir::<Felt>::preprocessed_trace(&handwritten),

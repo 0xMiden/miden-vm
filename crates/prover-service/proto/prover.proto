@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package miden.prover.v1;
+
+service ProverService {
+    rpc Prove(ProveRequest) returns (ProveResponse);
+}
+
+message ProveRequest {
+    uint32 protocol_version = 1;
+    bytes execution_witness = 2;
+}
+
+message ProveResponse {
+    bytes execution_proof = 1;
+}
+
+// These values are stable identifiers. Error text is not part of the protocol.
+enum ErrorCode {
+    UNSPECIFIED = 0;
+    UNSUPPORTED_VERSION = 1;
+    INVALID_WITNESS = 2;
+    REQUEST_TOO_LARGE = 3;
+    QUEUE_FULL = 4;
+    PROVER_LIMIT_EXCEEDED = 5;
+    DEADLINE_EXCEEDED = 6;
+    CANCELLED = 7;
+    SHUTTING_DOWN = 8;
+    PROVING_FAILED = 9;
+    INTERNAL = 10;
+    RESPONSE_TOO_LARGE = 11;
+}
+
+// Serialized into tonic::Status::details for application failures.
+message ErrorDetail {
+    ErrorCode code = 1;
+}

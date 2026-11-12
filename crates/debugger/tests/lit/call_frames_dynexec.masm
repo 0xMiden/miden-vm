@@ -1,0 +1,21 @@
+proc inner
+    push.3 mul
+end
+
+proc middle
+    push.2 add
+    procref.inner mem_storew_le.100 dropw
+    push.100 dynexec
+    push.4 add
+end
+
+proc outer
+    push.1 add
+    exec.middle
+    push.5 add
+end
+
+begin
+    exec.outer
+    push.6 add
+end
