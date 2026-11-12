@@ -126,14 +126,14 @@ where
     Env: ?Sized + ConstEnvironment,
     <Env as ConstEnvironment>::Error: From<ConstEvalError>,
 {
-    fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<()> {
-        if constant.value.is_value() {
+    fn visit_mut_constant(&mut self, constant: &mut ConstantDecl) -> ControlFlow<()> {
+        if constant.value().is_value() {
             return ControlFlow::Continue(());
         }
 
-        match constants::eval::expr(&constant.value, self.env) {
+        match constants::eval::expr(constant.value(), self.env) {
             Ok(evaluated) => {
-                constant.value = evaluated;
+                *constant.value_mut() = evaluated;
             },
             Err(err) => {
                 self.errors.push(err);

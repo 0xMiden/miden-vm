@@ -20,7 +20,10 @@ use super::{
         lower_function_type_from_signature, lower_type_expr_from_alias_body,
     },
 };
-use crate::{Report, ast, parser::ParsingError};
+use crate::{
+    Report, ast,
+    parser::{ParsingError, cst::fragments::lower_type_annotation},
+};
 
 /// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser
 /// pipeline.
@@ -321,6 +324,10 @@ fn lower_constant(
             });
         },
     };
+    let ty = constant
+        .type_annotation()
+        .map(|annot| lower_type_annotation(context, &annot))
+        .transpose()?;
     let expr = match constant.expr() {
         Some(expr) => lower_constant_expr(context, &expr)?,
         None => {
@@ -331,7 +338,11 @@ fn lower_constant(
         },
     };
 
-    Ok(ast::Form::Constant(ast::Constant::new(span, visibility, name, expr)))
+    let constant = match ty {
+        Some(ty) => ast::ConstantDecl::new_with_ty(span, visibility, name, expr, ty),
+        None => ast::ConstantDecl::new(span, visibility, name, expr),
+    };
+    Ok(ast::Form::Constant(constant))
 }
 
 /// Lowers either a `type` alias or an `enum` declaration from the shared CST form.

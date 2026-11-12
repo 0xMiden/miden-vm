@@ -521,10 +521,34 @@ const WORD = [1, 2, 3, 4]
 const DIGEST = word(\"miden::digest\")
 const EVENT_ID = event(\"miden::event\")
 const VALUE = (parts::COUNT + 3) // 2
+const TYPED_VALUE: u32 = 42
 ",
     );
 
     assert_parses(source);
+}
+
+#[test]
+fn constant_declaration_kinds_follow_value_expression() {
+    use ast::ConstantKind;
+
+    for (source, expected, annotated) in [
+        ("const VALUE = 42\n", ConstantKind::Untyped, false),
+        ("const VALUE = \"message\"\n", ConstantKind::String, false),
+        ("const VALUE = event(\"test::event\")\n", ConstantKind::Event, false),
+        ("const VALUE = word(\"test::word\")\n", ConstantKind::Untyped, false),
+        ("const VALUE = OTHER\n", ConstantKind::Untyped, false),
+        ("const VALUE: u8 = 42\n", ConstantKind::Typed, true),
+        ("const VALUE: felt = event(\"test::event\")\n", ConstantKind::Event, true),
+        ("const VALUE: felt = \"message\"\n", ConstantKind::String, true),
+    ] {
+        let forms = parse_forms(test_source_file(source)).expect("parser should succeed");
+        let [Form::Constant(constant)] = forms.as_slice() else {
+            panic!("expected one constant form, got {forms:?}");
+        };
+        assert_eq!(constant.kind(), expected, "{source}");
+        assert_eq!(constant.ty().is_some(), annotated, "{source}");
+    }
 }
 
 #[test]
@@ -535,8 +559,8 @@ fn parser_preserves_literal_constant_expr_tree() {
         panic!("expected one constant form, got {forms:?}");
     };
 
-    let ast::ConstantExpr::BinaryOp { op, lhs, rhs, .. } = &constant.value else {
-        panic!("expected addition expression, got {:?}", constant.value);
+    let ast::ConstantExpr::BinaryOp { op, lhs, rhs, .. } = constant.value() else {
+        panic!("expected addition expression, got {:?}", constant.value());
     };
     assert_eq!(*op, ast::ConstantOp::Add);
     assert!(matches!(lhs.as_ref(), ast::ConstantExpr::Int(value)
@@ -1356,7 +1380,7 @@ fn parse_package_visibility_on_all_declarations() {
         let visibility = match form {
             Form::Submodule(decl) => decl.visibility,
             Form::Import(import) => import.visibility(),
-            Form::Constant(constant) => constant.visibility,
+            Form::Constant(constant) => constant.visibility(),
             Form::Type(ty) => ty.visibility,
             Form::Enum(ty) => ty.visibility(),
             Form::Procedure(proc) => proc.visibility(),

@@ -30,7 +30,10 @@ pub use self::{
         MetaKeyValue, MetaList,
     },
     block::Block,
-    constants::{Constant, ConstantExpr, ConstantOp, ConstantValue, HashKind},
+    constants::{
+        ConstantDecl, ConstantDefinition, ConstantExpr, ConstantKind, ConstantOp, ConstantValue,
+        HashKind,
+    },
     docstring::DocString,
     form::Form,
     ident::{CaseKindError, Ident, IdentError},

@@ -46,7 +46,7 @@ pub fn rewrite_symbol(
                 cache,
                 current_module: gid.module,
             };
-            let value = ast::constants::eval::expr(&item.value, &mut resolver)?
+            let value = ast::constants::eval::expr(item.value(), &mut resolver)?
                 .into_value()
                 .expect("value or error to have been raised");
             resolver.cache.constants.insert(gid, value);

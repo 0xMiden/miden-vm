@@ -18,7 +18,7 @@ use proptest::prelude::*;
 use smallvec::SmallVec;
 
 use super::{
-    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Path,
+    ConstantDecl, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Path,
     Procedure, ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant,
     Visibility,
 };
@@ -371,11 +371,11 @@ impl Module {
     }
 
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
-    pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
+    pub fn define_constant(&mut self, constant: ConstantDecl) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
-        if let Some(prev) = self.get_declaration(constant.name.as_str()) {
+        if let Some(prev) = self.get_declaration(constant.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
-                span: constant.span,
+                span: constant.span(),
                 prev_span: prev.span(),
             });
         }
@@ -468,13 +468,9 @@ impl Module {
                 discriminant,
             } = variant;
 
-            self.define_constant(Constant {
-                span,
-                docs,
-                visibility: alias.visibility(),
-                name,
-                value: discriminant,
-            })?;
+            let mut constant = ConstantDecl::new(span, alias.visibility(), name, discriminant);
+            *constant.definition_mut().docs_mut() = docs;
+            self.define_constant(constant)?;
         }
 
         self.push_export(Item::Type(export.into()))?;
@@ -626,7 +622,7 @@ impl Module {
     }
 
     /// Get an iterator over the constants defined in this module.
-    pub fn constants(&self) -> impl Iterator<Item = &Constant> + '_ {
+    pub fn constants(&self) -> impl Iterator<Item = &ConstantDecl> + '_ {
         self.items.iter().filter_map(|item| match item {
             Item::Constant(item) => Some(item),
             _ => None,
@@ -634,7 +630,7 @@ impl Module {
     }
 
     /// Same as [Module::constants], but returns mutable references.
-    pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut Constant> + '_ {
+    pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut ConstantDecl> + '_ {
         self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
             Item::Constant(item) => Some(item),
