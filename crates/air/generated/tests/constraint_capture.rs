@@ -21,8 +21,8 @@ fn generated_adapter_preserves_authored_air_layout() {
             BaseAir::<Felt>::preprocessed_width(&air),
         );
         assert_eq!(
-            LiftedAir::<Felt, QuadFelt>::preprocessed_height(&handwritten),
-            LiftedAir::<Felt, QuadFelt>::preprocessed_height(&air),
+            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&handwritten),
+            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&air),
         );
         assert_eq!(
             BaseAir::<Felt>::preprocessed_trace(&handwritten),

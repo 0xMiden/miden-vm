@@ -20,10 +20,11 @@
 //!
 //! # Statement-bound trace heights
 //!
-//! The verifier accepts whatever trace heights the proof carries; it never
-//! compares them against a caller-supplied expectation. If your statement
-//! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
+//! AIRs with preprocessing must use the height declared by [`LiftedAir::log_preprocessed_height`].
+//! For other AIRs, the verifier checks shape constraints but does not compare trace heights against
+//! a caller-supplied expectation. If your statement fixes their trace sizes (e.g. a proof for a
+//! 2^16-row execution), parse it with
+//! [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
 //! [`VerifierInstance`], and check `proof.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)

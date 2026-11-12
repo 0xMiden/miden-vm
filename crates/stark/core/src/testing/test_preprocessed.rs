@@ -18,7 +18,7 @@ use crate::{
     VerifierInstance,
     air::{
         AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-        ProverStatement, Statement, WindowAccess,
+        ProverStatement, Statement, WindowAccess, log2_strict_u8,
     },
     check_constraints,
     pcs::params::PcsParams,
@@ -42,14 +42,14 @@ use crate::{
 struct RowCounterAir {
     preprocessed: RowMajorMatrix<Felt>,
     declared_width: usize,
-    declared_height: Option<usize>,
+    declared_log_height: Option<u8>,
 }
 
 impl RowCounterAir {
     fn new(preprocessed: RowMajorMatrix<Felt>) -> Self {
         Self {
             declared_width: preprocessed.width(),
-            declared_height: Some(preprocessed.height()),
+            declared_log_height: Some(log2_strict_u8(preprocessed.height())),
             preprocessed,
         }
     }
@@ -73,8 +73,8 @@ impl BaseAir<Felt> for RowCounterAir {
 impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
 
-    fn preprocessed_height(&self) -> Option<usize> {
-        self.declared_height
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.declared_log_height
     }
 
     fn aux_width(&self) -> usize {
@@ -199,10 +199,10 @@ impl BaseAir<Felt> for MixedAir {
 impl LiftedAir<Felt, QuadFelt> for MixedAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
 
-    fn preprocessed_height(&self) -> Option<usize> {
+    fn log_preprocessed_height(&self) -> Option<u8> {
         match self {
-            Self::Constant(a) => a.preprocessed_height(),
-            Self::RowCounter(a) => a.preprocessed_height(),
+            Self::Constant(a) => a.log_preprocessed_height(),
+            Self::RowCounter(a) => a.log_preprocessed_height(),
         }
     }
 
@@ -420,8 +420,8 @@ fn rejects_height_mismatch() {
             result,
             Err(PreprocessedValidationError::Shape(ShapeError::PreprocessedHeightMismatch {
                 air: 0,
-                trace_height: 8,
-                preprocessed_height: 4,
+                log_trace_height: 3,
+                log_preprocessed_height: 2,
             }))
         ),
         "main trace height must match the AIR's fixed preprocessing height",
@@ -490,8 +490,8 @@ fn rejects_reassigned_preprocessed_tables() {
             result,
             Err(VerifierError::Shape(ShapeError::PreprocessedHeightMismatch {
                 air: 0,
-                trace_height: 8,
-                preprocessed_height: 4,
+                log_trace_height: 3,
+                log_preprocessed_height: 2,
             }))
         ));
     }
@@ -524,7 +524,7 @@ fn rejects_reassigned_equal_height_preprocessed_tables() {
 #[should_panic(expected = "preprocessed matrix height for AIR 0 differs from its declaration")]
 fn setup_rejects_incorrect_declared_height() {
     let mut air = RowCounterAir::new(row_index_trace(4));
-    air.declared_height = Some(8);
+    air.declared_log_height = Some(3);
     let statement =
         Statement::new(PreprocMultiAir { airs: vec![air] }, vec![], vec![]).expect("statement");
     Preprocessed::build(&statement, &test_config());
@@ -688,8 +688,8 @@ impl BaseAir<Felt> for CountedAir {
 impl LiftedAir<Felt, QuadFelt> for CountedAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = CountedEvalData<E>;
 
-    fn preprocessed_height(&self) -> Option<usize> {
-        self.inner.preprocessed_height()
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.inner.log_preprocessed_height()
     }
 
     fn aux_width(&self) -> usize {

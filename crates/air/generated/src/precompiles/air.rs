@@ -86,8 +86,8 @@ impl BaseAir<Felt> for ChipletAir {
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
 
-    fn preprocessed_height(&self) -> Option<usize> {
-        self.0.preprocessed_height()
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.0.log_preprocessed_height()
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {

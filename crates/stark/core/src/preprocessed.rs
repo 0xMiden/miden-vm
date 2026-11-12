@@ -76,9 +76,9 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if a preprocessed matrix's presence or height differs from
-    /// [`LiftedAir::preprocessed_height`], its height is less than 2 or not a power of two,
-    /// or its LDE order exceeds the field's two-adicity. These are AIR setup errors.
+    /// Panics if a preprocessed matrix's height is less than 2 or not a power of two, its presence
+    /// or log height differs from [`LiftedAir::log_preprocessed_height`], or its LDE order exceeds
+    /// the field's two-adicity. These are AIR setup errors.
     pub fn build<EF, MA, C>(statement: &Statement<F, EF, MA>, config: &C) -> Option<Self>
     where
         EF: ExtensionField<F>,
@@ -91,9 +91,17 @@ where
             .enumerate()
             .map(|(air_idx, air)| {
                 let trace = air.preprocessed_trace();
+                let log_height = trace.as_ref().map(|trace| {
+                    let height = trace.height();
+                    assert!(
+                        height >= 2 && height.is_power_of_two(),
+                        "preprocessed matrix for AIR {air_idx} must have power-of-two height at least 2, got {height}",
+                    );
+                    log2_strict_u8(height)
+                });
                 assert_eq!(
-                    trace.as_ref().map(Matrix::height),
-                    air.preprocessed_height(),
+                    log_height,
+                    air.log_preprocessed_height(),
                     "preprocessed matrix height for AIR {air_idx} differs from its declaration",
                 );
                 trace
@@ -118,12 +126,7 @@ where
         let ldes: Vec<_> = pairs
             .into_iter()
             .map(|(air_idx, trace)| {
-                let height = trace.height();
-                assert!(
-                    height >= 2 && height.is_power_of_two(),
-                    "preprocessed matrix for AIR {air_idx} must have power-of-two height at least 2, got {height}",
-                );
-                let log_h = log2_strict_u8(height);
+                let log_h = log2_strict_u8(trace.height());
                 let coset_shift = LiftedDomain::<F>::canonical_lde_shift(log_h + log_blowup)
                     .expect("preprocessed LDE order exceeds field two-adicity");
                 let width = trace.width();

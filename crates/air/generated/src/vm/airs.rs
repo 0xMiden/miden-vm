@@ -69,8 +69,8 @@ impl BaseAir<Felt> for MidenAir {
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
 
-    fn preprocessed_height(&self) -> Option<usize> {
-        LiftedAir::<Felt, EF>::preprocessed_height(&self.0)
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        LiftedAir::<Felt, EF>::log_preprocessed_height(&self.0)
     }
 
     fn num_randomness(&self) -> usize {

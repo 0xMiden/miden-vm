@@ -182,9 +182,9 @@ impl BaseAir<Felt> for MidenAir {
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
 
-    fn preprocessed_height(&self) -> Option<usize> {
+    fn log_preprocessed_height(&self) -> Option<u8> {
         match self {
-            Self::And8Lookup => Some(trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT),
+            Self::And8Lookup => Some(trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT),
             Self::Core | Self::Chiplets | Self::EidosCompression => None,
         }
     }

@@ -114,22 +114,22 @@ impl TraceOrder {
         }
         for (idx, (air, &log_h)) in airs.iter().zip(log_heights.iter()).enumerate() {
             let trace_height = 1usize << log_h as usize;
-            match (air.preprocessed_width(), air.preprocessed_height()) {
+            match (air.preprocessed_width(), air.log_preprocessed_height()) {
                 (0, None) => {},
-                (1.., Some(height)) if height >= 2 && height.is_power_of_two() => {
-                    if trace_height != height {
+                (1.., Some(log_preprocessed_height)) => {
+                    if log_h != log_preprocessed_height {
                         return Err(ShapeError::PreprocessedHeightMismatch {
                             air: idx,
-                            trace_height,
-                            preprocessed_height: height,
+                            log_trace_height: log_h,
+                            log_preprocessed_height,
                         });
                     }
                 },
-                (width, height) => {
+                (width, log_height) => {
                     return Err(ShapeError::InvalidPreprocessedDimensions {
                         air: idx,
                         width,
-                        height,
+                        log_height,
                     });
                 },
             }
@@ -311,19 +311,20 @@ pub enum ShapeError {
     TooManyInstances { count: usize },
     #[error("airs().len() = {airs} does not match log trace heights length {heights}")]
     TraceCountMismatch { airs: usize, heights: usize },
-    #[error("AIR {air}: invalid preprocessed dimensions: width {width}, height {height:?}")]
+    #[error("AIR {air}: invalid preprocessed dimensions: width {width}, log height {log_height:?}")]
     InvalidPreprocessedDimensions {
         air: usize,
         width: usize,
-        height: Option<usize>,
+        log_height: Option<u8>,
     },
     #[error(
-        "AIR {air}: trace height {trace_height} does not match preprocessed height {preprocessed_height}"
+        "AIR {air}: log trace height {log_trace_height} does not match log preprocessed height \
+         {log_preprocessed_height}"
     )]
     PreprocessedHeightMismatch {
         air: usize,
-        trace_height: usize,
-        preprocessed_height: usize,
+        log_trace_height: u8,
+        log_preprocessed_height: u8,
     },
     #[error(
         "AIR {air}: trace height = {trace_height} is less than max periodic column \
@@ -352,7 +353,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct OrderTestAir {
         preprocessed_width: usize,
-        preprocessed_height: Option<usize>,
+        log_preprocessed_height: Option<u8>,
     }
 
     impl BaseAir<TF> for OrderTestAir {
@@ -366,8 +367,8 @@ mod tests {
 
     impl LiftedAir<TF, TF> for OrderTestAir {
         type EvalData<B: p3_field::Algebra<TF>, E: p3_field::Algebra<B>> = ();
-        fn preprocessed_height(&self) -> Option<usize> {
-            self.preprocessed_height
+        fn log_preprocessed_height(&self) -> Option<u8> {
+            self.log_preprocessed_height
         }
 
         fn num_randomness(&self) -> usize {
@@ -398,10 +399,10 @@ mod tests {
 
     #[test]
     fn rejects_invalid_preprocessed_dimensions() {
-        for (width, height) in [(1, None), (0, Some(4)), (1, Some(0)), (1, Some(1)), (1, Some(3))] {
+        for (width, log_height) in [(1, None), (0, Some(2))] {
             let air = OrderTestAir {
                 preprocessed_width: width,
-                preprocessed_height: height,
+                log_preprocessed_height: log_height,
             };
             assert!(matches!(
                 TraceOrder::from_log_heights::<TF, TF, _>(&[air], vec![2]),
@@ -412,21 +413,21 @@ mod tests {
 
     #[test]
     fn checks_preprocessed_height_in_instance_order() {
-        let airs = [
-            OrderTestAir::default(),
-            OrderTestAir {
-                preprocessed_width: 1,
-                preprocessed_height: Some(4),
-            },
-        ];
-        for height in [2, 8] {
+        for (log_trace_height, log_preprocessed_height) in [(1, 2), (3, 2), (2, 0), (2, u8::MAX)] {
+            let airs = [
+                OrderTestAir::default(),
+                OrderTestAir {
+                    preprocessed_width: 1,
+                    log_preprocessed_height: Some(log_preprocessed_height),
+                },
+            ];
             assert!(matches!(
-                TraceOrder::from_trace_heights::<TF, TF, _>(&airs, &[4, height]),
+                TraceOrder::from_trace_heights::<TF, TF, _>(&airs, &[4, 1usize << log_trace_height]),
                 Err(ShapeError::PreprocessedHeightMismatch {
                     air: 1,
-                    trace_height,
-                    preprocessed_height: 4,
-                }) if trace_height == height
+                    log_trace_height: actual_trace,
+                    log_preprocessed_height: actual_preprocessed,
+                }) if actual_trace == log_trace_height && actual_preprocessed == log_preprocessed_height
             ));
         }
     }

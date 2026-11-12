@@ -128,8 +128,8 @@ impl BaseAir<Felt> for ChipletAir {
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
 
-    fn preprocessed_height(&self) -> Option<usize> {
-        delegate!(self, preprocessed_height)
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        delegate!(self, log_preprocessed_height)
     }
 
     fn max_periodic_length(&self) -> usize {
