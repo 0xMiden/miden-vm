@@ -128,28 +128,16 @@ fn memory_chiplet_bus_request_response_pairs() {
         }
         mem_rows_seen += 1;
 
-        let mem = main.chiplet_cols(idx).memory();
-        let is_read = mem.is_read;
-        let is_word = mem.is_word;
-        let mem_ctx = main.chiplet_memory_ctx(idx);
-        let word_addr = main.chiplet_memory_word(idx);
-        let idx0 = main.chiplet_memory_idx0(idx);
-        let idx1 = main.chiplet_memory_idx1(idx);
-        let addr = word_addr + idx1.double() + idx0;
-        let mem_clk = main.chiplet_memory_clk(idx);
-        let word = [
-            main.chiplet_memory_value_0(idx),
-            main.chiplet_memory_value_1(idx),
-            main.chiplet_memory_value_2(idx),
-            main.chiplet_memory_value_3(idx),
-        ];
+        let mem = main.chiplet_cols(idx).memory_cols();
+        let addr = mem.word_addr + mem.idx1.double() + mem.idx0;
         // `element` is ignored by `MemoryResponseMsg::encode` when `is_word = 1`, so on
         // word-access rows the fallback `ZERO` is harmless. `element_idx` uses `u64`
         // arithmetic (native `usize` indexing) while `addr` above uses felt arithmetic —
         // same math, different domain required by the consumer.
-        let element = if is_word == ZERO {
-            let element_idx = (idx1.as_canonical_u64() * 2 + idx0.as_canonical_u64()) as usize;
-            word[element_idx]
+        let element = if mem.is_word == ZERO {
+            let element_idx =
+                (mem.idx1.as_canonical_u64() * 2 + mem.idx0.as_canonical_u64()) as usize;
+            mem.values[element_idx]
         } else {
             ZERO
         };
@@ -157,13 +145,13 @@ fn memory_chiplet_bus_request_response_pairs() {
         exp.add(
             row,
             &MemoryResponseMsg {
-                is_read,
-                ctx: mem_ctx,
+                is_read: mem.is_read,
+                ctx: mem.ctx,
                 addr,
-                clk: mem_clk,
-                is_word,
+                clk: mem.clk,
+                is_word: mem.is_word,
                 element,
-                word,
+                word: mem.values,
             },
         );
     }
@@ -192,8 +180,8 @@ fn aead_stream_emits_memory_requests() {
 
     let mut exp = Expectations::new(&log);
 
-    let aead_rows: Vec<_> = (0..main.core_height())
-        .filter(|&row| main.chiplet_aead_stream_active(RowIndex::from(row)) == ONE)
+    let aead_rows: Vec<_> = (0..main.chiplets_height())
+        .filter(|&row| main.is_aead_stream_row(RowIndex::from(row)))
         .collect();
     assert_eq!(aead_rows.len(), 16, "expected two 8-row stream entries");
 

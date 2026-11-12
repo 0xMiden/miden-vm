@@ -514,7 +514,7 @@ mod tests {
         CoreCols,
         constraints::{
             op_flags::{OpFlags, generate_test_row},
-            stack::test_utils::ConstraintEvalBuilder,
+            test_utils::ConstraintEvalBuilder,
         },
     };
 

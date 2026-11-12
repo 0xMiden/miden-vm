@@ -97,7 +97,7 @@ mod tests {
 
     use super::{OpBatchSelectors, enforce};
     use crate::vm::{
-        constraints::stack::test_utils::ConstraintEvalBuilder,
+        constraints::test_utils::ConstraintEvalBuilder,
         trace::decoder::{
             OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
         },

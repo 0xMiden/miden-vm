@@ -113,8 +113,7 @@ fn trace_writer_materializes_compression_cycle_id_on_internal_bus_rows() {
         TraceMode::Compression,
     );
 
-    for row in 0..BLOCK_PERIOD {
-        let row = &trace.rows[row];
+    for row in &trace.rows {
         assert_eq!(row[F_COMPRESSION_CYCLE_ID_COL], cycle_id);
     }
     for footer in 0..FOOTER_ROWS {
@@ -383,8 +382,8 @@ fn padding_retag_preserves_full_cv_coordinates() {
 
     retag_felt_trace_block_cycle_id(&mut trace.rows, 17);
 
-    for row in 0..FUSED_G_ROWS {
-        assert_eq!(trace.rows[row][F_COMPRESSION_CYCLE_ID_COL], Felt::from_u8(17));
+    for row in &trace.rows[..FUSED_G_ROWS] {
+        assert_eq!(row[F_COMPRESSION_CYCLE_ID_COL], Felt::from_u8(17));
     }
     for footer in 0..FOOTER_ROWS {
         let row = &trace.rows[FOOTER_START + footer];

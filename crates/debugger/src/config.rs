@@ -228,10 +228,7 @@ impl ColorChoice {
         }
         // If TERM != dumb, then the only way we don't allow colors at this
         // point is if NO_COLOR is set.
-        if std::env::var_os("NO_COLOR").is_some() {
-            return false;
-        }
-        true
+        std::env::var_os("NO_COLOR").is_none()
     }
 
     #[cfg(all(feature = "std", windows))]

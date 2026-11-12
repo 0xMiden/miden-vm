@@ -34,32 +34,34 @@ clock-tagged AEAD input/output relations rather than an ordinary controller comp
 
 ## Chiplet selector prefix
 
-The first physical selector is `s_ctrl = chiplets[0]`, which is one on controller rows. The
-remaining regions use the virtual selector `s0 = 1 - s_ctrl` and the physical selectors `s1..s4`:
+Each chiplet row starts with a selector prefix. Its payload follows the prefix in the same
+24-column trace. Column indices below are zero-based and inclusive.
 
-| Region                | Active when               |
-|-----------------------|---------------------------|
-| Hash controller       | `!s0`                     |
-| Bitwise / AEAD stream | `s0 * !s1`                |
-| Memory                | `s0 * s1 * !s2`           |
-| ACE                   | `s0 * s1 * s2 * !s3`      |
-| Kernel ROM            | `s0 * s1 * s2 * s3 * !s4` |
-| Padding               | `s0 * s1 * s2 * s3 * s4`  |
+| Region          | Prefix  | Payload columns |
+|-----------------|---------|-----------------|
+| Hash controller | `0`     | 1–23            |
+| AEAD stream     | `100`   | 3–22            |
+| Bitwise         | `101`   | 3–15            |
+| Memory          | `110`   | 3–19            |
+| ACE             | `1110`  | 4–19            |
+| Kernel ROM      | `11110` | 5–9             |
+| Padding         | `11111` | —               |
 
-The controller region is padded to an 8-row boundary before the bitwise/AEAD-stream region so its
-8-row entries remain phase-aligned.
+The producer packs the sections in this order. It pads the controller to an 8-row boundary so
+AEAD entries start on phase zero. The AIR permits AEAD and bitwise rows to alternate within
+prefix `10` at complete AEAD cycle boundaries.
 
 ## Single-row controller
 
-Every compression request occupies one controller row. The 19-column controller overlay is:
+Every compression request occupies one controller row. The 23-column controller payload contains
+the internal row-kind selectors, compression data, and operation metadata.
 
 ```text
-| cs0 cs1 cs2 | state[12]                                | row_data[4]   |
-|             | block_lo[4] | block_hi[4] | cv/digest[4] | row-kind data |
+| cs0 cs1 cs2 | state[12] | row_data[4] | op_final | mrupdate_id | merkle_or_padding | addr |
 ```
 
-Two additional controller cells carry `op_final` and `mrupdate_id`; a shared chiplet-mode cell
-distinguishes Merkle/padding rows from ordinary hash rows.
+`merkle_or_padding` marks Merkle and controller padding rows. `addr` is the controller row address.
+It starts at one and increments through controller padding.
 
 The overlay depends on row kind:
 
@@ -218,7 +220,7 @@ fixed.
 ## Implementation map
 
 - `crates/air/source/src/vm/constraints/chiplets/selectors.rs`
-  Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
+  Top-level chiplet selector prefixes, ordering, and precomputed `ChipletSelectors`.
 - `crates/air/source/src/vm/constraints/chiplets/hasher_control/`
   Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
   routing.

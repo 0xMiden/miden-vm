@@ -49,6 +49,11 @@ impl ConstraintEvalBuilder {
         self.transition = Felt::from_bool(transition);
         self
     }
+
+    pub(in crate::vm::constraints) fn with_periodic_values(mut self, values: Vec<Felt>) -> Self {
+        self.periodic_values = values;
+        self
+    }
 }
 
 impl AirBuilder for ConstraintEvalBuilder {
@@ -81,7 +86,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "stack tests use two-row transition windows");
+        assert_eq!(size, 2, "constraint tests use two-row transition windows");
         self.is_transition()
     }
 

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},

@@ -10,11 +10,12 @@ use miden_core::{
 use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
     and8_lookup::NUM_AND8_LOOKUP_COLS,
-    chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
+    chiplets::hasher::DIGEST_LEN,
     decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_ENCODING_COLS},
     eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
 use crate::vm::constraints::{
+    chiplets::selectors::ChipletActiveFlags,
     columns::{ChipletCols, CoreCols, NUM_CHIPLETS_COLS, NUM_CORE_COLS},
     decoder::columns::DecoderCols,
     stack::columns::StackCols,
@@ -63,7 +64,7 @@ impl<T> BorrowMut<MainTraceRow<T>> for [T] {
 // ================================================================================================
 
 /// Storage backing [`MainTrace`]: per-segment row-major buffers produced by `build_trace`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct TraceStorage {
     /// Core matrix (`CORE_STORAGE_WIDTH` cols), at its own per-AIR height.
     core_rm: RowMajorMatrix<Felt>,
@@ -75,7 +76,7 @@ struct TraceStorage {
     and8_lookup_rm: RowMajorMatrix<Felt>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MainTrace {
     storage: TraceStorage,
     last_program_row: RowIndex,
@@ -151,13 +152,13 @@ impl MainTrace {
     /// Returns the stored chiplets trace row at index `i`.
     ///
     /// The returned [`ChipletCols`] is the raw column layout shared across all chiplets;
-    /// use one of the per-chiplet overlays (`.controller()`, `.bitwise()`, `.memory()`,
-    /// `.ace()`, `.kernel_rom()`) to name the physical columns according to the chiplet
+    /// use a typed projection such as [`ChipletCols::controller_cols`] or
+    /// [`ChipletCols::memory_cols`] to name the physical columns according to the chiplet
     /// active on that row.
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets trace height — see [`Self::chiplets_height`]. The
-    /// four `is_*_row` classifiers short-circuit past the chiplets height, so they can be
+    /// `is_*_row` classifiers short-circuit past the chiplets height, so they can be
     /// used as bound-aware filters when iterating the unified trace.
     #[inline]
     pub fn chiplet_cols(&self, i: RowIndex) -> &ChipletCols<Felt> {
@@ -165,25 +166,6 @@ impl MainTrace {
         rows[i.as_usize()].as_slice().borrow()
     }
 
-    /// Clones the stored buffers into the per-AIR matrices used by the multi-AIR proving path.
-    pub fn clone_air_matrices(
-        &self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        // Each buffer is already stored at exactly its per-AIR height.
-        (
-            self.storage.core_rm.clone(),
-            self.storage.chiplets_rm.clone(),
-            self.storage.eidos_compression_rm.clone(),
-            self.storage.and8_lookup_rm.clone(),
-        )
-    }
-
-    /// Like [`Self::clone_air_matrices`], but consumes the trace and moves buffers.
     pub fn into_air_matrices(
         self,
     ) -> (
@@ -435,488 +417,51 @@ impl MainTrace {
     // CHIPLETS COLUMNS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns chiplet column number 0 at row i.
-    ///
-    /// # Panics
-    /// Panics if `i` is past the chiplets-AIR height. Callers iterating the unified trace
-    /// must guard via [`Self::chiplets_height`] or filter via [`Self::is_hash_row`] /
-    /// [`Self::is_bitwise_row`] / [`Self::is_memory_row`] / [`Self::is_ace_row`], which
-    /// short-circuit past the chiplets height.
-    pub fn chiplet_selector_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[0]
-    }
-
-    /// Returns chiplet column number 1 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[1]
-    }
-
-    /// Returns chiplet column number 2 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[2]
-    }
-
-    /// Returns chiplet column number 3 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[3]
-    }
-
-    /// Returns chiplet column number 4 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_4(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[4]
-    }
-
-    /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[5]
+    fn chiplet_active(&self, i: RowIndex) -> Option<ChipletActiveFlags<bool>> {
+        (i.as_usize() < self.chiplets_height())
+            .then(|| ChipletActiveFlags::from_trace_row(self.chiplet_cols(i)))
     }
 
     /// Returns `true` if a row is part of the hasher-controller chiplet.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; rows past `chiplets_height()`
     /// are not part of any chiplet by definition in the split-trace model.
-    pub fn is_hash_row(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ONE
-    }
-
-    /// Returns the (full) state of the hasher chiplet at row i.
-    pub fn chiplet_hasher_state(&self, i: RowIndex) -> [Felt; STATE_WIDTH] {
-        self.chiplet_cols(i).controller().state
-    }
-
-    /// Returns the Merkle current-node index carried by a controller row.
-    pub fn chiplet_node_index(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().merkle_node_index()
-    }
-
-    /// Returns the Merkle parent-node index carried by a controller row.
-    pub fn chiplet_node_index_next(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().merkle_node_index_next()
-    }
-
-    /// Returns the hasher's mrupdate_id column at row i (domain separator for sibling table).
-    pub fn chiplet_mrupdate_id(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller_mrupdate_id()
-    }
-
-    /// Returns the Merkle start flag carried by a controller row.
-    pub fn chiplet_merkle_is_start(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().merkle_is_start()
-    }
-
-    /// Returns the Merkle path level carried by a controller row.
-    pub fn chiplet_merkle_level(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().merkle_level()
-    }
-
-    /// Returns the virtual Merkle direction bit `node_index - 2 * node_index_next`.
-    pub fn chiplet_merkle_direction_bit(&self, i: RowIndex) -> Felt {
-        let ctrl = self.chiplet_cols(i).controller();
-        ctrl.merkle_node_index() - ctrl.merkle_node_index_next().double()
-    }
-
-    /// Returns the chiplet row clock at row i.
-    pub fn chiplet_clk(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chip_clk
-    }
-
-    /// Returns the chiplet stream-mode column at row i.
-    ///
-    /// # Panics
-    /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
-    /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
-    /// height, so they can be used as bound-aware filters.
-    pub fn chiplet_stream_mode(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise_stream_mode()
-    }
-
-    /// Returns the derived AEAD stream flag at row i. No physical column stores this flag.
-    pub fn chiplet_aead_stream_active(&self, i: RowIndex) -> Felt {
-        let cols = self.chiplet_cols(i);
-        if cols.chiplets[0] == ZERO && cols.chiplets[1] == ZERO && cols.bitwise_stream_mode() == ONE
-        {
-            ONE
-        } else {
-            ZERO
-        }
-    }
-
-    /// Returns the memory's word address low 16-bit limb at row i.
-    pub fn chiplet_memory_word_addr_lo(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory_word_addr_lo()
-    }
-
-    /// Returns the memory's word address high 16-bit limb at row i.
-    pub fn chiplet_memory_word_addr_hi(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory_word_addr_hi()
+    pub fn is_controller_row(&self, i: RowIndex) -> bool {
+        self.chiplet_active(i).is_some_and(|active| active.controller)
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0), s1=0, and `stream_mode=0`.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height so the classifier is safe to
-    /// call on any row of the unified trace.
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_controller_row`].
     pub fn is_bitwise_row(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_stream_mode(i) == ZERO
-            && self.chiplet_selector_1(i) == ZERO
+        self.chiplet_active(i).is_some_and(|active| active.bitwise)
     }
 
-    /// Returns bitwise input `a`, recomposed from little-endian byte witnesses at row i.
-    pub fn chiplet_bitwise_a(&self, i: RowIndex) -> Felt {
-        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().a_bytes)
-    }
-
-    /// Returns bitwise input `b`, recomposed from little-endian byte witnesses at row i.
-    pub fn chiplet_bitwise_b(&self, i: RowIndex) -> Felt {
-        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().b_bytes)
-    }
-
-    /// Returns the bitwise result recomposed from the byte witnesses at row i.
-    pub fn chiplet_bitwise_z(&self, i: RowIndex) -> Felt {
-        let cols = self.chiplet_cols(i).bitwise();
-        let a = u32_from_bitwise_bytes(cols.a_bytes);
-        let b = u32_from_bitwise_bytes(cols.b_bytes);
-        let and = u32_from_bitwise_bytes(cols.and_bytes);
-        let xor = a + b - and.double();
-        and + cols.op_flag * (xor - and)
+    /// Returns `true` if a row is part of the AEAD stream chiplet.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_controller_row`].
+    pub fn is_aead_stream_row(&self, i: RowIndex) -> bool {
+        self.chiplet_active(i).is_some_and(|active| active.aead_stream)
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=0, and `stream_mode=0`.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_controller_row`].
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_stream_mode(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ZERO
-    }
-
-    /// Returns the i-th row of the chiplet column containing memory context.
-    pub fn chiplet_memory_ctx(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().ctx
-    }
-
-    /// Returns the i-th row of the chiplet column containing memory address.
-    pub fn chiplet_memory_word(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().word_addr
-    }
-
-    /// Returns the i-th row of the chiplet column containing 0th bit of the word index.
-    pub fn chiplet_memory_idx0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().idx0
-    }
-
-    /// Returns the i-th row of the chiplet column containing 1st bit of the word index.
-    pub fn chiplet_memory_idx1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().idx1
-    }
-
-    /// Returns the i-th row of the chiplet column containing clock cycle.
-    pub fn chiplet_memory_clk(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().clk
-    }
-
-    /// Returns the i-th row of the chiplet column containing the zeroth memory value element.
-    pub fn chiplet_memory_value_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().values[0]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the first memory value element.
-    pub fn chiplet_memory_value_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().values[1]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the second memory value element.
-    pub fn chiplet_memory_value_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().values[2]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the third memory value element.
-    pub fn chiplet_memory_value_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).memory().values[3]
+        self.chiplet_active(i).is_some_and(|active| active.memory)
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=0, and `stream_mode=0`.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_controller_row`].
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_stream_mode(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ZERO
-    }
-
-    pub fn chiplet_ace_start_selector(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().s_start
-    }
-
-    pub fn chiplet_ace_block_selector(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().s_block
-    }
-
-    pub fn chiplet_ace_ctx(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().ctx
-    }
-
-    pub fn chiplet_ace_ptr(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().ptr
-    }
-
-    pub fn chiplet_ace_clk(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().clk
-    }
-
-    pub fn chiplet_ace_eval_op(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().eval_op
-    }
-
-    pub fn chiplet_ace_num_eval_rows(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().read().num_eval
-    }
-
-    pub fn chiplet_ace_id_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().id_0
-    }
-
-    pub fn chiplet_ace_v_0_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().v_0.0
-    }
-
-    pub fn chiplet_ace_v_0_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().v_0.1
-    }
-
-    pub fn chiplet_ace_wire_0(&self, i: RowIndex) -> [Felt; 3] {
-        let id_0 = self.chiplet_ace_id_0(i);
-        let v_0_0 = self.chiplet_ace_v_0_0(i);
-        let v_0_1 = self.chiplet_ace_v_0_1(i);
-
-        [id_0, v_0_0, v_0_1]
-    }
-
-    pub fn chiplet_ace_id_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().id_1
-    }
-
-    pub fn chiplet_ace_v_1_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().v_1.0
-    }
-
-    pub fn chiplet_ace_v_1_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().v_1.1
-    }
-
-    pub fn chiplet_ace_wire_1(&self, i: RowIndex) -> [Felt; 3] {
-        let id_1 = self.chiplet_ace_id_1(i);
-        let v_1_0 = self.chiplet_ace_v_1_0(i);
-        let v_1_1 = self.chiplet_ace_v_1_1(i);
-
-        [id_1, v_1_0, v_1_1]
-    }
-
-    pub fn chiplet_ace_id_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().eval().id_2
-    }
-
-    pub fn chiplet_ace_v_2_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().eval().v_2.0
-    }
-
-    pub fn chiplet_ace_v_2_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().eval().v_2.1
-    }
-
-    pub fn chiplet_ace_wire_2(&self, i: RowIndex) -> [Felt; 3] {
-        let id_2 = self.chiplet_ace_id_2(i);
-        let v_2_0 = self.chiplet_ace_v_2_0(i);
-        let v_2_1 = self.chiplet_ace_v_2_1(i);
-
-        [id_2, v_2_0, v_2_1]
-    }
-
-    pub fn chiplet_ace_m_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().read().m_1
-    }
-
-    pub fn chiplet_ace_m_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).ace().read().m_0
-    }
-
-    pub fn chiplet_ace_is_read_row(&self, i: RowIndex) -> bool {
-        self.is_ace_row(i) && self.chiplet_ace_block_selector(i) == ZERO
-    }
-
-    pub fn chiplet_ace_is_eval_row(&self, i: RowIndex) -> bool {
-        self.is_ace_row(i) && self.chiplet_ace_block_selector(i) == ONE
+        self.chiplet_active(i).is_some_and(|active| active.ace)
     }
 
     /// Returns `true` if a row is part of the kernel chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=1, s4=0, and `stream_mode=0`.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_controller_row`].
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_stream_mode(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ONE
-            && self.chiplet_selector_4(i) == ZERO
-    }
-
-    /// Returns true when the i-th row of the `s_first` column in the kernel chiplet is one, i.e.,
-    /// when this is the first row in a range of rows containing the same kernel proc hash.
-    pub fn chiplet_kernel_is_first_hash_row(&self, i: RowIndex) -> bool {
-        self.chiplet_cols(i).kernel_rom().multiplicity == ONE
-    }
-
-    /// Returns the i-th row of the chiplet column containing the zeroth element of the kernel
-    /// procedure root.
-    pub fn chiplet_kernel_root_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).kernel_rom().root[0]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the first element of the kernel
-    /// procedure root.
-    pub fn chiplet_kernel_root_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).kernel_rom().root[1]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the second element of the kernel
-    /// procedure root.
-    pub fn chiplet_kernel_root_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).kernel_rom().root[2]
-    }
-
-    /// Returns the i-th row of the chiplet column containing the third element of the kernel
-    /// procedure root.
-    pub fn chiplet_kernel_root_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).kernel_rom().root[3]
-    }
-
-    // MERKLE ROOT UPDATE SELECTORS
-    // --------------------------------------------------------------------------------------------
-    //
-    // The MRUPDATE operation has two legs, each traversing the same Merkle path:
-    //   - MV (Merkle Verify old path): inserts siblings into the sibling table
-    //   - MU (Merkle Update new path): removes siblings from the sibling table
-    //
-    // MPVERIFY (read-only path verification) does not interact with the sibling table.
-
-    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) controller row.
-    ///
-    /// Each row on the old path inserts its sibling into the virtual sibling table.
-    ///
-    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
-    pub fn f_mv(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
-            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
-            && self.chiplet_selector_3(i) == ZERO // s2=0
-    }
-
-    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) controller row.
-    ///
-    /// Each row on the new path removes its sibling from the virtual sibling table. Both paths
-    /// must use the same sibling at each level to balance the table.
-    ///
-    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
-    pub fn f_mu(&self, i: RowIndex) -> bool {
-        if i.as_usize() >= self.chiplets_height() {
-            return false;
-        }
-        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
-            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
-            && self.chiplet_selector_3(i) == ONE // s2=1
-    }
-}
-
-fn u32_from_bitwise_bytes(bytes: [Felt; 4]) -> Felt {
-    let bytes = bytes.map(|byte| {
-        u8::try_from(byte.as_canonical_u64()).expect("bitwise byte witness should fit in u8")
-    });
-    Felt::from_u32(u32::from_le_bytes(bytes))
-}
-
-#[cfg(test)]
-mod tests {
-    use miden_core::utils::Matrix;
-
-    use super::*;
-    use crate::vm::trace::TRACE_WIDTH;
-
-    /// Builds a deterministic Parts-form `MainTrace` with `num_rows` rows where each cell
-    /// holds `Felt::from_u32(row * TRACE_WIDTH + col)` for col positions matching the
-    /// equivalent unified-trace column index.
-    fn deterministic_parts_trace(num_rows: usize) -> MainTrace {
-        // `core_rm` is the full per-AIR Core matrix.
-        let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
-        let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
-        let mut eidos_compression_rm = Vec::with_capacity(num_rows * NUM_EIDOS_COMPRESSION_COLS);
-        let mut and8_rm = Vec::with_capacity(num_rows * NUM_AND8_LOOKUP_COLS);
-
-        for row in 0..num_rows {
-            for col in 0..CORE_STORAGE_WIDTH {
-                core_rm.push(Felt::from_u32((row * TRACE_WIDTH + col) as u32));
-            }
-            for c in 0..CHIPLETS_WIDTH {
-                chiplets_rm
-                    .push(Felt::from_u32((row * TRACE_WIDTH + CORE_STORAGE_WIDTH + c) as u32));
-            }
-            for c in 0..NUM_EIDOS_COMPRESSION_COLS {
-                eidos_compression_rm.push(Felt::from_u32(c as u32));
-            }
-            for c in 0..NUM_AND8_LOOKUP_COLS {
-                and8_rm.push(Felt::from_u32(c as u32));
-            }
-        }
-
-        MainTrace::from_parts(
-            core_rm,
-            chiplets_rm,
-            eidos_compression_rm,
-            and8_rm,
-            RowIndex::from(0),
-        )
-    }
-
-    #[test]
-    fn owned_matrices_match_cloned_matrices() {
-        const NUM_ROWS: usize = 8;
-        let (ref_core, ref_chip, ref_eidos, ref_and8) =
-            deterministic_parts_trace(NUM_ROWS).clone_air_matrices();
-        let (moved_core, moved_chip, moved_eidos, moved_and8) =
-            deterministic_parts_trace(NUM_ROWS).into_air_matrices();
-
-        assert_eq!(ref_core.width(), moved_core.width());
-        assert_eq!(ref_chip.width(), moved_chip.width());
-        assert_eq!(ref_eidos.width(), moved_eidos.width());
-        assert_eq!(ref_and8.width(), moved_and8.width());
-        assert_eq!(ref_core.values, moved_core.values);
-        assert_eq!(ref_chip.values, moved_chip.values);
-        assert_eq!(ref_eidos.values, moved_eidos.values);
-        assert_eq!(ref_and8.values, moved_and8.values);
+        self.chiplet_active(i).is_some_and(|active| active.kernel_rom)
     }
 }

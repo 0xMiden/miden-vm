@@ -768,9 +768,7 @@ mod tests {
         for (key, _value) in tree.entries() {
             let index = NodeIndex::from(Smt::key_to_leaf_index(key));
             let sparse_path = tree.get_path(key);
-            for (sparse_node, proof_idx) in
-                itertools::zip_eq(sparse_path.clone(), index.proof_indices())
-            {
+            for (sparse_node, proof_idx) in itertools::zip_eq(sparse_path, index.proof_indices()) {
                 let proof_node = tree.get_node_hash(proof_idx);
                 assert_eq!(sparse_node, proof_node);
             }

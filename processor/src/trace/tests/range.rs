@@ -37,7 +37,7 @@ use super::{
 use crate::{AdviceInputs, RowIndex};
 
 const CONTROLLER_WIDTH: usize = size_of::<ControllerCols<u8>>();
-// The Eidos controller overlay occupies chiplet columns 1..20; column 0 is `s_ctrl`.
+// The Eidos controller overlay follows the top-level chiplet selector.
 const CONTROLLER_OFFSET: usize = 1;
 
 /// `U32add` range-checks its four decoder helper columns: for `1 + 255 = 256`, the four
@@ -120,7 +120,7 @@ fn merkle_index_helpers_are_constrained_and_range_checked() {
     // unmatched range request). This mutation touches no controller row.
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcodes::MRUPDATE);
-    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
     let changed = main.helper_register(2, op_row) + Felt::ONE;
     set_helper_register(&mut core, op_row, 2, changed);
     super::lookup::assert_trace_constraints_reject(&trace, core, chiplets, eidos_compression, and8);
@@ -144,7 +144,7 @@ fn merkle_init_bus_binds_the_first_direction_bit() {
     let honest_message =
         HasherMsg::merkle_verify_init(helper_addr, Felt::new_unchecked(INDEX), honest_bit, word);
 
-    let (core, mut chiplets, eidos_compression, and8) = main.clone_air_matrices();
+    let (core, mut chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
     let alias = INDEX + Felt::ORDER_U64;
     set_mpverify_controller_indices(main, &mut chiplets, alias);
 
@@ -174,7 +174,7 @@ fn merkle_index_alias_emits_out_of_range_doubled_top_limb() {
     let limbs = split_u64_into_u16_limbs(alias_y);
     assert!(limbs[3] >= 1 << 15, "alias witness must violate y < 2^63");
 
-    let (mut core, mut chiplets, eidos_compression, and8) = main.clone_air_matrices();
+    let (mut core, mut chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
     set_mpverify_controller_indices(main, &mut chiplets, alias);
     set_helper_register(&mut core, op_row, 1, Felt::new_unchecked(alias_bit));
     for (i, limb) in limbs.into_iter().enumerate() {
@@ -211,7 +211,7 @@ fn forged_merkle_depths_emit_unbalanced_lookup_requests() {
     let helper0 = main.helper_register(0, op_row);
     let root = core::array::from_fn(|i| main.stack_element(6 + i, op_row));
     let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        main.clone_air_matrices();
+        main.clone().into_air_matrices();
     let first_unsupported_depth = Felt::new_unchecked(u64::from(MAX_MERKLE_DEPTH) + 1);
 
     for forged_depth in [ZERO, first_unsupported_depth, Felt::NEG_ONE] {
@@ -312,14 +312,14 @@ fn memory_chiplet_row_emits_range_check_removes() {
     let mut requested_values = Vec::with_capacity(5 * mem_rows.len());
     for mem_row in &mem_rows {
         let row = usize::from(*mem_row);
-        let mem = main.chiplet_cols(*mem_row).memory();
-        let d0 = mem.d0;
-        let d1 = mem.d1;
-        let w0 = main.chiplet_memory_word_addr_lo(*mem_row);
-        let w1 = main.chiplet_memory_word_addr_hi(*mem_row);
-        let four_w1 = w1 * Felt::from_u8(4);
-
-        for value in [d0, d1, w0, w1, four_w1] {
+        let mem = main.chiplet_cols(*mem_row).memory_cols();
+        for value in [
+            mem.d0,
+            mem.d1,
+            mem.word_addr_lo,
+            mem.word_addr_hi,
+            mem.word_addr_hi * Felt::from_u8(4),
+        ] {
             exp.remove(row, &RangeMsg { value });
             requested_values.push(value);
         }
@@ -350,7 +350,7 @@ fn range_checker_table_emits_per_row_adds() {
     let operations = vec![Operation::U32add];
     let trace = build_trace_from_ops(operations, &stack);
     let log = InteractionLog::new(&trace);
-    let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
+    let (_, _, _, and8_matrix) = trace.into_air_matrices();
 
     let mut nonzero_mult_rows = 0usize;
     let mut exp = Expectations::new(&log);
@@ -432,10 +432,10 @@ fn set_mpverify_controller_indices(
     let rows: Vec<RowIndex> = (0..main.chiplets_height())
         .map(RowIndex::from)
         .filter(|&row| {
-            if !main.is_hash_row(row) {
+            if !main.is_controller_row(row) {
                 return false;
             }
-            let ctrl = main.chiplet_cols(row).controller();
+            let ctrl = main.chiplet_cols(row).controller_cols();
             ctrl.s0 == Felt::ONE && ctrl.s1 == ZERO && ctrl.s2 == Felt::ONE
         })
         .collect();

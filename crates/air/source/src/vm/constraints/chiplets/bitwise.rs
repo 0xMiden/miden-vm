@@ -6,7 +6,8 @@
 //! response bus recomposes the VM-facing `(op, a, b, result)` message.
 
 use crate::vm::{
-    AirBuilder, ChipletCols, MidenAirBuilder, constraints::chiplets::columns::BitwiseCols,
+    AirBuilder, MidenAirBuilder,
+    constraints::chiplets::{columns::BitwiseOpCols, selectors::ChipletSelectors},
 };
 
 // ENTRY POINTS
@@ -18,16 +19,13 @@ use crate::vm::{
 /// enforced by the shared AND8 lookup.
 pub fn enforce_bitwise_constraints<AB>(
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    _next: &ChipletCols<AB::Var>,
-    normal_bitwise: AB::Expr,
+    cols: &BitwiseOpCols<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let cols: &BitwiseCols<AB::Var> = local.bitwise();
-
-    // Normal bitwise rows are disabled while the AEAD stream overlay uses this region.
-    let bitwise_builder = &mut builder.when(normal_bitwise);
+    // The operation flag is meaningful only on bitwise rows.
+    let bitwise_builder = &mut builder.when(selectors.bitwise_active.clone());
 
     // 0 = AND, 1 = XOR.
     bitwise_builder.assert_bool(cols.op_flag);
