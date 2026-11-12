@@ -59,14 +59,14 @@ pub use errors::{
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
-pub use executor::ProgramExecutor;
+pub use executor::{FallibleProgramExecutor, ProgramExecutor};
 pub use fast::{
     BreakReason, DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput,
     FastProcessor, ResumeContext,
 };
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
-    SyncHost,
+    BaseHost, FallibleHost, FallibleSyncHost, FutureMaybeSend, Host, LoadedMastForest,
+    MastForestLoadError, MastForestLoadResult, MastForestStore, MemMastForestStore, SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };
