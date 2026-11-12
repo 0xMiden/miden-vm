@@ -307,22 +307,19 @@ impl ProveCmd {
     }
 }
 
-/// Returns true when both paths name the same existing file.
+/// Returns true when writing outputs would replace the proof file.
 ///
 /// This runs after the proof has been written, so the proof side always exists. An outputs path
 /// that does not exist yet cannot be the proof, and neither can a FIFO or device. Identity is
-/// taken from the stat of each path, so neither file is opened: opening a FIFO blocks until a
+/// taken from each path's metadata, so neither file is opened: opening a FIFO blocks until a
 /// writer appears, and opening for reading fails on a write-only file that is still a valid
-/// destination. Any other stat error leaves the question unanswered, so it is returned rather
-/// than taken as a no.
+/// destination. A final output symlink is replaced atomically without touching its target.
+/// Other metadata errors leave the question unanswered and are returned.
 fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
-    let output_metadata = match fs::metadata(output_path) {
+    let output_metadata = match fs::symlink_metadata(output_path) {
+        Ok(metadata) if metadata.is_symlink() => return Ok(false),
         Ok(metadata) => metadata,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-        // Atomic writes replace a final symlink even when its target cannot be resolved.
-        Err(_) if fs::symlink_metadata(output_path).is_ok_and(|metadata| metadata.is_symlink()) => {
-            return Ok(false);
-        },
         Err(err) => return Err(err),
     };
     let proof_metadata = fs::metadata(proof_path)?;
@@ -404,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_to_same_file_sees_through_a_symlinked_proof_path() {
+    fn resolve_to_same_file_distinguishes_final_and_parent_symlinks() {
         let dir = tempfile::tempdir().unwrap();
         let proof_path = dir.path().join("same.proof");
         fs::write(&proof_path, "proof").unwrap();
@@ -413,7 +410,11 @@ mod tests {
         {
             let alias_path = dir.path().join("alias.proof");
             std::os::unix::fs::symlink(&proof_path, &alias_path).unwrap();
-            assert!(resolve_to_same_file(&alias_path, &proof_path).unwrap());
+            assert!(!resolve_to_same_file(&alias_path, &proof_path).unwrap());
+
+            let parent_alias = dir.path().join("parent");
+            std::os::unix::fs::symlink(dir.path(), &parent_alias).unwrap();
+            assert!(resolve_to_same_file(&parent_alias.join("same.proof"), &proof_path).unwrap());
         }
 
         // negative control: with `sub` missing there is nothing to resolve `..` against

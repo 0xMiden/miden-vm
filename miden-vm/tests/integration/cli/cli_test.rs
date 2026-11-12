@@ -334,7 +334,7 @@ fn prove_keeps_the_proof_when_atomic_write_separates_a_symlink_alias() {
 
 #[cfg(unix)]
 #[test]
-fn prove_keeps_the_proof_when_the_default_output_is_a_symlink_to_it() {
+fn prove_keeps_the_proof_when_atomic_write_replaces_an_output_symlink_to_it() {
     let (working_dir, mut cmd) = prove_command();
     let proof_path = working_dir.path().join("custom.proof");
     let output_path = working_dir.path().join("custom.outputs");
@@ -342,10 +342,11 @@ fn prove_keeps_the_proof_when_the_default_output_is_a_symlink_to_it() {
     std::os::unix::fs::symlink("custom.proof", &output_path).unwrap();
 
     cmd.arg("--proof").arg(&proof_path);
-    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+    cmd.assert().success();
 
     assert_proof_survived(&proof_path);
-    assert!(output_path.is_symlink(), "the alias should be left untouched");
+    assert!(!output_path.is_symlink());
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
 }
 
 #[cfg(unix)]
