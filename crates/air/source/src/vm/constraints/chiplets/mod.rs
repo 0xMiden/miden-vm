@@ -24,6 +24,9 @@ pub mod hasher_control;
 pub mod memory;
 pub mod selectors;
 
+#[cfg(test)]
+mod transition_tests;
+
 use selectors::ChipletSelectors;
 
 use crate::vm::{ChipletCols, MidenAirBuilder};

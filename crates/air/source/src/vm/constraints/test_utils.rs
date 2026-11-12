@@ -49,6 +49,11 @@ impl ConstraintEvalBuilder {
         self.transition = Felt::from_bool(transition);
         self
     }
+
+    pub(in crate::vm::constraints) fn with_periodic_values(mut self, values: Vec<Felt>) -> Self {
+        self.periodic_values = values;
+        self
+    }
 }
 
 impl AirBuilder for ConstraintEvalBuilder {
