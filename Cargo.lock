@@ -3641,6 +3641,7 @@ dependencies = [
  "miden-wasm-event-handlers",
  "predicates",
  "rand 0.10.2",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",

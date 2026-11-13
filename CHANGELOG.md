@@ -55,6 +55,7 @@
 
 - [BREAKING] Matched recursive VM/PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
 - [BREAKING] Require preprocessed AIRs to declare `LiftedAir::log_preprocessed_height` and reject proofs whose per-AIR heights differ, preserving table ownership during verification and proof parsing ([#4157](https://github.com/0xMiden/miden-vm/pull/4157)).
 - [BREAKING] Both XChaCha IES schemes preserve plaintext types and reject byte/element mismatches when unsealing. Existing IES messages sealed as elements must be regenerated ([#4161](https://github.com/0xMiden/miden-vm/pull/4161)).
 - [BREAKING] Bind recipient public-key encodings into IES HKDF contexts for both K256 and X25519, separating recipient contexts even when their DH secrets agree. Existing ciphertexts for the four HKDF-based IES schemes must be regenerated ([#4162](https://github.com/0xMiden/miden-vm/pull/4162)).
