@@ -30,3 +30,4 @@ book/
 # Constraint analysis tooling
 .constraint-tooling/
 scripts/__pycache__/
+scripts/tests/__pycache__/
