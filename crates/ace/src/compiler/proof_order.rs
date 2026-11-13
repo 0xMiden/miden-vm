@@ -69,16 +69,10 @@ const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
 /// is data-oblivious, so a verifier can apply it to untrusted keys with a fixed instruction
 /// sequence. Four inputs take five comparators; ten take 29.
 ///
-/// # Panics
-///
-/// Panics unless `1 <= num_inputs <= MAX_ORDER_AIRS`.
+/// The renderer supplies `1 <= num_inputs <= MAX_ORDER_AIRS`.
 ///
 /// The returned comparator sequence sorts arbitrary inputs over a totally ordered domain.
 pub(crate) fn sorting_network(num_inputs: usize) -> Vec<Comparator> {
-    assert!(
-        (1..=MAX_ORDER_AIRS).contains(&num_inputs),
-        "sorting networks are generated for 1..={MAX_ORDER_AIRS} inputs"
-    );
     if num_inputs == 10 {
         return TEN_INPUT_SORTING_NETWORK.to_vec();
     }

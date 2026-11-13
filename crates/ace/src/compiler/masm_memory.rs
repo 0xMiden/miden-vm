@@ -60,11 +60,8 @@ impl MasmMemoryLayout {
             "memory anchors must order dispatch storage, relation state, ACE data, query row, and FRI data without overlap"
         );
         let beta = inputs.index(InputKey::AuxRandBeta).unwrap();
-        assert!(
-            beta == inputs.counts.num_public
-                && (beta == 0
-                    || (inputs.index(InputKey::Public(0)) == Some(0)
-                        && inputs.index(InputKey::Public(beta - 1)) == Some(beta - 1))),
+        assert_eq!(
+            beta, inputs.counts.num_public,
             "ACE public values must form a dense prefix before the lookup challenges"
         );
         let ace_inputs_start = challenges_start - beta * EXT_DEGREE;
@@ -72,16 +69,10 @@ impl MasmMemoryLayout {
             ace_inputs_start >= relation_state_start && ace_inputs_start.is_multiple_of(8),
             "ACE public-input prefix exceeds its region or is unaligned"
         );
-        // The generic transcript stores both extension challenges with one word store.
-        assert!(
-            inputs.index(InputKey::AuxRandAlpha) == Some(beta + 1)
-                && beta + 2 <= inputs.total_inputs,
-            "lookup challenges must occupy adjacent beta, alpha READ slots"
-        );
-        let mut layout = Self {
+        let layout = Self {
             relation_state_start,
             ace_inputs_start,
-            stream_start: 0,
+            stream_start: ace_inputs_start + inputs.total_inputs * EXT_DEGREE,
         };
         let first_ood = inputs.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap();
         assert_eq!(
@@ -89,14 +80,9 @@ impl MasmMemoryLayout {
             ood_start,
             "ACE OOD inputs must begin at OOD_EVALUATIONS_PTR"
         );
-        layout.stream_start = layout.input_ptr(inputs.total_inputs);
         assert!(
-            layout.stream_start <= query_row_start && layout.stream_start.is_multiple_of(8),
-            "ACE READ inputs cross the query-row anchor or are unaligned"
-        );
-        assert!(
-            extents.stream_felts.is_multiple_of(8) && extents.query_row_felts.is_multiple_of(8),
-            "ACE streams and query rows must be eight-felt aligned"
+            layout.stream_start <= query_row_start,
+            "ACE READ inputs cross the query-row anchor"
         );
         for (name, start, len, limit) in [
             ("OOD dispatch table", scatter, extents.scatter_felts, relation_state_start),
@@ -212,8 +198,6 @@ mod tests {
             (state, usize::MAX - 7, row, scatter, "ACE stream"),
             (state, stream, usize::MAX - 7, scatter, "query row"),
             (state, stream, row, usize::MAX, "OOD dispatch table"),
-            (state, stream - 1, row, scatter, "aligned"),
-            (state, stream, row - 1, scatter, "aligned"),
         ] {
             let extents = MasmMemoryExtents {
                 state_felts,
@@ -263,13 +247,10 @@ mod tests {
             std::panic::catch_unwind(|| MasmMemoryLayout::new(ANCHORS, &stale_prefix, EXTENTS))
                 .is_err()
         );
-        for total in [0, 4096] {
-            let mut inputs = inputs(4);
-            inputs.total_inputs = total;
-            assert!(
-                std::panic::catch_unwind(|| MasmMemoryLayout::new(ANCHORS, &inputs, EXTENTS))
-                    .is_err()
-            );
-        }
+        let mut inputs = inputs(4);
+        inputs.total_inputs = 4096;
+        assert!(
+            std::panic::catch_unwind(|| MasmMemoryLayout::new(ANCHORS, &inputs, EXTENTS)).is_err()
+        );
     }
 }

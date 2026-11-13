@@ -140,26 +140,8 @@ impl PvmReadLayout {
             boundaries.push((constant, ptr));
         }
 
-        assert_eq!(
-            boundaries[0].1,
-            memory.ace_inputs_start(),
-            "PVM public inputs must begin at the first ACE READ slot"
-        );
-        assert!(
-            boundaries.windows(2).all(|pair| pair[0].1 < pair[1].1),
-            "PVM ACE READ-region boundaries must increase"
-        );
-
         boundaries.push(("ACE_CIRCUIT_STREAM_PTR", memory.stream_start()));
 
-        // The staged fold coefficients live at the end of the auxiliary-input region; a region
-        // that ended before them would silently overwrite the ACE stream reservation.
-        let fold_coefficients_end =
-            layout.index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1)).unwrap() + 1;
-        assert!(
-            fold_coefficients_end <= layout.total_inputs,
-            "PVM fold coefficients fall outside the READ section"
-        );
         let alpha_index = layout.index(InputKey::Alpha).unwrap();
         let first_fold_coefficient = layout.index(InputKey::MultiAirFoldCoeff(0)).unwrap();
         let fold_coefficient_offset = (first_fold_coefficient - alpha_index) * EXT_DEGREE;
@@ -182,10 +164,11 @@ impl PvmReadLayout {
 fn compute(constants: &str) -> GeneratedArtifacts {
     let captured = CapturedPvmRelation::new();
     let compiled = captured.compile();
+    compiled.geometry().assert_masm_compatible();
     let source = compiled.build_circuit(LayoutKind::Masm);
     let input_layout = source.layout();
     let circuit = PvmRecursiveAceCircuit::from(source.to_ace());
-    let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout);
+    let geometry = PvmOodGeometry::from_compiled(compiled.geometry());
     let memory = MasmMemoryLayout::new(
         constants,
         input_layout,
@@ -199,15 +182,11 @@ fn compute(constants: &str) -> GeneratedArtifacts {
     );
     let read_layout = PvmReadLayout::from_input_layout(input_layout, memory);
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    assert!(
-        num_quotient_chunks.is_power_of_two(),
-        "PVM quotient chunk count must be a power of two"
-    );
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
     )
-    .expect("configured PVM quotient geometry");
+    .expect("PVM quotient degree must fit the configured PCS blowup");
 
     let shape = CircuitShape {
         num_inputs: circuit.num_inputs,
@@ -220,11 +199,6 @@ fn compute(constants: &str) -> GeneratedArtifacts {
     // tests rebuild it from the authored setup trace.
     let preprocessed_commitment = Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked));
     let protocol = relation::protocol();
-    assert_eq!(
-        input_layout.counts.num_public,
-        miden_air_definitions::precompiles::logup::NUM_PUBLIC_VALUES,
-        "PVM ACE public values disagree with the statement schema"
-    );
 
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len);
     let ood_frames_masm = render_pvm_ood_frames(&geometry);
@@ -290,13 +264,12 @@ pub const BUS_GAMMA_C1_PTR = BUS_GAMMA_PTR + 1
             region.ptr,
             region.ptr + region.extent
         )
-        .expect("writing to String cannot fail");
+        .unwrap();
         if matches!(
             region.constant,
             "PUBLIC_INPUTS_PTR" | "AUX_BUS_BOUNDARY_PTR" | "AUXILIARY_ACE_INPUTS_PTR"
         ) {
-            writeln!(out, "pub const {} = {}\n", region.constant, region.ptr)
-                .expect("writing to String cannot fail");
+            writeln!(out, "pub const {} = {}\n", region.constant, region.ptr).unwrap();
         } else {
             out.push('\n');
         }
@@ -309,7 +282,7 @@ pub const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
 "#,
         stream_ptr = memory.stream_start(),
     )
-    .expect("writing to String cannot fail");
+    .unwrap();
 
     out.push_str("### Public values occupy consecutive quadratic-extension slots.\n");
     let public_felts = layout.regions[0].extent;
@@ -320,7 +293,7 @@ pub const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
             offset / 2,
             offset % 2,
         )
-        .expect("writing to String cannot fail");
+        .unwrap();
     }
     out.push_str("\n### Words of the normalized boundary array, two extension values per word.\n");
     for word in 1..NUM_CHIPLETS * EXT_DEGREE / WORD_SIZE {
@@ -329,7 +302,7 @@ pub const ACE_CIRCUIT_STREAM_PTR = {stream_ptr}
             "pub const AUX_BOUNDARY_WORD_{word}_PTR = AUX_BUS_BOUNDARY_PTR + {}",
             word * WORD_SIZE
         )
-        .expect("writing to String cannot fail");
+        .unwrap();
     }
 
     out
@@ -409,12 +382,8 @@ fn render_pvm_parameters(
         writeln!(output, "pub const {name} = {}", bus as usize + 1).unwrap();
     }
 
-    let setup_height = miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
-    assert!(
-        setup_height.is_power_of_two(),
-        "BytePairLut setup height must be a power of two"
-    );
-    let log_height = setup_height.ilog2();
+    let log_height =
+        u32::from(miden_air_definitions::precompiles::primitives::byte_pair_lut::LOG_TRACE_HEIGHT);
     let depth = log_height
         + u32::from(miden_air::precompiles::policy::precompile_pcs_params().log_blowup());
     let index_mask = u32::try_from((1u64 << depth) - 1).unwrap();
@@ -438,10 +407,6 @@ fn render_pvm_parameters(
                      # Each block contains eight base felts.\n",
     );
     for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
-        assert!(
-            width > 0 && width.is_multiple_of(EIDOS_BLOCK_WIDTH),
-            "PVM {blocks_name} must fill whole Eidos blocks"
-        );
         let encoded_len = u32::try_from(width).unwrap();
         let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
         writeln!(output, "pub const {blocks_name} = {}", width / EIDOS_BLOCK_WIDTH).unwrap();

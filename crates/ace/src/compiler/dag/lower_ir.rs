@@ -149,7 +149,7 @@ pub fn build_verifier_dag_from_ir(
         } else {
             constraints.base_roots[idx]
         };
-        let node = lower_ir_expr(graph, root, &mut builder, layout, &periodic_nodes);
+        let node = lower_ir_expr(graph, root, &mut builder, &periodic_nodes);
         let acc_mul = builder.mul(acc, alpha);
         acc = builder.add(acc_mul, node);
     }
@@ -176,7 +176,6 @@ fn lower_ir_expr(
     graph: &Graph,
     id: IrNodeId,
     builder: &mut DagBuilder<QuadFelt>,
-    layout: &InputLayout,
     periodic_nodes: &[NodeId],
 ) -> NodeId {
     match graph.node(id) {
@@ -196,8 +195,8 @@ fn lower_ir_expr(
                 // in the exact node order of the tree lowering.
                 let mut acc = builder.constant(QuadFelt::ZERO);
                 for coord in 0..<QuadFelt as BasedVectorSpace<Felt>>::DIMENSION {
-                    let basis = <QuadFelt as BasedVectorSpace<Felt>>::ith_basis_element(coord)
-                        .expect("basis index within extension degree");
+                    let basis =
+                        <QuadFelt as BasedVectorSpace<Felt>>::ith_basis_element(coord).unwrap();
                     let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
                     let basis_node = builder.constant(basis);
                     let term = builder.mul(basis_node, coord_node);
@@ -205,24 +204,21 @@ fn lower_ir_expr(
                 }
                 acc
             },
-            Leaf::Challenge(index) => randomness::lower_challenge(builder, layout, index),
+            Leaf::Challenge(index) => randomness::lower_challenge(builder, index),
             Leaf::PermValue(index) => builder.input(InputKey::AuxBusBoundary(index)),
             Leaf::ExtConst([c0, c1]) => {
-                let coeffs = [Felt::from_u64(c0), Felt::from_u64(c1)];
-                let value = QuadFelt::from_basis_coefficients_slice(&coeffs)
-                    .expect("two coefficients form a QuadFelt");
-                builder.constant(value)
+                builder.constant(QuadFelt::new([Felt::from_u64(c0), Felt::from_u64(c1)]))
             },
-            Leaf::ExtBase(inner) => lower_ir_expr(graph, inner, builder, layout, periodic_nodes),
+            Leaf::ExtBase(inner) => lower_ir_expr(graph, inner, builder, periodic_nodes),
         },
         Node::Op { op: OpKind::Neg, x, .. } => {
-            let lx = lower_ir_expr(graph, x, builder, layout, periodic_nodes);
+            let lx = lower_ir_expr(graph, x, builder, periodic_nodes);
             builder.neg(lx)
         },
         Node::Op { op, x, y, .. } => {
-            let lx = lower_ir_expr(graph, x, builder, layout, periodic_nodes);
+            let lx = lower_ir_expr(graph, x, builder, periodic_nodes);
             let y = y.expect("binary op has a right operand");
-            let ly = lower_ir_expr(graph, y, builder, layout, periodic_nodes);
+            let ly = lower_ir_expr(graph, y, builder, periodic_nodes);
             match op {
                 OpKind::Add => builder.add(lx, ly),
                 OpKind::Sub => builder.sub(lx, ly),

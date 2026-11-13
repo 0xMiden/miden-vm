@@ -112,9 +112,7 @@ fn leaf_value(seed: u64, leaf: Leaf) -> QuadFelt {
 }
 
 fn quad(c0: u64, c1: u64) -> QuadFelt {
-    let coeffs = [Felt::from_u64(c0), Felt::from_u64(c1)];
-    <QuadFelt as BasedVectorSpace<Felt>>::from_basis_coefficients_slice(&coeffs)
-        .expect("two coefficients form a QuadFelt")
+    QuadFelt::new([Felt::from_u64(c0), Felt::from_u64(c1)])
 }
 
 /// splitmix64-style mixer over a packed leaf key.

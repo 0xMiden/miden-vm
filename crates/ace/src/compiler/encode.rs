@@ -39,7 +39,6 @@ impl StreamGeometry {
     /// to whole `adv_pipe` blocks. The single authority for this arithmetic: `to_ace` derives
     /// every node id from here rather than repeating the padding rules inline.
     pub(crate) fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
-        assert!(num_ops > 0, "ACE circuit has no operations to encode");
         assert!(
             num_inputs.is_multiple_of(ACE_READ_ROW_EF_NODES),
             "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"
@@ -101,7 +100,7 @@ where
         assert_eq!(
             self.root,
             AceNode::Operation(num_op_nodes - 1),
-            "ACE circuit root must be the last operation before padding"
+            "ACE checks the final EVAL row, so the circuit root must be the last operation"
         );
 
         // The instruction stream is measured in base felts:

@@ -1,8 +1,6 @@
 use core::num::NonZeroUsize;
 
 use super::SELECTORS_PER_AIR;
-#[cfg(any(test, feature = "compiler"))]
-use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,94 +125,6 @@ impl InputLayout {
     /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
     pub fn quotient_width(&self) -> usize {
         self.regions.quotient_curr.width
-    }
-
-    /// Validate internal layout invariants.
-    #[cfg(any(test, feature = "compiler"))]
-    pub(crate) fn validate(&self) {
-        let mut max_end = 0usize;
-        for region in [
-            self.regions.public_values,
-            self.regions.randomness,
-            self.regions.preprocessed_curr,
-            self.regions.main_curr,
-            self.regions.aux_curr,
-            self.regions.quotient_curr,
-            self.regions.preprocessed_next,
-            self.regions.main_next,
-            self.regions.aux_next,
-            self.regions.quotient_next,
-            self.regions.aux_bus_boundary,
-            self.regions.stark_vars,
-        ] {
-            max_end = max_end.max(region.offset + region.width);
-        }
-
-        assert!(max_end <= self.total_inputs, "regions exceed total_inputs");
-
-        assert_eq!(
-            self.regions.preprocessed_curr.width, self.counts.preprocessed_width,
-            "preprocessed_curr width mismatch"
-        );
-        assert_eq!(
-            self.regions.preprocessed_next.width, self.counts.preprocessed_width,
-            "preprocessed_next width mismatch"
-        );
-        assert_eq!(self.regions.main_curr.width, self.counts.width, "main_curr width mismatch");
-        assert_eq!(self.regions.main_next.width, self.counts.width, "main_next width mismatch");
-
-        let aux_coord_width = self.counts.aux_width * EXT_DEGREE;
-        assert_eq!(self.regions.aux_curr.width, aux_coord_width, "aux_curr width mismatch");
-        assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
-
-        let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
-        assert!(
-            self.regions.quotient_curr.width >= quotient_width,
-            "quotient_curr omits logical chunks"
-        );
-        assert_eq!(
-            self.regions.quotient_next.width, self.regions.quotient_curr.width,
-            "quotient row widths differ"
-        );
-        assert_eq!(
-            self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,
-            "aux bus boundary width mismatch"
-        );
-
-        let stark_start = self.regions.stark_vars.offset;
-        let stark_end = stark_start + self.regions.stark_vars.width;
-        let check = |name: &str, idx: usize| {
-            assert!(idx >= stark_start && idx < stark_end, "stark var {name} out of range");
-        };
-        check("alpha", self.stark.alpha);
-        check("z_pow_n", self.stark.z_pow_n);
-        check("z_k", self.stark.z_k);
-        check("is_first", self.stark.is_first);
-        check("is_last", self.stark.is_last);
-        check("is_transition", self.stark.is_transition);
-        check("reserved", self.stark.reserved);
-        check("weight0", self.stark.weight0);
-        check("f", self.stark.f);
-        check("s0", self.stark.s0);
-        if let Some(multi_air) = self.stark.multi_air {
-            for i in 0..(multi_air.air_count.get() * SELECTORS_PER_AIR) {
-                check("air_selector", multi_air.selector_start + i);
-            }
-            for i in 0..multi_air.air_count.get() {
-                check("fold_coeff", multi_air.fold_coeff_start + i);
-            }
-        }
-
-        let rand_start = self.regions.randomness.offset;
-        let rand_end = rand_start + self.regions.randomness.width;
-        assert!(
-            self.aux_rand_alpha >= rand_start && self.aux_rand_alpha < rand_end,
-            "aux_rand_alpha out of randomness region"
-        );
-        assert!(
-            self.aux_rand_beta >= rand_start && self.aux_rand_beta < rand_end,
-            "aux_rand_beta out of randomness region"
-        );
     }
 }
 

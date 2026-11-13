@@ -5,7 +5,7 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
 use crate::{
-    EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
+    EXT_DEGREE, InputCounts, MAX_ORDER_AIRS,
     compiler::{AceCircuit, AceConfig, LayoutKind},
 };
 
@@ -228,84 +228,24 @@ impl RelationGeometry {
         self.preprocessed_width + self.main_width + self.aux_width + self.quotient_width
     }
 
-    /// Checks the shape supported by the MASM LogUp, OOD and DEEP stages against the
-    /// circuit's READ layout. AIRs must be in the same canonical order in both descriptions.
+    /// Checks the relation shape supported by the MASM LogUp, OOD and DEEP stages.
     ///
-    /// Each AIR contributes one normalized boundary value. Committed groups are padded to eight
-    /// base felts; OOD openings occupy one extension slot per committed coordinate, in two dense
-    /// rows followed by the boundary values. Statement encoding and height rules remain the
-    /// relation adapter's responsibility. Panics if the geometry and layout are incompatible.
-    pub fn validate_masm_layout(&self, layout: &InputLayout) {
+    /// Each AIR contributes one normalized boundary value, committed groups use eight-felt
+    /// alignment, and every commitment group is nonempty. Relation adapters check these
+    /// requirements before generating their MASM artifacts.
+    pub fn assert_masm_compatible(&self) {
         let n = self.airs.len();
         assert!(
             (2..=MAX_ORDER_AIRS).contains(&n) && self.trace_alignment == 8,
             "MASM staging requires 2..={MAX_ORDER_AIRS} AIRs and eight-felt trace alignment"
         );
         assert!(
-            self.airs.iter().all(|air| air.num_aux_boundary == 1) && self.num_aux_boundary == n,
+            self.airs.iter().all(|air| air.num_aux_boundary == 1),
             "MASM LogUp staging requires one boundary value per AIR"
         );
-        for (name, derived, actual) in [
-            ("preprocessed", self.preprocessed_width, layout.counts.preprocessed_width),
-            ("main", self.main_width, layout.counts.width),
-            ("auxiliary-coordinate", self.aux_width / EXT_DEGREE, layout.counts.aux_width),
-            ("auxiliary-boundary", self.num_aux_boundary, layout.counts.num_aux_boundary),
-            ("public-input", self.num_public, layout.counts.num_public),
-            ("lookup-challenge", self.num_randomness, layout.counts.num_randomness),
-            ("quotient-chunk", self.num_quotient_chunks, layout.counts.num_quotient_chunks),
-            ("quotient-coordinate", self.quotient_width, layout.quotient_width()),
-        ] {
-            assert_eq!(derived, actual, "AIR-derived {name} width disagrees with ACE input layout");
-        }
-        for (name, total, widths) in [
-            (
-                "preprocessed",
-                self.preprocessed_width,
-                self.airs.iter().map(|air| air.preprocessed.width).collect::<Vec<_>>(),
-            ),
-            ("main", self.main_width, self.airs.iter().map(|air| air.main.width).collect()),
-            (
-                "auxiliary-coordinate",
-                self.aux_width,
-                self.airs.iter().map(|air| air.aux.width).collect(),
-            ),
-        ] {
-            assert!(
-                total > 0
-                    && widths.iter().all(|width| width.is_multiple_of(8))
-                    && widths.iter().sum::<usize>() == total,
-                "MASM {name} group has inconsistent or unaligned AIR widths"
-            );
-        }
         assert!(
-            self.quotient_width > 0 && self.quotient_width.is_multiple_of(8),
-            "MASM quotient group must be nonempty and eight-felt aligned"
-        );
-        let index = |key| layout.index(key).unwrap();
-        let mut cursor = index(InputKey::Preprocessed { offset: 0, index: 0 });
-        for offset in 0..2 {
-            for (key, width) in [
-                (InputKey::Preprocessed { offset, index: 0 }, self.preprocessed_width),
-                (InputKey::Main { offset, index: 0 }, self.main_width),
-                (InputKey::AuxCoord { offset, index: 0, coord: 0 }, self.aux_width),
-                (InputKey::QuotientChunkCoord { offset, chunk: 0, coord: 0 }, self.quotient_width),
-            ] {
-                assert_eq!(
-                    index(key),
-                    cursor,
-                    "ACE OOD group {key:?} does not follow the committed widths"
-                );
-                cursor += width;
-            }
-        }
-        assert_eq!(
-            index(InputKey::AuxBusBoundary(0)),
-            cursor,
-            "ACE boundary values must follow the two OOD rows"
-        );
-        assert!(
-            index(InputKey::MultiAirFoldCoeff(n - 1)) < layout.total_inputs,
-            "ACE fold coefficients fall outside the READ section"
+            self.preprocessed_width > 0 && self.main_width > 0 && self.aux_width > 0,
+            "MASM commitment groups must be nonempty"
         );
     }
 

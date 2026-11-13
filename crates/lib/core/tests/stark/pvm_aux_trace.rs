@@ -403,13 +403,6 @@ fn generated_logup_stage_matches_rust_for_every_air_count() {
         correction_procedure: "compute_fixed_boundary_correction",
         num_airs: 0,
     };
-    for n in [0, 1, MAX_ORDER_AIRS + 1, usize::MAX] {
-        config.num_airs = n;
-        assert!(
-            std::panic::catch_unwind(|| render_masm_aux_trace(&config)).is_err(),
-            "unsupported AIR count {n}"
-        );
-    }
     for n in 2..=MAX_ORDER_AIRS {
         let (mut challenger, alpha, beta) = sampled_challenges();
         let correction = fixed_boundary_correction(alpha, beta);

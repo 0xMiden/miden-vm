@@ -176,7 +176,6 @@ impl<EF> PeriodicColumnData<EF> {
         let mut columns = Vec::with_capacity(periodic_columns.len());
         let mut basis_costs = Vec::with_capacity(periodic_columns.len());
         for col in &periodic_columns {
-            assert!(!col.is_empty(), "periodic column must not be empty");
             assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
 
             let period = col.len();

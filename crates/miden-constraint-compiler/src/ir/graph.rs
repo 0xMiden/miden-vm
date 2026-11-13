@@ -116,9 +116,6 @@ impl GraphBuilder {
 
     /// Intern a leaf, returning the id of its unique node.
     pub(crate) fn leaf(&mut self, leaf: Leaf) -> NodeId {
-        if let Leaf::ExtBase(inner) = leaf {
-            debug_assert!(inner.index() < self.nodes.len(), "ExtBase wraps a foreign node id");
-        }
         self.intern(Node::Leaf(leaf))
     }
 
@@ -126,11 +123,10 @@ impl GraphBuilder {
     ///
     /// `y` must be `None` exactly when `op` is [`OpKind::Neg`].
     pub(crate) fn op(&mut self, class: Class, op: OpKind, x: NodeId, y: Option<NodeId>) -> NodeId {
-        debug_assert_eq!(matches!(op, OpKind::Neg), y.is_none(), "Neg is unary; the rest binary");
-        debug_assert!(x.index() < self.nodes.len(), "operand x is a foreign node id");
-        debug_assert!(
-            y.is_none_or(|y| y.index() < self.nodes.len()),
-            "operand y is a foreign node id"
+        debug_assert_eq!(
+            matches!(op, OpKind::Neg),
+            y.is_none(),
+            "only Neg omits its second operand"
         );
         self.intern(Node::Op { class, op, x, y })
     }

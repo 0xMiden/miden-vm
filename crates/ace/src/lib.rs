@@ -44,7 +44,6 @@ mod encode;
 pub mod instruction;
 mod layout;
 mod proof_order;
-mod randomness;
 
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;

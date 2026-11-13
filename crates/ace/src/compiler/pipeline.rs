@@ -51,9 +51,8 @@ pub struct AceArtifacts<EF> {
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
 ///
-/// This builds the constraint-evaluation DAG, validates layout invariants, and
-/// emits the off-VM circuit representation. The circuit performs the constraint
-/// evaluation check at the out-of-domain point z.
+/// This builds the constraint-evaluation DAG and emits the off-VM circuit representation.
+/// The circuit performs the constraint evaluation check at the out-of-domain point z.
 ///
 /// The constraints are captured from `air.eval`: callers producing production
 /// artifacts must pass an AIR whose `eval` routes to the hand-written
@@ -92,7 +91,6 @@ fn build_ace_dag_from_capture(
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
-    layout.validate();
     let periodic_data = (!air.periodic_columns.is_empty())
         .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(air.periodic_columns.clone()));
     let dag = build_verifier_dag_from_ir(
@@ -120,7 +118,6 @@ fn reemit_air_root(
     air_index: usize,
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
-    debug_assert_eq!(source.root().index() + 1, source.nodes.len());
     // The right operand is `Mul(q, v)` over quotient inputs, which AIR constraints cannot
     // reference. It is therefore neither equal nor structurally related to the accumulator,
     // so none of `DagBuilder::sub`'s simplifications can remove the final `Sub` node.
@@ -204,7 +201,6 @@ pub(crate) fn build_circuit_for_relation(
         relation.geometry.quotient_width,
         matches!(config.layout, LayoutKind::Masm),
     );
-    layout.validate();
 
     // Re-emit in stable instance order, each AIR placed at its canonical trace offset and scaled
     // by the fold coefficient it reads from its own slot.

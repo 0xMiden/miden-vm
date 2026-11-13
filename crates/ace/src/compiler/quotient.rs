@@ -37,7 +37,7 @@ where
     for chunk in 0..k {
         let mut value = builder.constant(EF::ZERO);
         for coord in 0..EF::DIMENSION {
-            let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
+            let basis = EF::ith_basis_element(coord).unwrap();
             let coord_node =
                 builder.input(InputKey::QuotientChunkCoord { offset: 0, chunk, coord });
             let basis_node = builder.constant(basis);

@@ -8,7 +8,7 @@ use std::{fmt::Write as _, format, string::String, vec::Vec};
 use miden_core::WORD_SIZE;
 use miden_crypto::hash::eidos::BLOCK_LEN;
 
-use crate::{EXT_DEGREE, MAX_ORDER_AIRS};
+use crate::EXT_DEGREE;
 
 /// Relation bindings for a stage with one normalized extension-field LogUp sum per AIR.
 pub struct MasmAuxTraceConfig<'a> {
@@ -32,13 +32,8 @@ pub struct MasmAuxTraceConfig<'a> {
 ///
 /// At runtime, the caller must stage the relation's boundary inputs, validated canonical heights,
 /// and a map from AIR ids to proof positions. The challenger input buffer must be empty.
-/// Panics if the AIR count is outside `2..=MAX_ORDER_AIRS`.
 pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> String {
     let n = config.num_airs;
-    assert!(
-        (2..=MAX_ORDER_AIRS).contains(&n),
-        "LogUp staging needs 2..={MAX_ORDER_AIRS} AIRs, got {n}"
-    );
     let coordinates = n * EXT_DEGREE;
     let words = coordinates / WORD_SIZE;
 

@@ -39,7 +39,7 @@ where
     let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
     let shared_period =
         periods.iter().flat_map(|cols| cols.iter().map(Vec::len)).max().unwrap_or(1);
-    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let z_k = inputs[layout.stark.z_k];
     let (mut public, mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0, 0);
     let mut roots = Vec::with_capacity(airs.len());
     for (i, air) in airs.iter().enumerate() {
@@ -96,7 +96,7 @@ where
         boundary += counts.num_aux_boundary;
     }
     let folded = proof_order.iter().fold(QuadFelt::ZERO, |acc, &i| acc * beta + roots[i]);
-    let vanishing = inputs[layout.index(InputKey::ZPowN).unwrap()] - QuadFelt::ONE;
+    let vanishing = inputs[layout.stark.z_pow_n] - QuadFelt::ONE;
     folded - eval_quotient::<Felt, QuadFelt>(layout, inputs) * vanishing
 }
 
@@ -180,9 +180,9 @@ where
                 },
                 BaseEntry::Periodic => periodic_values[v.index],
             },
-            BaseLeaf::IsFirstRow => inputs[layout.index(InputKey::IsFirst).unwrap()],
-            BaseLeaf::IsLastRow => inputs[layout.index(InputKey::IsLast).unwrap()],
-            BaseLeaf::IsTransition => inputs[layout.index(InputKey::IsTransition).unwrap()],
+            BaseLeaf::IsFirstRow => inputs[layout.stark.is_first],
+            BaseLeaf::IsLastRow => inputs[layout.stark.is_last],
+            BaseLeaf::IsTransition => inputs[layout.stark.is_transition],
             BaseLeaf::Constant(c) => EF::from(*c),
         },
         SymbolicExpression::Add { x, y, .. } => {
@@ -231,8 +231,8 @@ where
                     acc
                 },
                 ExtEntry::Challenge => {
-                    let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
-                    let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
+                    let alpha = inputs[layout.aux_rand_alpha];
+                    let beta = inputs[layout.aux_rand_beta];
                     match v.index {
                         0 => alpha,
                         1 => beta,
@@ -283,7 +283,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+    let alpha = inputs[layout.stark.alpha];
 
     let total = constraint_layout.base_indices.len() + constraint_layout.ext_indices.len();
     let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
@@ -314,10 +314,10 @@ where
     EF: ExtensionField<F>,
 {
     let k = layout.counts.num_quotient_chunks;
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
-    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let f = inputs[layout.index(InputKey::F).expect("F in layout")];
-    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
+    let z_pow_n = inputs[layout.stark.z_pow_n];
+    let s0 = inputs[layout.stark.s0];
+    let f = inputs[layout.stark.f];
+    let weight0 = inputs[layout.stark.weight0];
 
     let (deltas, weights) = compute_deltas_and_weights(k, z_pow_n, s0, f, weight0);
 
@@ -325,10 +325,9 @@ where
     for chunk in 0..k {
         let mut chunk_value = EF::ZERO;
         for coord in 0..EF::DIMENSION {
-            let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
-            let coord_value = inputs[layout
-                .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
-                .expect("quotient chunk coord in layout")];
+            let basis = EF::ith_basis_element(coord).unwrap();
+            let coord_value = inputs
+                [layout.index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord }).unwrap()];
             chunk_value += basis * coord_value;
         }
 
@@ -351,12 +350,11 @@ where
     EF: ExtensionField<F>,
 {
     let k = layout.counts.num_quotient_chunks;
-    assert!(chunk < k, "quotient chunk {chunk} out of range (k={k})");
 
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
-    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let f = inputs[layout.index(InputKey::F).expect("F in layout")];
-    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
+    let z_pow_n = inputs[layout.stark.z_pow_n];
+    let s0 = inputs[layout.stark.s0];
+    let f = inputs[layout.stark.f];
+    let weight0 = inputs[layout.stark.weight0];
 
     let (deltas, weights) = compute_deltas_and_weights(k, z_pow_n, s0, f, weight0);
 
@@ -372,13 +370,11 @@ where
 
 /// Evaluate a lowered DAG against concrete inputs.
 ///
-/// Panics if the input length does not match the layout or the layout omits a DAG input.
+/// Panics if the layout omits a DAG input or a referenced input is missing.
 pub fn eval_dag<EF>(dag: &AceDag<EF>, inputs: &[EF], layout: &InputLayout) -> EF
 where
     EF: Field,
 {
-    assert_eq!(inputs.len(), layout.total_inputs, "ACE input length mismatch");
-
     let mut values: Vec<EF> = vec![EF::ZERO; dag.nodes().len()];
     for (idx, node) in dag.nodes().iter().enumerate() {
         let value = match node {

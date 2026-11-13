@@ -51,10 +51,12 @@ pub fn build_pvm_recursive_verifier_ace_circuit() -> PvmRecursiveAceCircuit {
     build_canonical_precompile_ace_circuit().to_ace().into()
 }
 
-/// Security shape from the same captured relation used for evaluators and ACE generation.
+/// Security shape from the canonical PVM relation used for evaluators and ACE generation.
+///
+/// `relation` must come from [`CapturedPvmRelation::compile`], since lookup accounting uses the
+/// same authored PVM AIR set.
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
     let geometry = relation.geometry();
-    assert_eq!(geometry.airs.len(), crate::precompiles::NUM_CHIPLETS);
     AirShape {
         num_composed_constraints: (geometry.num_constraints + geometry.airs.len() - 1) as u32,
         max_constraint_degree: geometry.max_constraint_degree as u32,

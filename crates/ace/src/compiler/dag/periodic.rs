@@ -41,10 +41,6 @@ where
     let mut nodes = Vec::with_capacity(periodic.num_columns());
     for column in periodic.columns() {
         let col_len = column.period();
-        assert!(
-            shared_period.is_multiple_of(col_len),
-            "periodic-column period must divide the shared period"
-        );
         let ratio = shared_period / col_len;
         let log_pow_col = ratio.ilog2();
         let log_len = col_len.ilog2();
@@ -132,8 +128,7 @@ where
         return builder.constant(EF::ZERO);
     }
 
-    let mut sum: Option<NodeId> = None;
-    for term in terms {
+    let contribution = |builder: &mut DagBuilder<EF>, term: &SparseTerm<EF>| {
         let mut factor = builder.constant(EF::ONE);
         for (&power, &twiddle) in zpow.iter().zip(&term.twiddles) {
             let twiddle_node = builder.constant(twiddle);
@@ -143,13 +138,14 @@ where
             factor = builder.mul(factor, one_plus);
         }
         let value_node = builder.constant(term.scaled_value);
-        let contribution = builder.mul(value_node, factor);
-        sum = Some(match sum {
-            None => contribution,
-            Some(acc) => builder.add(acc, contribution),
-        });
+        builder.mul(value_node, factor)
+    };
+    let mut sum = contribution(builder, &terms[0]);
+    for term in &terms[1..] {
+        let value = contribution(builder, term);
+        sum = builder.add(sum, value);
     }
-    sum.expect("terms is non-empty")
+    sum
 }
 
 /// Prefix and suffix products of a subgroup's linear factors `point - roots[k]`, from which every

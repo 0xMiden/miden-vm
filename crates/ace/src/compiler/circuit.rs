@@ -47,10 +47,7 @@ impl<EF: Field> AceCircuit<EF> {
     }
 
     /// Evaluate the circuit against the provided input vector.
-    ///
-    /// Panics if the input length does not match the circuit layout.
     pub fn eval(&self, inputs: &[EF]) -> EF {
-        assert_eq!(inputs.len(), self.layout.total_inputs, "ACE input length mismatch");
         let mut op_values = vec![EF::ZERO; self.operations.len()];
         for (idx, op) in self.operations.iter().enumerate() {
             let lhs = self.node_value(op.lhs, inputs, &op_values);
@@ -80,13 +77,11 @@ impl<EF: Field> AceCircuit<EF> {
 
 /// Emit an ACE circuit from the DAG and input layout.
 ///
-/// Panics if the layout is inconsistent or omits a DAG input.
+/// Panics if the layout omits a DAG input.
 pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> AceCircuit<EF>
 where
     EF: Field,
 {
-    layout.validate();
-
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();
     let mut operations = Vec::new();

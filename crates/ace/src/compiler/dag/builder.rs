@@ -243,8 +243,6 @@ where
     }
 
     fn resolve_id(&self, id: NodeId, message: &str) -> NodeId {
-        assert!(id.index() < self.nodes.len(), "{message}");
-
         if id.dag_id == self.dag_id {
             return id;
         }

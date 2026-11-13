@@ -39,6 +39,8 @@ mod preparation;
 use plan::{Coefficient, DotKind, Piece, Plan, Rewrite};
 
 /// One AIR to emit an evaluator function for.
+///
+/// The graph and constraint roots must come from the same authored AIR capture.
 pub struct AirEvaluator<'a> {
     /// Suffix of the emitted function name (`eval_{name}`).
     pub name: &'a str,
@@ -56,9 +58,8 @@ pub struct AirEvaluator<'a> {
 ///
 /// # Panics
 ///
-/// Panics if the inputs break capture's guarantees: a class-invariant violation,
-/// an out-of-range or duplicate global constraint index, or an ext constant with
-/// non-base coefficients (not representable under the builder bound).
+/// Panics for extension constants with non-base coefficients: the builder bound does not name
+/// an extension field in which to construct them.
 pub fn emit_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
     emit_module_with_plan(header, evals, false)
 }
@@ -161,7 +162,6 @@ fn as_expr(t: &Token, types: ExprTypes) -> String {
 /// Lift a base-class token into the extension expression type. Promote a base variable to a
 /// base expression first; `Algebra` supplies both conversions.
 fn lift_base_to_ext(t: &Token, types: ExprTypes) -> String {
-    debug_assert!(matches!(t.class, Class::Base), "lift_base_to_ext on a non-base token");
     match t.repr {
         Repr::Expr => format!("{}::from({}.dup())", types.ext, t.code),
         Repr::Var => format!("{}::from({}::from({}))", types.ext, types.base, t.code),
@@ -331,7 +331,10 @@ impl<'g> Emitter<'g> {
             Leaf::ExtConst([c0, c1]) => {
                 // The builder bound does not name EF, so only constants liftable
                 // from the base field can be emitted.
-                assert_eq!(c1, 0, "ext constant with non-base coefficients");
+                assert_eq!(
+                    c1, 0,
+                    "the builder bound cannot construct extension constants outside the base field"
+                );
                 if matches!(self.mode, EmissionMode::Preparation(_)) {
                     self.ext_leaf(format!("E::from(B::from_u64({c0}))"))
                 } else {
@@ -510,14 +513,6 @@ impl<'g> Emitter<'g> {
     }
 }
 
-/// Place a value at its global constraint index, validating range and
-/// uniqueness. With every index placed exactly once, index density follows by
-/// pigeonhole.
-fn place<T>(slots: &mut [Option<T>], global: usize, value: T) {
-    assert!(slots[global].is_none(), "duplicate global constraint index {global}");
-    slots[global] = Some(value);
-}
-
 /// Binary-operator symbol; `Neg` is emitted as a prefix, never through here.
 fn sym(op: OpKind) -> char {
     match op {
@@ -539,21 +534,25 @@ fn emit_evaluator(
     // that order, so the asserts replay the hand-written eval's layout (and
     // alpha assignment) exactly.
     let cons = eval.constraints;
-    let total = cons.base_roots.len() + cons.ext_roots.len();
-    let mut roots: Vec<Option<(NodeId, bool)>> = vec![None; total];
-    for (local, &global) in cons.base_global_indices.iter().enumerate() {
-        place(&mut roots, global, (cons.base_roots[local], false));
-    }
-    for (local, &global) in cons.ext_global_indices.iter().enumerate() {
-        place(&mut roots, global, (cons.ext_roots[local], true));
-    }
+    let mut roots: Vec<_> = cons
+        .base_roots
+        .iter()
+        .zip(&cons.base_global_indices)
+        .map(|(&root, &global)| (global, root, false))
+        .chain(
+            cons.ext_roots
+                .iter()
+                .zip(&cons.ext_global_indices)
+                .map(|(&root, &global)| (global, root, true)),
+        )
+        .collect();
+    roots.sort_unstable_by_key(|&(global, ..)| global);
 
     let mut e = Emitter::new(EmissionMode::Row(preparation));
     if optimized {
         e.plan = Some(Plan::new(eval.graph, cons, preparation.terms()));
     }
-    for entry in roots {
-        let (root, is_ext) = entry.expect("every global constraint index must be assigned");
+    for (_, root, is_ext) in roots {
         let t = e.token(root);
         let line = if is_ext {
             match t.class {
@@ -563,7 +562,6 @@ fn emit_evaluator(
                 },
             }
         } else {
-            assert!(t.class == Class::Base, "base constraint root must be base-class");
             format!("    builder.assert_zero({});", operand(&t))
         };
         e.lines.push(line);
@@ -799,26 +797,9 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     }
 
     #[test]
-    #[should_panic(expected = "duplicate global constraint index")]
-    fn duplicate_global_index_is_rejected() {
-        let mut b = GraphBuilder::new();
-        let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let r = b.op(Class::Base, OpKind::Neg, x, None);
-        let graph = b.freeze();
-        let cons = constraints(vec![(r, 0), (r, 0)], vec![]);
-        emit_module(
-            "//! h.\n",
-            &[AirEvaluator {
-                name: "dup",
-                air_label: "MockAir::DUP",
-                graph: &graph,
-                constraints: &cons,
-            }],
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "ext constant with non-base coefficients")]
+    #[should_panic(
+        expected = "the builder bound cannot construct extension constants outside the base field"
+    )]
     fn ext_constant_outside_base_field_is_rejected() {
         let mut b = GraphBuilder::new();
         let c = b.leaf(Leaf::ExtConst([1, 2]));

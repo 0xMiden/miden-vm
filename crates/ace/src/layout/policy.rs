@@ -4,7 +4,7 @@ use super::{
     InputCounts, InputLayout, InputRegion, LayoutRegions, MultiAirIndices, SELECTORS_PER_AIR,
     StarkVarIndices,
 };
-use crate::{EXT_DEGREE, randomness};
+use crate::EXT_DEGREE;
 
 #[derive(Clone, Copy)]
 enum Alignment {
@@ -183,7 +183,8 @@ impl InputLayout {
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
-        let (aux_rand_alpha, aux_rand_beta) = randomness::aux_rand_indices(randomness);
+        // Extension challenges are stored as [beta, alpha] in memory words.
+        let (aux_rand_alpha, aux_rand_beta) = (randomness.offset + 1, randomness.offset);
         let preprocessed_curr = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
@@ -191,7 +192,6 @@ impl InputLayout {
         let quotient_width = quotient_width.unwrap_or_else(|| {
             (counts.num_quotient_chunks * EXT_DEGREE).next_multiple_of(policy.quotient_padding)
         });
-        assert!(quotient_width >= counts.num_quotient_chunks * EXT_DEGREE);
         let quotient_curr = builder.alloc(quotient_width, policy.quotient);
         let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
@@ -280,7 +280,6 @@ mod tests {
             layout.index(InputKey::QuotientChunkCoord { offset: 0, chunk: 2, coord: 0 }),
             None
         );
-        layout.validate();
     }
 
     #[test]
@@ -326,8 +325,6 @@ mod tests {
         // MASM uses felt offsets: 20 for the prologue, then 6 per AIR for selectors.
         let stark_base = layout.regions.stark_vars.offset;
         assert_eq!((coeff0 - stark_base) * crate::EXT_DEGREE, 20 + 6 * 3);
-
-        layout.validate();
     }
 
     #[test]
@@ -336,6 +333,5 @@ mod tests {
         assert!(layout.index(InputKey::MultiAirFoldCoeff(0)).is_some());
         assert!(layout.index(InputKey::MultiAirFoldCoeff(1)).is_some());
         assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), None);
-        layout.validate();
     }
 }

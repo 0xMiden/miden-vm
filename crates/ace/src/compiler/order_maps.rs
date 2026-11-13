@@ -35,26 +35,9 @@ impl Stack {
         assert!(index < 16, "the proof-order pass exceeds the directly addressable stack slots");
     }
 
-    /// Removes the top two tracked items, refusing to model a consumption of the caller's stack.
-    fn pop_two(&mut self, op: &str) {
-        for _ in 0..2 {
-            self.items
-                .pop()
-                .unwrap_or_else(|| panic!("{op} would consume the caller's stack"));
-        }
-    }
-
-    fn depth(&self) -> usize {
-        self.items.len()
-    }
-
     /// Index of the named item from the top of the stack.
     fn index_of(&self, name: &str) -> usize {
-        let from_bottom = self
-            .items
-            .iter()
-            .rposition(|item| item == name)
-            .unwrap_or_else(|| panic!("{name}"));
+        let from_bottom = self.items.iter().rposition(|item| item == name).unwrap();
         self.items.len() - 1 - from_bottom
     }
 
@@ -115,48 +98,45 @@ impl Stack {
             1 => self.emit("swap"),
             _ => self.emit(&format!("movdn.{index}")),
         }
-        let item = self.items.pop().expect("movdn on an empty stack");
+        let item = self.items.pop().unwrap();
         let from_bottom = self.items.len() - index;
         self.items.insert(from_bottom, item);
     }
 
     fn drop(&mut self) {
         self.emit("drop");
-        self.items.pop().expect("drop on an empty stack");
+        self.items.truncate(self.items.len() - 1);
     }
 
     /// Replaces the top item's name after a value-transforming op.
     fn rename_top(&mut self, name: &str) {
-        *self.items.last_mut().expect("rename on an empty stack") = name.into();
+        *self.items.last_mut().unwrap() = name.into();
     }
 
     /// Binary op consuming the top two items and pushing `name`.
     fn binary(&mut self, op: &str, name: &str) {
         self.emit(op);
-        self.pop_two(op);
+        self.items.truncate(self.items.len() - 2);
         self.items.push(name.into());
     }
 
     /// `mem_store` consumes `[addr, value]`.
     fn mem_store(&mut self) {
         self.emit("mem_store");
-        self.pop_two("mem_store");
+        self.items.truncate(self.items.len() - 2);
     }
 
     /// `mem_storew_le` consumes the address and keeps the word beneath it.
     fn mem_storew_le(&mut self) {
         self.emit("mem_storew_le");
-        self.items.pop().expect("mem_storew_le needs an address");
+        self.items.truncate(self.items.len() - 1);
     }
 
     /// `mem_loadw_le` consumes the address and overwrites the word beneath it with `names`
     /// (top first).
     fn mem_loadw_le(&mut self, names: [&str; 4]) {
         self.emit("mem_loadw_le");
-        self.items.pop().expect("mem_loadw_le needs an address");
-        for _ in 0..4 {
-            self.drop_quiet();
-        }
+        self.items.truncate(self.items.len() - 5);
         for name in names.iter().rev() {
             self.items.push((*name).into());
         }
@@ -164,20 +144,12 @@ impl Stack {
 
     fn padw(&mut self) {
         self.emit("padw");
-        for _ in 0..4 {
-            self.items.push("pad".into());
-        }
+        self.items.extend(core::iter::repeat_n(String::from("pad"), 4));
     }
 
     fn dropw(&mut self) {
         self.emit("dropw");
-        for _ in 0..4 {
-            self.drop_quiet();
-        }
-    }
-
-    fn drop_quiet(&mut self) {
-        self.items.pop().expect("drop on an empty stack");
+        self.items.truncate(self.items.len() - 4);
     }
 
     fn line(&self, indent: usize) -> String {
@@ -275,10 +247,6 @@ pub fn render_proof_order_maps(num_airs: usize) -> String {
         // [k_lo, k_hi, ...] -> [min, max, ...]. Placing the lower key first lets every
         // comparator whose lower index is nonzero avoid the extra swap hidden inside `u32gt`.
         stack.emit("dup.1 dup.1 u32lt cswap");
-        let hi_name = stack.items.pop().expect("hi");
-        let lo_name = stack.items.pop().expect("lo");
-        stack.items.push(lo_name);
-        stack.items.push(hi_name);
         // Place `min` one slot below its final position while `max` is still on the stack. Moving
         // `max` to `hi` then shifts `min` up into `lo`.
         stack.movdn(lo + 1);
@@ -353,7 +321,7 @@ pub fn render_proof_order_maps(num_airs: usize) -> String {
     }
 
     // Tear down the table pointers.
-    while stack.depth() > 0 {
+    while !stack.items.is_empty() {
         stack.drop();
     }
     lines.push(stack.line(4));

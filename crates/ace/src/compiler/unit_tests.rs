@@ -379,7 +379,9 @@ fn compact_preserves_already_compact_dag() {
 }
 
 #[test]
-#[should_panic(expected = "ACE circuit root must be the last operation before padding")]
+#[should_panic(
+    expected = "ACE checks the final EVAL row, so the circuit root must be the last operation"
+)]
 fn ace_encoding_rejects_non_final_root() {
     let layout = minimal_layout(2);
 

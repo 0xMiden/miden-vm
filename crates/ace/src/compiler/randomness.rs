@@ -3,7 +3,7 @@
 use miden_core::field::Field;
 
 use super::dag::{DagBuilder, NodeId};
-use crate::{InputKey, InputLayout};
+use crate::InputKey;
 
 /// Lower a challenge index into DAG nodes.
 ///
@@ -11,17 +11,10 @@ use crate::{InputKey, InputLayout};
 /// internally expands beta into powers `[1, beta, beta^2, ...]` via symbolic
 /// multiplication. This means the DAG will contain nodes for `beta^k` built
 /// from `AuxRandBeta`, which is correct.
-pub(crate) fn lower_challenge<EF>(
-    builder: &mut DagBuilder<EF>,
-    layout: &InputLayout,
-    index: usize,
-) -> NodeId
+pub(crate) fn lower_challenge<EF>(builder: &mut DagBuilder<EF>, index: usize) -> NodeId
 where
     EF: Field,
 {
-    let num = layout.counts.num_randomness;
-    assert!(index < num, "challenge index {index} out of range (num={num})");
-
     match index {
         0 => builder.input(InputKey::AuxRandAlpha),
         1 => builder.input(InputKey::AuxRandBeta),

@@ -76,7 +76,6 @@ where
 fn lower_ext_expr<F, EF>(
     expr: &SymbolicExpressionExt<F, EF>,
     builder: &mut DagBuilder<EF>,
-    layout: &InputLayout,
     periodic_nodes: &[NodeId],
 ) -> NodeId
 where
@@ -93,8 +92,7 @@ where
                     let index = v.index;
                     let mut acc = builder.constant(EF::ZERO);
                     for coord in 0..EF::DIMENSION {
-                        let basis = EF::ith_basis_element(coord)
-                            .expect("basis index within extension degree");
+                        let basis = EF::ith_basis_element(coord).unwrap();
                         let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
                         let basis_node = builder.constant(basis);
                         let term = builder.mul(basis_node, coord_node);
@@ -102,28 +100,28 @@ where
                     }
                     acc
                 },
-                ExtEntry::Challenge => randomness::lower_challenge(builder, layout, v.index),
+                ExtEntry::Challenge => randomness::lower_challenge(builder, v.index),
                 ExtEntry::PermutationValue => builder.input(InputKey::AuxBusBoundary(v.index)),
             },
             ExtLeaf::ExtConstant(c) => builder.constant(*c),
         },
         SymbolicExpressionExt::Add { x, y, .. } => {
-            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            let lx = lower_ext_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, periodic_nodes);
             builder.add(lx, ly)
         },
         SymbolicExpressionExt::Sub { x, y, .. } => {
-            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            let lx = lower_ext_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, periodic_nodes);
             builder.sub(lx, ly)
         },
         SymbolicExpressionExt::Mul { x, y, .. } => {
-            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            let lx = lower_ext_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, periodic_nodes);
             builder.mul(lx, ly)
         },
         SymbolicExpressionExt::Neg { x, .. } => {
-            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let lx = lower_ext_expr::<F, EF>(x, builder, periodic_nodes);
             builder.neg(lx)
         },
     }
@@ -163,7 +161,7 @@ where
     let mut acc = builder.constant(EF::ZERO);
     for &(_, is_ext, idx) in &ordered {
         let node = if is_ext {
-            lower_ext_expr::<F, EF>(&ext_constraints[idx], &mut builder, layout, &periodic_nodes)
+            lower_ext_expr::<F, EF>(&ext_constraints[idx], &mut builder, &periodic_nodes)
         } else {
             lower_base_expr::<F, EF>(&base_constraints[idx], &mut builder, &periodic_nodes)
         };

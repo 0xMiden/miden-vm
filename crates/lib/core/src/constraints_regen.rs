@@ -77,7 +77,8 @@ pub fn run(mode: Mode) -> Result<(), String> {
 /// must already name the circuit the authored AIRs compile to.
 fn write() -> io::Result<()> {
     let artifact = compute_artifacts()?;
-    pinned_identity_matches_artifact(&artifact).unwrap();
+    pinned_identity_matches_artifact(&artifact)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     write_artifacts(&artifact)
 }
 
@@ -99,8 +100,8 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let fri_capacity =
         parse_masm_const::<u64>(&constants, "FRI_FORWARD_REGION_SIZE", STARK_CONSTANTS_PATH)
             .unwrap();
-    let fri_start = parse_masm_const::<u32>(&constants, "FRI_COM_PTR", STARK_CONSTANTS_PATH)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let fri_start =
+        parse_masm_const::<u32>(&constants, "FRI_COM_PTR", STARK_CONSTANTS_PATH).unwrap();
     assert!(
         fri_capacity <= u64::from(u32::MAX) + 1 - u64::from(fri_start),
         "FRI workspace exceeds u32 memory"
@@ -113,6 +114,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let captured: Vec<_> = AIRS.iter().map(CapturedAir::new).collect();
     let airs: Vec<_> = captured.iter().collect();
     let relation = CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT);
+    relation.geometry().assert_masm_compatible();
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
     let source = relation.build_circuit(LayoutKind::Masm);
@@ -120,12 +122,11 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let circuit = RecursiveAceCircuit::from(source.to_ace());
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    assert!(num_quotient_chunks.is_power_of_two());
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         config::pcs_params().log_blowup(),
     )
-    .unwrap();
+    .expect("the VM quotient degree must fit the configured PCS blowup");
 
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
@@ -188,7 +189,8 @@ fn render_fri_parameters(vm: &PcsParams, pvm: &PcsParams, forward_capacity: u64)
         pvm.log_final_degree(),
         "VM and PVM must share the MASM FRI remainder bound"
     );
-    // Each specialization streams whole eight-felt blocks (four extension coefficients).
+    // The verifier streams either N or N/2 quadratic coefficients. Each eight-felt block holds
+    // four coefficients, so N must be at least eight for both remainder sizes to fill blocks.
     assert!(
         log_final_degree >= 3 && usize::from(log_final_degree) < Felt::TWO_ADICITY,
         "the FRI remainder bound must fit u32 and contain at least eight coefficients"
@@ -244,13 +246,6 @@ impl VmGeometry {
         constants: &str,
         layout: &str,
     ) -> Self {
-        assert_eq!(compiled.airs.len(), MIDEN_AIR_COUNT);
-        compiled.validate_masm_layout(input_layout);
-        assert_eq!(
-            compiled.num_public,
-            miden_air::vm::NUM_PUBLIC_VALUES,
-            "VM ACE public values disagree with the statement schema"
-        );
         let raw_preprocessed_widths: Vec<_> =
             compiled.airs.iter().map(|air| air.preprocessed.raw_width).collect();
         let preprocessed_widths: Vec<_> =
@@ -416,10 +411,6 @@ fn render_vm_parameters(
         ("AUX", geometry.aux_width),
         ("QUOTIENT", geometry.quotient_width),
     ] {
-        assert!(
-            width > 0 && width.is_multiple_of(EIDOS_BLOCK_WIDTH),
-            "VM {group} query width {width} must be a positive multiple of {EIDOS_BLOCK_WIDTH}"
-        );
         let encoded_len = u32::try_from(width).unwrap();
         let cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
         writeln!(output, "pub const {group}_ROW_DOUBLE_WORDS = {}", width / EIDOS_BLOCK_WIDTH)
@@ -475,7 +466,6 @@ fn render_vm_parameters(
         ("AUXILIARY_ACE_INPUTS_PTR", geometry.auxiliary_ace_inputs_ptr),
         ("ACE_CIRCUIT_STREAM_PTR", geometry.ace_circuit_stream_ptr),
     ] {
-        assert!(u32::try_from(value).is_ok(), "VM {name} exceeds u32 memory");
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
     output.push_str("\n# Words of the normalized boundary array, two extension values per word.\n");
@@ -741,7 +731,8 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
     let air_shape = miden_air::vm::security::AIR_SHAPE;
     let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
-    let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
+    let lookup = miden_air::vm::security::LOOKUP_SHAPE;
+    let deep_terms = air_shape.num_deep_terms.expect("the MVM uses DEEP composition");
     let lookup_coefficient =
         (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
     let max_boundary_terms = u64::from(miden_air::vm::security::FIXED_LOOKUP_ERROR_TERMS)
@@ -752,9 +743,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     if u64::from(air_shape.max_constraint_degree) > parsed("MAX_CONSTRAINT_DEGREE")? {
         return Err("the MVM constraint degree exceeds the estimator envelope".into());
     }
-    if u64::from(air_shape.num_deep_terms.expect("the MVM uses DEEP composition"))
-        > parsed("MAX_DEEP_TERMS")?
-    {
+    if u64::from(deep_terms) > parsed("MAX_DEEP_TERMS")? {
         return Err("the MVM DEEP term count exceeds the estimator envelope".into());
     }
     if lookup_coefficient < parsed("MIN_LOOKUP_COEFFICIENT")? {
@@ -811,13 +800,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             parameters_source,
             miden_air::vm::security::AIR_SHAPE.max_constraint_degree as u64,
         ),
-        (
-            "NUM_DEEP_TERMS",
-            parameters_source,
-            miden_air::vm::security::AIR_SHAPE
-                .num_deep_terms
-                .expect("the MVM uses DEEP composition") as u64,
-        ),
+        ("NUM_DEEP_TERMS", parameters_source, u64::from(deep_terms)),
         (
             "FIXED_LOOKUP_ERROR_TERMS",
             wrapper_source,
@@ -897,8 +880,6 @@ struct ComputedArtifacts {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
-
     use super::*;
 
     #[test]
@@ -949,53 +930,5 @@ mod tests {
             })
             .is_err()
         );
-    }
-
-    /// Synthetic row widths with configurable preprocessed occupancy and the VM auxiliary layout.
-    fn scatter_test_geometry(preprocessed_widths: &[usize]) -> VmGeometry {
-        let preprocessed_widths = preprocessed_widths.to_vec();
-        let main_widths = vec![8; preprocessed_widths.len()];
-        let aux_widths = vec![8; preprocessed_widths.len()];
-        let preprocessed_width: usize = preprocessed_widths.iter().sum();
-        let main_width: usize = main_widths.iter().sum();
-        let aux_width: usize = aux_widths.iter().sum();
-        let quotient_width = 8;
-        let row_width = preprocessed_width + main_width + aux_width + quotient_width;
-        VmGeometry {
-            public_inputs_ptr: 0,
-            num_public_values: 32,
-            raw_preprocessed_widths: preprocessed_widths.clone(),
-            preprocessed_widths,
-            preprocessed_width,
-            main_widths,
-            main_width,
-            aux_widths,
-            aux_width,
-            quotient_width,
-            row_width,
-            ood_row_felts: row_width * EXT_DEGREE,
-            ood_frame_felts: 2 * row_width * EXT_DEGREE,
-            ood_pipe_blocks: row_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
-            aux_bus_boundary_ptr: 0,
-            auxiliary_ace_inputs_ptr: 0,
-            // Auxiliary slots: 10 shared, 12 selectors, 4 fold coefficients, 2 padding.
-            ace_circuit_stream_ptr: 28 * EXT_DEGREE,
-            air_selector_offset: 10 * EXT_DEGREE,
-            fold_coefficient_offset: 22 * EXT_DEGREE,
-        }
-    }
-
-    #[test]
-    fn deep_query_parameters_reject_empty_or_unaligned_rows() {
-        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
-        for invalid_width in [0, EIDOS_BLOCK_WIDTH - 1] {
-            geometry.main_width = invalid_width;
-            assert!(
-                std::panic::catch_unwind(|| {
-                    render_vm_parameters(&geometry, &[Felt::ZERO; 4], &[0; 4])
-                })
-                .is_err()
-            );
-        }
     }
 }

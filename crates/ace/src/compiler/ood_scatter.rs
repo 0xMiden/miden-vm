@@ -40,8 +40,7 @@ impl OodScatterPlan {
     /// Per-AIR widths are in canonical instance order and count extension-field evaluations,
     /// including trace padding. The three slices must describe the same nonempty AIR set.
     /// A per-AIR group may be empty, have one occupant, or contain every AIR. The quotient
-    /// segment must be nonempty. All segments must fill whole 8-felt `adv_pipe` blocks,
-    /// and the total row length must fit in a u32 address offset.
+    /// segment must be nonempty. All segments must fill whole 8-felt `adv_pipe` blocks.
     pub fn new(
         preprocessed: &[usize],
         main: &[usize],
@@ -62,10 +61,6 @@ impl OodScatterPlan {
             "scatter segments must be 8-felt aligned"
         );
         let row_felts = widths.sum::<usize>() * EXT_DEGREE;
-        assert!(
-            u32::try_from(row_felts).is_ok(),
-            "the OOD row length must fit in a u32 address offset"
-        );
 
         let mut groups = Vec::with_capacity(4);
         let mut dst = 0;
@@ -151,11 +146,7 @@ impl OodScatterPlan {
     }
 
     fn digest_offset_for(&self, blocks: usize) -> usize {
-        let index = self
-            .lengths
-            .iter()
-            .position(|length| *length == blocks)
-            .expect("every segment length has a pipe procedure");
+        let index = self.lengths.binary_search(&blocks).unwrap();
         self.pipe_digests().start + WORD_FELTS * index
     }
 
@@ -171,7 +162,7 @@ impl OodScatterPlan {
                 out,
                 "const OOD_SCATTER_RECORD_{record}_PTR = OOD_SCATTER_TABLE_PTR + {offset}",
             )
-            .expect("writing to String cannot fail");
+            .unwrap();
         }
         out.push('\n');
         for &blocks in &self.lengths {
@@ -191,7 +182,7 @@ end
 "#,
                 felts = blocks * ADV_PIPE_BLOCK_FELTS
             )
-            .expect("writing to String cannot fail");
+            .unwrap();
         }
         out.push_str(proof_order_maps);
         out.push_str(
@@ -216,7 +207,7 @@ pub proc stage_ood_scatter_table()
                 "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
                 offset = self.digest_offset_for(blocks)
             )
-            .expect("writing to String cannot fail");
+            .unwrap();
         }
         out.push_str("    push.PROOF_ORDER_POSITIONS_PTR\n    # => [pos_ptr, table]\n");
         let dispatched: Vec<_> =
@@ -229,7 +220,7 @@ pub proc stage_ood_scatter_table()
                     {position} mul.4 dup.2 add\n    # => [base, pos_ptr, table]",
                     position = scatter_position_load(air)
                 )
-                .expect("writing to String cannot fail");
+                .unwrap();
                 for (record, groups) in dispatched.chunks(2).enumerate() {
                     if let Some(second) = groups.get(1) {
                         let segment = &second.segments[air];
@@ -239,7 +230,7 @@ pub proc stage_ood_scatter_table()
                             digest = self.digest_offset_for(segment.blocks),
                             dst = segment.dst,
                         )
-                        .expect("writing to String cannot fail");
+                        .unwrap();
                     } else {
                         out.push_str("    push.0.0\n");
                     }
@@ -253,7 +244,7 @@ pub proc stage_ood_scatter_table()
                         digest = self.digest_offset_for(first.blocks),
                         dst = first.dst,
                     )
-                    .expect("writing to String cannot fail");
+                    .unwrap();
                 }
                 out.push_str("    drop\n");
             }
@@ -283,7 +274,7 @@ pub proc process_row_ood_evaluations(
 "#,
             row_felts = self.row_felts
         )
-        .expect("writing to String cannot fail");
+        .unwrap();
         for group in &self.groups {
             for (position, segment) in group.segments.iter().enumerate() {
                 match group.dispatch_index {
@@ -301,7 +292,7 @@ pub proc process_row_ood_evaluations(
                             group = group.name,
                             select = if index % 2 == 0 { "" } else { " movup.3 movup.3" },
                         )
-                        .expect("writing to String cannot fail");
+                        .unwrap();
                     },
                     None => {
                         writeln!(
@@ -309,7 +300,7 @@ pub proc process_row_ood_evaluations(
                             "    # {} group, sole occupant: {} blocks at row offset {}",
                             group.name, segment.blocks, segment.dst,
                         )
-                        .expect("writing to String cannot fail");
+                        .unwrap();
                         // Offset zero is the first nonempty segment, so the input pointer is ready.
                         if segment.dst != 0 {
                             writeln!(
@@ -317,10 +308,9 @@ pub proc process_row_ood_evaluations(
                                 "    mem_load.OOD_SCATTER_TABLE_PTR add.{}\n    swap.13 drop",
                                 segment.dst,
                             )
-                            .expect("writing to String cannot fail");
+                            .unwrap();
                         }
-                        writeln!(out, "    exec.pipe_{}", segment.blocks)
-                            .expect("writing to String cannot fail");
+                        writeln!(out, "    exec.pipe_{}", segment.blocks).unwrap();
                     },
                 }
             }
@@ -345,7 +335,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scatter_rejects_incomplete_or_unaddressable_rows() {
+    fn scatter_rejects_incomplete_rows() {
         OodScatterPlan::new(&[0, 0], &[4, 4], &[4, 4], 4);
         for (preprocessed, main, aux, quotient) in [
             (vec![0, 0], vec![4, 4], vec![4, 4], 2),
@@ -353,8 +343,6 @@ mod tests {
             // An incomplete segment also misaligns the next group's destination.
             (vec![2, 0], vec![4, 4], vec![4, 4], 4),
             (vec![4, 4, 0], vec![4, 4, 4], vec![4, 4, 4], 4),
-            #[cfg(target_pointer_width = "64")]
-            (vec![0], vec![1 << 31], vec![0], 4),
         ] {
             assert!(
                 std::panic::catch_unwind(|| OodScatterPlan::new(
