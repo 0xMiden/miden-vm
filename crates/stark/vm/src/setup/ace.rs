@@ -1,5 +1,5 @@
 //! Materialization and caching of the VM relation's embedded recursive circuit.
-pub use miden_air::vm::ace::RecursiveAceCircuit;
+use miden_ace::RecursiveAceCircuit;
 use miden_air::vm::ace::{ACE_CIRCUIT_SHAPE, ACE_INSTRUCTIONS};
 
 /// Materialize the build-compiled VM circuit without symbolic AIR capture at runtime.

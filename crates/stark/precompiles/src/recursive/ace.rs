@@ -13,18 +13,18 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
+use miden_ace::RecursiveAceCircuit;
 #[cfg(test)]
 use miden_air::precompiles::ChipletAir;
 use miden_air::precompiles::NUM_CHIPLETS;
-pub use miden_air::precompiles::protocol::PvmRecursiveAceCircuit;
 #[cfg(test)]
 use miden_air_definitions::compiler::precompiles::{
     build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
 };
 
 /// Returns the process-wide canonical circuit shared by every proof order.
-pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
-    static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
+pub fn shared_pvm_recursive_circuit() -> &'static RecursiveAceCircuit {
+    static CIRCUIT: std::sync::OnceLock<RecursiveAceCircuit> = std::sync::OnceLock::new();
     CIRCUIT.get_or_init(miden_air::precompiles::protocol::recursive_circuit)
 }
 
@@ -89,8 +89,11 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace::InputKey;
-    use miden_air::precompiles::policy::precompile_pcs_params;
-    use miden_air_definitions::precompiles::ace::LMCS_ALIGNMENT;
+    use miden_air::precompiles::{
+        policy::{PROTOCOL_ID, precompile_pcs_params},
+        protocol::{PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST},
+    };
+    use miden_air_definitions::precompiles::relation::LMCS_ALIGNMENT;
     use miden_core::{
         Felt, Word,
         crypto::hash::Eidos,
@@ -98,9 +101,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::recursive::ace_constants::{
-        PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST, relation_digest_for_circuit,
-    };
+    use crate::recursive::ace_constants::relation_digest_for_circuit;
 
     const PVM_WRAPPER_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/mod.masm");
@@ -356,11 +357,7 @@ mod tests {
     /// verifier.
     #[test]
     fn pvm_domain_is_separated_from_vm() {
-        assert_ne!(
-            crate::recursive::ace_constants::PVM_PROTOCOL_ID,
-            1,
-            "PVM must not reuse the VM protocol id"
-        );
+        assert_ne!(PROTOCOL_ID, 1, "PVM must not reuse the VM protocol id");
         assert_ne!(
             PVM_RELATION_DIGEST,
             miden_air::vm::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
@@ -414,10 +411,8 @@ mod tests {
 
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
-        use miden_air::precompiles::ChipletMultiAir;
+        use miden_air::precompiles::{ChipletMultiAir, protocol::PVM_PREPROCESSED_COMMITMENT};
         use miden_stark::air::{BaseAir, MultiAir};
-
-        use crate::recursive::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/public_inputs.masm");
@@ -809,7 +804,7 @@ mod tests {
         let actual = statement
             .eval_external(&challenges, &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
-        let expected = match crate::recursive::ace_constants::PVM_PROTOCOL_ID {
+        let expected = match PROTOCOL_ID {
             // Fixed secp256k1, Ed25519 and P-256 boundary denominators plus one value per chiplet.
             4 => QuadFelt::new([
                 Felt::new_unchecked(13_307_287_383_580_918_166),

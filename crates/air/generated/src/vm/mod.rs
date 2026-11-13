@@ -13,16 +13,6 @@ pub mod security;
 mod statement;
 
 pub use airs::MidenAir;
-pub use miden_air_definitions::vm::{NUM_PUBLIC_VALUES, PublicInputs};
-pub use miden_core::{Felt, serde::DeserializationError};
-pub use miden_stark::{
-    StarkConfig,
-    air::{
-        AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
-        LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
-    },
-    debug,
-    pcs::PcsParams,
-};
+pub use miden_air_definitions::vm::NUM_PUBLIC_VALUES;
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT};
 pub use statement::MidenMultiAir;

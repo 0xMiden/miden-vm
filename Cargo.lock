@@ -3683,6 +3683,7 @@ dependencies = [
 name = "miden-vm-stark"
 version = "1.0.0-rc.2"
 dependencies = [
+ "miden-ace",
  "miden-air",
  "miden-air-definitions",
  "miden-core",

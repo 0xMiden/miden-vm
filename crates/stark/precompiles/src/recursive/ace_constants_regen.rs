@@ -9,14 +9,19 @@
 use std::{fmt::Write as _, format, io, println, string::String, vec::Vec};
 
 use miden_ace::{
-    EXT_DEGREE, InputKey, InputLayout,
+    EXT_DEGREE, InputKey, InputLayout, RecursiveAceCircuit,
     compiler::{
         LayoutKind, MasmAuxTraceConfig, MasmConstraintsEvalConfig, MasmMemoryExtents,
         MasmMemoryLayout, render_masm_aux_trace, render_masm_constraints_eval,
         render_masm_deep_queries,
     },
 };
-use miden_air::precompiles::NUM_CHIPLETS;
+use miden_air::precompiles::{
+    NUM_CHIPLETS,
+    protocol::{
+        PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT, PVM_RELATION_DIGEST,
+    },
+};
 use miden_air_definitions::{
     compiler::precompiles::CapturedPvmRelation,
     precompiles::relation::{self, HeightRule},
@@ -26,11 +31,7 @@ use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LE
 use miden_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 
 use super::{
-    ace::PvmRecursiveAceCircuit,
-    ace_constants::{
-        GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
-        PVM_RELATION_DIGEST, relation_digest_for_circuit,
-    },
+    ace_constants::{GENERATED_BY, relation_digest_for_circuit},
     pvm_ood_frames::{PvmOodGeometry, pvm_scatter_plan, render_pvm_ood_frames},
 };
 
@@ -167,7 +168,7 @@ fn compute(constants: &str) -> GeneratedArtifacts {
     compiled.geometry().assert_masm_compatible();
     let source = compiled.build_circuit(LayoutKind::Masm);
     let input_layout = source.layout();
-    let circuit = PvmRecursiveAceCircuit::from(source.to_ace());
+    let circuit = RecursiveAceCircuit::from(source.to_ace());
     let geometry = PvmOodGeometry::from_compiled(compiled.geometry());
     let memory = MasmMemoryLayout::new(
         constants,

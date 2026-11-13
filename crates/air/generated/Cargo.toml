@@ -30,6 +30,7 @@ ignored = ["p3-field"]
 
 [dependencies]
 # Miden dependencies
+miden-ace.workspace = true
 miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true

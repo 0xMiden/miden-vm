@@ -2,12 +2,18 @@
 
 use alloc::vec::Vec;
 
-use miden_ace::compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind};
+use miden_ace::{
+    RecursiveAceCircuit,
+    compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
+};
 use miden_core::field::QuadFelt;
 use miden_stark::security::AirShape;
 
 use crate::{
-    precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
+    precompiles::{
+        geometry::lookup_shape,
+        relation::{AIRS, LMCS_ALIGNMENT},
+    },
     shared::geometry::NUM_OOD_POINTS,
 };
 
@@ -35,7 +41,7 @@ impl CapturedPvmRelation {
 
     pub fn compile(&self) -> CompiledRelation<'_> {
         let airs: Vec<_> = self.airs.iter().collect();
-        CompiledRelation::from_captured(&airs, crate::precompiles::ace::LMCS_ALIGNMENT)
+        CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT)
     }
 }
 
@@ -47,7 +53,7 @@ pub fn build_canonical_precompile_ace_circuit() -> AceCircuit<QuadFelt> {
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
 /// Callers needing the circuit for multiple proofs should cache the encoded result.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> PvmRecursiveAceCircuit {
+pub fn build_pvm_recursive_verifier_ace_circuit() -> RecursiveAceCircuit {
     build_canonical_precompile_ace_circuit().to_ace().into()
 }
 

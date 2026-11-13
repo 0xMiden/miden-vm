@@ -98,11 +98,24 @@ cached_preprocessed!(eidos, EidosConfig, eidos_config);
 
 #[cfg(test)]
 mod tests {
+    use miden_air::precompiles::protocol::{
+        PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
+        PVM_PREPROCESSED_COMMITMENT,
+    };
+
     #[test]
-    fn eidos_setup_matches_the_accepted_pin() {
+    fn native_commitments_match_independently_built_setups() {
+        assert_eq!(
+            <[u8; 32]>::from(super::blake3().commitment()),
+            PVM_BLAKE3_PREPROCESSED_COMMITMENT,
+        );
+        assert_eq!(
+            <[u64; 4]>::from(super::keccak().commitment()),
+            PVM_KECCAK_PREPROCESSED_COMMITMENT,
+        );
         assert_eq!(
             <[u64; 4]>::from(super::eidos().commitment()),
-            miden_air::precompiles::protocol::PVM_PREPROCESSED_COMMITMENT,
+            PVM_PREPROCESSED_COMMITMENT,
             "backend setup must reproduce the accepted AIR-owned commitment",
         );
     }

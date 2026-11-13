@@ -7,10 +7,10 @@ use std::collections::HashMap;
 
 use miden_core::field::Field;
 
-pub(crate) use crate::instruction::Op as AceOp;
 use crate::{
     InputLayout,
     compiler::dag::{AceDag, NodeKind},
+    instruction::Op,
 };
 
 /// Nodes in the emitted ACE circuit.
@@ -24,7 +24,7 @@ pub(crate) enum AceNode {
 /// Operation node in the ACE circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AceOpNode {
-    pub op: AceOp,
+    pub op: Op,
     pub lhs: AceNode,
     pub rhs: AceNode,
 }
@@ -53,9 +53,9 @@ impl<EF: Field> AceCircuit<EF> {
             let lhs = self.node_value(op.lhs, inputs, &op_values);
             let rhs = self.node_value(op.rhs, inputs, &op_values);
             op_values[idx] = match op.op {
-                AceOp::Add => lhs + rhs,
-                AceOp::Sub => lhs - rhs,
-                AceOp::Mul => lhs * rhs,
+                Op::Add => lhs + rhs,
+                Op::Sub => lhs - rhs,
+                Op::Mul => lhs * rhs,
             };
         }
         self.node_value(self.root, inputs, &op_values)
@@ -105,21 +105,21 @@ where
                 let lhs = node_map[a.index()];
                 let rhs = node_map[b.index()];
                 let op_idx = operations.len();
-                operations.push(AceOpNode { op: AceOp::Add, lhs, rhs });
+                operations.push(AceOpNode { op: Op::Add, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Sub(a, b) => {
                 let lhs = node_map[a.index()];
                 let rhs = node_map[b.index()];
                 let op_idx = operations.len();
-                operations.push(AceOpNode { op: AceOp::Sub, lhs, rhs });
+                operations.push(AceOpNode { op: Op::Sub, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Mul(a, b) => {
                 let lhs = node_map[a.index()];
                 let rhs = node_map[b.index()];
                 let op_idx = operations.len();
-                operations.push(AceOpNode { op: AceOp::Mul, lhs, rhs });
+                operations.push(AceOpNode { op: Op::Mul, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Neg(a) => {
@@ -130,7 +130,7 @@ where
                 });
                 let op_idx = operations.len();
                 operations.push(AceOpNode {
-                    op: AceOp::Sub,
+                    op: Op::Sub,
                     lhs: AceNode::Constant(zero),
                     rhs,
                 });

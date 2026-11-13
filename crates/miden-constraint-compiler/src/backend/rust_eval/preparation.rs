@@ -1,48 +1,43 @@
 //! Selects challenge-only results to share across native row evaluations.
 
-use crate::ir::{CapturedConstraints, ChallengeDependencies, Class, Graph, Leaf, Node, NodeId};
+use crate::ir::{
+    CapturedConstraints, Class, Graph, Leaf, Node, NodeId, analyze::ChallengeDependencies,
+};
 
 /// One cache layout shared by preparation and row emission for a captured AIR.
 ///
 /// Select reachable extension operations whose results feed expressions requiring other inputs
 /// or are assertion roots themselves. Intermediate results stay local to preparation. Leaves
 /// and base operations receive no cache slots.
-pub(super) struct PreparationPlan<'g> {
-    graph: &'g Graph,
+pub(super) struct PreparationPlan {
     terms: Vec<NodeId>,
     slots: Vec<Option<usize>>,
 }
 
-impl<'g> PreparationPlan<'g> {
-    pub(super) fn new(graph: &'g Graph, constraints: &CapturedConstraints) -> Self {
+impl PreparationPlan {
+    pub(super) fn new(graph: &Graph, constraints: &CapturedConstraints) -> Self {
         let dependencies = ChallengeDependencies::new(graph);
         let mut needed = vec![false; graph.len()];
-        let mut pending = Vec::new();
-        let mut visit = |id: NodeId, pending: &mut Vec<NodeId>| {
-            if !needed[id.index()] {
-                needed[id.index()] = true;
-                pending.push(id);
-            }
-        };
         for &root in constraints.base_roots.iter().chain(&constraints.ext_roots) {
-            visit(root, &mut pending);
+            needed[root.index()] = true;
         }
-        while let Some(id) = pending.pop() {
-            if dependencies.is_challenge_only(id) {
-                // Its operands are also challenge-only, so this path has no further boundary.
+        // Parents precede their children in reverse graph order. Stop at challenge-only nodes:
+        // their operands are also challenge-only, so this path has no further boundary.
+        for (id, node) in graph.iter().rev() {
+            if !needed[id.index()] || dependencies.is_challenge_only(id) {
                 continue;
             }
-            let children = match graph.node(id) {
+            let children = match node {
                 Node::Op { x, y, .. } => [Some(x), y],
                 Node::Leaf(Leaf::ExtBase(inner)) => [Some(inner), None],
                 _ => [None, None],
             };
             for child in children.into_iter().flatten() {
-                visit(child, &mut pending);
+                needed[child.index()] = true;
             }
         }
 
-        // Assign slots in graph order, independently of the root traversal order.
+        // Assign slots in graph order, independently of the root order.
         let mut terms = Vec::new();
         let mut slots = vec![None; graph.len()];
         for (id, node) in graph.iter() {
@@ -54,11 +49,7 @@ impl<'g> PreparationPlan<'g> {
                 terms.push(id);
             }
         }
-        Self { graph, terms, slots }
-    }
-
-    pub(super) fn graph(&self) -> &'g Graph {
-        self.graph
+        Self { terms, slots }
     }
 
     pub(super) fn terms(&self) -> &[NodeId] {

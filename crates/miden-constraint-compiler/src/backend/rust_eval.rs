@@ -79,7 +79,7 @@ fn emit_module_with_plan(header: &str, evals: &[AirEvaluator<'_>], optimized: bo
     for eval in evals {
         let plan = PreparationPlan::new(eval.graph, eval.constraints);
         let terms = plan.terms();
-        let mut preparation = Emitter::new(EmissionMode::Preparation(&plan));
+        let mut preparation = Emitter::new(eval.graph, EmissionMode::Preparation);
         let values: Vec<_> = terms
             .iter()
             .map(|&id| as_expr(&preparation.token(id), preparation.types()))
@@ -181,19 +181,12 @@ fn operand(t: &Token) -> String {
 
 #[derive(Clone, Copy)]
 enum EmissionMode<'g> {
-    Preparation(&'g PreparationPlan<'g>),
-    Row(&'g PreparationPlan<'g>),
-}
-
-impl<'g> EmissionMode<'g> {
-    fn graph(self) -> &'g Graph {
-        match self {
-            Self::Preparation(plan) | Self::Row(plan) => plan.graph(),
-        }
-    }
+    Preparation,
+    Row(&'g PreparationPlan),
 }
 
 struct Emitter<'g> {
+    graph: &'g Graph,
     mode: EmissionMode<'g>,
     plan: Option<Plan<'g>>,
     /// Token per emitted node, memoized on first use.
@@ -206,11 +199,12 @@ struct Emitter<'g> {
 }
 
 impl<'g> Emitter<'g> {
-    fn new(mode: EmissionMode<'g>) -> Self {
+    fn new(graph: &'g Graph, mode: EmissionMode<'g>) -> Self {
         Self {
+            graph,
             mode,
             plan: None,
-            tokens: vec![None; mode.graph().len()],
+            tokens: vec![None; graph.len()],
             lines: Vec::new(),
             hoisted: 0,
         }
@@ -218,7 +212,7 @@ impl<'g> Emitter<'g> {
 
     fn types(&self) -> ExprTypes {
         match self.mode {
-            EmissionMode::Preparation(_) => ExprTypes { base: "B", ext: "E" },
+            EmissionMode::Preparation => ExprTypes { base: "B", ext: "E" },
             EmissionMode::Row(_) => ExprTypes { base: "AB::Expr", ext: "AB::ExprEF" },
         }
     }
@@ -232,11 +226,11 @@ impl<'g> Emitter<'g> {
         if let EmissionMode::Row(plan) = self.mode
             && let Some(index) = plan.slot(id)
         {
-            let tok = self.ext_leaf(format!("terms[{index}].dup()"));
+            let tok = self.leaf(Class::Ext, Repr::Expr, format!("terms[{index}].dup()"));
             self.tokens[id.index()] = Some(tok.clone());
             return tok;
         }
-        let tok = match self.mode.graph().node(id) {
+        let tok = match self.graph.node(id) {
             Node::Leaf(leaf) => self.leaf_token(leaf),
             Node::Op { class, op, x, y } => self.op_token(id, class, op, x, y),
         };
@@ -244,89 +238,69 @@ impl<'g> Emitter<'g> {
         tok
     }
 
-    /// Emit `let h{n} = expr;` — or `let h{n}: ty = expr;` when `ty` is given —
-    /// with a fresh `h{n}` name that it returns. A `Var` leaf passes no `ty` so
-    /// its type is inferred from the trace-window read and stays `Copy`.
-    fn hoist(&mut self, ty: Option<&str>, expr: String) -> String {
-        let name = format!("h{}", self.hoisted);
+    /// Bind a leaf with a fresh `h{n}` name. A `Var` keeps its inferred Copy type;
+    /// an expression is annotated with its field's expression type.
+    fn leaf(&mut self, class: Class, repr: Repr, expr: String) -> Token {
+        let code = format!("h{}", self.hoisted);
         self.hoisted += 1;
-        match ty {
-            Some(ty) => self.lines.push(format!("    let {name}: {ty} = {expr};")),
-            None => self.lines.push(format!("    let {name} = {expr};")),
+        match repr {
+            Repr::Var => self.lines.push(format!("    let {code} = {expr};")),
+            Repr::Expr => {
+                let ty = match class {
+                    Class::Base => self.types().base,
+                    Class::Ext => self.types().ext,
+                };
+                self.lines.push(format!("    let {code}: {ty} = {expr};"));
+            },
         }
-        name
-    }
-
-    /// A materialized base `Expr` leaf.
-    fn base_leaf(&mut self, expr: String) -> Token {
-        Token {
-            class: Class::Base,
-            repr: Repr::Expr,
-            code: self.hoist(Some(self.types().base), expr),
-        }
-    }
-
-    /// A materialized ext `ExprEF` leaf.
-    fn ext_leaf(&mut self, expr: String) -> Token {
-        Token {
-            class: Class::Ext,
-            repr: Repr::Expr,
-            code: self.hoist(Some(self.types().ext), expr),
-        }
-    }
-
-    /// A Copy base `Var` leaf (a main trace-window read), bound bare.
-    fn base_var_leaf(&mut self, expr: String) -> Token {
-        Token {
-            class: Class::Base,
-            repr: Repr::Var,
-            code: self.hoist(None, expr),
-        }
-    }
-
-    /// A Copy ext `VarEF` leaf (an aux trace-window read), bound bare.
-    fn ext_var_leaf(&mut self, expr: String) -> Token {
-        Token {
-            class: Class::Ext,
-            repr: Repr::Var,
-            code: self.hoist(None, expr),
-        }
+        Token { class, repr, code }
     }
 
     fn leaf_token(&mut self, leaf: Leaf) -> Token {
+        use Class::{Base, Ext};
+        use Repr::{Expr, Var};
+
         match leaf {
             Leaf::Preprocessed { offset, index } => {
-                self.base_var_leaf(format!("p{offset}[{index}]"))
+                self.leaf(Base, Var, format!("p{offset}[{index}]"))
             },
-            Leaf::Main { offset, index } => self.base_var_leaf(format!("m{offset}[{index}]")),
+            Leaf::Main { offset, index } => self.leaf(Base, Var, format!("m{offset}[{index}]")),
             Leaf::Public(index) => {
-                self.base_leaf(format!("builder.public_values()[{index}].into()"))
+                self.leaf(Base, Expr, format!("builder.public_values()[{index}].into()"))
             },
             Leaf::Periodic(index) => {
-                self.base_leaf(format!("builder.periodic_values()[{index}].into()"))
+                self.leaf(Base, Expr, format!("builder.periodic_values()[{index}].into()"))
             },
-            Leaf::IsFirst => self.base_leaf("builder.is_first_row()".to_string()),
-            Leaf::IsLast => self.base_leaf("builder.is_last_row()".to_string()),
-            Leaf::IsTransition => self.base_leaf("builder.is_transition()".to_string()),
+            Leaf::IsFirst => self.leaf(Base, Expr, "builder.is_first_row()".to_string()),
+            Leaf::IsLast => self.leaf(Base, Expr, "builder.is_last_row()".to_string()),
+            Leaf::IsTransition => self.leaf(Base, Expr, "builder.is_transition()".to_string()),
             Leaf::BaseConst(raw) => {
-                if matches!(self.mode, EmissionMode::Preparation(_)) {
-                    self.base_leaf(format!("B::from_u64({raw})"))
+                if matches!(self.mode, EmissionMode::Preparation) {
+                    self.leaf(Base, Expr, format!("B::from_u64({raw})"))
                 } else {
-                    self.base_leaf(format!("AB::Expr::from(Felt::from_u64({raw}))"))
+                    self.leaf(Base, Expr, format!("AB::Expr::from(Felt::from_u64({raw}))"))
                 }
             },
-            Leaf::Aux { offset, index } => self.ext_var_leaf(format!("a{offset}[{index}]")),
+            Leaf::Aux { offset, index } => self.leaf(Ext, Var, format!("a{offset}[{index}]")),
             Leaf::Challenge(index) => {
-                if matches!(self.mode, EmissionMode::Preparation(_)) {
-                    self.ext_leaf(format!("challenges[{index}].dup()"))
+                if matches!(self.mode, EmissionMode::Preparation) {
+                    self.leaf(Ext, Expr, format!("challenges[{index}].dup()"))
                 } else {
-                    self.ext_leaf(format!("builder.permutation_randomness()[{index}].into()"))
+                    self.leaf(
+                        Ext,
+                        Expr,
+                        format!("builder.permutation_randomness()[{index}].into()"),
+                    )
                 }
             },
             Leaf::PermValue(index) => {
                 // PermutationVar is Clone-only (not Copy), so it cannot be kept as
                 // a reusable Var; it stays a materialized ExprEF via `.clone().into()`.
-                self.ext_leaf(format!("builder.permutation_values()[{index}].clone().into()"))
+                self.leaf(
+                    Ext,
+                    Expr,
+                    format!("builder.permutation_values()[{index}].clone().into()"),
+                )
             },
             Leaf::ExtConst([c0, c1]) => {
                 // The builder bound does not name EF, so only constants liftable
@@ -335,10 +309,14 @@ impl<'g> Emitter<'g> {
                     c1, 0,
                     "the builder bound cannot construct extension constants outside the base field"
                 );
-                if matches!(self.mode, EmissionMode::Preparation(_)) {
-                    self.ext_leaf(format!("E::from(B::from_u64({c0}))"))
+                if matches!(self.mode, EmissionMode::Preparation) {
+                    self.leaf(Ext, Expr, format!("E::from(B::from_u64({c0}))"))
                 } else {
-                    self.ext_leaf(format!("AB::ExprEF::from(AB::Expr::from(Felt::from_u64({c0})))"))
+                    self.leaf(
+                        Ext,
+                        Expr,
+                        format!("AB::ExprEF::from(AB::Expr::from(Felt::from_u64({c0})))"),
+                    )
                 }
             },
             Leaf::ExtBase(inner) => self.token(inner),
@@ -452,8 +430,8 @@ impl<'g> Emitter<'g> {
                     let right = self.expr(right, class);
                     return format!("({left} + {right}) * Felt::from_u64({scalar})");
                 }
-                let factor = self.mode.graph().class(common);
-                let sum = plan::join(self.mode.graph().class(left), self.mode.graph().class(right));
+                let factor = self.graph.class(common);
+                let sum = plan::join(self.graph.class(left), self.graph.class(right));
                 let common = self.expr(common, factor);
                 let left = self.expr(left, sum);
                 let right = self.expr(right, sum);
@@ -527,7 +505,7 @@ fn sym(op: OpKind) -> char {
 fn emit_evaluator(
     eval: &AirEvaluator<'_>,
     out: &mut String,
-    preparation: &PreparationPlan<'_>,
+    preparation: &PreparationPlan,
     optimized: bool,
 ) {
     // Order the constraint roots by global index; emission then walks them in
@@ -548,7 +526,7 @@ fn emit_evaluator(
         .collect();
     roots.sort_unstable_by_key(|&(global, ..)| global);
 
-    let mut e = Emitter::new(EmissionMode::Row(preparation));
+    let mut e = Emitter::new(eval.graph, EmissionMode::Row(preparation));
     if optimized {
         e.plan = Some(Plan::new(eval.graph, cons, preparation.terms()));
     }

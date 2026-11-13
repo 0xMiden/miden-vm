@@ -176,7 +176,7 @@ impl Graph {
     }
 
     /// Iterate `(id, node)` in topological (interning) order.
-    pub fn iter(&self) -> impl Iterator<Item = (NodeId, Node)> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (NodeId, Node)> + '_ {
         self.nodes.iter().enumerate().map(|(i, n)| (NodeId(i as u32), *n))
     }
 

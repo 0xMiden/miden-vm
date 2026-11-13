@@ -1,7 +1,6 @@
 //! Build-compiled recursive-verifier circuit data.
 //!
 //! Authored circuit construction lives in `miden_air_definitions::compiler::vm`.
-pub use miden_air_definitions::vm::ace::RecursiveAceCircuit;
 
 /// `(READ variables, evaluation gates, stream length)` of the build-compiled VM circuit.
 pub const ACE_CIRCUIT_SHAPE: (usize, usize, usize) =

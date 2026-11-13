@@ -15,9 +15,9 @@ use std::{collections::HashMap, sync::Arc};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
 use miden_stark::air::{
-    BaseAir, LiftedAir,
+    LiftedAir,
     symbolic::{
-        AirLayout, BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpression,
+        BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpression,
         SymbolicExpressionExt, eval_air,
     },
 };
@@ -91,16 +91,7 @@ pub fn capture_into_with<A>(
 where
     A: LiftedAir<Felt, EF>,
 {
-    let air_layout = AirLayout {
-        preprocessed_width: BaseAir::<Felt>::preprocessed_width(air),
-        main_width: BaseAir::<Felt>::width(air),
-        num_public_values: BaseAir::<Felt>::num_public_values(air),
-        permutation_width: LiftedAir::<Felt, EF>::aux_width(air),
-        num_permutation_challenges: LiftedAir::<Felt, EF>::num_randomness(air),
-        num_permutation_values: LiftedAir::<Felt, EF>::num_aux_values(air),
-        num_periodic_columns: BaseAir::<Felt>::periodic_columns(air).len(),
-    };
-    let mut symbolic = SymbolicAirBuilder::<Felt, EF>::new(air_layout);
+    let mut symbolic = SymbolicAirBuilder::<Felt, EF>::new(air.air_layout());
     eval(&mut symbolic);
     let base_constraints = symbolic.base_constraints();
     let ext_constraints = symbolic.extension_constraints();

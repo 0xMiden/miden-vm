@@ -3,12 +3,12 @@
 mod multi_air;
 mod recursive;
 
-pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
+use miden_ace::compiler::CompiledRelation;
 use miden_stark::security::{AirShape, LookupShape};
 
 pub use self::{
     multi_air::build_canonical_multi_air_ace_circuit,
-    recursive::{build_recursive_verifier_ace_circuit, recursive_verifier_ace_config},
+    recursive::build_recursive_verifier_ace_circuit,
 };
 use crate::{
     shared::geometry::NUM_OOD_POINTS,

@@ -5,6 +5,7 @@
 //! on the operand stack; its root is the PVM statement.
 
 mod ace;
+#[cfg(any(test, feature = "constants-tools"))]
 mod ace_constants;
 #[cfg(feature = "constants-tools")]
 pub mod ace_constants_regen;
@@ -20,7 +21,9 @@ use alloc::{
 };
 
 use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params,
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS,
+    policy::precompile_pcs_params,
+    protocol::{PVM_PREPROCESSED_COMMITMENT, PVM_RELATION_DIGEST},
 };
 use miden_core::{
     Felt, Word,
@@ -45,10 +48,7 @@ use miden_stark::{
 use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
-use crate::setup::{
-    commitments,
-    config::{EidosConfig, eidos_config},
-};
+use crate::setup::config::{EidosConfig, eidos_config};
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
@@ -163,10 +163,8 @@ fn build_verifier_advice(
         });
     }
 
-    let config = eidos_config(
-        precompile_pcs_params(),
-        ace_constants::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
-    );
+    let config =
+        eidos_config(precompile_pcs_params(), PVM_RELATION_DIGEST.map(Felt::new_unchecked));
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
@@ -184,7 +182,7 @@ fn build_verifier_advice(
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
     let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(commitments::EIDOS.into()))?;
+        VerifierInstance::new(&config, &statement, Some(PVM_PREPROCESSED_COMMITMENT.into()))?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;

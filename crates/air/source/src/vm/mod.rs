@@ -1,6 +1,5 @@
 //! Authored Miden VM AIRs, trace schemas, public inputs, and relation boundaries.
 
-pub mod ace;
 mod airs;
 mod constraints;
 mod execution_trace;

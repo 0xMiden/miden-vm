@@ -1,12 +1,11 @@
 //! The constraint IR: a hash-consed expression graph with structural identity,
 //! plus the symbolic-capture frontend that builds it and analyses over it.
 
-pub mod analyze;
+pub(crate) mod analyze;
 pub mod auxiliary;
-pub mod capture;
-pub mod graph;
+mod capture;
+mod graph;
 
-pub(crate) use analyze::ChallengeDependencies;
 pub use analyze::{OpCounts, op_counts};
 pub use capture::{CapturedConstraints, capture, capture_into, capture_into_with};
 pub use graph::{Class, Graph, GraphBuilder, Leaf, Node, NodeId, OpKind};

@@ -1,8 +1,10 @@
 use core::num::NonZeroUsize;
 
 use super::{
-    InputCounts, InputLayout, InputRegion, LayoutRegions, MultiAirIndices, SELECTORS_PER_AIR,
-    StarkVarIndices,
+    SELECTORS_PER_AIR,
+    plan::{
+        InputCounts, InputLayout, InputRegion, LayoutRegions, MultiAirIndices, StarkVarIndices,
+    },
 };
 use crate::EXT_DEGREE;
 

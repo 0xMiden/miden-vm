@@ -2,10 +2,9 @@
 //!
 //! Independent capture and setup tests verify that the authored AIRs still reproduce these pins.
 
-/// Encoded circuit returned by the production relation's embedded artifact.
-pub use miden_air_definitions::precompiles::ace::PvmRecursiveAceCircuit;
+use miden_ace::RecursiveAceCircuit;
 use miden_core::{Felt, Word};
-pub use miden_stark::security::{AirShape, LookupShape};
+use miden_stark::security::{AirShape, LookupShape};
 
 /// Pinned relation identity and setup commitments for the supported proof configurations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,9 +116,9 @@ pub fn metadata() -> &'static ProtocolMetadata {
 ///
 /// The commitment is the relation's pinned ACE circuit digest; the recursive verifier rejects a
 /// stream that does not hash to it.
-pub fn recursive_circuit() -> PvmRecursiveAceCircuit {
+pub fn recursive_circuit() -> RecursiveAceCircuit {
     let (num_inputs, num_eval_gates, stream_len) = metadata().circuit_shape;
-    PvmRecursiveAceCircuit {
+    RecursiveAceCircuit {
         num_inputs,
         num_eval_gates,
         stream_len,

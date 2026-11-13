@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_ace::{RecursiveAceCircuit, compiler::LayoutKind};
+use miden_ace::compiler::LayoutKind;
 use miden_air_definitions::{
     compiler::precompiles::{self as compiler, CapturedPvmRelation},
     precompiles::{fixed, relation::AIRS},
@@ -42,13 +42,13 @@ pub fn generate() {
         ),
     );
     let compiled = captured.compile();
-    let circuit: RecursiveAceCircuit = compiled.build_circuit(LayoutKind::Masm).to_ace().into();
+    let circuit = compiled.build_circuit(LayoutKind::Masm).to_ace();
     write(
         "ace_instructions.rs",
         format!(
             "{:?}",
             circuit
-                .instructions
+                .instructions()
                 .iter()
                 .map(miden_core::Felt::as_canonical_u64)
                 .collect::<Vec<_>>()
@@ -60,7 +60,7 @@ pub fn generate() {
         "protocol.rs",
         format!(
             "pub const PROTOCOL: ProtocolMetadata = ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {}, fixed_boundary_lookup_terms: {} }};",
-            (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len),
+            (circuit.num_vars(), circuit.num_eval_rows(), circuit.size_in_felt()),
             compiler::air_shape(&compiled),
             compiled.geometry().raw_widths(),
             compiled.geometry().num_quotient_chunks,

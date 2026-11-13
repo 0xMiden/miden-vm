@@ -1,9 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_definitions::{
-    compiler::vm::{CapturedAir, CompiledRelation, LayoutKind},
-    vm::AIRS,
-};
+use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
+use miden_air_definitions::vm::AIRS;
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
 #[path = "build/precompiles.rs"]
@@ -52,18 +50,17 @@ fn main() {
         format!("{:?}", miden_air_definitions::compiler::vm::air_shape(&relation)),
     );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
-    let circuit: miden_air_definitions::vm::ace::RecursiveAceCircuit =
-        relation.build_circuit(LayoutKind::Masm).to_ace().into();
+    let circuit = relation.build_circuit(LayoutKind::Masm).to_ace();
     write(
         "ace_circuit_shape.rs",
-        format!("{:?}", (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len)),
+        format!("{:?}", (circuit.num_vars(), circuit.num_eval_rows(), circuit.size_in_felt())),
     );
     write(
         "ace_instructions.rs",
         format!(
             "{:?}",
             circuit
-                .instructions
+                .instructions()
                 .iter()
                 .map(miden_air_definitions::vm::Felt::as_canonical_u64)
                 .collect::<Vec<_>>()

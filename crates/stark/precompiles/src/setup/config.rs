@@ -18,7 +18,7 @@ pub use miden_stark::{
 ///
 /// The accepted value is pinned in [`miden_air::precompiles::protocol::PINS`].
 pub(crate) const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
-    let [d0, d1, d2, d3] = miden_air::precompiles::PVM_RELATION_DIGEST;
+    let [d0, d1, d2, d3] = miden_air::precompiles::protocol::PVM_RELATION_DIGEST;
     [
         Felt::new_unchecked(d0),
         Felt::new_unchecked(d1),

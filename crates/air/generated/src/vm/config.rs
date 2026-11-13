@@ -4,7 +4,7 @@
 //! identities. Concrete runtime configuration construction belongs to the VM STARK backend.
 
 use miden_core::Felt;
-pub use miden_stark::{config::RelationDigest, pcs::PcsParams};
+use miden_stark::{config::RelationDigest, pcs::PcsParams};
 
 // PCS PARAMETERS
 // ================================================================================================

@@ -6,6 +6,9 @@ use miden_stark::air::LiftedAir;
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
 
+/// Per-AIR trace regions are padded to this width before concatenation.
+pub const LMCS_ALIGNMENT: usize = 8;
+
 /// Canonical AIR identity and proof instance order.
 pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
     ChipletAir::ChunkNodeSponge,

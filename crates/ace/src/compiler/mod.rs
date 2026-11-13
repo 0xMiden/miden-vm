@@ -33,7 +33,7 @@ mod unit_tests;
 /// Exposed for the lowering differential tests (`crates/air/generated/tests/ace_codegen.rs`);
 /// production consumes the IR lowering through the pipeline.
 #[cfg(any(test, feature = "testing"))]
-pub use dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
+pub use dag::{PeriodicColumnData, build_verifier_dag};
 
 pub use self::{
     aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace, render_masm_ext2_power},

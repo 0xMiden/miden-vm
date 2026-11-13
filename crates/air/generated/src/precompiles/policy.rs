@@ -1,6 +1,6 @@
 //! Canonical STARK parameters and protocol version of the precompile relation.
 
-pub use miden_stark::pcs::PcsParams;
+use miden_stark::pcs::PcsParams;
 pub const LOG_BLOWUP: u8 = 3;
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Protocol version included in the PVM relation digest.

@@ -18,11 +18,12 @@ doctest = false
 default = ["std"]
 # Reference estimators used by cross-crate regression tests.
 testing = []
-std = ["miden-air/std", "miden-air-definitions/std", "miden-core/std", "miden-stark/std", "thiserror/std"]
+std = ["miden-ace/std", "miden-air/std", "miden-air-definitions/std", "miden-core/std", "miden-stark/std", "thiserror/std"]
 concurrent = ["std", "miden-air/concurrent", "miden-stark/concurrent"]
 prover = ["dep:tracing"]
 
 [dependencies]
+miden-ace.workspace = true
 miden-air.workspace = true
 miden-air-definitions.workspace = true
 miden-core.workspace = true

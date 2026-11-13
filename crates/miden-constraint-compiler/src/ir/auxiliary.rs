@@ -10,7 +10,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 
-use super::{Graph, Leaf, Node, NodeId, OpKind};
+use super::graph::{Graph, Leaf, Node, NodeId, OpKind};
 
 type Result<T> = std::result::Result<T, &'static str>;
 

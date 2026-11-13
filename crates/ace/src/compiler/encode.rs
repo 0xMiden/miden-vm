@@ -5,9 +5,9 @@ use alloc::vec::Vec;
 use miden_core::{Felt, field::ExtensionField};
 
 use crate::{
-    compiler::circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    compiler::circuit::{AceCircuit, AceNode, AceOpNode},
     encode::{ACE_READ_ROW_EF_NODES, BASE_FELTS_PER_EF, EncodedCircuit},
-    instruction::{MAX_ID, encode_instruction},
+    instruction::{MAX_ID, Op, encode_instruction},
 };
 
 /// Constants are padded to an even number of EF nodes (full READ rows).
@@ -128,7 +128,7 @@ where
         while instructions.len() < len_circuit_padded {
             let last_node = AceNode::Operation(last_node_index);
             let dummy_op = AceOpNode {
-                op: AceOp::Mul,
+                op: Op::Mul,
                 lhs: last_node,
                 rhs: last_node,
             };

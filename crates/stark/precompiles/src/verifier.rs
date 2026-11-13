@@ -2,7 +2,14 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs_params};
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir,
+    policy::precompile_pcs_params,
+    protocol::{
+        PVM_BLAKE3_PREPROCESSED_COMMITMENT, PVM_KECCAK_PREPROCESSED_COMMITMENT,
+        PVM_PREPROCESSED_COMMITMENT,
+    },
+};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
@@ -22,7 +29,6 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 use crate::setup::{
-    commitments,
     config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
     security,
 };
@@ -64,7 +70,7 @@ fn verify_stark(
             let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(
                 &config,
-                commitments::BLAKE3.into(),
+                PVM_BLAKE3_PREPROCESSED_COMMITMENT.into(),
                 proof.bytes(),
                 public_root,
             )
@@ -73,14 +79,19 @@ fn verify_stark(
             let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(
                 &config,
-                commitments::KECCAK.into(),
+                PVM_KECCAK_PREPROCESSED_COMMITMENT.into(),
                 proof.bytes(),
                 public_root,
             )
         },
         HashFunction::Eidos => {
             let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
-            verify_stark_with_config(&config, commitments::EIDOS.into(), proof.bytes(), public_root)
+            verify_stark_with_config(
+                &config,
+                PVM_PREPROCESSED_COMMITMENT.into(),
+                proof.bytes(),
+                public_root,
+            )
         },
     }
 }

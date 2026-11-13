@@ -4,7 +4,7 @@ use miden_core::field::QuadFelt;
 use crate::vm::AIRS;
 
 /// Per-AIR preprocessed, main, and aux regions are padded to this width before concatenation.
-const LMCS_ALIGNMENT: usize = 8;
+pub(super) const LMCS_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
 
 /// Builds the order-invariant Miden circuit with canonical trace offsets and per-AIR fold
 /// coefficients.

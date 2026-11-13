@@ -29,8 +29,9 @@ concurrent = [
     "miden-air-definitions/concurrent",
 ]
 fixture-tools = ["std", "prover"]
-constants-tools = ["std", "dep:miden-ace", "miden-ace/compiler", "miden-air-definitions/compiler"]
+constants-tools = ["std", "miden-ace/compiler", "miden-air-definitions/compiler"]
 std = [
+    "miden-ace/std",
     "miden-air-definitions/std",
     "miden-core/std",
     "miden-crypto/std",
@@ -41,7 +42,7 @@ std = [
 ]
 
 [dependencies]
-miden-ace = { workspace = true, optional = true }
+miden-ace.workspace = true
 miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true

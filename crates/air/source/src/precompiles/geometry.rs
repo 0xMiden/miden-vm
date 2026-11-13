@@ -23,7 +23,7 @@ pub fn derive_air_shape() -> AirShape {
     crate::shared::geometry::derive_air_shape(
         &airs,
         lookup_shape(),
-        crate::precompiles::ace::LMCS_ALIGNMENT,
+        crate::precompiles::relation::LMCS_ALIGNMENT,
     )
 }
 
