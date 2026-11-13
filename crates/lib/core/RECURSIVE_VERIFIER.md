@@ -1,100 +1,121 @@
-# Maintaining recursive-verifier MASM
+# Recursive verifier design principles
 
-Ordinary library builds assemble the tracked `.masm` files. Regeneration is explicit.
+The [VM](asm/sys/vm/mod.masm) and [PVM](asm/sys/pvm/mod.masm) entrypoints supply statements and
+relation parameters to the [generic STARK verifier](asm/stark/verifier.masm). Its entry contract
+defines the required state and five hooks: public inputs, auxiliary-boundary checks, OOD routing,
+constraint evaluation, and DEEP queries.
 
-The generators capture the authored AIRs in `crates/air/source` once and derive widths,
-quotient geometry, security metadata, and the canonical ACE circuit from that capture. Optional
-authored relation compiler entry points live in `miden_air_definitions::compiler::{vm, precompiles}`.
-Cargo builds
-the native evaluators and embedded ACE streams from the same capture into `OUT_DIR`, so they have
-no regeneration step.
+## Share algorithms; specialize geometry
 
-## Source ownership
+The generic STARK verifier owns the transcript and verification sequence and calls shared FRI
+code. Shared `miden-ace` renderers generate the LogUp, OOD, constraint-evaluation, and DEEP hooks
+from relation metadata. Widths, AIR counts, message widths, and preprocessed-tree parameters are
+compile-time inputs to these algorithms. Generic MASM must not depend on `sys/vm` or `sys/pvm`.
 
-Source paths are relative to the repository root. MASM outputs are under `crates/lib/core/asm/sys/`.
+Relation adapters own statement encoding, trace-height checks, external LogUp boundary corrections,
+and the meaning of canonical AIR indices. The common LogUp stage absorbs and weights the auxiliary
+sums and asserts that their total plus the relation's boundary correction is zero. The common DEEP
+reader hashes, folds, and authenticates each opened row using generated group parameters.
 
-The PVM fixed-environment correction consumes `UintVal` and `EcGroup` bus messages for predefined
-integers and elliptic-curve parameters.
+## Derive geometry from native definitions
 
-| What changes | Where to edit | MASM output |
-|---|---|---|
-| VM/PVM DEEP query computation | `crates/lib/core/asm/sys/{vm,pvm}/deep_queries.masm` | Edit directly |
-| VM parameters and ACE addresses | Authored VM AIRs and configuration; `crates/lib/core/src/constraints_regen.rs` | `vm/parameters.masm` |
-| PVM parameters and layout | Authored PVM AIRs and relation protocol; `crates/stark/precompiles/src/recursive/ace_constants_regen.rs` | `pvm/parameters.masm`, `pvm/layout.masm` |
-| Fixed-environment bus message catalogue | `crates/air/source/src/precompiles/fixed.rs` | `pvm/fixed_boundary.masm` |
-| Fixed-boundary instructions | Templates in `crates/stark/precompiles/src/recursive/masm/` | `pvm/fixed_boundary.masm` |
-| OOD routing and proof-order schedules | Relation geometry and `miden-ace` renderers | `{vm,pvm}/ood_frames.masm` |
-| Constraint evaluation | Canonical ACE circuit and `miden-ace` renderer | `{vm,pvm}/constraints_eval.masm` |
+The generators derive widths, quotient geometry, security metadata, and the ACE circuit from
+captured native AIRs and protocol configuration. Cargo builds native evaluators and ACE streams
+into `OUT_DIR`. Library builds assemble tracked MASM; regenerate it explicitly from these sources:
 
-The `.masm.tpl` files are source inputs. Edit `fixed_boundary.masm.tpl` for shared helpers and
-`fixed_uintval.masm.tpl` or `fixed_ecgroup.masm.tpl` for the instructions applied to each message.
+| Responsibility | Source |
+|---|---|
+| AIRs, statements, and bus-message definitions | [AIR source](../../air/source/src/) |
+| Common hook renderers and templates | [miden-ace compiler](../../ace/src/compiler/) |
+| VM parameters, ACE addresses, and shared FRI parameters | [VM generator](src/constraints_regen.rs) |
+| PVM parameters, layout, and boundary instructions | [PVM generator and templates](../../stark/precompiles/src/recursive/) |
 
-The VM's fixed memory anchors live in `vm/layout.masm`; regeneration checks derived allocations
-against them. The PVM layout is generated as a complete module.
+An AIR or statement change still requires reviewing the handwritten adapters: `mod.masm`,
+`public_inputs.masm`, layout field aliases, and allocation extents in the memory audit. PVM boundary
+changes also require reviewing the [fixed-message catalogue](../../air/source/src/precompiles/fixed.rs)
+and its generator templates. Keep these dependencies explicit rather than duplicating derived counts.
 
-## Pinned relation identities
+Shared FRI parameters come from both native presets. Regeneration requires folding factor four,
+a common remainder bound, and enough workspace for layers and coefficients. Remainder sizes and
+streaming counts are independent of LDE blowup; the complete recursive verifier uses blowup eight,
+fixed by `LOG_BLOWUP_FACTOR` in `stark/constants.masm`.
 
-The relation digest, ACE circuit digest, and setup commitments are pinned in
-`crates/air/generated/src/vm/config.rs` for the VM and
-`crates/air/generated/src/precompiles/protocol.rs` for the PVM. Native proving and verification bind
-to these values, and the generated MASM embeds them. Two checks guard the pins, for different reasons:
+## Give memory a clear owner and checked bounds
 
-- The AIR and STARK backend tests compare the pins with digests and commitments recomputed from
-  the authored AIRs and setup tables. A stale pin fails these tests independently of MASM regeneration.
-- The generators enforce change control. They compare the compiled circuit and relation digests
-  with the pins and fail when they differ, and they take the setup commitments from the pins as
-  trusted inputs. They read the pins but never write them, so regeneration cannot introduce a new
-  relation identity; it only carries an identity that was already accepted into the MASM.
+Each `verify_proof` call runs in a fresh execution context. Shared and relation-owned allocations
+must be disjoint within that context; separate calls can reuse the same addresses.
 
-An intentional relation change therefore updates the pins first, as its own reviewable edit, then
-regenerates the MASM and updates the verifier roots in `core/src/proof.rs`.
+The [shared layout](asm/stark/constants.masm) owns protocol state, lookup challenges, per-AIR
+arrays, and OOD dispatch storage. Relation layouts own statement fields and boundary scratch.
+Boundaries within the ACE input vector are generated from its native `InputLayout`. Import
+addresses directly from their owning module. Derive OOD dispatch readers and writers from the
+same scatter plan.
 
-## Assumptions to review
+Fixed anchors leave ample room for circuit growth without moving unrelated state or query scratch.
+The ACE challenge and query-row anchors are `12 * 2^20` felts apart; unused address space adds no
+VM operations or trace rows. Keep allocation capacity separate from the live AIR count: shared
+arrays reserve sixteen entries, while the proof-order encoding supports twelve AIRs because its
+permutation tag must fit in a `u32`.
 
-`vm/public_inputs.masm` defines the VM's bus prefix factors, AIR count, and stack I/O count.
-These must match the native bus identifiers plus one, `MIDEN_AIR_COUNT`, and `NUM_PUBLIC_VALUES`,
-respectively. The constants are maintained manually; `make check-constraints` checks the AIR count.
+The [placement constructor](../../ace/src/compiler/masm_memory.rs) checks relation extents and
+alignment against the shared anchors. The [memory audit](tests/stark_asserts/memory_layout.rs)
+checks coverage and disjointness, alias bounds, and the full width of immediate memory accesses.
+Documented gaps are not allocations. Dynamic addresses and streaming lengths also need bounds
+established by geometry checks and procedure contracts, with execution tests covering their use.
 
-The module's `compute_bus_gamma` routine is specialized to `gamma = beta^16`. The assertion in
-`crates/air/source/src/vm/constraints/lookup/messages.rs` pins `MIDEN_MAX_MESSAGE_WIDTH` to 16. Changing that width
-requires updating both the routine and the assertion.
+Keep the memory map beside the constants. Sizes count base-field felts and ranges exclude their
+upper endpoint; word accesses require four-felt alignment and streaming regions require eight.
+Preserve the literal declarations and capacity-comment syntax identified there: generators read them.
 
-Generation requires `MAX_MESSAGE_WIDTH == 18`, matching the PVM gamma addition chain for `beta^18`.
-Update the chain and its guard together if the message width changes. PVM height minima are generated
-from the authored relation protocol. When changing the PVM AIR set, review height loading and fixed-height
-checks in `pvm/mod.masm`, the AIR count in `pvm/public_inputs.masm`, and boundary processing in
-`pvm/aux_trace.masm`; these procedures are not generated from the AIR set.
+## Preserve verification contracts
 
-## Edit and verification loop
+Procedure contracts should identify caller-owned stack values, memory inputs and outputs, and
+scratch lifetimes. Explain non-obvious stack manipulations where they occur. When changing shared
+code, check these protocol invariants in both relations:
 
-Edit the sources listed above. For AIR, parameter, or template changes, regenerate and check the
-affected relation from the repository root:
+- Required properties of advice-derived witnesses are enforced by AIR-constrained checks.
+- Transcript observations and challenge draws match the native verifier.
+- Proof-order maps remain complete, height-sorted permutations; every AIR receives its selectors
+  and constraint-folding coefficient.
+- Query values remain associated with their indices through DEEP and FRI. Every opened row is
+  checked against its authenticated leaf digest, and final folds match remainder evaluations.
+
+Native/MASM parity tests should compare intermediate values where acceptance alone could hide
+an error. Rejection tests should identify the intended guard, so a later failure cannot conceal
+missing authentication. For optimizations, report cycles per proof and all AIR row counts;
+unchanged padded trace dimensions do not establish unchanged prover runtime.
+
+## Review identity changes explicitly
+
+Relation digests, ACE circuit digests, and setup commitments are pinned in the native
+[VM configuration](../../air/generated/src/vm/config.rs) and
+[PVM protocol](../../air/generated/src/precompiles/protocol.rs). The generators compare compiled
+circuit and relation digests with these pins and fail on a mismatch. They read setup commitments
+as trusted inputs and never rewrite the pins. Native AIR and STARK tests independently recompute
+the identities and setup commitments from authored AIRs and tables.
+
+An intentional relation change updates its pins as an explicit reviewable edit before MASM
+regeneration. Check assembled verifier roots against [the root pins](../../../core/src/proof.rs)
+and update those pins for intended root changes.
+
+## Change and validate
+
+Regenerate the affected relation from the repository root, or both for shared changes:
 
 | Relation | Regenerate | Check freshness |
 |---|---|---|
-| VM | `make regenerate-constraints` | `make check-constraints` |
+| VM, including shared FRI parameters | `make regenerate-constraints` | `make check-constraints` |
 | PVM | `make regenerate-pvm-constants` | `make check-pvm-constants` |
 
-Inspect the generated values, catalogue membership, and instruction order. Update stack diagrams and
-memory maps when their layouts change. For module export or procedure documentation changes,
-regenerate the tracked MASM documentation:
+Inspect generated values and instruction order. Update affected stack contracts, memory maps,
+and audit extents. For MASM documentation or export changes, regenerate tracked documentation
+with `MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib`; a second build should leave it unchanged.
+
+Run relevant native/MASM parity, rejection, layout, and root-consistency tests. Before integration,
+run the repository gates, which include the documentation build:
 
 ```sh
-MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
+make format-check
+make clippy
+make test NEXTEST_PROFILE=ci
 ```
-
-Include the changes under `crates/lib/core/docs`; a second build should leave them unchanged.
-
-Run the pin and evaluator checks, generator tests, core-library integration suite, and
-verifier-root consistency check:
-
-```sh
-cargo test -p miden-air
-cargo test -p miden-vm-stark --lib
-cargo test -p miden-precompiles-stark --features constants-tools --lib
-cargo test -p miden-core-lib --features constraints-tools --test core-lib
-cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library
-```
-
-The verifier-root test compares the embedded VM and PVM procedure roots with the current roots
-returned by `Verifier::proof_compatibility()`.

@@ -7,15 +7,18 @@ use miden_processor::advice::AdviceStack;
 
 use super::{
     EXAMPLE_FIB_KERNEL_SMALL, KERNEL_ODD_NUM_PROC, fib_stack_inputs,
-    generate_recursive_verifier_data,
+    generate_recursive_verifier_data, pvm_layout_const, vm_layout_const,
 };
+use crate::helpers::stark_constant;
 
-const CALLER_ADDRESSES: [u32; 4] = [
-    3_223_322_628, // stark::constants::NUM_QUERIES_PTR
-    3_223_322_776, // sys::vm::layout::CLAIM_COMMITMENT_PTR
-    3_225_426_416, // sys::pvm::layout::PUBLIC_INPUTS_PTR
-    2_147_483_648, // Initial local-memory base.
-];
+fn caller_addresses() -> [u32; 4] {
+    [
+        stark_constant("NUM_QUERIES_PTR"),
+        vm_layout_const("CLAIM_COMMITMENT_PTR"),
+        pvm_layout_const("PUBLIC_INPUTS_PTR"),
+        2_147_483_648, // Initial local-memory base.
+    ]
+}
 
 #[test]
 fn mvm_verifier_preserves_caller_state() {
@@ -91,14 +94,14 @@ fn check_caller_state(relation: &str, claim: Word, advice: AdviceInputs, output_
 }
 
 fn store_sentinels(value: u32) -> String {
-    CALLER_ADDRESSES
+    caller_addresses()
         .iter()
         .map(|addr| format!("push.{value} mem_store.{addr} "))
         .collect()
 }
 
 fn check_sentinels(value: u32) -> String {
-    CALLER_ADDRESSES
+    caller_addresses()
         .iter()
         .map(|addr| {
             format!(

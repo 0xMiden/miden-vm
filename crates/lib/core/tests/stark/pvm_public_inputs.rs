@@ -1,17 +1,14 @@
 //! Behavioral oracles for the PVM statement and shape transcript hook.
 
-use miden_core::Felt;
-use miden_stark::{StarkConfig, config::observe_protocol_params, pcs::PcsParams};
+use miden_air::precompiles::{ChipletAir, ChipletMultiAir};
+use miden_core::{Felt, Word, field::QuadFelt};
+use miden_stark::{StarkConfig, air::Statement, config::observe_protocol_params, pcs::PcsParams};
 use miden_vm_stark::setup::config::eidos_config;
 use p3_challenger::{CanObserve, FieldChallenger};
 
 use super::pvm_layout_const;
-use crate::helpers::read_memory_felt;
+use crate::helpers::{masm_push_word, masm_store_felts, read_memory_felt, stark_constant};
 
-const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3_223_322_638;
-const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
-const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
-const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
 const ROOT: [u64; 4] = [101, 102, 103, 104];
 const HEIGHTS: [u64; 12] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const MAIN_COMMITMENT: [u64; 4] = [201, 202, 203, 204];
@@ -34,70 +31,50 @@ fn precompile_pcs_params() -> PcsParams {
 }
 
 fn stage_statement_and_shape() -> String {
-    let root = ROOT;
-    let heights = HEIGHTS;
+    let root = masm_push_word(&Word::new(ROOT.map(Felt::new_unchecked)));
+    let heights = masm_store_felts(
+        &HEIGHTS.map(Felt::new_unchecked),
+        stark_constant("LOG_AIR_TRACE_LENGTHS_PTR"),
+    );
     format!(
         r#"
-        push.{root3}.{root2}.{root1}.{root0}
-        exec.public_inputs::stage_public_root
+        # Both words must be overwritten, including every high extension coordinate.
+        push.99.98.97.96
+        push.PUBLIC_INPUTS_PTR mem_storew_le
+        push.PUBLIC_INPUTS_PTR add.4 mem_storew_le dropw
 
-        push.{h0} mem_store.LOG_AIR_TRACE_LENGTHS_PTR
-        push.{h1} push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_store
-        push.{h2} push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_store
-        push.{h3} push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_store
-        push.{h4} push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_store
-        push.{h5} push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_store
-        push.{h6} push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_store
-        push.{h7} push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_store
-        push.{h8} push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_store
-        push.{h9} push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_store
-        push.{h10} push.LOG_AIR_TRACE_LENGTHS_PTR add.10 mem_store
-        push.{h11} push.LOG_AIR_TRACE_LENGTHS_PTR add.11 mem_store
+        {root}
+        exec.public_inputs::stage_public_root
+        {heights}
         "#,
-        root0 = root[0],
-        root1 = root[1],
-        root2 = root[2],
-        root3 = root[3],
-        h0 = heights[0],
-        h1 = heights[1],
-        h2 = heights[2],
-        h3 = heights[3],
-        h4 = heights[4],
-        h5 = heights[5],
-        h6 = heights[6],
-        h7 = heights[7],
-        h8 = heights[8],
-        h9 = heights[9],
-        h10 = heights[10],
-        h11 = heights[11],
     )
 }
 
 fn transcript_source() -> String {
     let setup = stage_statement_and_shape();
-    let main = MAIN_COMMITMENT;
-    let relation = pvm_word("RELATION_DIGEST");
-    let preprocessed = pvm_word("PREPROCESSED_COMMITMENT");
+    let main = masm_push_word(&Word::new(MAIN_COMMITMENT.map(Felt::new_unchecked)));
+    let relation = masm_push_word(&Word::new(pvm_word("RELATION_DIGEST").map(Felt::new_unchecked)));
+    let preprocessed =
+        masm_push_word(&Word::new(pvm_word("PREPROCESSED_COMMITMENT").map(Felt::new_unchecked)));
     let params = precompile_pcs_params();
     format!(
         r#"
         use {{
-            DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR,
             LOG_TRACE_LENGTH_PTR, NUM_QUERIES_PTR, PREPROCESSED_TRACE_COM_PTR, QUERY_POW_BITS_PTR,
             RELATION_DIGEST_PTR
         }} from miden::core::stark::constants
         use miden::core::stark::random_coin
-        use miden::core::sys::pvm::layout
+        use {{PUBLIC_INPUTS_PTR}} from miden::core::sys::pvm::layout
         use miden::core::sys::pvm::public_inputs
 
         begin
             {setup}
 
-            push.{relation3}.{relation2}.{relation1}.{relation0}
+            {relation}
             mem_storew_le.RELATION_DIGEST_PTR dropw
-            push.{preprocessed3}.{preprocessed2}.{preprocessed1}.{preprocessed0}
-            dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
-            exec.layout::preprocessed_com_ptr mem_storew_le dropw
+            {preprocessed}
+            mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
 
             push.{num_queries} mem_store.NUM_QUERIES_PTR
             push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
@@ -108,24 +85,12 @@ fn transcript_source() -> String {
 
             exec.public_inputs::process_public_inputs
 
-            push.{main3}.{main2}.{main1}.{main0}
+            {main}
             exec.random_coin::observe_word_and_flush_buffer
             exec.random_coin::sample_felt
             swap drop
         end
         "#,
-        main0 = main[0],
-        main1 = main[1],
-        main2 = main[2],
-        main3 = main[3],
-        relation0 = relation[0],
-        relation1 = relation[1],
-        relation2 = relation[2],
-        relation3 = relation[3],
-        preprocessed0 = preprocessed[0],
-        preprocessed1 = preprocessed[1],
-        preprocessed2 = preprocessed[2],
-        preprocessed3 = preprocessed[3],
         num_queries = params.num_queries(),
         query_pow_bits = params.query_pow_bits(),
         deep_pow_bits = params.deep_pow_bits(),
@@ -143,16 +108,20 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
     let relation_digest = pvm_word("RELATION_DIGEST");
     let preprocessed_commitment = pvm_word("PREPROCESSED_COMMITMENT");
     let public_inputs_ptr = pvm_layout_const("PUBLIC_INPUTS_PTR");
-    let preprocessed_com_ptr = pvm_layout_const("PREPROCESSED_COM_PTR");
+    let preprocessed_com_ptr = stark_constant("PREPROCESSED_TRACE_COM_PTR");
     let config = eidos_config(params, relation_digest.map(Felt::new_unchecked));
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     challenger.observe_slice(&preprocessed_commitment.map(Felt::new_unchecked));
-    challenger.observe(Felt::from_u8(4));
-    challenger.observe_slice(&ROOT.map(Felt::new_unchecked));
-    challenger.observe(Felt::ZERO); // max_aux_inputs
-    challenger.observe(Felt::ZERO); // aux_inputs.len()
-    challenger.observe(Felt::from_u8(12));
+    let statement = Statement::<Felt, QuadFelt, _>::new(
+        ChipletMultiAir::new(),
+        vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, ROOT.map(Felt::new_unchecked).to_vec())],
+        vec![],
+    )
+    .expect("PVM statement must match the native relation");
+    assert_eq!(statement.airs().len(), HEIGHTS.len());
+    statement.observe(&mut challenger, &HEIGHTS.map(|height| height as u8));
+    challenger.observe(Felt::from_u32(statement.airs().len() as u32));
     challenger.observe_slice(&HEIGHTS.map(Felt::new_unchecked));
     challenger.observe_slice(&MAIN_COMMITMENT.map(Felt::new_unchecked));
     let mut cv_oracle = challenger.clone();
@@ -161,19 +130,21 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
 
     for (i, expected) in expected_cv.iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, RANDOM_COIN_CV_PTR + i as u32),
+            read_memory_felt(&output, stark_constant("RANDOM_COIN_CV_PTR") + i as u32),
             *expected,
             "Eidos transcript CV differs at index {i}"
         );
     }
     assert_eq!(output.stack.get_element(0), Some(expected_sample));
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_INPUT_LENGTH_PTR), Felt::ZERO);
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_OUTPUT_LENGTH_PTR), Felt::from_u8(3));
-
     assert_eq!(
-        read_memory_felt(&output, PUBLIC_INPUTS_ADDRESS_PTR),
-        Felt::from_u32(public_inputs_ptr)
+        read_memory_felt(&output, stark_constant("RANDOM_COIN_INPUT_LENGTH_PTR")),
+        Felt::ZERO
     );
+    assert_eq!(
+        read_memory_felt(&output, stark_constant("RANDOM_COIN_OUTPUT_LENGTH_PTR")),
+        Felt::from_u8(3)
+    );
+
     for (i, expected) in ROOT.into_iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, public_inputs_ptr + 2 * i as u32),

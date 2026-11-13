@@ -1,5 +1,12 @@
+use {
+    AUX_ALPHA_C0_PTR,
+    AUX_ALPHA_C1_PTR,
+    AUX_BETA_C1_PTR,
+    AUX_RAND_ELEM_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::sys::pvm::layout
+use {BUS_GAMMA_C1_PTR, BUS_GAMMA_PTR} from miden::core::sys::pvm::layout
+
 use {UINT_VAL_BUS_SCALE, EC_GROUP_BUS_SCALE} from miden::core::sys::pvm::parameters
 
 #! An address in the PVM fixed environment, carried as a 32-bit bus-message value.
@@ -23,23 +30,19 @@ type EcGroupPayload = struct {
     lambda: EnvironmentPtr,
 }
 
-#! Computes gamma = beta^18 for the PVM fixed-message domain prefix.
+#! Computes gamma = beta^{{max_message_width}} for the PVM fixed-message domain prefix.
 #!
-#! Four squarings produce beta^16; the retained beta^2 supplies the remaining factor. The result
-#! is stored as `[gamma0, gamma1, 0, 0]`.
+#! The exponent comes from the native relation's maximum message width. The result is stored
+#! as `[gamma0, gamma1, 0, 0]`.
 #!
 #! Input:  [...]
 #! Output: [...]
 proc compute_bus_gamma()
     exec.load_beta
-    dup.1 dup.1 ext2mul   # beta^2
-    dup.1 dup.1           # retain beta^2
-    dup.1 dup.1 ext2mul   # beta^4, beta^2
-    dup.1 dup.1 ext2mul   # beta^8
-    dup.1 dup.1 ext2mul   # beta^16
-    ext2mul                # beta^18
+    {{gamma_power}}
+    # => [gamma0, gamma1, ...]
     push.0.0 movup.3 movup.3
-    exec.layout::bus_gamma_ptr mem_storew_le
+    mem_storew_le.BUS_GAMMA_PTR
     dropw
 end
 
@@ -48,8 +51,8 @@ end
 #! Input:  [...]
 #! Output: [beta0, beta1, ...]
 proc load_beta() -> types::QuadFelt
-    exec.layout::aux_rand_elem_ptr add.1 mem_load
-    exec.layout::aux_rand_elem_ptr mem_load
+    mem_load.AUX_BETA_C1_PTR
+    mem_load.AUX_RAND_ELEM_PTR
 end
 
 #! Loads alpha from `[beta0, beta1, alpha0, alpha1]`.
@@ -57,8 +60,8 @@ end
 #! Input:  [...]
 #! Output: [alpha0, alpha1, ...]
 proc load_alpha() -> types::QuadFelt
-    exec.layout::aux_rand_elem_ptr add.3 mem_load
-    exec.layout::aux_rand_elem_ptr add.2 mem_load
+    mem_load.AUX_ALPHA_C1_PTR
+    mem_load.AUX_ALPHA_C0_PTR
 end
 
 #! Loads gamma from its relation-local scratch word.
@@ -66,8 +69,8 @@ end
 #! Input:  [...]
 #! Output: [gamma0, gamma1, ...]
 proc load_gamma() -> types::QuadFelt
-    exec.layout::bus_gamma_ptr add.1 mem_load
-    exec.layout::bus_gamma_ptr mem_load
+    mem_load.BUS_GAMMA_C1_PTR
+    mem_load.BUS_GAMMA_PTR
 end
 
 #! Horner-folds a UintVal payload `(ptr, bound_ptr, c0, ..., c7)`.
@@ -144,13 +147,13 @@ end
 
 #! Sums the inverses of the compressed fixed-environment UintVal and EcGroup bus messages.
 #!
-#! Reads beta and alpha from the relation's auxiliary-randomness region, stores beta^18 in
-#! BUS_GAMMA_PTR, and stores the sum in C_TOTAL_PTR. All caller stack elements are preserved.
+#! Reads beta and alpha from the shared auxiliary-randomness region, stores the bus separator
+#! in BUS_GAMMA_PTR, and returns the sum. Preserves caller stack elements and transcript state.
 #! Fails if an encoded message denominator is zero.
 #!
 #! Input:  [...]
-#! Output: [...]
-pub proc compute_fixed_boundary_correction()
+#! Output: [correction0, correction1, ...]
+pub proc compute_fixed_boundary_correction() -> types::QuadFelt
     exec.compute_bus_gamma
     exec.load_beta
     push.0.0
@@ -167,7 +170,6 @@ pub proc compute_fixed_boundary_correction()
 
 {{ecgroup_messages}}
 
-    exec.layout::c_total_ptr mem_store
-    exec.layout::c_total_ptr add.1 mem_store
-    drop drop
+    # => [correction0, correction1, beta0, beta1, ...]
+    movup.2 drop movup.2 drop
 end

@@ -18,6 +18,9 @@
 
 #### Changes
 
+- [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS` ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Repacked chiplet selector prefixes and localized chiplet payloads, changing the VM proof relation and recursive verifier root ([#4158](https://github.com/0xMiden/miden-vm/pull/4158)).
 - [BREAKING] Removed unsupported debugger DAP message types and profiler registration APIs. Simplified glob matching and field formatting ([#4164](https://github.com/0xMiden/miden-vm/pull/4164)).
 - [BREAKING] `PrecompileWork::class` and `PrecompileLimits::class` now take `&WorkClass` instead of `WorkClass`. Callers must pass `&WorkClass` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
@@ -50,6 +53,8 @@
 
 #### Fixes
 
+- [BREAKING] Matched recursive VM/PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Require preprocessed AIRs to declare `LiftedAir::log_preprocessed_height` and reject proofs whose per-AIR heights differ, preserving table ownership during verification and proof parsing ([#4157](https://github.com/0xMiden/miden-vm/pull/4157)).
 - [BREAKING] Both XChaCha IES schemes preserve plaintext types and reject byte/element mismatches when unsealing. Existing IES messages sealed as elements must be regenerated ([#4161](https://github.com/0xMiden/miden-vm/pull/4161)).
 - [BREAKING] Bind recipient public-key encodings into IES HKDF contexts for both K256 and X25519, separating recipient contexts even when their DH secrets agree. Existing ciphertexts for the four HKDF-based IES schemes must be regenerated ([#4162](https://github.com/0xMiden/miden-vm/pull/4162)).

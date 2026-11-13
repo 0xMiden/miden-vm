@@ -2,6 +2,7 @@ use {
     FRI_COM_PTR,
     FRI_QUERIES_ADDRESS_PTR,
     LDE_DOMAIN_INFO_PTR,
+    LOG_TRACE_LENGTH_PTR,
     NUM_FRI_LAYERS_PTR,
     NUM_QUERIES_PTR,
     RANDOM_COIN_CV_PTR,
@@ -12,110 +13,98 @@ use {
 } from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::random_coin
+use {LOG_FINAL_DEGREE, REMAINDER_MAX_COEFFICIENTS} from miden::core::pcs::fri::parameters
 
 # CONSTANTS
 # =================================================================================================
 
-# General constants
-const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF = 512
-const FRI_REMAINDER_CODEWORD_MAX_SIZE = 1024
-const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG = 9
-const FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG = 10
-const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF = 64
-
-# CONSTANTS GETTERS
-# =================================================================================================
-
-pub proc get_fri_remainder_poly_max_degree_plus_1_half() -> u8
-    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
-end
+# One eight-felt block contains four quadratic-extension coefficients.
+const REMAINDER_MAX_BLOCKS = REMAINDER_MAX_COEFFICIENTS // 4
+pub const REMAINDER_HALF_COEFFICIENTS = REMAINDER_MAX_COEFFICIENTS // 2
+const REMAINDER_HALF_BLOCKS = REMAINDER_MAX_BLOCKS // 2
+const REMAINDER_HALF_LOG_DEGREE = LOG_FINAL_DEGREE - 1
 
 # HELPERS
 # =================================================================================================
 
-#! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
+#! Loads and absorbs REMAINDER_MAX_COEFFICIENTS / 2 extension coefficients from advice.
 proc load_fri_remainder_poly_max_degree_plus_1_half(
     state: types::EidosState,
     dst: types::Address,
 ) -> (types::EidosState, types::Address)
-    repeat.16
+    repeat.REMAINDER_HALF_BLOCKS
         adv_pipe
         compress
     end
 end
 
-#! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
+#! Loads and absorbs REMAINDER_MAX_COEFFICIENTS extension coefficients from advice.
 proc load_fri_remainder_poly_max_degree_plus_1(
     state: types::EidosState,
     dst: types::Address,
 ) -> (types::EidosState, types::Address)
-    repeat.32
+    repeat.REMAINDER_MAX_BLOCKS
         adv_pipe
         compress
     end
 end
 
-#! Evaluates FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
+#! Uses `evaluate_fri_remainder_poly_max_degree_plus_1`'s contract with N/2 extension
+#! coefficients, where N = REMAINDER_MAX_COEFFICIENTS. Advances the coefficient cursor by N felts.
 pub proc evaluate_fri_remainder_poly_max_degree_plus_1_half(
     scratch0: word,
     scratch1: word,
     preserved: word,
     horner: types::HornerState,
 ) -> (word, word, word, types::HornerState)
-    repeat.16
+    repeat.REMAINDER_HALF_BLOCKS
         mem_stream
         horner_eval_ext
     end
 end
 
-#! Evaluates FRI remainder polynomial of degree strictly less than `max_degree + 1`.
+#! Processes N = REMAINDER_MAX_COEFFICIENTS extension coefficients using Horner's method.
+#!
+#! Coefficients are descending-degree (c0, c1) pairs at a word-aligned cursor. The point pointer
+#! must address an aligned [x0, x1, 0, 0] word. The supplied accumulator is updated; set it to zero
+#! to evaluate the polynomial.
+#!
+#! Input:  [scratch(8), preserved(4), coefficients, point_ptr, acc0, acc1, ...]
+#! Output: [coeffs(8), preserved(4), coefficients+2*N, point_ptr, acc0', acc1', ...]
 pub proc evaluate_fri_remainder_poly_max_degree_plus_1(
     scratch0: word,
     scratch1: word,
     preserved: word,
     horner: types::HornerState,
 ) -> (word, word, word, types::HornerState)
-    repeat.32
+    repeat.REMAINDER_MAX_BLOCKS
         mem_stream
         horner_eval_ext
     end
 end
 
-#! Computes and stores the number of FRI layers and the remainder polynomial size from the LDE
-#! domain size.
+#! Stores the fold count and remainder coefficient count derived from LOG_TRACE_LENGTH_PTR.
+#!
+#! The stored log trace height must be at least LOG_FINAL_DEGREE - 1. Fold-by-four reduces it
+#! by two per round, leaving a remainder of the configured maximum length or half that length.
 #!
 #! Input: [...]
 #! Output: [...]
 pub proc generate_fri_parameters()
-    # Load FRI verifier data
-    padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
-    #=> [lde_size, log(lde_size), lde_g, 0, ...]
-
-    # Compute the number of FRI layers
-    dup
-    dup.2
-    dup
-    is_odd
+    # Measured from the smaller endpoint, even distances reach the half-sized remainder;
+    # odd distances reach the maximum. This depends on the polynomial bound, not the LDE size.
+    mem_load.LOG_TRACE_LENGTH_PTR
+    sub.REMAINDER_HALF_LOG_DEGREE
+    dup is_odd
     if.true
-        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF
-        swap
-        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG sub
-        div.2
+        sub.1
+        push.REMAINDER_MAX_COEFFICIENTS
     else
-        push.FRI_REMAINDER_CODEWORD_MAX_SIZE
-        swap
-        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG sub
-        div.2
+        push.REMAINDER_HALF_COEFFICIENTS
     end
-    # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
-
-    mem_store.NUM_FRI_LAYERS_PTR
-    div.8
+    # => [remainder_coefficients, twice_num_fri_layers, ...]
     mem_store.REMAINDER_POLY_SIZE_PTR
-    # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
-
-    dropw
-    drop
+    div.2 mem_store.NUM_FRI_LAYERS_PTR
     # => [...]
 end
 
@@ -156,7 +145,8 @@ pub proc load_fri_layer_commitments()
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
         mem_loadw_le.TMP1_PTR
-        # => [lde_size, log2(lde_size), lde_generator, 0, a0, a1, Y, num_layers, ptr_layer + 4, y, y, ...]
+        # => [lde_size, log2(lde_size), lde_generator, 0, a0, a1,
+        #     num_layers, ptr_layer + 4, y, y, ...]
 
         # Compute and save to memory new lde_size and its new logarithm
         div.4
@@ -190,14 +180,16 @@ pub proc load_fri_layer_commitments()
     #=> [...]
 end
 
-#! Loads the FRI remainder polynomial into memory and absorbs it into the transcript.
+#! Loads the remainder coefficients from advice into memory and absorbs them into the transcript.
+#!
+#! Requires an empty transcript buffer and a stored remainder length of N or N/2, where
+#! N = REMAINDER_MAX_COEFFICIENTS. Coefficients arrive in descending degree order.
+#! `frie2f4::verify` checks their evaluations against folded queries.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
-#!
-#! Invocation: exec
 pub proc load_and_verify_remainder()
-    # Each FRI layer uses eight elements: a commitment word and a padded folding challenge.
+    # Each FRI layer stores [root(4), d_size, t_depth, alpha0, alpha1] in eight cells.
     # The remainder coefficients follow these layers in memory.
     mem_load.NUM_FRI_LAYERS_PTR
     mul.8 push.FRI_COM_PTR add
@@ -209,20 +201,20 @@ pub proc load_and_verify_remainder()
     assertz.err="FRI remainder absorption requires an empty transcript buffer"
 
     mem_load.REMAINDER_POLY_SIZE_PTR
-    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
+    push.REMAINDER_HALF_COEFFICIENTS
 
     eq
     if.true
-        # Remainder polynomial degree less than 64
-        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        # Half-sized remainder.
+        # Keep the transcript CV on stack while streaming the remainder coefficients.
         padw mem_loadw_le.RANDOM_COIN_CV_PTR
         padw padw
         # => [Y, Y, cv, remainder_poly_ptr, ...]
 
         exec.load_fri_remainder_poly_max_degree_plus_1_half
     else
-        # Remainder polynomial degree less than 128
-        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        # Maximum-length remainder.
+        # Keep the transcript CV on stack while streaming the remainder coefficients.
         padw mem_loadw_le.RANDOM_COIN_CV_PTR
         padw padw
         # => [Y, Y, cv, remainder_poly_ptr, ...]
@@ -241,11 +233,10 @@ pub proc load_and_verify_remainder()
     #=> [...]
 end
 
-#! Compute the pointer to the first word storing the FRI queries.
+#! Stores the start of the query records in FRI_QUERIES_ADDRESS_PTR.
 #!
-#! Since the FRI queries are laid out just before the FRI commitments, we compute the address
-#! to the first FRI query by subtracting from the pointer to the first FRI layer commitment
-#! the total number of queries.
+#! Each query occupies four felts immediately before the layer commitments, so the start is
+#! FRI_COM_PTR minus four times the number of queries.
 #!
 #! Input: [...]
 #! Output: [...]

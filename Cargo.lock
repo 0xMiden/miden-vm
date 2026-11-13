@@ -2953,6 +2953,7 @@ dependencies = [
  "miden-precompiles-stark",
  "miden-processor",
  "miden-prover",
+ "miden-serde-utils",
  "miden-stark",
  "miden-test-utils",
  "miden-utils-sync",
@@ -2965,6 +2966,7 @@ dependencies = [
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rstest",
+ "serde-wincode",
  "thiserror 2.0.19",
  "tokio",
 ]

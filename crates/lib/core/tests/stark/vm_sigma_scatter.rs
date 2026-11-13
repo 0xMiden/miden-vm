@@ -4,10 +4,10 @@
 //! The harness stages these pairs, calls `scatter_aux_bus_boundary`, and checks canonical
 //! memory placement and stack preservation. Transcript observation is outside this harness.
 
-use miden_air::vm::MIDEN_AIR_COUNT;
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenAir};
 use miden_core::Felt;
 
-use super::vm_layout_const;
+use super::{AND8_LOOKUP_LOG_HEIGHT, vm_layout_const};
 use crate::helpers::read_memory_felt;
 
 /// Each AIR contributes one extension-field boundary value, so two base felts.
@@ -17,8 +17,6 @@ const SIGMA_FELTS: u32 = 2;
 const SENTINELS: [u64; 4] = [7_001, 7_002, 7_003, 7_004];
 /// Word-aligned harness cell the sentinels are written back to.
 const SENTINEL_PTR: u32 = 1_000;
-/// Word-aligned harness cell the pushed log heights are written back to.
-const HEIGHTS_PTR: u32 = 1_004;
 
 // ORACLES
 // ================================================================================================
@@ -34,10 +32,16 @@ fn proof_order(heights: &[u64]) -> Vec<usize> {
 }
 
 /// Log heights that place canonical AIR `order[p]` at proof position `p`.
+/// Anchor And8 at its setup height and place the variable-height AIRs around it.
 pub(super) fn heights_for_order(order: &[usize]) -> Vec<u64> {
+    let and8_position = order
+        .iter()
+        .position(|&air| air == MidenAir::AND8_LOOKUP.instance_index())
+        .expect("the VM proof order includes And8");
+    let min_height = u64::from(AND8_LOOKUP_LOG_HEIGHT) - and8_position as u64;
     let mut heights = vec![0u64; order.len()];
     for (position, &air) in order.iter().enumerate() {
-        heights[air] = 10 + position as u64;
+        heights[air] = min_height + position as u64;
     }
     heights
 }
@@ -85,7 +89,7 @@ fn source(heights: &[u64]) -> String {
     format!(
         "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::vm::aux_trace
-use miden::core::sys::vm::layout
+use {{AUX_BUS_BOUNDARY_PTR}} from miden::core::sys::vm::parameters
 use miden::core::sys::vm::ood_frames
 
 begin
@@ -95,18 +99,16 @@ begin
     push.{s3}.{s2}.{s1}.{s0}
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr mem_storew_le
+    push.AUX_BUS_BOUNDARY_PTR mem_storew_le
     dropw
 
     padw adv_loadw
-    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+    push.AUX_BUS_BOUNDARY_PTR add.4 mem_storew_le
     dropw
 
     exec.aux_trace::scatter_aux_bus_boundary
 
     push.{SENTINEL_PTR} mem_storew_le dropw
-    exec.aux_trace::push_canonical_log_heights
-    push.{HEIGHTS_PTR} mem_storew_le dropw
 end",
         s0 = SENTINELS[0],
         s1 = SENTINELS[1],
@@ -130,14 +132,6 @@ fn run(heights: &[u64]) -> Vec<u64> {
             read_memory_felt(&output, SENTINEL_PTR + i as u32),
             Felt::new_unchecked(*sentinel),
             "the absorb/scatter sequence disturbed operand-stack slot {i} for heights {heights:?}"
-        );
-    }
-
-    for (air, &height) in heights.iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(&output, HEIGHTS_PTR + air as u32).as_canonical_u64(),
-            height,
-            "canonical height for AIR {air}"
         );
     }
 
@@ -200,7 +194,11 @@ fn the_scatter_moves_every_boundary_value_to_its_canonical_air() {
 #[test]
 fn tied_heights_scatter_to_the_instance_order() {
     let wire = wire_values();
-    for heights in [vec![18u64; MIDEN_AIR_COUNT], vec![9u64, 9, 21, 9]] {
+    let fixed_height = u64::from(AND8_LOOKUP_LOG_HEIGHT);
+    for heights in [
+        vec![fixed_height; MIDEN_AIR_COUNT],
+        vec![fixed_height, fixed_height, fixed_height + 3, fixed_height],
+    ] {
         let order = proof_order(&heights);
         let mut expected = vec![u64::MAX; wire.len()];
         for (position, &air) in order.iter().enumerate() {
