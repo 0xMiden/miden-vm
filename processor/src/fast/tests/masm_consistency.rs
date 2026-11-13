@@ -355,12 +355,12 @@ fn test_masm_errors_consistency(
 
     // fast processor
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err().into_kind();
 
     // fast processor by step
     let fast_stepped_err = {
         let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap_err()
+        processor.execute_by_step_sync(&program, &mut host).unwrap_err().into_kind()
     };
 
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());

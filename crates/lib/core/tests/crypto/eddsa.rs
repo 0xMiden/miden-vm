@@ -26,7 +26,8 @@ use miden_crypto::{
 };
 use miden_precompiles::{Ed25519Base, UintSpec, ed25519_decompress_x};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProcessorError,
+    StackInputs,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventHandler,
     operation::OperationError,
@@ -194,10 +195,8 @@ fn ed25519_rejects_advice_that_negates_both_encoded_points() {
     let err = run_program_with_handler(&source, &pk, &sig, Some(handler)).unwrap_err();
     assert!(
         matches!(
-            &err,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, .. }, ..
-            } if *err_code == miden_core::mast::error_code_from_msg(
+            err.kind(),
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if *err_code == miden_core::mast::error_code_from_msg(
                 "invalid compressed point parity"
             )
         ),
@@ -315,10 +314,8 @@ fn ed25519_rejects_buffers_that_alias_verifier_local_frames() {
         let err = run_bytes_at(&message_bytes, &pk, &sig, message_ptr, scratch_ptr).unwrap_err();
         assert!(
             matches!(
-                &err,
-                ExecutionError::OperationError {
-                    err: OperationError::FailedAssertion { err_code, .. }, ..
-                } if *err_code == miden_core::mast::error_code_from_msg(
+                err.kind(),
+                ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if *err_code == miden_core::mast::error_code_from_msg(
                     "Ed25519 buffers must precede verifier locals"
                 )
             ),

@@ -12,7 +12,7 @@ use super::handlers::{
     EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
 };
 use crate::{
-    BaseHost, ExecutionError, LoadedMastForest, MastForestLoadError, MastForestStore,
+    BaseHost, HostError, LoadedMastForest, MastForestLoadError, MastForestStore,
     MemMastForestStore, ProcessorState, SyncHost, advice::AdviceMutation,
 };
 
@@ -65,7 +65,7 @@ where
     /// # Errors
     /// Returns an error when a handler of the library has an empty or reserved event name, or
     /// when its event already has a handler in this host.
-    pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
+    pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), HostError> {
         let library = library.into();
 
         // Each successful registration adds a handler that the registry did not have, so
@@ -91,7 +91,7 @@ where
 
     /// Adds a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
     /// to the host.
-    pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, ExecutionError> {
+    pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, HostError> {
         self.load_library(library)?;
         Ok(self)
     }
@@ -104,7 +104,7 @@ where
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), HostError> {
         self.event_handlers.register(event, handler)
     }
 
@@ -124,7 +124,7 @@ where
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<bool, ExecutionError> {
+    ) -> Result<bool, HostError> {
         self.event_handlers.replace(event, handler)
     }
 
@@ -137,7 +137,7 @@ where
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), HostError> {
         self.trace_handlers.register(event, handler)
     }
 
@@ -157,7 +157,7 @@ where
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> Result<bool, ExecutionError> {
+    ) -> Result<bool, HostError> {
         self.trace_handlers.replace(event, handler)
     }
 }
@@ -342,7 +342,6 @@ mod tests {
     use miden_core::{mast::BasicBlockNodeBuilder, operations::Operation};
 
     use super::{super::handlers::NoopEventHandler, *};
-    use crate::errors::HostError;
 
     /// Builds a library with one procedure and one handler per event name.
     fn library(events: &[&'static str]) -> HostLibrary {
@@ -391,7 +390,7 @@ mod tests {
         let err = host.load_library(library).unwrap_err();
 
         assert!(
-            matches!(err, ExecutionError::HostError(HostError::DuplicateEventHandler { .. })),
+            matches!(err, HostError::DuplicateEventHandler { .. }),
             "unexpected error: {err}"
         );
         assert!(!is_registered(&host, "test::a"), "the first handler must be rolled back");

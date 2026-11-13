@@ -168,8 +168,8 @@ pub trait SyncHost: BaseHost {
 ///
 /// ```
 /// use miden_processor::{
-///     BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host,
-///     LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, Word,
+///     BaseHost, FastProcessor, FutureMaybeSend, Host,
+///     LoadedMastForest, MastForestLoadError, ProcessorError, ProcessorState, StackInputs, Word,
 ///     advice::AdviceMutation, event::EventError,
 /// };
 /// # use std::sync::Arc;
@@ -200,11 +200,11 @@ pub trait SyncHost: BaseHost {
 /// let mut host = DatabaseHost;
 /// let error = FastProcessor::new(StackInputs::default())
 ///     .execute(&program, &mut host).await.unwrap_err();
-/// let ExecutionError::MastForestError { error, .. } = error else {
+/// let ProcessorError::MastForestLoad { source, .. } = error.kind() else {
 ///     panic!("expected the database error");
 /// };
 /// assert_eq!(
-///     error.downcast_ref::<std::io::Error>().unwrap().to_string(),
+///     source.downcast_ref::<std::io::Error>().unwrap().to_string(),
 ///     "database unavailable",
 /// );
 /// # }

@@ -5,7 +5,6 @@ use miden_mast_package::debug_info::DebugSourceNodeId;
 use crate::{
     BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::PackageSourceDebugContext,
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
@@ -287,23 +286,14 @@ where
             },
             _ => {
                 // If the operation is not an Emit, we execute it normally.
-                let source_debug_info = state.source_debug_info.clone();
-                let package_source_context = source_debug_info.as_deref().map(|debug_info| {
-                    PackageSourceDebugContext::new_optional(
-                        debug_info,
-                        state.current_source_node_id(),
-                    )
-                });
-                match execute_op(
-                    state.processor,
-                    op,
-                    op_idx_in_block,
-                    state.host,
-                    state.tracer,
-                    package_source_context,
-                ) {
+                match execute_op(state.processor, op, state.tracer) {
                     Ok(operation_helpers) => operation_helpers,
                     Err(err) => {
+                        let err = err.with_context(
+                            state.package_source_context(),
+                            state.host,
+                            Some(op_idx_in_block),
+                        );
                         return ControlFlow::Break(BreakReason::Err(err).into());
                     },
                 }

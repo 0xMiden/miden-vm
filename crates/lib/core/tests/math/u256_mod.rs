@@ -121,7 +121,7 @@ fn divmod_panics_on_zero_divisor() {
         end";
     let a = U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 8]);
     let operands = [U256::ZERO.to_le_limbs(), a.to_le_limbs()].concat();
-    assert!(build_test!(source, &operands).execute().is_err());
+    assert!(build_test!(source, &operands).execute_for_output().is_err());
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn divmod_panics_on_non_u32_limb() {
     let non_u32: u64 = (1u64 << 32) + 1;
     let mut operands = vec![1u64, non_u32, 0, 0, 0, 0, 0, 0];
     operands.extend([42u64, 0, 0, 0, 0, 0, 0, 0]);
-    assert!(build_test!(source, &operands).execute().is_err());
+    assert!(build_test!(source, &operands).execute_for_output().is_err());
 }
 
 #[test]
@@ -634,7 +634,7 @@ fn shift_panics_when_amount_out_of_range() {
             let mut operands = vec![n];
             operands.extend(U256::from_bit(0).to_le_limbs());
             assert!(
-                build_test!(&source, &operands).execute().is_err(),
+                build_test!(&source, &operands).execute_for_output().is_err(),
                 "{op} with n={n} should panic"
             );
         }
@@ -655,7 +655,7 @@ fn shift_panics_on_non_u32_amount() {
             let mut operands = vec![n];
             operands.extend(U256::from_bit(0).to_le_limbs());
             assert!(
-                build_test!(&source, &operands).execute().is_err(),
+                build_test!(&source, &operands).execute_for_output().is_err(),
                 "{op} with non-u32 n={n} should panic"
             );
         }

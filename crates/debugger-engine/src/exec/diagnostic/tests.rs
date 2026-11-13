@@ -1,6 +1,7 @@
 use alloc::string::ToString;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_processor::ProcessorError;
 
 use super::*;
 use crate::exec::{DebuggerHost, poll_immediately};
@@ -29,11 +30,11 @@ fn trace_handler_errors_preserve_the_registered_name_through_diagnostics() {
         FastProcessor::new(StackInputs::default()).execute(&package.unwrap_program(), &mut wrapper),
     )
     .expect_err("the trace handler must reject execution");
-    let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
+    let ProcessorError::Event { event_id, event_name, source: error } = error.kind() else {
         panic!("unexpected execution error: {error:?}");
     };
-    assert_eq!(event_id, name.to_event_id());
-    assert_eq!(event_name, Some(name));
+    assert_eq!(*event_id, name.to_event_id());
+    assert_eq!(event_name.as_ref(), Some(&name));
     assert_eq!(error.to_string(), "trace rejected");
     assert!(wrapper.last_cycle > RowIndex::from(0u32));
     assert!(!wrapper.last_stack_state.is_empty());
@@ -80,7 +81,7 @@ fn diagnostics_delegate_events_capture_state_and_preserve_execution_results() {
     assert_eq!(wrapper.call_depth, 0);
     assert!(wrapper.last_cycle > RowIndex::from(0u32));
     assert!(!wrapper.last_stack_state.is_empty());
-    wrapper.report_diagnostics(&ExecutionError::Internal("test failure"));
+    wrapper.report_diagnostics(&ProcessorError::Internal("test failure").into());
     assert_eq!(host.take_recorded_event_mutations().len(), 3);
 }
 

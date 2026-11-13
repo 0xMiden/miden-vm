@@ -81,7 +81,7 @@ fn load_air_context_accepts_trace_length_boundaries() {
 fn load_air_context_rejects_a_non_u32_trace_length() {
     let non_u32 = u64::from(u32::MAX) + 1;
     let test = build_test!(LOAD_AIR_CONTEXT, &[], &[non_u32, 10, 10]);
-    assert!(test.execute().is_err(), "a non-u32 AIR height must be rejected");
+    assert!(test.execute_for_output().is_err(), "a non-u32 AIR height must be rejected");
 }
 
 #[test]
@@ -162,7 +162,10 @@ fn validate_inputs_processor_rejects_non_u32_security_parameters() {
     ] {
         let source = validate_inputs_source(num_queries, query, deep, folding);
         let test = build_test!(&source, &[]);
-        assert!(test.execute().is_err(), "a non-u32 security parameter must be rejected");
+        assert!(
+            test.execute_for_output().is_err(),
+            "a non-u32 security parameter must be rejected"
+        );
     }
 }
 

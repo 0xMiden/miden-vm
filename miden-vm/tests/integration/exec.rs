@@ -39,11 +39,8 @@ fn advice_map_loaded_before_execution() {
         Ok(_) => panic!("Expected error"),
         Err(e) => {
             assert_matches!(
-                e,
-                miden_processor::ExecutionError::AdviceError {
-                    err: AdviceError::MapKeyNotFound { .. },
-                    ..
-                }
+                e.into_kind(),
+                miden_processor::ProcessorError::Advice(AdviceError::MapKeyNotFound { .. })
             );
         },
     }

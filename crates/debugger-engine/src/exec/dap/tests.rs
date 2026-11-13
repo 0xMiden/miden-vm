@@ -6,7 +6,7 @@ use miden_core::{
     events::{EventId, EventName},
 };
 use miden_debug_types::{ByteIndex, Location, SourceManagerExt, Uri};
-use miden_processor::event::EventHandler;
+use miden_processor::{ProcessorError, event::EventHandler};
 
 use super::*;
 use crate::exec::{DebuggerHost, EventMutationRecorder};
@@ -50,10 +50,10 @@ fn dap_wrapper_preserves_forest_lookup_errors() {
         FastProcessor::new(StackInputs::default()).execute(&program, &mut wrapper),
     )
     .unwrap_err();
-    let ExecutionError::MastForestError { error, .. } = error else {
+    let ProcessorError::MastForestLoad { source, .. } = error.kind() else {
         panic!("expected the store error");
     };
-    assert!(error.downcast_ref::<std::io::Error>().is_some());
+    assert!(source.downcast_ref::<std::io::Error>().is_some());
     assert!(forests.snapshot().is_empty());
 }
 
@@ -80,11 +80,11 @@ fn trace_handler_errors_preserve_the_registered_name_through_dap() {
         FastProcessor::new(StackInputs::default()).execute(&package.unwrap_program(), &mut wrapper),
     )
     .expect_err("the trace handler must reject execution");
-    let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
+    let ProcessorError::Event { event_id, event_name, source: error } = error.kind() else {
         panic!("unexpected execution error: {error:?}");
     };
-    assert_eq!(event_id, name.to_event_id());
-    assert_eq!(event_name, Some(name));
+    assert_eq!(*event_id, name.to_event_id());
+    assert_eq!(event_name.as_ref(), Some(&name));
     assert_eq!(error.to_string(), "trace rejected");
 }
 

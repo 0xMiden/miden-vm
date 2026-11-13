@@ -1,99 +1,49 @@
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, ExecutionError,
+    BaseHost, ExecutionError, ProcessorError,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{
-        OperationError, PackageSourceDebugContext, mast_forest_error_with_context,
-        mast_forest_error_with_package_source_context, procedure_not_found_with_context,
-        procedure_not_found_with_package_source_context,
-    },
+    errors::{OperationError, PackageSourceDebugContext},
 };
 
-// HELPERS
-// ---------------------------------------------------------------------------------------------
-
-/// If the given error is generated when trying to resolve an External node, and there is a caller
-/// continuation available, rebuild the error in the legacy no-context form.
+/// Chooses the failing external occurrence or its caller before resolving diagnostics once.
 ///
-/// In practice, `ExternalNode`s are executed via a `CallNode` or `DynNode`. Thus, if we fail to
-/// resolve an `ExternalNode`, we can look at the top of the continuation stack to confirm that the
-/// break came from a caller node that can lead to external node execution.
-pub(super) fn maybe_use_caller_error_context<F>(
-    original_err: ExecutionError,
+/// An external reference may have no source location of its own. For resolution failures, the
+/// pending caller continuation provides a useful fallback within the same package.
+pub(super) fn load_error_with_context<F>(
+    err: ProcessorError,
+    source_node_id: Option<DebugSourceNodeId>,
     continuation_stack: &ContinuationStack<F>,
     package_debug_info: Option<&PackageDebugInfo>,
     host: &impl BaseHost,
 ) -> ExecutionError {
-    if matches!(
-        original_err,
-        ExecutionError::ProcedureNotFound { source_file: Some(_), .. }
-            | ExecutionError::OperationError { source_file: Some(_), .. }
-            | ExecutionError::MastForestError { source_file: Some(_), .. }
-    ) {
-        return original_err;
-    }
-
-    // We only care about procedure-not-found, malformed MAST forest, or forest-loading errors.
-    let root_digest = match &original_err {
-        ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,
-        ExecutionError::OperationError {
-            err: OperationError::MalformedMastForestInHost { root_digest },
-            ..
-        } => *root_digest,
-        ExecutionError::MastForestError { root_digest, .. } => *root_digest,
-        _ => return original_err,
-    };
-
-    // Look for caller context in the continuation stack
-    let Some((top_continuation, source_node_id)) =
-        continuation_stack.peek_continuation_with_source_node_id()
-    else {
-        return original_err;
-    };
-
-    // Accept all continuations that can lead to external node execution.
-    match top_continuation {
-        Continuation::FinishCall(_)
-        | Continuation::FinishJoin(_)
-        | Continuation::FinishSplit(_)
-        | Continuation::FinishLoop(_) => {},
-        _ => return original_err,
-    }
-
-    // We found a caller continuation, so rebuild the error with caller source context when present.
-    match original_err {
-        ExecutionError::ProcedureNotFound { .. } => match (package_debug_info, source_node_id) {
-            (Some(debug_info), Some(source_node_id)) => {
-                procedure_not_found_with_package_source_context(
-                    root_digest,
-                    PackageSourceDebugContext::new(debug_info, source_node_id),
-                    host,
-                )
+    let context = package_debug_info
+        .map(|debug_info| PackageSourceDebugContext::new(debug_info, source_node_id));
+    let is_resolution_error = matches!(
+        err,
+        ProcessorError::ProcedureNotFound { .. }
+            | ProcessorError::MastForestLoad { .. }
+            | ProcessorError::Operation(OperationError::MalformedMastForestInHost { .. })
+    );
+    let has_location = context.and_then(|context| context.assembly_location(None)).is_some();
+    let context = if is_resolution_error && !has_location {
+        let caller = continuation_stack.peek_continuation_with_source_node_id().and_then(
+            |(continuation, source_node_id)| match continuation {
+                Continuation::FinishCall(_)
+                | Continuation::FinishJoin(_)
+                | Continuation::FinishSplit(_)
+                | Continuation::FinishLoop(_) => source_node_id,
+                _ => None,
             },
-            _ => procedure_not_found_with_context(root_digest),
-        },
-        ExecutionError::OperationError { err, .. } => match (package_debug_info, source_node_id) {
-            (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
-                PackageSourceDebugContext::new(debug_info, source_node_id),
-                host,
-                None,
-            ),
-            _ => err.with_context(),
-        },
-        ExecutionError::MastForestError { error, .. } => {
-            match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => {
-                    mast_forest_error_with_package_source_context(
-                        root_digest,
-                        error,
-                        PackageSourceDebugContext::new(debug_info, source_node_id),
-                        host,
-                    )
-                },
-                _ => mast_forest_error_with_context(root_digest, error),
-            }
-        },
-        other => other,
-    }
+        );
+        match (package_debug_info, caller) {
+            (Some(debug_info), Some(source_node_id)) => {
+                Some(PackageSourceDebugContext::new(debug_info, Some(source_node_id)))
+            },
+            _ => context,
+        }
+    } else {
+        context
+    };
+    err.with_context(context, host, None)
 }

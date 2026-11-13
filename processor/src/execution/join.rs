@@ -36,11 +36,15 @@ where
 
     let first_source_node_id = match state.child_source_node_id(0) {
         Ok(source_node_id) => source_node_id,
-        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        Err(err) => {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+        },
     };
     let second_source_node_id = match state.child_source_node_id(1) {
         Ok(source_node_id) => source_node_id,
-        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        Err(err) => {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+        },
     };
 
     state.continuation_stack.push_with_source_node_id(

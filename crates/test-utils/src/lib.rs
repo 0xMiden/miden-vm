@@ -37,7 +37,7 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
-    ContextId, ExecutionError, ProcessorState,
+    ContextId, ExecutionError, ExecutionTraceError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
 };
 #[cfg(not(target_family = "wasm"))]
@@ -87,17 +87,6 @@ pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
         let namespace = path.strip_prefix("::").unwrap_or(&path);
         format!("namespace {namespace}\n\n{source}")
     }
-}
-
-#[cfg(not(target_family = "wasm"))]
-/// Constructs a processor with the default VM environment.
-fn new_vm_default_processor(
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    options: ExecutionOptions,
-) -> Result<FastProcessor, ExecutionError> {
-    FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)
 }
 
 // CONSTANTS
@@ -178,14 +167,17 @@ assertion failed (expected assembly error, but got a different type):
     };
 }
 
-/// Asserts that running the given execution test will result in the expected error.
+/// Asserts that running the given execution test will result in the expected execution error kind.
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 #[macro_export]
 macro_rules! expect_exec_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err($crate::ExecutionTraceError::Execution(error)) => {
+                ::core::assert_matches!(error.into_kind(), $( $pattern )|+ $( if $guard )?)
+            },
+            Err(error) => panic!("expected an execution error, got: {error}"),
         }
     };
 }
@@ -250,7 +242,7 @@ macro_rules! assert_assembler_diagnostic {
 /// - Assembly error test: check that attempting to compile the given source causes an AssemblyError
 ///   which contains the specified substring.
 /// - Execution error test: check that running a program compiled from the given source causes an
-///   ExecutionError which contains the specified substring.
+///   ExecutionTraceError which contains the specified substring.
 pub struct Test {
     pub source_manager: Arc<DefaultSourceManager>,
     pub source: Arc<SourceFile>,
@@ -420,7 +412,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = new_vm_default_processor(
+        let processor = FastProcessor::new_with_options(
             self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default(),
@@ -570,7 +562,7 @@ impl Test {
     /// stack outputs.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
+    pub fn execute(&self) -> Result<VmTrace, ExecutionTraceError> {
         self.execute_with_stack_inputs_inner(self.stack_inputs)
     }
 
@@ -583,7 +575,7 @@ impl Test {
     pub fn execute_with_stack_inputs(
         &self,
         stack_inputs: &[u64],
-    ) -> Result<VmTrace, ExecutionError> {
+    ) -> Result<VmTrace, ExecutionTraceError> {
         let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
@@ -593,7 +585,7 @@ impl Test {
     fn execute_with_stack_inputs_inner(
         &self,
         stack_inputs: StackInputs,
-    ) -> Result<VmTrace, ExecutionError> {
+    ) -> Result<VmTrace, ExecutionTraceError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
         // with these tests (which are tested separately), but rather only the per-fragment trace
         // generation logic - though not too big so as to over-allocate memory.
@@ -604,13 +596,14 @@ impl Test {
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let fast_stack_result = {
-            let fast_processor = new_vm_default_processor(
+            let fast_processor = FastProcessor::new_with_options(
                 stack_inputs,
                 self.advice_inputs.clone(),
                 ExecutionOptions::default()
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
-            )?;
+            )
+            .map_err(ExecutionError::from)?;
             if let Some(debug_info) = debug_info.as_ref() {
                 fast_processor.execute_for_proving_with_package_debug_info_sync(
                     &program, debug_info, &mut host,
@@ -623,13 +616,11 @@ impl Test {
         // Compare traced full execution and step/resume execution stack outputs.
         self.assert_result_with_step_execution(stack_inputs, &fast_stack_result);
 
-        fast_stack_result.and_then(|witness| {
-            let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
+        let (vm_witness, _) = fast_stack_result?.into_parts();
+        let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
 
-            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            Ok(trace)
-        })
+        assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
+        Ok(trace)
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs.
@@ -641,7 +632,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let processor = new_vm_default_processor(
+        let processor = FastProcessor::new_with_options(
             self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default(),
@@ -668,7 +659,7 @@ impl Test {
         let (program, mut host, debug_info) = self.get_program_and_host();
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
-        let processor = new_vm_default_processor(
+        let processor = FastProcessor::new_with_options(
             stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default(),
@@ -833,7 +824,7 @@ impl Test {
         let compare_error_diagnostics = debug_info.is_none();
 
         let fast_result_by_step = {
-            let fast_process = new_vm_default_processor(
+            let fast_process = FastProcessor::new_with_options(
                 stack_inputs,
                 self.advice_inputs.clone(),
                 ExecutionOptions::default(),

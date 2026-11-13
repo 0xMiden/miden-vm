@@ -1192,7 +1192,7 @@ fn divmod_divide_by_zero() {
 
     // b = 0, a = 42
     build_test!(source, &[0, 0, 0, 0, 42, 0, 0, 0])
-        .execute()
+        .execute_for_output()
         .expect_err("division by zero");
 }
 
@@ -1208,7 +1208,7 @@ fn divmod_non_u32_limb() {
     // b has a non-u32 limb (b1 = 2^32 + 1)
     let non_u32: u64 = (1u64 << 32) + 1;
     build_test!(source, &[1, non_u32, 0, 0, 42, 0, 0, 0])
-        .execute()
+        .execute_for_output()
         .expect_err("not a valid u32");
 }
 

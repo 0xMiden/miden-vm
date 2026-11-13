@@ -3436,6 +3436,7 @@ dependencies = [
  "miden-precompiles-stark",
  "miden-processor",
  "miden-stark",
+ "miden-utils-diagnostics",
  "miden-verifier",
  "miden-vm-stark",
  "rayon",

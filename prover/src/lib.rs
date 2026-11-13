@@ -19,9 +19,10 @@ pub use miden_core::{
 };
 pub use miden_precompiles_stark::prover::PrecompileProvingError;
 pub use miden_processor::{
-    ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness, FutureMaybeSend, Host,
-    SyncHost, VmWitness,
+    ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionTraceError, ExecutionWitness,
+    FutureMaybeSend, Host, ProcessorError, SyncHost, TraceGenerationError, VmWitness,
 };
+pub use miden_vm_stark::prover::ProvingError as VmProvingError;
 pub use prover::{Prover, ProverError, prove_sync};
 
 #[cfg(all(test, feature = "std"))]

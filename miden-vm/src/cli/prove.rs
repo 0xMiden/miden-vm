@@ -247,7 +247,7 @@ impl ProveCmd {
         } else {
             prover.prove(witness)
         }
-        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+        .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
         if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {

@@ -6,8 +6,8 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
-    trace::build_trace,
+    DefaultHost, ExecutionOptions, ExecutionTraceError, FastProcessor, Felt, ProcessorError,
+    StackInputs, advice::AdviceInputs, trace::build_trace,
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
@@ -221,4 +221,34 @@ fn overlap_builder_thread_enters_the_instrument_span() {
         2,
         "expected execution and the hasher builder to use separate threads, got {threads:?}"
     );
+}
+
+#[test]
+fn combined_trace_build_preserves_failure_phase() {
+    let failing_program = Assembler::default()
+        .assemble_program("execution_failure", "begin assert end")
+        .unwrap()
+        .unwrap_program();
+    let execution_error = processor(&[], AdviceInputs::default())
+        .execute_and_build_trace_sync(
+            &failing_program,
+            &mut DefaultHost::default(),
+            &miden_vm_stark::memory::default_budget(),
+        )
+        .unwrap_err();
+    assert!(matches!(execution_error, ExecutionTraceError::Execution(error)
+        if matches!(error.kind(), ProcessorError::Operation(_))));
+
+    let program = Assembler::default()
+        .assemble_program("trace_failure", "begin nop end")
+        .unwrap()
+        .unwrap_program();
+    let trace_error = processor(&[], AdviceInputs::default())
+        .execute_and_build_trace_sync(
+            &program,
+            &mut DefaultHost::default(),
+            &miden_vm_stark::memory::canonical_budget(1),
+        )
+        .unwrap_err();
+    assert!(matches!(trace_error, ExecutionTraceError::TraceGeneration(_)));
 }

@@ -11,7 +11,7 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorState, StackInputs,
+    DefaultHost, ExecutionOptions, FastProcessor, ProcessorError, ProcessorState, StackInputs,
     advice::AdviceMutation, operation::OperationError,
 };
 use miden_prover::Prover;
@@ -92,10 +92,8 @@ async fn live_accumulator_is_proved_before_clearing() {
             requested_root,
             "failed settlement must retain the live obligation",
         );
-        let ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } = &error
+        let ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) =
+            error.kind()
         else {
             panic!("expected a verifier or security assertion, got {error}");
         };

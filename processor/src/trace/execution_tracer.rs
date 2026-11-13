@@ -22,7 +22,7 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    AceError, ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE,
+    AceError, ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, ProcessorError,
     RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
@@ -1137,7 +1137,7 @@ impl Tracer for ExecutionTracer {
         processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), ProcessorError> {
         // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
         // from start_clock_cycle because finalize_clock_cycle is only called when the operation
         // succeeds (i.e., the stack depth check in processor.restore_context() passes).
@@ -1145,7 +1145,7 @@ impl Tracer for ExecutionTracer {
             // Restore context for call/syscall/dyncall: pop the current context's
             // (empty) overflow stack and restore the previous context's overflow state.
             self.overflow_table.restore_context().map_err(|_| {
-                ExecutionError::Internal(
+                ProcessorError::Internal(
                     "overflow table restore_context failed during trace finalization",
                 )
             })?;

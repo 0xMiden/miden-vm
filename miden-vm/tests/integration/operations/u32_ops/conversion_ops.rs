@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::PrimeField64;
 #[cfg(feature = "arbitrary")]
@@ -106,7 +106,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 1 &&
             values[0] == Felt::new_unchecked(equal)
     );
@@ -116,7 +116,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 1 &&
             values[0] == Felt::new_unchecked(larger)
     );
@@ -146,7 +146,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 2 &&
             values[0] == Felt::new_unchecked(value_a) &&
             values[1] == Felt::new_unchecked(value_b)
@@ -159,7 +159,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 1 &&
             values[0] == Felt::new_unchecked(value_a)
     );
@@ -171,7 +171,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 1 &&
             values[0] == Felt::new_unchecked(value_b)
     );
@@ -201,7 +201,7 @@ fn u32assertw_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 2 &&
             values.iter().all(|v| *v == Felt::new_unchecked(U32_BOUND))
     );

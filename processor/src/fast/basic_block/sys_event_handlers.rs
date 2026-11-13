@@ -3,7 +3,6 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     chiplets::hasher,
-    deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -13,26 +12,9 @@ use super::deferred_handlers::{
     handle_deferred_export_witness, handle_deferred_register, handle_deferred_register_data,
     handle_deferred_root_to_stack,
 };
-use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
-
-// SYSTEM EVENT ERROR
-// ================================================================================================
-
-/// Context-free error type for system event handlers.
-///
-/// This enum captures error conditions without source location information.
-/// The caller wraps it with context when converting to `ExecutionError`.
-#[derive(Debug, thiserror::Error)]
-pub enum SystemEventError {
-    #[error(transparent)]
-    Advice(#[from] AdviceError),
-    #[error(transparent)]
-    Operation(#[from] OperationError),
-    #[error(transparent)]
-    Memory(#[from] MemoryError),
-    #[error(transparent)]
-    Deferred(#[from] PrecompileError),
-}
+use crate::{
+    MemoryError, ProcessorError, advice::AdviceError, errors::OperationError, fast::FastProcessor,
+};
 
 // SYSTEM EVENT HANDLERS
 // ================================================================================================
@@ -40,7 +22,7 @@ pub enum SystemEventError {
 pub fn handle_system_event(
     processor: &mut FastProcessor,
     system_event: SystemEvent,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     match system_event {
         SystemEvent::MerkleNodeMerge => merge_merkle_nodes(processor),
         SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(processor),
@@ -92,7 +74,7 @@ pub fn handle_system_event(
 /// - `start_addr` is greater than or equal to 2^32.
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
-fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     let start_addr = processor.stack_get(5).as_canonical_u64();
     let end_addr = processor.stack_get(6).as_canonical_u64();
 
@@ -143,7 +125,7 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
 ///
 /// A is the first word after event_id (positions 1-4), and B is the second (positions 5-8).
 /// KEY is the generic Eidos hash of the eight Felts in `A || B`.
-fn insert_hdword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn insert_hdword_into_adv_map(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
@@ -174,7 +156,7 @@ fn insert_hdword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 ///
 /// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
 /// KEY is computed as the canonical Eidos hash of `[A, B, C, D]` (two compression blocks).
-fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
@@ -208,7 +190,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 /// ```
 ///
 /// `KEY` is the updated chaining value.
-fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [BLOCK_LO, BLOCK_HI, CV] where BLOCK_LO is at positions 1-4.
     let mut state = [
@@ -257,7 +239,7 @@ fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), Sys
 /// provider (i.e., the input trees are not removed).
 ///
 /// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
-fn merge_merkle_nodes(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn merge_merkle_nodes(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // fetch the arguments from the stack
     let lhs = processor.stack_get_word(1);
     let rhs = processor.stack_get_word(5);
@@ -288,7 +270,7 @@ fn merge_merkle_nodes(processor: &mut FastProcessor) -> Result<(), SystemEventEr
 /// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
 ///   the specified root.
 /// - Value of the node at the specified depth and index is not known to the advice provider.
-fn copy_merkle_node_to_adv_stack(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn copy_merkle_node_to_adv_stack(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // Stack at this point is `[event_id, d, i, R, ...]` where:
     // - `d` is depth,
     // - `i` is index,
@@ -333,7 +315,7 @@ fn copy_map_value_to_adv_stack(
     processor: &mut FastProcessor,
     include_len: bool,
     pad_to: u8,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let key = processor.stack_get_word(1);
 
     processor.advice.push_from_map(key, include_len, pad_to)?;
@@ -357,9 +339,7 @@ fn copy_map_value_to_adv_stack(
 ///
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
-fn copy_map_value_length_to_adv_stack(
-    processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+fn copy_map_value_length_to_adv_stack(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     let key = processor.stack_get_word(1);
 
     let values_len = processor
@@ -388,7 +368,7 @@ fn copy_map_value_length_to_adv_stack(
 /// Outputs:
 ///   Advice stack: [has_mapkey, ...]
 /// ```
-pub fn push_key_presence_flag(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+pub fn push_key_presence_flag(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     let map_key = processor.stack_get_word(1);
 
     let presence_flag = processor.advice.contains_map_key(&map_key);
@@ -415,7 +395,7 @@ pub fn push_key_presence_flag(processor: &mut FastProcessor) -> Result<(), Syste
 ///
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
-fn push_ext2_inv_result(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_ext2_inv_result(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     // Stack layout: [event_id, a0, a1, ...] with event_id on top, a0 (low) at position 1
     // Read from positions 1 and 2 (skipping event_id at position 0)
     let coef0 = processor.stack_get(1); // low coefficient
@@ -447,7 +427,7 @@ fn push_ext2_inv_result(processor: &mut FastProcessor) -> Result<(), SystemEvent
 /// Outputs:
 ///   Advice stack: [leading_zeros, ...]
 /// ```
-fn push_leading_zeros(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_leading_zeros(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     push_transformed_stack_top(processor, |stack_top| Felt::from_u32(stack_top.leading_zeros()))
 }
 
@@ -461,7 +441,7 @@ fn push_leading_zeros(processor: &mut FastProcessor) -> Result<(), SystemEventEr
 /// Outputs:
 ///   Advice stack: [trailing_zeros, ...]
 /// ```
-fn push_trailing_zeros(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_trailing_zeros(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     push_transformed_stack_top(processor, |stack_top| Felt::from_u32(stack_top.trailing_zeros()))
 }
 
@@ -475,7 +455,7 @@ fn push_trailing_zeros(processor: &mut FastProcessor) -> Result<(), SystemEventE
 /// Outputs:
 ///   Advice stack: [leading_ones, ...]
 /// ```
-fn push_leading_ones(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_leading_ones(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     push_transformed_stack_top(processor, |stack_top| Felt::from_u32(stack_top.leading_ones()))
 }
 
@@ -489,7 +469,7 @@ fn push_leading_ones(processor: &mut FastProcessor) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [trailing_ones, ...]
 /// ```
-fn push_trailing_ones(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_trailing_ones(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     push_transformed_stack_top(processor, |stack_top| Felt::from_u32(stack_top.trailing_ones()))
 }
 
@@ -506,7 +486,7 @@ fn push_trailing_ones(processor: &mut FastProcessor) -> Result<(), SystemEventEr
 ///
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals `ZERO`.
-fn push_ilog2(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+fn push_ilog2(processor: &mut FastProcessor) -> Result<(), ProcessorError> {
     let n = processor.stack_get(1).as_canonical_u64();
     if n == 0 {
         return Err(OperationError::LogArgumentZero.into());
@@ -525,7 +505,7 @@ fn push_ilog2(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
 fn push_transformed_stack_top(
     processor: &mut FastProcessor,
     f: impl FnOnce(u32) -> Felt,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let stack_top = processor.stack_get(1);
     let stack_top: u32 = stack_top
         .as_canonical_u64()
@@ -593,7 +573,7 @@ mod tests {
         let err = insert_hdword_into_adv_map(&mut processor).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
+            ProcessorError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
                 if current == base && actual == added && max == base + added - 1
         ));
     }
@@ -611,7 +591,7 @@ mod tests {
         let err = insert_hqword_into_adv_map(&mut processor).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
+            ProcessorError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
                 if current == base && actual == added && max == base + added - 1
         ));
     }
@@ -634,7 +614,7 @@ mod tests {
 
         write_stack_values(&mut processor, 8, 17);
         let err = insert_hdword_into_adv_map(&mut processor).unwrap_err();
-        let SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added, max }) = err
+        let ProcessorError::Advice(AdviceError::SizeBudgetExceeded { current, added, max }) = err
         else {
             panic!("expected advice map element budget error, got {err:?}");
         };

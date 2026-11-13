@@ -94,7 +94,7 @@ let mut exec = Executor::for_package(program_package, args).unwrap();
 
 exec.register_event_handler(EventName::new("my-event"), |_state| {
     vec![AdviceMutation::extend_advice_stack(AdviceStack::from(vec![RawFelt::from(1u32)]))]
-}).expect("invalid event handler");
+});
 ```
 
 ## Controlling execution with breakpoints

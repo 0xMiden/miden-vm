@@ -7,7 +7,7 @@ use miden_core::{mast::MastForest, program::KernelDescriptor};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
+    ExecutionError, FastProcessor, ProcessorError, SourceInlineCallContext, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
 };
 
@@ -126,9 +126,9 @@ impl Stopper for StepStopper {
 #[inline(always)]
 fn check_if_max_cycles_exceeded<F>(processor: &FastProcessor) -> ControlFlow<BreakReason<F>> {
     if processor.clk > processor.options.max_cycles() as usize {
-        ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
-            processor.options.max_cycles(),
-        )))
+        ControlFlow::Break(BreakReason::Err(
+            ProcessorError::CycleLimitExceeded(processor.options.max_cycles()).into(),
+        ))
     } else {
         ControlFlow::Continue(())
     }
@@ -142,9 +142,9 @@ fn check_if_continuation_stack_too_large<F>(
     continuation_stack: &ContinuationStack<F>,
 ) -> ControlFlow<BreakReason<F>> {
     if continuation_stack.len() > processor.options.max_num_continuations() {
-        ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
-            "continuation stack size exceeded the allowed maximum",
-        )))
+        ControlFlow::Break(BreakReason::Err(
+            ProcessorError::Internal("continuation stack size exceeded the allowed maximum").into(),
+        ))
     } else {
         ControlFlow::Continue(())
     }

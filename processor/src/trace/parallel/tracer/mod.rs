@@ -15,11 +15,13 @@ use super::{
     processor::ReplayProcessor,
 };
 use crate::{
-    ExecutionError, Felt, ONE, Word, ZERO,
+    Felt, ONE, ProcessorError, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
     mast::{ExecutableMastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
-    trace::trace_state::{EndBlockFlags, EndBlockStackEntryKind},
+    trace::{
+        TraceGenerationError,
+        trace_state::{EndBlockFlags, EndBlockStackEntryKind},
+    },
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -103,7 +105,7 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// If an error is encountered during trace generation, it is stored here. Once set, all
     /// subsequent `start_clock_cycle` and `finalize_clock_cycle` calls become no-ops, and the
     /// error is returned by [`into_parts`](Self::into_parts).
-    error_encountered: Option<ExecutionError>,
+    error_encountered: Option<TraceGenerationError>,
 }
 
 impl<'a> CoreTraceGenerationTracer<'a> {
@@ -132,7 +134,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 
     /// Consumes this tracer and returns its final state, or an error if one was encountered
     /// during trace generation.
-    pub fn into_final_state(self) -> Result<TracerFinalState, ExecutionError> {
+    pub fn into_final_state(self) -> Result<TracerFinalState, TraceGenerationError> {
         if let Some(err) = self.error_encountered {
             return Err(err);
         }
@@ -162,7 +164,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         node_id: MastNodeId,
         processor: &ReplayProcessor,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), TraceGenerationError> {
         let node = get_node_in_forest(current_forest, node_id)?;
 
         match node {
@@ -206,12 +208,13 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                 )?;
             },
             MastNode::Dyn(dyn_node) => {
-                let callee_hash = self.dyn_callee_hash.take().ok_or(ExecutionError::Internal(
-                    "dyn callee hash not stored at start of clock cycle",
-                ))?;
+                let callee_hash =
+                    self.dyn_callee_hash.take().ok_or(TraceGenerationError::InvalidReplay(
+                        "dyn callee hash not stored at start of clock cycle",
+                    ))?;
 
                 if dyn_node.is_dyncall() {
-                    let ctx_info = self.ctx_info.take().ok_or(ExecutionError::Internal(
+                    let ctx_info = self.ctx_info.take().ok_or(TraceGenerationError::InvalidReplay(
                         "execution context info not stored at start of clock cycle for DYNCALL node",
                     ))?;
 
@@ -245,13 +248,15 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         current_forest: &Arc<SparseMastForest>,
         continuation: &Continuation<Arc<SparseMastForest>>,
         processor: &ReplayProcessor,
-    ) -> Result<Option<ExecutionContextInfo>, ExecutionError> {
+    ) -> Result<Option<ExecutionContextInfo>, TraceGenerationError> {
         let Continuation::StartNode(node_id) = &continuation else {
             return Ok(None);
         };
 
         let Some(node) = current_forest.get_node_by_id(*node_id) else {
-            return Err(ExecutionError::Internal("invalid node ID stored in continuation"));
+            return Err(TraceGenerationError::InvalidReplay(
+                "invalid node ID stored in continuation",
+            ));
         };
 
         let MastNode::Dyn(dyn_node) = node else {
@@ -269,7 +274,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                 let (_, overflow_addr_after_drop) = processor
                 .stack_overflow_replay
                 .peek_replay_pop_overflow()
-                .ok_or(ExecutionError::Internal(
+                .ok_or(TraceGenerationError::InvalidReplay(
                     "stack depth is above minimum, but no corresponding overflow pop in the replay",
                 ))?;
                 let stack_depth_after_drop = processor.stack.stack_depth() - 1;
@@ -313,7 +318,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         &self,
         continuation: &Continuation<Arc<SparseMastForest>>,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<EndBlockFlags, ExecutionError> {
+    ) -> Result<EndBlockFlags, TraceGenerationError> {
         let is_loop_body = self.is_loop_body;
 
         match continuation {
@@ -325,7 +330,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             Continuation::FinishCall(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
                 let MastNode::Call(_) = node else {
-                    return Err(ExecutionError::Internal(
+                    return Err(TraceGenerationError::InvalidReplay(
                         "expected call node in FinishCall continuation",
                     ));
                 };
@@ -334,7 +339,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             Continuation::FinishDyn(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
                 let MastNode::Dyn(dyn_node) = node else {
-                    return Err(ExecutionError::Internal(
+                    return Err(TraceGenerationError::InvalidReplay(
                         "expected dyn node in FinishDyn continuation",
                     ));
                 };
@@ -350,7 +355,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             | Continuation::FinishBasicBlock(_) => {
                 Ok(EndBlockFlags::new(is_loop_body, EndBlockStackEntryKind::Continuation))
             },
-            _ => Err(ExecutionError::Internal(
+            _ => Err(TraceGenerationError::InvalidReplay(
                 "compute_end_block_flags called for non-END continuation",
             )),
         }
@@ -366,16 +371,18 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation<Arc<SparseMastForest>>,
         processor: &ReplayProcessor,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<Option<Word>, ExecutionError> {
+    ) -> Result<Option<Word>, TraceGenerationError> {
         if let Continuation::StartNode(node_id) = continuation {
             let Some(node) = current_forest.get_node_by_id(*node_id) else {
-                return Err(ExecutionError::Internal("invalid node ID stored in continuation"));
+                return Err(TraceGenerationError::InvalidReplay(
+                    "invalid node ID stored in continuation",
+                ));
             };
 
             if let MastNode::Dyn(_) = node {
                 let (word_read, _addr, _ctx, _clk) =
                     processor.memory_reads_replay.iter_read_words().next().ok_or(
-                        ExecutionError::Internal(
+                        TraceGenerationError::InvalidReplay(
                             "dyn node reads the procedure hash (word) from memory",
                         ),
                     )?;
@@ -405,7 +412,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             return;
         }
 
-        let result = (|| -> Result<(), ExecutionError> {
+        let result = (|| -> Result<(), TraceGenerationError> {
             // If this is a DYNCALL node, store execution context info needed when writing the trace
             // row in finalize_clock_cycle.
             self.ctx_info =
@@ -437,17 +444,18 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         processor: &ReplayProcessor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), ProcessorError> {
         if self.error_encountered.is_some() {
             return Ok(());
         }
 
         use Continuation::*;
 
-        let result = (|| -> Result<(), ExecutionError> {
-            let continuation = self.continuation.as_ref().ok_or(ExecutionError::Internal(
-                "continuation not stored at start of clock cycle",
-            ))?;
+        let result = (|| -> Result<(), TraceGenerationError> {
+            let continuation =
+                self.continuation.as_ref().ok_or(TraceGenerationError::InvalidReplay(
+                    "continuation not stored at start of clock cycle",
+                ))?;
 
             match continuation {
                 StartNode(node_id) => {
@@ -480,7 +488,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishLoop(node_id) => {
                     let loop_condition = self.finish_loop_condition.take().ok_or(
-                        ExecutionError::Internal(
+                        TraceGenerationError::InvalidReplay(
                             "loop condition not stored at start of clock cycle for FinishLoop continuation",
                         ),
                     )?;
@@ -490,7 +498,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         let MastNode::Loop(loop_node) =
                             get_node_in_forest(current_forest, *node_id)?
                         else {
-                            return Err(ExecutionError::Internal(
+                            return Err(TraceGenerationError::InvalidReplay(
                                 "expected loop node in FinishLoop continuation",
                             ));
                         };
@@ -539,7 +547,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     let MastNode::Block(basic_block_node) =
                         get_node_in_forest(current_forest, *node_id)?
                     else {
-                        return Err(ExecutionError::Internal(
+                        return Err(TraceGenerationError::InvalidReplay(
                             "expected basic block node in ResumeBasicBlock continuation",
                         ));
                     };
@@ -548,19 +556,17 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         basic_block_node,
                         *batch_index,
                         *op_idx_in_batch,
-                    )
-                    .map_exec_err_no_ctx()?;
+                    )?;
                     let current_batch = basic_block_node
                         .op_batches()
                         .get(*batch_index)
-                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
-                    let operation = *current_batch
-                        .ops()
-                        .get(*op_idx_in_batch)
-                        .ok_or(ExecutionError::Internal("op index in batch out of bounds"))?;
+                        .ok_or(TraceGenerationError::InvalidReplay("batch index out of bounds"))?;
+                    let operation = *current_batch.ops().get(*op_idx_in_batch).ok_or(
+                        TraceGenerationError::InvalidReplay("op index in batch out of bounds"),
+                    )?;
                     let (_, op_idx_in_group) = current_batch
                         .op_idx_in_batch_to_group(*op_idx_in_batch)
-                        .ok_or(ExecutionError::Internal("invalid op index in batch"))?;
+                        .ok_or(TraceGenerationError::InvalidReplay("invalid op index in batch"))?;
 
                     self.fill_operation_trace_row(
                         &processor.system,
@@ -575,18 +581,17 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     let MastNode::Block(basic_block_node) =
                         get_node_in_forest(current_forest, *node_id)?
                     else {
-                        return Err(ExecutionError::Internal(
+                        return Err(TraceGenerationError::InvalidReplay(
                             "expected basic block node in Respan continuation",
                         ));
                     };
 
                     let mut basic_block_context =
-                        BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index)
-                            .map_exec_err_no_ctx()?;
+                        BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index)?;
                     let current_batch = basic_block_node
                         .op_batches()
                         .get(*batch_index)
-                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
+                        .ok_or(TraceGenerationError::InvalidReplay("batch index out of bounds"))?;
 
                     self.fill_respan_trace_row(
                         &processor.system,
@@ -599,7 +604,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     let MastNode::Block(basic_block_node) =
                         get_node_in_forest(current_forest, *node_id)?
                     else {
-                        return Err(ExecutionError::Internal(
+                        return Err(TraceGenerationError::InvalidReplay(
                             "expected basic block node in FinishBasicBlock continuation",
                         ));
                     };
@@ -634,13 +639,13 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 // ================================================================================================
 
 /// Returns a reference to the node with the given ID from the forest, or an error if not found.
-fn get_node_in_forest<F>(forest: &F, node_id: MastNodeId) -> Result<&MastNode, ExecutionError>
+fn get_node_in_forest<F>(forest: &F, node_id: MastNodeId) -> Result<&MastNode, TraceGenerationError>
 where
     F: ExecutableMastForest + ?Sized,
 {
     forest
         .get_node_by_id(node_id)
-        .ok_or(ExecutionError::Internal("invalid node ID stored in continuation"))
+        .ok_or(TraceGenerationError::InvalidReplay("invalid node ID stored in continuation"))
 }
 
 /// Returns the digest of the node with the given ID from the forest, or an error if not found.
@@ -648,13 +653,13 @@ where
 /// Prefer this over [`get_node_in_forest`] when only the digest is needed: on a
 /// [`miden_core::mast::SparseMastForest`], digest-only entries are reachable through this path
 /// but not through [`get_node_in_forest`].
-fn get_digest_in_forest<F>(forest: &F, node_id: MastNodeId) -> Result<Word, ExecutionError>
+fn get_digest_in_forest<F>(forest: &F, node_id: MastNodeId) -> Result<Word, TraceGenerationError>
 where
     F: ExecutableMastForest + ?Sized,
 {
     forest
         .get_digest_by_id(node_id)
-        .ok_or(ExecutionError::Internal("invalid node ID stored in continuation"))
+        .ok_or(TraceGenerationError::InvalidReplay("invalid node ID stored in continuation"))
 }
 
 // TESTS

@@ -4,9 +4,10 @@ use core::ops::ControlFlow;
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BreakReason,
+    BaseHost, BreakReason, ProcessorError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    execution::InternalBreakReason,
+    errors::PackageSourceDebugContext,
+    execution::{InternalBreakReason, ResolvedMastForest},
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
     option_map_break_reason,
@@ -52,11 +53,8 @@ where
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromExternal`] is handled. See
 /// the documentation of that enum variant for more details.
-pub fn finish_load_mast_forest_from_external<F, T>(
-    resolved_node_id_new_forest: MastNodeId,
-    new_mast_forest: F,
-    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
-    new_source_node_id: Option<DebugSourceNodeId>,
+pub(crate) fn finish_load_mast_forest_from_external<F, T>(
+    resolved: ResolvedMastForest<F>,
     inline_call_context: Option<SourceInlineCallContext>,
     external_origin: (MastNodeId, Option<DebugSourceNodeId>),
     current_forest: &mut F,
@@ -64,11 +62,18 @@ pub fn finish_load_mast_forest_from_external<F, T>(
     inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
+    host: &impl BaseHost,
 ) -> ControlFlow<BreakReason<F>>
 where
     F: ExecutableMastForest + Clone,
     T: Tracer<Forest = F>,
 {
+    let ResolvedMastForest {
+        root_id: resolved_node_id_new_forest,
+        forest: new_mast_forest,
+        package_debug_info: new_package_debug_info,
+        source_node_id: new_source_node_id,
+    } = resolved;
     let (external_node_id_old_forest, old_source_node_id) = external_origin;
     let old_forest = current_forest as &F;
     let external_node_old_forest = option_map_break_reason(
@@ -84,7 +89,16 @@ where
     // node, we are about to enter into an infinite loop - so, return an error
     if resolved_node_new_forest.is_external() {
         return ControlFlow::Break(BreakReason::Err(
-            OperationError::CircularExternalNode(external_node_old_forest.digest()).with_context(),
+            ProcessorError::Operation(OperationError::CircularExternalNode(
+                external_node_old_forest.digest(),
+            ))
+            .with_context(
+                current_package_debug_info.as_deref().map(|debug_info| {
+                    PackageSourceDebugContext::new(debug_info, old_source_node_id)
+                }),
+                host,
+                None,
+            ),
         ));
     }
 
@@ -159,10 +173,12 @@ mod tests {
         let mut inline_call_contexts = Vec::new();
 
         let result = finish_load_mast_forest_from_external(
-            target_id,
-            new_mast_forest,
-            None,
-            None,
+            ResolvedMastForest {
+                root_id: target_id,
+                forest: new_mast_forest,
+                package_debug_info: None,
+                source_node_id: None,
+            },
             None,
             (external_id, None),
             &mut current_forest,
@@ -170,6 +186,7 @@ mod tests {
             &mut inline_call_contexts,
             &mut continuation_stack,
             &mut tracer,
+            &crate::host::default::NoopHost,
         );
 
         assert_matches!(result, ControlFlow::Continue(()));

@@ -9,7 +9,7 @@ use miden_core::{
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::Package;
 use miden_processor::{
-    BaseHost, ExecutionError, LoadedMastForest, MastForestLoadError, MastForestStore,
+    BaseHost, HostError, LoadedMastForest, MastForestLoadError, MastForestStore,
     MemMastForestStore, ProcessorState, SyncHost,
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventHandlerRegistry},
@@ -117,7 +117,7 @@ where
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), HostError> {
         self.event_handlers.register(event, handler)
     }
 }

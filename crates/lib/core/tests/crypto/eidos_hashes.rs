@@ -1,7 +1,7 @@
 use miden_core::{Felt, Word, chiplets::eidos_compression};
 use miden_crypto::hash::eidos::{Eidos, domain::EidosDomain, domains::GenericFeltSequenceDomain};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs, ZERO,
+    DefaultHost, ExecutionOptions, FastProcessor, ProcessorError, StackInputs, ZERO,
     operation::OperationError,
 };
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
@@ -23,13 +23,11 @@ fn assert_hash_input_error(source: &str, message: &str) {
         .unwrap()
         .execute_sync(&program, &mut host)
         .unwrap_err();
-    match error {
-        ExecutionError::OperationError {
-            err:
-                OperationError::FailedAssertion { err_code, .. }
-                | OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(message)),
+    match error.into_kind() {
+        ProcessorError::Operation(
+            OperationError::FailedAssertion { err_code, .. }
+            | OperationError::U32AssertionFailed { err_code, .. },
+        ) => assert_eq!(err_code, miden_core::mast::error_code_from_msg(message)),
         error => panic!("expected input assertion {message:?}, got {error:?}"),
     }
 }
@@ -184,10 +182,7 @@ fn test_state_initializers_reject_non_u32_inputs() {
         let test = build_test!(source.as_str(), &[]);
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError {
-                err: OperationError::U32AssertionFailed { err_code, .. },
-                ..
-            } if err_code == expected_error_code
+            ProcessorError::Operation(OperationError::U32AssertionFailed { err_code, .. }) if err_code == expected_error_code
         );
     }
 }
@@ -208,7 +203,7 @@ fn test_invalid_end_addr() {
     let test = build_test!(empty_range, &[]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 }
@@ -818,10 +813,7 @@ fn test_prepare_hasher_state_rejects_invalid_padding_flag() {
     let test = build_test!(source, &[]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if err_code == expected_error_code
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == expected_error_code
     );
 }
 
@@ -844,10 +836,7 @@ fn test_prepare_hasher_state_rejects_padded_length_overflow() {
     let test = build_test!(source.as_str(), &[]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if err_code == expected_error_code
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == expected_error_code
     );
 }
 

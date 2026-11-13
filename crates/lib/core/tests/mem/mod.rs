@@ -1,6 +1,6 @@
 use miden_assembly::Linkage;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, FastProcessor, Felt, ONE, Program, StackInputs, Word,
+    ContextId, DefaultHost, FastProcessor, Felt, ONE, ProcessorError, Program, StackInputs, Word,
     ZERO, operation::OperationError, trace::RowIndex,
 };
 use miden_utils_testing::{
@@ -331,11 +331,8 @@ fn pipe_double_words_rejects_invalid_range_before_reading_advice(
     let expected_code = miden_core::mast::error_code_from_msg(message);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. }
-                | OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } if err_code == expected_code
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }
+                | OperationError::U32AssertionFailed { err_code, .. }) if err_code == expected_code
     );
 }
 
@@ -350,10 +347,7 @@ fn pipe_words_rejects_tail_overflow_before_reading_advice(#[case] invocation: &s
         miden_core::mast::error_code_from_msg("copy tail address must fit in a u32");
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } if err_code == expected_code
+        ProcessorError::Operation(OperationError::U32AssertionFailed { err_code, .. }) if err_code == expected_code
     );
 }
 

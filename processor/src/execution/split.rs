@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use crate::{
-    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
+    BaseHost, BreakReason, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{ExecutableMastForest, MastNodeId, SplitNode},
@@ -38,15 +38,17 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-        return ControlFlow::Break(BreakReason::Err(err));
+    if let Err(err) = state.processor.stack_mut().decrement_size() {
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
     }
 
     // execute the appropriate branch
     if condition == ONE {
         let source_node_id = match state.child_source_node_id(0) {
             Ok(source_node_id) => source_node_id,
-            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+            },
         };
         state.continuation_stack.push_with_source_node_id(
             Continuation::FinishSplit(node_id),
@@ -59,7 +61,9 @@ where
     } else if condition == ZERO {
         let source_node_id = match state.child_source_node_id(1) {
             Ok(source_node_id) => source_node_id,
-            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+            },
         };
         state.continuation_stack.push_with_source_node_id(
             Continuation::FinishSplit(node_id),
@@ -74,9 +78,7 @@ where
             context: BinaryValueErrorContext::If,
             value: condition,
         };
-        return ControlFlow::Break(BreakReason::Err(
-            state.operation_error_with_current_context(err),
-        ));
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.
@@ -114,8 +116,8 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-        return ControlFlow::Break(BreakReason::Err(err));
+    if let Err(err) = state.processor.stack_mut().decrement_size() {
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
     }
 
     // execute the appropriate branch
@@ -130,9 +132,7 @@ where
             context: BinaryValueErrorContext::If,
             value: condition,
         };
-        return ControlFlow::Break(BreakReason::Err(
-            state.operation_error_with_current_context(err),
-        ));
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.

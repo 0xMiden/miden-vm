@@ -5,13 +5,9 @@ use miden_core::events::{EventId, SystemEvent};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, Host, SyncHost,
+    BaseHost, Host, ProcessorError, SyncHost,
     advice::AdviceMutation,
-    errors::{
-        MapExecErrWithOpIdx, PackageSourceDebugContext, advice_error_with_context,
-        advice_error_with_package_source_context, event_error_with_context,
-        event_error_with_package_source_context,
-    },
+    errors::PackageSourceDebugContext,
     event::EventError,
     fast::{BreakReason, FastProcessor},
     host::handlers::TraceError,
@@ -19,108 +15,37 @@ use crate::{
 
 mod deferred_handlers;
 mod sys_event_handlers;
-pub use sys_event_handlers::SystemEventError;
 use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
     #[inline(always)]
-    fn handle_system_event<F>(
-        &mut self,
-        system_event: SystemEvent,
-        host: &impl BaseHost,
-        op_idx: usize,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) -> ControlFlow<BreakReason<F>> {
-        let context = package_source_context(package_debug_info, source_node_id);
-        match handle_system_event(self, system_event)
-            .map_exec_err_with_package_source_op_idx(context, host, op_idx)
-        {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(err) => ControlFlow::Break(BreakReason::Err(err)),
-        }
-    }
-
-    #[inline(always)]
-    fn apply_host_event_mutations<F>(
+    fn apply_host_event_mutations(
         &mut self,
         host: &impl BaseHost,
-        op_idx: usize,
         event_id: EventId,
         mutations: Result<Vec<AdviceMutation>, EventError>,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) -> ControlFlow<BreakReason<F>> {
-        let mutations = match mutations {
-            Ok(mutations) => mutations,
-            Err(err) => {
-                let event_name = host.resolve_event(event_id).cloned();
-                let context = package_source_context(package_debug_info, source_node_id);
-                if let Some(context) = context {
-                    return ControlFlow::Break(BreakReason::Err(
-                        event_error_with_package_source_context(
-                            err,
-                            context,
-                            host,
-                            Some(op_idx),
-                            event_id,
-                            event_name,
-                        ),
-                    ));
-                }
-                return ControlFlow::Break(BreakReason::Err(event_error_with_context(
-                    err, event_id, event_name,
-                )));
-            },
-        };
-
-        match self.advice.apply_mutations(mutations) {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(err) => {
-                let context = package_source_context(package_debug_info, source_node_id);
-                let err = if let Some(context) = context {
-                    advice_error_with_package_source_context(err, context, host, Some(op_idx))
-                } else {
-                    advice_error_with_context(err)
-                };
-                ControlFlow::Break(BreakReason::Err(err))
-            },
-        }
+    ) -> Result<(), ProcessorError> {
+        let mutations = mutations.map_err(|source| ProcessorError::Event {
+            event_id,
+            event_name: host.resolve_event(event_id).cloned(),
+            source,
+        })?;
+        self.advice.apply_mutations(mutations)?;
+        Ok(())
     }
 
     /// `trace_id` refers to the event defined by the user, which is on the stack below
     /// `SystemEvent::TraceEvent`.
-    fn handle_trace_result<F>(
-        &mut self,
+    fn handle_trace_result(
         host: &impl BaseHost,
-        op_idx: usize,
         trace_id: EventId,
         result: Result<(), TraceError>,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) -> ControlFlow<BreakReason<F>> {
-        match result {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(err) => {
-                let event_name = host.resolve_trace(trace_id).cloned();
-                let context = package_source_context(package_debug_info, source_node_id);
-                if let Some(context) = context {
-                    return ControlFlow::Break(BreakReason::Err(
-                        event_error_with_package_source_context(
-                            err,
-                            context,
-                            host,
-                            Some(op_idx),
-                            trace_id,
-                            event_name,
-                        ),
-                    ));
-                }
-                ControlFlow::Break(BreakReason::Err(event_error_with_context(
-                    err, trace_id, event_name,
-                )))
-            },
-        }
+    ) -> Result<(), ProcessorError> {
+        result.map_err(|source| ProcessorError::Event {
+            event_id: trace_id,
+            event_name: host.resolve_trace(trace_id).cloned(),
+            source,
+        })
     }
 
     #[inline(always)]
@@ -132,44 +57,27 @@ impl FastProcessor {
         source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
-
-        match SystemEvent::from_event_id(event_id) {
-            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
+        let result = match SystemEvent::from_event_id(event_id) {
+            // `SystemEvent::TraceEvent` is forwarded to the host's trace handler.
             Some(SystemEvent::TraceEvent) => {
-                let processor_state = self.state();
-                let result = host.on_trace(&processor_state);
+                let result = host.on_trace(&self.state());
                 // The trace id is below `SystemEvent::TraceEvent`.
                 let trace_id = EventId::from_felt(self.stack_get(1));
-                self.handle_trace_result(
-                    host,
-                    op_idx,
-                    trace_id,
-                    result,
-                    package_debug_info,
-                    source_node_id,
-                )
+                Self::handle_trace_result(host, trace_id, result)
             },
-            // Other system events are handled directly.
-            Some(system_event) => self.handle_system_event(
-                system_event,
-                host,
-                op_idx,
-                package_debug_info,
-                source_node_id,
-            ),
-            // If it's not a system event, forward it to the host.
+            Some(system_event) => handle_system_event(self, system_event),
             None => {
-                let processor_state = self.state();
-                let mutations = host.on_event(&processor_state);
-                self.apply_host_event_mutations(
-                    host,
-                    op_idx,
-                    event_id,
-                    mutations,
-                    package_debug_info,
-                    source_node_id,
-                )
+                let mutations = host.on_event(&self.state());
+                self.apply_host_event_mutations(host, event_id, mutations)
             },
+        };
+        match result {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => ControlFlow::Break(BreakReason::Err(err.with_context(
+                package_source_context(package_debug_info, source_node_id),
+                host,
+                Some(op_idx),
+            ))),
         }
     }
 
@@ -182,44 +90,27 @@ impl FastProcessor {
         source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
-
-        match SystemEvent::from_event_id(event_id) {
-            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
+        let result = match SystemEvent::from_event_id(event_id) {
             Some(SystemEvent::TraceEvent) => {
                 let processor_state = self.state();
                 let result = host.on_trace(&processor_state).await;
-                // The trace id is below `SystemEvent::TraceEvent`.
                 let trace_id = EventId::from_felt(self.stack_get(1));
-                self.handle_trace_result(
-                    host,
-                    op_idx,
-                    trace_id,
-                    result,
-                    package_debug_info,
-                    source_node_id,
-                )
+                Self::handle_trace_result(host, trace_id, result)
             },
-            // Other system events are handled directly.
-            Some(system_event) => self.handle_system_event(
-                system_event,
-                host,
-                op_idx,
-                package_debug_info,
-                source_node_id,
-            ),
-            // If it's not a system event, forward it to the host.
+            Some(system_event) => handle_system_event(self, system_event),
             None => {
                 let processor_state = self.state();
                 let mutations = host.on_event(&processor_state).await;
-                self.apply_host_event_mutations(
-                    host,
-                    op_idx,
-                    event_id,
-                    mutations,
-                    package_debug_info,
-                    source_node_id,
-                )
+                self.apply_host_event_mutations(host, event_id, mutations)
             },
+        };
+        match result {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => ControlFlow::Break(BreakReason::Err(err.with_context(
+                package_source_context(package_debug_info, source_node_id),
+                host,
+                Some(op_idx),
+            ))),
         }
     }
 }
@@ -228,5 +119,5 @@ fn package_source_context(
     package_debug_info: Option<&PackageDebugInfo>,
     source_node_id: Option<DebugSourceNodeId>,
 ) -> Option<PackageSourceDebugContext<'_>> {
-    Some(PackageSourceDebugContext::new_optional(package_debug_info?, source_node_id))
+    Some(PackageSourceDebugContext::new(package_debug_info?, source_node_id))
 }

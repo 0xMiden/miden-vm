@@ -115,7 +115,7 @@ fn test_mmr_get_fails_for_absent_leaf() {
     end";
 
     let test = build_test!(source, &[]);
-    assert!(test.execute().is_err());
+    assert!(test.execute_for_output().is_err());
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn test_mmr_unpack_invalid_hash() {
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
 
-    assert!(test.execute().is_err());
+    assert!(test.execute_for_output().is_err());
 }
 
 #[test]
@@ -424,7 +424,7 @@ fn test_mmr_unpack_rejects_forged_num_leaves() -> Result<(), MerkleError> {
         MerkleStore::new(),
         forged_advice_map.iter().cloned()
     );
-    assert!(forged_test.execute().is_err());
+    assert!(forged_test.execute_for_output().is_err());
 
     Ok(())
 }

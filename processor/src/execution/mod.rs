@@ -4,12 +4,12 @@ use core::ops::ControlFlow;
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, Stopper, Word,
+    BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, ProcessorError, Stopper,
+    Word,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::PackageSourceDebugContext,
     host::default::NoopHost,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
-    operation::OperationError,
     option_map_break_reason,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -35,6 +35,14 @@ use operations::execute_op;
 
 // EXECUTION STATE
 // ================================================================================================
+
+/// A resolved procedure root together with its forest and the debug metadata owned by that forest.
+pub(crate) struct ResolvedMastForest<F> {
+    pub root_id: MastNodeId,
+    pub forest: F,
+    pub package_debug_info: Option<Arc<PackageDebugInfo>>,
+    pub source_node_id: Option<DebugSourceNodeId>,
+}
 
 /// Bundles the common state threaded through all execution functions.
 ///
@@ -68,7 +76,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     pub fn child_source_node_id(
         &self,
         child_index: usize,
-    ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
+    ) -> Result<Option<DebugSourceNodeId>, ProcessorError> {
         let Some(source_debug_info) = &self.source_debug_info else {
             return Ok(None);
         };
@@ -79,7 +87,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
         Ok(source_debug_info
             .child_source_node(current_source_node_id, child_index)
             .map_err(|_| {
-                ExecutionError::Internal(
+                ProcessorError::Internal(
                     "package debug source graph has malformed child references",
                 )
             })?
@@ -87,17 +95,14 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     }
 
     pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'_>> {
-        Some(PackageSourceDebugContext::new_optional(
+        Some(PackageSourceDebugContext::new(
             self.source_debug_info.as_deref()?,
             self.current_source_node_id,
         ))
     }
 
-    pub fn operation_error_with_current_context(&self, err: OperationError) -> ExecutionError {
-        match self.package_source_context() {
-            Some(context) => err.with_package_source_context(context, self.host, None),
-            None => err.with_context(),
-        }
+    pub fn error_with_current_context(&self, err: impl Into<ProcessorError>) -> ExecutionError {
+        err.into().with_context(self.package_source_context(), self.host, None)
     }
 }
 
@@ -749,7 +754,7 @@ where
 {
     // Signal the end of clock cycle to tracer (before incrementing processor clock).
     if let Err(e) = tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest) {
-        return ControlFlow::Break(BreakReason::Err(e));
+        return ControlFlow::Break(BreakReason::Err(e.into()));
     }
 
     // Increment the processor clock.

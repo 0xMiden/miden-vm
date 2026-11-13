@@ -17,8 +17,8 @@ use super::{
     validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
 use crate::{
-    AdviceInputs, ContextId,
-    errors::{IoError, MemoryError, OperationError},
+    AdviceInputs, ContextId, ProcessorError,
+    errors::{MemoryError, OperationError},
     fast::{FastProcessor, NoopTracer},
     processor::{Processor, SystemInterface},
 };
@@ -520,7 +520,7 @@ fn horner_eval_ops_reject_nonzero_eval_point_padding() {
         .unwrap();
     assert!(matches!(
         op_horner_eval_base(&mut processor, &mut tracer),
-        Err(IoError::Operation(OperationError::InvalidHornerEvaluationPointWord {
+        Err(ProcessorError::Operation(OperationError::InvalidHornerEvaluationPointWord {
             ctx,
             addr,
         })) if ctx == ContextId::root() && addr == 0
@@ -534,7 +534,7 @@ fn horner_eval_ops_reject_nonzero_eval_point_padding() {
         .unwrap();
     assert!(matches!(
         op_horner_eval_ext(&mut processor, &mut tracer),
-        Err(IoError::Operation(OperationError::InvalidHornerEvaluationPointWord {
+        Err(ProcessorError::Operation(OperationError::InvalidHornerEvaluationPointWord {
             ctx,
             addr,
         })) if ctx == ContextId::root() && addr == 0
@@ -552,7 +552,7 @@ fn horner_eval_base_rejects_unaligned_eval_point_address() {
     let mut tracer = NoopTracer;
     assert!(matches!(
         op_horner_eval_base(&mut processor, &mut tracer),
-        Err(IoError::Memory(MemoryError::UnalignedWordAccess { addr, ctx }))
+        Err(ProcessorError::Memory(MemoryError::UnalignedWordAccess { addr, ctx }))
             if addr == UNALIGNED_ADDR && ctx == ContextId::root()
     ));
 }
@@ -862,7 +862,7 @@ mod merkle_validation {
     use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::errors::{CryptoError, OperationError};
+    use crate::operation::OperationError;
 
     #[test]
     fn validator_accepts_supported_boundaries() {
@@ -883,10 +883,10 @@ mod merkle_validation {
             .expect_err("a materialized path must match the stack depth");
         assert!(matches!(
             err,
-            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+            OperationError::InvalidMerklePathLength {
                 path_len: 3,
                 depth,
-            }) if depth == felt(2)
+            } if depth == felt(2)
         ));
     }
 
@@ -896,10 +896,10 @@ mod merkle_validation {
             .expect_err("the actual path length must not wrap to the expected depth");
         assert!(matches!(
             err,
-            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+            OperationError::InvalidMerklePathLength {
                 path_len: 257,
                 depth,
-            }) if depth == felt(1)
+            } if depth == felt(1)
         ));
     }
 
@@ -977,9 +977,9 @@ mod merkle_validation {
         ]
     }
 
-    fn assert_merkle_depth_error(error: CryptoError, expected_depth: Felt, operation: &str) {
+    fn assert_merkle_depth_error(error: ProcessorError, expected_depth: Felt, operation: &str) {
         match error {
-            CryptoError::Operation(OperationError::MerkleDepthOutOfRange { depth }) => {
+            ProcessorError::Operation(OperationError::MerkleDepthOutOfRange { depth }) => {
                 assert_eq!(depth, expected_depth, "{operation} reported the wrong depth");
             },
             other => panic!(

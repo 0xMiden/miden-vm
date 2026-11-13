@@ -1,6 +1,6 @@
 #[cfg(feature = "arbitrary")]
 use miden_core::field::{BasedVectorSpace, QuadFelt};
-use miden_processor::{ExecutionError, MemoryError};
+use miden_processor::{MemoryError, ProcessorError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::build_expected_hash;
 #[cfg(feature = "arbitrary")]
@@ -330,13 +330,12 @@ fn aead_stream_rejects_in_place() {
     ";
 
     let test = build_op_test!(asm_op, &[]);
-    let err = test.execute().expect_err("aead_stream should reject in-place encryption");
+    let err = test
+        .execute_for_output()
+        .expect_err("aead_stream should reject in-place encryption");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::IllegalMemoryAccess { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::IllegalMemoryAccess { .. })
     ));
 }
 
@@ -357,14 +356,11 @@ fn aead_stream_rejects_partial_overlap() {
 
     let test = build_op_test!(asm_op_case1, &[]);
     let err = test
-        .execute()
+        .execute_for_output()
         .expect_err("aead_stream should reject overlap when dst starts inside src");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::IllegalMemoryAccess { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::IllegalMemoryAccess { .. })
     ));
 
     let asm_op_case2 = "
@@ -382,14 +378,11 @@ fn aead_stream_rejects_partial_overlap() {
 
     let test = build_op_test!(asm_op_case2, &[]);
     let err = test
-        .execute()
+        .execute_for_output()
         .expect_err("aead_stream should reject overlap when src starts inside dst");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::IllegalMemoryAccess { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::IllegalMemoryAccess { .. })
     ));
 }
 
@@ -406,13 +399,12 @@ fn aead_stream_rejects_src_range_overflow() {
     ";
 
     let test = build_op_test!(asm_op, &[]);
-    let err = test.execute().expect_err("aead_stream should reject when src+8 overflows");
+    let err = test
+        .execute_for_output()
+        .expect_err("aead_stream should reject when src+8 overflows");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::AddressOutOfBounds { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::AddressOutOfBounds { .. })
     ));
 }
 
@@ -429,13 +421,12 @@ fn aead_stream_rejects_dst_range_overflow() {
     ";
 
     let test = build_op_test!(asm_op, &[]);
-    let err = test.execute().expect_err("aead_stream should reject when dst+16 overflows");
+    let err = test
+        .execute_for_output()
+        .expect_err("aead_stream should reject when dst+16 overflows");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::AddressOutOfBounds { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::AddressOutOfBounds { .. })
     ));
 }
 
@@ -477,13 +468,10 @@ fn aead_stream_rejects_unaligned_src() {
     ";
 
     let test = build_op_test!(asm_op, &[]);
-    let err = test.execute().expect_err("aead_stream should reject unaligned src");
+    let err = test.execute_for_output().expect_err("aead_stream should reject unaligned src");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::UnalignedWordAccess { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::UnalignedWordAccess { .. })
     ));
 }
 
@@ -500,13 +488,10 @@ fn aead_stream_rejects_unaligned_dst() {
     ";
 
     let test = build_op_test!(asm_op, &[]);
-    let err = test.execute().expect_err("aead_stream should reject unaligned dst");
+    let err = test.execute_for_output().expect_err("aead_stream should reject unaligned dst");
     assert!(matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::UnalignedWordAccess { .. },
-            ..
-        }
+        err.kind(),
+        ProcessorError::Memory(MemoryError::UnalignedWordAccess { .. })
     ));
 }
 

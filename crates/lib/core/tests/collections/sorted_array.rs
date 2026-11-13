@@ -3,7 +3,7 @@ use miden_core_lib::{
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
 use miden_processor::{
-    ExecutionError, ProcessorState,
+    ProcessorError, ProcessorState,
     advice::{AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -96,11 +96,11 @@ fn test_sorted_array_lookups_reject_oversized_ranges() {
         );
 
         let err = build_test!(source, &[])
-            .execute()
+            .execute_for_output()
             .expect_err("oversized sorted-array range should fail");
 
-        match err {
-            ExecutionError::EventError { error, .. } => assert_eq!(
+        match err.into_kind() {
+            ProcessorError::Event { source: error, .. } => assert_eq!(
                 error.to_string(),
                 "sorted array entry count 65537 exceeds maximum of 65536"
             ),
@@ -170,7 +170,7 @@ fn test_unsorted_array_find_word_fails() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("NotAscendingOrder");
+    program.execute_for_output().expect_err("NotAscendingOrder");
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn test_assert_sorted_words_rejects_unsorted_array() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("words must be sorted");
+    program.execute_for_output().expect_err("words must be sorted");
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn test_assert_sorted_words_rejects_invalid_range() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("start_ptr must be <= end_ptr");
+    program.execute_for_output().expect_err("start_ptr must be <= end_ptr");
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn test_assert_sorted_words_rejects_non_u32_range_pointer() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("range pointers must be u32");
+    program.execute_for_output().expect_err("range pointers must be u32");
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn test_assert_sorted_words_rejects_misaligned_range() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("start_ptr must be word-aligned");
+    program.execute_for_output().expect_err("start_ptr must be word-aligned");
 }
 
 #[test]
@@ -425,7 +425,7 @@ fn test_unsorted_key_value_find_key_fails() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("NotAscendingOrder");
+    program.execute_for_output().expect_err("NotAscendingOrder");
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn test_assert_sorted_keys_rejects_unsorted_key_value_array() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("keys must be sorted");
+    program.execute_for_output().expect_err("keys must be sorted");
 }
 
 #[test]
@@ -504,7 +504,9 @@ fn test_assert_sorted_keys_rejects_invalid_tuple_range() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("key-value range must be double-word aligned");
+    program
+        .execute_for_output()
+        .expect_err("key-value range must be double-word aligned");
 }
 
 #[test]
@@ -525,7 +527,7 @@ fn test_assert_sorted_keys_rejects_non_u32_range_pointer() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("range pointers must be u32");
+    program.execute_for_output().expect_err("range pointers must be u32");
 }
 
 #[test]
@@ -583,7 +585,7 @@ fn test_assert_sorted_half_keys_rejects_unsorted_key_value_array() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("half-keys must be sorted");
+    program.execute_for_output().expect_err("half-keys must be sorted");
 }
 
 #[test]
@@ -604,7 +606,9 @@ fn test_assert_sorted_half_keys_rejects_invalid_tuple_range() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("key-value range must be double-word aligned");
+    program
+        .execute_for_output()
+        .expect_err("key-value range must be double-word aligned");
 }
 
 #[test]
@@ -625,7 +629,7 @@ fn test_assert_sorted_half_keys_rejects_non_u32_range_pointer() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("range pointers must be u32");
+    program.execute_for_output().expect_err("range pointers must be u32");
 }
 
 #[test]
@@ -655,7 +659,7 @@ fn test_misaligned_key_value_find_key_fails() {
     );
 
     let program = build_test!(source, &[]);
-    program.execute().expect_err("InvalidKeyValueRange");
+    program.execute_for_output().expect_err("InvalidKeyValueRange");
 }
 
 // MALICIOUS ADVICE PROVIDER TESTS
@@ -843,7 +847,7 @@ fn test_find_word_rejects_oob_pointer_above_end() {
         .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
-        test.execute().is_err(),
+        test.execute_for_output().is_err(),
         "find_word must reject maybe_value_ptr above end_ptr in the not-found branch",
     );
 }
@@ -872,7 +876,7 @@ fn test_find_word_rejects_oob_pointer_below_start() {
         .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_below);
 
     assert!(
-        test.execute().is_err(),
+        test.execute_for_output().is_err(),
         "find_word must reject maybe_value_ptr below start_ptr in the not-found branch",
     );
 }
@@ -908,7 +912,7 @@ fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
         .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
-        test.execute().is_err(),
+        test.execute_for_output().is_err(),
         "find_partial_key_value must reject maybe_key_ptr above end_ptr in the not-found branch",
     );
 }
@@ -944,7 +948,7 @@ fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
         .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_below);
 
     assert!(
-        test.execute().is_err(),
+        test.execute_for_output().is_err(),
         "find_partial_key_value must reject maybe_key_ptr below start_ptr in the not-found branch",
     );
 }
@@ -973,7 +977,7 @@ fn test_assert_sorted_words_rejects_false_miss_on_unsorted_array() {
     let test = build_lib_test(&source, &[])
         .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_start_ptr);
 
-    test.execute().expect_err("words must be sorted");
+    test.execute_for_output().expect_err("words must be sorted");
 }
 
 #[test]
@@ -1003,7 +1007,7 @@ fn test_assert_sorted_keys_rejects_false_miss_on_unsorted_keys() {
     let test = build_lib_test(&source, &[])
         .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
 
-    test.execute().expect_err("keys must be sorted");
+    test.execute_for_output().expect_err("keys must be sorted");
 }
 
 #[test]
@@ -1033,7 +1037,7 @@ fn test_assert_sorted_half_keys_rejects_false_miss_on_unsorted_half_keys() {
     let test = build_lib_test(&source, &[])
         .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
 
-    test.execute().expect_err("half-keys must be sorted");
+    test.execute_for_output().expect_err("half-keys must be sorted");
 }
 
 // MALICIOUS ADVICE PROVIDERS

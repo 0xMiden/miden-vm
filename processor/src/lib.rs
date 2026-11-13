@@ -36,7 +36,6 @@ use miden_core::{
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
-    errors::MapExecErr,
     processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
@@ -54,9 +53,7 @@ mod tests;
 
 pub use continuation_stack::{Continuation, SourceInlineCallContext};
 pub use errors::{
-    AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
-    advice_error_with_package_source_context, event_error_with_package_source_context,
-    procedure_not_found_with_package_source_context,
+    AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext, ProcessorError,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
@@ -79,7 +76,9 @@ pub use miden_core::{
     },
     serde, utils,
 };
-pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
+pub use trace::{
+    ExecutionTraceError, ExecutionWitness, PrecompileWitness, TraceGenerationError, VmWitness,
+};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
@@ -452,7 +451,7 @@ impl core::ops::Add<u32> for MemoryAddress {
 // ===============================================================================================
 
 /// Lifts an [`Option<T>`] into a [`ControlFlow`] suitable for the execution loop, mapping `None`
-/// to a break carrying an [`ExecutionError::Internal`] with `err_msg`.
+/// to a break carrying an [`ProcessorError::Internal`] with `err_msg`.
 ///
 /// Intended for use with `?` at sites where a `None` represents a violated internal invariant —
 /// most commonly a missing node returned by
@@ -466,6 +465,6 @@ fn option_map_break_reason<F, T>(
 ) -> ControlFlow<BreakReason<F>, T> {
     match opt {
         Some(value) => ControlFlow::Continue(value),
-        None => ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(err_msg))),
+        None => ControlFlow::Break(BreakReason::Err(ProcessorError::Internal(err_msg).into())),
     }
 }

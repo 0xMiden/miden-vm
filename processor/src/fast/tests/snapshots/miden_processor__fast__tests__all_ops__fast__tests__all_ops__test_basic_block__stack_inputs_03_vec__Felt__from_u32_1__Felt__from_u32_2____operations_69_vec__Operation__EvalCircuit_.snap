@@ -3,21 +3,9 @@ source: processor/src/fast/tests/all_ops.rs
 expression: fast_stack_outputs
 ---
 Err(
-    AceChipError {
-        label: SourceSpan {
-            source_id: SourceId(
-                4294967295,
-            ),
-            start: ByteIndex(
-                0,
-            ),
-            end: ByteIndex(
-                0,
-            ),
-        },
-        source_file: None,
-        error: AceError(
+    Ace(
+        AceError(
             "num of evaluation gates should be word aligned and non-zero but was 0",
         ),
-    },
+    ),
 )

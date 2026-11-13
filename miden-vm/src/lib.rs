@@ -33,11 +33,12 @@ pub use miden_precompiles::{
     default_verification_precompile_limits,
 };
 pub use miden_processor::{
-    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
-    FastProcessor, FutureMaybeSend, Host, ProgramExecutor, SyncHost, VmWitness, advice, crypto,
-    field, serde, trace, trace::VmTrace, utils,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionTraceError,
+    ExecutionWitness, FastProcessor, FutureMaybeSend, Host, ProcessorError, ProgramExecutor,
+    SyncHost, TraceGenerationError, VmWitness, advice, crypto, field, serde, trace, trace::VmTrace,
+    utils,
 };
-pub use miden_prover::{PrecompileProvingError, Prover, ProverError, prove_sync};
+pub use miden_prover::{PrecompileProvingError, Prover, ProverError, VmProvingError, prove_sync};
 pub use miden_verifier::{
     PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
     StarkVerificationError, VerificationError, VerificationOutcome, Verifier,

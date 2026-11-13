@@ -340,7 +340,7 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         data.store,
         data.advice_map
     );
-    test.execute().expect_err(
+    test.execute_for_output().expect_err(
         "verifier must reject a non-identity proof order when two scatter destinations are swapped",
     );
 }
