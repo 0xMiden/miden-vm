@@ -221,6 +221,16 @@ end
 #! The deferred root is the relation's four public base-field values, supplied by the caller as the
 #! obligation being settled. The advice stream provides the proof data, four security parameters,
 #! and AIR heights. The proof must satisfy the PVM relation with that root as its public input.
+#!
+#! For a batch proof, the recursive program must establish that `D` includes every deferred root
+#! it needs to settle. Compute `D` from the roots returned by the execution verifiers, or check that
+#! every required root appears in a supplied list and compute `D` as that list's ordered aggregate.
+#! This procedure verifies the PVM relation for `D`; it does not perform those inclusion checks.
+#!
+#! `PvmRecursiveVerifierInputs::for_request` uses the proof's own aggregate root when packaging
+#! advice. Its claim commitment does not establish that the proof includes the required roots.
+#! See the [batch settlement example](../../tests/stark/pvm_settlement/batch.masm).
+#!
 #! The returned descriptor combines those transcript-bound parameters and the maximum AIR height
 #! with relation-shape constants compiled into this verifier. The caller passes all twelve elements
 #! unchanged to `stark::security::compute_conjectured_security_level` or
