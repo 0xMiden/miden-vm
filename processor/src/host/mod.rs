@@ -20,6 +20,9 @@ pub mod default;
 pub mod handlers;
 use handlers::{EventError, TraceError};
 
+pub(crate) mod extensions;
+pub use extensions::{FallibleHost, FallibleSyncHost, MastForestLoadError, MastForestLoadResult};
+
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 

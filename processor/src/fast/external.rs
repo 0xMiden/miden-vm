@@ -4,7 +4,8 @@ use crate::{
     BaseHost, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{
-        OperationError, PackageSourceDebugContext, procedure_not_found_with_context,
+        OperationError, PackageSourceDebugContext, mast_forest_error_with_context,
+        mast_forest_error_with_package_source_context, procedure_not_found_with_context,
         procedure_not_found_with_package_source_context,
     },
 };
@@ -28,17 +29,19 @@ pub(super) fn maybe_use_caller_error_context<F>(
         original_err,
         ExecutionError::ProcedureNotFound { source_file: Some(_), .. }
             | ExecutionError::OperationError { source_file: Some(_), .. }
+            | ExecutionError::MastForestError { source_file: Some(_), .. }
     ) {
         return original_err;
     }
 
-    // We only care about procedure-not-found errors or malformed MAST forest errors.
+    // We only care about procedure-not-found, malformed MAST forest, or forest-loading errors.
     let root_digest = match &original_err {
         ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,
         ExecutionError::OperationError {
             err: OperationError::MalformedMastForestInHost { root_digest },
             ..
         } => *root_digest,
+        ExecutionError::MastForestError { root_digest, .. } => *root_digest,
         _ => return original_err,
     };
 
@@ -59,7 +62,7 @@ pub(super) fn maybe_use_caller_error_context<F>(
     }
 
     // We found a caller continuation, so rebuild the error with caller source context when present.
-    match &original_err {
+    match original_err {
         ExecutionError::ProcedureNotFound { .. } => match (package_debug_info, source_node_id) {
             (Some(debug_info), Some(source_node_id)) => {
                 procedure_not_found_with_package_source_context(
@@ -71,13 +74,26 @@ pub(super) fn maybe_use_caller_error_context<F>(
             _ => procedure_not_found_with_context(root_digest),
         },
         ExecutionError::OperationError { err, .. } => match (package_debug_info, source_node_id) {
-            (Some(debug_info), Some(source_node_id)) => err.clone().with_package_source_context(
+            (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
                 PackageSourceDebugContext::new(debug_info, source_node_id),
                 host,
                 None,
             ),
-            _ => err.clone().with_context(),
+            _ => err.with_context(),
         },
-        _ => original_err,
+        ExecutionError::MastForestError { error, .. } => {
+            match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => {
+                    mast_forest_error_with_package_source_context(
+                        root_digest,
+                        error,
+                        PackageSourceDebugContext::new(debug_info, source_node_id),
+                        host,
+                    )
+                },
+                _ => mast_forest_error_with_context(root_digest, error),
+            }
+        },
+        other => other,
     }
 }

@@ -30,6 +30,9 @@ use crate::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
+    host::extensions::{
+        AsyncForestLookup, FallibleForestLoader, LegacyForestLoader, SyncForestLookup,
+    },
     trace::execution_tracer::ExecutionTracer,
     tracer::Tracer,
 };
@@ -98,6 +101,95 @@ impl FastProcessor {
         host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
         self.execute_with_tracer(program, host, &mut NoopTracer).await
+    }
+
+    /// Executes with fallible MAST forest loading and any configured package debug information.
+    /// See [`crate::FallibleHost`] for the host interface.
+    ///
+    /// # Cancellation safety
+    ///
+    /// Dropping this future discards the processor. Completed host effects are not rolled back,
+    /// so cancellation correctness also depends on the host callbacks. To continue execution
+    /// across `select!` iterations, create and pin this future once and poll it by mutable
+    /// reference.
+    pub async fn execute_fallible(
+        mut self,
+        program: &Program,
+        host: &mut impl crate::FallibleHost,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        let debug_info = self.package_debug_info.take().map(Arc::new);
+        let source_node = self.entrypoint_source_node;
+        self.run::<_, _, FallibleForestLoader>(
+            program,
+            host,
+            &mut NoopTracer,
+            debug_info,
+            source_node,
+        )
+        .await
+    }
+
+    /// Executes with fallible MAST forest loading and any configured package debug information.
+    /// See [`crate::FallibleSyncHost`] for the host interface.
+    pub fn execute_fallible_sync(
+        mut self,
+        program: &Program,
+        host: &mut impl crate::FallibleSyncHost,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        let debug_info = self.package_debug_info.take().map(Arc::new);
+        let source_node = self.entrypoint_source_node;
+        self.run_sync::<_, _, FallibleForestLoader>(
+            program,
+            host,
+            &mut NoopTracer,
+            debug_info,
+            source_node,
+        )
+    }
+
+    /// Executes with fallible loading and returns a witness for proving.
+    /// Uses package debug information configured through [`crate::ProgramExecutor`].
+    /// For cancellation behavior, see [`Self::execute_fallible`].
+    pub async fn execute_for_proving_fallible(
+        mut self,
+        program: &Program,
+        host: &mut impl crate::FallibleHost,
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let debug_info = self.package_debug_info.take().map(Arc::new);
+        let source_node = self.entrypoint_source_node;
+        let output = self
+            .run::<_, _, FallibleForestLoader>(program, host, &mut tracer, debug_info, source_node)
+            .await?;
+        Ok(Self::execution_witness_from_parts(program, stack_inputs, output, tracer).0)
+    }
+
+    /// Executes with fallible loading and returns a witness for proving.
+    /// Uses package debug information configured through [`crate::ProgramExecutor`].
+    pub fn execute_for_proving_fallible_sync(
+        mut self,
+        program: &Program,
+        host: &mut impl crate::FallibleSyncHost,
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let debug_info = self.package_debug_info.take().map(Arc::new);
+        let source_node = self.entrypoint_source_node;
+        let output = self.run_sync::<_, _, FallibleForestLoader>(
+            program,
+            host,
+            &mut tracer,
+            debug_info,
+            source_node,
+        )?;
+        Ok(Self::execution_witness_from_parts(program, stack_inputs, output, tracer).0)
     }
 
     /// Async variant of [`Self::execute_with_package_debug_info_sync`].
@@ -544,9 +636,9 @@ impl FastProcessor {
         ))
     }
 
-    /// Executes the given program with the provided tracer using an async host.
+    /// Executes the given program with the provided tracer.
     pub async fn execute_with_tracer<T>(
-        mut self,
+        self,
         program: &Program,
         host: &mut impl Host,
         tracer: &mut T,
@@ -554,31 +646,11 @@ impl FastProcessor {
     where
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-        let mut package_debug_info = None;
-        let mut inline_call_contexts = Vec::new();
-
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-        let flow = self
-            .execute_impl_async(
-                &mut continuation_stack,
-                &mut current_forest,
-                program.kernel(),
-                host,
-                tracer,
-                &NeverStopper,
-                &mut package_debug_info,
-                &mut inline_call_contexts,
-            )
-            .await;
-        Self::execution_result_from_flow(flow, self)
+        self.run::<_, _, LegacyForestLoader>(program, host, tracer, None, None).await
     }
 
-    /// Executes the given program with package-owned source/debug context and the provided tracer
-    /// using an async host.
     async fn execute_with_package_debug_info_and_tracer<T>(
-        mut self,
+        self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: Option<DebugSourceNodeId>,
@@ -588,64 +660,70 @@ impl FastProcessor {
     where
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack = Self::source_aware_continuation_stack(
+        self.run::<_, _, LegacyForestLoader>(
             program,
-            package_debug_info,
-            entrypoint_source_node_id,
-        )?;
-        let mut current_forest = program.mast_forest().clone();
-        let mut package_debug_info = Some(Arc::new(package_debug_info.clone()));
-        let mut inline_call_contexts = Vec::new();
-
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-        let flow = self
-            .execute_impl_async(
-                &mut continuation_stack,
-                &mut current_forest,
-                program.kernel(),
-                host,
-                tracer,
-                &NeverStopper,
-                &mut package_debug_info,
-                &mut inline_call_contexts,
-            )
-            .await;
-        Self::execution_result_from_flow(flow, self)
-    }
-
-    /// Executes the given program with the provided tracer using a sync host.
-    pub fn execute_with_tracer_sync<T>(
-        mut self,
-        program: &Program,
-        host: &mut impl SyncHost,
-        tracer: &mut T,
-    ) -> Result<ExecutionOutput, ExecutionError>
-    where
-        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
-    {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-        let mut package_debug_info = None;
-        let mut inline_call_contexts = Vec::new();
-
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-        let flow = self.execute_impl(
-            &mut continuation_stack,
-            &mut current_forest,
-            program.kernel(),
             host,
             tracer,
-            &NeverStopper,
-            &mut package_debug_info,
-            &mut inline_call_contexts,
-        );
+            Some(Arc::new(package_debug_info.clone())),
+            entrypoint_source_node_id,
+        )
+        .await
+    }
+
+    async fn run<H, T, L>(
+        mut self,
+        program: &Program,
+        host: &mut H,
+        tracer: &mut T,
+        mut package_debug_info: Option<Arc<PackageDebugInfo>>,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        H: Host,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+        L: AsyncForestLookup<H>,
+    {
+        let mut continuation_stack = match package_debug_info.as_deref() {
+            Some(debug_info) => Self::source_aware_continuation_stack(
+                program,
+                debug_info,
+                entrypoint_source_node_id,
+            )?,
+            None => ContinuationStack::new(program),
+        };
+        let mut current_forest = program.mast_forest().clone();
+        let mut inline_call_contexts = Vec::new();
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        let flow = self
+            .execute_impl_async::<_, _, _, L>(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                tracer,
+                &NeverStopper,
+                &mut package_debug_info,
+                &mut inline_call_contexts,
+            )
+            .await;
         Self::execution_result_from_flow(flow, self)
     }
 
-    /// Executes the given program with package-owned source/debug context and the provided tracer
-    /// using a sync host.
+    /// Executes the given program with the provided tracer.
+    pub fn execute_with_tracer_sync<T>(
+        self,
+        program: &Program,
+        host: &mut impl SyncHost,
+        tracer: &mut T,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+    {
+        self.run_sync::<_, _, LegacyForestLoader>(program, host, tracer, None, None)
+    }
+
     fn execute_with_package_debug_info_and_tracer_sync<T>(
-        mut self,
+        self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: Option<DebugSourceNodeId>,
@@ -655,17 +733,40 @@ impl FastProcessor {
     where
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack = Self::source_aware_continuation_stack(
+        self.run_sync::<_, _, LegacyForestLoader>(
             program,
-            package_debug_info,
+            host,
+            tracer,
+            Some(Arc::new(package_debug_info.clone())),
             entrypoint_source_node_id,
-        )?;
-        let mut current_forest = program.mast_forest().clone();
-        let mut package_debug_info = Some(Arc::new(package_debug_info.clone()));
-        let mut inline_call_contexts = Vec::new();
+        )
+    }
 
+    fn run_sync<H, T, L>(
+        mut self,
+        program: &Program,
+        host: &mut H,
+        tracer: &mut T,
+        mut package_debug_info: Option<Arc<PackageDebugInfo>>,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        H: SyncHost,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+        L: SyncForestLookup<H>,
+    {
+        let mut continuation_stack = match package_debug_info.as_deref() {
+            Some(debug_info) => Self::source_aware_continuation_stack(
+                program,
+                debug_info,
+                entrypoint_source_node_id,
+            )?,
+            None => ContinuationStack::new(program),
+        };
+        let mut current_forest = program.mast_forest().clone();
+        let mut inline_call_contexts = Vec::new();
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-        let flow = self.execute_impl(
+        let flow = self.execute_impl::<_, _, _, L>(
             &mut continuation_stack,
             &mut current_forest,
             program.kernel(),
@@ -692,7 +793,7 @@ impl FastProcessor {
             mut inline_call_contexts,
         } = resume_ctx;
 
-        let flow = self.execute_impl(
+        let flow = self.execute_impl::<_, _, _, LegacyForestLoader>(
             &mut continuation_stack,
             &mut current_forest,
             &kernel,
@@ -732,7 +833,7 @@ impl FastProcessor {
             package_debug_info,
         )?;
 
-        let flow = self.execute_impl(
+        let flow = self.execute_impl::<_, _, _, LegacyForestLoader>(
             &mut continuation_stack,
             &mut current_forest,
             &kernel,
@@ -768,7 +869,7 @@ impl FastProcessor {
         } = resume_ctx;
 
         let flow = self
-            .execute_impl_async(
+            .execute_impl_async::<_, _, _, LegacyForestLoader>(
                 &mut continuation_stack,
                 &mut current_forest,
                 &kernel,
@@ -811,7 +912,7 @@ impl FastProcessor {
         )?;
 
         let flow = self
-            .execute_impl_async(
+            .execute_impl_async::<_, _, _, LegacyForestLoader>(
                 &mut continuation_stack,
                 &mut current_forest,
                 &kernel,
@@ -1022,12 +1123,12 @@ impl FastProcessor {
     /// This function takes a `&mut self` (compared to `self` for the public sync execution
     /// methods) so that the processor state may be accessed after execution. Reusing the same
     /// processor for a second program is incorrect. This is mainly meant to be used in tests.
-    fn execute_impl<S, T>(
+    fn execute_impl<S, T, H, L>(
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &KernelDescriptor,
-        host: &mut impl SyncHost,
+        host: &mut H,
         tracer: &mut T,
         stopper: &S,
         package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
@@ -1036,6 +1137,8 @@ impl FastProcessor {
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+        H: SyncHost,
+        L: SyncForestLookup<H>,
     {
         while let ControlFlow::Break(internal_break_reason) = execute_impl(
             self,
@@ -1068,7 +1171,7 @@ impl FastProcessor {
                 },
                 InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self.load_mast_forest_sync(
+                        match self.load_mast_forest_sync::<_, L>(
                             callee_hash,
                             host,
                             current_package_debug_info,
@@ -1102,7 +1205,7 @@ impl FastProcessor {
                         SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
                     });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self.load_mast_forest_sync(
+                        match self.load_mast_forest_sync::<_, L>(
                             procedure_hash,
                             host,
                             current_package_debug_info,
@@ -1152,12 +1255,12 @@ impl FastProcessor {
         }
     }
 
-    async fn execute_impl_async<S, T>(
+    async fn execute_impl_async<S, T, H, L>(
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &KernelDescriptor,
-        host: &mut impl Host,
+        host: &mut H,
         tracer: &mut T,
         stopper: &S,
         package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
@@ -1166,6 +1269,8 @@ impl FastProcessor {
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+        H: Host,
+        L: AsyncForestLookup<H>,
     {
         while let ControlFlow::Break(internal_break_reason) = execute_impl(
             self,
@@ -1199,7 +1304,7 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self
-                            .load_mast_forest(
+                            .load_mast_forest::<_, L>(
                                 callee_hash,
                                 host,
                                 current_package_debug_info,
@@ -1236,7 +1341,7 @@ impl FastProcessor {
                     });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self
-                            .load_mast_forest(
+                            .load_mast_forest::<_, L>(
                                 procedure_hash,
                                 host,
                                 current_package_debug_info,
@@ -1291,10 +1396,10 @@ impl FastProcessor {
     // HELPERS
     // ------------------------------------------------------------------------------------------
 
-    fn load_mast_forest_sync(
+    fn load_mast_forest_sync<H: SyncHost, L: SyncForestLookup<H>>(
         &mut self,
         node_digest: Word,
-        host: &mut impl SyncHost,
+        host: &mut H,
         package_debug_info: Option<&PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
         source_aware_execution: bool,
@@ -1311,18 +1416,34 @@ impl FastProcessor {
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
-            None => host.get_mast_forest(&node_digest).ok_or_else(|| {
-                match (package_debug_info, source_node_id) {
-                    (Some(debug_info), Some(source_node_id)) => {
-                        crate::errors::procedure_not_found_with_package_source_context(
-                            node_digest,
-                            PackageSourceDebugContext::new(debug_info, source_node_id),
-                            host,
-                        )
-                    },
-                    _ => crate::errors::procedure_not_found_with_context(node_digest),
-                }
-            })?,
+            None => match L::load(host, &node_digest) {
+                Ok(Some(mast_forest)) => mast_forest,
+                Ok(None) => {
+                    return Err(match (package_debug_info, source_node_id) {
+                        (Some(debug_info), Some(source_node_id)) => {
+                            crate::errors::procedure_not_found_with_package_source_context(
+                                node_digest,
+                                PackageSourceDebugContext::new(debug_info, source_node_id),
+                                host,
+                            )
+                        },
+                        _ => crate::errors::procedure_not_found_with_context(node_digest),
+                    });
+                },
+                Err(error) => {
+                    return Err(match (package_debug_info, source_node_id) {
+                        (Some(debug_info), Some(source_node_id)) => {
+                            crate::errors::mast_forest_error_with_package_source_context(
+                                node_digest,
+                                error,
+                                PackageSourceDebugContext::new(debug_info, source_node_id),
+                                host,
+                            )
+                        },
+                        _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                    });
+                },
+            },
         };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
@@ -1350,10 +1471,10 @@ impl FastProcessor {
         Ok((root_id, mast_forest, loaded_package_debug_info, loaded_source_node_id))
     }
 
-    async fn load_mast_forest(
+    async fn load_mast_forest<H: Host, L: AsyncForestLookup<H>>(
         &mut self,
         node_digest: Word,
-        host: &mut impl Host,
+        host: &mut H,
         package_debug_info: Option<&PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
         source_aware_execution: bool,
@@ -1370,10 +1491,9 @@ impl FastProcessor {
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
-            None => {
-                if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
-                    mast_forest
-                } else {
+            None => match L::load(host, &node_digest).await {
+                Ok(Some(mast_forest)) => mast_forest,
+                Ok(None) => {
                     return Err(match (package_debug_info, source_node_id) {
                         (Some(debug_info), Some(source_node_id)) => {
                             crate::errors::procedure_not_found_with_package_source_context(
@@ -1384,7 +1504,20 @@ impl FastProcessor {
                         },
                         _ => crate::errors::procedure_not_found_with_context(node_digest),
                     });
-                }
+                },
+                Err(error) => {
+                    return Err(match (package_debug_info, source_node_id) {
+                        (Some(debug_info), Some(source_node_id)) => {
+                            crate::errors::mast_forest_error_with_package_source_context(
+                                node_digest,
+                                error,
+                                PackageSourceDebugContext::new(debug_info, source_node_id),
+                                host,
+                            )
+                        },
+                        _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                    });
+                },
             },
         };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
@@ -1628,7 +1761,7 @@ impl FastProcessor {
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
-        let flow = self.execute_impl(
+        let flow = self.execute_impl::<_, _, _, LegacyForestLoader>(
             &mut continuation_stack,
             &mut current_forest,
             program.kernel(),
@@ -1657,7 +1790,7 @@ impl FastProcessor {
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         let flow = self
-            .execute_impl_async(
+            .execute_impl_async::<_, _, _, LegacyForestLoader>(
                 &mut continuation_stack,
                 &mut current_forest,
                 program.kernel(),
