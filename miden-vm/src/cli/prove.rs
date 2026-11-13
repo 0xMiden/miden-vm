@@ -326,31 +326,18 @@ fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<boo
     if !output_metadata.is_file() || !proof_metadata.is_file() {
         return Ok(false);
     }
-    same_file_identity(output_path, &output_metadata, proof_path, &proof_metadata)
-}
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
 
-#[cfg(unix)]
-fn same_file_identity(
-    _: &Path,
-    output_metadata: &fs::Metadata,
-    _: &Path,
-    proof_metadata: &fs::Metadata,
-) -> io::Result<bool> {
-    use std::os::unix::fs::MetadataExt;
-
-    Ok(output_metadata.dev() == proof_metadata.dev()
-        && output_metadata.ino() == proof_metadata.ino())
-}
-
-// `is_same_file` opens with no access rights on Windows, so file permissions do not get in the way
-#[cfg(not(unix))]
-fn same_file_identity(
-    output_path: &Path,
-    _: &fs::Metadata,
-    proof_path: &Path,
-    _: &fs::Metadata,
-) -> io::Result<bool> {
-    same_file::is_same_file(output_path, proof_path)
+        Ok(output_metadata.dev() == proof_metadata.dev()
+            && output_metadata.ino() == proof_metadata.ino())
+    }
+    // `is_same_file` opens with no access rights on Windows, so permissions do not get in the way.
+    #[cfg(not(unix))]
+    {
+        same_file::is_same_file(output_path, proof_path)
+    }
 }
 
 #[cfg(test)]
