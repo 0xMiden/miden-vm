@@ -1,0 +1,87 @@
+name: Rust coverage
+
+on:
+  push:
+    branches: [next, main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Optional PR number to measure; otherwise measure the selected ref"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-coverage
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    # Existing benchmark-build runner: 8 vCPU, 32 GB RAM. PR tests use x64.
+    runs-on: warp-ubuntu-latest-arm64-8x
+    env:
+      CARGO_BUILD_JOBS: '8'
+      RAYON_NUM_THREADS: '4'
+    steps:
+      - name: Validate optional PR number
+        env:
+          PR_NUMBER: ${{ inputs.pr }}
+        run: |
+          if [ -n "$PR_NUMBER" ] && ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Expected a positive PR number" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: coverage-tools
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/coverage.sh
+            scripts/coverage-nextest.toml
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.sha }}
+          path: source
+          persist-credentials: false
+      - uses: 0xMiden/miden-vm/.github/actions/cleanup-runner@29abecaac16bbd01b4391b61363cb1c85d95cf6e
+      - name: Install Rust and LLVM tools
+        run: rustup toolchain install 1.99.0 --profile minimal --component llvm-tools-preview --no-self-update
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends protobuf-compiler libclang-dev
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+        with:
+          tool: cargo-llvm-cov@0.8.7,cargo-nextest@0.9.135
+      - name: Install debugger fixture runner
+        run: cargo +1.99.0 install litcheck --version 0.4.6 --locked
+      - name: Inspect coverage runner
+        run: |
+          lscpu
+          free --human
+          df --human-readable .
+      - name: Collect coverage
+        env:
+          COVERAGE_WORKSPACE: ${{ github.workspace }}/source
+        run: bash coverage-tools/scripts/coverage.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: rust-coverage-${{ github.run_id }}
+          path: |
+            source/target/coverage-workspace/*/reports/
+            source/target/coverage-workspace/*/diagnostic/
+            source/target/coverage-workspace/*/*.txt
+            source/target/coverage-workspace/*/*.json
+            source/target/coverage-workspace/*/*.sh
+            source/target/coverage-workspace/*/*.toml
+            source/target/coverage-workspace/*/*.log
+          if-no-files-found: warn
+          retention-days: 14

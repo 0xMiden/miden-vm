@@ -208,6 +208,10 @@ test: test-masm-root-stability ## Run the standard workspace test suite
 test-masm-root-stability: ## Test the release gate's version policy
 	bash scripts/test-check-masm-root-stability.sh
 
+.PHONY: coverage
+coverage: ## Collect all workspace test coverage without a collection deadline
+	bash scripts/coverage.sh
+
 .PHONY: test-crypto
 # Ordinary crypto, field, serde, derive, and Wycheproof tests run in the standard workspace suite.
 # This target only adds feature configurations which that suite does not cover.

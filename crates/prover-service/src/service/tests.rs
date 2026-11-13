@@ -57,7 +57,10 @@ fn application_errors_have_stable_wire_identifiers() {
 }
 
 fn config() -> ServerConfig {
-    ServerConfig::new(8 << 20, 8 << 20, Duration::from_secs(60), 32 << 30, 32 << 30).unwrap()
+    let seconds = std::env::var("MIDEN_COVERAGE_PROOF_TIMEOUT_SECS")
+        .map(|value| value.parse().expect("coverage proof timeout must be a positive integer"))
+        .unwrap_or(60);
+    ServerConfig::new(8 << 20, 8 << 20, Duration::from_secs(seconds), 32 << 30, 32 << 30).unwrap()
 }
 
 fn witness(source: &str) -> ExecutionWitness {
