@@ -38,7 +38,7 @@ pub use dag::{PeriodicColumnData, build_verifier_dag};
 pub use self::{
     aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace, render_masm_ext2_power},
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
+    dag::{AceDag, DagBuilder, NodeId, NodeKind},
     deep_queries::render_masm_deep_queries,
     masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
     masm_memory::{MasmMemoryExtents, MasmMemoryLayout},

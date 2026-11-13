@@ -19,7 +19,7 @@ mod periodic;
 pub use builder::DagBuilder;
 #[cfg(test)]
 pub(super) use ir::PeriodicColumn;
-pub use ir::{AceDag, DagSnapshot, NodeId, NodeKind, PeriodicColumnData};
+pub use ir::{AceDag, NodeId, NodeKind, PeriodicColumnData};
 #[cfg(any(test, feature = "testing"))]
 pub use lower::build_verifier_dag;
 pub(super) use lower_ir::build_verifier_dag_from_ir;

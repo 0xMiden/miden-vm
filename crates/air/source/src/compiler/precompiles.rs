@@ -1,7 +1,5 @@
 //! Symbolic capture, circuit construction, and compiled geometry for the precompile relation.
 
-use alloc::vec::Vec;
-
 use miden_ace::{
     RecursiveAceCircuit,
     compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
@@ -19,7 +17,7 @@ use crate::{
 
 /// One symbolic capture of each AIR, shared by the compiler backends.
 pub struct CapturedPvmRelation {
-    airs: Vec<CapturedAir>,
+    airs: [CapturedAir; AIRS.len()],
 }
 
 impl Default for CapturedPvmRelation {
@@ -35,13 +33,12 @@ impl CapturedPvmRelation {
 
     pub fn new() -> Self {
         Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect(),
+            airs: AIRS.map(|air| CapturedAir::new(&air)),
         }
     }
 
     pub fn compile(&self) -> CompiledRelation<'_> {
-        let airs: Vec<_> = self.airs.iter().collect();
-        CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT)
+        CompiledRelation::from_captured(&self.airs.each_ref(), LMCS_ALIGNMENT)
     }
 }
 

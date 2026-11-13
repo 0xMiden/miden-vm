@@ -29,8 +29,6 @@ pub struct InputCounts {
     pub num_aux_boundary: usize,
     /// Number of public inputs.
     pub num_public: usize,
-    /// Number of randomness challenges used by the AIR.
-    pub num_randomness: usize,
     /// Number of quotient chunks.
     pub num_quotient_chunks: usize,
 }

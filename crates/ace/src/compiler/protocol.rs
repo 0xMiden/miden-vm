@@ -6,7 +6,7 @@ use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
 use crate::{
     EXT_DEGREE, InputCounts, MAX_ORDER_AIRS,
-    compiler::{AceCircuit, AceConfig, LayoutKind},
+    compiler::{AceCircuit, LayoutKind},
 };
 
 /// An AIR captured once for both native evaluator and ACE generation.
@@ -46,7 +46,6 @@ impl CapturedAir {
             aux_width: air.aux_width(),
             num_aux_boundary: air.num_aux_values(),
             num_public: air.num_public_values(),
-            num_randomness: air.num_randomness(),
             num_quotient_chunks: quotient_chunks(degrees.max()),
         };
         Self {
@@ -151,7 +150,6 @@ pub struct RelationGeometry {
     pub aux_width: usize,
     pub num_aux_boundary: usize,
     pub num_public: usize,
-    pub num_randomness: usize,
     pub num_constraints: usize,
     pub max_constraint_degree: usize,
     pub num_quotient_chunks: usize,
@@ -163,7 +161,7 @@ pub struct RelationGeometry {
 
 impl RelationGeometry {
     fn derive(airs: &[&CapturedAir], alignment: usize, chunks: Option<usize>) -> Self {
-        let first = airs[0];
+        assert!(!airs.is_empty(), "relation must contain at least one AIR");
         let mut result = Self {
             airs: Vec::with_capacity(airs.len()),
             preprocessed_width: 0,
@@ -171,7 +169,6 @@ impl RelationGeometry {
             aux_width: 0,
             num_aux_boundary: 0,
             num_public: 0,
-            num_randomness: first.counts.num_randomness,
             num_constraints: 0,
             max_constraint_degree: 0,
             num_quotient_chunks: 0,
@@ -256,7 +253,6 @@ impl RelationGeometry {
             aux_width: self.aux_width / EXT_DEGREE,
             num_aux_boundary: self.num_aux_boundary,
             num_public: self.num_public,
-            num_randomness: self.num_randomness,
             num_quotient_chunks: self.num_quotient_chunks,
         }
     }
@@ -303,12 +299,6 @@ impl<'a> CompiledRelation<'a> {
     }
 
     pub fn build_circuit(&self, layout: LayoutKind) -> AceCircuit<QuadFelt> {
-        crate::compiler::pipeline::build_circuit_for_relation(
-            self,
-            AceConfig {
-                num_quotient_chunks: self.geometry.num_quotient_chunks,
-                layout,
-            },
-        )
+        crate::compiler::pipeline::build_circuit_for_relation(self, layout)
     }
 }

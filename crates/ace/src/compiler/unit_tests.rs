@@ -23,7 +23,6 @@ fn minimal_layout(num_public: usize) -> InputLayout {
         aux_width: 0,
         num_aux_boundary: 0,
         num_public,
-        num_randomness: 2,
         num_quotient_chunks: 1,
     };
     InputLayout::new(counts)
@@ -376,6 +375,10 @@ fn compact_preserves_already_compact_dag() {
     let before = dag.nodes().len();
     dag.compact();
     assert_eq!(dag.nodes().len(), before);
+    assert_eq!(dag.root(), root);
+
+    let mut resumed = DagBuilder::from_dag(dag);
+    assert_eq!(resumed.add(a, b), root);
 }
 
 #[test]

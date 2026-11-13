@@ -230,11 +230,6 @@ impl<'g> Plan<'g> {
             // Keep a shared/materialized prefix and try its descendants later.
             terms = vec![x, y];
         }
-        let pieces = self.pieces(&terms, class);
-        if terms.len() >= 4 || pieces.iter().any(|p| matches!(p, Piece::Dot { .. })) {
-            Some(Rewrite::Sum(pieces))
-        } else {
-            None
-        }
+        (terms.len() >= 4).then(|| Rewrite::Sum(self.pieces(&terms, class)))
     }
 }

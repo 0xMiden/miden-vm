@@ -154,7 +154,6 @@ mod tests {
             aux_width: 4,
             num_aux_boundary: 1,
             num_public,
-            num_randomness: 2,
             num_quotient_chunks: 4,
         })
     }

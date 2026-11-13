@@ -133,7 +133,7 @@ pub fn build_verifier_dag<F, EF>(
     ext_constraints: &[SymbolicExpressionExt<F, EF>],
     constraint_layout: &ConstraintLayout,
     layout: &InputLayout,
-    periodic: Option<&PeriodicColumnData<EF>>,
+    periodic: &PeriodicColumnData<EF>,
     shared_period: usize,
 ) -> AceDag<EF>
 where
@@ -141,10 +141,7 @@ where
     EF: ExtensionField<F>,
 {
     let mut builder = DagBuilder::<EF>::new();
-    let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, data, shared_period),
-        None => Vec::new(),
-    };
+    let periodic_nodes = build_periodic_nodes(&mut builder, periodic, shared_period);
     let alpha = builder.input(InputKey::Alpha);
 
     // Merge base and extension constraints in evaluation order using the layout.

@@ -289,7 +289,6 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
         aux_width: 1,
         num_aux_boundary: 3,
         num_public: 8,
-        num_randomness: 2,
         num_quotient_chunks: 1,
     };
 

@@ -167,7 +167,7 @@ impl<EF> PeriodicColumnData<EF> {
     /// sharing only if that sum exceeds the estimated basis setup cost, and switch only columns
     /// whose individual estimates improve. The estimates include arithmetic and constant storage,
     /// but do not capture every simplification or shared expression in the final DAG.
-    pub fn from_periodic_columns<F>(periodic_columns: Vec<Vec<F>>) -> Self
+    pub fn from_periodic_columns<F>(periodic_columns: &[Vec<F>]) -> Self
     where
         F: TwoAdicField,
         EF: From<F>,
@@ -175,7 +175,7 @@ impl<EF> PeriodicColumnData<EF> {
         let dft = Radix2DFTSmallBatch::<F>::default();
         let mut columns = Vec::with_capacity(periodic_columns.len());
         let mut basis_costs = Vec::with_capacity(periodic_columns.len());
-        for col in &periodic_columns {
+        for col in periodic_columns {
             assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
 
             let period = col.len();
@@ -224,7 +224,7 @@ impl<EF> PeriodicColumnData<EF> {
             if period < 2 || savings <= basis_overhead_felts(period) {
                 continue;
             }
-            for ((column, col), cost) in columns.iter_mut().zip(&periodic_columns).zip(&basis_costs)
+            for ((column, col), cost) in columns.iter_mut().zip(periodic_columns).zip(&basis_costs)
             {
                 if col.len() != period {
                     continue;
@@ -398,14 +398,6 @@ pub struct AceDag<EF> {
     pub root: NodeId,
 }
 
-/// Exported DAG data that preserves the source DAG id across imports.
-#[derive(Debug, Clone)]
-pub struct DagSnapshot<EF> {
-    nodes: Vec<NodeKind<EF>>,
-    root: NodeId,
-    source_dag_id: DagId,
-}
-
 impl<EF> AceDag<EF> {
     pub(crate) fn from_parts(dag_id: DagId, nodes: Vec<NodeKind<EF>>, root: NodeId) -> Self {
         Self { dag_id, nodes, root }
@@ -427,17 +419,6 @@ impl<EF> AceDag<EF> {
         self.root
     }
 
-    /// Consume the DAG and return an exported snapshot that can be re-imported later.
-    pub fn into_snapshot(self) -> DagSnapshot<EF> {
-        DagSnapshot {
-            nodes: self.nodes,
-            root: self.root,
-            source_dag_id: self.dag_id,
-        }
-    }
-}
-
-impl<EF: Clone> AceDag<EF> {
     /// Remove nodes unreachable from `root` and compact the node vector.
     ///
     /// After compaction, `nodes` contains only nodes reachable from `root`, in the same
@@ -452,19 +433,19 @@ impl<EF: Clone> AceDag<EF> {
         }
 
         let mut reachable = vec![false; n];
-        let mut stack = vec![self.root.index()];
-        while let Some(idx) = stack.pop() {
-            if reachable[idx] {
+        reachable[self.root.index()] = true;
+        // Children precede parents, so one reverse pass reaches every live operand.
+        for (index, node) in self.nodes.iter().enumerate().rev() {
+            if !reachable[index] {
                 continue;
             }
-            reachable[idx] = true;
-            match &self.nodes[idx] {
+            match node {
                 NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
-                    stack.push(a.index());
-                    stack.push(b.index());
+                    reachable[a.index()] = true;
+                    reachable[b.index()] = true;
                 },
                 NodeKind::Neg(a) => {
-                    stack.push(a.index());
+                    reachable[a.index()] = true;
                 },
                 NodeKind::Input(_) | NodeKind::Constant(_) => {},
             }
@@ -486,35 +467,24 @@ impl<EF: Clone> AceDag<EF> {
         let dag_id = DagId::fresh();
         let remap_id = |id: NodeId| NodeId::in_dag(remap[id.index()], dag_id);
 
-        let mut new_nodes = Vec::with_capacity(new_len);
-        for (i, node) in self.nodes.iter().enumerate() {
-            if !reachable[i] {
-                continue;
+        let mut index = 0;
+        self.nodes.retain_mut(|node| {
+            let keep = reachable[index];
+            index += 1;
+            if keep {
+                match node {
+                    NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
+                        *a = remap_id(*a);
+                        *b = remap_id(*b);
+                    },
+                    NodeKind::Neg(a) => *a = remap_id(*a),
+                    NodeKind::Input(_) | NodeKind::Constant(_) => {},
+                }
             }
-            let remapped = match node {
-                NodeKind::Input(k) => NodeKind::Input(*k),
-                NodeKind::Constant(v) => NodeKind::Constant(v.clone()),
-                NodeKind::Add(a, b) => NodeKind::Add(remap_id(*a), remap_id(*b)),
-                NodeKind::Sub(a, b) => NodeKind::Sub(remap_id(*a), remap_id(*b)),
-                NodeKind::Mul(a, b) => NodeKind::Mul(remap_id(*a), remap_id(*b)),
-                NodeKind::Neg(a) => NodeKind::Neg(remap_id(*a)),
-            };
-            new_nodes.push(remapped);
-        }
+            keep
+        });
 
-        self.nodes = new_nodes;
         self.root = remap_id(self.root);
         self.dag_id = dag_id;
-    }
-}
-
-impl<EF> DagSnapshot<EF> {
-    /// Root node of the verifier equation.
-    pub fn root(&self) -> NodeId {
-        self.root
-    }
-
-    pub(super) fn into_parts(self) -> (DagId, Vec<NodeKind<EF>>, NodeId) {
-        (self.source_dag_id, self.nodes, self.root)
     }
 }

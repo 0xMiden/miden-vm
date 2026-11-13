@@ -8,7 +8,6 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         aux_width: 2,
         num_aux_boundary: 2,
         num_public: 5,
-        num_randomness: 2,
         num_quotient_chunks: 2,
     };
     let layout = InputLayout::new_masm(counts);

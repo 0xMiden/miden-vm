@@ -20,7 +20,7 @@ fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_challenges: 2,
         num_permutation_values: LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
         num_periodic_columns: air.periodic_columns().len(),
     }
@@ -262,14 +262,13 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
             SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &artifacts.layout));
         <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder, &());
         let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
-        let periodic_data = (!periodic_columns.is_empty())
-            .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
+        let periodic_data = PeriodicColumnData::from_periodic_columns::<Felt>(&periodic_columns);
         let tree_dag = build_verifier_dag(
             &builder.base_constraints(),
             &builder.extension_constraints(),
             &builder.constraint_layout(),
             &artifacts.layout,
-            periodic_data.as_ref(),
+            &periodic_data,
             periodic_columns.iter().map(Vec::len).max().unwrap_or(1),
         );
 

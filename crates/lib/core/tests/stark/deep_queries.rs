@@ -179,8 +179,9 @@ fn vm_deep_queries_reject_tampered_rows() {
 
 pub(super) fn check_pvm_queries(test: &miden_utils_testing::Test, proof: &PrecompileProof) {
     use miden_air::precompiles::{
-        ChipletAir, ChipletMultiAir, PVM_RELATION_DIGEST, policy::precompile_pcs_params,
-        protocol::PVM_PREPROCESSED_COMMITMENT,
+        ChipletAir, ChipletMultiAir,
+        policy::precompile_pcs_params,
+        protocol::{PVM_PREPROCESSED_COMMITMENT, PVM_RELATION_DIGEST},
     };
     use miden_precompiles_stark::setup::config::eidos_config;
 

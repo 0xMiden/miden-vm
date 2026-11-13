@@ -120,35 +120,27 @@ pub fn build_verifier_dag_from_ir(
     graph: &Graph,
     constraints: &CapturedConstraints,
     layout: &InputLayout,
-    periodic: Option<&PeriodicColumnData<QuadFelt>>,
+    periodic: &PeriodicColumnData<QuadFelt>,
     shared_period: usize,
 ) -> AceDag<QuadFelt> {
     let mut builder = DagBuilder::<QuadFelt>::new();
-    let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, data, shared_period),
-        None => Vec::new(),
-    };
+    let periodic_nodes = build_periodic_nodes(&mut builder, periodic, shared_period);
     let alpha = builder.input(InputKey::Alpha);
 
     // Merge base and extension constraints in evaluation order using the
     // captured global indices.
     let total = constraints.base_global_indices.len() + constraints.ext_global_indices.len();
-    let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
+    let mut ordered = Vec::with_capacity(total);
     for (i, &pos) in constraints.base_global_indices.iter().enumerate() {
-        ordered.push((pos, false, i));
+        ordered.push((pos, constraints.base_roots[i]));
     }
     for (i, &pos) in constraints.ext_global_indices.iter().enumerate() {
-        ordered.push((pos, true, i));
+        ordered.push((pos, constraints.ext_roots[i]));
     }
     ordered.sort_by_key(|(pos, ..)| *pos);
 
     let mut acc = builder.constant(QuadFelt::ZERO);
-    for &(_, is_ext, idx) in &ordered {
-        let root = if is_ext {
-            constraints.ext_roots[idx]
-        } else {
-            constraints.base_roots[idx]
-        };
+    for &(_, root) in &ordered {
         let node = lower_ir_expr(graph, root, &mut builder, &periodic_nodes);
         let acc_mul = builder.mul(acc, alpha);
         acc = builder.add(acc_mul, node);

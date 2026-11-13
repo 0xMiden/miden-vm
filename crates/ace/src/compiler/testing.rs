@@ -49,7 +49,6 @@ where
             aux_width: air.aux_width(),
             num_aux_boundary: air.num_aux_values(),
             num_public: air.num_public_values(),
-            num_randomness: layout.counts.num_randomness,
             num_quotient_chunks: layout.counts.num_quotient_chunks,
         };
         let local = InputLayout::new(counts);

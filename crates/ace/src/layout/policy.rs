@@ -171,10 +171,6 @@ impl InputLayout {
         quotient_width: Option<usize>,
     ) -> Self {
         const NUM_RANDOMNESS_INPUTS: usize = 2;
-        assert_eq!(
-            counts.num_randomness, NUM_RANDOMNESS_INPUTS,
-            "ACE layouts require exactly alpha and beta randomness inputs"
-        );
 
         // Every ACE input slot is an extension-field element. Slots 7-9 carry base-field values
         // embedded as `(value, 0)`.
@@ -266,7 +262,6 @@ mod tests {
             aux_width: 1,
             num_aux_boundary: 3,
             num_public: 8,
-            num_randomness: 2,
             num_quotient_chunks: 1,
         }
     }

@@ -734,7 +734,7 @@ fn test_verifier_dag_matches_manual_eval() {
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_challenges: 2,
         num_permutation_values: air.num_aux_values(),
         num_periodic_columns: periodic_columns.len(),
     };
@@ -781,7 +781,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_challenges: 2,
         num_permutation_values: air.num_aux_values(),
         num_periodic_columns: periodic_columns.len(),
     };
@@ -814,7 +814,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
 fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
     use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
 
-    let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
+    let data = PeriodicColumnData::<EF>::from_periodic_columns(&shared_basis_columns());
     let columns = data.columns();
     assert!(
         columns[..SHARED_BASIS_COLUMNS]
@@ -845,7 +845,7 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_challenges: 2,
         num_permutation_values: air.num_aux_values(),
         num_periodic_columns: periodic_columns.len(),
     };
@@ -886,7 +886,7 @@ fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis(
     let repeated = vec![one_hot; 4];
 
     for (case, columns) in [("constant", with_constants), ("repeated", repeated)] {
-        let data = PeriodicColumnData::<EF>::from_periodic_columns(columns);
+        let data = PeriodicColumnData::<EF>::from_periodic_columns(&columns);
         assert!(
             data.columns()
                 .iter()

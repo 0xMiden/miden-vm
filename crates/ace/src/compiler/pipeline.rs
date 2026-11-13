@@ -72,6 +72,7 @@ pub fn build_ace_dag_for_air<A>(air: &A, config: AceConfig) -> AceArtifacts<Quad
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
+    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
     let air = CapturedAir::new(air);
     let shared_period = air.max_periodic_length.max(1);
     build_ace_dag_from_capture(&air, config, shared_period)
@@ -82,7 +83,6 @@ fn build_ace_dag_from_capture(
     config: AceConfig,
     shared_period: usize,
 ) -> AceArtifacts<QuadFelt> {
-    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
     let counts = InputCounts {
         num_quotient_chunks: config.num_quotient_chunks,
         ..air.counts
@@ -91,13 +91,12 @@ fn build_ace_dag_from_capture(
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
-    let periodic_data = (!air.periodic_columns.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(air.periodic_columns.clone()));
+    let periodic_data = PeriodicColumnData::from_periodic_columns::<Felt>(&air.periodic_columns);
     let dag = build_verifier_dag_from_ir(
         &air.graph,
         &air.constraints,
         &layout,
-        periodic_data.as_ref(),
+        &periodic_data,
         shared_period,
     );
     AceArtifacts { layout, dag }
@@ -187,13 +186,17 @@ where
         trace_width_alignment,
         Some(config.num_quotient_chunks),
     );
-    build_circuit_for_relation(&relation, config)
+    build_circuit_for_relation(&relation, config.layout)
 }
 
 pub(crate) fn build_circuit_for_relation(
     relation: &CompiledRelation<'_>,
-    config: AceConfig,
+    layout: LayoutKind,
 ) -> AceCircuit<QuadFelt> {
+    let config = AceConfig {
+        num_quotient_chunks: relation.geometry.num_quotient_chunks,
+        layout,
+    };
     let num_airs = relation.airs.len();
     let layout = InputLayout::for_relation(
         relation.geometry.input_counts(),

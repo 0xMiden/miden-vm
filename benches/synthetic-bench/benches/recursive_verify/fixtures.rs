@@ -166,7 +166,7 @@ fn store_cached_tx_proof(
 
 fn pvm_proof_cache_key(root: Word) -> String {
     let parameters = pcs_params_bytes(&miden_air::precompiles::policy::precompile_pcs_params());
-    let relation = miden_air::precompiles::PVM_RELATION_DIGEST;
+    let relation = miden_air::precompiles::protocol::PVM_RELATION_DIGEST;
     let relation_bytes: Vec<_> = relation.iter().flat_map(|value| value.to_le_bytes()).collect();
     let digest: [u8; 32] = Blake3_256::hash_iter(
         [
