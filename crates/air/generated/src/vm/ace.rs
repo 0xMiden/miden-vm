@@ -18,7 +18,7 @@ mod tests {
 
     #[test]
     fn embedded_circuit_matches_independent_capture() {
-        let independent = build_recursive_verifier_ace_circuit().unwrap();
+        let independent = build_recursive_verifier_ace_circuit();
         assert_eq!(
             ACE_CIRCUIT_SHAPE,
             (independent.num_inputs, independent.num_eval_gates, independent.stream_len)

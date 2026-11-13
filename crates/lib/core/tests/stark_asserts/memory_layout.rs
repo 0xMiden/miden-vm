@@ -747,8 +747,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         &widths[n..2 * n],
         &widths[2 * n..3 * n],
         widths[3 * n],
-    )
-    .unwrap();
+    );
     assert!(plan.table_felts() as u64 <= table.hi - table.lo + 1);
     let relation_region_refs: Vec<_> = relation_regions.iter().collect();
     assert_contexts_disjoint(&canonical_generic_regions, &relation_region_refs);

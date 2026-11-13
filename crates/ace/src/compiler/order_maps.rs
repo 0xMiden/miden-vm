@@ -15,7 +15,7 @@
 use std::{format, string::String, vec::Vec};
 
 use crate::{
-    AceError, MAX_ORDER_AIRS,
+    MAX_ORDER_AIRS,
     compiler::proof_order::{PROOF_ORDER_KEY_STRIDE, sorting_network},
 };
 
@@ -24,23 +24,15 @@ use crate::{
 struct Stack {
     items: Vec<String>,
     ops: Vec<String>,
-    /// Set when an index beyond the directly addressable 16 stack slots was requested.
-    out_of_reach: bool,
 }
 
 impl Stack {
     fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            ops: Vec::new(),
-            out_of_reach: false,
-        }
+        Self { items: Vec::new(), ops: Vec::new() }
     }
 
-    fn reach(&mut self, index: usize) {
-        if index >= 16 {
-            self.out_of_reach = true;
-        }
+    fn reach(index: usize) {
+        assert!(index < 16, "the proof-order pass exceeds the directly addressable stack slots");
     }
 
     /// Removes the top two tracked items, refusing to model a consumption of the caller's stack.
@@ -87,7 +79,7 @@ impl Stack {
     }
 
     fn dup(&mut self, index: usize, name: &str) {
-        self.reach(index);
+        Self::reach(index);
         self.emit(
             if index == 0 {
                 "dup".into()
@@ -105,7 +97,7 @@ impl Stack {
     }
 
     fn movup(&mut self, index: usize) {
-        self.reach(index);
+        Self::reach(index);
         match index {
             0 => {},
             1 => self.emit("swap"),
@@ -117,7 +109,7 @@ impl Stack {
     }
 
     fn movdn(&mut self, index: usize) {
-        self.reach(index);
+        Self::reach(index);
         match index {
             0 => {},
             1 => self.emit("swap"),
@@ -202,13 +194,13 @@ impl Stack {
 ///
 /// The enclosing module imports the shared `LOG_AIR_TRACE_LENGTHS_PTR`,
 /// `PROOF_ORDER_POSITIONS_PTR` and `PROOF_ORDER_IDS_PTR` constants. Their arrays must be
-/// word-aligned and contain at least `num_airs` cells.
-pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
-    if !(2..=MAX_ORDER_AIRS).contains(&num_airs) {
-        return Err(AceError::InvalidInputLayout {
-            message: format!("proof-order maps need 2..={MAX_ORDER_AIRS} AIRs, got {num_airs}"),
-        });
-    }
+/// word-aligned and contain at least `num_airs` cells. Panics if the AIR count is outside
+/// `2..=MAX_ORDER_AIRS`.
+pub fn render_proof_order_maps(num_airs: usize) -> String {
+    assert!(
+        (2..=MAX_ORDER_AIRS).contains(&num_airs),
+        "proof-order maps need 2..={MAX_ORDER_AIRS} AIRs, got {num_airs}"
+    );
     let network = sorting_network(num_airs);
     let stride = PROOF_ORDER_KEY_STRIDE;
 
@@ -365,16 +357,8 @@ pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
         stack.drop();
     }
     lines.push(stack.line(4));
-    if stack.out_of_reach {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "the proof-order pass for {num_airs} AIRs needs more than the 16 directly \
-                 addressable stack slots"
-            ),
-        });
-    }
 
-    Ok(format!(
+    format!(
         "#! Derives the height-sorted proof order once and materializes its two inverse maps.\n\
          #!\n\
          #! Packs each AIR's key as `{stride} * log_height + instance_index`, sorts the keys with a \
@@ -396,7 +380,7 @@ pub fn render_proof_order_maps(num_airs: usize) -> Result<String, AceError> {
          end\n",
         comparators = network.len(),
         body = lines.join("\n"),
-    ))
+    )
 }
 
 fn describe(stack: &Stack) -> String {
@@ -409,7 +393,7 @@ mod tests {
 
     #[test]
     fn renders_one_comparator_line_per_network_entry() {
-        let masm = render_proof_order_maps(4).expect("renders");
+        let masm = render_proof_order_maps(4);
         assert_eq!(masm.matches("u32lt cswap").count(), sorting_network(4).len());
         assert_eq!(masm.matches("u32and.15").count(), 4);
         assert!(masm.starts_with("#! Derives the height-sorted proof order"));
@@ -418,8 +402,9 @@ mod tests {
 
     #[test]
     fn accepts_the_maximum_and_rejects_unsupported_air_counts() {
-        render_proof_order_maps(MAX_ORDER_AIRS).expect("the maximum AIR count must render");
-        assert!(render_proof_order_maps(1).is_err());
-        assert!(render_proof_order_maps(MAX_ORDER_AIRS + 1).is_err());
+        render_proof_order_maps(MAX_ORDER_AIRS);
+        for n in [1, MAX_ORDER_AIRS + 1] {
+            assert!(std::panic::catch_unwind(|| render_proof_order_maps(n)).is_err());
+        }
     }
 }

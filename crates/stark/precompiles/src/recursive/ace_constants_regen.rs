@@ -6,12 +6,7 @@
 //! `miden_air::precompiles::protocol`; generation never accepts a new identity. `--check` then
 //! byte-compares every rendered file against its checked-in copy.
 
-use std::{
-    fmt::Write as _,
-    format, io, println,
-    string::{String, ToString},
-    vec::Vec,
-};
+use std::{fmt::Write as _, format, io, println, string::String, vec::Vec};
 
 use miden_ace::{
     EXT_DEGREE, InputKey, InputLayout,
@@ -59,7 +54,7 @@ pub enum Mode {
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(mode: Mode) -> Result<(), String> {
-    let artifacts = compute()?;
+    let artifacts = compute(&read_masm_file(STARK_CONSTANTS_PATH)?);
     pinned_identity_matches(&artifacts)?;
     match mode {
         Mode::Check => check(&artifacts),
@@ -116,7 +111,7 @@ struct CircuitShape {
 
 impl PvmReadLayout {
     /// Derive every READ-region boundary from the circuit's own `InputLayout`.
-    fn from_input_layout(layout: &InputLayout, memory: MasmMemoryLayout) -> Result<Self, String> {
+    fn from_input_layout(layout: &InputLayout, memory: MasmMemoryLayout) -> Self {
         let boundary_specs = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
             ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
@@ -140,43 +135,34 @@ impl PvmReadLayout {
 
         let mut boundaries = Vec::with_capacity(boundary_specs.len() + 1);
         for &(constant, key) in &boundary_specs {
-            let index = layout.index(key).ok_or_else(|| {
-                format!("PVM ACE layout is missing boundary {constant} ({key:?})")
-            })?;
-            let ptr = memory.input_ptr(index).map_err(|err| err.to_string())?;
+            let index = layout.index(key).unwrap();
+            let ptr = memory.input_ptr(index);
             boundaries.push((constant, ptr));
         }
 
-        if boundaries.first().map(|(_, ptr)| *ptr) != Some(memory.ace_inputs_start()) {
-            return Err("PVM public inputs must begin at the first ACE READ slot".into());
-        }
-        if boundaries.windows(2).any(|pair| pair[0].1 >= pair[1].1) {
-            return Err("PVM ACE READ-region boundaries are not strictly increasing".into());
-        }
+        assert_eq!(
+            boundaries[0].1,
+            memory.ace_inputs_start(),
+            "PVM public inputs must begin at the first ACE READ slot"
+        );
+        assert!(
+            boundaries.windows(2).all(|pair| pair[0].1 < pair[1].1),
+            "PVM ACE READ-region boundaries must increase"
+        );
 
         boundaries.push(("ACE_CIRCUIT_STREAM_PTR", memory.stream_start()));
 
         // The staged fold coefficients live at the end of the auxiliary-input region; a region
         // that ended before them would silently overwrite the ACE stream reservation.
         let fold_coefficients_end =
-            layout.index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1)).ok_or_else(|| {
-                "PVM ACE layout is missing its last fold-coefficient slot".to_string()
-            })? + 1;
-        if fold_coefficients_end > layout.total_inputs {
-            return Err("PVM fold coefficients fall outside the declared READ section".into());
-        }
-        let alpha_index = layout
-            .index(InputKey::Alpha)
-            .ok_or_else(|| "PVM ACE layout is missing its stark-vars base".to_string())?;
-        let first_fold_coefficient =
-            layout.index(InputKey::MultiAirFoldCoeff(0)).ok_or_else(|| {
-                "PVM ACE layout is missing its first fold-coefficient slot".to_string()
-            })?;
-        let fold_coefficient_offset = first_fold_coefficient
-            .checked_sub(alpha_index)
-            .ok_or_else(|| "PVM fold coefficients precede the stark-vars base".to_string())?
-            .checked_mul(EXT_DEGREE)
-            .ok_or_else(|| "PVM fold-coefficient felt offset overflows usize".to_string())?;
+            layout.index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1)).unwrap() + 1;
+        assert!(
+            fold_coefficients_end <= layout.total_inputs,
+            "PVM fold coefficients fall outside the READ section"
+        );
+        let alpha_index = layout.index(InputKey::Alpha).unwrap();
+        let first_fold_coefficient = layout.index(InputKey::MultiAirFoldCoeff(0)).unwrap();
+        let fold_coefficient_offset = (first_fold_coefficient - alpha_index) * EXT_DEGREE;
 
         let regions = boundaries
             .windows(2)
@@ -187,44 +173,41 @@ impl PvmReadLayout {
             })
             .collect();
 
-        Ok(Self { regions, memory, fold_coefficient_offset })
+        Self { regions, memory, fold_coefficient_offset }
     }
 }
 
 /// Compile the canonical circuit from the captured chiplet AIRs and derive every generated
 /// artifact from it.
-fn compute() -> Result<GeneratedArtifacts, String> {
-    let captured = CapturedPvmRelation::new().map_err(|e| format!("{e}"))?;
-    let compiled = captured.compile().map_err(|e| format!("{e}"))?;
-    let source = compiled.build_circuit(LayoutKind::Masm).map_err(|e| format!("{e}"))?;
+fn compute(constants: &str) -> GeneratedArtifacts {
+    let captured = CapturedPvmRelation::new();
+    let compiled = captured.compile();
+    let source = compiled.build_circuit(LayoutKind::Masm);
     let input_layout = source.layout();
-    let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
-        .map_err(|e| format!("{e}"))?;
-    let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout)?;
+    let circuit = PvmRecursiveAceCircuit::from(source.to_ace());
+    let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout);
     let memory = MasmMemoryLayout::new(
-        &read_masm_file(STARK_CONSTANTS_PATH)?,
+        constants,
         input_layout,
         MasmMemoryExtents {
             // One scratch word for the LogUp bus separator.
             state_felts: WORD_SIZE,
             stream_felts: circuit.stream_len,
             query_row_felts: geometry.query_row_felts(),
-            scatter_felts: pvm_scatter_plan(&geometry)?.table_felts(),
+            scatter_felts: pvm_scatter_plan(&geometry).table_felts(),
         },
-    )
-    .map_err(|err| err.to_string())?;
-    let read_layout = PvmReadLayout::from_input_layout(input_layout, memory)?;
+    );
+    let read_layout = PvmReadLayout::from_input_layout(input_layout, memory);
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(format!(
-            "PVM quotient chunk count {num_quotient_chunks} is not a power of two"
-        ));
-    }
+    assert!(
+        num_quotient_chunks.is_power_of_two(),
+        "PVM quotient chunk count must be a power of two"
+    );
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         miden_air::precompiles::policy::precompile_pcs_params().log_blowup(),
     )
-    .map_err(|err| err.to_string())?;
+    .expect("configured PVM quotient geometry");
 
     let shape = CircuitShape {
         num_inputs: circuit.num_inputs,
@@ -237,32 +220,32 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     // tests rebuild it from the authored setup trace.
     let preprocessed_commitment = Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked));
     let protocol = relation::protocol();
-    if input_layout.counts.num_public
-        != miden_air_definitions::precompiles::logup::NUM_PUBLIC_VALUES
-    {
-        return Err("PVM ACE public values disagree with the statement schema".into());
-    }
+    assert_eq!(
+        input_layout.counts.num_public,
+        miden_air_definitions::precompiles::logup::NUM_PUBLIC_VALUES,
+        "PVM ACE public values disagree with the statement schema"
+    );
 
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len);
-    let ood_frames_masm = render_pvm_ood_frames(&geometry)?;
+    let ood_frames_masm = render_pvm_ood_frames(&geometry);
     let parameters_masm =
-        render_pvm_parameters(&geometry, &protocol, relation_digest, preprocessed_commitment)?;
+        render_pvm_parameters(&geometry, &protocol, relation_digest, preprocessed_commitment);
     let constraints_eval_masm = render_pvm_constraints_eval(
         shape,
         circuit_digest,
         quotient_inputs,
         read_layout.fold_coefficient_offset,
         protocol.max_periodic_log,
-    )?;
+    );
 
-    Ok(GeneratedArtifacts {
+    GeneratedArtifacts {
         circuit_digest,
         relation_digest,
         shape,
         layout_masm,
         ood_frames_masm,
         parameters_masm,
-        fixed_boundary_masm: crate::recursive::fixed_boundary_codegen::render_fixed_boundary()?,
+        fixed_boundary_masm: crate::recursive::fixed_boundary_codegen::render_fixed_boundary(),
         constraints_eval_masm,
         aux_trace_masm: render_masm_aux_trace(&MasmAuxTraceConfig {
             generated_by: GENERATED_BY,
@@ -270,13 +253,12 @@ fn compute() -> Result<GeneratedArtifacts, String> {
             correction_module: "miden::core::sys::pvm::fixed_boundary",
             correction_procedure: "compute_fixed_boundary_correction",
             num_airs: NUM_CHIPLETS,
-        })
-        .map_err(|err| err.to_string())?,
+        }),
         deep_queries_masm: render_masm_deep_queries(
             "make regenerate-pvm-constants",
             "miden::core::sys::pvm::parameters",
         ),
-    })
+    }
 }
 
 fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> String {
@@ -359,7 +341,7 @@ fn render_pvm_constraints_eval(
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     fold_coefficient_offset: usize,
     max_cycle_len_log: u32,
-) -> Result<String, String> {
+) -> String {
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: GENERATED_BY,
         layout_module: "miden::core::sys::pvm::layout",
@@ -372,7 +354,6 @@ fn render_pvm_constraints_eval(
         quotient_inputs,
         circuit_digest,
     })
-    .map_err(|err| err.to_string())
 }
 
 fn render_pvm_parameters(
@@ -380,7 +361,7 @@ fn render_pvm_parameters(
     protocol: &relation::RelationProtocol,
     relation_digest: [Felt; 4],
     preprocessed_commitment: Word,
-) -> Result<String, String> {
+) -> String {
     let mut output = String::from(
         "# Generated by `make regenerate-pvm-constants`. Do not edit.\n\n\
          # Protocol commitments under the native Eidos configuration.\n",
@@ -395,7 +376,7 @@ fn render_pvm_parameters(
     }
     let metadata = &miden_air::precompiles::protocol::PROTOCOL;
     let air_shape = metadata.air_shape;
-    let lookup_shape = air_shape.lookup.ok_or("PVM security metadata requires lookup arguments")?;
+    let lookup_shape = air_shape.lookup.expect("PVM security metadata requires lookup arguments");
     output.push_str("\n# Security descriptor from miden_air::precompiles::protocol.\n");
     for (name, value) in [
         ("MAX_MESSAGE_WIDTH", u64::from(lookup_shape.max_message_width)),
@@ -429,16 +410,14 @@ fn render_pvm_parameters(
     }
 
     let setup_height = miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
-    if !setup_height.is_power_of_two() {
-        return Err("BytePairLut setup height must be a power of two".into());
-    }
+    assert!(
+        setup_height.is_power_of_two(),
+        "BytePairLut setup height must be a power of two"
+    );
     let log_height = setup_height.ilog2();
     let depth = log_height
         + u32::from(miden_air::precompiles::policy::precompile_pcs_params().log_blowup());
-    let index_mask = 1u64
-        .checked_shl(depth)
-        .and_then(|size| u32::try_from(size - 1).ok())
-        .ok_or_else(|| "PVM preprocessed LDE depth exceeds u32 indices".to_string())?;
+    let index_mask = u32::try_from((1u64 << depth) - 1).unwrap();
     output.push_str("\n# BytePairLut setup height and PCS-expanded Merkle tree.\n");
     writeln!(output, "pub const PREPROCESSED_TRACE_LOG_HEIGHT = {log_height}").unwrap();
     writeln!(output, "pub const PREPROCESSED_TREE_DEPTH = {depth}").unwrap();
@@ -459,18 +438,16 @@ fn render_pvm_parameters(
                      # Each block contains eight base felts.\n",
     );
     for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
-        if width == 0 || !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
-            return Err(format!(
-                "PVM {blocks_name} width {width} must be a positive multiple of {EIDOS_BLOCK_WIDTH}"
-            ));
-        }
-        let encoded_len = u32::try_from(width)
-            .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
+        assert!(
+            width > 0 && width.is_multiple_of(EIDOS_BLOCK_WIDTH),
+            "PVM {blocks_name} must fill whole Eidos blocks"
+        );
+        let encoded_len = u32::try_from(width).unwrap();
         let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
         writeln!(output, "pub const {blocks_name} = {}", width / EIDOS_BLOCK_WIDTH).unwrap();
         writeln!(output, "pub const {init_cv_name} = {}", masm_word_literal(init_cv)).unwrap();
     }
-    Ok(output)
+    output
 }
 
 /// Compares the compiled circuit with the relation identity pinned in `miden-air`.

@@ -31,9 +31,9 @@ impl RegisterFixture {
         let first = base_leaf(&mut graph, Leaf::IsFirst);
         let update_filter = base_leaf(&mut graph, Leaf::IsTransition);
         let next_coefficient = graph.leaf(Leaf::ExtConst([1, 0]));
-        let weighted_state = graph.op(Ext, Mul, beta, Some(current)).0;
-        let update_rhs = Some(graph.op(Ext, Add, weighted_state, Some(main)).0);
-        let initialization = Some(graph.op(Ext, Mul, first, Some(current)).0);
+        let weighted_state = graph.op(Ext, Mul, beta, Some(current));
+        let update_rhs = Some(graph.op(Ext, Add, weighted_state, Some(main)));
+        let initialization = Some(graph.op(Ext, Mul, first, Some(current)));
         Self {
             graph,
             current,
@@ -50,9 +50,9 @@ impl RegisterFixture {
         let mut roots: Vec<_> = self.initialization.into_iter().collect();
         if let Some(rhs) = self.update_rhs {
             let next = self.graph.leaf(Leaf::Aux { offset: 1, index: 0 });
-            let lhs = self.graph.op(Ext, Mul, self.next_coefficient, Some(next)).0;
-            let equation = self.graph.op(Ext, Sub, lhs, Some(rhs)).0;
-            roots.push(self.graph.op(Ext, Mul, self.update_filter, Some(equation)).0);
+            let lhs = self.graph.op(Ext, Mul, self.next_coefficient, Some(next));
+            let equation = self.graph.op(Ext, Sub, lhs, Some(rhs));
+            roots.push(self.graph.op(Ext, Mul, self.update_filter, Some(equation)));
         }
         beta_degree_bound(&self.graph.freeze(), &roots, &[], self.aux_width, &self.periodic)
     }
@@ -62,8 +62,8 @@ impl RegisterFixture {
 fn extracts_the_local_challenge_degree() {
     let mut fixture = RegisterFixture::new();
     let beta = fixture.graph.leaf(Leaf::Challenge(1));
-    let beta_squared = fixture.graph.op(Ext, Mul, beta, Some(beta)).0;
-    fixture.update_rhs = Some(fixture.graph.op(Ext, Mul, beta_squared, Some(fixture.current)).0);
+    let beta_squared = fixture.graph.op(Ext, Mul, beta, Some(beta));
+    fixture.update_rhs = Some(fixture.graph.op(Ext, Mul, beta_squared, Some(fixture.current)));
 
     assert_eq!(fixture.analyze(), Ok(2));
 }
@@ -81,8 +81,8 @@ fn accepts_nonzero_constant_initialization() {
     let mut fixture = RegisterFixture::new();
     let one = fixture.graph.leaf(Leaf::ExtConst([1, 0]));
     let first = base_leaf(&mut fixture.graph, Leaf::IsFirst);
-    let equation = fixture.graph.op(Ext, Sub, fixture.current, Some(one)).0;
-    fixture.initialization = Some(fixture.graph.op(Ext, Mul, first, Some(equation)).0);
+    let equation = fixture.graph.op(Ext, Sub, fixture.current, Some(one));
+    fixture.initialization = Some(fixture.graph.op(Ext, Mul, first, Some(equation)));
 
     assert_eq!(fixture.analyze(), Ok(1));
 }
@@ -100,8 +100,8 @@ fn rejects_challenge_dependent_initialization() {
     let mut fixture = RegisterFixture::new();
     let beta = fixture.graph.leaf(Leaf::Challenge(1));
     let first = base_leaf(&mut fixture.graph, Leaf::IsFirst);
-    let equation = fixture.graph.op(Ext, Sub, fixture.current, Some(beta)).0;
-    fixture.initialization = Some(fixture.graph.op(Ext, Mul, first, Some(equation)).0);
+    let equation = fixture.graph.op(Ext, Sub, fixture.current, Some(beta));
+    fixture.initialization = Some(fixture.graph.op(Ext, Mul, first, Some(equation)));
 
     assert_eq!(fixture.analyze(), Err("missing fixed initialization"));
 }
@@ -121,7 +121,7 @@ fn periodic_initialization_requires_an_active_first_row() {
         let mut fixture = RegisterFixture::new();
         fixture.periodic = vec![vec![first, Felt::ONE - first]];
         let gate = base_leaf(&mut fixture.graph, Leaf::Periodic(0));
-        fixture.initialization = Some(fixture.graph.op(Ext, Mul, gate, Some(fixture.current)).0);
+        fixture.initialization = Some(fixture.graph.op(Ext, Mul, gate, Some(fixture.current)));
 
         assert_eq!(fixture.analyze(), expected, "first periodic value: {first:?}");
     }
@@ -133,8 +133,8 @@ fn first_row_selector_is_not_a_boolean_coefficient() {
     let first = base_leaf(&mut fixture.graph, Leaf::IsFirst);
     let two = fixture.graph.leaf(Leaf::ExtConst([2, 0]));
     // The first-row selector equals the height, so this coefficient vanishes at height two.
-    let coefficient = fixture.graph.op(Ext, Sub, first, Some(two)).0;
-    fixture.initialization = Some(fixture.graph.op(Ext, Mul, coefficient, Some(fixture.current)).0);
+    let coefficient = fixture.graph.op(Ext, Sub, first, Some(two));
+    fixture.initialization = Some(fixture.graph.op(Ext, Mul, coefficient, Some(fixture.current)));
 
     assert_eq!(fixture.analyze(), Err("missing fixed initialization"));
 }
@@ -160,7 +160,7 @@ fn rejects_periodically_gated_updates() {
     let mut fixture = RegisterFixture::new();
     fixture.periodic = vec![vec![Felt::ONE, Felt::ZERO]];
     let gate = base_leaf(&mut fixture.graph, Leaf::Periodic(0));
-    fixture.update_filter = fixture.graph.op(Ext, Mul, fixture.update_filter, Some(gate)).0;
+    fixture.update_filter = fixture.graph.op(Ext, Mul, fixture.update_filter, Some(gate));
 
     assert_eq!(fixture.analyze(), Err("missing explicit update"));
 }
@@ -192,7 +192,7 @@ fn rejects_a_main_trace_next_coefficient() {
 #[test]
 fn rejects_nonlinear_register_updates() {
     let mut fixture = RegisterFixture::new();
-    fixture.update_rhs = Some(fixture.graph.op(Ext, Mul, fixture.current, Some(fixture.current)).0);
+    fixture.update_rhs = Some(fixture.graph.op(Ext, Mul, fixture.current, Some(fixture.current)));
 
     assert_eq!(fixture.analyze(), Err("nonlinear auxiliary dependence"));
 }
@@ -225,10 +225,10 @@ fn lookup_guards_require_fixed_affine_coefficients() {
     let register = graph.leaf(Leaf::Aux { offset: 0, index: 1 });
     let beta = graph.leaf(Leaf::Challenge(1));
     let main = base_leaf(&mut graph, Leaf::Main { offset: 0, index: 0 });
-    let fixed_coefficient = graph.op(Ext, Mul, cell, Some(main)).0;
-    let challenge_coefficient = graph.op(Ext, Mul, cell, Some(beta)).0;
-    let nonlinear = graph.op(Ext, Mul, cell, Some(cell)).0;
-    let mixed = graph.op(Ext, Add, cell, Some(register)).0;
+    let fixed_coefficient = graph.op(Ext, Mul, cell, Some(main));
+    let challenge_coefficient = graph.op(Ext, Mul, cell, Some(beta));
+    let nonlinear = graph.op(Ext, Mul, cell, Some(cell));
+    let mixed = graph.op(Ext, Add, cell, Some(register));
     let graph = graph.freeze();
 
     let analyze_guard = |root, width| beta_degree_bound(&graph, &[cell, root], &[cell], width, &[]);
@@ -249,7 +249,7 @@ fn degree_overflow_fails_closed() {
     let mut graph = GraphBuilder::new();
     let mut power = graph.leaf(Leaf::Challenge(1));
     for _ in 0..usize::BITS {
-        power = graph.op(Ext, Mul, power, Some(power)).0;
+        power = graph.op(Ext, Mul, power, Some(power));
     }
 
     assert_eq!(

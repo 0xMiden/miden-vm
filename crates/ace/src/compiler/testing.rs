@@ -15,7 +15,7 @@ use miden_stark::air::symbolic::{
 };
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
-use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
+use crate::{InputCounts, InputKey, InputLayout, compiler::AceDag};
 
 /// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
 ///
@@ -371,24 +371,19 @@ where
 }
 
 /// Evaluate a lowered DAG against concrete inputs.
-pub fn eval_dag<EF>(dag: &AceDag<EF>, inputs: &[EF], layout: &InputLayout) -> Result<EF, AceError>
+///
+/// Panics if the input length does not match the layout or the layout omits a DAG input.
+pub fn eval_dag<EF>(dag: &AceDag<EF>, inputs: &[EF], layout: &InputLayout) -> EF
 where
     EF: Field,
 {
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
+    assert_eq!(inputs.len(), layout.total_inputs, "ACE input length mismatch");
 
     let mut values: Vec<EF> = vec![EF::ZERO; dag.nodes().len()];
     for (idx, node) in dag.nodes().iter().enumerate() {
         let value = match node {
             crate::compiler::dag::NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
-                    message: format!("missing input key in layout: {key:?}"),
-                })?;
+                let input_idx = layout.index(*key).unwrap();
                 inputs[input_idx]
             },
             crate::compiler::dag::NodeKind::Constant(c) => *c,
@@ -400,7 +395,7 @@ where
         values[idx] = value;
     }
 
-    Ok(values[dag.root().index()])
+    values[dag.root().index()]
 }
 
 fn compute_deltas_and_weights<EF: Field>(

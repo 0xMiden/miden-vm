@@ -149,11 +149,7 @@ fn generic_renderer_executes_every_supported_count() {
     for num_airs in 2..=MAX_ORDER_AIRS {
         let relation = Relation { module: "generated", num_airs };
         let heights = &GENERIC_HEIGHTS[..num_airs];
-        let procedure = render_proof_order_maps(num_airs).expect("supported AIR count").replacen(
-            "pub proc ",
-            "proc ",
-            1,
-        );
+        let procedure = render_proof_order_maps(num_airs).replacen("pub proc ", "proc ", 1);
         let prelude = format!(
             "use {{PROOF_ORDER_POSITIONS_PTR, PROOF_ORDER_IDS_PTR}} from miden::core::stark::constants\n{procedure}"
         );

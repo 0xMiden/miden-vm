@@ -405,7 +405,10 @@ fn generated_logup_stage_matches_rust_for_every_air_count() {
     };
     for n in [0, 1, MAX_ORDER_AIRS + 1, usize::MAX] {
         config.num_airs = n;
-        assert!(render_masm_aux_trace(&config).is_err(), "unsupported AIR count {n}");
+        assert!(
+            std::panic::catch_unwind(|| render_masm_aux_trace(&config)).is_err(),
+            "unsupported AIR count {n}"
+        );
     }
     for n in 2..=MAX_ORDER_AIRS {
         let (mut challenger, alpha, beta) = sampled_challenges();
@@ -418,8 +421,8 @@ fn generated_logup_stage_matches_rust_for_every_air_count() {
         advice.extend([98765, 43210]);
 
         config.num_airs = n;
-        let stage = render_masm_aux_trace(&config).unwrap().replace("pub proc ", "proc ");
-        let maps = render_proof_order_maps(n).unwrap().replace("pub proc ", "proc ");
+        let stage = render_masm_aux_trace(&config).replace("pub proc ", "proc ");
+        let maps = render_proof_order_maps(n).replace("pub proc ", "proc ");
         let base = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
         let guards = [base - 1, base + 2 * n as u32];
         let mut source = format!(

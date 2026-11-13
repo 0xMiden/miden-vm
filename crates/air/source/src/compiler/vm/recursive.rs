@@ -1,7 +1,4 @@
-use miden_ace::{
-    AceError,
-    compiler::{AceConfig, LayoutKind},
-};
+use miden_ace::compiler::{AceConfig, LayoutKind};
 use miden_core::{Felt, field::QuadFelt};
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
@@ -36,8 +33,8 @@ pub use miden_ace::RecursiveAceCircuit;
 /// The circuit does not depend on the proof order. Callers that need repeated access should use
 /// the build-compiled `miden_vm_stark::setup::ace::shared_recursive_circuit` rather than rebuild it
 /// for each proof.
-pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, AceError> {
-    let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())?;
-    let encoded = circuit.to_ace()?;
-    encoded.try_into()
+pub fn build_recursive_verifier_ace_circuit() -> RecursiveAceCircuit {
+    build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
+        .to_ace()
+        .into()
 }

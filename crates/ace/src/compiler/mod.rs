@@ -2,6 +2,10 @@
 //!
 //! This module owns the generic compilation pipeline. Encoded circuit data, input layouts,
 //! and proof-order encodings remain available from the crate root for runtime consumers.
+//!
+//! AIRs, layouts, and generated code are compiler-owned. Invalid configurations and broken
+//! compiler invariants panic; arithmetic and indexing use ordinary Rust operations. Guest circuit
+//! evaluation remains checked by the processor.
 
 mod aux_trace;
 mod circuit;

@@ -9,8 +9,8 @@ use miden_core::field::Field;
 
 pub(crate) use crate::instruction::Op as AceOp;
 use crate::{
-    AceError, InputLayout,
-    compiler::dag::{AceDag, NodeId, NodeKind},
+    InputLayout,
+    compiler::dag::{AceDag, NodeKind},
 };
 
 /// Nodes in the emitted ACE circuit.
@@ -47,13 +47,10 @@ impl<EF: Field> AceCircuit<EF> {
     }
 
     /// Evaluate the circuit against the provided input vector.
-    pub fn eval(&self, inputs: &[EF]) -> Result<EF, AceError> {
-        if inputs.len() != self.layout.total_inputs {
-            return Err(AceError::InvalidInputLength {
-                expected: self.layout.total_inputs,
-                got: inputs.len(),
-            });
-        }
+    ///
+    /// Panics if the input length does not match the circuit layout.
+    pub fn eval(&self, inputs: &[EF]) -> EF {
+        assert_eq!(inputs.len(), self.layout.total_inputs, "ACE input length mismatch");
         let mut op_values = vec![EF::ZERO; self.operations.len()];
         for (idx, op) in self.operations.iter().enumerate() {
             let lhs = self.node_value(op.lhs, inputs, &op_values);
@@ -64,7 +61,7 @@ impl<EF: Field> AceCircuit<EF> {
                 AceOp::Mul => lhs * rhs,
             };
         }
-        Ok(self.node_value(self.root, inputs, &op_values))
+        self.node_value(self.root, inputs, &op_values)
     }
 
     /// Total number of nodes (inputs + constants + ops).
@@ -82,7 +79,9 @@ impl<EF: Field> AceCircuit<EF> {
 }
 
 /// Emit an ACE circuit from the DAG and input layout.
-pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> Result<AceCircuit<EF>, AceError>
+///
+/// Panics if the layout is inconsistent or omits a DAG input.
+pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> AceCircuit<EF>
 where
     EF: Field,
 {
@@ -91,14 +90,13 @@ where
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();
     let mut operations = Vec::new();
-    let mut node_map: Vec<Option<AceNode>> = vec![None; dag.nodes().len()];
+    // Each operand precedes its operation in the topologically ordered DAG.
+    let mut node_map = Vec::with_capacity(dag.nodes().len());
 
-    for (idx, node) in dag.nodes().iter().enumerate() {
+    for node in dag.nodes() {
         let ace_node = match node {
             NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
-                    message: format!("missing input key in layout: {key:?}"),
-                })?;
+                let input_idx = layout.index(*key).unwrap();
                 AceNode::Input(input_idx)
             },
             NodeKind::Constant(value) => {
@@ -109,28 +107,28 @@ where
                 AceNode::Constant(const_idx)
             },
             NodeKind::Add(a, b) => {
-                let lhs = lookup_node(&node_map, *a);
-                let rhs = lookup_node(&node_map, *b);
+                let lhs = node_map[a.index()];
+                let rhs = node_map[b.index()];
                 let op_idx = operations.len();
                 operations.push(AceOpNode { op: AceOp::Add, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Sub(a, b) => {
-                let lhs = lookup_node(&node_map, *a);
-                let rhs = lookup_node(&node_map, *b);
+                let lhs = node_map[a.index()];
+                let rhs = node_map[b.index()];
                 let op_idx = operations.len();
                 operations.push(AceOpNode { op: AceOp::Sub, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Mul(a, b) => {
-                let lhs = lookup_node(&node_map, *a);
-                let rhs = lookup_node(&node_map, *b);
+                let lhs = node_map[a.index()];
+                let rhs = node_map[b.index()];
                 let op_idx = operations.len();
                 operations.push(AceOpNode { op: AceOp::Mul, lhs, rhs });
                 AceNode::Operation(op_idx)
             },
             NodeKind::Neg(a) => {
-                let rhs = lookup_node(&node_map, *a);
+                let rhs = node_map[a.index()];
                 let zero = *constant_map.entry(EF::ZERO).or_insert_with(|| {
                     constants.push(EF::ZERO);
                     constants.len() - 1
@@ -144,13 +142,9 @@ where
                 AceNode::Operation(op_idx)
             },
         };
-        node_map[idx] = Some(ace_node);
+        node_map.push(ace_node);
     }
 
-    let root = lookup_node(&node_map, dag.root());
-    Ok(AceCircuit { layout, constants, operations, root })
-}
-
-fn lookup_node(map: &[Option<AceNode>], id: NodeId) -> AceNode {
-    map[id.index()].expect("ACE DAG nodes must be topologically ordered")
+    let root = node_map[dag.root().index()];
+    AceCircuit { layout, constants, operations, root }
 }

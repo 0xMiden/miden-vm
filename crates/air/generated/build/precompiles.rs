@@ -15,7 +15,7 @@ pub fn generate() {
         fs::write(&path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
     };
-    let captured = CapturedPvmRelation::new().expect("capture PVM AIRs");
+    let captured = CapturedPvmRelation::new();
     let evals: Vec<_> = captured
         .airs()
         .iter()
@@ -41,14 +41,8 @@ pub fn generate() {
             "fn generated_degrees(air: ChipletAir) -> ConstraintDegrees {{ match air.0 {{ {degree_arms} }} }}"
         ),
     );
-    let compiled = captured.compile().expect("compile PVM relation");
-    let circuit: RecursiveAceCircuit = compiled
-        .build_circuit(LayoutKind::Masm)
-        .expect("PVM ACE circuit")
-        .to_ace()
-        .expect("encode PVM ACE")
-        .try_into()
-        .expect("PVM recursive circuit");
+    let compiled = captured.compile();
+    let circuit: RecursiveAceCircuit = compiled.build_circuit(LayoutKind::Masm).to_ace().into();
     write(
         "ace_instructions.rs",
         format!(

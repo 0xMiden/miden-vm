@@ -122,7 +122,7 @@ fn ace_read_pointers_match_masm_layout() {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
     };
-    let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical ACE circuit");
+    let circuit = build_canonical_multi_air_ace_circuit(config);
     let layout = circuit.layout();
 
     let beta = layout.index(InputKey::AuxRandBeta).expect("aux randomness beta");
@@ -375,7 +375,7 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
     };
 
     let order = extract_order(&read);
-    let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical ace circuit");
+    let circuit = build_canonical_multi_air_ace_circuit(config);
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(&read, layout);
@@ -385,7 +385,7 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
     assert_air_selectors_match_trace_metadata(&read, &inputs, layout);
     assert_fold_coefficients_match_the_proof_order(&read, &order, &inputs, layout);
 
-    let result = circuit.eval(&inputs).expect("ACE eval failed");
+    let result = circuit.eval(&inputs);
     assert!(
         result.is_zero(),
         "ACE cross-evaluation is non-zero: {result:?}\n\

@@ -77,8 +77,7 @@ pub fn run(mode: Mode) -> Result<(), String> {
 /// must already name the circuit the authored AIRs compile to.
 fn write() -> io::Result<()> {
     let artifact = compute_artifacts()?;
-    pinned_identity_matches_artifact(&artifact)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    pinned_identity_matches_artifact(&artifact).unwrap();
     write_artifacts(&artifact)
 }
 
@@ -96,72 +95,61 @@ fn check() -> Result<(), String> {
 /// Generate a full computed snapshot from the authored AIRs.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let constants = read_file(STARK_CONSTANTS_PATH)?;
+    let layout = read_file(VM_LAYOUT_PATH)?;
     let fri_capacity =
         parse_masm_const::<u64>(&constants, "FRI_FORWARD_REGION_SIZE", STARK_CONSTANTS_PATH)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+            .unwrap();
     let fri_start = parse_masm_const::<u32>(&constants, "FRI_COM_PTR", STARK_CONSTANTS_PATH)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    if fri_capacity > u64::from(u32::MAX) + 1 - u64::from(fri_start) {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "FRI workspace exceeds u32 memory"));
-    }
+    assert!(
+        fri_capacity <= u64::from(u32::MAX) + 1 - u64::from(fri_start),
+        "FRI workspace exceeds u32 memory"
+    );
     let fri_parameters = render_fri_parameters(
         &config::pcs_params(),
         &miden_air::precompiles::policy::precompile_pcs_params(),
         fri_capacity,
-    )?;
-    let captured = AIRS
-        .iter()
-        .map(CapturedAir::new)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    );
+    let captured: Vec<_> = AIRS.iter().map(CapturedAir::new).collect();
     let airs: Vec<_> = captured.iter().collect();
-    let relation = CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let relation = CompiledRelation::from_captured(&airs, LMCS_ALIGNMENT);
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
-    let source = relation
-        .build_circuit(LayoutKind::Masm)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let source = relation.build_circuit(LayoutKind::Masm);
     let input_layout = source.layout();
-    let circuit = RecursiveAceCircuit::try_from(
-        source
-            .to_ace()
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let circuit = RecursiveAceCircuit::from(source.to_ace());
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("quotient chunk count {num_quotient_chunks} is not a power of two"),
-        ));
-    }
+    assert!(num_quotient_chunks.is_power_of_two());
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         config::pcs_params().log_blowup(),
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    .unwrap();
 
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let vm_geometry =
-        VmGeometry::from_compiled(relation.geometry(), input_layout, circuit.stream_len)?;
+    let vm_geometry = VmGeometry::from_compiled(
+        relation.geometry(),
+        input_layout,
+        circuit.stream_len,
+        &constants,
+        &layout,
+    );
     let constraints_eval = render_constraints_eval_file(
         &circuit,
         quotient_inputs,
         &vm_geometry,
-        max_periodic_cycle_len_log(relation.geometry())?,
-    )?;
-    let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
+        relation.geometry().shared_period.ilog2(),
+    );
+    let vm_ood_frames = render_vm_ood_frames(&vm_geometry);
     let vm_aux_trace = render_masm_aux_trace(&MasmAuxTraceConfig {
         generated_by: "make regenerate-constraints",
         boundary_module: "miden::core::sys::vm::parameters",
         correction_module: "miden::core::sys::vm::public_inputs",
         correction_procedure: "compute_outer_logup_correction",
         num_airs: MIDEN_AIR_COUNT,
-    })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    });
 
     // The setup commitment is a trusted verifier input pinned in `miden_air::vm::config`, whose
     // tests rebuild it from the authored setup trace.
@@ -169,7 +157,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         &vm_geometry,
         &relation_digest,
         &config::EIDOS_PREPROCESSED_COMMITMENT,
-    )?;
+    );
 
     Ok(ComputedArtifacts {
         num_inputs: circuit.num_inputs,
@@ -191,52 +179,37 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
 /// Both relations use the same fold-4 MASM implementation and remainder specializations.
 /// Blowup is excluded: it determines evaluation domains, not the coefficient counts.
-fn render_fri_parameters(
-    vm: &PcsParams,
-    pvm: &PcsParams,
-    forward_capacity: u64,
-) -> io::Result<String> {
-    if vm.log_folding_arity() != 2 || pvm.log_folding_arity() != 2 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "the MASM FRI verifier requires folding arity four",
-        ));
-    }
+fn render_fri_parameters(vm: &PcsParams, pvm: &PcsParams, forward_capacity: u64) -> String {
+    assert_eq!(vm.log_folding_arity(), 2, "the MASM FRI verifier requires folding arity four");
+    assert_eq!(pvm.log_folding_arity(), 2, "the MASM FRI verifier requires folding arity four");
     let log_final_degree = vm.log_final_degree();
-    if log_final_degree != pvm.log_final_degree() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "VM and PVM must share the MASM FRI remainder bound",
-        ));
-    }
+    assert_eq!(
+        log_final_degree,
+        pvm.log_final_degree(),
+        "VM and PVM must share the MASM FRI remainder bound"
+    );
     // Each specialization streams whole eight-felt blocks (four extension coefficients).
-    if log_final_degree < 3 || usize::from(log_final_degree) >= Felt::TWO_ADICITY {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "the FRI remainder bound must fit u32 and contain at least eight coefficients",
-        ));
-    }
+    assert!(
+        log_final_degree >= 3 && usize::from(log_final_degree) < Felt::TWO_ADICITY,
+        "the FRI remainder bound must fit u32 and contain at least eight coefficients"
+    );
     let max_coefficients = 1u64 << log_final_degree;
     // One record per domain squaring is a conservative bound for every supported fold count.
     let layer_felts = Felt::TWO_ADICITY as u64 * (2 * WORD_SIZE) as u64;
     let required_felts =
         layer_felts + max_coefficients * <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION as u64;
-    if required_felts > forward_capacity {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "FRI layers and remainder need {required_felts} felts, but the workspace has {forward_capacity}"
-            ),
-        ));
-    }
-    Ok(format!(
+    assert!(
+        required_felts <= forward_capacity,
+        "FRI layers and remainder need {required_felts} felts, but the workspace has {forward_capacity}"
+    );
+    format!(
         "#! Shared fold-4 parameters for the VM and PVM recursive verifiers.\n\
          #! Remainder lengths count quadratic-extension coefficients.\n\n\
          # Generated by make regenerate-constraints. Do not edit.\n\n\
          pub const FRI_FOLD_ARITY = 4\n\
          pub const LOG_FINAL_DEGREE = {log_final_degree}\n\
          pub const REMAINDER_MAX_COEFFICIENTS = {max_coefficients}\n"
-    ))
+    )
 }
 
 struct VmGeometry {
@@ -268,25 +241,16 @@ impl VmGeometry {
         compiled: &RelationGeometry,
         input_layout: &InputLayout,
         stream_len: usize,
-    ) -> io::Result<Self> {
-        if compiled.airs.len() != MIDEN_AIR_COUNT {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the compiled VM relation has {} AIRs, expected {MIDEN_AIR_COUNT}",
-                    compiled.airs.len()
-                ),
-            ));
-        }
-        compiled
-            .validate_masm_layout(input_layout)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-        if compiled.num_public != miden_air::vm::NUM_PUBLIC_VALUES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "VM ACE public values disagree with the statement schema",
-            ));
-        }
+        constants: &str,
+        layout: &str,
+    ) -> Self {
+        assert_eq!(compiled.airs.len(), MIDEN_AIR_COUNT);
+        compiled.validate_masm_layout(input_layout);
+        assert_eq!(
+            compiled.num_public,
+            miden_air::vm::NUM_PUBLIC_VALUES,
+            "VM ACE public values disagree with the statement schema"
+        );
         let raw_preprocessed_widths: Vec<_> =
             compiled.airs.iter().map(|air| air.preprocessed.raw_width).collect();
         let preprocessed_widths: Vec<_> =
@@ -299,26 +263,18 @@ impl VmGeometry {
         let quotient_width = compiled.quotient_width;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
 
-        let layout = read_file(VM_LAYOUT_PATH)?;
         let kernel_witness_ptr =
-            parse_masm_const::<usize>(&layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let kernel_witness_end = kernel_witness_ptr
-            .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
-            })?;
-        let constants = read_file(STARK_CONSTANTS_PATH)?;
+            parse_masm_const::<usize>(layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH).unwrap();
+        let kernel_witness_end =
+            kernel_witness_ptr + WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES;
         let state_start =
-            parse_masm_const::<usize>(&constants, "RELATION_STATE_START", STARK_CONSTANTS_PATH)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let state_felts = kernel_witness_end.checked_sub(state_start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "VM state ends before its anchor")
-        })?;
+            parse_masm_const::<usize>(constants, "RELATION_STATE_START", STARK_CONSTANTS_PATH)
+                .unwrap();
+        let state_felts = kernel_witness_end - state_start;
         let scatter =
-            vm_scatter_plan(&preprocessed_widths, &main_widths, &aux_widths, quotient_width)?;
+            OodScatterPlan::new(&preprocessed_widths, &main_widths, &aux_widths, quotient_width);
         let memory = MasmMemoryLayout::new(
-            &constants,
+            constants,
             input_layout,
             MasmMemoryExtents {
                 state_felts,
@@ -326,41 +282,24 @@ impl VmGeometry {
                 query_row_felts: row_width,
                 scatter_felts: scatter.table_felts(),
             },
-        )
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        );
 
-        let ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 0, index: 0 })?;
-        let next_ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 1, index: 0 })?;
-        let aux_bus_boundary_index =
-            require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
-        let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
-        let air_selector_offset = input_layout_extent(
-            auxiliary_ace_inputs_index,
-            require_input_index(input_layout, InputKey::IsFirstAir(0))?,
-            "per-AIR selectors",
-        )?;
-        let fold_coefficient_index =
-            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
-        let fold_coefficient_offset = input_layout_extent(
-            auxiliary_ace_inputs_index,
-            fold_coefficient_index,
-            "fold coefficients",
-        )?;
+        let index = |key| input_layout.index(key).unwrap();
+        let ood_index = index(InputKey::Preprocessed { offset: 0, index: 0 });
+        let next_ood_index = index(InputKey::Preprocessed { offset: 1, index: 0 });
+        let aux_bus_boundary_index = index(InputKey::AuxBusBoundary(0));
+        let auxiliary_ace_inputs_index = index(InputKey::Alpha);
+        let air_selector_offset =
+            (index(InputKey::IsFirstAir(0)) - auxiliary_ace_inputs_index) * EXT_DEGREE;
+        let fold_coefficient_offset =
+            (index(InputKey::MultiAirFoldCoeff(0)) - auxiliary_ace_inputs_index) * EXT_DEGREE;
+        let ood_row_felts = (next_ood_index - ood_index) * EXT_DEGREE;
+        let ood_frame_felts = (aux_bus_boundary_index - ood_index) * EXT_DEGREE;
+        let aux_bus_boundary_ptr = memory.input_ptr(aux_bus_boundary_index);
+        let auxiliary_ace_inputs_ptr = memory.input_ptr(auxiliary_ace_inputs_index);
+        let ace_circuit_stream_ptr = memory.stream_start();
 
-        let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row")?;
-        let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame")?;
-        let input_ptr = |index| {
-            memory
-                .input_ptr(index)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
-        };
-        let aux_bus_boundary_ptr = input_ptr(aux_bus_boundary_index)?;
-        let auxiliary_ace_inputs_ptr = input_ptr(auxiliary_ace_inputs_index)?;
-        let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs)?;
-
-        Ok(Self {
+        Self {
             public_inputs_ptr: memory.ace_inputs_start(),
             num_public_values: input_layout.counts.num_public,
             raw_preprocessed_widths,
@@ -380,28 +319,8 @@ impl VmGeometry {
             ace_circuit_stream_ptr,
             air_selector_offset,
             fold_coefficient_offset,
-        })
+        }
     }
-}
-
-fn require_input_index(input_layout: &InputLayout, key: InputKey) -> io::Result<usize> {
-    input_layout.index(key).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("VM ACE input layout is missing {key:?}"),
-        )
-    })
-}
-
-fn input_layout_extent(start: usize, end: usize, label: &str) -> io::Result<usize> {
-    end.checked_sub(start)
-        .and_then(|slots| slots.checked_mul(EXT_DEGREE))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("VM ACE {label} extent is reversed or overflows"),
-            )
-        })
 }
 
 /// Renders VM protocol constants, geometry, and the message-width-specific LogUp power.
@@ -409,16 +328,13 @@ fn render_vm_parameters(
     geometry: &VmGeometry,
     relation_digest: &[Felt; 4],
     preprocessed_commitment: &[u64; 4],
-) -> io::Result<String> {
+) -> String {
     let mut output = String::from(
         "# Generated by `make regenerate-constraints`. Do not edit.\n\n\
          use miden::core::stark::types\n\n\
          # Protocol commitments under the native Eidos configuration.\n",
     );
-    let max_message_width =
-        u32::try_from(miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "LogUp message width exceeds u32")
-        })?;
+    let max_message_width = miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH as u32;
     for (prefix, word) in [
         ("RELATION_DIGEST", relation_digest.map(|felt| felt.as_canonical_u64())),
         ("AND8_PREPROCESSED_TRACE_COM", *preprocessed_commitment),
@@ -455,12 +371,7 @@ fn render_vm_parameters(
     let and8_log_height =
         miden_air_definitions::vm::and8_lookup::columns::LOG_AND8_LOOKUP_TRACE_HEIGHT;
     let tree_depth = u32::from(and8_log_height) + u32::from(config::pcs_params().log_blowup());
-    let index_mask = 1u64
-        .checked_shl(tree_depth)
-        .and_then(|size| u32::try_from(size - 1).ok())
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "AND8 LDE depth exceeds u32 indices")
-        })?;
+    let index_mask = u32::try_from((1u64 << tree_depth) - 1).unwrap();
     writeln!(
         output,
         "\n# Fixed And8 setup height and its PCS-expanded tree depth and index mask."
@@ -505,20 +416,11 @@ fn render_vm_parameters(
         ("AUX", geometry.aux_width),
         ("QUOTIENT", geometry.quotient_width),
     ] {
-        if width == 0 || !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "VM {group} query width {width} must be a positive multiple of {EIDOS_BLOCK_WIDTH}"
-                ),
-            ));
-        }
-        let encoded_len = u32::try_from(width).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("VM {group} LMCS encoded length exceeds u32"),
-            )
-        })?;
+        assert!(
+            width > 0 && width.is_multiple_of(EIDOS_BLOCK_WIDTH),
+            "VM {group} query width {width} must be a positive multiple of {EIDOS_BLOCK_WIDTH}"
+        );
+        let encoded_len = u32::try_from(width).unwrap();
         let cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
         writeln!(output, "pub const {group}_ROW_DOUBLE_WORDS = {}", width / EIDOS_BLOCK_WIDTH)
             .unwrap();
@@ -554,37 +456,11 @@ fn render_vm_parameters(
     )
     .unwrap();
     let shared_stark_slots = geometry.air_selector_offset / EXT_DEGREE;
-    let selector_slots = geometry
-        .fold_coefficient_offset
-        .checked_sub(geometry.air_selector_offset)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "VM ACE fold coefficients precede per-AIR selectors",
-            )
-        })?
-        / EXT_DEGREE;
-    let auxiliary_felts = geometry
-        .ace_circuit_stream_ptr
-        .checked_sub(geometry.auxiliary_ace_inputs_ptr)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "VM ACE circuit stream precedes auxiliary inputs",
-            )
-        })?;
+    let selector_slots =
+        (geometry.fold_coefficient_offset - geometry.air_selector_offset) / EXT_DEGREE;
+    let auxiliary_felts = geometry.ace_circuit_stream_ptr - geometry.auxiliary_ace_inputs_ptr;
     let auxiliary_slots = auxiliary_felts / EXT_DEGREE;
-    let padding_slots = auxiliary_slots
-        .checked_sub(shared_stark_slots)
-        .and_then(|slots| slots.checked_sub(selector_slots))
-        .and_then(|slots| slots.checked_sub(MIDEN_AIR_COUNT))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "VM ACE auxiliary allocation cannot fit STARK variables, selectors, and \
-                 fold coefficients",
-            )
-        })?;
+    let padding_slots = auxiliary_slots - shared_stark_slots - selector_slots - MIDEN_AIR_COUNT;
     writeln!(
         output,
         "# Auxiliary ACE inputs, in memory order (one slot = {EXT_DEGREE} base felts):\n\
@@ -599,9 +475,7 @@ fn render_vm_parameters(
         ("AUXILIARY_ACE_INPUTS_PTR", geometry.auxiliary_ace_inputs_ptr),
         ("ACE_CIRCUIT_STREAM_PTR", geometry.ace_circuit_stream_ptr),
     ] {
-        u32::try_from(value).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("VM {name} exceeds u32 memory"))
-        })?;
+        assert!(u32::try_from(value).is_ok(), "VM {name} exceeds u32 memory");
         writeln!(output, "pub const {name} = {value}").unwrap();
     }
     output.push_str("\n# Words of the normalized boundary array, two extension values per word.\n");
@@ -627,32 +501,21 @@ fn render_vm_parameters(
         writeln!(output, "    {instruction}").unwrap();
     }
     output.push_str("end\n");
-    Ok(output)
+    output
 }
 
-fn vm_scatter_plan(
-    preprocessed_widths: &[usize],
-    main_widths: &[usize],
-    aux_widths: &[usize],
-    quotient_width: usize,
-) -> io::Result<OodScatterPlan> {
-    OodScatterPlan::new(preprocessed_widths, main_widths, aux_widths, quotient_width)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
-}
-
-fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
-    let plan = vm_scatter_plan(
+fn render_vm_ood_frames(geometry: &VmGeometry) -> String {
+    let plan = OodScatterPlan::new(
         &geometry.preprocessed_widths,
         &geometry.main_widths,
         &geometry.aux_widths,
         geometry.quotient_width,
-    )?;
-    let proof_order_maps = render_proof_order_maps(MIDEN_AIR_COUNT)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    );
+    let proof_order_maps = render_proof_order_maps(MIDEN_AIR_COUNT);
 
     let procedures = plan.render(&proof_order_maps);
 
-    Ok(format!(
+    format!(
         r#"# GENERATED by `cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write` — do not edit by hand.
 use {{
     LOG_AIR_TRACE_LENGTHS_PTR,
@@ -683,7 +546,7 @@ use miden::core::stark::types
         quotient = geometry.quotient_width,
         ood_felts = geometry.ood_row_felts,
         pipe_blocks = geometry.ood_pipe_blocks,
-    ))
+    )
 }
 
 fn format_sum(parts: &[usize]) -> String {
@@ -716,7 +579,7 @@ fn render_constraints_eval_file(
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     geometry: &VmGeometry,
     max_cycle_len_log: u32,
-) -> io::Result<String> {
+) -> String {
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
@@ -733,17 +596,6 @@ fn render_constraints_eval_file(
         quotient_inputs,
         circuit_digest: circuit.commitment,
     })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
-}
-
-fn max_periodic_cycle_len_log(geometry: &RelationGeometry) -> io::Result<u32> {
-    if !geometry.shared_period.is_power_of_two() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "maximum AIR periodic cycle length must be a power of two",
-        ));
-    }
-    Ok(geometry.shared_period.ilog2())
 }
 
 /// Verify that the ACE circuit constants in `constraints_eval.masm` match the current AIR.
@@ -1045,7 +897,7 @@ struct ComputedArtifacts {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec};
+    use alloc::vec;
 
     use super::*;
 
@@ -1054,28 +906,32 @@ mod tests {
         let params =
             |blowup, fold, degree| PcsParams::new(blowup, fold, degree, 4, 12, 27, 17).unwrap();
         let vm = params(3, 2, 7);
-        let expected = render_fri_parameters(&vm, &vm, 512).unwrap();
+        let expected = render_fri_parameters(&vm, &vm, 512);
         for log_blowup in [4, 5] {
             let same_fri = params(log_blowup, 2, 7);
             assert_eq!(
-                render_fri_parameters(&vm, &same_fri, 512).unwrap(),
+                render_fri_parameters(&vm, &same_fri, 512),
                 expected,
                 "blowup must not affect FRI coefficient parameters"
             );
         }
-        assert!(render_fri_parameters(&vm, &vm, 511).is_err());
+        assert!(std::panic::catch_unwind(|| render_fri_parameters(&vm, &vm, 511)).is_err());
         for unsupported_fold in [1, 3] {
             let other = params(3, unsupported_fold, 7);
-            assert!(render_fri_parameters(&vm, &other, 512).is_err());
-            assert!(render_fri_parameters(&other, &vm, 512).is_err());
+            assert!(std::panic::catch_unwind(|| render_fri_parameters(&vm, &other, 512)).is_err());
+            assert!(std::panic::catch_unwind(|| render_fri_parameters(&other, &vm, 512)).is_err());
         }
         let smaller = params(3, 2, 6);
-        assert!(render_fri_parameters(&vm, &smaller, 512).is_err());
-        assert!(render_fri_parameters(&smaller, &smaller, 384).is_ok());
-        assert!(render_fri_parameters(&smaller, &smaller, 383).is_err());
+        assert!(std::panic::catch_unwind(|| render_fri_parameters(&vm, &smaller, 512)).is_err());
+        render_fri_parameters(&smaller, &smaller, 384);
+        assert!(
+            std::panic::catch_unwind(|| render_fri_parameters(&smaller, &smaller, 383)).is_err()
+        );
         for unsupported_degree in [2, 8, 32] {
             let other = params(3, 2, unsupported_degree);
-            assert!(render_fri_parameters(&other, &other, 512).is_err());
+            assert!(
+                std::panic::catch_unwind(|| render_fri_parameters(&other, &other, 512)).is_err()
+            );
         }
     }
 
@@ -1085,18 +941,13 @@ mod tests {
     #[test]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
         // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
-        assert!(vm_scatter_plan(&[0, 0, 0, 16], &[8; 4], &[8; 4], 8).is_ok());
-        // Every AIR occupies the group.
-        assert!(vm_scatter_plan(&[16; 4], &[8; 4], &[8; 4], 8).is_ok());
-        // Two of four: the proof-order position no longer indexes the group's slots.
-        let Err(partial) = vm_scatter_plan(&[16, 0, 0, 16], &[8; 4], &[8; 4], 8) else {
-            panic!("a partially occupied group must be refused");
-        };
+        OodScatterPlan::new(&[0, 0, 0, 16], &[8; 4], &[8; 4], 8);
+        OodScatterPlan::new(&[16; 4], &[8; 4], &[8; 4], 8);
         assert!(
-            partial
-                .to_string()
-                .contains("preprocessed commitment group is occupied by 2 of 4"),
-            "unexpected refusal: {partial}"
+            std::panic::catch_unwind(|| {
+                OodScatterPlan::new(&[16, 0, 0, 16], &[8; 4], &[8; 4], 8)
+            })
+            .is_err()
         );
     }
 
@@ -1139,33 +990,12 @@ mod tests {
         let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
         for invalid_width in [0, EIDOS_BLOCK_WIDTH - 1] {
             geometry.main_width = invalid_width;
-            let error = render_vm_parameters(&geometry, &[Felt::ZERO; 4], &[0; 4]).unwrap_err();
-            assert!(error.to_string().contains("MAIN query width"), "{error}");
+            assert!(
+                std::panic::catch_unwind(|| {
+                    render_vm_parameters(&geometry, &[Felt::ZERO; 4], &[0; 4])
+                })
+                .is_err()
+            );
         }
-    }
-
-    #[test]
-    fn auxiliary_input_layout_rejects_reversed_or_truncated_regions() {
-        let assert_rejected = |geometry: &VmGeometry, expected: &str| {
-            let error = render_vm_parameters(geometry, &[Felt::ZERO; 4], &[0; 4]).unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-            assert_eq!(error.to_string(), expected);
-        };
-
-        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
-        geometry.air_selector_offset = geometry.fold_coefficient_offset + EXT_DEGREE;
-        assert_rejected(&geometry, "VM ACE fold coefficients precede per-AIR selectors");
-
-        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
-        geometry.auxiliary_ace_inputs_ptr = geometry.ace_circuit_stream_ptr + EXT_DEGREE;
-        assert_rejected(&geometry, "VM ACE circuit stream precedes auxiliary inputs");
-
-        let mut geometry = scatter_test_geometry(&[0, 0, 0, 8]);
-        geometry.ace_circuit_stream_ptr = geometry.fold_coefficient_offset;
-        assert_rejected(
-            &geometry,
-            "VM ACE auxiliary allocation cannot fit STARK variables, selectors, and \
-             fold coefficients",
-        );
     }
 }

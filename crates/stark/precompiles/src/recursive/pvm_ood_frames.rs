@@ -9,7 +9,6 @@
 //! The generator derives all three from the same compiled geometry.
 
 use alloc::{
-    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -49,23 +48,15 @@ pub(crate) struct PvmOodGeometry {
 impl PvmOodGeometry {
     /// Derives the row geometry from the compiled relation's chiplet widths and cross-checks it
     /// against the circuit's own input layout.
-    pub(crate) fn from_compiled(
-        compiled: &RelationGeometry,
-        layout: &InputLayout,
-    ) -> Result<Self, String> {
-        compiled.validate_masm_layout(layout).map_err(|err| err.to_string())?;
-        if compiled.airs.len() != NUM_CHIPLETS {
-            return Err(format!(
-                "compiled PVM relation has {} AIRs, expected {NUM_CHIPLETS}",
-                compiled.airs.len()
-            ));
-        }
-        Ok(Self {
+    pub(crate) fn from_compiled(compiled: &RelationGeometry, layout: &InputLayout) -> Self {
+        compiled.validate_masm_layout(layout);
+        assert_eq!(compiled.airs.len(), NUM_CHIPLETS);
+        Self {
             preprocessed: compiled.airs.iter().map(|air| air.preprocessed.width).collect(),
             main: compiled.airs.iter().map(|air| air.main.width).collect(),
             aux: compiled.airs.iter().map(|air| air.aux.width).collect(),
             quotient: compiled.quotient_width,
-        })
+        }
     }
 
     /// Base-field felts in the scratch row used for one authenticated query opening.
@@ -109,9 +100,8 @@ impl PvmOodGeometry {
 // SCATTER PLAN
 // ================================================================================================
 
-pub(crate) fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<OodScatterPlan, String> {
+pub(crate) fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> OodScatterPlan {
     OodScatterPlan::new(&geometry.preprocessed, &geometry.main, &geometry.aux, geometry.quotient)
-        .map_err(|err| err.to_string())
 }
 
 // RENDERING
@@ -122,11 +112,11 @@ fn format_sum(parts: &[usize]) -> String {
 }
 
 /// Renders `asm/sys/pvm/ood_frames.masm` from the chiplet widths.
-pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> Result<String, String> {
-    let plan = pvm_scatter_plan(geometry)?;
+pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> String {
+    let plan = pvm_scatter_plan(geometry);
     let row_felts = geometry.row_felts();
     let row_blocks = geometry.row_blocks();
-    let proof_order_maps = render_proof_order_maps(NUM_CHIPLETS).map_err(|err| err.to_string())?;
+    let proof_order_maps = render_proof_order_maps(NUM_CHIPLETS);
 
     let procedures = plan.render(&proof_order_maps);
 
@@ -163,7 +153,7 @@ use miden::core::stark::types
         dispatched = plan.dispatched_slots(),
     )
     .expect("writing to String cannot fail");
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -181,11 +171,10 @@ mod tests {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/ood_frames.masm");
 
     pub(crate) fn live_geometry() -> PvmOodGeometry {
-        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
-        let compiled = captured.compile().expect("compiled PVM relation");
-        let canonical = compiled.build_circuit(LayoutKind::Masm).expect("PVM canonical circuit");
+        let captured = CapturedPvmRelation::new();
+        let compiled = captured.compile();
+        let canonical = compiled.build_circuit(LayoutKind::Masm);
         PvmOodGeometry::from_compiled(compiled.geometry(), canonical.layout())
-            .expect("PVM out-of-domain geometry")
     }
 
     /// Pins the per-chiplet row geometry and dispatch plan derived from the canonical circuit
@@ -200,7 +189,7 @@ mod tests {
         assert_eq!(geometry.row_felts(), 1_520);
         assert_eq!(geometry.row_blocks(), 190);
 
-        let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
+        let plan = pvm_scatter_plan(&geometry);
         assert_eq!(plan.segment_count(), 26, "one segment per occupied per-chiplet block");
         assert_eq!(plan.dispatched_slots(), 24, "main and aux are the order-dependent groups");
         assert_eq!(plan.proof_order_pairs(), 4..52);
@@ -210,7 +199,7 @@ mod tests {
     /// The checked-in hook must be exactly what the current chiplet widths render.
     #[test]
     fn generated_pvm_ood_hook_is_up_to_date() {
-        let rendered = render_pvm_ood_frames(&live_geometry()).expect("render the PVM hook");
+        let rendered = render_pvm_ood_frames(&live_geometry());
         let checked_in = std::fs::read_to_string(HOOK_PATH)
             .unwrap_or_else(|err| panic!("failed to read {HOOK_PATH}: {err}"));
         assert_eq!(
@@ -234,34 +223,29 @@ mod tests {
         };
 
         // The PVM preprocessed commitment group is occupied only by `ChipletAir::BytePairLut`.
-        assert!(pvm_scatter_plan(&live_geometry()).is_ok());
+        pvm_scatter_plan(&live_geometry());
         let mut sole = vec![0usize; NUM_CHIPLETS];
         sole[3] = 16;
-        assert!(pvm_scatter_plan(&with_preprocessed(sole)).is_ok());
+        pvm_scatter_plan(&with_preprocessed(sole));
         // Every chiplet occupies the group.
-        assert!(pvm_scatter_plan(&with_preprocessed(vec![16; NUM_CHIPLETS])).is_ok());
+        pvm_scatter_plan(&with_preprocessed(vec![16; NUM_CHIPLETS]));
 
         let mut partial = vec![0usize; NUM_CHIPLETS];
         partial[0] = 16;
         partial[3] = 16;
-        let Err(error) = pvm_scatter_plan(&with_preprocessed(partial)) else {
-            panic!("a partially occupied group must be refused");
-        };
         assert!(
-            error.contains("preprocessed commitment group is occupied by 2 of 12"),
-            "unexpected refusal: {error}"
+            std::panic::catch_unwind(|| pvm_scatter_plan(&with_preprocessed(partial))).is_err()
         );
     }
 
     /// The row the hook pipes is the row the circuit reads; a drifted width must fail closed.
     #[test]
     fn geometry_derivation_cross_checks_the_input_layout() {
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
-        let captured = CapturedPvmRelation::new().expect("captured PVM relation");
-        let compiled = captured.compile().expect("compiled PVM relation");
-        let geometry =
-            PvmOodGeometry::from_compiled(compiled.geometry(), layout).expect("geometry");
+        let captured = CapturedPvmRelation::new();
+        let compiled = captured.compile();
+        let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), layout);
         assert_eq!(
             geometry.row_felts() / 2,
             layout.counts.preprocessed_width
@@ -297,13 +281,28 @@ mod tests {
         ] {
             let mut stale = layout.clone();
             stale.counts = counts;
-            assert!(PvmOodGeometry::from_compiled(compiled.geometry(), &stale).is_err());
+            assert!(
+                std::panic::catch_unwind(|| PvmOodGeometry::from_compiled(
+                    compiled.geometry(),
+                    &stale
+                ))
+                .is_err()
+            );
         }
         let mut truncated = layout.clone();
         truncated.total_inputs = 0;
-        assert!(PvmOodGeometry::from_compiled(compiled.geometry(), &truncated).is_err());
+        assert!(
+            std::panic::catch_unwind(|| PvmOodGeometry::from_compiled(
+                compiled.geometry(),
+                &truncated
+            ))
+            .is_err()
+        );
         let mut unsupported = compiled.geometry().clone();
         unsupported.airs[0].num_aux_boundary = 2;
-        assert!(PvmOodGeometry::from_compiled(&unsupported, layout).is_err());
+        assert!(
+            std::panic::catch_unwind(|| PvmOodGeometry::from_compiled(&unsupported, layout))
+                .is_err()
+        );
     }
 }

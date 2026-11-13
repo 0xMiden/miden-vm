@@ -187,7 +187,7 @@ impl<EF> PeriodicColumnData<EF> {
             // costs `3 * log_len` ops per nonzero evaluation to build its doubling product,
             // plus one combining op per term less one shared across the column. Keep
             // whichever form yields the smaller circuit.
-            let dense_ops = 2 * period.saturating_sub(1);
+            let dense_ops = 2 * (period - 1);
             let sparse_ops = terms.len() * (3 * log_len) + terms.len().saturating_sub(1);
             let standalone_felts = if terms.is_empty() || sparse_ops < dense_ops {
                 sparse_ops + CONSTANT_FELTS * (terms.len() + log_len)

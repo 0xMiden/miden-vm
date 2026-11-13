@@ -90,15 +90,15 @@ mod tests {
     fn slots_cover_live_boundaries_in_graph_order() {
         let mut b = GraphBuilder::new();
         let beta = b.leaf(Leaf::Challenge(1));
-        let (square, _) = b.op(Class::Ext, OpKind::Mul, beta, Some(beta));
-        let (cube, _) = b.op(Class::Ext, OpKind::Mul, square, Some(beta));
-        let (unused, _) = b.op(Class::Ext, OpKind::Mul, cube, Some(beta));
-        let (neg, _) = b.op(Class::Ext, OpKind::Neg, beta, None);
+        let square = b.op(Class::Ext, OpKind::Mul, beta, Some(beta));
+        let cube = b.op(Class::Ext, OpKind::Mul, square, Some(beta));
+        let unused = b.op(Class::Ext, OpKind::Mul, cube, Some(beta));
+        let neg = b.op(Class::Ext, OpKind::Neg, beta, None);
         let main = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let aux = b.leaf(Leaf::Aux { offset: 0, index: 0 });
-        let (first, _) = b.op(Class::Ext, OpKind::Mul, cube, Some(main));
-        let (second, _) = b.op(Class::Ext, OpKind::Mul, cube, Some(aux));
-        let (third, _) = b.op(Class::Ext, OpKind::Mul, neg, Some(aux));
+        let first = b.op(Class::Ext, OpKind::Mul, cube, Some(main));
+        let second = b.op(Class::Ext, OpKind::Mul, cube, Some(aux));
+        let third = b.op(Class::Ext, OpKind::Mul, neg, Some(aux));
         let graph = b.freeze();
         let plan = PreparationPlan::new(&graph, &constraints(vec![], vec![third, second, first]));
 
@@ -114,13 +114,13 @@ mod tests {
     fn challenge_only_assertions_cache_extension_operations() {
         let mut b = GraphBuilder::new();
         let constant = b.leaf(Leaf::BaseConst(3));
-        let (base, _) = b.op(Class::Base, OpKind::Neg, constant, None);
+        let base = b.op(Class::Base, OpKind::Neg, constant, None);
         let lifted = b.leaf(Leaf::ExtBase(base));
         let ext_constant = b.leaf(Leaf::ExtConst([7, 0]));
-        let (ext_neg, _) = b.op(Class::Ext, OpKind::Neg, ext_constant, None);
+        let ext_neg = b.op(Class::Ext, OpKind::Neg, ext_constant, None);
         let beta = b.leaf(Leaf::Challenge(0));
-        let (square, _) = b.op(Class::Ext, OpKind::Mul, beta, Some(beta));
-        let (cube, _) = b.op(Class::Ext, OpKind::Mul, square, Some(beta));
+        let square = b.op(Class::Ext, OpKind::Mul, beta, Some(beta));
+        let cube = b.op(Class::Ext, OpKind::Mul, square, Some(beta));
         let graph = b.freeze();
         let plan = PreparationPlan::new(
             &graph,

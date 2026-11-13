@@ -179,7 +179,7 @@ where
     }
 
     fn const_value(&self, id: NodeId) -> Option<EF> {
-        match self.nodes.get(id.index())? {
+        match &self.nodes[id.index()] {
             NodeKind::Constant(v) => Some(*v),
             _ => None,
         }
@@ -194,7 +194,7 @@ where
     }
 
     fn negated(&self, id: NodeId) -> Option<NodeId> {
-        match self.nodes.get(id.index())? {
+        match &self.nodes[id.index()] {
             NodeKind::Neg(inner) => Some(*inner),
             _ => None,
         }

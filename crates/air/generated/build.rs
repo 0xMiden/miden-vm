@@ -18,11 +18,7 @@ fn main() {
         fs::write(&path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
     };
-    let captured: Vec<_> = AIRS
-        .iter()
-        .copied()
-        .map(|air| (air, CapturedAir::new(&air).expect("capture VM AIR")))
-        .collect();
+    let captured: Vec<_> = AIRS.iter().copied().map(|air| (air, CapturedAir::new(&air))).collect();
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
     let evals: Vec<_> = captured
@@ -50,20 +46,14 @@ fn main() {
         ),
     );
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
-    let relation = CompiledRelation::from_captured(&airs, miden_crypto::hash::eidos::BLOCK_LEN)
-        .expect("compile VM relation");
+    let relation = CompiledRelation::from_captured(&airs, miden_crypto::hash::eidos::BLOCK_LEN);
     write(
         "air_shape.rs",
         format!("{:?}", miden_air_definitions::compiler::vm::air_shape(&relation)),
     );
     write("raw_widths.rs", format!("{:?}", relation.geometry().raw_widths()));
-    let circuit: miden_air_definitions::vm::ace::RecursiveAceCircuit = relation
-        .build_circuit(LayoutKind::Masm)
-        .expect("canonical VM ACE circuit")
-        .to_ace()
-        .expect("encode VM ACE")
-        .try_into()
-        .expect("VM recursive circuit");
+    let circuit: miden_air_definitions::vm::ace::RecursiveAceCircuit =
+        relation.build_circuit(LayoutKind::Masm).to_ace().into();
     write(
         "ace_circuit_shape.rs",
         format!("{:?}", (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len)),

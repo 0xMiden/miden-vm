@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn embedded_circuit_matches_the_authored_relation() {
-        let independent = build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let independent = build_pvm_recursive_verifier_ace_circuit();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
     }
 

@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use super::{InputKey, SELECTORS_PER_AIR};
+use super::SELECTORS_PER_AIR;
 #[cfg(any(test, feature = "compiler"))]
 use crate::EXT_DEGREE;
 
@@ -19,7 +19,7 @@ impl InputRegion {
 }
 
 /// Counts needed to build the ACE input layout.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InputCounts {
     /// Width of the preprocessed trace.
     pub preprocessed_width: usize,
@@ -105,7 +105,7 @@ pub(crate) struct MultiAirIndices {
 }
 
 /// ACE input layout for circuit evaluation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputLayout {
     /// Grouped regions for the ACE input layout.
     pub(crate) regions: LayoutRegions,
@@ -122,20 +122,11 @@ pub struct InputLayout {
 }
 
 impl InputLayout {
-    pub(crate) fn mapper(&self) -> super::InputKeyMapper<'_> {
-        super::InputKeyMapper { layout: self }
-    }
-
     /// Number of quotient coordinate READ slots, including committed row padding.
     ///
     /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
     pub fn quotient_width(&self) -> usize {
         self.regions.quotient_curr.width
-    }
-
-    /// Map a logical `InputKey` into the flat input index, if present.
-    pub fn index(&self, key: InputKey) -> Option<usize> {
-        self.mapper().index_of(key)
     }
 
     /// Validate internal layout invariants.
@@ -156,7 +147,7 @@ impl InputLayout {
             self.regions.aux_bus_boundary,
             self.regions.stark_vars,
         ] {
-            max_end = max_end.max(region.offset.saturating_add(region.width));
+            max_end = max_end.max(region.offset + region.width);
         }
 
         assert!(max_end <= self.total_inputs, "regions exceed total_inputs");

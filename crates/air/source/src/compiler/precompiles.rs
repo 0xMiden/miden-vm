@@ -2,10 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_ace::{
-    AceError,
-    compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
-};
+use miden_ace::compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind};
 use miden_core::field::QuadFelt;
 use miden_stark::security::AirShape;
 
@@ -19,34 +16,39 @@ pub struct CapturedPvmRelation {
     airs: Vec<CapturedAir>,
 }
 
+impl Default for CapturedPvmRelation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CapturedPvmRelation {
     pub fn airs(&self) -> &[CapturedAir] {
         &self.airs
     }
 
-    pub fn new() -> Result<Self, AceError> {
-        Ok(Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect::<Result<_, _>>()?,
-        })
+    pub fn new() -> Self {
+        Self {
+            airs: AIRS.iter().map(CapturedAir::new).collect(),
+        }
     }
 
-    pub fn compile(&self) -> Result<CompiledRelation<'_>, AceError> {
+    pub fn compile(&self) -> CompiledRelation<'_> {
         let airs: Vec<_> = self.airs.iter().collect();
         CompiledRelation::from_captured(&airs, crate::precompiles::ace::LMCS_ALIGNMENT)
     }
 }
 
 /// Builds the canonical precompile chiplet ACE circuit.
-pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    CapturedPvmRelation::new()?.compile()?.build_circuit(LayoutKind::Masm)
+pub fn build_canonical_precompile_ace_circuit() -> AceCircuit<QuadFelt> {
+    CapturedPvmRelation::new().compile().build_circuit(LayoutKind::Masm)
 }
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
 /// Callers needing the circuit for multiple proofs should cache the encoded result.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    encoded.try_into()
+pub fn build_pvm_recursive_verifier_ace_circuit() -> PvmRecursiveAceCircuit {
+    build_canonical_precompile_ace_circuit().to_ace().into()
 }
 
 /// Security shape from the same captured relation used for evaluators and ACE generation.

@@ -10,7 +10,7 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::LiftedAir;
 
 use crate::{
-    AceError, EXT_DEGREE,
+    EXT_DEGREE,
     compiler::{
         CapturedAir, CompiledRelation,
         circuit::{AceCircuit, emit_circuit},
@@ -58,28 +58,22 @@ pub struct AceArtifacts<EF> {
 /// The constraints are captured from `air.eval`: callers producing production
 /// artifacts must pass an AIR whose `eval` routes to the hand-written
 /// definitions (e.g. `miden_air_definitions::vm::MidenAir`).
-pub fn build_ace_circuit_for_air<A>(
-    air: &A,
-    config: AceConfig,
-) -> Result<AceCircuit<QuadFelt>, AceError>
+pub fn build_ace_circuit_for_air<A>(air: &A, config: AceConfig) -> AceCircuit<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let artifacts = build_ace_dag_for_air(air, config)?;
+    let artifacts = build_ace_dag_for_air(air, config);
     emit_circuit(&artifacts.dag, artifacts.layout)
 }
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
 ///
 /// See [`build_ace_circuit_for_air`] for the capture invariant on `air`.
-pub fn build_ace_dag_for_air<A>(
-    air: &A,
-    config: AceConfig,
-) -> Result<AceArtifacts<QuadFelt>, AceError>
+pub fn build_ace_dag_for_air<A>(air: &A, config: AceConfig) -> AceArtifacts<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let air = CapturedAir::new(air)?;
+    let air = CapturedAir::new(air);
     let shared_period = air.max_periodic_length.max(1);
     build_ace_dag_from_capture(&air, config, shared_period)
 }
@@ -88,12 +82,8 @@ fn build_ace_dag_from_capture(
     air: &CapturedAir,
     config: AceConfig,
     shared_period: usize,
-) -> Result<AceArtifacts<QuadFelt>, AceError> {
-    if config.num_quotient_chunks == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "num_quotient_chunks must be > 0".into(),
-        });
-    }
+) -> AceArtifacts<QuadFelt> {
+    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
     let counts = InputCounts {
         num_quotient_chunks: config.num_quotient_chunks,
         ..air.counts
@@ -112,7 +102,7 @@ fn build_ace_dag_from_capture(
         periodic_data.as_ref(),
         shared_period,
     );
-    Ok(AceArtifacts { layout, dag })
+    AceArtifacts { layout, dag }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -189,42 +179,25 @@ pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,
     trace_width_alignment: usize,
-) -> Result<AceCircuit<QuadFelt>, AceError>
+) -> AceCircuit<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let captured = airs.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>()?;
+    let captured = airs.iter().map(CapturedAir::new).collect::<Vec<_>>();
     let captured = captured.iter().collect::<Vec<_>>();
     let relation = CompiledRelation::with_quotient_chunks(
         &captured,
         trace_width_alignment,
         Some(config.num_quotient_chunks),
-    )?;
+    );
     build_circuit_for_relation(&relation, config)
 }
 
 pub(crate) fn build_circuit_for_relation(
     relation: &CompiledRelation<'_>,
     config: AceConfig,
-) -> Result<AceCircuit<QuadFelt>, AceError> {
+) -> AceCircuit<QuadFelt> {
     let num_airs = relation.airs.len();
-    let artifacts = relation
-        .airs
-        .iter()
-        .map(|air| build_ace_dag_from_capture(air, config, relation.geometry.shared_period))
-        .collect::<Result<Vec<_>, _>>()?;
-    let offsets: Vec<_> = relation
-        .geometry
-        .airs
-        .iter()
-        .map(|air| TraceOffsets {
-            public: air.public_offset,
-            preprocessed: air.preprocessed.offset,
-            main: air.main.offset,
-            aux: air.aux.offset / EXT_DEGREE,
-            boundary: air.aux_boundary_offset,
-        })
-        .collect();
     let layout = InputLayout::for_relation(
         relation.geometry.input_counts(),
         num_airs,
@@ -237,26 +210,32 @@ pub(crate) fn build_circuit_for_relation(
     // by the fold coefficient it reads from its own slot.
     let mut builder = DagBuilder::<QuadFelt>::new();
     let mut roots = Vec::with_capacity(num_airs);
-    for (air_index, artifacts) in artifacts.iter().enumerate() {
-        roots.push(reemit_air_root(&mut builder, &artifacts.dag, air_index, offsets[air_index]));
+    for (air_index, (air, geometry)) in
+        relation.airs.iter().zip(&relation.geometry.airs).enumerate()
+    {
+        let artifacts = build_ace_dag_from_capture(air, config, relation.geometry.shared_period);
+        let offsets = TraceOffsets {
+            public: geometry.public_offset,
+            preprocessed: geometry.preprocessed.offset,
+            main: geometry.main.offset,
+            aux: geometry.aux.offset / EXT_DEGREE,
+            boundary: geometry.aux_boundary_offset,
+        };
+        roots.push(reemit_air_root(&mut builder, &artifacts.dag, air_index, offsets));
     }
     let quotient_binding = roots[0].1;
-    if roots.iter().any(|&(_, binding)| binding != quotient_binding) {
-        return Err(AceError::InvalidInputLayout {
-            message: "all AIR quotient bindings must use the same q*v node".into(),
-        });
-    }
+    assert!(
+        roots.iter().all(|&(_, binding)| binding == quotient_binding),
+        "all AIR quotient bindings must use the same q*v node"
+    );
 
-    let mut accumulator = None;
-    for (air_index, &(acc, _)) in roots.iter().enumerate() {
+    let coeff = builder.input(InputKey::MultiAirFoldCoeff(0));
+    let mut accumulator = builder.mul(roots[0].0, coeff);
+    for (air_index, &(acc, _)) in roots.iter().enumerate().skip(1) {
         let coeff = builder.input(InputKey::MultiAirFoldCoeff(air_index));
         let scaled = builder.mul(acc, coeff);
-        accumulator = Some(match accumulator {
-            None => scaled,
-            Some(previous) => builder.add(previous, scaled),
-        });
+        accumulator = builder.add(accumulator, scaled);
     }
-    let accumulator = accumulator.expect("multi-AIR composition is nonempty");
 
     // The encoded ACE circuit treats the final operation as its root.
     let root = builder.sub(accumulator, quotient_binding);

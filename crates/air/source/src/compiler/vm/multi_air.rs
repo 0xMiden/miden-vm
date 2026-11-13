@@ -1,7 +1,4 @@
-use miden_ace::{
-    AceError,
-    compiler::{AceCircuit, AceConfig},
-};
+use miden_ace::compiler::{AceCircuit, AceConfig};
 use miden_core::field::QuadFelt;
 
 use crate::vm::AIRS;
@@ -14,9 +11,7 @@ const LMCS_ALIGNMENT: usize = 8;
 ///
 /// Cross-AIR LogUp closure is checked outside this circuit; see
 /// [`crate::vm::statement::eval_external`].
-pub fn build_canonical_multi_air_ace_circuit(
-    config: AceConfig,
-) -> Result<AceCircuit<QuadFelt>, AceError> {
+pub fn build_canonical_multi_air_ace_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     miden_ace::compiler::build_canonical_multi_air_ace_circuit(&AIRS, config, LMCS_ALIGNMENT)
 }
 
@@ -33,7 +28,7 @@ mod tests {
             num_quotient_chunks: 8,
             layout: LayoutKind::Masm,
         };
-        let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical circuit");
+        let circuit = build_canonical_multi_air_ace_circuit(config);
         let layout = circuit.layout();
 
         for air_index in 0..MIDEN_AIR_COUNT {
@@ -46,7 +41,7 @@ mod tests {
 
         // The extra fold-coefficient slots must not break the READ-section alignment the
         // recursive verifier's `adv_pipe` ingestion relies on.
-        let encoded = circuit.to_ace().expect("canonical circuit must be MASM encodable");
+        let encoded = circuit.to_ace();
         assert!(
             encoded.size_in_felt().is_multiple_of(8),
             "encoded canonical circuit must be 8-felt aligned for adv_pipe"

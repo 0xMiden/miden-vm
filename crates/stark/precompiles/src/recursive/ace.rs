@@ -161,11 +161,8 @@ mod tests {
     /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
     fn pvm_recursive_circuit_matches_the_canonical_builder() {
-        let encoded = build_canonical_precompile_ace_circuit()
-            .expect("canonical circuit")
-            .to_ace()
-            .expect("canonical circuit must be MASM encodable");
-        let produced = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let encoded = build_canonical_precompile_ace_circuit().to_ace();
+        let produced = build_pvm_recursive_verifier_ace_circuit();
 
         assert_eq!(produced.num_inputs, encoded.num_vars());
         assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
@@ -185,7 +182,7 @@ mod tests {
     #[test]
     fn canonical_circuit_matches_direct_evaluation_for_structured_orders() {
         let airs = ChipletAir::all();
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let canonical_layout = canonical.layout();
 
         // Nonzero quotient openings exercise the shared quotient binding.
@@ -206,7 +203,7 @@ mod tests {
                     .expect("canonical fold-coefficient slot");
                 canonical_inputs[index] = beta.exp_u64((NUM_CHIPLETS - 1 - position) as u64);
             }
-            let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
+            let canonical_root = canonical.eval(&canonical_inputs);
 
             let direct = miden_ace::compiler::testing::eval_multi_air_constraints(
                 &airs,
@@ -271,7 +268,7 @@ mod tests {
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         assert_eq!(canonical.layout().counts.num_quotient_chunks, expected_chunks);
     }
 
@@ -286,7 +283,7 @@ mod tests {
             }),
             "long periodic tables make every recursive proof pay for dense SHA program polynomials"
         );
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty.
         assert!(canonical.layout().counts.preprocessed_width > 0);
@@ -298,7 +295,7 @@ mod tests {
             .sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
-        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let circuit = build_pvm_recursive_verifier_ace_circuit();
         assert!(
             circuit.num_eval_gates < 32_768,
             "the SHA program must not restore the 97,576-gate fixed verifier cost"
@@ -329,7 +326,7 @@ mod tests {
     /// constant never committed to.
     #[test]
     fn pvm_ace_circuit_digest_matches_canonical_circuit() {
-        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let circuit = build_pvm_recursive_verifier_ace_circuit();
         let actual: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(
             actual, PVM_ACE_CIRCUIT_DIGEST,
@@ -390,7 +387,7 @@ mod tests {
         );
         // The scatter permutes the region the circuit reads, so it must be exactly one slot per
         // exposed value.
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let base = layout.index(InputKey::AuxBusBoundary(0)).expect("boundary base");
         let alpha = layout.index(InputKey::Alpha).expect("auxiliary inputs base");
@@ -446,7 +443,7 @@ mod tests {
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/layout.masm");
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let challenges_start = masm_const(
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/stark/constants.masm"),
@@ -499,7 +496,7 @@ mod tests {
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/parameters.masm");
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let index = |key| layout.index(key).unwrap_or_else(|| panic!("missing {key:?}"));
 
@@ -738,7 +735,7 @@ mod tests {
             "/../../lib/core/asm/sys/pvm/constraints_eval.masm"
         );
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
         let expected = miden_stark::quotient_recomposition_inputs::<Felt>(

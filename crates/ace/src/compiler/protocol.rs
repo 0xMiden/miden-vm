@@ -5,13 +5,9 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 
 use crate::{
-    AceError, EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
+    EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
     compiler::{AceCircuit, AceConfig, LayoutKind},
 };
-
-fn invalid(message: impl Into<String>) -> AceError {
-    AceError::InvalidInputLayout { message: message.into() }
-}
 
 /// An AIR captured once for both native evaluator and ACE generation.
 #[derive(Debug)]
@@ -27,23 +23,23 @@ pub struct CapturedAir {
 }
 
 impl CapturedAir {
-    pub fn new<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Result<Self, AceError> {
-        if air.num_randomness() != 2 {
-            return Err(invalid(format!(
-                "AIR must declare exactly 2 randomness challenges (alpha, beta), got {}",
-                air.num_randomness()
-            )));
-        }
+    /// Captures a code-owned AIR. Panics if its randomness or periodic-column declarations
+    /// violate the compiler's conventions.
+    pub fn new<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Self {
+        assert_eq!(air.num_randomness(), 2, "AIR must declare alpha and beta challenges");
         let periodic_columns = air.periodic_columns().into_owned();
-        if periodic_columns.iter().any(|column| !column.len().is_power_of_two()) {
-            return Err(invalid("periodic column lengths must be positive powers of two"));
-        }
+        assert!(
+            periodic_columns.iter().all(|column| column.len().is_power_of_two()),
+            "periodic column lengths must be positive powers of two"
+        );
         let max_periodic_length = periodic_columns.iter().map(Vec::len).max().unwrap_or(0);
-        if max_periodic_length != air.max_periodic_length() {
-            return Err(invalid("AIR periodic length hint disagrees with its periodic columns"));
-        }
+        assert_eq!(
+            max_periodic_length,
+            air.max_periodic_length(),
+            "AIR periodic length hint disagrees with its periodic columns"
+        );
         let (graph, constraints) = capture(air);
-        let degrees = constraint_degrees(&graph, &constraints)?;
+        let degrees = constraint_degrees(&graph, &constraints);
         let counts = InputCounts {
             preprocessed_width: air.preprocessed_width(),
             width: air.width(),
@@ -51,16 +47,16 @@ impl CapturedAir {
             num_aux_boundary: air.num_aux_values(),
             num_public: air.num_public_values(),
             num_randomness: air.num_randomness(),
-            num_quotient_chunks: quotient_chunks(degrees.max())?,
+            num_quotient_chunks: quotient_chunks(degrees.max()),
         };
-        Ok(Self {
+        Self {
             graph,
             constraints,
             counts,
             degrees,
             periodic_columns,
             max_periodic_length,
-        })
+        }
     }
 
     pub fn graph(&self) -> &Graph {
@@ -84,10 +80,7 @@ impl CapturedAir {
 }
 
 // Match SymbolicExpression::degree_multiple without evaluating the AIR a second time.
-fn constraint_degrees(
-    graph: &Graph,
-    constraints: &CapturedConstraints,
-) -> Result<ConstraintDegrees, AceError> {
+fn constraint_degrees(graph: &Graph, constraints: &CapturedConstraints) -> ConstraintDegrees {
     let mut degrees: Vec<usize> = Vec::with_capacity(graph.len());
     for (_, node) in graph.iter() {
         let degree = match node {
@@ -106,26 +99,21 @@ fn constraint_degrees(
                 match op {
                     OpKind::Neg => x,
                     OpKind::Add | OpKind::Sub => x.max(degrees[y.unwrap().index()]),
-                    OpKind::Mul => x
-                        .checked_add(degrees[y.unwrap().index()])
-                        .ok_or_else(|| invalid("constraint degree overflow"))?,
+                    OpKind::Mul => x + degrees[y.unwrap().index()],
                 }
             },
         };
         degrees.push(degree);
     }
-    Ok(ConstraintDegrees {
+    ConstraintDegrees {
         base: constraints.base_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
         ext: constraints.ext_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
-    })
+    }
 }
 
-fn quotient_chunks(degree: usize) -> Result<usize, AceError> {
-    degree
-        .saturating_sub(1)
-        .max(1)
-        .checked_next_power_of_two()
-        .ok_or_else(|| invalid("quotient chunk count overflow"))
+fn quotient_chunks(degree: usize) -> usize {
+    // Constant and linear constraints still require one quotient chunk.
+    (degree.max(2) - 1).next_power_of_two()
 }
 
 /// A segment of a concatenated committed row, measured in base-field coordinates.
@@ -174,17 +162,8 @@ pub struct RelationGeometry {
 }
 
 impl RelationGeometry {
-    fn derive(
-        airs: &[&CapturedAir],
-        alignment: usize,
-        chunks: Option<usize>,
-    ) -> Result<Self, AceError> {
-        let first = airs
-            .first()
-            .ok_or_else(|| invalid("multi-AIR composition requires a nonempty AIR set"))?;
-        if alignment == 0 {
-            return Err(invalid("trace width alignment must be nonzero"));
-        }
+    fn derive(airs: &[&CapturedAir], alignment: usize, chunks: Option<usize>) -> Self {
+        let first = airs[0];
         let mut result = Self {
             airs: Vec::with_capacity(airs.len()),
             preprocessed_width: 0,
@@ -202,24 +181,14 @@ impl RelationGeometry {
         };
         for air in airs {
             let counts = air.counts;
-            if counts.num_randomness != 2 {
-                return Err(invalid(
-                    "AIR must declare exactly 2 randomness challenges (alpha, beta)",
-                ));
-            }
             let preprocessed =
-                allocate(&mut result.preprocessed_width, counts.preprocessed_width, alignment)?;
-            let main = allocate(&mut result.main_width, counts.width, alignment)?;
-            let aux_coords = counts
-                .aux_width
-                .checked_mul(EXT_DEGREE)
-                .ok_or_else(|| invalid("auxiliary coordinate width overflow"))?;
-            let aux = allocate(&mut result.aux_width, aux_coords, alignment)?;
-            if !aux.width.is_multiple_of(EXT_DEGREE) {
-                return Err(invalid(
-                    "aligned auxiliary width must be divisible by the extension degree",
-                ));
-            }
+                allocate(&mut result.preprocessed_width, counts.preprocessed_width, alignment);
+            let main = allocate(&mut result.main_width, counts.width, alignment);
+            let aux = allocate(&mut result.aux_width, counts.aux_width * EXT_DEGREE, alignment);
+            assert!(
+                aux.width.is_multiple_of(EXT_DEGREE),
+                "aligned auxiliary width must be divisible by the extension degree"
+            );
             let constraint_counts = air.constraint_counts();
             result.airs.push(AirGeometry {
                 public_offset: result.num_public,
@@ -233,32 +202,18 @@ impl RelationGeometry {
                 degrees: air.degrees,
                 period: air.max_periodic_length.max(1),
             });
-            result.num_public = result
-                .num_public
-                .checked_add(counts.num_public)
-                .ok_or_else(|| invalid("public input count overflow"))?;
-            result.num_aux_boundary = result
-                .num_aux_boundary
-                .checked_add(counts.num_aux_boundary)
-                .ok_or_else(|| invalid("auxiliary boundary count overflow"))?;
-            result.num_constraints = result
-                .num_constraints
-                .checked_add(constraint_counts.total())
-                .ok_or_else(|| invalid("constraint count overflow"))?;
+            result.num_public += counts.num_public;
+            result.num_aux_boundary += counts.num_aux_boundary;
+            result.num_constraints += constraint_counts.total();
             result.max_constraint_degree = result.max_constraint_degree.max(air.degrees.max());
             result.shared_period = result.shared_period.max(air.max_periodic_length);
         }
         result.num_quotient_chunks =
-            chunks.unwrap_or(quotient_chunks(result.max_constraint_degree)?);
-        if result.num_quotient_chunks == 0 {
-            return Err(invalid("num_quotient_chunks must be > 0"));
-        }
-        let coords = result
-            .num_quotient_chunks
-            .checked_mul(EXT_DEGREE)
-            .ok_or_else(|| invalid("quotient coordinate width overflow"))?;
-        result.quotient_width = aligned(coords, alignment)?;
-        Ok(result)
+            chunks.unwrap_or(quotient_chunks(result.max_constraint_degree));
+        assert!(result.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
+        result.quotient_width =
+            (result.num_quotient_chunks * EXT_DEGREE).next_multiple_of(alignment);
+        result
     }
 
     /// Raw committed row widths, in base coordinates and canonical AIR order.
@@ -279,17 +234,17 @@ impl RelationGeometry {
     /// Each AIR contributes one normalized boundary value. Committed groups are padded to eight
     /// base felts; OOD openings occupy one extension slot per committed coordinate, in two dense
     /// rows followed by the boundary values. Statement encoding and height rules remain the
-    /// relation adapter's responsibility.
-    pub fn validate_masm_layout(&self, layout: &InputLayout) -> Result<(), AceError> {
+    /// relation adapter's responsibility. Panics if the geometry and layout are incompatible.
+    pub fn validate_masm_layout(&self, layout: &InputLayout) {
         let n = self.airs.len();
-        if !(2..=MAX_ORDER_AIRS).contains(&n) || self.trace_alignment != 8 {
-            return Err(invalid(format!(
-                "MASM staging requires 2..={MAX_ORDER_AIRS} AIRs and eight-felt trace alignment"
-            )));
-        }
-        if self.airs.iter().any(|air| air.num_aux_boundary != 1) || self.num_aux_boundary != n {
-            return Err(invalid("MASM LogUp staging requires one boundary value per AIR"));
-        }
+        assert!(
+            (2..=MAX_ORDER_AIRS).contains(&n) && self.trace_alignment == 8,
+            "MASM staging requires 2..={MAX_ORDER_AIRS} AIRs and eight-felt trace alignment"
+        );
+        assert!(
+            self.airs.iter().all(|air| air.num_aux_boundary == 1) && self.num_aux_boundary == n,
+            "MASM LogUp staging requires one boundary value per AIR"
+        );
         for (name, derived, actual) in [
             ("preprocessed", self.preprocessed_width, layout.counts.preprocessed_width),
             ("main", self.main_width, layout.counts.width),
@@ -300,11 +255,7 @@ impl RelationGeometry {
             ("quotient-chunk", self.num_quotient_chunks, layout.counts.num_quotient_chunks),
             ("quotient-coordinate", self.quotient_width, layout.quotient_width()),
         ] {
-            if derived != actual {
-                return Err(invalid(format!(
-                    "AIR-derived {name} width {derived} disagrees with ACE input layout width {actual}"
-                )));
-            }
+            assert_eq!(derived, actual, "AIR-derived {name} width disagrees with ACE input layout");
         }
         for (name, total, widths) in [
             (
@@ -319,25 +270,19 @@ impl RelationGeometry {
                 self.airs.iter().map(|air| air.aux.width).collect(),
             ),
         ] {
-            if total == 0
-                || widths.iter().any(|width| !width.is_multiple_of(8))
-                || widths.iter().try_fold(0usize, |sum, width| sum.checked_add(*width))
-                    != Some(total)
-            {
-                return Err(invalid(format!(
-                    "MASM {name} group has inconsistent or unaligned AIR widths"
-                )));
-            }
+            assert!(
+                total > 0
+                    && widths.iter().all(|width| width.is_multiple_of(8))
+                    && widths.iter().sum::<usize>() == total,
+                "MASM {name} group has inconsistent or unaligned AIR widths"
+            );
         }
-        if self.quotient_width == 0 || !self.quotient_width.is_multiple_of(8) {
-            return Err(invalid("MASM quotient group must be nonempty and eight-felt aligned"));
-        }
-        let index = |key| {
-            layout
-                .index(key)
-                .ok_or_else(|| invalid(format!("ACE input layout is missing {key:?}")))
-        };
-        let mut cursor = index(InputKey::Preprocessed { offset: 0, index: 0 })?;
+        assert!(
+            self.quotient_width > 0 && self.quotient_width.is_multiple_of(8),
+            "MASM quotient group must be nonempty and eight-felt aligned"
+        );
+        let index = |key| layout.index(key).unwrap();
+        let mut cursor = index(InputKey::Preprocessed { offset: 0, index: 0 });
         for offset in 0..2 {
             for (key, width) in [
                 (InputKey::Preprocessed { offset, index: 0 }, self.preprocessed_width),
@@ -345,24 +290,23 @@ impl RelationGeometry {
                 (InputKey::AuxCoord { offset, index: 0, coord: 0 }, self.aux_width),
                 (InputKey::QuotientChunkCoord { offset, chunk: 0, coord: 0 }, self.quotient_width),
             ] {
-                if index(key)? != cursor {
-                    return Err(invalid(format!(
-                        "ACE OOD group {key:?} does not follow the committed widths"
-                    )));
-                }
-                cursor = cursor
-                    .checked_add(width)
-                    .ok_or_else(|| invalid("ACE OOD frame extent overflows"))?;
+                assert_eq!(
+                    index(key),
+                    cursor,
+                    "ACE OOD group {key:?} does not follow the committed widths"
+                );
+                cursor += width;
             }
         }
-        if index(InputKey::AuxBusBoundary(0))? != cursor {
-            return Err(invalid("ACE boundary values must follow the two OOD rows"));
-        }
-        let last_fold = index(InputKey::MultiAirFoldCoeff(n - 1))?;
-        if last_fold >= layout.total_inputs {
-            return Err(invalid("ACE fold coefficients fall outside the READ section"));
-        }
-        Ok(())
+        assert_eq!(
+            index(InputKey::AuxBusBoundary(0)),
+            cursor,
+            "ACE boundary values must follow the two OOD rows"
+        );
+        assert!(
+            index(InputKey::MultiAirFoldCoeff(n - 1)) < layout.total_inputs,
+            "ACE fold coefficients fall outside the READ section"
+        );
     }
 
     pub(crate) fn input_counts(&self) -> InputCounts {
@@ -378,19 +322,11 @@ impl RelationGeometry {
     }
 }
 
-fn aligned(width: usize, alignment: usize) -> Result<usize, AceError> {
-    width
-        .checked_next_multiple_of(alignment)
-        .ok_or_else(|| invalid("aligned row width overflow"))
-}
-
-fn allocate(total: &mut usize, raw_width: usize, alignment: usize) -> Result<RowSegment, AceError> {
-    let width = aligned(raw_width, alignment)?;
+fn allocate(total: &mut usize, raw_width: usize, alignment: usize) -> RowSegment {
+    let width = raw_width.next_multiple_of(alignment);
     let segment = RowSegment { offset: *total, width, raw_width };
-    *total = total
-        .checked_add(width)
-        .ok_or_else(|| invalid("committed row width overflow"))?;
-    Ok(segment)
+    *total += width;
+    segment
 }
 
 /// A relation borrowing captured AIRs in canonical order.
@@ -401,10 +337,8 @@ pub struct CompiledRelation<'a> {
 }
 
 impl<'a> CompiledRelation<'a> {
-    pub fn from_captured(
-        airs: &[&'a CapturedAir],
-        trace_alignment: usize,
-    ) -> Result<Self, AceError> {
+    /// Derives a relation from nonempty, code-owned AIRs and a nonzero trace alignment.
+    pub fn from_captured(airs: &[&'a CapturedAir], trace_alignment: usize) -> Self {
         Self::with_quotient_chunks(airs, trace_alignment, None)
     }
 
@@ -412,11 +346,11 @@ impl<'a> CompiledRelation<'a> {
         airs: &[&'a CapturedAir],
         trace_alignment: usize,
         chunks: Option<usize>,
-    ) -> Result<Self, AceError> {
-        Ok(Self {
-            geometry: RelationGeometry::derive(airs, trace_alignment, chunks)?,
+    ) -> Self {
+        Self {
+            geometry: RelationGeometry::derive(airs, trace_alignment, chunks),
             airs: airs.to_vec(),
-        })
+        }
     }
 
     #[cfg(test)]
@@ -428,7 +362,7 @@ impl<'a> CompiledRelation<'a> {
         &self.geometry
     }
 
-    pub fn build_circuit(&self, layout: LayoutKind) -> Result<AceCircuit<QuadFelt>, AceError> {
+    pub fn build_circuit(&self, layout: LayoutKind) -> AceCircuit<QuadFelt> {
         crate::compiler::pipeline::build_circuit_for_relation(
             self,
             AceConfig {

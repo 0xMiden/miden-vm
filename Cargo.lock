@@ -2768,7 +2768,6 @@ dependencies = [
  "miden-stark",
  "p3-dft",
  "proptest",
- "thiserror 2.0.19",
 ]
 
 [[package]]

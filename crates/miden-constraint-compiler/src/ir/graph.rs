@@ -73,7 +73,7 @@ pub enum Leaf {
 }
 
 /// A graph node: a leaf input or a field operation over earlier nodes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Node {
     Leaf(Leaf),
     Op {
@@ -81,18 +81,6 @@ pub enum Node {
         op: OpKind,
         x: NodeId,
         /// `None` exactly when `op` is [`OpKind::Neg`].
-        y: Option<NodeId>,
-    },
-}
-
-/// Structural identity key for hash-consing.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum Key {
-    Leaf(Leaf),
-    Op {
-        class: Class,
-        op: OpKind,
-        x: NodeId,
         y: Option<NodeId>,
     },
 }
@@ -109,7 +97,7 @@ enum Key {
 #[derive(Default)]
 pub struct GraphBuilder {
     nodes: Vec<Node>,
-    interner: HashMap<Key, NodeId>,
+    interner: HashMap<Node, NodeId>,
 }
 
 impl GraphBuilder {
@@ -131,27 +119,20 @@ impl GraphBuilder {
         if let Leaf::ExtBase(inner) = leaf {
             debug_assert!(inner.index() < self.nodes.len(), "ExtBase wraps a foreign node id");
         }
-        self.intern(Key::Leaf(leaf), Node::Leaf(leaf)).0
+        self.intern(Node::Leaf(leaf))
     }
 
-    /// Intern an operation over already-interned children, returning `(id, fresh)`
-    /// where `fresh` is false when an identical node already existed.
+    /// Intern an operation over already-interned children, returning its unique id.
     ///
     /// `y` must be `None` exactly when `op` is [`OpKind::Neg`].
-    pub(crate) fn op(
-        &mut self,
-        class: Class,
-        op: OpKind,
-        x: NodeId,
-        y: Option<NodeId>,
-    ) -> (NodeId, bool) {
+    pub(crate) fn op(&mut self, class: Class, op: OpKind, x: NodeId, y: Option<NodeId>) -> NodeId {
         debug_assert_eq!(matches!(op, OpKind::Neg), y.is_none(), "Neg is unary; the rest binary");
         debug_assert!(x.index() < self.nodes.len(), "operand x is a foreign node id");
         debug_assert!(
             y.is_none_or(|y| y.index() < self.nodes.len()),
             "operand y is a foreign node id"
         );
-        self.intern(Key::Op { class, op, x, y }, Node::Op { class, op, x, y })
+        self.intern(Node::Op { class, op, x, y })
     }
 
     /// Finish building and freeze into an immutable [`Graph`].
@@ -159,14 +140,14 @@ impl GraphBuilder {
         Graph { nodes: self.nodes }
     }
 
-    fn intern(&mut self, key: Key, node: Node) -> (NodeId, bool) {
+    fn intern(&mut self, node: Node) -> NodeId {
         let next = NodeId(u32::try_from(self.nodes.len()).expect("more than u32::MAX nodes"));
-        match self.interner.entry(key) {
-            Entry::Occupied(e) => (*e.get(), false),
+        match self.interner.entry(node) {
+            Entry::Occupied(e) => *e.get(),
             Entry::Vacant(v) => {
                 v.insert(next);
                 self.nodes.push(node);
-                (next, true)
+                next
             },
         }
     }
@@ -233,17 +214,15 @@ mod tests {
         assert_eq!(a, a2);
 
         let c = b.leaf(Leaf::BaseConst(7));
-        let (s1, fresh1) = b.op(Class::Base, OpKind::Add, a, Some(c));
-        let (s2, fresh2) = b.op(Class::Base, OpKind::Add, a, Some(c));
+        let s1 = b.op(Class::Base, OpKind::Add, a, Some(c));
+        let s2 = b.op(Class::Base, OpKind::Add, a, Some(c));
         assert_eq!(s1, s2);
-        assert!(fresh1);
-        assert!(!fresh2);
 
         // Same operands, different op — and same op, different class: distinct
         // nodes. (An ext op over base operands is not a well-formed capture shape,
         // but the key must still discriminate on class.)
-        let (m, _) = b.op(Class::Base, OpKind::Mul, a, Some(c));
-        let (me, _) = b.op(Class::Ext, OpKind::Mul, a, Some(c));
+        let m = b.op(Class::Base, OpKind::Mul, a, Some(c));
+        let me = b.op(Class::Ext, OpKind::Mul, a, Some(c));
         assert_ne!(s1, m);
         assert_ne!(m, me);
         assert_eq!(b.len(), 5);
@@ -254,7 +233,7 @@ mod tests {
         let mut b = Graph::builder();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let y = b.leaf(Leaf::Main { offset: 1, index: 0 });
-        let (d, _) = b.op(Class::Base, OpKind::Sub, y, Some(x));
+        let d = b.op(Class::Base, OpKind::Sub, y, Some(x));
         b.op(Class::Base, OpKind::Neg, d, None);
         let g = b.freeze();
 
@@ -284,7 +263,7 @@ mod tests {
         let base = b.leaf(Leaf::Periodic(0));
         let wrapped = b.leaf(Leaf::ExtBase(base));
         let ch = b.leaf(Leaf::Challenge(0));
-        let (prod, _) = b.op(Class::Ext, OpKind::Mul, wrapped, Some(ch));
+        let prod = b.op(Class::Ext, OpKind::Mul, wrapped, Some(ch));
         let g = b.freeze();
 
         assert_eq!(g.class(base), Class::Base);

@@ -514,11 +514,6 @@ impl<'g> Emitter<'g> {
 /// uniqueness. With every index placed exactly once, index density follows by
 /// pigeonhole.
 fn place<T>(slots: &mut [Option<T>], global: usize, value: T) {
-    assert!(
-        global < slots.len(),
-        "global constraint index {global} out of range ({} constraints)",
-        slots.len()
-    );
     assert!(slots[global].is_none(), "duplicate global constraint index {global}");
     slots[global] = Some(value);
 }
@@ -655,18 +650,18 @@ mod tests {
         let mut b = GraphBuilder::new();
         let cur = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let next = b.leaf(Leaf::Main { offset: 1, index: 0 });
-        let (diff, _) = b.op(Class::Base, OpKind::Sub, next, Some(cur));
+        let diff = b.op(Class::Base, OpKind::Sub, next, Some(cur));
         let first = b.leaf(Leaf::IsFirst);
-        let (gated, _) = b.op(Class::Base, OpKind::Mul, first, Some(diff));
-        let (neg, _) = b.op(Class::Base, OpKind::Neg, gated, None);
+        let gated = b.op(Class::Base, OpKind::Mul, first, Some(diff));
+        let neg = b.op(Class::Base, OpKind::Neg, gated, None);
         let public = b.leaf(Leaf::Public(2));
         let periodic = b.leaf(Leaf::Periodic(1));
-        let (sum, _) = b.op(Class::Base, OpKind::Add, public, Some(periodic));
+        let sum = b.op(Class::Base, OpKind::Add, public, Some(periodic));
         let last = b.leaf(Leaf::IsLast);
         let transition = b.leaf(Leaf::IsTransition);
-        let (edges, _) = b.op(Class::Base, OpKind::Mul, last, Some(transition));
+        let edges = b.op(Class::Base, OpKind::Mul, last, Some(transition));
         let three = b.leaf(Leaf::BaseConst(3));
-        let (offset, _) = b.op(Class::Base, OpKind::Add, edges, Some(three));
+        let offset = b.op(Class::Base, OpKind::Add, edges, Some(three));
         let graph = b.freeze();
 
         // Local order (neg, sum, offset) deliberately differs from global order
@@ -740,17 +735,17 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let mut b = GraphBuilder::new();
         let aux = b.leaf(Leaf::Aux { offset: 0, index: 0 });
         let alpha = b.leaf(Leaf::Challenge(0));
-        let (acc, _) = b.op(Class::Ext, OpKind::Add, aux, Some(alpha));
+        let acc = b.op(Class::Ext, OpKind::Add, aux, Some(alpha));
         let main = b.leaf(Leaf::Main { offset: 0, index: 1 });
         let lift = b.leaf(Leaf::ExtBase(main));
-        let (flip, _) = b.op(Class::Ext, OpKind::Mul, lift, Some(acc));
-        let (sub_promote, _) = b.op(Class::Ext, OpKind::Sub, lift, Some(acc));
-        let (sub_plain, _) = b.op(Class::Ext, OpKind::Sub, acc, Some(lift));
-        let (neg_promote, _) = b.op(Class::Ext, OpKind::Neg, lift, None);
+        let flip = b.op(Class::Ext, OpKind::Mul, lift, Some(acc));
+        let sub_promote = b.op(Class::Ext, OpKind::Sub, lift, Some(acc));
+        let sub_plain = b.op(Class::Ext, OpKind::Sub, acc, Some(lift));
+        let neg_promote = b.op(Class::Ext, OpKind::Neg, lift, None);
         let seven = b.leaf(Leaf::ExtConst([7, 0]));
-        let (shifted, _) = b.op(Class::Ext, OpKind::Add, sub_promote, Some(seven));
+        let shifted = b.op(Class::Ext, OpKind::Add, sub_promote, Some(seven));
         let bound = b.leaf(Leaf::PermValue(0));
-        let (closed, _) = b.op(Class::Ext, OpKind::Sub, shifted, Some(bound));
+        let closed = b.op(Class::Ext, OpKind::Sub, shifted, Some(bound));
         let graph = b.freeze();
 
         let cons = constraints(
@@ -808,7 +803,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     fn duplicate_global_index_is_rejected() {
         let mut b = GraphBuilder::new();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let (r, _) = b.op(Class::Base, OpKind::Neg, x, None);
+        let r = b.op(Class::Base, OpKind::Neg, x, None);
         let graph = b.freeze();
         let cons = constraints(vec![(r, 0), (r, 0)], vec![]);
         emit_module(
@@ -937,14 +932,14 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     fn optimized_square_and_scalar_scaling() {
         let mut b = GraphBuilder::new();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let (sq, _) = b.op(Class::Base, OpKind::Mul, x, Some(x));
+        let sq = b.op(Class::Base, OpKind::Mul, x, Some(x));
         let two = b.leaf(Leaf::BaseConst(2));
         let eight = b.leaf(Leaf::BaseConst(8));
         let half = b.leaf(Leaf::BaseConst(0x7fff_ffff_8000_0001));
-        let (double, _) = b.op(Class::Base, OpKind::Mul, two, Some(x));
-        let (scale, _) = b.op(Class::Base, OpKind::Mul, x, Some(eight));
-        let (halve, _) = b.op(Class::Base, OpKind::Mul, half, Some(x));
-        let (sub, _) = b.op(Class::Base, OpKind::Sub, two, Some(x));
+        let double = b.op(Class::Base, OpKind::Mul, two, Some(x));
+        let scale = b.op(Class::Base, OpKind::Mul, x, Some(eight));
+        let halve = b.op(Class::Base, OpKind::Mul, half, Some(x));
+        let sub = b.op(Class::Base, OpKind::Sub, two, Some(x));
         let out = optimized(b, vec![sq, double, scale, halve, sub], vec![]);
         assert!(out.contains(".square()"), "{out}");
         assert!(out.contains(".double()"));
@@ -957,33 +952,33 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     fn optimized_sum_and_typed_dots() {
         let mut b = GraphBuilder::new();
         let xs: Vec<_> = (0..8).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
-        let left = b.op(Class::Base, OpKind::Add, xs[0], Some(xs[1])).0;
-        let right = b.op(Class::Base, OpKind::Add, xs[2], Some(xs[3])).0;
-        let sum = b.op(Class::Base, OpKind::Add, left, Some(right)).0;
+        let left = b.op(Class::Base, OpKind::Add, xs[0], Some(xs[1]));
+        let right = b.op(Class::Base, OpKind::Add, xs[2], Some(xs[3]));
+        let sum = b.op(Class::Base, OpKind::Add, left, Some(right));
         let products: Vec<_> = xs
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])).0)
+            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])))
             .collect();
         let dot = products
             .into_iter()
-            .reduce(|x, y| b.op(Class::Base, OpKind::Add, x, Some(y)).0)
+            .reduce(|x, y| b.op(Class::Base, OpKind::Add, x, Some(y)))
             .unwrap();
         let mut lc = xs[0];
         for i in 1..4 {
             let coefficient = b.leaf(Leaf::BaseConst(7 + i as u64));
-            let weighted = b.op(Class::Base, OpKind::Mul, coefficient, Some(xs[2 * i])).0;
-            lc = b.op(Class::Base, OpKind::Add, lc, Some(weighted)).0;
+            let weighted = b.op(Class::Base, OpKind::Mul, coefficient, Some(xs[2 * i]));
+            lc = b.op(Class::Base, OpKind::Add, lc, Some(weighted));
         }
         let mut products = Vec::new();
         for i in 0..4 {
             let challenge = b.leaf(Leaf::Challenge(i));
-            products.push(b.op(Class::Ext, OpKind::Mul, xs[4 + i], Some(challenge)).0);
+            products.push(b.op(Class::Ext, OpKind::Mul, xs[4 + i], Some(challenge)));
         }
         let mixed = products
             .into_iter()
-            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)).0)
+            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)))
             .unwrap();
         let out = optimized(b, vec![sum, dot, lc], vec![mixed]);
         assert!(out.contains("AB::Expr::sum_array::<4>"), "{out}");
@@ -997,12 +992,12 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     fn optimized_factoring_respects_edges_and_assertion_roots() {
         let mut b = GraphBuilder::new();
         let input = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let u = b.op(Class::Base, OpKind::Mul, input, Some(input)).0;
+        let u = b.op(Class::Base, OpKind::Mul, input, Some(input));
         let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
         let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
-        let p = b.op(Class::Base, OpKind::Mul, u, Some(a)).0;
-        let q = b.op(Class::Base, OpKind::Mul, c, Some(u)).0;
-        let factored = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let p = b.op(Class::Base, OpKind::Mul, u, Some(a));
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(u));
+        let factored = b.op(Class::Base, OpKind::Add, p, Some(q));
         let out = optimized(b, vec![factored], vec![]);
         assert!(out.contains(" * ("), "{out}");
         assert!(!out.contains("dot_product"));
@@ -1014,9 +1009,9 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let u = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
         let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
-        let p = b.op(Class::Base, OpKind::Mul, u, Some(a)).0;
-        let q = b.op(Class::Base, OpKind::Mul, c, Some(u)).0;
-        let sum = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let p = b.op(Class::Base, OpKind::Mul, u, Some(a));
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(u));
+        let sum = b.op(Class::Base, OpKind::Add, p, Some(q));
         // A constraint root is a use too: p must be computed once and retained.
         let out = optimized(b, vec![p, sum], vec![]);
         assert!(out.contains(&format!("let b{} =", p.index())));
@@ -1031,11 +1026,11 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])).0)
+            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])))
             .collect();
         let mut sum = xs[0];
         for &product in &products {
-            sum = b.op(Class::Base, OpKind::Add, sum, Some(product)).0;
+            sum = b.op(Class::Base, OpKind::Add, sum, Some(product));
         }
         let out = optimized(b, vec![sum], vec![]);
         assert!(out.contains("AB::Expr::dot_product::<4>"), "{out}");
@@ -1048,19 +1043,18 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
     fn optimized_extension_dots_keep_coefficient_types() {
         let mut b = GraphBuilder::new();
         let es: Vec<_> = (0..8).map(|index| b.leaf(Leaf::Aux { offset: 0, index })).collect();
-        let products: Vec<_> = (0..4)
-            .map(|i| b.op(Class::Ext, OpKind::Mul, es[i], Some(es[4 + i])).0)
-            .collect();
+        let products: Vec<_> =
+            (0..4).map(|i| b.op(Class::Ext, OpKind::Mul, es[i], Some(es[4 + i]))).collect();
         let sum = products
             .into_iter()
-            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)).0)
+            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)))
             .unwrap();
         let mut mixed = es[0];
         for (i, &value) in es.iter().enumerate().take(4).skip(1) {
             let base = b.leaf(Leaf::Main { offset: 0, index: i - 1 });
             let lift = b.leaf(Leaf::ExtBase(base));
-            let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(value)).0;
-            mixed = b.op(Class::Ext, OpKind::Add, mixed, Some(weighted)).0;
+            let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(value));
+            mixed = b.op(Class::Ext, OpKind::Add, mixed, Some(weighted));
         }
         let out = optimized(b, vec![], vec![sum, mixed]);
         assert!(out.contains("AB::ExprEF::dot_product::<4>"), "{out}");
@@ -1076,7 +1070,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let mut sum = xs[0];
         let mut shared = xs[0];
         for (i, &x) in xs.iter().enumerate().skip(1) {
-            sum = b.op(Class::Base, OpKind::Add, sum, Some(x)).0;
+            sum = b.op(Class::Base, OpKind::Add, sum, Some(x));
             if i == 7 {
                 shared = sum;
             }
@@ -1095,9 +1089,9 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let c = b.leaf(Leaf::BaseConst(7));
         let a = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let z = b.leaf(Leaf::Main { offset: 0, index: 1 });
-        let p = b.op(Class::Base, OpKind::Mul, c, Some(a)).0;
-        let q = b.op(Class::Base, OpKind::Mul, c, Some(z)).0;
-        let sum = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let p = b.op(Class::Base, OpKind::Mul, c, Some(a));
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(z));
+        let sum = b.op(Class::Base, OpKind::Add, p, Some(q));
         let out = optimized(b, vec![sum], vec![]);
         assert!(out.contains(") * Felt::from_u64(7)"), "{out}");
         assert!(!out.contains("AB::Expr::from(Felt::from_u64(7))"));
@@ -1110,25 +1104,25 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let s = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let x = b.leaf(Leaf::PermValue(0));
         let y = b.leaf(Leaf::Aux { offset: 0, index: 0 });
-        let p = b.op(Class::Ext, OpKind::Mul, s, Some(x)).0;
-        let q = b.op(Class::Ext, OpKind::Mul, y, Some(s)).0;
-        let base_factor = b.op(Class::Ext, OpKind::Add, p, Some(q)).0;
+        let p = b.op(Class::Ext, OpKind::Mul, s, Some(x));
+        let q = b.op(Class::Ext, OpKind::Mul, y, Some(s));
+        let base_factor = b.op(Class::Ext, OpKind::Add, p, Some(q));
         // e*a + c*e: an extension factor shared by base terms.
         let e = b.leaf(Leaf::Challenge(1));
         let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
         let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
-        let r = b.op(Class::Ext, OpKind::Mul, e, Some(a)).0;
-        let t = b.op(Class::Ext, OpKind::Mul, c, Some(e)).0;
-        let ext_factor = b.op(Class::Ext, OpKind::Add, r, Some(t)).0;
+        let r = b.op(Class::Ext, OpKind::Mul, e, Some(a));
+        let t = b.op(Class::Ext, OpKind::Mul, c, Some(e));
+        let ext_factor = b.op(Class::Ext, OpKind::Add, r, Some(t));
         // All-base operands would factor to a base value for an extension node.
-        let u = b.op(Class::Ext, OpKind::Mul, s, Some(a)).0;
-        let v = b.op(Class::Ext, OpKind::Mul, c, Some(s)).0;
-        let base_only = b.op(Class::Ext, OpKind::Add, u, Some(v)).0;
+        let u = b.op(Class::Ext, OpKind::Mul, s, Some(a));
+        let v = b.op(Class::Ext, OpKind::Mul, c, Some(s));
+        let base_only = b.op(Class::Ext, OpKind::Add, u, Some(v));
         // `AB::ExprEF` has no `Felt` product, so a literal factor stays an `AB::Expr`.
         let seven = b.leaf(Leaf::BaseConst(7));
-        let w = b.op(Class::Ext, OpKind::Mul, seven, Some(x)).0;
-        let z = b.op(Class::Ext, OpKind::Mul, y, Some(seven)).0;
-        let literal_factor = b.op(Class::Ext, OpKind::Add, w, Some(z)).0;
+        let w = b.op(Class::Ext, OpKind::Mul, seven, Some(x));
+        let z = b.op(Class::Ext, OpKind::Mul, y, Some(seven));
+        let literal_factor = b.op(Class::Ext, OpKind::Add, w, Some(z));
         let out = optimized(b, vec![], vec![base_factor, ext_factor, base_only, literal_factor]);
         assert!(
             out.contains(&format!(
@@ -1176,12 +1170,12 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
                         3 => b.leaf(Leaf::Main { offset: 0, index: i }),
                         _ => unreachable!(),
                     };
-                    products.push(b.op(class, OpKind::Mul, left, Some(right)).0);
+                    products.push(b.op(class, OpKind::Mul, left, Some(right)));
                 }
                 let sum = products
                     .iter()
                     .copied()
-                    .reduce(|x, y| b.op(class, OpKind::Add, x, Some(y)).0)
+                    .reduce(|x, y| b.op(class, OpKind::Add, x, Some(y)))
                     .unwrap();
                 let out = if class == Class::Base {
                     optimized(b, vec![sum], vec![])
@@ -1202,14 +1196,14 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &
         let alpha = b.leaf(Leaf::Challenge(0));
         let beta = b.leaf(Leaf::Challenge(1));
         let aux: [_; 9] = core::array::from_fn(|index| b.leaf(Leaf::Aux { offset: 0, index }));
-        let (mut sum, _) = b.op(Class::Ext, OpKind::Add, alpha, Some(beta));
+        let mut sum = b.op(Class::Ext, OpKind::Add, alpha, Some(beta));
         for value in &aux[..3] {
-            (sum, _) = b.op(Class::Ext, OpKind::Add, sum, Some(*value));
+            sum = b.op(Class::Ext, OpKind::Add, sum, Some(*value));
         }
-        let (mut products, _) = b.op(Class::Ext, OpKind::Mul, alpha, Some(beta));
+        let mut products = b.op(Class::Ext, OpKind::Mul, alpha, Some(beta));
         for pair in aux[3..].as_chunks::<2>().0 {
-            let (product, _) = b.op(Class::Ext, OpKind::Mul, pair[0], Some(pair[1]));
-            (products, _) = b.op(Class::Ext, OpKind::Add, products, Some(product));
+            let product = b.op(Class::Ext, OpKind::Mul, pair[0], Some(pair[1]));
+            products = b.op(Class::Ext, OpKind::Add, products, Some(product));
         }
         let out = optimized(b, vec![], vec![sum, products]);
         let row = out.split("pub fn eval_optimized").nth(1).unwrap();

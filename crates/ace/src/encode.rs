@@ -13,8 +13,6 @@ use alloc::vec::Vec;
 
 use miden_crypto::{Felt, Word, hash::eidos::Eidos};
 
-use crate::AceError;
-
 // NOTE: `num_vars`/`num_const_nodes` count extension-field (EF) nodes, while the
 // instruction stream (`instructions.len()`) is measured in base field elements.
 
@@ -22,10 +20,6 @@ use crate::AceError;
 pub(crate) const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
 pub(crate) const ACE_READ_ROW_EF_NODES: usize = 2;
-/// Instruction stream padding unit in base felts (adv_pipe block size), so that
-/// the constants+ops stream can be read in aligned chunks.
-pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
-
 /// Encoded ACE circuit ready for chiplet consumption.
 ///
 /// This packs the circuit into the chiplet instruction stream and exposes
@@ -54,23 +48,16 @@ pub struct RecursiveAceCircuit {
     pub instructions: Vec<Felt>,
 }
 
-impl TryFrom<EncodedCircuit> for RecursiveAceCircuit {
-    type Error = AceError;
-
-    fn try_from(encoded: EncodedCircuit) -> Result<Self, Self::Error> {
+impl From<EncodedCircuit> for RecursiveAceCircuit {
+    fn from(encoded: EncodedCircuit) -> Self {
         let stream_len = encoded.size_in_felt();
-        if !stream_len.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-            return Err(AceError::InvalidInputLayout {
-                message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
-            });
-        }
-        Ok(Self {
+        Self {
             num_inputs: encoded.num_vars(),
             num_eval_gates: encoded.num_eval_rows(),
             stream_len,
             commitment: encoded.circuit_hash(),
             instructions: encoded.instructions,
-        })
+        }
     }
 }
 

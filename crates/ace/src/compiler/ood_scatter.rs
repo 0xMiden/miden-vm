@@ -2,7 +2,7 @@
 
 use core::{fmt::Write, ops::Range};
 
-use crate::{AceError, EXT_DEGREE};
+use crate::EXT_DEGREE;
 
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 const WORD_FELTS: usize = 4;
@@ -47,31 +47,25 @@ impl OodScatterPlan {
         main: &[usize],
         aux: &[usize],
         quotient_width: usize,
-    ) -> Result<Self, AceError> {
+    ) -> Self {
         let num_airs = main.len();
-        if num_airs == 0 || preprocessed.len() != num_airs || aux.len() != num_airs {
-            return Err(AceError::InvalidInputLayout {
-                message: "scatter groups must describe the same nonempty AIR set".into(),
-            });
-        }
-        if quotient_width == 0 {
-            return Err(AceError::InvalidInputLayout {
-                message: "the quotient scatter segment must be nonempty".into(),
-            });
-        }
-        let widths = || preprocessed.iter().chain(main).chain(aux).chain([&quotient_width]);
-        if widths().any(|width| !width.is_multiple_of(ADV_PIPE_BLOCK_FELTS / EXT_DEGREE)) {
-            return Err(AceError::InvalidInputLayout {
-                message: "scatter segments must be 8-felt aligned".into(),
-            });
-        }
-        let row_felts = widths()
-            .try_fold(0usize, |total, width| total.checked_add(*width))
-            .and_then(|total| total.checked_mul(EXT_DEGREE))
-            .filter(|&total| u32::try_from(total).is_ok())
-            .ok_or_else(|| AceError::InvalidInputLayout {
-                message: "the OOD row length must fit in a u32 address offset".into(),
-            })?;
+        assert!(
+            num_airs > 0 && preprocessed.len() == num_airs && aux.len() == num_airs,
+            "scatter groups must describe the same nonempty AIR set"
+        );
+        assert!(quotient_width > 0, "the quotient scatter segment must be nonempty");
+        let widths = preprocessed.iter().chain(main).chain(aux).chain([&quotient_width]);
+        assert!(
+            widths
+                .clone()
+                .all(|width| width.is_multiple_of(ADV_PIPE_BLOCK_FELTS / EXT_DEGREE)),
+            "scatter segments must be 8-felt aligned"
+        );
+        let row_felts = widths.sum::<usize>() * EXT_DEGREE;
+        assert!(
+            u32::try_from(row_felts).is_ok(),
+            "the OOD row length must fit in a u32 address offset"
+        );
 
         let mut groups = Vec::with_capacity(4);
         let mut dst = 0;
@@ -80,14 +74,10 @@ impl OodScatterPlan {
             let occupied = widths.iter().filter(|&&width| width != 0).count();
             // Proof positions rank all AIRs. A partially occupied group would need ranks
             // among its occupants to index its dispatch slots.
-            if occupied > 1 && occupied != num_airs {
-                return Err(AceError::InvalidInputLayout {
-                    message: format!(
-                        "the {name} commitment group is occupied by {occupied} of {num_airs} AIRs; \
-                         dispatch by proof position requires every AIR to occupy the group",
-                    ),
-                });
-            }
+            assert!(
+                occupied <= 1 || occupied == num_airs,
+                "the {name} commitment group is occupied by {occupied} of {num_airs} AIRs; dispatch by proof position requires every AIR to occupy the group"
+            );
             let dispatch_index = if occupied > 1 {
                 let index = dispatched_groups;
                 dispatched_groups += 1;
@@ -124,7 +114,7 @@ impl OodScatterPlan {
             .collect();
         lengths.sort_unstable();
         lengths.dedup();
-        Ok(Self { num_airs, row_felts, groups, lengths })
+        Self { num_airs, row_felts, groups, lengths }
     }
 
     /// Number of nonempty segments in each wire row.
@@ -356,12 +346,25 @@ mod tests {
 
     #[test]
     fn scatter_rejects_incomplete_or_unaddressable_rows() {
-        assert!(OodScatterPlan::new(&[0, 0], &[4, 4], &[4, 4], 4).is_ok());
-        assert!(OodScatterPlan::new(&[0, 0], &[4, 4], &[4, 4], 2).is_err());
-        assert!(OodScatterPlan::new(&[0, 0], &[4, 4], &[4, 4], 0).is_err());
-        // An incomplete segment also misaligns the next group's destination.
-        assert!(OodScatterPlan::new(&[2, 0], &[4, 4], &[4, 4], 4).is_err());
-        assert!(OodScatterPlan::new(&[0], &[usize::MAX - 3], &[0], 4).is_err());
-        assert!(OodScatterPlan::new(&[0], &[1 << 31], &[0], 4).is_err());
+        OodScatterPlan::new(&[0, 0], &[4, 4], &[4, 4], 4);
+        for (preprocessed, main, aux, quotient) in [
+            (vec![0, 0], vec![4, 4], vec![4, 4], 2),
+            (vec![0, 0], vec![4, 4], vec![4, 4], 0),
+            // An incomplete segment also misaligns the next group's destination.
+            (vec![2, 0], vec![4, 4], vec![4, 4], 4),
+            (vec![4, 4, 0], vec![4, 4, 4], vec![4, 4, 4], 4),
+            #[cfg(target_pointer_width = "64")]
+            (vec![0], vec![1 << 31], vec![0], 4),
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| OodScatterPlan::new(
+                    &preprocessed,
+                    &main,
+                    &aux,
+                    quotient
+                ))
+                .is_err()
+            );
+        }
     }
 }

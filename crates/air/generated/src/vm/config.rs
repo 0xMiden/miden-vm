@@ -120,8 +120,7 @@ mod tests {
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
     #[test]
     fn relation_digest_matches_current_air() {
-        let circuit =
-            build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
+        let circuit = build_recursive_verifier_ace_circuit();
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
         let digest = miden_stark::config::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
@@ -144,7 +143,6 @@ mod tests {
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
         let expected: Vec<u64> = build_recursive_verifier_ace_circuit()
-            .expect("recursive-verifier ACE circuit")
             .commitment
             .iter()
             .map(Felt::as_canonical_u64)

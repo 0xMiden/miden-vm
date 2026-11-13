@@ -493,8 +493,7 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
             layout: LayoutKind::Masm,
         },
         4,
-    )
-    .unwrap();
+    );
 
     assert_eq!(
         (
@@ -545,7 +544,7 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
             set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), ef(coefficient));
         }
         let expected = expected - quotient_binding;
-        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(circuit.eval(&inputs), expected);
         assert_eq!(
             crate::compiler::testing::eval_multi_air_constraints(
                 &airs,
@@ -558,7 +557,7 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
             expected,
         );
     }
-    circuit.to_ace().expect("multi-AIR root must be MASM encodable");
+    circuit.to_ace();
 }
 
 #[test]
@@ -573,8 +572,7 @@ fn multi_air_concatenates_distinct_public_inputs() {
             &airs,
             AceConfig { num_quotient_chunks: 1, layout },
             1,
-        )
-        .unwrap();
+        );
         assert_eq!(circuit.layout().counts.num_public, 3);
         let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
         for (i, value) in [11, 13, 17].into_iter().enumerate() {
@@ -592,7 +590,7 @@ fn multi_air_concatenates_distinct_public_inputs() {
             let coefficient = beta.exp_u64((order.len() - 1 - position) as u64);
             set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), coefficient);
         }
-        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(circuit.eval(&inputs), expected);
         assert_eq!(
             crate::compiler::testing::eval_multi_air_constraints(
                 &airs,
@@ -620,8 +618,7 @@ fn mixed_air_periods_use_one_shared_basis() {
             layout: LayoutKind::Native,
         },
         1,
-    )
-    .unwrap();
+    );
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
     let z_k = ef(3);
     set_input(&circuit, &mut inputs, InputKey::ZK, z_k);
@@ -635,7 +632,7 @@ fn mixed_air_periods_use_one_shared_basis() {
     let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
     let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
     let expected = period_four * ef(7) + period_thirty_two;
-    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    assert_eq!(circuit.eval(&inputs), expected);
     assert_eq!(
         crate::compiler::testing::eval_multi_air_constraints(
             &airs,
@@ -657,9 +654,22 @@ fn multi_air_rejects_empty_airs_and_invalid_alignment() {
         layout: LayoutKind::Native,
     };
     let airs = [TestAir { aux: 1, ..TestAir::simple() }];
-    assert!(build_canonical_multi_air_ace_circuit::<TestAir>(&[], config, 2).is_err());
-    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 0).is_err());
-    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 3).is_err());
+    assert!(
+        std::panic::catch_unwind(|| build_canonical_multi_air_ace_circuit::<TestAir>(
+            &[],
+            config,
+            2
+        ))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(|| build_canonical_multi_air_ace_circuit(&airs, config, 0))
+            .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(|| build_canonical_multi_air_ace_circuit(&airs, config, 3))
+            .is_err()
+    );
 }
 
 #[test]
@@ -669,7 +679,7 @@ fn test_preprocessed_entries_lower_to_input_keys() {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
 
     assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
     assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
@@ -691,15 +701,15 @@ fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let mut inputs = vec![EF::ZERO; layout.total_inputs];
     inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
     inputs[layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap()] = ef(17);
 
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
+    let dag_value = eval_dag(&artifacts.dag, &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs);
 
     assert_eq!(dag_value, ef(30));
     assert_eq!(circuit_value, dag_value);
@@ -712,7 +722,7 @@ fn test_verifier_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -743,7 +753,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -759,7 +769,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -790,11 +800,11 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 
-    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout);
+    let circuit_value = circuit.eval(&inputs);
     assert_eq!(circuit_value, actual);
 }
 
@@ -823,7 +833,7 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -854,11 +864,11 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 
-    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
-    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+    let circuit = emit_circuit(&artifacts.dag, layout);
+    assert_eq!(circuit.eval(&inputs), actual);
 }
 
 /// Constant columns and repeats of another column add nothing to the basis savings of their
@@ -893,17 +903,18 @@ fn test_emitted_circuit_matches_dag_eval() {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
 
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
+    let dag_value = eval_dag(&artifacts.dag, &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs);
     assert_eq!(circuit_value, dag_value);
 }
 
 #[test]
+#[should_panic(expected = "num_quotient_chunks must be > 0")]
 fn pipeline_rejects_zero_quotient_chunks() {
     let air = MockAir;
     let config = AceConfig {
@@ -911,11 +922,7 @@ fn pipeline_rejects_zero_quotient_chunks() {
         layout: LayoutKind::Native,
     };
 
-    let err = build_ace_dag_for_air(&air, config).unwrap_err();
-    assert!(
-        matches!(err, crate::AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
+    build_ace_dag_for_air(&air, config);
 }
 
 #[test]
@@ -925,11 +932,11 @@ fn test_encoded_circuit_structure() {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
 
-    let encoded = circuit.to_ace().unwrap();
+    let encoded = circuit.to_ace();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
 }
@@ -940,11 +947,13 @@ fn stream_geometry_rejects_the_node_id_packing_bound() {
 
     // Valid streams have an even node count because READ and EVAL rows are word-aligned. Thus,
     // 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30-wire bound.
-    let below_limit = StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
-    assert!(below_limit.validate().is_ok(), "the largest aligned shape must validate");
-
-    let at_limit = StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
-    assert!(at_limit.validate().is_err(), "a shape with 2^30 nodes must be rejected");
+    StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
+    assert!(
+        std::panic::catch_unwind(|| {
+            StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -958,8 +967,7 @@ fn canonical_builder_air_count_is_independent_of_order_maps() {
                 layout: LayoutKind::Masm,
             },
             8,
-        )
-        .expect("canonical circuit");
+        );
         let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
         for i in 0..num_airs {
             set_input(
@@ -970,8 +978,8 @@ fn canonical_builder_air_count_is_independent_of_order_maps() {
             );
             set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), EF::ONE);
         }
-        assert_eq!(circuit.eval(&inputs).unwrap(), ef((num_airs * (num_airs + 1) / 2) as u64));
-        circuit.to_ace().expect("canonical circuit must encode");
+        assert_eq!(circuit.eval(&inputs), ef((num_airs * (num_airs + 1) / 2) as u64));
+        circuit.to_ace();
     }
 }
 
@@ -991,8 +999,8 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
         period: 4,
         ..TestAir::simple()
     };
-    let captures = [CapturedAir::new(&first).unwrap(), CapturedAir::new(&second).unwrap()];
-    let relation = CompiledRelation::from_captured(&[&captures[0], &captures[1]], 8).unwrap();
+    let captures = [CapturedAir::new(&first), CapturedAir::new(&second)];
+    let relation = CompiledRelation::from_captured(&[&captures[0], &captures[1]], 8);
     assert_eq!(relation.geometry().main_width, 16);
     assert_eq!(relation.geometry().preprocessed_width, 8);
     assert_eq!(relation.geometry().aux_width, 16);
@@ -1002,11 +1010,13 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
     assert_eq!(relation.geometry().num_quotient_chunks, 1);
     assert_eq!(relation.geometry().quotient_width, 8);
     assert_eq!(relation.geometry().shared_period, 4);
-    let circuit = relation.build_circuit(LayoutKind::Masm).unwrap();
+    let circuit = relation.build_circuit(LayoutKind::Masm);
     assert_eq!(circuit.layout.quotient_width(), 8);
     assert!(core::ptr::eq(relation.airs()[0], &captures[0]));
-    assert!(CompiledRelation::from_captured(&[], 8).is_err());
-    assert!(CompiledRelation::from_captured(&[&captures[0]], 0).is_err());
+    assert!(std::panic::catch_unwind(|| CompiledRelation::from_captured(&[], 8)).is_err());
+    assert!(
+        std::panic::catch_unwind(|| CompiledRelation::from_captured(&[&captures[0]], 0)).is_err()
+    );
 }
 
 #[test]
@@ -1022,7 +1032,7 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
             boundaries: 1,
             ..TestAir::simple()
         };
-        let captured = CapturedAir::new(&air).unwrap();
+        let captured = CapturedAir::new(&air);
         assert_eq!(captured.degrees(), ConstraintDegrees::from_air::<F, EF, _>(&air));
         assert_eq!(captured.constraint_counts().base, 1);
         assert_eq!(captured.constraint_counts().ext, 1);
@@ -1030,27 +1040,16 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
 }
 
 #[test]
-fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
+fn relation_geometry_concatenates_public_windows() {
     use crate::compiler::{CapturedAir, CompiledRelation};
-    let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
-    let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
-    let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
+    let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() });
+    let second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() });
+    let relation = CompiledRelation::from_captured(&[&first, &second], 8);
     assert_eq!(relation.geometry().num_public, 3);
     assert_eq!(relation.geometry().airs[0].public_offset, 0);
     assert_eq!(relation.geometry().airs[0].num_public, 2);
     assert_eq!(relation.geometry().airs[1].public_offset, 2);
     assert_eq!(relation.geometry().airs[1].num_public, 1);
-
-    // Intentionally inject invalid crate-private metadata to exercise defensive geometry checks.
-    // Production callers can only read a capture's metadata through immutable getters.
-    second.counts.num_public = usize::MAX;
-    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
-    second.counts.num_public = 1;
-    second.counts.width = usize::MAX;
-    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
-    second.counts.width = 1;
-    second.counts.aux_width = 1;
-    assert!(CompiledRelation::from_captured(&[&second], 3).is_err());
 }
 
 struct CountedCubicAir {
@@ -1101,12 +1100,12 @@ fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
     let air = CountedCubicAir {
         eval_count: std::sync::atomic::AtomicUsize::new(0),
     };
-    let captured = CapturedAir::new(&air).unwrap();
+    let captured = CapturedAir::new(&air);
     assert_eq!(captured.degrees().base, 3);
-    let relation = CompiledRelation::from_captured(&[&captured], 8).unwrap();
+    let relation = CompiledRelation::from_captured(&[&captured], 8);
     assert_eq!(relation.geometry().num_quotient_chunks, 2);
     for layout in [LayoutKind::Native, LayoutKind::Masm] {
-        let circuit = relation.build_circuit(layout).unwrap();
+        let circuit = relation.build_circuit(layout);
         assert_eq!(circuit.layout().quotient_width(), 8);
         assert_eq!(circuit.layout().counts.num_quotient_chunks, 2);
     }

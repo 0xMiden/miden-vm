@@ -20,7 +20,7 @@
 //! use miden_air_definitions::vm::MidenAir;
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
-//! let circuit = build_ace_circuit_for_air(&MidenAir::CORE, config)?;
+//! let circuit = build_ace_circuit_for_air(&MidenAir::CORE, config);
 //! ```
 //!
 //! Module map (data flow):
@@ -36,8 +36,6 @@ extern crate alloc;
 #[cfg(all(test, not(feature = "std")))]
 extern crate std;
 
-use alloc::string::String;
-
 /// AIR capture, circuit compilation, and MASM generation.
 #[cfg(feature = "compiler")]
 pub mod compiler;
@@ -50,15 +48,6 @@ mod randomness;
 
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;
-
-/// Errors returned by ACE circuit operations.
-#[derive(Debug, thiserror::Error)]
-pub enum AceError {
-    #[error("invalid input length: expected {expected}, got {got}")]
-    InvalidInputLength { expected: usize, got: usize },
-    #[error("invalid input layout: {message}")]
-    InvalidInputLayout { message: String },
-}
 
 pub use crate::{
     encode::{EncodedCircuit, RecursiveAceCircuit},

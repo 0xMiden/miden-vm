@@ -86,12 +86,12 @@ mod tests {
     fn challenge_dependencies_propagate_through_constants_lifts_and_operations() {
         let mut b = Graph::builder();
         let constant = b.leaf(Leaf::BaseConst(3));
-        let (base_neg, _) = b.op(Class::Base, OpKind::Neg, constant, None);
+        let base_neg = b.op(Class::Base, OpKind::Neg, constant, None);
         let lifted = b.leaf(Leaf::ExtBase(base_neg));
         let ext_constant = b.leaf(Leaf::ExtConst([5, 0]));
         let challenge = b.leaf(Leaf::Challenge(1));
-        let (product, _) = b.op(Class::Ext, OpKind::Mul, lifted, Some(challenge));
-        let (sum, _) = b.op(Class::Ext, OpKind::Add, product, Some(ext_constant));
+        let product = b.op(Class::Ext, OpKind::Mul, lifted, Some(challenge));
+        let sum = b.op(Class::Ext, OpKind::Add, product, Some(ext_constant));
         b.op(Class::Ext, OpKind::Neg, sum, None);
         let graph = b.freeze();
         let dependencies = ChallengeDependencies::new(&graph);
@@ -118,13 +118,13 @@ mod tests {
             Leaf::IsTransition,
         ] {
             let input = b.leaf(leaf);
-            let (left, _) = b.op(Class::Ext, OpKind::Mul, input, Some(challenge));
-            let (right, _) = b.op(Class::Ext, OpKind::Mul, challenge, Some(input));
+            let left = b.op(Class::Ext, OpKind::Mul, input, Some(challenge));
+            let right = b.op(Class::Ext, OpKind::Mul, challenge, Some(input));
             dependent.extend([input, left, right]);
         }
         let public = b.leaf(Leaf::Public(0));
-        let (cancelled, _) = b.op(Class::Base, OpKind::Sub, public, Some(public));
-        let (neg, _) = b.op(Class::Base, OpKind::Neg, cancelled, None);
+        let cancelled = b.op(Class::Base, OpKind::Sub, public, Some(public));
+        let neg = b.op(Class::Base, OpKind::Neg, cancelled, None);
         dependent.extend([cancelled, neg]);
         dependent.push(b.leaf(Leaf::ExtBase(public)));
         let graph = b.freeze();
@@ -139,7 +139,7 @@ mod tests {
         let mut b = Graph::builder();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let ch = b.leaf(Leaf::Challenge(0));
-        let (s, _) = b.op(Class::Base, OpKind::Add, x, Some(x));
+        let s = b.op(Class::Base, OpKind::Add, x, Some(x));
         b.op(Class::Base, OpKind::Add, x, Some(x)); // dedupes: no new node
         let xe = b.leaf(Leaf::ExtBase(s));
         b.op(Class::Ext, OpKind::Mul, xe, Some(ch));

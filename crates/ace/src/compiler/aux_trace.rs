@@ -8,7 +8,7 @@ use std::{fmt::Write as _, format, string::String, vec::Vec};
 use miden_core::WORD_SIZE;
 use miden_crypto::hash::eidos::BLOCK_LEN;
 
-use crate::{AceError, EXT_DEGREE, MAX_ORDER_AIRS};
+use crate::{EXT_DEGREE, MAX_ORDER_AIRS};
 
 /// Relation bindings for a stage with one normalized extension-field LogUp sum per AIR.
 pub struct MasmAuxTraceConfig<'a> {
@@ -32,14 +32,13 @@ pub struct MasmAuxTraceConfig<'a> {
 ///
 /// At runtime, the caller must stage the relation's boundary inputs, validated canonical heights,
 /// and a map from AIR ids to proof positions. The challenger input buffer must be empty.
-/// Counts outside `2..=MAX_ORDER_AIRS` are rejected.
-pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> Result<String, AceError> {
+/// Panics if the AIR count is outside `2..=MAX_ORDER_AIRS`.
+pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> String {
     let n = config.num_airs;
-    if !(2..=MAX_ORDER_AIRS).contains(&n) {
-        return Err(AceError::InvalidInputLayout {
-            message: format!("LogUp staging needs 2..={MAX_ORDER_AIRS} AIRs, got {n}"),
-        });
-    }
+    assert!(
+        (2..=MAX_ORDER_AIRS).contains(&n),
+        "LogUp staging needs 2..={MAX_ORDER_AIRS} AIRs, got {n}"
+    );
     let coordinates = n * EXT_DEGREE;
     let words = coordinates / WORD_SIZE;
 
@@ -111,7 +110,7 @@ pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> Result<String, 
         }
     }
     let correction_alias = config.correction_module.rsplit("::").next().unwrap();
-    Ok(include_str!("templates/aux_trace.masm")
+    include_str!("templates/aux_trace.masm")
         .replace("{{generated_by}}", config.generated_by)
         .replace("{{aliases}}", aliases.trim_end())
         .replace("{{boundary_imports}}", boundary_imports.trim_end())
@@ -125,7 +124,7 @@ pub fn render_masm_aux_trace(config: &MasmAuxTraceConfig<'_>) -> Result<String, 
         .replace("{{buffered_felts}}", &((WORD_SIZE + coordinates) % BLOCK_LEN).to_string())
         .replace("{{scatter}}", scatter.trim_end())
         .replace("{{observe}}", observe.trim_end())
-        .replace("{{weighted}}", weighted.trim_end()))
+        .replace("{{weighted}}", weighted.trim_end())
 }
 
 /// Emits fixed exponentiation: `[x0, x1, ...]` becomes `[(x^exponent)0, (x^exponent)1, ...]`,

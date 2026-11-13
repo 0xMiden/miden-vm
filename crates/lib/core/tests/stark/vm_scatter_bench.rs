@@ -357,8 +357,7 @@ fn packed_records_handle_empty_and_unpaired_dispatch_groups() {
             &geometry.main,
             &geometry.aux,
             geometry.quotient,
-        )
-        .unwrap();
+        );
         check_scatter(geometry, vec![vec![18, 16, 18, 17]], Some(&plan));
     }
 }

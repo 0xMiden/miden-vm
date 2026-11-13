@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = []
-std = ["miden-crypto/std", "thiserror/std"]
+std = ["miden-crypto/std"]
 compiler = [
     "std",
     "dep:miden-core",
@@ -32,7 +32,6 @@ miden-core = { workspace = true, optional = true }
 miden-crypto = { workspace = true }
 miden-stark = { workspace = true, optional = true }
 p3-dft = { workspace = true, optional = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
