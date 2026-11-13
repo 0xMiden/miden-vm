@@ -140,28 +140,34 @@ impl ProcessorError {
         host: &(dyn BaseHost + '_),
         op_idx: Option<usize>,
     ) -> ExecutionError {
-        let mut error = ExecutionError::from(self);
-        if let Some(context) = context {
-            if let Self::Operation(err) = error.kind {
-                error.kind = Self::Operation(err.with_package_debug_info(context.debug_info));
-            }
-            if let Some(location) = context.assembly_location(op_idx) {
-                let (span, source_file) = host.get_label_and_source_file(&location);
-                error.source_span = (span != SourceSpan::UNKNOWN).then_some(span);
-                error.source_file = source_file;
-            }
+        let source =
+            context.map(|context| context.resolve_source(host, op_idx)).unwrap_or_default();
+        self.with_resolved_context(context.map(|context| context.debug_info), source)
+    }
+
+    /// Attaches selected source diagnostics without repeating source lookup.
+    pub(crate) fn with_resolved_context(
+        self,
+        debug_info: Option<&PackageDebugInfo>,
+        (span, source_file): (SourceSpan, Option<Arc<SourceFile>>),
+    ) -> ExecutionError {
+        let kind = match (self, debug_info) {
+            (Self::Operation(err), Some(debug_info)) => {
+                Self::Operation(err.with_package_debug_info(debug_info))
+            },
+            (kind, _) => kind,
+        };
+        ExecutionError {
+            kind,
+            source_span: (span != SourceSpan::UNKNOWN).then_some(span),
+            source_file,
         }
-        error
     }
 }
 
 impl From<ProcessorError> for ExecutionError {
     fn from(kind: ProcessorError) -> Self {
-        Self {
-            kind,
-            source_span: None,
-            source_file: None,
-        }
+        kind.with_resolved_context(None, (SourceSpan::UNKNOWN, None))
     }
 }
 
@@ -410,6 +416,18 @@ impl<'a> PackageSourceDebugContext<'a> {
             .location_idx
             .into_option()
             .and_then(|idx| self.debug_info.get_location(idx))
+    }
+
+    /// Resolves the source independently of final error construction so callers can select a
+    /// fallback when the host cannot provide the referenced file.
+    pub(crate) fn resolve_source(
+        &self,
+        host: &(dyn BaseHost + '_),
+        op_idx: Option<usize>,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        self.assembly_location(op_idx)
+            .map(|location| host.get_label_and_source_file(&location))
+            .unwrap_or_default()
     }
 }
 

@@ -6,10 +6,11 @@ use crate::{
     errors::{OperationError, PackageSourceDebugContext},
 };
 
-/// Chooses the failing external occurrence or its caller before resolving diagnostics once.
+/// Selects resolved source diagnostics before constructing the execution error.
 ///
-/// An external reference may have no source location of its own. For resolution failures, the
-/// pending caller continuation provides a useful fallback within the same package.
+/// An external reference may have no location or refer to a source file unavailable to the host.
+/// For resolution failures, the pending caller continuation provides a fallback in the same
+/// package.
 pub(super) fn load_error_with_context<F>(
     err: ProcessorError,
     source_node_id: Option<DebugSourceNodeId>,
@@ -19,14 +20,14 @@ pub(super) fn load_error_with_context<F>(
 ) -> ExecutionError {
     let context = package_debug_info
         .map(|debug_info| PackageSourceDebugContext::new(debug_info, source_node_id));
+    let mut source = context.map(|context| context.resolve_source(host, None)).unwrap_or_default();
     let is_resolution_error = matches!(
         err,
         ProcessorError::ProcedureNotFound { .. }
             | ProcessorError::MastForestLoad { .. }
             | ProcessorError::Operation(OperationError::MalformedMastForestInHost { .. })
     );
-    let has_location = context.and_then(|context| context.assembly_location(None)).is_some();
-    let context = if is_resolution_error && !has_location {
+    if is_resolution_error && source.1.is_none() {
         let caller = continuation_stack.peek_continuation_with_source_node_id().and_then(
             |(continuation, source_node_id)| match continuation {
                 Continuation::FinishCall(_)
@@ -36,14 +37,13 @@ pub(super) fn load_error_with_context<F>(
                 _ => None,
             },
         );
-        match (package_debug_info, caller) {
-            (Some(debug_info), Some(source_node_id)) => {
-                Some(PackageSourceDebugContext::new(debug_info, Some(source_node_id)))
-            },
-            _ => context,
+        if let (Some(debug_info), Some(source_node_id)) = (package_debug_info, caller) {
+            let caller_source = PackageSourceDebugContext::new(debug_info, Some(source_node_id))
+                .resolve_source(host, None);
+            if caller_source.1.is_some() {
+                source = caller_source;
+            }
         }
-    } else {
-        context
-    };
-    err.with_context(context, host, None)
+    }
+    err.with_resolved_context(package_debug_info, source)
 }
