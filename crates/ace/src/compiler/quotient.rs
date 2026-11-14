@@ -5,8 +5,8 @@
 //! aligned.
 
 use {
-    miden_crypto::field::ExtensionField,
-    miden_crypto::field::Field,
+    miden_core::field::ExtensionField,
+    miden_core::field::Field,
 };
 
 use {

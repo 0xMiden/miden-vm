@@ -5,7 +5,7 @@
 
 use core::mem::size_of;
 
-use p3_field::Field;
+use crate::field::Field;
 
 use {
     super::Alignable,
@@ -231,7 +231,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use p3_bn254::Bn254;
-    use p3_field::Field;
+    use crate::field::Field;
     use p3_goldilocks::Goldilocks;
     use p3_mersenne_31::Mersenne31;
 

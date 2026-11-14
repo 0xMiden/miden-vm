@@ -102,7 +102,7 @@ mod tests {
         miden_core::crypto::hash::Eidos,
         miden_core::field::QuadFelt,
     };
-    use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;
     use {

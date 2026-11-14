@@ -5,8 +5,8 @@ use {
     miden_core::field::QuadFelt,
 };
 use {
-    miden_crypto::field::Field,
-    miden_crypto::field::PrimeCharacteristicRing,
+    miden_core::field::Field,
+    miden_core::field::PrimeCharacteristicRing,
 };
 use proptest::prelude::*;
 

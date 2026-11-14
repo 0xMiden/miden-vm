@@ -8,7 +8,7 @@ use {
 };
 
 use {
-    miden_crypto::field::PrimeField64,
+    crate::field::PrimeField64,
     miden_crypto::utils::ByteReader,
     miden_crypto::utils::ByteWriter,
     miden_crypto::utils::Deserializable,

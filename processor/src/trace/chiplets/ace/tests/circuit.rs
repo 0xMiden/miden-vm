@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use super::*;
 use {
     miden_core::Felt,
-    crate::field::QuadFelt,
+    miden_core::field::QuadFelt,
 };
 
 /// A `Circuit` is a DAG representing a multivariate polynomial over its inputs.

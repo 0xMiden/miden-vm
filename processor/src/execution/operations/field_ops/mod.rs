@@ -2,7 +2,7 @@ use {
     miden_core::Felt,
     miden_core::ONE,
     miden_core::ZERO,
-    crate::field::Field,
+    miden_core::field::Field,
     crate::operation::BinaryValueErrorContext,
     crate::operation::OperationError,
     crate::processor::Processor,

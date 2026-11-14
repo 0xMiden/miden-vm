@@ -8,8 +8,8 @@
 //! the node-for-node differential retires with it. Do not add production callers.
 
 use {
-    miden_crypto::field::ExtensionField,
-    miden_crypto::field::Field,
+    miden_core::field::ExtensionField,
+    miden_core::field::Field,
 };
 use {
     miden_stark::air::symbolic::BaseEntry,
