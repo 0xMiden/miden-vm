@@ -13,8 +13,8 @@ use {
 };
 #[cfg(any(test, feature = "compiler"))]
 use {
-    p3_security::budget::AirShape,
-    p3_security::budget::LookupShape,
+    miden_stark::security::AirShape,
+    miden_stark::security::LookupShape,
 };
 
 #[cfg(any(test, feature = "compiler"))]

@@ -10,7 +10,7 @@ use {
     miden_ace::compiler::LayoutKind,
 };
 use miden_core::field::QuadFelt;
-use p3_security::budget::AirShape;
+use miden_stark::security::AirShape;
 
 use {
     crate::precompiles::ace::PvmRecursiveAceCircuit,

@@ -17,7 +17,7 @@ use {
 
 use {
     crate::vm::Felt,
-    crate::vm::LiftedAir,
+    miden_stark::air::LiftedAir,
 };
 
 /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
@@ -29,7 +29,7 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
     use miden_stark::lookup::build_lookup_fractions;
 
     use {
-        crate::vm::BaseAir,
+        miden_stark::air::BaseAir,
         crate::vm::MidenAir,
         crate::vm::logup::BusId,
         crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
@@ -87,7 +87,7 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
 #[test]
 #[should_panic(expected = "auxiliary trace width must accommodate all LogUp columns")]
 fn logup_rejects_width_smaller_than_lookup_columns() {
-    use crate::vm::BaseAir;
+    use miden_stark::air::BaseAir;
 
     let air = crate::vm::MidenAir::EIDOS_COMPRESSION;
     let main = RowMajorMatrix::new(Felt::zero_vec(32 * air.width()), air.width());
@@ -99,7 +99,7 @@ fn logup_rejects_width_smaller_than_lookup_columns() {
 
 #[test]
 fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
-    use crate::vm::BaseAir;
+    use miden_stark::air::BaseAir;
 
     let air = crate::vm::MidenAir::AND8_LOOKUP;
     let main = RowMajorMatrix::new(Felt::zero_vec(8 * air.width()), air.width());

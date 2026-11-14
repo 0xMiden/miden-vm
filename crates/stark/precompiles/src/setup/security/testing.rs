@@ -17,11 +17,11 @@ use {
 
 use {
     super::AIR_SHAPE,
-    super::InstanceShape,
-    super::LookupShape,
-    super::ProtocolParams,
-    super::SecurityReport,
-    super::SecurityTerm,
+    miden_stark::security::InstanceShape,
+    miden_stark::security::LookupShape,
+    miden_stark::security::ProtocolParams,
+    miden_stark::security::SecurityReport,
+    miden_stark::security::SecurityTerm,
 };
 
 /// Lookup shape generated from the authored AIR metadata.

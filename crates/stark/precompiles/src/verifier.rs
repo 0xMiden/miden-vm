@@ -39,7 +39,7 @@ use {
     crate::setup::config::PRECOMPILE_RELATION_DIGEST,
     crate::setup::config::eidos_config,
     crate::setup::security,
-    crate::setup::security::ProofSecurityParameters,
+    miden_stark::security::ProofSecurityParameters,
 };
 
 /// Verifies a precompile STARK against an explicit deferred root and returns its authenticated
