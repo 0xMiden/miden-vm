@@ -514,7 +514,7 @@ impl Memory {
             .inner()
             .get(&addr)
             .and_then(|accesses| accesses.last())
-            .map(|access| access.word()))
+            .map(super::segment::MemorySegmentAccess::word))
     }
 
     fn get_state_at(&self, ctx: ContextId, clk: RowIndex) -> Vec<(MemoryAddress, Felt)> {
