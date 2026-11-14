@@ -43,7 +43,7 @@ use {
     miden_processor::DefaultHost,
     miden_processor::FastProcessor,
     miden_core::program::StackInputs,
-    miden_processor::trace::VmTrace,
+    miden_air_definitions::vm::VmTrace,
     miden_processor::trace::chiplets::build_external_eidos_compression_traces,
 };
 use {

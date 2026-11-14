@@ -47,6 +47,7 @@ use {
     crate::FastProcessor,
     crate::HostLibrary,
     crate::trace::trace_state::MemoryReadsReplay,
+    miden_air_definitions::vm::VmTrace,
 };
 
 const DEFAULT_STACK: &[Felt] =

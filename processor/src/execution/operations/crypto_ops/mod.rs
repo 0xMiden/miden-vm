@@ -21,7 +21,7 @@ use {
     miden_core::Felt,
     crate::MemoryError,
     miden_core::ONE,
-    crate::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
     miden_core::Word,
     miden_core::ZERO,
     crate::errors::CryptoError,

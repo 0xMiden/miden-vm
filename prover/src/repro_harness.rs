@@ -22,7 +22,7 @@ use {
     miden_core::utils::Matrix,
     miden_core::utils::RowMajorMatrix,
 };
-use miden_processor::trace::VmTrace;
+use miden_air_definitions::vm::VmTrace;
 use {
     miden_verifier::VerificationError,
     miden_verifier::VerificationOutcome,

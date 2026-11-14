@@ -50,7 +50,7 @@ use {
 };
 
 use {
-    super::VmTrace,
+    miden_air_definitions::vm::VmTrace,
     super::build_trace_from_ops,
     super::build_trace_from_program,
     super::build_trace_from_program_with_stack,
@@ -58,7 +58,7 @@ use {
     super::lookup_harness::InteractionLog,
 };
 use {
-    crate::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
     miden_core::program::StackInputs,
 };
 

@@ -388,7 +388,7 @@ mod tests {
         let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air_definitions::vm::NUM_PUBLIC_VALUES])],
             vec![],
         )
         .expect("valid Miden statement shape");

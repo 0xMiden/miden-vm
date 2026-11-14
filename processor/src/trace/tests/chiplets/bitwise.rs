@@ -21,7 +21,7 @@ use {
     super::super::lookup_harness::Expectations,
     super::super::lookup_harness::InteractionLog,
 };
-use crate::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 
 #[test]
 fn bitwise_chiplet_bus_emits_per_request_row() {

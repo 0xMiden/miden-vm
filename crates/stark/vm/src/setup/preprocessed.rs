@@ -63,7 +63,7 @@ mod tests {
     use std::sync::Arc;
 
     use {
-        miden_air::vm::NUM_PUBLIC_VALUES,
+        miden_air_definitions::vm::NUM_PUBLIC_VALUES,
         miden_air::vm::config as air_config,
     };
     use miden_stark::pcs::PcsParams;

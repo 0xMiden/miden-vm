@@ -54,7 +54,7 @@ fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     Program::new(mast_forest.into(), root)
 }
 
-fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
+fn execute(program: &Program, stack: &[u64]) -> miden_air_definitions::vm::VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())

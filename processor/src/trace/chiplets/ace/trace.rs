@@ -574,7 +574,7 @@ mod arbitrary {
         super::ReadNode,
         super::WireBus,
     };
-    use crate::RowIndex;
+    use miden_air_definitions::vm::trace::RowIndex;
 
     fn quad() -> impl Strategy<Value = QuadFelt> {
         (any::<Felt>(), any::<Felt>()).prop_map(|(a, b)| QuadFelt::new([a, b]))

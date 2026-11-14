@@ -69,7 +69,7 @@ use miden_vm_stark::setup::config::eidos_config;
 
 use {
     miden_core::Felt,
-    super::VmTrace,
+    miden_air_definitions::vm::VmTrace,
     super::build_trace_from_ops,
     super::build_trace_from_ops_with_inputs,
     super::lookup_harness::InteractionLog,

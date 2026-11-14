@@ -42,7 +42,7 @@ use {
     super::super::lookup_harness::Expectations,
     super::super::lookup_harness::InteractionLog,
 };
-use crate::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 
 const FOUR: Felt = Felt::new_unchecked(4);
 const TWO: Felt = Felt::new_unchecked(2);

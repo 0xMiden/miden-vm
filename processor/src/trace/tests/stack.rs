@@ -23,7 +23,7 @@ use {
     super::lookup_harness::Expectations,
     super::lookup_harness::InteractionLog,
 };
-use crate::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 
 #[test]
 fn stack_overflow_bus_emits_per_interaction_row() {

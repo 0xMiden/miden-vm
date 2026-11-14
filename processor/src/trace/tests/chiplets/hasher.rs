@@ -60,7 +60,7 @@ use {
 };
 use {
     miden_core::advice::AdviceInputs,
-    crate::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
     miden_core::utils::ToElements,
 };
 
