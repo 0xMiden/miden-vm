@@ -28,12 +28,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(node_id), current_forest, None)?;
 
     let condition = state.processor.stack().get(0);
 
@@ -106,12 +101,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(node_id), current_forest, None)?;
 
     let condition = state.processor.stack().get(0);
 
@@ -159,12 +149,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishSplit(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::FinishSplit(node_id), current_forest, None)?;
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

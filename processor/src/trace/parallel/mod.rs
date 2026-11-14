@@ -373,7 +373,7 @@ fn generate_core_trace_row_major(
                 &mut tracer,
             )?;
 
-            tracer.into_final_state()
+            Ok(tracer.into_final_state())
         })
         .collect();
     let fragment_results = fragment_results?;

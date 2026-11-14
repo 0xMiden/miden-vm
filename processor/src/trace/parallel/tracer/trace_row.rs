@@ -20,9 +20,9 @@ use miden_core::{
 };
 
 use super::{ExecutionContextInfo, StackState, SystemState, get_digest_in_forest};
-use crate::trace::{
-    TraceGenerationError,
-    parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
+use crate::{
+    ProcessorError,
+    trace::parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
 };
 
 // DECODER ROW
@@ -74,7 +74,7 @@ impl DecoderRow {
         op_batch: &OpBatch,
         addr: Felt,
         group_count: Felt,
-    ) -> Result<Self, TraceGenerationError> {
+    ) -> Result<Self, ProcessorError> {
         let opcode = match start_op {
             BasicBlockStartOperation::Span => opcodes::SPAN,
             BasicBlockStartOperation::Respan => opcodes::RESPAN,
@@ -150,15 +150,12 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         basic_block_node: &BasicBlockNode,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         let group_count_for_block = Felt::from_u32(basic_block_node.num_op_groups() as u32);
-        let first_op_batch =
-            basic_block_node
-                .op_batches()
-                .first()
-                .ok_or(TraceGenerationError::InvalidReplay(
-                    "basic block should have at least one op batch",
-                ))?;
+        let first_op_batch = basic_block_node
+            .op_batches()
+            .first()
+            .ok_or(ProcessorError::Internal("basic block should have at least one op batch"))?;
 
         let decoder_row = DecoderRow::new_basic_block_batch(
             BasicBlockStartOperation::Span,
@@ -180,7 +177,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         basic_block_node: &BasicBlockNode,
         hasher_state_second_word: Word,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         let ended_node_addr = self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -207,7 +204,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         op_batch: &OpBatch,
         basic_block_context: &mut BasicBlockContext,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // Add RESPAN trace row
         {
             let decoder_row = DecoderRow::new_basic_block_batch(
@@ -272,7 +269,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         call_node: &CallNode,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
         // child)
@@ -351,7 +348,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         join_node: &JoinNode,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // Get the child hashes for the hasher state
         let child1_hash: Word = get_digest_in_forest(current_forest, join_node.first())?;
         let child2_hash: Word = get_digest_in_forest(current_forest, join_node.second())?;
@@ -376,7 +373,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         loop_node: &LoopNode,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
         let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
@@ -400,7 +397,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         loop_node: &LoopNode,
         current_forest: &Arc<SparseMastForest>,
         current_addr: Felt,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // For REPEAT operations, the hasher state in start operations contains the loop body hash
         // in the first half.
         let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
@@ -426,7 +423,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         split_node: &SplitNode,
         current_forest: &Arc<SparseMastForest>,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // Get the child hashes for the hasher state
         let on_true_hash: Word = get_digest_in_forest(current_forest, split_node.on_true())?;
         let on_false_hash: Word = get_digest_in_forest(current_forest, split_node.on_false())?;
@@ -450,7 +447,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         node_digest: Word,
         hasher_state_second_word: Word,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         // Pop the block from stack and use its info for END operations
         let ended_node_addr = self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
@@ -568,7 +565,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 /// Returns the operation-batch encoding for the specified group count.
 fn get_op_batch_encoding(
     num_groups_left: Felt,
-) -> Result<[Felt; NUM_OP_BATCH_ENCODING_COLS], TraceGenerationError> {
+) -> Result<[Felt; NUM_OP_BATCH_ENCODING_COLS], ProcessorError> {
     use miden_air_definitions::vm::trace::decoder::{
         OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     };
@@ -580,7 +577,7 @@ fn get_op_batch_encoding(
         4 => Ok(OP_BATCH_4_GROUPS),
         2 => Ok(OP_BATCH_2_GROUPS),
         1 => Ok(OP_BATCH_1_GROUPS),
-        _ => Err(TraceGenerationError::InvalidReplay(
+        _ => Err(ProcessorError::Internal(
             "invalid number of groups in a batch, must be 1, 2, 4, or 8",
         )),
     }

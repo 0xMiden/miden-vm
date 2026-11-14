@@ -34,12 +34,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     state.processor.stack_mut().start_context();
     state.processor.system_mut().save_call_state();
@@ -121,12 +116,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     state.processor.stack_mut().start_context();
     state.processor.system_mut().save_call_state();
@@ -195,12 +185,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishCall(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::FinishCall(node_id), current_forest, None)?;
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.

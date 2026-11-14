@@ -104,6 +104,35 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     pub fn error_with_current_context(&self, err: impl Into<ProcessorError>) -> ExecutionError {
         err.into().with_context(self.package_source_context(), self.host, None)
     }
+
+    /// Runs the start hook before instruction mutations and resolves any failure at this boundary.
+    ///
+    /// Basic-block operations supply their block-relative index; structural node hooks use the
+    /// source occurrence's first assembly operation.
+    #[inline(always)]
+    fn start_clock_cycle(
+        &mut self,
+        continuation: Continuation<F>,
+        current_forest: &F,
+        op_idx: Option<usize>,
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        T: Tracer<Processor = P, Forest = F>,
+    {
+        match self.tracer.start_clock_cycle(
+            self.processor,
+            continuation,
+            self.continuation_stack,
+            current_forest,
+        ) {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => ControlFlow::Break(BreakReason::Err(err.with_context(
+                self.package_source_context(),
+                self.host,
+                op_idx,
+            ))),
+        }
+    }
 }
 
 // MAIN EXECUTION FUNCTION

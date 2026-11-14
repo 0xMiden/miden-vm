@@ -749,8 +749,9 @@ impl Tracer for NoopTracer {
         _continuation: Continuation<Arc<MastForest>>,
         _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ProcessorError> {
         // do nothing
+        Ok(())
     }
 
     #[inline(always)]

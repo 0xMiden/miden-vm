@@ -34,12 +34,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
@@ -164,12 +161,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
@@ -332,13 +326,8 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    state.start_clock_cycle(Continuation::FinishDyn(node_id), current_forest, None)?;
     state.inline_call_contexts.pop();
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishDyn(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(node_id).and_then(|node| match node {

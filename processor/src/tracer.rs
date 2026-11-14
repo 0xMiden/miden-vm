@@ -81,13 +81,18 @@ pub(crate) trait Tracer {
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
+    ///
+    /// # Errors
+    /// Returning an error stops execution before the processor mutates state for this cycle.
+    /// No in-cycle or finalization hooks are called for the failed cycle. The tracer may already
+    /// have changed its own state; execution must not resume after a tracing error.
     fn start_clock_cycle(
         &mut self,
         processor: &Self::Processor,
         continuation: Continuation<Self::Forest>,
         continuation_stack: &ContinuationStack<Self::Forest>,
         current_forest: &Self::Forest,
-    );
+    ) -> Result<(), ProcessorError>;
 
     /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
     /// clock, and after all mutations to the processor state have been applied.
@@ -97,6 +102,10 @@ pub(crate) trait Tracer {
     ///
     /// The `current_forest` parameter is guaranteed to be the same as the one passed to
     /// [Tracer::start_clock_cycle] for the same clock cycle.
+    ///
+    /// # Errors
+    /// Returning an error stops execution after the processor's mutations for this cycle, before
+    /// its clock is incremented. Execution must not resume after a tracing error.
     fn finalize_clock_cycle(
         &mut self,
         processor: &Self::Processor,

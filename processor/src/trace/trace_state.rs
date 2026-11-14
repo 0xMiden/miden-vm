@@ -14,7 +14,7 @@ use miden_core::{
 
 use super::TraceGenerationError;
 use crate::{
-    AceError, ContextId, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    AceError, ContextId, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProcessorError, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -159,7 +159,7 @@ impl DecoderState {
         &mut self,
         block_address_replay: &mut BlockAddressReplay,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> Result<(), TraceGenerationError> {
+    ) -> Result<(), ProcessorError> {
         self.current_addr = block_address_replay.replay_block_address()?;
         self.parent_addr = block_stack_replay.replay_node_start_parent_addr()?;
         Ok(())
@@ -171,7 +171,7 @@ impl DecoderState {
     pub fn replay_node_end(
         &mut self,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> Result<Felt, TraceGenerationError> {
+    ) -> Result<Felt, ProcessorError> {
         let node_end_data = block_stack_replay.replay_node_end()?;
 
         self.current_addr = node_end_data.prev_addr;
@@ -405,17 +405,17 @@ impl BlockStackReplay {
     }
 
     /// Replays the node's parent address
-    pub fn replay_node_start_parent_addr(&mut self) -> Result<Felt, TraceGenerationError> {
+    pub fn replay_node_start_parent_addr(&mut self) -> Result<Felt, ProcessorError> {
         self.node_start_parent_addr
             .pop_front()
-            .ok_or(TraceGenerationError::InvalidReplay("no node start parent address recorded"))
+            .ok_or(ProcessorError::Internal("no node start parent address recorded"))
     }
 
     /// Replays the data needed to recover the state on an END operation.
-    pub fn replay_node_end(&mut self) -> Result<NodeEndData, TraceGenerationError> {
+    pub fn replay_node_end(&mut self) -> Result<NodeEndData, ProcessorError> {
         self.node_end
             .pop_front()
-            .ok_or(TraceGenerationError::InvalidReplay("no node address and flags recorded"))
+            .ok_or(ProcessorError::Internal("no node address and flags recorded"))
     }
 }
 
@@ -1092,10 +1092,10 @@ impl BlockAddressReplay {
 
     /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
     /// the pre-recorded address
-    pub fn replay_block_address(&mut self) -> Result<Felt, TraceGenerationError> {
+    pub fn replay_block_address(&mut self) -> Result<Felt, ProcessorError> {
         self.block_addresses
             .pop_front()
-            .ok_or(TraceGenerationError::InvalidReplay("no block address operations recorded"))
+            .ok_or(ProcessorError::Internal("no block address operations recorded"))
     }
 }
 

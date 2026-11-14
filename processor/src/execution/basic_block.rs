@@ -34,12 +34,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     // Finalize the clock cycle corresponding to the SPAN operation.
     let source_node_id = state.current_source_node_id();
@@ -147,12 +144,13 @@ where
     {
         {
             // Start clock cycle corresponding to the RESPAN operation before the batch.
-            state.tracer.start_clock_cycle(
-                state.processor,
-                Continuation::Respan { node_id, batch_index },
-                state.continuation_stack,
-                current_forest,
-            );
+            state
+                .start_clock_cycle(
+                    Continuation::Respan { node_id, batch_index },
+                    current_forest,
+                    Some(batch_offset_in_block),
+                )
+                .map_break(InternalBreakReason::from)?;
 
             // Finalize the clock cycle corresponding to the RESPAN operation.
             //
@@ -208,12 +206,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishBasicBlock(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::FinishBasicBlock(node_id), current_forest, None)?;
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
@@ -258,12 +251,13 @@ where
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
         let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .start_clock_cycle(
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
+                current_forest,
+                Some(op_idx_in_block),
+            )
+            .map_break(InternalBreakReason::from)?;
 
         // Execute the operation.
         let operation_helpers = match op {

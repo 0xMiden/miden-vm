@@ -34,12 +34,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     // Unconditionally enter the loop body for the first iteration.
     //
@@ -85,12 +80,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     // Unconditionally enter the loop body for the first iteration.
     //
@@ -139,12 +129,7 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // Drop the condition from the stack.
         if let Err(err) = state.processor.stack_mut().decrement_size() {
@@ -176,12 +161,7 @@ where
         )
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // The END operation drops the condition from the stack; the loop body always leaves the
         // condition there.
@@ -233,12 +213,7 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // Drop the condition from the stack.
         if let Err(err) = state.processor.stack_mut().decrement_size() {
@@ -258,12 +233,7 @@ where
         )
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // The END operation drops the condition from the stack; the loop body always leaves the
         // condition there.

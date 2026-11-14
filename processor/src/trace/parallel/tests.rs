@@ -968,6 +968,85 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
     );
 }
 
+#[rstest]
+#[case::start_hook(true)]
+#[case::finalize_hook(false)]
+fn replay_tracer_hook_failure_stops_at_original_error(#[case] failing_start: bool) {
+    let (program, stack_inputs, fragment_size, fragment_index, expected_reason) = if failing_start {
+        (
+            dyncall_program(),
+            dyn_target_proc_hash(),
+            12,
+            1,
+            "stack depth is above minimum, but no corresponding overflow pop in the replay",
+        )
+    } else {
+        (
+            basic_block_program_small(),
+            DEFAULT_STACK,
+            4,
+            0,
+            "no block address operations recorded",
+        )
+    };
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(fragment_size)
+            .unwrap(),
+    )
+    .unwrap();
+    let mut witness = processor
+        .execute_for_proving_sync(&program, &mut DefaultHost::default())
+        .unwrap()
+        .into_parts()
+        .0;
+    let replay = witness.trace_replay_mut();
+    let mut fragment = replay.core_trace_contexts.remove(fragment_index);
+    if failing_start {
+        // DYNCALL's start hook needs the overflow pop before execution reads the callee hash.
+        // Both are absent: continuing after the hook failure would replace its original reason.
+        fragment.replay.stack_overflow = Default::default();
+        fragment.replay.memory_reads = Default::default();
+    } else {
+        // The first JOIN's finalizer needs its recorded block address. If replay continues,
+        // the PUSH in the following basic block exceeds the replay stack limit below.
+        fragment.replay.block_address = Default::default();
+    }
+    let mut rows = Felt::zero_vec(fragment_size * CORE_STORAGE_WIDTH);
+    let writer =
+        RowMajorTraceWriter::with_stride(&mut rows, CORE_STORAGE_WIDTH, CORE_STORAGE_WIDTH);
+    let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
+        split_trace_fragment_context(
+            fragment,
+            writer,
+            fragment_size,
+            &replay.mast_forest_store,
+            MIN_STACK_DEPTH,
+        )
+        .unwrap();
+    let initial_clock = processor.system.clk;
+    let initial_stack = processor.stack.stack_top;
+
+    let result = processor.execute(
+        &mut continuation_stack,
+        &mut current_forest,
+        program.kernel(),
+        &mut tracer,
+    );
+
+    match result {
+        Err(TraceGenerationError::InvalidReplay(reason)) => assert_eq!(reason, expected_reason),
+        other => panic!("expected the original replay hook failure, got {other:?}"),
+    }
+    assert_eq!(processor.system.clk, initial_clock, "a failed hook must not advance the clock");
+    assert_eq!(tracer.into_final_state().num_rows_written, 0);
+    if failing_start {
+        assert_eq!(processor.stack.stack_top, initial_stack);
+    }
+}
+
 /// Verifies that `build_trace` returns `Err` (instead of panicking) when the hasher chiplet replay
 /// contains a `HashBasicBlock` entry whose `MastNodeId` does not exist in the associated
 /// `MastForest`.

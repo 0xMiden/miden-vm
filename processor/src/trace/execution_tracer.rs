@@ -739,7 +739,7 @@ impl Tracer for ExecutionTracer {
         continuation: Continuation<Arc<MastForest>>,
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
         current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ProcessorError> {
         // check if we need to start a new trace state
         if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
@@ -873,6 +873,7 @@ impl Tracer for ExecutionTracer {
                 panic!("EnterForest continuations are guaranteed not to be passed here")
             },
         }
+        Ok(())
     }
 
     #[inline(always)]

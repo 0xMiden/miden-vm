@@ -8,11 +8,12 @@
 
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
-- [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
+- [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ProcessorError::MastForestLoad`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
 
 - Updated development and coverage to Rust 1.100 with Cargo dependency checks enforced in CI. Reduced dependencies in builds with fewer features while keeping MSRV at 1.96.1 ([#4234](https://github.com/0xMiden/miden-vm/pull/4234)).
 - Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
 - Added workspace test coverage collection with `make coverage` and CI reports on `next`/`main` pushes and manual runs ([#4218](https://github.com/0xMiden/miden-vm/pull/4218)).
+- [BREAKING] Separated context-free `ProcessorError` from `ExecutionError` source diagnostics. Trace building returns `TraceGenerationError`, and execution with trace building returns `ExecutionTraceError`. `prove_sync` returns `ProverError` with typed execution, trace, VM-proof, and precompile-proof causes. Inspect processor failures with `kind()` or `into_kind()`, and use `ProcessorError::with_context` instead of error-specific context helpers. Host registration and library loading return `HostError` directly. `Tracer::start_clock_cycle` now returns `Result<(), ProcessorError>`; clock-hook failures abort execution immediately.
 
 #### Fixes
 
@@ -38,7 +39,6 @@
 
 #### Changes
 
-- [BREAKING] Separated context-free `ProcessorError` from `ExecutionError` source diagnostics. Trace building returns `TraceGenerationError`, and execution with trace building returns `ExecutionTraceError`. `prove_sync` returns `ProverError` with typed execution, trace, VM-proof, and precompile-proof causes. Inspect processor failures with `kind()` or `into_kind()`, and use `ProcessorError::with_context` instead of error-specific context helpers. Host registration and library loading return `HostError` directly.
 - [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS` ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).

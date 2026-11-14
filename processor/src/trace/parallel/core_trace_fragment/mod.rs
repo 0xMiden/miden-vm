@@ -1,7 +1,7 @@
 use miden_air_definitions::vm::trace::decoder::NUM_OP_BITS;
 use miden_core::{Felt, mast::BasicBlockNode, operations::opcodes};
 
-use crate::trace::TraceGenerationError;
+use crate::ProcessorError;
 
 #[cfg(test)]
 mod tests;
@@ -26,11 +26,11 @@ impl BasicBlockContext {
     pub(crate) fn new_at_batch_start(
         basic_block_node: &BasicBlockNode,
         batch_index: usize,
-    ) -> Result<Self, TraceGenerationError> {
+    ) -> Result<Self, ProcessorError> {
         let current_batch = basic_block_node
             .op_batches()
             .get(batch_index)
-            .ok_or(TraceGenerationError::InvalidReplay("batch index out of bounds"))?;
+            .ok_or(ProcessorError::Internal("batch index out of bounds"))?;
 
         Ok(Self {
             current_op_group: current_batch.groups()[0],
@@ -60,14 +60,14 @@ impl BasicBlockContext {
         basic_block_node: &BasicBlockNode,
         batch_index: usize,
         op_idx_in_batch: usize,
-    ) -> Result<Self, TraceGenerationError> {
+    ) -> Result<Self, ProcessorError> {
         let op_batches = basic_block_node.op_batches();
         let current_batch = op_batches
             .get(batch_index)
-            .ok_or(TraceGenerationError::InvalidReplay("batch index out of bounds"))?;
+            .ok_or(ProcessorError::Internal("batch index out of bounds"))?;
         let (current_op_group_idx, op_idx_in_group) = current_batch
             .op_idx_in_batch_to_group(op_idx_in_batch)
-            .ok_or(TraceGenerationError::InvalidReplay("invalid op index in batch"))?;
+            .ok_or(ProcessorError::Internal("invalid op index in batch"))?;
 
         let current_op_group = {
             // Note: this here relies on NOOP's opcode to be 0, since `current_op_group_idx` could
@@ -78,7 +78,7 @@ impl BasicBlockContext {
             let current_op_group = *current_batch
                 .groups()
                 .get(current_op_group_idx)
-                .ok_or(TraceGenerationError::InvalidReplay("op group index out of bounds"))?;
+                .ok_or(ProcessorError::Internal("op group index out of bounds"))?;
 
             // Shift out all operations that are already executed in this group.
             //
@@ -108,7 +108,7 @@ impl BasicBlockContext {
                 let mut current_op_group = current_batch
                     .groups()
                     .get(current_op_group_idx)
-                    .ok_or(TraceGenerationError::InvalidReplay("op group index out of bounds"))?
+                    .ok_or(ProcessorError::Internal("op group index out of bounds"))?
                     .as_canonical_u64();
                 for _ in 0..op_idx_in_group {
                     let current_op = (current_op_group & 0b1111111) as u8;
@@ -125,9 +125,9 @@ impl BasicBlockContext {
             // *after* being done with the current group)
             groups_consumed += current_op_group_idx + 1;
 
-            let groups_left = total_groups.checked_sub(groups_consumed).ok_or(
-                TraceGenerationError::InvalidReplay("groups consumed exceeds total groups"),
-            )?;
+            let groups_left = total_groups
+                .checked_sub(groups_consumed)
+                .ok_or(ProcessorError::Internal("groups consumed exceeds total groups"))?;
             Felt::from_u32(groups_left as u32)
         };
 
