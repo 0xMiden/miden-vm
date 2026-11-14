@@ -1,17 +1,32 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use {
+    alloc::collections::BTreeSet,
+    alloc::vec::Vec,
+};
 
-use rand::{RngExt, prelude::IteratorRandom, rng};
+use {
+    rand::RngExt,
+    rand::prelude::IteratorRandom,
+    rand::rng,
+};
 
-use super::{IN_MEMORY_DEPTH, MemoryStorage, SmtStorage, SmtStorageReader};
-use crate::{
-    EMPTY_WORD, Felt, ONE, Word,
-    merkle::{
-        InnerNodeInfo,
-        smt::{
-            LargeSmt, LeafIndex, SMT_DEPTH, SmtLeaf,
-            full::{Smt, concurrent::COLS_PER_SUBTREE},
-        },
-    },
+use {
+    super::IN_MEMORY_DEPTH,
+    super::MemoryStorage,
+    super::SmtStorage,
+    super::SmtStorageReader,
+};
+use {
+    crate::EMPTY_WORD,
+    crate::Felt,
+    crate::ONE,
+    crate::Word,
+    crate::merkle::InnerNodeInfo,
+    crate::merkle::smt::LargeSmt,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::SMT_DEPTH,
+    crate::merkle::smt::SmtLeaf,
+    crate::merkle::smt::full::Smt,
+    crate::merkle::smt::full::concurrent::COLS_PER_SUBTREE,
 };
 
 fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
@@ -648,7 +663,10 @@ fn test_flat_layout_index_zero_unused_in_instance() {
 
 #[test]
 fn test_flat_layout_after_insertion() {
-    use crate::merkle::{Eidos, EmptySubtreeRoots};
+    use {
+        crate::merkle::Eidos,
+        crate::merkle::EmptySubtreeRoots,
+    };
 
     // Insert a value and verify the flat layout is updated correctly
     let storage = MemoryStorage::new();
@@ -684,7 +702,11 @@ fn test_flat_layout_after_insertion() {
 
 #[test]
 fn test_flat_layout_children_relationship() {
-    use crate::merkle::{Eidos, EmptySubtreeRoots, NodeIndex};
+    use {
+        crate::merkle::Eidos,
+        crate::merkle::EmptySubtreeRoots,
+        crate::merkle::NodeIndex,
+    };
 
     // Insert multiple values and verify parent-child relationships in the flat layout
     let storage = MemoryStorage::new();

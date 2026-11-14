@@ -1,18 +1,36 @@
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use {
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
+};
 
-use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, Stopper, Word,
-    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    errors::PackageSourceDebugContext,
-    host::default::NoopHost,
-    mast::{ExecutableMastForest, MastNode, MastNodeId},
-    operation::OperationError,
-    option_map_break_reason,
-    processor::{Processor, SystemInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::BaseHost,
+    crate::BreakReason,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::KernelDescriptor,
+    crate::Stopper,
+    crate::Word,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
+    crate::continuation_stack::SourceInlineCallContext,
+    crate::errors::PackageSourceDebugContext,
+    crate::host::default::NoopHost,
+    crate::mast::ExecutableMastForest,
+    crate::mast::MastNode,
+    crate::mast::MastNodeId,
+    crate::operation::OperationError,
+    crate::option_map_break_reason,
+    crate::processor::Processor,
+    crate::processor::SystemInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 mod basic_block;

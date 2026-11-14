@@ -1,15 +1,28 @@
-use alloc::{string::ToString, vec::Vec};
+use {
+    alloc::string::ToString,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{SourceSpan, Span};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+};
 use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
 
-use crate::{
-    Felt, PathBuf, assert_diagnostic, assert_diagnostic_lines,
-    ast::{types::Type, *},
-    parser::{IntValue, PushValue, WordValue},
-    regex, source_file,
-    testing::SyntaxTestContext,
+use {
+    crate::Felt,
+    crate::PathBuf,
+    crate::assert_diagnostic,
+    crate::assert_diagnostic_lines,
+    crate::ast::types::Type,
+    crate::ast::*,
+    crate::parser::IntValue,
+    crate::parser::PushValue,
+    crate::parser::WordValue,
+    crate::regex,
+    crate::source_file,
+    crate::testing::SyntaxTestContext,
 };
 
 macro_rules! id {

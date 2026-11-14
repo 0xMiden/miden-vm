@@ -1,24 +1,48 @@
-use std::{path::Path, process::Command, string::String, sync::Arc};
-
-use miden_assembly_syntax::{ast::DebugVarLocation, source_file};
-use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
-    operations::Operation,
-    serde::{Deserializable, Serializable, SliceReader},
-    utils::{Idx, hash_string_to_word},
+use {
+    std::path::Path,
+    std::process::Command,
+    std::string::String,
+    std::sync::Arc,
 };
-use miden_mast_package::{
-    PackageExport, PackageModule, ProcedureExport, Section, SectionId,
-    debug_info::{
-        DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-        PackageDebugInfo, PackageDebugInfoBuilder,
-    },
+
+use {
+    miden_assembly_syntax::ast::DebugVarLocation,
+    miden_assembly_syntax::source_file,
+};
+use {
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::operations::Operation,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
+    miden_core::serde::SliceReader,
+    miden_core::utils::Idx,
+    miden_core::utils::hash_string_to_word,
+};
+use {
+    miden_mast_package::PackageExport,
+    miden_mast_package::PackageModule,
+    miden_mast_package::ProcedureExport,
+    miden_mast_package::Section,
+    miden_mast_package::SectionId,
+    miden_mast_package::debug_info::DEBUG_INFO_VERSION,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceNode,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::DebugSourceVar,
+    miden_mast_package::debug_info::PackageDebugInfo,
+    miden_mast_package::debug_info::PackageDebugInfoBuilder,
 };
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
 use super::*;
-use crate::testing::{TestContext, TestRegistry};
+use {
+    crate::testing::TestContext,
+    crate::testing::TestRegistry,
+};
 
 #[test]
 fn builds_library_package_from_project_profiles() {

@@ -4,17 +4,40 @@ mod error;
 mod tests;
 mod value;
 
-use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
-
-use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
-use miden_utils_diagnostics::{IntoDiagnostic, Report};
-
-pub use self::{
-    cst::parse_inline_masm,
-    error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
-    value::{IntValue, PushValue, WordValue},
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeSet,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use crate::{Path, ast, sema};
+
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceLanguage,
+    miden_debug_types::SourceManager,
+    miden_debug_types::Uri,
+};
+use {
+    miden_utils_diagnostics::IntoDiagnostic,
+    miden_utils_diagnostics::Report,
+};
+
+pub use {
+    self::cst::parse_inline_masm,
+    self::error::BinErrorKind,
+    self::error::HexErrorKind,
+    self::error::LiteralErrorKind,
+    self::error::ParsingError,
+    self::value::IntValue,
+    self::value::PushValue,
+    self::value::WordValue,
+};
+use {
+    crate::Path,
+    crate::ast,
+    crate::sema,
+};
 
 /// Maximum allowed nesting depth of parenthesized constant expressions.
 pub(crate) const MAX_CONSTANT_EXPR_NESTING: usize = 256;
@@ -116,7 +139,10 @@ impl ModuleParser {
         P: AsRef<std::path::Path>,
     {
         use miden_debug_types::SourceManagerExt;
-        use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
+        use {
+            miden_utils_diagnostics::IntoDiagnostic,
+            miden_utils_diagnostics::WrapErr,
+        };
 
         let file_path = file_path.as_ref();
         let source_file =
@@ -272,7 +298,10 @@ pub fn walk_module_tree<F>(
 where
     F: FnMut(Box<ast::Module>) -> Result<(), Report>,
 {
-    use miden_debug_types::{Spanned, Uri};
+    use {
+        miden_debug_types::Spanned,
+        miden_debug_types::Uri,
+    };
 
     struct ModuleEntry {
         pub name: ast::Ident,

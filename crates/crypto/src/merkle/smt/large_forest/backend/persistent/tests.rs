@@ -11,18 +11,36 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use miden_field::Felt;
 use proptest::prelude::*;
-use rand::{RngExt, SeedableRng};
+use {
+    rand::RngExt,
+    rand::SeedableRng,
+};
 use rand_chacha::ChaCha20Rng;
-use tempfile::{TempDir, tempdir};
+use {
+    tempfile::TempDir,
+    tempfile::tempdir,
+};
 
-use super::{LEAVES_CF, PersistentBackend, Result};
-use crate::{
-    EMPTY_WORD, Word,
-    merkle::smt::{
-        Backend, BackendError, BackendReader, LargeSmtForest, LineageId, Smt, SmtForestUpdateBatch,
-        SmtUpdateBatch, TreeEntry, TreeWithRoot, VersionId,
-        large_forest::backend::persistent::config::Config,
-    },
+use {
+    super::LEAVES_CF,
+    super::PersistentBackend,
+    super::Result,
+};
+use {
+    crate::EMPTY_WORD,
+    crate::Word,
+    crate::merkle::smt::Backend,
+    crate::merkle::smt::BackendError,
+    crate::merkle::smt::BackendReader,
+    crate::merkle::smt::LargeSmtForest,
+    crate::merkle::smt::LineageId,
+    crate::merkle::smt::Smt,
+    crate::merkle::smt::SmtForestUpdateBatch,
+    crate::merkle::smt::SmtUpdateBatch,
+    crate::merkle::smt::TreeEntry,
+    crate::merkle::smt::TreeWithRoot,
+    crate::merkle::smt::VersionId,
+    crate::merkle::smt::large_forest::backend::persistent::config::Config,
 };
 
 // UTILITIES
@@ -64,7 +82,10 @@ fn load_empty() -> Result<()> {
 
 #[test]
 fn load_rejects_incompatible_hash_storage() -> Result<()> {
-    use crate::merkle::smt::{StorageError, persistent_hash::HASH_SCHEME_KEY};
+    use {
+        crate::merkle::smt::StorageError,
+        crate::merkle::smt::persistent_hash::HASH_SCHEME_KEY,
+    };
 
     for marker in [None, Some([0; 32])] {
         let path = tempdir()?;

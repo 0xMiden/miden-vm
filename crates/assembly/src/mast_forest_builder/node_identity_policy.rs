@@ -1,8 +1,14 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use {
+    alloc::collections::BTreeSet,
+    alloc::vec::Vec,
+};
 
 use miden_core::utils::IndexVec;
 
-use super::{MastNodeRef, PendingMastNode};
+use {
+    super::MastNodeRef,
+    super::PendingMastNode,
+};
 
 /// Finalization plan that decides which builder-local records become final forest nodes.
 pub(super) struct FinalForestLayout {

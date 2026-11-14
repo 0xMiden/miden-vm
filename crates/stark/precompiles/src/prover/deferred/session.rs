@@ -1,37 +1,71 @@
 //! Direct checked import of singleton portable witnesses into one private proving session.
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet, btree_map::Entry},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::collections::btree_map::Entry,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_air::precompiles::{ChipletMultiAir, policy::precompile_pcs_params};
-use miden_air_definitions::precompiles::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
-use miden_core::{
-    Felt,
-    deferred::{
-        DEFERRED_AND_FRAME, DataChunk, Digest, MAX_PRECOMPILE_ROOTS, PrecompileLimits,
-        PrecompileWitness, PreparationError, PreparedNode, PreparedWitness, TRUE_DIGEST,
-        fold_deferred_root,
-    },
-    field::QuadFelt,
-    program::domain::DeferredChunksDomain,
+use {
+    miden_air::precompiles::ChipletMultiAir,
+    miden_air::precompiles::policy::precompile_pcs_params,
+};
+use {
+    miden_air_definitions::precompiles::hash::keccak::node::MAX_SPONGE_PERMS,
+    miden_air_definitions::precompiles::hash::keccak::node::SPONGE_RATE_BYTES,
+};
+use {
+    miden_core::Felt,
+    miden_core::deferred::DEFERRED_AND_FRAME,
+    miden_core::deferred::DataChunk,
+    miden_core::deferred::Digest,
+    miden_core::deferred::MAX_PRECOMPILE_ROOTS,
+    miden_core::deferred::PrecompileLimits,
+    miden_core::deferred::PrecompileWitness,
+    miden_core::deferred::PreparationError,
+    miden_core::deferred::PreparedNode,
+    miden_core::deferred::PreparedWitness,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::deferred::fold_deferred_root,
+    miden_core::field::QuadFelt,
+    miden_core::program::domain::DeferredChunksDomain,
 };
 use miden_crypto::hash::eidos::EidosDomain;
-use miden_precompiles::{
-    CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
-    UintBinaryOp, UintDomain, UintOp, UintPrecompile, chunks_to_bytes_exact, n_chunks,
+use {
+    miden_precompiles::CurveBinaryOp,
+    miden_precompiles::CurveId,
+    miden_precompiles::CurveOp,
+    miden_precompiles::Keccak256Precompile,
+    miden_precompiles::Sha256Precompile,
+    miden_precompiles::Sha512Precompile,
+    miden_precompiles::UintBinaryOp,
+    miden_precompiles::UintDomain,
+    miden_precompiles::UintOp,
+    miden_precompiles::UintPrecompile,
+    miden_precompiles::chunks_to_bytes_exact,
+    miden_precompiles::n_chunks,
 };
 use miden_stark::memory;
 
-use super::capacity::{self, MemoryBudget};
-use crate::prover::{
-    PrecompileProvingError,
-    ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
-    math::{U256, from_limbs32, to_limbs32},
-    session::{EcNode, Session, Truthy, UintNode, strategies},
-    transcript::eidos::EidosDigest,
+use {
+    super::capacity,
+    super::capacity::MemoryBudget,
+};
+use {
+    crate::prover::PrecompileProvingError,
+    crate::prover::ec::msm::trace::EcExprPtr,
+    crate::prover::ec::trace::EcPointPtr,
+    crate::prover::math::U256,
+    crate::prover::math::from_limbs32,
+    crate::prover::math::to_limbs32,
+    crate::prover::session::EcNode,
+    crate::prover::session::Session,
+    crate::prover::session::Truthy,
+    crate::prover::session::UintNode,
+    crate::prover::session::strategies,
+    crate::prover::transcript::eidos::EidosDigest,
 };
 
 /// wNAF window for [`msm_from_terms`](WitnessImporter::msm_from_terms)'s joint-wNAF
@@ -210,13 +244,23 @@ pub(crate) fn prove(
 pub mod testing {
     use miden_core::utils::Matrix;
 
-    use super::{
-        ChipletMultiAir, Felt, PrecompileLimits, QuadFelt, WitnessSession,
-        import_witnesses_with_roots, memory, precompile_pcs_params,
+    use {
+        super::ChipletMultiAir,
+        super::Felt,
+        super::PrecompileLimits,
+        super::QuadFelt,
+        super::WitnessSession,
+        super::import_witnesses_with_roots,
+        super::memory,
+        super::precompile_pcs_params,
     };
-    use crate::prover::{
-        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction, PrecompileProof,
-        PrecompileProvingError, PrecompileWitness, session::SessionTraces,
+    use {
+        crate::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+        crate::prover::HashFunction,
+        crate::prover::PrecompileProof,
+        crate::prover::PrecompileProvingError,
+        crate::prover::PrecompileWitness,
+        crate::prover::session::SessionTraces,
     };
 
     /// Checked and lowered precompile work, before main-trace allocation.

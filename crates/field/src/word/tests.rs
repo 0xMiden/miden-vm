@@ -1,10 +1,19 @@
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::string::String,
+    alloc::vec::Vec,
+};
 use core::cmp::Ordering;
 
 use miden_serde_utils::SliceReader;
 use proptest::prelude::*;
 
-use super::{Deserializable, Felt, Serializable, Word};
+use {
+    super::Deserializable,
+    super::Felt,
+    super::Serializable,
+    super::Word,
+};
 use crate::word;
 
 // TESTS

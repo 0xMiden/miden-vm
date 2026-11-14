@@ -1,9 +1,14 @@
-use miden_core::{Felt, Word};
+use {
+    miden_core::Felt,
+    miden_core::Word,
+};
 use miden_crypto::hash::eidos::Eidos;
 
-use super::{
-    model::low_output,
-    test_support::{execute_fused_rounds, execute_unfused_rounds, xof_lanes},
+use {
+    super::model::low_output,
+    super::test_support::execute_fused_rounds,
+    super::test_support::execute_unfused_rounds,
+    super::test_support::xof_lanes,
 };
 
 const BLOCK_WIDTH: usize = 8;

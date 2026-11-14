@@ -1,10 +1,17 @@
 use alloc::sync::Arc;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use {
+    serde::Deserialize,
+    serde::Serialize,
+};
 
 use super::parsing::SetSourceId;
-use crate::{Metadata, SourceId, Span};
+use {
+    crate::Metadata,
+    crate::SourceId,
+    crate::Span,
+};
 
 /// Represents configuration options for a specific build profile, e.g. `release`
 #[derive(Default, Debug, Clone)]
@@ -38,10 +45,16 @@ impl SetSourceId for Profile {
 
 #[cfg(feature = "serde")]
 pub(super) mod serialization {
-    use alloc::{sync::Arc, vec::Vec};
+    use {
+        alloc::sync::Arc,
+        alloc::vec::Vec,
+    };
 
     use miden_assembly_syntax::debuginfo::Span;
-    use serde::de::{MapAccess, Visitor};
+    use {
+        serde::de::MapAccess,
+        serde::de::Visitor,
+    };
 
     use super::Profile;
 

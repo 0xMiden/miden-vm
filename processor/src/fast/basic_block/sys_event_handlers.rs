@@ -1,19 +1,34 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt, WORD_SIZE, Word, ZERO,
-    chiplets::hasher,
-    deferred::PrecompileError,
-    events::SystemEvent,
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
+use {
+    miden_core::Felt,
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::chiplets::hasher,
+    miden_core::deferred::PrecompileError,
+    miden_core::events::SystemEvent,
+    miden_core::field::BasedVectorSpace,
+    miden_core::field::Field,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
 };
 
-use super::deferred_handlers::{
-    handle_deferred_evaluate, handle_deferred_evaluate_frame, handle_deferred_evaluate_payload,
-    handle_deferred_export_witness, handle_deferred_register, handle_deferred_register_data,
-    handle_deferred_root_to_stack,
+use {
+    super::deferred_handlers::handle_deferred_evaluate,
+    super::deferred_handlers::handle_deferred_evaluate_frame,
+    super::deferred_handlers::handle_deferred_evaluate_payload,
+    super::deferred_handlers::handle_deferred_export_witness,
+    super::deferred_handlers::handle_deferred_register,
+    super::deferred_handlers::handle_deferred_register_data,
+    super::deferred_handlers::handle_deferred_root_to_stack,
 };
-use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
+use {
+    crate::MemoryError,
+    crate::advice::AdviceError,
+    crate::errors::OperationError,
+    crate::fast::FastProcessor,
+};
 
 // SYSTEM EVENT ERROR
 // ================================================================================================
@@ -540,10 +555,19 @@ fn push_transformed_stack_top(
 mod tests {
     use alloc::vec;
 
-    use miden_core::{Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore};
+    use {
+        miden_core::Felt,
+        miden_core::ZERO,
+        miden_core::chiplets::hasher,
+        miden_core::crypto::merkle::MerkleStore,
+    };
 
     use super::*;
-    use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
+    use {
+        crate::ExecutionOptions,
+        crate::StackInputs,
+        crate::fast::FastProcessor,
+    };
 
     /// Tests that `insert_compress_into_adv_map` produces the same key as compressing the same
     /// state directly, and stores the two block words (first 8 elements) as the values.

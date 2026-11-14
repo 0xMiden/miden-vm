@@ -1,12 +1,29 @@
-use alloc::{string::ToString, vec::Vec};
+use {
+    alloc::string::ToString,
+    alloc::vec::Vec,
+};
 
-use super::{
-    EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
-    MutationSet, NodeIndex, SparseMerklePath, SparseMerkleTree, SparseMerkleTreeReader, Word,
+use {
+    super::EMPTY_WORD,
+    super::EmptySubtreeRoots,
+    super::InnerNode,
+    super::InnerNodeInfo,
+    super::InnerNodes,
+    super::LeafIndex,
+    super::MerkleError,
+    super::MutationSet,
+    super::NodeIndex,
+    super::SparseMerklePath,
+    super::SparseMerkleTree,
+    super::SparseMerkleTreeReader,
+    super::Word,
 };
 
 mod error;
-pub use error::{SmtLeafError, SmtProofError};
+pub use {
+    error::SmtLeafError,
+    error::SmtProofError,
+};
 
 mod leaf;
 pub use leaf::SmtLeaf;
@@ -14,7 +31,13 @@ pub use leaf::SmtLeaf;
 mod proof;
 pub use proof::SmtProof;
 
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use {
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
+};
 
 // Concurrent implementation
 #[cfg(feature = "concurrent")]
@@ -688,11 +711,21 @@ impl Smt {
 mod arbitrary {
     extern crate alloc;
 
-    use alloc::{collections::BTreeMap, vec::Vec};
+    use {
+        alloc::collections::BTreeMap,
+        alloc::vec::Vec,
+    };
 
     use proptest::prelude::*;
 
-    use super::{LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof, Word};
+    use {
+        super::LeafIndex,
+        super::SMT_DEPTH,
+        super::Smt,
+        super::SmtLeaf,
+        super::SmtProof,
+        super::Word,
+    };
 
     // Deduped key/value pairs -> a full Smt built by construction (distinct keys guaranteed).
     pub(super) fn smt_from_pairs(pairs: Vec<(Word, Word)>) -> Smt {

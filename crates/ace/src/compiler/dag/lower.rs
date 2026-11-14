@@ -7,20 +7,32 @@
 //! after the checked-in circuit digests survive a release cycle on the IR path;
 //! the node-for-node differential retires with it. Do not add production callers.
 
-use miden_crypto::field::{ExtensionField, Field};
-use miden_stark::air::symbolic::{
-    BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-    SymbolicExpressionExt,
+use {
+    miden_crypto::field::ExtensionField,
+    miden_crypto::field::Field,
+};
+use {
+    miden_stark::air::symbolic::BaseEntry,
+    miden_stark::air::symbolic::BaseLeaf,
+    miden_stark::air::symbolic::ConstraintLayout,
+    miden_stark::air::symbolic::ExtEntry,
+    miden_stark::air::symbolic::ExtLeaf,
+    miden_stark::air::symbolic::SymbolicExpression,
+    miden_stark::air::symbolic::SymbolicExpressionExt,
 };
 
-use super::{
-    builder::DagBuilder,
-    ir::{AceDag, NodeId, PeriodicColumnData},
-    periodic::build_periodic_nodes,
+use {
+    super::builder::DagBuilder,
+    super::ir::AceDag,
+    super::ir::NodeId,
+    super::ir::PeriodicColumnData,
+    super::periodic::build_periodic_nodes,
 };
-use crate::{
-    compiler::{quotient::build_quotient_recomposition_dag, randomness},
-    layout::{InputKey, InputLayout},
+use {
+    crate::compiler::quotient::build_quotient_recomposition_dag,
+    crate::compiler::randomness,
+    crate::layout::InputKey,
+    crate::layout::InputLayout,
 };
 
 /// Lower a base-field symbolic expression into DAG nodes.

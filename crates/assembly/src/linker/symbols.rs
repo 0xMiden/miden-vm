@@ -1,11 +1,23 @@
-use alloc::{boxed::Box, sync::Arc};
-use core::cell::{Cell, RefCell};
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+};
+use {
+    core::cell::Cell,
+    core::cell::RefCell,
+};
 
-use miden_assembly_syntax::{
-    Path,
-    ast::{self, GlobalItemIndex, Ident, ImportKind, Visibility},
-    debuginfo::{SourceSpan, Span, Spanned},
-    module::ItemInfo,
+use {
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::GlobalItemIndex,
+    miden_assembly_syntax::ast::Ident,
+    miden_assembly_syntax::ast::ImportKind,
+    miden_assembly_syntax::ast::Visibility,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::module::ItemInfo,
 };
 
 use super::LinkStatus;

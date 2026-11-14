@@ -1,16 +1,33 @@
-use alloc::{format, string::ToString, sync::Arc, vec::Vec};
-use core::{fmt, num::NonZeroU32};
+use {
+    alloc::format,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
+use {
+    core::fmt,
+    core::num::NonZeroU32,
+};
 
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
+use {
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+    miden_core::serde::read_bounded_len,
 };
 use miden_debug_types::Location;
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use {
+    serde::Deserialize,
+    serde::Serialize,
+};
 
-use crate::{
-    Felt,
-    ast::{TypeExpr, types::Type},
+use {
+    crate::Felt,
+    crate::ast::TypeExpr,
+    crate::ast::types::Type,
 };
 
 // DEBUG VARIABLE INFO
@@ -577,8 +594,11 @@ fn read_debug_frame_base<R: ByteReader>(
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::{
-        DebugFrameBase, DebugLocationExpression, DebugLocationExpressionOp, DebugVarLocation,
+    use {
+        super::DebugFrameBase,
+        super::DebugLocationExpression,
+        super::DebugLocationExpressionOp,
+        super::DebugVarLocation,
     };
     use crate::Felt;
 
@@ -669,10 +689,20 @@ mod arbitrary {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec::Vec};
+    use {
+        alloc::string::ToString,
+        alloc::vec::Vec,
+    };
 
-    use miden_core::serde::{Deserializable, Serializable, SliceReader};
-    use miden_debug_types::{ByteIndex, Uri};
+    use {
+        miden_core::serde::Deserializable,
+        miden_core::serde::Serializable,
+        miden_core::serde::SliceReader,
+    };
+    use {
+        miden_debug_types::ByteIndex,
+        miden_debug_types::Uri,
+    };
 
     use super::*;
 

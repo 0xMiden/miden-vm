@@ -1,9 +1,16 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use crate::{Felt, ast::Ident};
+use {
+    crate::Felt,
+    crate::ast::Ident,
+};
 
 /// An 8-bit unsigned immediate
 pub type ImmU8 = Immediate<u8>;

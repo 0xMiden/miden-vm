@@ -2,16 +2,21 @@
 
 use alloc::vec::Vec;
 
-use miden_ace::{
-    AceError,
-    compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
+use {
+    miden_ace::AceError,
+    miden_ace::compiler::AceCircuit,
+    miden_ace::compiler::CapturedAir,
+    miden_ace::compiler::CompiledRelation,
+    miden_ace::compiler::LayoutKind,
 };
 use miden_core::field::QuadFelt;
 use p3_security::budget::AirShape;
 
-use crate::{
-    precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
-    shared::geometry::NUM_OOD_POINTS,
+use {
+    crate::precompiles::ace::PvmRecursiveAceCircuit,
+    crate::precompiles::geometry::lookup_shape,
+    crate::precompiles::relation::AIRS,
+    crate::shared::geometry::NUM_OOD_POINTS,
 };
 
 /// One symbolic capture of each AIR, shared by the compiler backends.

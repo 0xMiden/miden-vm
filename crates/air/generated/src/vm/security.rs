@@ -7,9 +7,18 @@
 
 use miden_core::proof::HashFunction;
 /// Types describing the generated AIR and lookup shapes.
-pub use miden_stark::security::{AirShape, LookupShape};
-use miden_stark::security::{CHALLENGE_FIELD_BITS, EIDOS_CHALLENGE_SAMPLE_BITS};
-use p3_security::{budget::InstanceShape, fixed};
+pub use {
+    miden_stark::security::AirShape,
+    miden_stark::security::LookupShape,
+};
+use {
+    miden_stark::security::CHALLENGE_FIELD_BITS,
+    miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS,
+};
+use {
+    p3_security::budget::InstanceShape,
+    p3_security::fixed,
+};
 
 use crate::vm::config;
 

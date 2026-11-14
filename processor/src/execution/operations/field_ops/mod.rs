@@ -1,9 +1,13 @@
-use crate::{
-    Felt, ONE, ZERO,
-    field::Field,
-    operation::{BinaryValueErrorContext, OperationError},
-    processor::{Processor, StackInterface},
-    tracer::OperationHelperRegisters,
+use {
+    crate::Felt,
+    crate::ONE,
+    crate::ZERO,
+    crate::field::Field,
+    crate::operation::BinaryValueErrorContext,
+    crate::operation::OperationError,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]

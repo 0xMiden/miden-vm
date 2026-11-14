@@ -1,15 +1,28 @@
 use alloc::vec::Vec;
-use core::{borrow::BorrowMut, ops::Range};
+use {
+    core::borrow::BorrowMut,
+    core::ops::Range,
+};
 
-use miden_air_definitions::vm::{
-    ControllerCols,
-    trace::chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
+use {
+    miden_air_definitions::vm::ControllerCols,
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+    miden_air_definitions::vm::trace::chiplets::hasher::PADDING,
+    miden_air_definitions::vm::trace::chiplets::hasher::TRACE_WIDTH,
 };
 use miden_core::chiplets::eidos_compression;
 
-use super::{
-    ChipletTraceFragment, Felt, HasherState, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, ONE,
-    STATE_WIDTH, Selectors, ZERO,
+use {
+    super::ChipletTraceFragment,
+    super::Felt,
+    super::HasherState,
+    super::MP_VERIFY,
+    super::MR_UPDATE_NEW,
+    super::MR_UPDATE_OLD,
+    super::ONE,
+    super::STATE_WIDTH,
+    super::Selectors,
+    super::ZERO,
 };
 
 // HASHER OPERATION

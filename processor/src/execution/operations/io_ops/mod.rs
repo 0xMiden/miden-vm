@@ -1,11 +1,17 @@
-use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
-use crate::{
-    Felt,
-    errors::IoError,
-    processor::{
-        AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
-    },
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    super::DOUBLE_WORD_SIZE,
+    super::WORD_SIZE_FELT,
+};
+use {
+    crate::Felt,
+    crate::errors::IoError,
+    crate::processor::AdviceProviderInterface,
+    crate::processor::MemoryInterface,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 #[cfg(test)]

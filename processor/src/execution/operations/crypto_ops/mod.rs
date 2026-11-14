@@ -1,24 +1,45 @@
 use alloc::boxed::Box;
 
-use miden_air_definitions::vm::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
-use miden_core::{
-    chiplets::{eidos_compression, hasher::CV_RANGE},
-    crypto::merkle::MerklePath,
+use {
+    miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH,
+    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+};
+use {
+    miden_core::chiplets::eidos_compression,
+    miden_core::chiplets::hasher::CV_RANGE,
+    miden_core::crypto::merkle::MerklePath,
 };
 
-use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
-use crate::{
-    BaseHost, ContextId, ExecutionError, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{
-        CryptoError, IoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner,
-        OperationError, PackageSourceDebugContext,
-    },
-    field::{BasedVectorSpace, QuadFelt},
-    processor::{
-        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
-        SystemInterface,
-    },
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    super::DOUBLE_WORD_SIZE,
+    super::WORD_SIZE_FELT,
+};
+use {
+    crate::BaseHost,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::Felt,
+    crate::MemoryError,
+    crate::ONE,
+    crate::RowIndex,
+    crate::Word,
+    crate::ZERO,
+    crate::errors::CryptoError,
+    crate::errors::IoError,
+    crate::errors::MapExecErrWithOpIdx,
+    crate::errors::MerklePathVerificationFailedInner,
+    crate::errors::OperationError,
+    crate::errors::PackageSourceDebugContext,
+    crate::field::BasedVectorSpace,
+    crate::field::QuadFelt,
+    crate::processor::AdviceProviderInterface,
+    crate::processor::HasherInterface,
+    crate::processor::MemoryInterface,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 #[cfg(test)]

@@ -1,30 +1,58 @@
-use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
-
-use miden_air_definitions::vm::trace::{
-    RowIndex,
-    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
-};
-use miden_core::{
-    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
-    serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_bounded_len,
-    },
+use {
+    alloc::boxed::Box,
+    alloc::collections::VecDeque,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use crate::{
-    AceError, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
-    advice::AdviceError,
-    continuation_stack::ContinuationStack,
-    crypto::merkle::MerklePath,
-    errors::OperationError,
-    mast::{MastForestId, MastNodeId, SparseMastForest},
-    processor::{
-        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
-    },
-    trace::chiplets::{AEAD_STREAM_CYCLE_LEN, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
-    tracer::merkle_index_helper_values,
-    utils::Idx,
+use {
+    miden_air_definitions::vm::trace::RowIndex,
+    miden_air_definitions::vm::trace::chiplets::hasher::HasherState,
+    miden_air_definitions::vm::trace::chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
+    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+};
+use {
+    miden_core::mast::BasicBlockNode,
+    miden_core::mast::ExecutableMastForest,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::OpBatch,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+    miden_core::serde::read_bounded_len,
+};
+
+use {
+    crate::AceError,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::Felt,
+    crate::MIN_STACK_DEPTH,
+    crate::MemoryError,
+    crate::ONE,
+    crate::Word,
+    crate::ZERO,
+    crate::advice::AdviceError,
+    crate::continuation_stack::ContinuationStack,
+    crate::crypto::merkle::MerklePath,
+    crate::errors::OperationError,
+    crate::mast::MastForestId,
+    crate::mast::MastNodeId,
+    crate::mast::SparseMastForest,
+    crate::processor::AdviceProviderInterface,
+    crate::processor::HasherInterface,
+    crate::processor::MemoryInterface,
+    crate::processor::Processor,
+    crate::processor::SystemInterface,
+    crate::trace::chiplets::AEAD_STREAM_CYCLE_LEN,
+    crate::trace::chiplets::CircuitEvaluation,
+    crate::trace::chiplets::MAX_EVAL_CIRCUIT_INVOCATIONS,
+    crate::tracer::merkle_index_helper_values,
+    crate::utils::Idx,
 };
 
 mod serde;
@@ -1690,13 +1718,31 @@ mod arbitrary {
     use miden_air_definitions::vm::trace::RowIndex;
     use proptest::prelude::*;
 
-    use super::{
-        AdviceReplay, BitwiseOp, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceState, DecoderState, ExecutionContextReplay, ExecutionContextSystemInfo,
-        KernelReplay, MIN_STACK_DEPTH, MemoryReadsReplay, MemoryWritesReplay, NodeEndData,
-        RangeCheckReplayValues, RangeCheckerReplay, StackState, SystemState,
+    use {
+        super::AdviceReplay,
+        super::BitwiseOp,
+        super::BitwiseReplay,
+        super::BlockAddressReplay,
+        super::BlockStackReplay,
+        super::CoreTraceState,
+        super::DecoderState,
+        super::ExecutionContextReplay,
+        super::ExecutionContextSystemInfo,
+        super::KernelReplay,
+        super::MIN_STACK_DEPTH,
+        super::MemoryReadsReplay,
+        super::MemoryWritesReplay,
+        super::NodeEndData,
+        super::RangeCheckReplayValues,
+        super::RangeCheckerReplay,
+        super::StackState,
+        super::SystemState,
     };
-    use crate::{ContextId, Felt, Word};
+    use {
+        crate::ContextId,
+        crate::Felt,
+        crate::Word,
+    };
 
     impl Arbitrary for SystemState {
         type Parameters = ();
@@ -2024,16 +2070,35 @@ mod arbitrary {
 
 #[cfg(any(test, feature = "arbitrary"))]
 mod arbitrary_replays {
-    use miden_core::mast::{MastForestId, MastNodeId};
+    use {
+        miden_core::mast::MastForestId,
+        miden_core::mast::MastNodeId,
+    };
     use proptest::prelude::*;
 
-    use super::{
-        AdviceReplay, BlockAddressReplay, BlockStackReplay, CoreTraceFragmentContext,
-        CoreTraceState, ExecutionContextReplay, ExecutionReplay, HasherOp, HasherRequestReplay,
-        HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
-        StackOverflowReplay,
+    use {
+        super::AdviceReplay,
+        super::BlockAddressReplay,
+        super::BlockStackReplay,
+        super::CoreTraceFragmentContext,
+        super::CoreTraceState,
+        super::ExecutionContextReplay,
+        super::ExecutionReplay,
+        super::HasherOp,
+        super::HasherRequestReplay,
+        super::HasherResponseReplay,
+        super::MastForestResolutionReplay,
+        super::MemoryReadsReplay,
+        super::STATE_WIDTH,
+        super::StackOverflowReplay,
     };
-    use crate::{ContextId, Felt, RowIndex, Word, crypto::merkle::MerklePath};
+    use {
+        crate::ContextId,
+        crate::Felt,
+        crate::RowIndex,
+        crate::Word,
+        crate::crypto::merkle::MerklePath,
+    };
 
     impl Arbitrary for StackOverflowReplay {
         type Parameters = ();

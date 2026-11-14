@@ -1,9 +1,17 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use crate::{Path, Word, ast::Ident};
+use {
+    crate::Path,
+    crate::Word,
+    crate::ast::Ident,
+};
 
 // INVOKE
 // ================================================================================================

@@ -1,20 +1,33 @@
-use alloc::{
-    string::{String, ToString},
-    sync::Arc,
+use {
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
 };
-use core::{
-    fmt,
-    hash::{Hash, Hasher},
-    ops::Deref,
-    str::FromStr,
+use {
+    core::fmt,
+    core::hash::Hash,
+    core::hash::Hasher,
+    core::ops::Deref,
+    core::str::FromStr,
 };
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
+use {
+    miden_utils_diagnostics::IntoDiagnostic,
+    miden_utils_diagnostics::Report,
+    miden_utils_diagnostics::miette,
+};
 
-use crate::{
-    Path, PathBuf,
-    ast::{CaseKindError, Ident, IdentError},
+use {
+    crate::Path,
+    crate::PathBuf,
+    crate::ast::CaseKindError,
+    crate::ast::Ident,
+    crate::ast::IdentError,
 };
 
 // QUALIFIED PROCEDURE NAME

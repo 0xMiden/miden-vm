@@ -1,9 +1,19 @@
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use {
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
+};
 
-use crate::{
-    ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    Program, StackInputs,
-    advice::{AdviceError, AdviceInputs},
+use {
+    crate::ExecutionError,
+    crate::ExecutionOptions,
+    crate::ExecutionOutput,
+    crate::FastProcessor,
+    crate::FutureMaybeSend,
+    crate::Host,
+    crate::Program,
+    crate::StackInputs,
+    crate::advice::AdviceError,
+    crate::advice::AdviceInputs,
 };
 
 // PROGRAM EXECUTOR
@@ -107,7 +117,10 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::*;
-    use crate::{DefaultHost, StackInputs};
+    use {
+        crate::DefaultHost,
+        crate::StackInputs,
+    };
 
     #[tokio::test(flavor = "current_thread")]
     async fn program_executor_default_impl_runs_via_trait() {

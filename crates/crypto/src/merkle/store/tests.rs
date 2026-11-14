@@ -3,21 +3,33 @@ use assert_matches::assert_matches;
 use seq_macro::seq;
 #[cfg(feature = "std")]
 use {
-    super::{Deserializable, DeserializationError, Serializable},
+    super::Deserializable,
+    super::DeserializationError,
+    super::Serializable,
     alloc::boxed::Box,
     std::error::Error,
 };
 
-use super::{
-    Eidos, EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
-    Word,
+use {
+    super::Eidos,
+    super::EmptySubtreeRoots,
+    super::MerkleError,
+    super::MerklePath,
+    super::MerkleStore,
+    super::NodeIndex,
+    super::PartialMerkleTree,
+    super::Word,
 };
-use crate::{
-    Felt, ONE, ZERO,
-    merkle::{
-        MerkleTree, int_to_leaf, int_to_node,
-        smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt},
-    },
+use {
+    crate::Felt,
+    crate::ONE,
+    crate::ZERO,
+    crate::merkle::MerkleTree,
+    crate::merkle::int_to_leaf,
+    crate::merkle::int_to_node,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::SMT_MAX_DEPTH,
+    crate::merkle::smt::SimpleSmt,
 };
 
 // TEST DATA
@@ -1092,7 +1104,10 @@ fn deserialize_accepts_empty_versioned_store() {
 
 #[test]
 fn serialization_preserves_noncanonical_children_at_empty_node_keys() {
-    use crate::utils::{ByteReader, SliceReader};
+    use {
+        crate::utils::ByteReader,
+        crate::utils::SliceReader,
+    };
 
     let key = *EmptySubtreeRoots::entry(64, 0);
     for right in [VALUES4[0], VALUES4[1]] {

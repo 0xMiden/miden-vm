@@ -1,49 +1,78 @@
 //! Tests for the deferred transcript's native 32-row Eidos compression AIR.
 
-use std::{collections::HashMap, vec, vec::Vec};
+use {
+    std::collections::HashMap,
+    std::vec,
+    std::vec::Vec,
+};
 
 use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos;
-use miden_core::{
-    Felt,
-    deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},
-    field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
+use {
+    miden_core::Felt,
+    miden_core::deferred::DEFERRED_AND_FRAME,
+    miden_core::deferred::deferred_chunks_frame,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
+    miden_core::utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
-use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
+use {
+    miden_precompiles::CurvePrecompile,
+    miden_precompiles::Keccak256Precompile,
+};
+use {
+    miden_stark::air::BaseAir,
+    miden_stark::air::ConstraintDegrees,
+    miden_stark::air::LiftedAir,
+    miden_stark::lookup::debug::ValidateLayout,
+    miden_stark::lookup::debug::ValidateLookupAir,
 };
 
-use crate::prover::{
-    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, build_lookup_fractions},
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::Session,
-    transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_EIDOS_COMPRESSION_END, COL_HAS_SUCCESSOR, COL_IN_MULTIPLICITY,
-        COL_INITIAL_MULTIPLICITY, COL_IS_CONTINUATION, COL_OUT_MULTIPLICITY, EidosBlockMsg,
-        EidosCompressionAir, EidosDigest, EidosInitMsg, EidosOutMsg, INTERNAL_CV_BUS_ID,
-        NUM_AUX_COLS, NUM_MAIN_COLS,
-        compression::{
-            layout::{
-                BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTE_SLOT_WIDTH, BYTES_PER_WORD,
-                F_COMPRESSION_CYCLE_ID_COL, F_CV_STORAGE_COLS, F_TOP_BIT_MASK,
-                F_TOP_BIT_SLOT_BASE_COL, FOOTER_START, G_COMPRESSION_CYCLE_ID_COL,
-                NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, footer_digest_col, footer_r_col,
-                g_bd_rot_slot_col,
-            },
-            testing::{
-                EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,
-                rewrite_felt_footer_for_test,
-            },
-            trace::{set_cycle_metadata as write_cycle_metadata, set_footer_multiplicity},
-        },
-        trace::{
-            EidosRequires,
-            testing::{generate_trace, total_cycles},
-        },
-    },
+use {
+    crate::prover::logup::Challenges,
+    crate::prover::logup::LookupMessage,
+    crate::prover::logup::NUM_RANDOMNESS,
+    crate::prover::logup::build_lookup_fractions,
+    crate::prover::relations::BusId,
+    crate::prover::relations::MAX_MESSAGE_WIDTH,
+    crate::prover::relations::NUM_BUS_IDS,
+    crate::prover::session::Session,
+    crate::prover::transcript::eidos::COL_CHAIN_HEAD_ID,
+    crate::prover::transcript::eidos::COL_EIDOS_COMPRESSION_END,
+    crate::prover::transcript::eidos::COL_HAS_SUCCESSOR,
+    crate::prover::transcript::eidos::COL_IN_MULTIPLICITY,
+    crate::prover::transcript::eidos::COL_INITIAL_MULTIPLICITY,
+    crate::prover::transcript::eidos::COL_IS_CONTINUATION,
+    crate::prover::transcript::eidos::COL_OUT_MULTIPLICITY,
+    crate::prover::transcript::eidos::EidosBlockMsg,
+    crate::prover::transcript::eidos::EidosCompressionAir,
+    crate::prover::transcript::eidos::EidosDigest,
+    crate::prover::transcript::eidos::EidosInitMsg,
+    crate::prover::transcript::eidos::EidosOutMsg,
+    crate::prover::transcript::eidos::INTERNAL_CV_BUS_ID,
+    crate::prover::transcript::eidos::NUM_AUX_COLS,
+    crate::prover::transcript::eidos::NUM_MAIN_COLS,
+    crate::prover::transcript::eidos::compression::layout::BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN,
+    crate::prover::transcript::eidos::compression::layout::BYTE_SLOT_WIDTH,
+    crate::prover::transcript::eidos::compression::layout::BYTES_PER_WORD,
+    crate::prover::transcript::eidos::compression::layout::F_COMPRESSION_CYCLE_ID_COL,
+    crate::prover::transcript::eidos::compression::layout::F_CV_STORAGE_COLS,
+    crate::prover::transcript::eidos::compression::layout::F_TOP_BIT_MASK,
+    crate::prover::transcript::eidos::compression::layout::F_TOP_BIT_SLOT_BASE_COL,
+    crate::prover::transcript::eidos::compression::layout::FOOTER_START,
+    crate::prover::transcript::eidos::compression::layout::G_COMPRESSION_CYCLE_ID_COL,
+    crate::prover::transcript::eidos::compression::layout::NUM_COLS as NUM_EIDOS_COMPRESSION_COLS,
+    crate::prover::transcript::eidos::compression::layout::footer_digest_col,
+    crate::prover::transcript::eidos::compression::layout::footer_r_col,
+    crate::prover::transcript::eidos::compression::layout::g_bd_rot_slot_col,
+    crate::prover::transcript::eidos::compression::testing::EidosCompressionFeltTraceBlock,
+    crate::prover::transcript::eidos::compression::testing::generate_felt_trace_block_with_cycle_id,
+    crate::prover::transcript::eidos::compression::testing::rewrite_felt_footer_for_test,
+    crate::prover::transcript::eidos::compression::trace::set_cycle_metadata as write_cycle_metadata,
+    crate::prover::transcript::eidos::compression::trace::set_footer_multiplicity,
+    crate::prover::transcript::eidos::trace::EidosRequires,
+    crate::prover::transcript::eidos::trace::testing::generate_trace,
+    crate::prover::transcript::eidos::trace::testing::total_cycles,
 };
 
 const NUM_INTERFACE_AUX_COLS: usize = 3;
@@ -1131,7 +1160,10 @@ fn continuation_lookup_binds_previous_digest_even_with_zero_input_multiplicity()
 
 #[test]
 fn initial_cv_lookup_footer_binds_its_two_additional_words() {
-    use miden_air_definitions::shared::eidos::{footer_cv_word, trace::write_full_felt_footer_cv};
+    use {
+        miden_air_definitions::shared::eidos::footer_cv_word,
+        miden_air_definitions::shared::eidos::trace::write_full_felt_footer_cv,
+    };
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(DEFERRED_AND_FRAME, [block(1)]);
     requires.require_digest(output.digest);

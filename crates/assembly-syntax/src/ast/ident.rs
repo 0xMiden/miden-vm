@@ -1,14 +1,26 @@
-use alloc::{string::ToString, sync::Arc};
-use core::{
-    fmt,
-    hash::{Hash, Hasher},
-    str::FromStr,
+use {
+    alloc::string::ToString,
+    alloc::sync::Arc,
+};
+use {
+    core::fmt,
+    core::hash::Hash,
+    core::hash::Hasher,
+    core::str::FromStr,
 };
 
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use {
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
 /// Represents the types of errors that can occur when parsing/validating an [Ident]
 #[derive(Debug, thiserror::Error)]
@@ -282,9 +294,16 @@ mod tests {
 
 #[cfg(feature = "arbitrary")]
 pub mod arbitrary {
-    use alloc::{borrow::Cow, string::String};
+    use {
+        alloc::borrow::Cow,
+        alloc::string::String,
+    };
 
-    use proptest::{char::CharStrategy, collection::vec, prelude::*};
+    use {
+        proptest::char::CharStrategy,
+        proptest::collection::vec,
+        proptest::prelude::*,
+    };
 
     use super::*;
 

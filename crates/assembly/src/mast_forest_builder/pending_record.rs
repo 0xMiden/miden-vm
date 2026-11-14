@@ -1,12 +1,17 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    Word,
-    mast::{MastNode, OpBatch},
-    utils::newtype_id,
+use {
+    miden_core::Word,
+    miden_core::mast::MastNode,
+    miden_core::mast::OpBatch,
+    miden_core::utils::newtype_id,
 };
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar, SourceNodeIdMarker,
+use {
+    miden_mast_package::debug_info::DebugFunctionIdx,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceInlineCall,
+    miden_mast_package::debug_info::DebugSourceVar,
+    miden_mast_package::debug_info::SourceNodeIdMarker,
 };
 
 /// Content-equivalence key used while interning pending MAST nodes.

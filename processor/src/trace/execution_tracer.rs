@@ -1,39 +1,89 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
-
-use miden_air_definitions::vm::trace::chiplets::hasher::{
-    CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
-};
-use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
-    operations::Operation,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    alloc::collections::BTreeMap,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use super::{
-    block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
-    stack::OverflowTable,
-    trace_state::{
-        AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
-        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
-        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
-    },
-    utils::split_u32_into_u16,
+use {
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP,
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
+    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
 };
-use crate::{
-    AceError, ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE,
-    RowIndex, Word, ZERO,
-    continuation_stack::{Continuation, ContinuationStack},
-    crypto::merkle::MerklePath,
-    mast::{
-        BasicBlockNode, JoinNode, LoopNode, MastForest, MastForestId, MastNode, MastNodeExt,
-        MastNodeId, SparseMastForest, SparseMastForestBuilder, SplitNode, VisitKind,
-    },
-    processor::{Processor, StackInterface, SystemInterface},
-    trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    tracer::{OperationHelperRegisters, Tracer},
-    utils::Idx,
+use {
+    miden_core::FMP_ADDR,
+    miden_core::FMP_INIT_VALUE,
+    miden_core::operations::Operation,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+};
+
+use {
+    super::block_stack::BlockInfo,
+    super::block_stack::BlockStack,
+    super::block_stack::ExecutionContextInfo,
+    super::stack::OverflowTable,
+    super::trace_state::AceReplay,
+    super::trace_state::AdviceReplay,
+    super::trace_state::BitwiseReplay,
+    super::trace_state::BlockAddressReplay,
+    super::trace_state::BlockStackReplay,
+    super::trace_state::CoreTraceFragmentContext,
+    super::trace_state::CoreTraceState,
+    super::trace_state::DecoderState,
+    super::trace_state::ExecutionContextReplay,
+    super::trace_state::ExecutionContextSystemInfo,
+    super::trace_state::ExecutionReplay,
+    super::trace_state::HasherRequestReplay,
+    super::trace_state::HasherResponseReplay,
+    super::trace_state::KernelReplay,
+    super::trace_state::MastForestResolutionReplay,
+    super::trace_state::MemoryReadsReplay,
+    super::trace_state::MemoryWritesReplay,
+    super::trace_state::RangeCheckerReplay,
+    super::trace_state::StackOverflowReplay,
+    super::trace_state::StackState,
+    super::trace_state::SystemState,
+    super::utils::split_u32_into_u16,
+};
+use {
+    crate::AceError,
+    crate::ContextId,
+    crate::EMPTY_WORD,
+    crate::ExecutionError,
+    crate::FastProcessor,
+    crate::Felt,
+    crate::MIN_STACK_DEPTH,
+    crate::ONE,
+    crate::RowIndex,
+    crate::Word,
+    crate::ZERO,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
+    crate::crypto::merkle::MerklePath,
+    crate::mast::BasicBlockNode,
+    crate::mast::JoinNode,
+    crate::mast::LoopNode,
+    crate::mast::MastForest,
+    crate::mast::MastForestId,
+    crate::mast::MastNode,
+    crate::mast::MastNodeExt,
+    crate::mast::MastNodeId,
+    crate::mast::SparseMastForest,
+    crate::mast::SparseMastForestBuilder,
+    crate::mast::SplitNode,
+    crate::mast::VisitKind,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
+    crate::trace::chiplets::CircuitEvaluation,
+    crate::trace::chiplets::PTR_OFFSET_ELEM,
+    crate::trace::chiplets::PTR_OFFSET_WORD,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
+    crate::utils::Idx,
 };
 
 // STATE SNAPSHOT

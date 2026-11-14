@@ -1,20 +1,35 @@
 use alloc::vec::Vec;
 
-use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
-use miden_core::{
-    Felt, WORD_SIZE, Word, ZERO,
-    chiplets::{eidos_compression, hasher::compress_state},
-    crypto::merkle::MerklePath,
-    deferred::Digest,
-    program::MIN_STACK_DEPTH,
-    utils::range,
+use {
+    miden_air_definitions::vm::trace::RowIndex,
+    miden_air_definitions::vm::trace::chiplets::hasher::HasherState,
+};
+use {
+    miden_core::Felt,
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::chiplets::eidos_compression,
+    miden_core::chiplets::hasher::compress_state,
+    miden_core::crypto::merkle::MerklePath,
+    miden_core::deferred::Digest,
+    miden_core::program::MIN_STACK_DEPTH,
+    miden_core::utils::range,
 };
 
-use crate::{
-    AdviceProvider, ContextId, ExecutionError,
-    errors::OperationError,
-    fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
-    processor::{HasherInterface, Processor, StackInterface, SystemInterface},
+use {
+    crate::AdviceProvider,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::errors::OperationError,
+    crate::fast::FastProcessor,
+    crate::fast::INITIAL_STACK_TOP_IDX,
+    crate::fast::SystemCallState,
+    crate::fast::memory::Memory,
+    crate::processor::HasherInterface,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
 };
 
 impl Processor for FastProcessor {

@@ -1,24 +1,63 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_assembly::{
-    Assembler, DefaultSourceManager, Path, PathBuf,
-    ast::{Module, ModuleKind},
-    testing::{Pattern, TestContext, regex, source_file},
+use {
+    miden_assembly::Assembler,
+    miden_assembly::DefaultSourceManager,
+    miden_assembly::Path,
+    miden_assembly::PathBuf,
+    miden_assembly::ast::Module,
+    miden_assembly::ast::ModuleKind,
+    miden_assembly::testing::Pattern,
+    miden_assembly::testing::TestContext,
+    miden_assembly::testing::regex,
+    miden_assembly::testing::source_file,
 };
-use miden_core::{
-    crypto::merkle::{MerkleStore, MerkleTree},
-    mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
+use {
+    miden_core::crypto::merkle::MerkleStore,
+    miden_core::crypto::merkle::MerkleTree,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::mast::error_code_from_msg,
 };
-use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
-use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
+use {
+    miden_debug_types::Location,
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+};
+use {
+    miden_utils_testing::crypto::init_merkle_leaves,
+    miden_utils_testing::crypto::init_merkle_store,
+};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
-use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
-    Program, StackInputs, SyncHost, Word, ZERO,
-    advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
-    operation::Operation,
+use {
+    crate::BaseHost,
+    crate::DefaultHost,
+    crate::FastProcessor,
+    crate::KernelDescriptor,
+    crate::LoadedMastForest,
+    crate::ONE,
+    crate::ProcessorState,
+    crate::Program,
+    crate::StackInputs,
+    crate::SyncHost,
+    crate::Word,
+    crate::ZERO,
+    crate::advice::AdviceInputs,
+    crate::advice::AdviceMap,
+    crate::advice::AdviceMutation,
+    crate::event::EventError,
+    crate::event::EventHandler,
+    crate::event::EventName,
+    crate::event::TraceError,
+    crate::event::TraceHandler,
+    crate::operation::Operation,
 };
 
 macro_rules! assert_diagnostic_lines {

@@ -1,11 +1,25 @@
 use alloc::collections::BTreeSet;
 
-use super::{
-    EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
-    MutationSet, NodeIndex, SMT_MAX_DEPTH, SMT_MIN_DEPTH, SparseMerkleTree, SparseMerkleTreeReader,
-    Word,
+use {
+    super::EMPTY_WORD,
+    super::EmptySubtreeRoots,
+    super::InnerNode,
+    super::InnerNodeInfo,
+    super::InnerNodes,
+    super::LeafIndex,
+    super::MerkleError,
+    super::MutationSet,
+    super::NodeIndex,
+    super::SMT_MAX_DEPTH,
+    super::SMT_MIN_DEPTH,
+    super::SparseMerkleTree,
+    super::SparseMerkleTreeReader,
+    super::Word,
 };
-use crate::merkle::{SparseMerklePath, smt::SmtLeafError};
+use {
+    crate::merkle::SparseMerklePath,
+    crate::merkle::smt::SmtLeafError,
+};
 
 mod proof;
 pub use proof::SimpleSmtProof;

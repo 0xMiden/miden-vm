@@ -1,8 +1,9 @@
 use miden_core::serde::Serializable;
 use miden_mast_package::Package;
-use proptest::{
-    prelude::*,
-    test_runner::{Config, TestRunner},
+use {
+    proptest::prelude::*,
+    proptest::test_runner::Config,
+    proptest::test_runner::TestRunner,
 };
 
 // PACKAGE SERIALIZATION AND DESERIALIZATION

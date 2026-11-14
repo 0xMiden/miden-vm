@@ -1,19 +1,34 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt, Word, ZERO,
-    advice::AdviceStack,
-    program::{MIN_STACK_DEPTH, StackInputs},
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::advice::AdviceStack,
+    miden_core::program::MIN_STACK_DEPTH,
+    miden_core::program::StackInputs,
 };
 
-use super::{
-    super::stack_ops::{op_pad, op_push},
-    op_advpop, op_advpopw, op_mload, op_mloadw, op_mstore, op_mstorew, op_mstream, op_pipe,
+use {
+    super::super::stack_ops::op_pad,
+    super::super::stack_ops::op_push,
+    super::op_advpop,
+    super::op_advpopw,
+    super::op_mload,
+    super::op_mloadw,
+    super::op_mstore,
+    super::op_mstorew,
+    super::op_mstream,
+    super::op_pipe,
 };
-use crate::{
-    AdviceInputs, ContextId,
-    fast::{FastProcessor, NoopTracer},
-    processor::{Processor, StackInterface, SystemInterface},
+use {
+    crate::AdviceInputs,
+    crate::ContextId,
+    crate::fast::FastProcessor,
+    crate::fast::NoopTracer,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
 };
 
 // ADVICE INPUT TESTS

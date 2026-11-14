@@ -1,11 +1,23 @@
-use alloc::{string::ToString, vec::Vec};
+use {
+    alloc::string::ToString,
+    alloc::vec::Vec,
+};
 
 use super::EMPTY_WORD;
-use crate::{
-    Felt, Word,
-    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
-    merkle::smt::{LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    crate::Felt,
+    crate::Word,
+    crate::hash::eidos::Eidos,
+    crate::hash::eidos::domains::SMT_BUCKET_LEAF,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::MAX_LEAF_ENTRIES,
+    crate::merkle::smt::SMT_DEPTH,
+    crate::merkle::smt::SmtLeafError,
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 
 /// The number of field elements in a key-value pair (two Words, 4 Felts each).

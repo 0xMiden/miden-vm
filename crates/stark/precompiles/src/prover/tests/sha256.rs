@@ -1,34 +1,53 @@
-use std::{
-    collections::HashMap,
-    panic::{AssertUnwindSafe, catch_unwind},
-    vec,
-    vec::Vec,
+use {
+    std::collections::HashMap,
+    std::panic::AssertUnwindSafe,
+    std::panic::catch_unwind,
+    std::vec,
+    std::vec::Vec,
 };
 
 use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
-use miden_core::{
-    Felt,
-    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
+use {
+    miden_core::Felt,
+    miden_core::field::Field,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::PrimeField64,
+    miden_core::field::QuadFelt,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
 use miden_crypto::hash::sha2::Sha256;
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+use {
+    miden_stark::air::BaseAir,
+    miden_stark::air::LiftedAir,
+    miden_stark::lookup::Challenges,
+    miden_stark::lookup::LookupAir,
+    miden_stark::lookup::ProverLookupBuilder,
+    miden_stark::lookup::build_lookup_fractions,
 };
 
-use crate::prover::{
-    hash::sha256::compression::{
-        COL_A_BEGIN, COL_ACT, COL_B_BEGIN, COL_BLOCK_ID, COL_CARRY, COL_R_BEGIN, COL_ROT_BEGIN,
-        NUM_MAIN_COLS, Sha256CompressionAir, Sha256CompressionRequires, Sha256WordMsg,
-        generate_trace, program,
-    },
-    logup::LookupMessage,
-    primitives::byte_pair_lut::{
-        BytePairLutAir, BytePairLutRequires, NUM_MAIN_COLS as BPL_MAIN_COLS, Range16Msg,
-        generate_trace as bpl_trace,
-    },
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+use {
+    crate::prover::hash::sha256::compression::COL_A_BEGIN,
+    crate::prover::hash::sha256::compression::COL_ACT,
+    crate::prover::hash::sha256::compression::COL_B_BEGIN,
+    crate::prover::hash::sha256::compression::COL_BLOCK_ID,
+    crate::prover::hash::sha256::compression::COL_CARRY,
+    crate::prover::hash::sha256::compression::COL_R_BEGIN,
+    crate::prover::hash::sha256::compression::COL_ROT_BEGIN,
+    crate::prover::hash::sha256::compression::NUM_MAIN_COLS,
+    crate::prover::hash::sha256::compression::Sha256CompressionAir,
+    crate::prover::hash::sha256::compression::Sha256CompressionRequires,
+    crate::prover::hash::sha256::compression::Sha256WordMsg,
+    crate::prover::hash::sha256::compression::generate_trace,
+    crate::prover::hash::sha256::compression::program,
+    crate::prover::logup::LookupMessage,
+    crate::prover::primitives::byte_pair_lut::BytePairLutAir,
+    crate::prover::primitives::byte_pair_lut::BytePairLutRequires,
+    crate::prover::primitives::byte_pair_lut::NUM_MAIN_COLS as BPL_MAIN_COLS,
+    crate::prover::primitives::byte_pair_lut::Range16Msg,
+    crate::prover::primitives::byte_pair_lut::generate_trace as bpl_trace,
+    crate::prover::relations::MAX_MESSAGE_WIDTH,
+    crate::prover::relations::NUM_BUS_IDS,
 };
 
 const COL_MULT_CANONICAL_XOR: usize = EidosRelation::CanonicalXor.index();
@@ -37,10 +56,11 @@ const COL_MULT_RANGE16: usize = BPL_MAIN_COLS - 1;
 #[cfg(feature = "concurrent")]
 #[test]
 fn sha256_parallel_trace_and_lookups_match_sequential() {
-    use crate::prover::{
-        hash::sha256::{io::Sha256IoRequires, trace},
-        primitives::byte_pair_lut::BytePairOp,
-        transcript::eidos::trace::EidosRequires,
+    use {
+        crate::prover::hash::sha256::io::Sha256IoRequires,
+        crate::prover::hash::sha256::trace,
+        crate::prover::primitives::byte_pair_lut::BytePairOp,
+        crate::prover::transcript::eidos::trace::EidosRequires,
     };
 
     let serial = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
@@ -879,7 +899,10 @@ fn sha256_nonuniform_arbitrary_state_and_block_match_reference() {
 
 #[test]
 fn sha256_short_templates_bind_all_program_fields() {
-    use crate::prover::hash::sha256::compression::{COL_PROG_BEGIN, COL_ROL_K};
+    use {
+        crate::prover::hash::sha256::compression::COL_PROG_BEGIN,
+        crate::prover::hash::sha256::compression::COL_ROL_K,
+    };
     // Exercise each phase, initial inputs, expansion (including the idle lane 14), and late
     // rounds whose fanouts shrink.
     for row in [
@@ -894,8 +917,11 @@ fn sha256_short_templates_bind_all_program_fields() {
 
 #[test]
 fn sha256_controller_cannot_skip_repeat_or_truncate_phases() {
-    use crate::prover::hash::sha256::compression::{
-        COL_CYCLE, COL_PHASE_BEGIN, COL_PHASE_END, COL_PHASE_INV,
+    use {
+        crate::prover::hash::sha256::compression::COL_CYCLE,
+        crate::prover::hash::sha256::compression::COL_PHASE_BEGIN,
+        crate::prover::hash::sha256::compression::COL_PHASE_END,
+        crate::prover::hash::sha256::compression::COL_PHASE_INV,
     };
     for row in [0, 31, 32, 1055, 1056, 1183, 1184, 3231, 3232, 3263, 3264, 4095] {
         for column in COL_PHASE_BEGIN..=COL_PHASE_INV {
@@ -922,7 +948,10 @@ fn sha256_controller_cannot_skip_repeat_or_truncate_phases() {
 
 #[test]
 fn sha256_metadata_is_held_through_each_round() {
-    use crate::prover::hash::sha256::compression::{COL_META_K, COL_META_T};
+    use {
+        crate::prover::hash::sha256::compression::COL_META_K,
+        crate::prover::hash::sha256::compression::COL_META_T,
+    };
     for row in [32, 33, 47, 544, 559, 1184, 1185, 1215, 3231] {
         for column in COL_META_T..=COL_META_K {
             assert_local_rejects(|main| main.values[row * NUM_MAIN_COLS + column] += Felt::ONE);
@@ -932,7 +961,11 @@ fn sha256_metadata_is_held_through_each_round() {
 
 #[test]
 fn sha256_fixed_metadata_provider_authenticates_unused_tuple_fields() {
-    use crate::prover::hash::sha256::compression::{COL_META_A_MULT, COL_META_E_MULT, COL_META_K};
+    use {
+        crate::prover::hash::sha256::compression::COL_META_A_MULT,
+        crate::prover::hash::sha256::compression::COL_META_E_MULT,
+        crate::prover::hash::sha256::compression::COL_META_K,
+    };
     for column in [COL_META_A_MULT, COL_META_E_MULT, COL_META_K] {
         assert!(
             two_block_bus_residual(|main| {

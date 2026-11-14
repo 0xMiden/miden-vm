@@ -1,25 +1,54 @@
-use alloc::{boxed::Box, collections::BTreeMap, format, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::format,
+    alloc::vec::Vec,
+};
 use core::fmt::Debug;
 
-use miden_core::{
-    advice::AdviceMap,
-    mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
-        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
-    },
-    utils::IndexVec,
+use {
+    miden_core::advice::AdviceMap,
+    miden_core::mast::BasicBlockNode,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::CallNodeBuilder,
+    miden_core::mast::DynNodeBuilder,
+    miden_core::mast::ExternalNodeBuilder,
+    miden_core::mast::JoinNodeBuilder,
+    miden_core::mast::LoopNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastForestContributor,
+    miden_core::mast::MastForestError,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeBuilder,
+    miden_core::mast::MastNodeId,
+    miden_core::mast::SplitNodeBuilder,
+    miden_core::utils::IndexVec,
 };
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNodeId,
-    DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder, SourceNode,
+use {
+    miden_mast_package::debug_info::DebugFunctionIdx,
+    miden_mast_package::debug_info::DebugInfoBuilder,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceInlineCall,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::DebugSourceVar,
+    miden_mast_package::debug_info::PackageDebugInfo,
+    miden_mast_package::debug_info::PackageDebugInfoBuilder,
+    miden_mast_package::debug_info::SourceNode,
 };
 
-use super::{
-    MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
-    compute_operations_and_adjust_mappings, remap_inline_ranges,
+use {
+    super::MastNodeRef,
+    super::PendingMastNode,
+    super::PendingMastNodeKind,
+    super::SourceNodeRef,
+    super::compute_operations_and_adjust_mappings,
+    super::remap_inline_ranges,
 };
-use crate::diagnostics::{Diagnostic, Report, miette};
+use {
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::Report,
+    crate::diagnostics::miette,
+};
 
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {

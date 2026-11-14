@@ -735,14 +735,18 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
 
 #[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
-    use std::{
-        panic::{AssertUnwindSafe, catch_unwind},
-        sync::Arc,
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+        std::sync::Arc,
     };
 
     use miden_assembly_syntax::Parse;
 
-    use crate::{Assembler, DefaultSourceManager};
+    use {
+        crate::Assembler,
+        crate::DefaultSourceManager,
+    };
 
     let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
 

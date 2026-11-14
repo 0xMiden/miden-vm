@@ -36,47 +36,77 @@ mod snapshot;
 mod tests;
 mod tree_metadata;
 
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use {
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::ffi::c_int;
-use std::{collections::HashMap, mem};
+use {
+    std::collections::HashMap,
+    std::mem,
+};
 
-use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
+use {
+    miden_serde_utils::Deserializable,
+    miden_serde_utils::DeserializationError,
+    miden_serde_utils::Serializable,
+};
 use num::Integer;
 use rayon::prelude::*;
 use rocksdb as db;
 pub use snapshot::PersistentBackendReader;
 
-use super::{BackendError, Result};
+use {
+    super::BackendError,
+    super::Result,
+};
 #[cfg(test)]
 use crate::merkle::smt::SmtUpdateBatch;
-use crate::{
-    EMPTY_WORD, Map, Word,
-    merkle::{
-        EmptySubtreeRoots, MerkleError, NodeIndex,
-        smt::{
-            Backend, BackendReader, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
-            SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, StorageUpdateParts,
-            StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot, VersionId,
-            full::concurrent::{
-                MutatedSubtreeLeaves, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
-                fetch_sibling_pair, process_sorted_pairs_to_leaves,
-            },
-            large::{StorageError, SubtreeUpdate},
-            large_forest::{
-                backend::persistent::{
-                    config::Config,
-                    internal::merge_batches,
-                    iterator::PersistentBackendEntriesIterator,
-                    keys::{LeafKey, SubtreeKey},
-                    tree_metadata::TreeMetadata,
-                },
-                utils::{
-                    AppliedLineageMutation, LineageMutation, LineageMutationKind, MutationSet,
-                },
-            },
-            persistent_hash::ensure_hash_scheme,
-        },
-    },
+use {
+    crate::EMPTY_WORD,
+    crate::Map,
+    crate::Word,
+    crate::merkle::EmptySubtreeRoots,
+    crate::merkle::MerkleError,
+    crate::merkle::NodeIndex,
+    crate::merkle::smt::Backend,
+    crate::merkle::smt::BackendReader,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::LineageId,
+    crate::merkle::smt::NodeMutation,
+    crate::merkle::smt::NodeMutations,
+    crate::merkle::smt::SMT_DEPTH,
+    crate::merkle::smt::SmtForestUpdateBatch,
+    crate::merkle::smt::SmtLeaf,
+    crate::merkle::smt::SmtLeafError,
+    crate::merkle::smt::SmtProof,
+    crate::merkle::smt::StorageUpdateParts,
+    crate::merkle::smt::StorageUpdates,
+    crate::merkle::smt::Subtree,
+    crate::merkle::smt::SubtreeError,
+    crate::merkle::smt::TreeEntry,
+    crate::merkle::smt::TreeWithRoot,
+    crate::merkle::smt::VersionId,
+    crate::merkle::smt::full::concurrent::MutatedSubtreeLeaves,
+    crate::merkle::smt::full::concurrent::SUBTREE_DEPTH,
+    crate::merkle::smt::full::concurrent::SubtreeLeaf,
+    crate::merkle::smt::full::concurrent::SubtreeLeavesIter,
+    crate::merkle::smt::full::concurrent::fetch_sibling_pair,
+    crate::merkle::smt::full::concurrent::process_sorted_pairs_to_leaves,
+    crate::merkle::smt::large::StorageError,
+    crate::merkle::smt::large::SubtreeUpdate,
+    crate::merkle::smt::large_forest::backend::persistent::config::Config,
+    crate::merkle::smt::large_forest::backend::persistent::internal::merge_batches,
+    crate::merkle::smt::large_forest::backend::persistent::iterator::PersistentBackendEntriesIterator,
+    crate::merkle::smt::large_forest::backend::persistent::keys::LeafKey,
+    crate::merkle::smt::large_forest::backend::persistent::keys::SubtreeKey,
+    crate::merkle::smt::large_forest::backend::persistent::tree_metadata::TreeMetadata,
+    crate::merkle::smt::large_forest::utils::AppliedLineageMutation,
+    crate::merkle::smt::large_forest::utils::LineageMutation,
+    crate::merkle::smt::large_forest::utils::LineageMutationKind,
+    crate::merkle::smt::large_forest::utils::MutationSet,
+    crate::merkle::smt::persistent_hash::ensure_hash_scheme,
 };
 
 // TYPE ALIASES

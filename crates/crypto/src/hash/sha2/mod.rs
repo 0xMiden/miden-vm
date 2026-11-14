@@ -4,9 +4,13 @@ use core::mem::size_of;
 
 use sha2::Digest as Sha2Digest;
 
-use super::{
-    Felt, HasherExt,
-    digest::{DIGEST256_BYTES, DIGEST512_BYTES, Digest256, Digest512},
+use {
+    super::Felt,
+    super::HasherExt,
+    super::digest::DIGEST256_BYTES,
+    super::digest::DIGEST512_BYTES,
+    super::digest::Digest256,
+    super::digest::Digest512,
 };
 use crate::field::BasedVectorSpace;
 

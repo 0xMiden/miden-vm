@@ -2,19 +2,31 @@ use once_cell::sync::Lazy;
 use p3_goldilocks::Goldilocks;
 use p3_symmetric::Permutation;
 
-use super::{
-    AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
-    Range, STATE_WIDTH, Word,
+use {
+    super::AlgebraicSponge,
+    super::CAPACITY_RANGE,
+    super::DIGEST_RANGE,
+    super::Felt,
+    super::RATE_RANGE,
+    super::RATE0_RANGE,
+    super::RATE1_RANGE,
+    super::Range,
+    super::STATE_WIDTH,
+    super::Word,
 };
-use crate::{
-    ZERO,
-    hash::algebraic_sponge::poseidon2::constants::{
-        ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
-    },
+use {
+    crate::ZERO,
+    crate::hash::algebraic_sponge::poseidon2::constants::ARK_EXT_INITIAL,
+    crate::hash::algebraic_sponge::poseidon2::constants::ARK_EXT_TERMINAL,
+    crate::hash::algebraic_sponge::poseidon2::constants::ARK_INT,
+    crate::hash::algebraic_sponge::poseidon2::constants::MAT_DIAG,
 };
 
 mod constants;
-use constants::{NUM_EXTERNAL_ROUNDS_HALF, NUM_INTERNAL_ROUNDS};
+use {
+    constants::NUM_EXTERNAL_ROUNDS_HALF,
+    constants::NUM_INTERNAL_ROUNDS,
+};
 
 #[cfg(test)]
 mod test;
@@ -375,7 +387,11 @@ impl Poseidon2 {
 // ================================================================================================
 
 use p3_challenger::DuplexChallenger;
-use p3_symmetric::{CryptographicPermutation, PaddingFreeSponge, TruncatedPermutation};
+use {
+    p3_symmetric::CryptographicPermutation,
+    p3_symmetric::PaddingFreeSponge,
+    p3_symmetric::TruncatedPermutation,
+};
 
 use crate::field::BasedVectorSpace;
 

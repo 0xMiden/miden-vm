@@ -1,11 +1,18 @@
 //! This module contains the definition of the various key types necessary for querying the backing
 //! persistent DB.
 
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use {
+    miden_serde_utils::ByteReader,
+    miden_serde_utils::ByteWriter,
+    miden_serde_utils::Deserializable,
+    miden_serde_utils::DeserializationError,
+    miden_serde_utils::Serializable,
 };
 
-use crate::merkle::{NodeIndex, smt::LineageId};
+use {
+    crate::merkle::NodeIndex,
+    crate::merkle::smt::LineageId,
+};
 
 // LEAF KEY
 // ================================================================================================
@@ -88,7 +95,12 @@ impl Deserializable for SubtreeKey {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::{LeafKey, LineageId, NodeIndex, SubtreeKey};
+    use {
+        super::LeafKey,
+        super::LineageId,
+        super::NodeIndex,
+        super::SubtreeKey,
+    };
 
     impl Arbitrary for LeafKey {
         type Parameters = ();

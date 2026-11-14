@@ -10,14 +10,16 @@
 use alloc::vec::Vec;
 
 use miden_air_definitions::vm::logup::BitwiseMsg;
-use miden_core::{
-    Felt,
-    operations::{Operation, opcodes},
+use {
+    miden_core::Felt,
+    miden_core::operations::Operation,
+    miden_core::operations::opcodes,
 };
 
-use super::super::{
-    build_trace_from_ops,
-    lookup_harness::{Expectations, InteractionLog},
+use {
+    super::super::build_trace_from_ops,
+    super::super::lookup_harness::Expectations,
+    super::super::lookup_harness::InteractionLog,
 };
 use crate::RowIndex;
 

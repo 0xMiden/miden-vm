@@ -1,19 +1,34 @@
 //! Regression test for a REPEAT row placed before the committed program starts.
 
-use alloc::{vec, vec::Vec};
+use {
+    alloc::vec,
+    alloc::vec::Vec,
+};
 use core::borrow::Borrow;
 
 use miden_air_definitions::vm::CoreCols;
-use miden_core::{
-    Felt,
-    mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
-    operations::{Operation, opcodes},
-    program::{Program, StackOutputs},
-    utils::{Matrix, RowMajorMatrix},
+use {
+    miden_core::Felt,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::LoopNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::operations::Operation,
+    miden_core::operations::opcodes,
+    miden_core::program::Program,
+    miden_core::program::StackOutputs,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use {
+    miden_processor::DefaultHost,
+    miden_processor::FastProcessor,
+    miden_processor::StackInputs,
+};
 
-use crate::repro_harness::{ReproTrace, core_row_mut};
+use {
+    crate::repro_harness::ReproTrace,
+    crate::repro_harness::core_row_mut,
+};
 
 struct ForgedTrace {
     repro: ReproTrace,

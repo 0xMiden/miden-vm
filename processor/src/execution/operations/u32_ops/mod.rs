@@ -2,11 +2,15 @@ use alloc::vec::Vec;
 
 use paste::paste;
 
-use crate::{
-    ExecutionError, Felt, ZERO,
-    operation::OperationError,
-    processor::{Processor, StackInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::ExecutionError,
+    crate::Felt,
+    crate::ZERO,
+    crate::operation::OperationError,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 #[cfg(test)]

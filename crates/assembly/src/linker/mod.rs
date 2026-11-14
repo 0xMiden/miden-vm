@@ -46,43 +46,71 @@ mod resolver;
 mod rewrites;
 mod symbols;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use core::{
-    cell::RefCell,
-    ops::{ControlFlow, Index},
+use {
+    core::cell::RefCell,
+    core::ops::ControlFlow,
+    core::ops::Index,
 };
 
-use miden_assembly_syntax::{
-    Report,
-    ast::{
-        self, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
-        Path, SymbolResolution, Visibility, types,
-    },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    module::{ItemInfo, ModuleDescriptor},
+use {
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::AttributeSet,
+    miden_assembly_syntax::ast::GlobalItemIndex,
+    miden_assembly_syntax::ast::InvocationTarget,
+    miden_assembly_syntax::ast::ItemIndex,
+    miden_assembly_syntax::ast::Module,
+    miden_assembly_syntax::ast::ModuleIndex,
+    miden_assembly_syntax::ast::Path,
+    miden_assembly_syntax::ast::SymbolResolution,
+    miden_assembly_syntax::ast::Visibility,
+    miden_assembly_syntax::ast::types,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::module::ItemInfo,
+    miden_assembly_syntax::module::ModuleDescriptor,
 };
-use miden_core::{Word, advice::AdviceMap, program::KernelDescriptor};
+use {
+    miden_core::Word,
+    miden_core::advice::AdviceMap,
+    miden_core::program::KernelDescriptor,
+};
 use miden_mast_package::Package as MastPackage;
-use smallvec::{SmallVec, smallvec};
-
-pub use self::{
-    callgraph::{CallGraph, CycleError},
-    errors::LinkerError,
-    library::{LinkLibrary, Linkage},
-    namespaces::NamespaceGraph,
-    resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
-    symbols::{Import, Symbol, SymbolItem},
+use {
+    smallvec::SmallVec,
+    smallvec::smallvec,
 };
-use self::{
-    module::{LinkModule, ModuleSource},
-    namespaces::ResolvedImports,
-    resolver::*,
+
+pub use {
+    self::callgraph::CallGraph,
+    self::callgraph::CycleError,
+    self::errors::LinkerError,
+    self::library::LinkLibrary,
+    self::library::Linkage,
+    self::namespaces::NamespaceGraph,
+    self::resolver::ResolverCache,
+    self::resolver::SymbolResolutionContext,
+    self::resolver::SymbolResolver,
+    self::symbols::Import,
+    self::symbols::Symbol,
+    self::symbols::SymbolItem,
+};
+use {
+    self::module::LinkModule,
+    self::module::ModuleSource,
+    self::namespaces::ResolvedImports,
+    self::resolver::*,
 };
 
 /// Selects how [`Linker::link`] handles a static cycle in the call graph.
@@ -1022,7 +1050,10 @@ impl Linker {
         span: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
-        use miden_assembly_syntax::ast::{TypeResolver, constants::ConstEnvironment};
+        use {
+            miden_assembly_syntax::ast::TypeResolver,
+            miden_assembly_syntax::ast::constants::ConstEnvironment,
+        };
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
@@ -1116,28 +1147,36 @@ impl Index<GlobalItemIndex> for Linker {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeSet,
-        panic::{AssertUnwindSafe, catch_unwind},
-        string::String,
-        sync::Arc,
+    use {
+        std::collections::BTreeSet,
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+        std::string::String,
+        std::sync::Arc,
     };
 
-    use miden_assembly_syntax::{
-        ast::{
-            Ident, InvocationTarget, InvokeKind, ItemIndex, Path, SymbolResolutionError,
-            Visibility, types,
-        },
-        debuginfo::{SourceSpan, Span},
-        module::{ItemInfo, TypeInfo},
+    use {
+        miden_assembly_syntax::ast::Ident,
+        miden_assembly_syntax::ast::InvocationTarget,
+        miden_assembly_syntax::ast::InvokeKind,
+        miden_assembly_syntax::ast::ItemIndex,
+        miden_assembly_syntax::ast::Path,
+        miden_assembly_syntax::ast::SymbolResolutionError,
+        miden_assembly_syntax::ast::Visibility,
+        miden_assembly_syntax::ast::types,
+        miden_assembly_syntax::debuginfo::SourceSpan,
+        miden_assembly_syntax::debuginfo::Span,
+        miden_assembly_syntax::module::ItemInfo,
+        miden_assembly_syntax::module::TypeInfo,
     };
     use miden_core::Felt;
 
     use super::*;
-    use crate::{
-        Assembler,
-        ast::Module,
-        testing::{TestContext, source_file},
+    use {
+        crate::Assembler,
+        crate::ast::Module,
+        crate::testing::TestContext,
+        crate::testing::source_file,
     };
 
     #[test]

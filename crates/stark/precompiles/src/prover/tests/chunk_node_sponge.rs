@@ -1,53 +1,66 @@
 //! Tests for the composite chunk, Keccak-node, and Keccak-sponge chiplet.
 
-use std::{vec, vec::Vec};
+use {
+    std::vec,
+    std::vec::Vec,
+};
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix, bytes_to_packed_u32_elements},
+use {
+    miden_core::Felt,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
+    miden_core::utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees},
-    lookup::{
-        LookupAir, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+use {
+    miden_stark::air::BaseAir,
+    miden_stark::air::ConstraintDegrees,
+    miden_stark::lookup::LookupAir,
+    miden_stark::lookup::ProverLookupBuilder,
+    miden_stark::lookup::debug::ValidateLayout,
+    miden_stark::lookup::debug::ValidateLookupAir,
 };
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use {
+    rand::RngExt,
+    rand::SeedableRng,
+    rand::rngs::StdRng,
+};
 
-use crate::prover::{
-    hash::{
-        chunk::{
-            self, ChunkAir,
-            trace::{ChunkRequires, generate_trace_padded_to as chunk_trace},
-        },
-        chunk_node,
-        chunk_node_sponge::{
-            ChunkNodeSpongeAir, NUM_AUX_COLS, NUM_MAIN_COLS, trace::generate_trace,
-        },
-        keccak::{
-            node::{
-                self, KeccakNodeAir,
-                trace::{KeccakNodeRequires, generate_trace as node_trace},
-            },
-            round::RoundRequires,
-            sponge::{
-                self, KeccakSpongeAir, NUM_AUX_COLS as SPONGE_NUM_AUX_COLS,
-                trace::{SpongeRequires, generate_trace_padded_to as sponge_trace},
-            },
-        },
-    },
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
-    primitives::byte_pair_lut::BytePairLutRequires,
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::Session,
-    tests::{
-        assert_same_rational_fold, log_quotient_degree, lookup_column_folds, lookup_fractions,
-        sum_rational_folds,
-    },
-    transcript::eidos::trace::EidosRequires,
+use {
+    crate::prover::hash::chunk,
+    crate::prover::hash::chunk::ChunkAir,
+    crate::prover::hash::chunk::trace::ChunkRequires,
+    crate::prover::hash::chunk::trace::generate_trace_padded_to as chunk_trace,
+    crate::prover::hash::chunk_node,
+    crate::prover::hash::chunk_node_sponge::ChunkNodeSpongeAir,
+    crate::prover::hash::chunk_node_sponge::NUM_AUX_COLS,
+    crate::prover::hash::chunk_node_sponge::NUM_MAIN_COLS,
+    crate::prover::hash::chunk_node_sponge::trace::generate_trace,
+    crate::prover::hash::keccak::node,
+    crate::prover::hash::keccak::node::KeccakNodeAir,
+    crate::prover::hash::keccak::node::trace::KeccakNodeRequires,
+    crate::prover::hash::keccak::node::trace::generate_trace as node_trace,
+    crate::prover::hash::keccak::round::RoundRequires,
+    crate::prover::hash::keccak::sponge,
+    crate::prover::hash::keccak::sponge::KeccakSpongeAir,
+    crate::prover::hash::keccak::sponge::NUM_AUX_COLS as SPONGE_NUM_AUX_COLS,
+    crate::prover::hash::keccak::sponge::trace::SpongeRequires,
+    crate::prover::hash::keccak::sponge::trace::generate_trace_padded_to as sponge_trace,
+    crate::prover::logup::Challenges,
+    crate::prover::logup::NUM_LOGUP_VALUES,
+    crate::prover::logup::NUM_RANDOMNESS,
+    crate::prover::primitives::byte_pair_lut::BytePairLutRequires,
+    crate::prover::relations::MAX_MESSAGE_WIDTH,
+    crate::prover::relations::NUM_BUS_IDS,
+    crate::prover::session::Session,
+    crate::prover::tests::assert_same_rational_fold,
+    crate::prover::tests::log_quotient_degree,
+    crate::prover::tests::lookup_column_folds,
+    crate::prover::tests::lookup_fractions,
+    crate::prover::tests::sum_rational_folds,
+    crate::prover::transcript::eidos::trace::EidosRequires,
 };
 
 #[test]

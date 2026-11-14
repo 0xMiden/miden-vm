@@ -10,53 +10,79 @@ mod seed_gen;
 mod serialization;
 mod target_type;
 
-use alloc::{
-    borrow::Cow,
-    boxed::Box,
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::borrow::Cow,
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    Path, Report,
-    ast::{self, QualifiedProcedureName},
-    module::ModuleDescriptor,
+use {
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::QualifiedProcedureName,
+    miden_assembly_syntax::module::ModuleDescriptor,
 };
 #[cfg(feature = "std")]
 use miden_core::serde::DeserializationError;
-use miden_core::{
-    Word,
-    advice::AdviceMap,
-    chiplets::hasher,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    program::KernelDescriptor,
-    serde::{ByteWriter, Deserializable, Serializable},
+use {
+    miden_core::Word,
+    miden_core::advice::AdviceMap,
+    miden_core::chiplets::hasher,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::program::KernelDescriptor,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
 };
 
-pub use self::{
-    error::{PackageDebugInfoError, PackageStripError},
-    event_handlers::{
-        EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
-        MAX_MODULE_BYTES, MAX_NAME_BYTES, MIN_ABI_VERSION, validate_manifest_entries,
-    },
-    id::PackageId,
-    manifest::{
-        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
-        PackageSubmodule, ProcedureExport, TypeExport,
-    },
-    section::{InvalidSectionIdError, Section, SectionId},
-    target_type::{InvalidTargetTypeError, TargetType},
+pub use {
+    self::error::PackageDebugInfoError,
+    self::error::PackageStripError,
+    self::event_handlers::EventHandlerManifestEntry,
+    self::event_handlers::EventHandlerSection,
+    self::event_handlers::EventHandlerSectionError,
+    self::event_handlers::MAX_HANDLERS,
+    self::event_handlers::MAX_MODULE_BYTES,
+    self::event_handlers::MAX_NAME_BYTES,
+    self::event_handlers::MIN_ABI_VERSION,
+    self::event_handlers::validate_manifest_entries,
+    self::id::PackageId,
+    self::manifest::ConstantExport,
+    self::manifest::ManifestValidationError,
+    self::manifest::PackageExport,
+    self::manifest::PackageManifest,
+    self::manifest::PackageModule,
+    self::manifest::PackageSubmodule,
+    self::manifest::ProcedureExport,
+    self::manifest::TypeExport,
+    self::section::InvalidSectionIdError,
+    self::section::Section,
+    self::section::SectionId,
+    self::target_type::InvalidTargetTypeError,
+    self::target_type::TargetType,
 };
-use crate::{
-    Dependency, Version,
-    debug_info::{
-        DebugFunctionIdx, DebugFunctionInfo, DebugSourceNode, DebugSourceNodeId, DebugStringIdx,
-        DebugTypeIdx, DebugTypeInfo, PackageDebugInfo,
-    },
-    serde_helpers::{PayloadError, read_payload_with_budget},
+use {
+    crate::Dependency,
+    crate::Version,
+    crate::debug_info::DebugFunctionIdx,
+    crate::debug_info::DebugFunctionInfo,
+    crate::debug_info::DebugSourceNode,
+    crate::debug_info::DebugSourceNodeId,
+    crate::debug_info::DebugStringIdx,
+    crate::debug_info::DebugTypeIdx,
+    crate::debug_info::DebugTypeInfo,
+    crate::debug_info::PackageDebugInfo,
+    crate::serde_helpers::PayloadError,
+    crate::serde_helpers::read_payload_with_budget,
 };
 
 // PACKAGE
@@ -1236,7 +1262,10 @@ impl Package {
     // TODO(pauls): This function can be removed when we remove Program
     #[doc(hidden)]
     pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
-        use miden_assembly_syntax::{Path as MasmPath, ast};
+        use {
+            miden_assembly_syntax::Path as MasmPath,
+            miden_assembly_syntax::ast,
+        };
         use miden_core::program::Program;
 
         if !self.is_program() {
@@ -1570,33 +1599,64 @@ fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, Deser
 
 #[cfg(test)]
 mod tests {
-    use alloc::{sync::Arc, vec, vec::Vec};
-    use core::{assert_matches, str::FromStr};
+    use {
+        alloc::sync::Arc,
+        alloc::vec,
+        alloc::vec::Vec,
+    };
+    use {
+        core::assert_matches,
+        core::str::FromStr,
+    };
 
-    use miden_assembly_syntax::ast::{
-        DebugVarLocation, Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
+    use {
+        miden_assembly_syntax::ast::DebugVarLocation,
+        miden_assembly_syntax::ast::Path as AstPath,
+        miden_assembly_syntax::ast::PathBuf,
+        miden_assembly_syntax::ast::ProcedureName,
+        miden_assembly_syntax::ast::QualifiedProcedureName,
     };
-    use miden_core::{
-        Felt, Word,
-        advice::AdviceMap,
-        mast::{
-            BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
-            MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
-        },
-        operations::Operation,
-        serde::Serializable,
-        utils::IndexVec,
+    use {
+        miden_core::Felt,
+        miden_core::Word,
+        miden_core::advice::AdviceMap,
+        miden_core::mast::BasicBlockNodeBuilder,
+        miden_core::mast::DenseMastForestBuilder,
+        miden_core::mast::ExternalNodeBuilder,
+        miden_core::mast::MastForest,
+        miden_core::mast::MastNode,
+        miden_core::mast::MastNodeExt,
+        miden_core::mast::MastNodeId,
+        miden_core::mast::SplitNodeBuilder,
+        miden_core::operations::Operation,
+        miden_core::serde::Serializable,
+        miden_core::utils::IndexVec,
     };
-    use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Uri};
+    use {
+        miden_debug_types::ByteIndex,
+        miden_debug_types::ColumnNumber,
+        miden_debug_types::LineNumber,
+        miden_debug_types::Uri,
+    };
 
     use super::*;
-    use crate::{
-        Dependency, Version,
-        debug_info::{
-            DebugFileIdx, DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx,
-            DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId,
-            DebugSourceVar, DebugStringIdx, DebugTypeIdx, DebugTypeInfo, PackageDebugInfoBuilder,
-        },
+    use {
+        crate::Dependency,
+        crate::Version,
+        crate::debug_info::DebugFileIdx,
+        crate::debug_info::DebugFunctionIdx,
+        crate::debug_info::DebugFunctionInfo,
+        crate::debug_info::DebugLoc,
+        crate::debug_info::DebugLocIdx,
+        crate::debug_info::DebugSourceAsmOp,
+        crate::debug_info::DebugSourceInlineCall,
+        crate::debug_info::DebugSourceNode,
+        crate::debug_info::DebugSourceNodeId,
+        crate::debug_info::DebugSourceVar,
+        crate::debug_info::DebugStringIdx,
+        crate::debug_info::DebugTypeIdx,
+        crate::debug_info::DebugTypeInfo,
+        crate::debug_info::PackageDebugInfoBuilder,
     };
 
     fn debug_source_node(
@@ -2747,7 +2807,10 @@ mod tests {
 
     #[test]
     fn procedures_with_attribute_filters_by_attribute_name() {
-        use miden_assembly_syntax::ast::{Attribute, Ident};
+        use {
+            miden_assembly_syntax::ast::Attribute,
+            miden_assembly_syntax::ast::Ident,
+        };
 
         let (mast, exports, _) = build_same_digest_package_exports(&[
             ("app::tagged", "tagged"),

@@ -1,27 +1,44 @@
 mod symbol_resolver;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    string::ToString,
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    Report,
-    ast::{
-        self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, Path, SymbolResolution,
-        SymbolResolutionError,
-        constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
-        types,
-    },
-    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
-    diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
-    module::ItemInfo,
+use {
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::GlobalItemIndex,
+    miden_assembly_syntax::ast::Ident,
+    miden_assembly_syntax::ast::ItemIndex,
+    miden_assembly_syntax::ast::ModuleIndex,
+    miden_assembly_syntax::ast::Path,
+    miden_assembly_syntax::ast::SymbolResolution,
+    miden_assembly_syntax::ast::SymbolResolutionError,
+    miden_assembly_syntax::ast::constants::ConstEnvironment,
+    miden_assembly_syntax::ast::constants::ConstEvalError,
+    miden_assembly_syntax::ast::constants::eval::CachedConstantValue,
+    miden_assembly_syntax::ast::types,
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::diagnostics::LabeledSpan,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::diagnostics::Severity,
+    miden_assembly_syntax::diagnostics::diagnostic,
+    miden_assembly_syntax::module::ItemInfo,
 };
 
-pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
+pub use {
+    self::symbol_resolver::SymbolResolutionContext,
+    self::symbol_resolver::SymbolResolver,
+};
 use super::SymbolItem;
 use crate::LinkerError;
 

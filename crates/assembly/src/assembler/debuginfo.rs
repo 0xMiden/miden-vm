@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use {
+    std::path::Path,
+    std::path::PathBuf,
+};
 
 use miden_assembly_syntax::debuginfo::Uri;
 use miden_mast_package::debug_info::PackageDebugInfo;

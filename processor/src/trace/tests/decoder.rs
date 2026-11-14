@@ -12,33 +12,55 @@
 //! batching). Broader end-to-end soundness comes from
 //! `build_lookup_fractions_runs_on_execution_trace` in `tests/lookup.rs`.
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::vec::Vec,
+};
 use core::borrow::BorrowMut;
 
-use miden_air_definitions::vm::{
-    CoreCols,
-    logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg},
-    trace::{
-        MainTrace,
-        decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
-    },
+use {
+    miden_air_definitions::vm::CoreCols,
+    miden_air_definitions::vm::logup::BlockHashMsg,
+    miden_air_definitions::vm::logup::BlockStackMsg,
+    miden_air_definitions::vm::logup::OpGroupMsg,
+    miden_air_definitions::vm::logup::StackOverflowMsg,
+    miden_air_definitions::vm::trace::MainTrace,
+    miden_air_definitions::vm::trace::decoder::OP_BATCH_1_GROUPS,
+    miden_air_definitions::vm::trace::decoder::OP_BATCH_2_GROUPS,
+    miden_air_definitions::vm::trace::decoder::OP_BATCH_4_GROUPS,
+    miden_air_definitions::vm::trace::decoder::OP_BATCH_8_GROUPS,
 };
-use miden_core::{
-    Felt, ONE, ZERO,
-    mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest,
-        MastNodeExt, SplitNodeBuilder,
-    },
-    operations::{Operation, opcodes},
-    program::{KernelDescriptor, Program},
-    utils::{Matrix, RowMajorMatrix},
+use {
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::ZERO,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::CallNodeBuilder,
+    miden_core::mast::JoinNodeBuilder,
+    miden_core::mast::LoopNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::SplitNodeBuilder,
+    miden_core::operations::Operation,
+    miden_core::operations::opcodes,
+    miden_core::program::KernelDescriptor,
+    miden_core::program::Program,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
 
-use super::{
-    VmTrace, build_trace_from_ops, build_trace_from_program, build_trace_from_program_with_stack,
-    lookup_harness::{Expectations, InteractionLog},
+use {
+    super::VmTrace,
+    super::build_trace_from_ops,
+    super::build_trace_from_program,
+    super::build_trace_from_program_with_stack,
+    super::lookup_harness::Expectations,
+    super::lookup_harness::InteractionLog,
 };
-use crate::{RowIndex, StackInputs};
+use {
+    crate::RowIndex,
+    crate::StackInputs,
+};
 
 // HELPERS
 // ================================================================================================
@@ -1097,7 +1119,11 @@ fn valid_op_batch_encoding_swaps_unbalance_the_op_group_bus(
 fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     use std::sync::Arc;
 
-    use crate::{MIN_STACK_DEPTH, mast::DynNodeBuilder, operation::opcodes};
+    use {
+        crate::MIN_STACK_DEPTH,
+        crate::mast::DynNodeBuilder,
+        crate::operation::opcodes,
+    };
 
     // Build exactly the same program shape as `dyncall_program()` in parallel/tests.rs:
     //   join(
@@ -1182,7 +1208,10 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     // the second-to-last entry), not the pre-pop address (the clock of the top entry).
     use std::sync::Arc;
 
-    use crate::{mast::DynNodeBuilder, operation::opcodes};
+    use {
+        crate::mast::DynNodeBuilder,
+        crate::operation::opcodes,
+    };
 
     const HASH_ADDR: Felt = Felt::new_unchecked(40);
 

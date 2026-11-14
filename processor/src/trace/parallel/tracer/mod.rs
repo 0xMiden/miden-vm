@@ -1,26 +1,40 @@
 use alloc::sync::Arc;
 
-use miden_air_definitions::vm::{StackCols, SystemCols};
+use {
+    miden_air_definitions::vm::StackCols,
+    miden_air_definitions::vm::SystemCols,
+};
 use miden_core::program::MIN_STACK_DEPTH;
 
-use super::{
-    super::{
-        block_stack::ExecutionContextInfo,
-        trace_state::{
-            BlockAddressReplay, BlockStackReplay, DecoderState, StackState, SystemState,
-        },
-        utils::RowMajorTraceWriter,
-    },
-    core_trace_fragment::BasicBlockContext,
-    processor::ReplayProcessor,
+use {
+    super::super::block_stack::ExecutionContextInfo,
+    super::super::trace_state::BlockAddressReplay,
+    super::super::trace_state::BlockStackReplay,
+    super::super::trace_state::DecoderState,
+    super::super::trace_state::StackState,
+    super::super::trace_state::SystemState,
+    super::super::utils::RowMajorTraceWriter,
+    super::core_trace_fragment::BasicBlockContext,
+    super::processor::ReplayProcessor,
 };
-use crate::{
-    ExecutionError, Felt, ONE, Word, ZERO,
-    continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
-    mast::{ExecutableMastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
-    trace::trace_state::{EndBlockFlags, EndBlockStackEntryKind},
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::ExecutionError,
+    crate::Felt,
+    crate::ONE,
+    crate::Word,
+    crate::ZERO,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
+    crate::errors::MapExecErrNoCtx,
+    crate::mast::ExecutableMastForest,
+    crate::mast::MastNode,
+    crate::mast::MastNodeExt,
+    crate::mast::MastNodeId,
+    crate::mast::SparseMastForest,
+    crate::trace::trace_state::EndBlockFlags,
+    crate::trace::trace_state::EndBlockStackEntryKind,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 mod trace_row;
@@ -667,17 +681,18 @@ mod tests {
     use miden_core::mast::DynNodeBuilder;
 
     use super::*;
-    use crate::{
-        ContextId,
-        trace::{
-            parallel::CORE_TRACE_WIDTH,
-            trace_state::{
-                AdviceReplay, ExecutionContextReplay, HasherResponseReplay,
-                MastForestResolutionReplay, MemoryReadsReplay, StackOverflowReplay, StackState,
-                SystemState,
-            },
-            utils::RowMajorTraceWriter,
-        },
+    use {
+        crate::ContextId,
+        crate::trace::parallel::CORE_TRACE_WIDTH,
+        crate::trace::trace_state::AdviceReplay,
+        crate::trace::trace_state::ExecutionContextReplay,
+        crate::trace::trace_state::HasherResponseReplay,
+        crate::trace::trace_state::MastForestResolutionReplay,
+        crate::trace::trace_state::MemoryReadsReplay,
+        crate::trace::trace_state::StackOverflowReplay,
+        crate::trace::trace_state::StackState,
+        crate::trace::trace_state::SystemState,
+        crate::trace::utils::RowMajorTraceWriter,
     };
 
     /// Ensures that `get_execution_context_for_dyncall()` correctly populates the

@@ -1,20 +1,30 @@
 use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
-use miden_core::events::{EventId, SystemEvent};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use {
+    miden_core::events::EventId,
+    miden_core::events::SystemEvent,
+};
+use {
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
+};
 
-use crate::{
-    BaseHost, Host, SyncHost,
-    advice::AdviceMutation,
-    errors::{
-        MapExecErrWithOpIdx, PackageSourceDebugContext, advice_error_with_context,
-        advice_error_with_package_source_context, event_error_with_context,
-        event_error_with_package_source_context,
-    },
-    event::EventError,
-    fast::{BreakReason, FastProcessor},
-    host::handlers::TraceError,
+use {
+    crate::BaseHost,
+    crate::Host,
+    crate::SyncHost,
+    crate::advice::AdviceMutation,
+    crate::errors::MapExecErrWithOpIdx,
+    crate::errors::PackageSourceDebugContext,
+    crate::errors::advice_error_with_context,
+    crate::errors::advice_error_with_package_source_context,
+    crate::errors::event_error_with_context,
+    crate::errors::event_error_with_package_source_context,
+    crate::event::EventError,
+    crate::fast::BreakReason,
+    crate::fast::FastProcessor,
+    crate::host::handlers::TraceError,
 };
 
 mod deferred_handlers;

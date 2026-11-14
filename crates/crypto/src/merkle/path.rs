@@ -1,11 +1,24 @@
 use alloc::vec::Vec;
-use core::{
-    num::NonZero,
-    ops::{Deref, DerefMut},
+use {
+    core::num::NonZero,
+    core::ops::Deref,
+    core::ops::DerefMut,
 };
 
-use super::{Eidos, InnerNodeInfo, MerkleError, NodeIndex, Word};
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use {
+    super::Eidos,
+    super::InnerNodeInfo,
+    super::MerkleError,
+    super::NodeIndex,
+    super::Word,
+};
+use {
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
+};
 
 // MERKLE PATH
 // ================================================================================================
@@ -304,9 +317,10 @@ impl Deserializable for RootPath {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        merkle::{MerklePath, int_to_node},
-        utils::Serializable,
+    use {
+        crate::merkle::MerklePath,
+        crate::merkle::int_to_node,
+        crate::utils::Serializable,
     };
 
     #[test]

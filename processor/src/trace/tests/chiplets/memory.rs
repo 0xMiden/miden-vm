@@ -23,19 +23,24 @@
 
 use alloc::vec::Vec;
 
-use miden_air_definitions::vm::{
-    logup::{MemoryMsg, MemoryResponseMsg},
-    trace::MainTrace,
+use {
+    miden_air_definitions::vm::logup::MemoryMsg,
+    miden_air_definitions::vm::logup::MemoryResponseMsg,
+    miden_air_definitions::vm::trace::MainTrace,
 };
-use miden_core::{
-    Felt, ONE, ZERO,
-    chiplets::eidos_compression,
-    operations::{Operation, opcodes},
+use {
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::ZERO,
+    miden_core::chiplets::eidos_compression,
+    miden_core::operations::Operation,
+    miden_core::operations::opcodes,
 };
 
-use super::super::{
-    build_trace_from_ops,
-    lookup_harness::{Expectations, InteractionLog},
+use {
+    super::super::build_trace_from_ops,
+    super::super::lookup_harness::Expectations,
+    super::super::lookup_harness::InteractionLog,
 };
 use crate::RowIndex;
 

@@ -1,22 +1,44 @@
-use alloc::{vec, vec::Vec};
-use core::borrow::{Borrow, BorrowMut};
+use {
+    alloc::vec,
+    alloc::vec::Vec,
+};
+use {
+    core::borrow::Borrow,
+    core::borrow::BorrowMut,
+};
 
-use miden_air_definitions::vm::{
-    CoreCols, VmTrace,
-    trace::{MainTrace, RowIndex},
+use {
+    miden_air_definitions::vm::CoreCols,
+    miden_air_definitions::vm::VmTrace,
+    miden_air_definitions::vm::trace::MainTrace,
+    miden_air_definitions::vm::trace::RowIndex,
 };
-use miden_core::{
-    Felt,
-    deferred::TRUE_DIGEST,
-    mast::{BasicBlockNodeBuilder, MastForest},
-    operations::{Operation, opcodes},
-    program::{ExecutionClaim, Program, StackOutputs},
-    proof::{ExecutionProof, HashFunction},
-    utils::{Matrix, RowMajorMatrix},
+use {
+    miden_core::Felt,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::operations::Operation,
+    miden_core::operations::opcodes,
+    miden_core::program::ExecutionClaim,
+    miden_core::program::Program,
+    miden_core::program::StackOutputs,
+    miden_core::proof::ExecutionProof,
+    miden_core::proof::HashFunction,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use {
+    miden_processor::DefaultHost,
+    miden_processor::FastProcessor,
+    miden_processor::StackInputs,
+};
 use miden_stark::verifier::VerifierError;
-use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
+use {
+    miden_verifier::StarkVerificationError,
+    miden_verifier::VerificationError,
+    miden_verifier::Verifier,
+};
 use miden_vm_stark::prover::prove;
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {

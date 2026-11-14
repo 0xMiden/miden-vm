@@ -1,13 +1,26 @@
 use alloc::collections::BTreeMap;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-use super::{
-    parsing::{MaybeInherit, SetSourceId, Validate},
-    *,
+use {
+    serde::Deserialize,
+    serde::Serialize,
 };
-use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, Uri};
+
+use {
+    super::parsing::MaybeInherit,
+    super::parsing::SetSourceId,
+    super::parsing::Validate,
+    super::*,
+};
+use {
+    crate::Map,
+    crate::MetadataSet,
+    crate::RelatedLabel,
+    crate::SemVer,
+    crate::SourceId,
+    crate::Span,
+    crate::Uri,
+};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -55,16 +68,28 @@ pub struct PackageDetail {
 
 #[cfg(feature = "serde")]
 mod semver_serde {
-    use alloc::string::{String, ToString};
-    use core::{fmt, marker::PhantomData};
-
-    use serde::{
-        Serialize,
-        de::{self, MapAccess, Visitor},
-        ser::SerializeMap,
+    use {
+        alloc::string::String,
+        alloc::string::ToString,
+    };
+    use {
+        core::fmt,
+        core::marker::PhantomData,
     };
 
-    use super::{MaybeInherit, SemVer, Span};
+    use {
+        serde::Serialize,
+        serde::de,
+        serde::de::MapAccess,
+        serde::de::Visitor,
+        serde::ser::SerializeMap,
+    };
+
+    use {
+        super::MaybeInherit,
+        super::SemVer,
+        super::Span,
+    };
 
     pub fn serialize<S>(
         value: &Option<Span<MaybeInherit<SemVer>>>,
@@ -244,7 +269,10 @@ impl ProjectFile {
     /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
     ///   up to the caller to compute the concrete property values and validate them at that point.
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use parsing::{SetSourceId, Validate};
+        use {
+            parsing::SetSourceId,
+            parsing::Validate,
+        };
 
         let source_id = source.id();
 
@@ -341,7 +369,10 @@ impl ProjectFile {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Vec<crate::Dependency>, Report> {
-        use crate::{Dependency, DependencyVersionScheme};
+        use {
+            crate::Dependency,
+            crate::DependencyVersionScheme,
+        };
 
         let mut dependencies = Vec::with_capacity(self.config.dependencies.len());
         for dependency in self.config.dependencies.values() {

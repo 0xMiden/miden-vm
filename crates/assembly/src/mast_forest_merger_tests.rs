@@ -1,16 +1,22 @@
-use alloc::{boxed::Box, sync::Arc};
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+};
 
 use miden_assembly_syntax::ast;
-use miden_core::{
-    mast::{MastForest, MastForestRootMap, MastNodeExt},
-    utils::Idx,
+use {
+    miden_core::mast::MastForest,
+    miden_core::mast::MastForestRootMap,
+    miden_core::mast::MastNodeExt,
+    miden_core::utils::Idx,
 };
 use miden_project::Linkage;
 
-use crate::{
-    Assembler,
-    diagnostics::{IntoDiagnostic, Report},
-    testing::TestContext,
+use {
+    crate::Assembler,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
+    crate::testing::TestContext,
 };
 
 fn merge_programs(

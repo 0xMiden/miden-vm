@@ -1,49 +1,92 @@
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
+use {
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec,
 };
-use core::{assert_matches, cell::Cell, str::FromStr};
+use {
+    core::assert_matches,
+    core::cell::Cell,
+    core::str::FromStr,
+};
 
 use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
-use miden_assembly::{
-    Assembler, DefaultSourceManager, Linkage, Path,
-    ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
+use {
+    miden_assembly::Assembler,
+    miden_assembly::DefaultSourceManager,
+    miden_assembly::Linkage,
+    miden_assembly::Path,
+    miden_assembly::ast::DebugInlineCallInfo,
+    miden_assembly::ast::Instruction,
+    miden_assembly::ast::Module,
+    miden_assembly::ast::ModuleKind,
+    miden_assembly::ast::Op,
+    miden_assembly::ast::QualifiedProcedureName,
 };
-use miden_core::{
-    ONE, Word,
-    events::SystemEvent,
-    mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
-        MastNodeId, SplitNodeBuilder,
-    },
-    operations::Operation,
-    program::StackInputs,
-    serde::{Deserializable, Serializable},
+use {
+    miden_core::ONE,
+    miden_core::Word,
+    miden_core::events::SystemEvent,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::CallNodeBuilder,
+    miden_core::mast::ExternalNodeBuilder,
+    miden_core::mast::JoinNodeBuilder,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::mast::SplitNodeBuilder,
+    miden_core::operations::Operation,
+    miden_core::program::StackInputs,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
 };
-use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
-    Span, Uri,
+use {
+    miden_debug_types::ByteIndex,
+    miden_debug_types::Location,
+    miden_debug_types::SourceContent,
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceLanguage,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Uri,
 };
-use miden_mast_package::{
-    Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
-    debug_info::{
-        DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfo,
-        PackageDebugInfoBuilder,
-    },
+use {
+    miden_mast_package::Package,
+    miden_mast_package::PackageExport,
+    miden_mast_package::PackageId,
+    miden_mast_package::ProcedureExport,
+    miden_mast_package::Section,
+    miden_mast_package::SectionId,
+    miden_mast_package::TargetType,
+    miden_mast_package::Version,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceNode,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
+    miden_mast_package::debug_info::PackageDebugInfoBuilder,
 };
-use miden_utils_testing::{build_test, stack_inputs_from_ints};
+use {
+    miden_utils_testing::build_test,
+    miden_utils_testing::stack_inputs_from_ints,
+};
 use rstest::rstest;
 
 use super::*;
-use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
-    SyncHost,
-    advice::{AdviceMap, AdviceMutation},
-    event::EventError,
-    operation::OperationError,
-    processor::{StackInterface, SystemInterface},
+use {
+    crate::AdviceInputs,
+    crate::BaseHost,
+    crate::DefaultHost,
+    crate::LoadedMastForest,
+    crate::ProcessorState,
+    crate::ProgramExecutor,
+    crate::SyncHost,
+    crate::advice::AdviceMap,
+    crate::advice::AdviceMutation,
+    crate::event::EventError,
+    crate::operation::OperationError,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
 };
 
 mod advice_provider;
@@ -3442,7 +3485,10 @@ fn source_debug_call_frames_preserve_locals_wrappers_and_padding(#[case] invocat
 #[case(0)]
 #[case(4)]
 fn source_debug_call_frames_keep_inline_depth_from_selected_occurrence(#[case] num_locals: u16) {
-    use miden_assembly::ast::{DebugVarInfo, DebugVarLocation};
+    use {
+        miden_assembly::ast::DebugVarInfo,
+        miden_assembly::ast::DebugVarLocation,
+    };
     let manager = Arc::new(DefaultSourceManager::default());
     let mut module = Module::parser(Some(ModuleKind::Executable))
         .parse_str(

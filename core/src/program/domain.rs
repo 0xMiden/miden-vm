@@ -7,8 +7,13 @@
 pub use miden_crypto::hash::eidos::DomainTag;
 #[cfg(test)]
 use miden_crypto::hash::eidos::domains::MidenCryptoDomainRegistry;
-use miden_crypto::hash::eidos::{
-    Custom, DomainVersion, FeltSequence, Transcript, domain::EidosDomain, namespace,
+use {
+    miden_crypto::hash::eidos::Custom,
+    miden_crypto::hash::eidos::DomainVersion,
+    miden_crypto::hash::eidos::FeltSequence,
+    miden_crypto::hash::eidos::Transcript,
+    miden_crypto::hash::eidos::domain::EidosDomain,
+    miden_crypto::hash::eidos::namespace,
 };
 
 use crate::Felt;

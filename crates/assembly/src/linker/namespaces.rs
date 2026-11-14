@@ -1,18 +1,33 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    Path, PathBuf,
-    ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    diagnostics::RelatedLabel,
+use {
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::PathBuf,
+    miden_assembly_syntax::ast::GlobalItemIndex,
+    miden_assembly_syntax::ast::ImportKind,
+    miden_assembly_syntax::ast::ItemIndex,
+    miden_assembly_syntax::ast::ModuleIndex,
+    miden_assembly_syntax::ast::SymbolResolutionError,
+    miden_assembly_syntax::ast::Visibility,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
 };
 
-use super::{Linker, LinkerError, ModuleSource};
+use {
+    super::Linker,
+    super::LinkerError,
+    super::ModuleSource,
+};
 
 /// A graph of modules, concrete items, submodule declarations, and imports known to the linker.
 ///
@@ -1016,11 +1031,18 @@ fn source_file(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use {
+        alloc::boxed::Box,
+        alloc::sync::Arc,
+    };
 
-    use miden_assembly_syntax::{
-        Parse, Path,
-        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
+    use {
+        miden_assembly_syntax::Parse,
+        miden_assembly_syntax::Path,
+        miden_assembly_syntax::debuginfo::DefaultSourceManager,
+        miden_assembly_syntax::debuginfo::SourceLanguage,
+        miden_assembly_syntax::debuginfo::SourceManager,
+        miden_assembly_syntax::debuginfo::Span,
     };
 
     use super::*;

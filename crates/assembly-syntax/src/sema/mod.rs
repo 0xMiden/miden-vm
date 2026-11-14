@@ -4,25 +4,47 @@ mod passes;
 #[cfg(test)]
 mod tests;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::collections::VecDeque,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_core::{Word, chiplets::hasher};
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
+use {
+    miden_core::Word,
+    miden_core::chiplets::hasher,
+};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 use smallvec::SmallVec;
 
-use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
-pub use self::{
-    context::AnalysisContext,
-    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
-    passes::{ConstEvalVisitor, VerifyRepeatCounts},
+use {
+    self::passes::LocalInvokeTarget,
+    self::passes::VerifyInvokeTargets,
 };
-use crate::{ast::*, parser::WordValue};
+pub use {
+    self::context::AnalysisContext,
+    self::errors::ExportedTypeUse,
+    self::errors::LimitKind,
+    self::errors::SemanticAnalysisError,
+    self::errors::SyntaxError,
+    self::passes::ConstEvalVisitor,
+    self::passes::VerifyRepeatCounts,
+};
+use {
+    crate::ast::*,
+    crate::parser::WordValue,
+};
 
 /// Constructs and validates a [Module], given the forms constituting the module body.
 ///

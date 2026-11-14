@@ -1,12 +1,18 @@
 use core::ops::ControlFlow;
 
-use crate::{
-    BaseHost, BreakReason, Stopper,
-    continuation_stack::Continuation,
-    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{ExecutableMastForest, JoinNode, MastNodeId},
-    processor::Processor,
-    tracer::Tracer,
+use {
+    crate::BaseHost,
+    crate::BreakReason,
+    crate::Stopper,
+    crate::continuation_stack::Continuation,
+    crate::execution::ExecutionState,
+    crate::execution::finalize_clock_cycle,
+    crate::execution::finalize_clock_cycle_with_continuation,
+    crate::mast::ExecutableMastForest,
+    crate::mast::JoinNode,
+    crate::mast::MastNodeId,
+    crate::processor::Processor,
+    crate::tracer::Tracer,
 };
 
 // JOIN NODE PROCESSING

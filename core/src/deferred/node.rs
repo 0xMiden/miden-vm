@@ -1,18 +1,29 @@
 //! Deferred node model: frames, payloads, shapes, and content-addressed digests.
 
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::mem::size_of;
 
-use miden_crypto::{
-    ZERO,
-    hash::eidos::{Eidos, EidosDomain, EidosFrame},
+use {
+    miden_crypto::ZERO,
+    miden_crypto::hash::eidos::Eidos,
+    miden_crypto::hash::eidos::EidosDomain,
+    miden_crypto::hash::eidos::EidosFrame,
 };
 
-use super::{DEFERRED_AND_FRAME, DeferredError, deferred_chunks_frame};
-use crate::{
-    Felt, Word,
-    program::domain::{DeferredAndDomain, DeferredChunksDomain},
-    utils::bytes_to_packed_u32_elements,
+use {
+    super::DEFERRED_AND_FRAME,
+    super::DeferredError,
+    super::deferred_chunks_frame,
+};
+use {
+    crate::Felt,
+    crate::Word,
+    crate::program::domain::DeferredAndDomain,
+    crate::program::domain::DeferredChunksDomain,
+    crate::utils::bytes_to_packed_u32_elements,
 };
 
 /// Stable address of a deferred [`Node`], computed as a 4-felt Eidos digest.

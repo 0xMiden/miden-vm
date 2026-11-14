@@ -1,20 +1,32 @@
-use alloc::{boxed::Box, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::vec::Vec,
+};
 use core::fmt;
 
-use miden_formatting::{
-    hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, text},
+use {
+    miden_formatting::hex::ToHex,
+    miden_formatting::prettier::Document,
+    miden_formatting::prettier::PrettyPrint,
+    miden_formatting::prettier::const_text,
+    miden_formatting::prettier::text,
 };
 
-use super::{
-    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
+use {
+    super::MastForestContributor,
+    super::MastNodeContext,
+    super::MastNodeExt,
+    super::fingerprint_with_child_fingerprints,
 };
-use crate::{
-    Felt, Word,
-    chiplets::hasher,
-    mast::{MastForest, MastForestError, MastNodeId},
-    operations::opcodes,
-    utils::LookupByIdx,
+use {
+    crate::Felt,
+    crate::Word,
+    crate::chiplets::hasher,
+    crate::mast::MastForest,
+    crate::mast::MastForestError,
+    crate::mast::MastNodeId,
+    crate::operations::opcodes,
+    crate::utils::LookupByIdx,
 };
 
 // CALL NODE

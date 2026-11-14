@@ -1,17 +1,32 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
 use miden_core::Felt;
-use miden_debug_types::{
-    DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
+use {
+    miden_debug_types::DefaultSourceManager,
+    miden_debug_types::Location,
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceManagerSync,
+    miden_debug_types::SourceSpan,
 };
 
 #[cfg(test)]
 use crate::mast::MastForest;
-use crate::{
-    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word,
-    advice::AdviceMutation,
-    event::{EventError, TraceError},
+use {
+    crate::BaseHost,
+    crate::LoadedMastForest,
+    crate::MastForestStore,
+    crate::MemMastForestStore,
+    crate::ProcessorState,
+    crate::SyncHost,
+    crate::Word,
+    crate::advice::AdviceMutation,
+    crate::event::EventError,
+    crate::event::TraceError,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -214,7 +229,13 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::TestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use {
+        crate::AdviceInputs,
+        crate::ExecutionOptions,
+        crate::FastProcessor,
+        crate::Program,
+        crate::StackInputs,
+    };
 
     #[test]
     fn test_host_records_trace_and_snapshot() {

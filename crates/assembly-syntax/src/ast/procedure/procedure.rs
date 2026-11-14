@@ -1,10 +1,25 @@
-use alloc::{collections::BTreeSet, string::String};
+use {
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+};
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
 use super::ProcedureName;
-use crate::ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke, Visibility};
+use {
+    crate::ast::Attribute,
+    crate::ast::AttributeSet,
+    crate::ast::Block,
+    crate::ast::DocString,
+    crate::ast::FunctionType,
+    crate::ast::Invoke,
+    crate::ast::Visibility,
+};
 
 // PROCEDURE
 // ================================================================================================

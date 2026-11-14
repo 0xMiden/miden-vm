@@ -1,16 +1,23 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air_definitions::vm::trace::{
-    chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
-    eidos_compression::{
-        EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_HIGH_EVEN_SLOT_BASE,
-        F_HIGH_ODD_SLOT_BASE, FOOTER_START, NUM_EIDOS_COMPRESSION_COLS,
-        TraceMode as EidosCompressionTraceMode, footer_interface_tail_col, footer_message_word,
-        footer_r_col, footer_xor_slot_col,
-        generate_felt_trace_block as generate_eidos_compression_felt_trace_block,
-        write_felt_trace_block as write_eidos_compression_felt_trace_block,
-    },
+use {
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+    miden_air_definitions::vm::trace::chiplets::hasher::PADDING,
+    miden_air_definitions::vm::trace::chiplets::hasher::TRACE_WIDTH,
+    miden_air_definitions::vm::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
+    miden_air_definitions::vm::trace::eidos_compression::F_COMPRESSION_MULTIPLICITY_COL,
+    miden_air_definitions::vm::trace::eidos_compression::F_HIGH_EVEN_SLOT_BASE,
+    miden_air_definitions::vm::trace::eidos_compression::F_HIGH_ODD_SLOT_BASE,
+    miden_air_definitions::vm::trace::eidos_compression::FOOTER_START,
+    miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
+    miden_air_definitions::vm::trace::eidos_compression::TraceMode as EidosCompressionTraceMode,
+    miden_air_definitions::vm::trace::eidos_compression::footer_interface_tail_col,
+    miden_air_definitions::vm::trace::eidos_compression::footer_message_word,
+    miden_air_definitions::vm::trace::eidos_compression::footer_r_col,
+    miden_air_definitions::vm::trace::eidos_compression::footer_xor_slot_col,
+    miden_air_definitions::vm::trace::eidos_compression::generate_felt_trace_block as generate_eidos_compression_felt_trace_block,
+    miden_air_definitions::vm::trace::eidos_compression::write_felt_trace_block as write_eidos_compression_felt_trace_block,
 };
 
 // Chiplet-local column indices used by the hasher trace tests.
@@ -32,18 +39,32 @@ fn controller_len(controller_rows: usize) -> usize {
 
 #[cfg(feature = "testing")]
 use miden_core::chiplets::eidos_compression;
-use miden_core::{
-    ONE, ZERO,
-    chiplets::hasher,
-    crypto::merkle::{MerkleTree, NodeIndex},
-    field::PrimeCharacteristicRing,
-    mast::OpBatch,
+use {
+    miden_core::ONE,
+    miden_core::ZERO,
+    miden_core::chiplets::hasher,
+    miden_core::crypto::merkle::MerkleTree,
+    miden_core::crypto::merkle::NodeIndex,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::mast::OpBatch,
 };
 
-use super::{
-    BLOCK_LEN, ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, Selectors, absorb_into_state, get_digest, init_state,
-    init_state_from_words,
+use {
+    super::BLOCK_LEN,
+    super::ChipletTraceFragment,
+    super::Digest,
+    super::Felt,
+    super::Hasher,
+    super::HasherState,
+    super::LINEAR_HASH,
+    super::MP_VERIFY,
+    super::MR_UPDATE_NEW,
+    super::MR_UPDATE_OLD,
+    super::Selectors,
+    super::absorb_into_state,
+    super::get_digest,
+    super::init_state,
+    super::init_state_from_words,
 };
 
 // HASH AND COMPRESSION MODE TESTS

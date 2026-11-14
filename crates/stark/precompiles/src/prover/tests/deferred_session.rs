@@ -1,25 +1,46 @@
-use alloc::{vec, vec::Vec};
-
-use miden_core::{
-    Felt,
-    deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitness, TRUE_DIGEST},
-    serde::{ByteWriter, Deserializable, Serializable},
-};
-use miden_crypto::hash::{
-    keccak::Keccak256,
-    sha2::{Sha256, Sha512},
-};
-use miden_precompiles::{
-    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, MSM_WORK, Sha256Precompile,
-    Sha512Precompile, UintDomain, UintPrecompile,
+use {
+    alloc::vec,
+    alloc::vec::Vec,
 };
 
-use crate::prover::{
-    deferred::session::{import_witnesses, session_from_witnesses},
-    math::{U256, from_hex, to_limbs32},
-    session::SessionTraces,
-    tests::batch_witness::WitnessFixture,
-    transcript::eval::{COL_ACT, COL_IS_AND, COL_OUT_MULT},
+use {
+    miden_core::Felt,
+    miden_core::deferred::DEFERRED_AND_FRAME,
+    miden_core::deferred::Node,
+    miden_core::deferred::PrecompileWitness,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
+};
+use {
+    miden_crypto::hash::keccak::Keccak256,
+    miden_crypto::hash::sha2::Sha256,
+    miden_crypto::hash::sha2::Sha512,
+};
+use {
+    miden_precompiles::CurveId,
+    miden_precompiles::CurvePoint,
+    miden_precompiles::CurvePrecompile,
+    miden_precompiles::Keccak256Precompile,
+    miden_precompiles::MSM_WORK,
+    miden_precompiles::Sha256Precompile,
+    miden_precompiles::Sha512Precompile,
+    miden_precompiles::UintDomain,
+    miden_precompiles::UintPrecompile,
+};
+
+use {
+    crate::prover::deferred::session::import_witnesses,
+    crate::prover::deferred::session::session_from_witnesses,
+    crate::prover::math::U256,
+    crate::prover::math::from_hex,
+    crate::prover::math::to_limbs32,
+    crate::prover::session::SessionTraces,
+    crate::prover::tests::batch_witness::WitnessFixture,
+    crate::prover::transcript::eval::COL_ACT,
+    crate::prover::transcript::eval::COL_IS_AND,
+    crate::prover::transcript::eval::COL_OUT_MULT,
 };
 
 fn state() -> WitnessFixture {

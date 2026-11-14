@@ -17,18 +17,39 @@ pub mod utils;
 
 // RE-EXPORTS
 // ================================================================================================
-pub use miden_field::{Felt, Word, WordError, word};
+pub use {
+    miden_field::Felt,
+    miden_field::Word,
+    miden_field::WordError,
+    miden_field::word,
+};
 
 pub mod field {
     //! Traits and utilities for working with the Goldilocks finite field (i.e.,
     //! [Felt](super::Felt)).
 
-    pub use miden_field::{
-        Algebra, BasedVectorSpace, Binomial, BinomialExtensionField, BinomiallyExtendable,
-        BoundedPowers, ExtensionAlgebra, ExtensionField, Field, HasTwoAdicBinomialExtension,
-        InjectiveMonomial, Packable, PermutationMonomial, Powers, PrimeCharacteristicRing,
-        PrimeField, PrimeField64, QuotientMap, RawDataSerializable, TwoAdicField,
-        batch_multiplicative_inverse,
+    pub use {
+        miden_field::Algebra,
+        miden_field::BasedVectorSpace,
+        miden_field::Binomial,
+        miden_field::BinomialExtensionField,
+        miden_field::BinomiallyExtendable,
+        miden_field::BoundedPowers,
+        miden_field::ExtensionAlgebra,
+        miden_field::ExtensionField,
+        miden_field::Field,
+        miden_field::HasTwoAdicBinomialExtension,
+        miden_field::InjectiveMonomial,
+        miden_field::Packable,
+        miden_field::PermutationMonomial,
+        miden_field::Powers,
+        miden_field::PrimeCharacteristicRing,
+        miden_field::PrimeField,
+        miden_field::PrimeField64,
+        miden_field::QuotientMap,
+        miden_field::RawDataSerializable,
+        miden_field::TwoAdicField,
+        miden_field::batch_multiplicative_inverse,
     };
 
     pub use super::batch_inversion::batch_inversion_allow_zeros;
@@ -121,7 +142,12 @@ pub trait SequentialCommit {
 mod batch_inversion {
     use p3_maybe_rayon::prelude::*;
 
-    use super::{Felt, ONE, ZERO, field::Field};
+    use {
+        super::Felt,
+        super::ONE,
+        super::ZERO,
+        super::field::Field,
+    };
 
     /// Parallel batch inversion using Montgomery's trick, with zeros left unchanged.
     ///

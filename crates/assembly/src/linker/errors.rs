@@ -1,13 +1,26 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::string::String,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_assembly_syntax::{
-    Felt, Path, Word,
-    ast::{ModuleIndex, SymbolResolutionError, constants::ConstEvalError},
-    debuginfo::{SourceFile, SourceSpan},
-    diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
+use {
+    miden_assembly_syntax::Felt,
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::Word,
+    miden_assembly_syntax::ast::ModuleIndex,
+    miden_assembly_syntax::ast::SymbolResolutionError,
+    miden_assembly_syntax::ast::constants::ConstEvalError,
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::diagnostics::Diagnostic,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
+    miden_assembly_syntax::diagnostics::miette,
 };
 
 // LINKER ERROR

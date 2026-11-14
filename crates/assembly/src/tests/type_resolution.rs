@@ -5,8 +5,15 @@ use super::*;
 
 #[test]
 fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
-    use miden_assembly_syntax::ast::types::{AddressSpace, PointerType, Type};
-    use miden_mast_package::{Package, PackageExport};
+    use {
+        miden_assembly_syntax::ast::types::AddressSpace,
+        miden_assembly_syntax::ast::types::PointerType,
+        miden_assembly_syntax::ast::types::Type,
+    };
+    use {
+        miden_mast_package::Package,
+        miden_mast_package::PackageExport,
+    };
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -138,7 +145,10 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
 
 #[test]
 fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
-    use miden_mast_package::{Package, PackageExport};
+    use {
+        miden_mast_package::Package,
+        miden_mast_package::PackageExport,
+    };
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(

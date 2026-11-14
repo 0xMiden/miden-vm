@@ -1,13 +1,23 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+use {
+    miden_core::Felt,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
 };
-use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use {
+    miden_stark::air::AirBuilder,
+    miden_stark::air::ExtensionBuilder,
+    miden_stark::air::PermutationAirBuilder,
+    miden_stark::air::RowWindow,
+};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::vm::trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH};
+use {
+    crate::vm::trace::AUX_TRACE_RAND_CHALLENGES,
+    crate::vm::trace::AUX_TRACE_WIDTH,
+    crate::vm::trace::TRACE_WIDTH,
+};
 
 pub(in crate::vm::constraints) struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,

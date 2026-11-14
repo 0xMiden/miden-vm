@@ -1,29 +1,40 @@
-use std::{collections::HashMap, string::String, vec, vec::Vec};
+use {
+    std::collections::HashMap,
+    std::string::String,
+    std::vec,
+    std::vec::Vec,
+};
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
+use {
+    miden_core::Felt,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
+    miden_core::utils::RowMajorMatrix,
 };
 use miden_crypto::hash::sha2::Sha256;
 use miden_stark::lookup::Challenges;
 
-use crate::prover::{
-    hash::sha256::{
-        compression::{self, Sha256CompressionAir, Sha256CompressionRequires, Sha256WordMsg},
-        io::{self, Sha256IoAir, Sha256IoRequires, generate_trace},
-    },
-    logup::LookupMessage,
-    primitives::byte_pair_lut::{self, BytePairLutAir, BytePairLutRequires, Range16Msg},
-    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::bus_balance::fold_balance,
-    transcript::{
-        binding::BindingMsg,
-        eidos::{
-            EidosCompressionAir,
-            trace::{EidosRequires, generate_trace_with_byte_lookups as eidos_trace},
-        },
-    },
+use {
+    crate::prover::hash::sha256::compression,
+    crate::prover::hash::sha256::compression::Sha256CompressionAir,
+    crate::prover::hash::sha256::compression::Sha256CompressionRequires,
+    crate::prover::hash::sha256::compression::Sha256WordMsg,
+    crate::prover::hash::sha256::io,
+    crate::prover::hash::sha256::io::Sha256IoAir,
+    crate::prover::hash::sha256::io::Sha256IoRequires,
+    crate::prover::hash::sha256::io::generate_trace,
+    crate::prover::logup::LookupMessage,
+    crate::prover::primitives::byte_pair_lut,
+    crate::prover::primitives::byte_pair_lut::BytePairLutAir,
+    crate::prover::primitives::byte_pair_lut::BytePairLutRequires,
+    crate::prover::primitives::byte_pair_lut::Range16Msg,
+    crate::prover::relations::MAX_MESSAGE_WIDTH,
+    crate::prover::relations::NUM_BUS_IDS,
+    crate::prover::tests::bus_balance::fold_balance,
+    crate::prover::transcript::binding::BindingMsg,
+    crate::prover::transcript::eidos::EidosCompressionAir,
+    crate::prover::transcript::eidos::trace::EidosRequires,
+    crate::prover::transcript::eidos::trace::generate_trace_with_byte_lookups as eidos_trace,
 };
 
 #[test]

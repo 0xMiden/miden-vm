@@ -1,9 +1,25 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use super::{SymbolResolution, SymbolResolutionError};
-use crate::ast::{Ident, Import, ItemIndex};
+use {
+    super::SymbolResolution,
+    super::SymbolResolutionError,
+};
+use {
+    crate::ast::Ident,
+    crate::ast::Import,
+    crate::ast::ItemIndex,
+};
 
 /// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::ast::Module].
 ///
@@ -328,7 +344,10 @@ mod tests {
 
     #[test]
     fn local_symbol_table_duplicate_symbols_have_explicit_behavior() {
-        use std::panic::{AssertUnwindSafe, catch_unwind};
+        use {
+            std::panic::AssertUnwindSafe,
+            std::panic::catch_unwind,
+        };
 
         let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
         let result = catch_unwind(AssertUnwindSafe(|| {

@@ -1,21 +1,36 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::vec::Vec,
 };
 
-use miden_core::{
-    Felt, Word,
-    advice::{AdviceInputs, AdviceMap, AdviceStack},
-    chiplets::hasher,
-    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::advice::AdviceInputs,
+    miden_core::advice::AdviceMap,
+    miden_core::advice::AdviceStack,
+    miden_core::chiplets::hasher,
+    miden_core::crypto::merkle::InnerNodeInfo,
+    miden_core::crypto::merkle::MerkleError,
+    miden_core::crypto::merkle::MerklePath,
+    miden_core::crypto::merkle::MerkleStore,
+    miden_core::crypto::merkle::NodeIndex,
 };
 #[cfg(test)]
-use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use {
+    miden_core::crypto::hash::Blake3_256,
+    miden_core::serde::Serializable,
+};
 
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
+use {
+    crate::ExecutionOptions,
+    crate::host::AdviceMutation,
+    crate::processor::AdviceProviderInterface,
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -774,15 +789,26 @@ impl AdviceProviderInterface for AdviceProvider {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeMap, vec, vec::Vec};
+    use {
+        alloc::collections::BTreeMap,
+        alloc::vec,
+        alloc::vec::Vec,
+    };
 
     use miden_core::WORD_SIZE;
 
     use super::AdviceProvider;
-    use crate::{
-        AdviceInputs, ExecutionOptions, Felt, Word,
-        advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
-        crypto::merkle::{MerkleStore, MerkleTree},
+    use {
+        crate::AdviceInputs,
+        crate::ExecutionOptions,
+        crate::Felt,
+        crate::Word,
+        crate::advice::AdviceError,
+        crate::advice::AdviceMap,
+        crate::advice::AdviceMutation,
+        crate::advice::AdviceStack,
+        crate::crypto::merkle::MerkleStore,
+        crate::crypto::merkle::MerkleTree,
     };
 
     fn make_leaf(seed: u64) -> Word {

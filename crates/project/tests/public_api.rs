@@ -1,4 +1,9 @@
-use miden_project::{SemVer, Version, VersionReq, VersionRequirement};
+use {
+    miden_project::SemVer,
+    miden_project::Version,
+    miden_project::VersionReq,
+    miden_project::VersionRequirement,
+};
 
 #[test]
 fn version_paths_preserve_registry_identities() {

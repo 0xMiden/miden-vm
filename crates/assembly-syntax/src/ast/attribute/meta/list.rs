@@ -1,9 +1,16 @@
 use alloc::vec::Vec;
 
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use {
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
 };
-use miden_debug_types::{SourceSpan, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Spanned,
+};
 
 use super::MetaExpr;
 use crate::ast::Ident;
@@ -115,7 +122,10 @@ impl proptest::arbitrary::Arbitrary for MetaList {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::{arbitrary::any, strategy::Strategy};
+        use {
+            proptest::arbitrary::any,
+            proptest::strategy::Strategy,
+        };
 
         let name = any::<Ident>();
         let items = proptest::collection::vec(any::<MetaExpr>(), 1..3);

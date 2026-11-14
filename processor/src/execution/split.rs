@@ -1,13 +1,24 @@
 use core::ops::ControlFlow;
 
-use crate::{
-    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
-    continuation_stack::Continuation,
-    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{ExecutableMastForest, MastNodeId, SplitNode},
-    operation::{BinaryValueErrorContext, OperationError},
-    processor::{Processor, StackInterface},
-    tracer::Tracer,
+use {
+    crate::BaseHost,
+    crate::BreakReason,
+    crate::MapExecErr,
+    crate::ONE,
+    crate::Stopper,
+    crate::ZERO,
+    crate::continuation_stack::Continuation,
+    crate::execution::ExecutionState,
+    crate::execution::finalize_clock_cycle,
+    crate::execution::finalize_clock_cycle_with_continuation,
+    crate::mast::ExecutableMastForest,
+    crate::mast::MastNodeId,
+    crate::mast::SplitNode,
+    crate::operation::BinaryValueErrorContext,
+    crate::operation::OperationError,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::tracer::Tracer,
 };
 
 // SPLIT PROCESSING

@@ -1,31 +1,48 @@
-use alloc::{
-    borrow::ToOwned,
-    collections::{BTreeMap, BTreeSet},
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::borrow::ToOwned,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
+use {
+    std::path::Path,
+    std::path::PathBuf,
+    std::process::Command,
 };
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{DefaultSourceManager, SourceManager, Uri},
+use {
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::debuginfo::DefaultSourceManager,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::Uri,
 };
-use miden_core::{
-    serde::Deserializable,
-    utils::{DisplayHex, hash_string_to_word},
+use {
+    miden_core::serde::Deserializable,
+    miden_core::utils::DisplayHex,
+    miden_core::utils::hash_string_to_word,
 };
 use miden_mast_package::Package as MastPackage;
-use miden_package_registry::{
-    InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,
+use {
+    miden_package_registry::InMemoryPackageRegistry,
+    miden_package_registry::PackageId,
+    miden_package_registry::PackageRecord,
+    miden_package_registry::PackageRegistry,
+    miden_package_registry::PackageResolver,
+    miden_package_registry::Version,
 };
 
-use crate::{
-    Dependency, DependencyVersionScheme, GitRevision, Linkage, Package, SemVer, VersionRequirement,
+use {
+    crate::Dependency,
+    crate::DependencyVersionScheme,
+    crate::GitRevision,
+    crate::Linkage,
+    crate::Package,
+    crate::SemVer,
+    crate::VersionRequirement,
 };
 
 /// The [ProjectDependencyGraph] represents a materialized dependency graph rooted at a specific
@@ -1097,17 +1114,36 @@ fn package_requirements(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, string::ToString};
-    use core::assert_matches;
-    use std::{collections::BTreeMap, fs, sync::Arc};
-
-    use miden_assembly_syntax::{
-        ast::Path as AstPath,
-        debuginfo::{DefaultSourceManager, Span},
+    use {
+        alloc::boxed::Box,
+        alloc::string::ToString,
     };
-    use miden_core::{serde::Serializable, utils::hash_string_to_word};
-    use miden_mast_package::{Package as MastPackage, TargetType};
-    use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
+    use core::assert_matches;
+    use {
+        std::collections::BTreeMap,
+        std::fs,
+        std::sync::Arc,
+    };
+
+    use {
+        miden_assembly_syntax::ast::Path as AstPath,
+        miden_assembly_syntax::debuginfo::DefaultSourceManager,
+        miden_assembly_syntax::debuginfo::Span,
+    };
+    use {
+        miden_core::serde::Serializable,
+        miden_core::utils::hash_string_to_word,
+    };
+    use {
+        miden_mast_package::Package as MastPackage,
+        miden_mast_package::TargetType,
+    };
+    use {
+        miden_package_registry::PackageIndex,
+        miden_package_registry::PackageRecord,
+        miden_package_registry::PackageRegistry,
+        miden_package_registry::PackageVersions,
+    };
     use tempfile::TempDir;
 
     use super::*;

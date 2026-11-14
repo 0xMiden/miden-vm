@@ -1,25 +1,41 @@
 use std::borrow::Cow;
 
-use miden_core::{
-    Felt,
-    field::{Algebra, QuadFelt},
+use {
+    miden_core::Felt,
+    miden_core::field::Algebra,
+    miden_core::field::QuadFelt,
 };
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_stark::air::{
-    AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-    symbolic::{AirLayout, SymbolicAirBuilder},
+use {
+    miden_stark::air::AirBuilder,
+    miden_stark::air::BaseAir,
+    miden_stark::air::LiftedAir,
+    miden_stark::air::LiftedAirBuilder,
+    miden_stark::air::WindowAccess,
+    miden_stark::air::symbolic::AirLayout,
+    miden_stark::air::symbolic::SymbolicAirBuilder,
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use {
+    p3_matrix::Matrix,
+    p3_matrix::dense::RowMajorMatrix,
+};
 
-use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
-use crate::{
-    InputKey, InputLayout,
-    compiler::{
-        AceCircuit, AceConfig, LayoutKind,
-        circuit::emit_circuit,
-        dag::NodeKind,
-        pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
-    },
+use {
+    super::common::eval_dag,
+    super::common::eval_folded_constraints,
+    super::common::eval_periodic_values,
+    super::common::eval_quotient,
+};
+use {
+    crate::InputKey,
+    crate::InputLayout,
+    crate::compiler::AceCircuit,
+    crate::compiler::AceConfig,
+    crate::compiler::LayoutKind,
+    crate::compiler::circuit::emit_circuit,
+    crate::compiler::dag::NodeKind,
+    crate::compiler::pipeline::build_ace_dag_for_air,
+    crate::compiler::pipeline::build_canonical_multi_air_ace_circuit,
 };
 
 // Base and extension field types for tests.
@@ -803,7 +819,10 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
 /// representation choice must actually exercise it alongside the standalone forms.
 #[test]
 fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
-    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
+    use {
+        crate::compiler::dag::PeriodicColumn,
+        crate::compiler::dag::PeriodicColumnData,
+    };
 
     let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
     let columns = data.columns();
@@ -868,7 +887,10 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
 /// kind of column must not change that.
 #[test]
 fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
-    use crate::compiler::dag::{PeriodicColumn, PeriodicColumnData};
+    use {
+        crate::compiler::dag::PeriodicColumn,
+        crate::compiler::dag::PeriodicColumnData,
+    };
 
     let mut one_hot = vec![F::ZERO; 8];
     one_hot[5] = F::ONE;
@@ -978,7 +1000,10 @@ fn canonical_builder_air_count_is_independent_of_order_maps() {
 
 #[test]
 fn compiled_relation_reuses_capture_and_pads_each_air_row() {
-    use crate::compiler::{CapturedAir, CompiledRelation};
+    use {
+        crate::compiler::CapturedAir,
+        crate::compiler::CompiledRelation,
+    };
     let first = TestAir {
         main: 3,
         aux: 1,
@@ -1032,7 +1057,10 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
 
 #[test]
 fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
-    use crate::compiler::{CapturedAir, CompiledRelation};
+    use {
+        crate::compiler::CapturedAir,
+        crate::compiler::CompiledRelation,
+    };
     let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
     let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
     let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
@@ -1098,7 +1126,10 @@ impl LiftedAir<F, EF> for CountedCubicAir {
 
 #[test]
 fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
-    use crate::compiler::{CapturedAir, CompiledRelation};
+    use {
+        crate::compiler::CapturedAir,
+        crate::compiler::CompiledRelation,
+    };
     let air = CountedCubicAir {
         eval_count: std::sync::atomic::AtomicUsize::new(0),
     };

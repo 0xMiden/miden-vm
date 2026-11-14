@@ -8,9 +8,12 @@ use std::collections::HashMap;
 use miden_crypto::field::Field;
 
 pub(crate) use crate::instruction::Op as AceOp;
-use crate::{
-    AceError, InputLayout,
-    compiler::dag::{AceDag, NodeId, NodeKind},
+use {
+    crate::AceError,
+    crate::InputLayout,
+    crate::compiler::dag::AceDag,
+    crate::compiler::dag::NodeId,
+    crate::compiler::dag::NodeKind,
 };
 
 /// Nodes in the emitted ACE circuit.

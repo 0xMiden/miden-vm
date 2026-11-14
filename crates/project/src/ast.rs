@@ -13,26 +13,42 @@ mod target;
 mod tests;
 mod workspace;
 
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec,
+    alloc::vec::Vec,
 };
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-pub use self::{
-    dependency::DependencySpec,
-    package::{PackageConfig, PackageDetail, PackageTable, ProjectFile},
-    profile::Profile,
-    target::{BinTarget, LibTarget},
-    workspace::WorkspaceFile,
+use {
+    serde::Deserialize,
+    serde::Serialize,
 };
-use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
+
+pub use {
+    self::dependency::DependencySpec,
+    self::package::PackageConfig,
+    self::package::PackageDetail,
+    self::package::PackageTable,
+    self::package::ProjectFile,
+    self::profile::Profile,
+    self::target::BinTarget,
+    self::target::LibTarget,
+    self::workspace::WorkspaceFile,
+};
+use {
+    crate::Diagnostic,
+    crate::Label,
+    crate::RelatedError,
+    crate::Report,
+    crate::SourceFile,
+    crate::SourceSpan,
+    crate::miette,
+};
 
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]

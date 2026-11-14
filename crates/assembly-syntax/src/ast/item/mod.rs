@@ -4,14 +4,22 @@ mod resolver;
 
 use miden_debug_types::Spanned;
 
-pub use self::{
-    index::{GlobalItemIndex, ItemIndex, ModuleIndex},
-    items::Item,
-    resolver::{
-        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError, SymbolTable,
-    },
+pub use {
+    self::index::GlobalItemIndex,
+    self::index::ItemIndex,
+    self::index::ModuleIndex,
+    self::items::Item,
+    self::resolver::LocalSymbol,
+    self::resolver::LocalSymbolResolver,
+    self::resolver::SymbolResolution,
+    self::resolver::SymbolResolutionError,
+    self::resolver::SymbolTable,
 };
-use super::{Ident, Import, Visibility};
+use {
+    super::Ident,
+    super::Import,
+    super::Visibility,
+};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Declaration<'a> {

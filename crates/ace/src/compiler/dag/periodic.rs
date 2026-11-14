@@ -8,11 +8,18 @@ use std::collections::HashMap;
 
 use miden_crypto::field::Field;
 
-use super::{
-    builder::DagBuilder,
-    ir::{LagrangeBasis, NodeId, PeriodicColumn, PeriodicColumnData, SparseTerm},
+use {
+    super::builder::DagBuilder,
+    super::ir::LagrangeBasis,
+    super::ir::NodeId,
+    super::ir::PeriodicColumn,
+    super::ir::PeriodicColumnData,
+    super::ir::SparseTerm,
 };
-use crate::layout::{InputKey, InputLayout};
+use {
+    crate::layout::InputKey,
+    crate::layout::InputLayout,
+};
 
 pub(super) fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,

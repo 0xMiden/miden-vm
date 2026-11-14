@@ -1,7 +1,11 @@
 /// The representation of a single Merkle path.
 use alloc::vec::Vec;
 
-use super::{super::MerklePath, MmrError, forest::Forest};
+use {
+    super::super::MerklePath,
+    super::MmrError,
+    super::forest::Forest,
+};
 use crate::Word;
 
 // MMR PROOF
@@ -166,13 +170,16 @@ impl MmrProof {
 
 #[cfg(test)]
 mod tests {
-    use super::{MerklePath, MmrPath, MmrProof};
-    use crate::{
-        Word,
-        merkle::{
-            int_to_node,
-            mmr::{Mmr, forest::Forest},
-        },
+    use {
+        super::MerklePath,
+        super::MmrPath,
+        super::MmrProof,
+    };
+    use {
+        crate::Word,
+        crate::merkle::int_to_node,
+        crate::merkle::mmr::Mmr,
+        crate::merkle::mmr::forest::Forest,
     };
 
     #[test]

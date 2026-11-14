@@ -23,10 +23,22 @@
 use alloc::vec;
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{Felt, Word, operations::opcodes, program::StackOutputs};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::operations::opcodes,
+    miden_core::program::StackOutputs,
+};
+use {
+    miden_processor::DefaultHost,
+    miden_processor::FastProcessor,
+    miden_processor::StackInputs,
+};
 
-use crate::repro_harness::{ReproTrace, core_row_mut};
+use {
+    crate::repro_harness::ReproTrace,
+    crate::repro_harness::core_row_mut,
+};
 
 const ADDR: u64 = 40;
 

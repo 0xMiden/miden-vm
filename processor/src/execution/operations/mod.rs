@@ -1,9 +1,14 @@
-use crate::{
-    BaseHost, ExecutionError, Felt,
-    errors::{MapExecErrWithOpIdx, PackageSourceDebugContext},
-    operation::Operation,
-    processor::{Processor, StackInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::BaseHost,
+    crate::ExecutionError,
+    crate::Felt,
+    crate::errors::MapExecErrWithOpIdx,
+    crate::errors::PackageSourceDebugContext,
+    crate::operation::Operation,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 mod crypto_ops;

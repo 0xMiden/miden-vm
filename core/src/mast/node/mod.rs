@@ -1,44 +1,80 @@
 mod basic_block_node;
-use alloc::{boxed::Box, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::vec::Vec,
+};
 use core::fmt;
 
-pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder,
-    GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
+pub use {
+    basic_block_node::BATCH_SIZE as OP_BATCH_SIZE,
+    basic_block_node::BasicBlockNode,
+    basic_block_node::BasicBlockNodeBuilder,
+    basic_block_node::GROUP_SIZE as OP_GROUP_SIZE,
+    basic_block_node::OpBatch,
 };
-pub(crate) use basic_block_node::{collect_immediate_placements, hash_op_batches};
+pub(crate) use {
+    basic_block_node::collect_immediate_placements,
+    basic_block_node::hash_op_batches,
+};
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
 
 mod call_node;
-pub use call_node::{CallNode, CallNodeBuilder};
+pub use {
+    call_node::CallNode,
+    call_node::CallNodeBuilder,
+};
 
 mod dyn_node;
-pub use dyn_node::{DynNode, DynNodeBuilder};
+pub use {
+    dyn_node::DynNode,
+    dyn_node::DynNodeBuilder,
+};
 
 mod external;
-pub use external::{ExternalNode, ExternalNodeBuilder};
+pub use {
+    external::ExternalNode,
+    external::ExternalNodeBuilder,
+};
 
 mod join_node;
-pub use join_node::{JoinNode, JoinNodeBuilder};
+pub use {
+    join_node::JoinNode,
+    join_node::JoinNodeBuilder,
+};
 
 mod split_node;
-use miden_crypto::{Felt, Word};
+use {
+    miden_crypto::Felt,
+    miden_crypto::Word,
+};
 use miden_formatting::prettier::PrettyPrint;
-pub use split_node::{SplitNode, SplitNodeBuilder};
+pub use {
+    split_node::SplitNode,
+    split_node::SplitNodeBuilder,
+};
 
 mod loop_node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use basic_block_node::arbitrary;
-pub use loop_node::{LoopNode, LoopNodeBuilder};
+pub use {
+    loop_node::LoopNode,
+    loop_node::LoopNodeBuilder,
+};
 
 mod mast_forest_contributor;
 pub(super) use mast_forest_contributor::fingerprint_with_child_fingerprints;
-pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder, MastNodeContext};
+pub use {
+    mast_forest_contributor::MastForestContributor,
+    mast_forest_contributor::MastNodeBuilder,
+    mast_forest_contributor::MastNodeContext,
+};
 
-use crate::{
-    chiplets::hasher,
-    mast::{MastForest, MastForestError, MastNodeId},
+use {
+    crate::chiplets::hasher,
+    crate::mast::MastForest,
+    crate::mast::MastForestError,
+    crate::mast::MastNodeId,
 };
 
 pub trait MastNodeExt {

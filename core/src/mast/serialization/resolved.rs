@@ -1,18 +1,34 @@
-use alloc::{format, string::ToString, vec::Vec};
-
-use super::{
-    AdviceMap, ForestLayout, MastForest, MastNodeEntry, MastNodeId, basic_block_data_len,
-    reserve_allocation,
+use {
+    alloc::format,
+    alloc::string::ToString,
+    alloc::vec::Vec,
 };
-use crate::{
-    chiplets::hasher,
-    mast::{
-        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, MastNode, SplitNode,
-        node::hash_op_batches,
-        serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
-    },
-    serde::{Deserializable, DeserializationError, SliceReader},
-    utils::IndexVec,
+
+use {
+    super::AdviceMap,
+    super::ForestLayout,
+    super::MastForest,
+    super::MastNodeEntry,
+    super::MastNodeId,
+    super::basic_block_data_len,
+    super::reserve_allocation,
+};
+use {
+    crate::chiplets::hasher,
+    crate::mast::CallNode,
+    crate::mast::DynNode,
+    crate::mast::JoinNode,
+    crate::mast::LoopNode,
+    crate::mast::MastForestParts,
+    crate::mast::MastNode,
+    crate::mast::SplitNode,
+    crate::mast::node::hash_op_batches,
+    crate::mast::serialization::basic_blocks::BasicBlockDataDecoder,
+    crate::mast::serialization::layout::read_fixed_section_entry,
+    crate::serde::Deserializable,
+    crate::serde::DeserializationError,
+    crate::serde::SliceReader,
+    crate::utils::IndexVec,
 };
 
 /// Digest sources for a parsed serialized forest.

@@ -1,18 +1,27 @@
 //! AIR traits for the lifted STARK system: [`LiftedAir`] (a single AIR) and
 //! [`MultiAir`] (the AIR collection plus the cross-AIR behavior on it).
 
-use alloc::{boxed::Box, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::vec::Vec,
+};
 
 use p3_air::BaseAir;
 use p3_challenger::CanObserve;
-use p3_field::{Algebra, ExtensionField, Field};
+use {
+    p3_field::Algebra,
+    p3_field::ExtensionField,
+    p3_field::Field,
+};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::air::{
-    LiftedAirBuilder,
-    symbolic::{
-        AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt, eval_air,
-    },
+use {
+    crate::air::LiftedAirBuilder,
+    crate::air::symbolic::AirLayout,
+    crate::air::symbolic::SymbolicAirBuilder,
+    crate::air::symbolic::SymbolicExpression,
+    crate::air::symbolic::SymbolicExpressionExt,
+    crate::air::symbolic::eval_air,
 };
 
 /// Inputs that stay fixed throughout one AIR evaluation pass.

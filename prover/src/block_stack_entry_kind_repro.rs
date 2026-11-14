@@ -14,10 +14,22 @@
 //! and both single-half controls were unaffected.
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{Felt, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use {
+    miden_core::Felt,
+    miden_core::field::Field,
+    miden_core::operations::opcodes,
+    miden_core::utils::RowMajorMatrix,
+};
+use {
+    miden_processor::DefaultHost,
+    miden_processor::FastProcessor,
+    miden_processor::StackInputs,
+};
 
-use crate::repro_harness::{ReproTrace, core_row_mut};
+use {
+    crate::repro_harness::ReproTrace,
+    crate::repro_harness::core_row_mut,
+};
 
 struct Fixture {
     trace: ReproTrace,

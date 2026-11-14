@@ -1,11 +1,17 @@
-use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::btree_map::Entry,
+    alloc::vec::Vec,
 };
 
 use miden_core::WORD_SIZE;
 
-use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
+use {
+    super::Felt,
+    super::INIT_MEM_VALUE,
+    super::MemoryError,
+    super::Word,
+};
 use crate::ContextId;
 
 // MEMORY SEGMENT TRACE

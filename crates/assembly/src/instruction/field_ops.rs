@@ -1,12 +1,25 @@
-use miden_assembly_syntax::{
-    Felt, ParsingError,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{RelatedError, RelatedLabel, Report},
+use {
+    miden_assembly_syntax::Felt,
+    miden_assembly_syntax::ParsingError,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
+    miden_assembly_syntax::diagnostics::Report,
 };
-use miden_core::{events::SystemEvent, field::Field, operations::Operation::*};
+use {
+    miden_core::events::SystemEvent,
+    miden_core::field::Field,
+    miden_core::operations::Operation::*,
+};
 
 use super::BasicBlockBuilder;
-use crate::{MAX_DYNAMIC_EXP_BITS, ONE, ProcedureContext, ZERO};
+use {
+    crate::MAX_DYNAMIC_EXP_BITS,
+    crate::ONE,
+    crate::ProcedureContext,
+    crate::ZERO,
+};
 
 /// Field element representing TWO in the base field of the VM.
 const TWO: Felt = Felt::new_unchecked(2);

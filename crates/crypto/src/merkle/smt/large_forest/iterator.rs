@@ -23,9 +23,10 @@ use core::iter::Peekable;
 use miden_field::Word;
 
 use super::Result;
-use crate::{
-    Set,
-    merkle::smt::large_forest::{history::HistoryView, root::TreeEntry},
+use {
+    crate::Set,
+    crate::merkle::smt::large_forest::history::HistoryView,
+    crate::merkle::smt::large_forest::root::TreeEntry,
 };
 
 // ENTRIES ITERATOR

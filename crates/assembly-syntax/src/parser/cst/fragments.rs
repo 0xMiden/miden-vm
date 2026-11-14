@@ -1,31 +1,52 @@
-use alloc::{
-    borrow::Cow,
-    boxed::Box,
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::borrow::Cow,
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax_cst::{
-    SyntaxKind, SyntaxToken,
-    ast::{
-        AdviceMap as CstAdviceMap, AstNode, Attribute as CstAttribute, Expr as CstExpr,
-        Signature as CstSignature, TypeBody as CstTypeBody,
-    },
-    rowan,
+use {
+    miden_assembly_syntax_cst::SyntaxKind,
+    miden_assembly_syntax_cst::SyntaxToken,
+    miden_assembly_syntax_cst::ast::AdviceMap as CstAdviceMap,
+    miden_assembly_syntax_cst::ast::AstNode,
+    miden_assembly_syntax_cst::ast::Attribute as CstAttribute,
+    miden_assembly_syntax_cst::ast::Expr as CstExpr,
+    miden_assembly_syntax_cst::ast::Signature as CstSignature,
+    miden_assembly_syntax_cst::ast::TypeBody as CstTypeBody,
+    miden_assembly_syntax_cst::rowan,
 };
-use miden_core::{Felt, field::PrimeField64};
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_core::Felt,
+    miden_core::field::PrimeField64,
+};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use super::{super::MAX_CONSTANT_EXPR_NESTING, context::LoweringContext};
-use crate::{
-    Path,
-    ast::{
-        self, MAX_TYPE_EXPR_NESTING, PathBuf,
-        types::{AddressSpace, Type, TypeRepr},
-    },
-    parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
+use {
+    super::super::MAX_CONSTANT_EXPR_NESTING,
+    super::context::LoweringContext,
+};
+use {
+    crate::Path,
+    crate::ast,
+    crate::ast::MAX_TYPE_EXPR_NESTING,
+    crate::ast::PathBuf,
+    crate::ast::types::AddressSpace,
+    crate::ast::types::Type,
+    crate::ast::types::TypeRepr,
+    crate::parser::BinErrorKind,
+    crate::parser::HexErrorKind,
+    crate::parser::IntValue,
+    crate::parser::LiteralErrorKind,
+    crate::parser::ParsingError,
+    crate::parser::WordValue,
 };
 
 /// Lowers a CST expression fragment into the constant-expression AST.
@@ -1526,22 +1547,39 @@ fn close_text(kind: SyntaxKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeSet, string::ToString, sync::Arc};
-
-    use miden_assembly_syntax_cst::{
-        ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
-        parse_source_file,
+    use {
+        alloc::collections::BTreeSet,
+        alloc::string::ToString,
+        alloc::sync::Arc,
     };
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+
+    use {
+        miden_assembly_syntax_cst::ast::AstNode,
+        miden_assembly_syntax_cst::ast::Item as CstItem,
+        miden_assembly_syntax_cst::ast::SourceFile as CstSourceFile,
+        miden_assembly_syntax_cst::parse_source_file,
+    };
+    use {
+        miden_debug_types::SourceFile,
+        miden_debug_types::SourceId,
+        miden_debug_types::SourceLanguage,
+        miden_debug_types::Uri,
+    };
     use pretty_assertions::assert_eq;
 
-    use super::{
-        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body, parse_numeric_token,
+    use {
+        super::ParsedNumeric,
+        super::lower_advice_map_decl,
+        super::lower_attribute,
+        super::lower_function_type_from_signature,
+        super::lower_type_expr_from_alias_body,
+        super::parse_numeric_token,
     };
-    use crate::{
-        Word, ast,
-        parser::{ParsingError, cst::context::LoweringContext},
+    use {
+        crate::Word,
+        crate::ast,
+        crate::parser::ParsingError,
+        crate::parser::cst::context::LoweringContext,
     };
 
     #[test]

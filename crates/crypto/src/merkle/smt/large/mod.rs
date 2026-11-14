@@ -237,19 +237,37 @@
 //! To optimize memory and I/O: group updates by key locality so that keys sharing
 //! high-order bits are processed together.
 
-use alloc::{sync::Arc, vec::Vec};
-
-use super::{
-    EmptySubtreeRoots, InnerNode, InnerNodeInfo, LeafIndex, MerkleError, NodeIndex, NodeMutation,
-    SMT_DEPTH, SmtLeaf, SmtProof, SparseMerkleTree, SparseMerkleTreeReader, Word,
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use crate::{
-    EMPTY_WORD,
-    merkle::smt::{Map, full::concurrent::MutatedSubtreeLeaves},
+
+use {
+    super::EmptySubtreeRoots,
+    super::InnerNode,
+    super::InnerNodeInfo,
+    super::LeafIndex,
+    super::MerkleError,
+    super::NodeIndex,
+    super::NodeMutation,
+    super::SMT_DEPTH,
+    super::SmtLeaf,
+    super::SmtProof,
+    super::SparseMerkleTree,
+    super::SparseMerkleTreeReader,
+    super::Word,
+};
+use {
+    crate::EMPTY_WORD,
+    crate::merkle::smt::Map,
+    crate::merkle::smt::full::concurrent::MutatedSubtreeLeaves,
 };
 
 mod error;
-pub use error::{LargeSmtError, LargeSmtResult};
+pub use {
+    error::LargeSmtError,
+    error::LargeSmtResult,
+};
 
 #[cfg(test)]
 mod property_tests;
@@ -257,17 +275,33 @@ mod property_tests;
 mod tests;
 
 mod subtree;
-pub use subtree::{Subtree, SubtreeError};
+pub use {
+    subtree::Subtree,
+    subtree::SubtreeError,
+};
 
 mod storage;
-pub use storage::{
-    MemoryStorage, MemoryStorageSnapshot, SmtStorage, SmtStorageReader, StorageError,
-    StorageResult, StorageUpdateParts, StorageUpdates, SubtreeUpdate,
+pub use {
+    storage::MemoryStorage,
+    storage::MemoryStorageSnapshot,
+    storage::SmtStorage,
+    storage::SmtStorageReader,
+    storage::StorageError,
+    storage::StorageResult,
+    storage::StorageUpdateParts,
+    storage::StorageUpdates,
+    storage::SubtreeUpdate,
 };
 #[cfg(feature = "rocksdb")]
-pub use storage::{
-    RocksDbBloomFilterBitsPerKey, RocksDbConfig, RocksDbDurabilityMode, RocksDbMemoryBudget,
-    RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
+pub use {
+    storage::RocksDbBloomFilterBitsPerKey,
+    storage::RocksDbConfig,
+    storage::RocksDbDurabilityMode,
+    storage::RocksDbMemoryBudget,
+    storage::RocksDbSnapshotStorage,
+    storage::RocksDbStorage,
+    storage::RocksDbTuningOptions,
+    storage::RocksDbWriteBufferManagerBudget,
 };
 
 mod iter;

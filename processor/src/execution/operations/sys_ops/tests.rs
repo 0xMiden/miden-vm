@@ -1,15 +1,24 @@
 use alloc::vec;
 
-use miden_core::{
-    Felt, ONE, ZERO,
-    program::{MIN_STACK_DEPTH, StackInputs},
+use {
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::ZERO,
+    miden_core::program::MIN_STACK_DEPTH,
+    miden_core::program::StackInputs,
 };
 
-use super::{op_assert, op_clk, op_sdepth};
-use crate::{
-    execution::operations::stack_ops::op_push,
-    fast::FastProcessor,
-    processor::{Processor, StackInterface, SystemInterface},
+use {
+    super::op_assert,
+    super::op_clk,
+    super::op_sdepth,
+};
+use {
+    crate::execution::operations::stack_ops::op_push,
+    crate::fast::FastProcessor,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
 };
 
 // TESTS

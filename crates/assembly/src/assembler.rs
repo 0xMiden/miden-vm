@@ -3,51 +3,98 @@ pub(super) mod debuginfo;
 pub(crate) mod error;
 mod product;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    string::ToString,
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    ExportedTypeUse, MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
-    ast::{
-        self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
-        SymbolResolution, Visibility, types::FunctionType,
-    },
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
-    module::ItemInfo,
+use {
+    miden_assembly_syntax::ExportedTypeUse,
+    miden_assembly_syntax::MAX_CONTROL_FLOW_NESTING,
+    miden_assembly_syntax::MAX_REPEAT_COUNT,
+    miden_assembly_syntax::Parse,
+    miden_assembly_syntax::SemanticAnalysisError,
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::AttributeSet,
+    miden_assembly_syntax::ast::Ident,
+    miden_assembly_syntax::ast::InvocationTarget,
+    miden_assembly_syntax::ast::InvokeKind,
+    miden_assembly_syntax::ast::ItemIndex,
+    miden_assembly_syntax::ast::ModuleKind,
+    miden_assembly_syntax::ast::SymbolResolution,
+    miden_assembly_syntax::ast::Visibility,
+    miden_assembly_syntax::ast::types::FunctionType,
+    miden_assembly_syntax::debuginfo::DefaultSourceManager,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::diagnostics::IntoDiagnostic,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
+    miden_assembly_syntax::diagnostics::Report,
+    miden_assembly_syntax::module::ItemInfo,
 };
-use miden_core::{
-    WORD_SIZE, Word,
-    mast::{MastNodeExt, MastNodeId},
-    operations::{AssemblyOp, Operation},
-    program::KernelDescriptor,
-    serde::Serializable,
+use {
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::operations::AssemblyOp,
+    miden_core::operations::Operation,
+    miden_core::program::KernelDescriptor,
+    miden_core::serde::Serializable,
 };
-use miden_mast_package::{
-    ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
-    PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
-    debug_info::{DebugFunctionIdx, DebugSourceNodeId, PackageDebugInfo},
+use {
+    miden_mast_package::ConstantExport,
+    miden_mast_package::Package,
+    miden_mast_package::PackageDebugInfoError,
+    miden_mast_package::PackageExport,
+    miden_mast_package::PackageId,
+    miden_mast_package::PackageModule,
+    miden_mast_package::PackageSubmodule,
+    miden_mast_package::ProcedureExport,
+    miden_mast_package::Section,
+    miden_mast_package::SectionId,
+    miden_mast_package::TypeExport,
+    miden_mast_package::debug_info::DebugFunctionIdx,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
 };
-use miden_project::{Linkage, TargetType};
+use {
+    miden_project::Linkage,
+    miden_project::TargetType,
+};
 
-use self::{error::AssemblerError, product::AssemblyProduct};
-use crate::{
-    GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
-    ast::Path,
-    basic_block_builder::{ActiveInlineCall, BasicBlockBuilder},
-    fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{
-        Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
-        SymbolResolver,
-    },
-    mast_forest_builder::{
-        MastForestBuilder, MastNodeRef, MastNodeUse, SourceNodeRef, StaticLibrary,
-    },
+use {
+    self::error::AssemblerError,
+    self::product::AssemblyProduct,
+};
+use {
+    crate::GlobalItemIndex,
+    crate::ModuleIndex,
+    crate::Procedure,
+    crate::ProcedureContext,
+    crate::ast::Path,
+    crate::basic_block_builder::ActiveInlineCall,
+    crate::basic_block_builder::BasicBlockBuilder,
+    crate::fmp::fmp_end_frame_sequence,
+    crate::fmp::fmp_initialization_sequence,
+    crate::fmp::fmp_start_frame_sequence,
+    crate::linker::Import,
+    crate::linker::LinkLibrary,
+    crate::linker::Linker,
+    crate::linker::LinkerError,
+    crate::linker::SymbolItem,
+    crate::linker::SymbolResolutionContext,
+    crate::linker::SymbolResolver,
+    crate::mast_forest_builder::MastForestBuilder,
+    crate::mast_forest_builder::MastNodeRef,
+    crate::mast_forest_builder::MastNodeUse,
+    crate::mast_forest_builder::SourceNodeRef,
+    crate::mast_forest_builder::StaticLibrary,
 };
 
 /// Maximum number of locals a single procedure may allocate.

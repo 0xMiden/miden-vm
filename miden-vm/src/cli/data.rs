@@ -1,23 +1,46 @@
-use std::{
-    fs,
-    io::{self, Write},
-    path::{Path, PathBuf},
-    sync::Arc,
+use {
+    std::fs,
+    std::io,
+    std::io::Write,
+    std::path::Path,
+    std::path::PathBuf,
+    std::sync::Arc,
 };
 
-use miden_assembly::{
-    Assembler, DefaultSourceManager, Path as LibraryPath, SourceManager,
-    ast::{Module, ModuleKind},
-    diagnostics::{Report, WrapErr},
-    report,
-    serde::Deserializable,
+use {
+    miden_assembly::Assembler,
+    miden_assembly::DefaultSourceManager,
+    miden_assembly::Path as LibraryPath,
+    miden_assembly::SourceManager,
+    miden_assembly::ast::Module,
+    miden_assembly::ast::ModuleKind,
+    miden_assembly::diagnostics::Report,
+    miden_assembly::diagnostics::WrapErr,
+    miden_assembly::report,
+    miden_assembly::serde::Deserializable,
 };
-use miden_core::{Felt, field::QuotientMap, serde::read_file_bounded};
+use {
+    miden_core::Felt,
+    miden_core::field::QuotientMap,
+    miden_core::serde::read_file_bounded,
+};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
-use serde::{Deserialize, Serialize};
-use tracing::{field::Empty, instrument};
+use {
+    miden_vm::ExecutionProof,
+    miden_vm::Program,
+    miden_vm::StackOutputs,
+    miden_vm::Word,
+    miden_vm::serde::SliceReader,
+};
+use {
+    serde::Deserialize,
+    serde::Serialize,
+};
+use {
+    tracing::field::Empty,
+    tracing::instrument,
+};
 
 // HELPERS
 // ================================================================================================
@@ -532,7 +555,10 @@ mod atomic_write_tests {
     #[cfg(unix)]
     #[test]
     fn new_and_replaced_artifacts_use_ordinary_file_creation_permissions() {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use {
+            std::os::unix::fs::MetadataExt,
+            std::os::unix::fs::PermissionsExt,
+        };
 
         let dir = tempfile::tempdir().unwrap();
         let reference = dir.path().join("ordinary");

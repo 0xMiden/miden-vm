@@ -1,33 +1,55 @@
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    vec,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::sync::Arc,
+    alloc::vec,
+    alloc::vec::Vec,
 };
-use core::{cmp::min, ops::ControlFlow};
+use {
+    core::cmp::min,
+    core::ops::ControlFlow,
+};
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{
-    EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Digest, PrecompileWitness},
-    mast::{ExecutableMastForest, MastForest},
-    program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
-    utils::range,
+use {
+    miden_core::EMPTY_WORD,
+    miden_core::Felt,
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::deferred::DeferredState,
+    miden_core::deferred::Digest,
+    miden_core::deferred::PrecompileWitness,
+    miden_core::mast::ExecutableMastForest,
+    miden_core::mast::MastForest,
+    miden_core::program::MIN_STACK_DEPTH,
+    miden_core::program::Program,
+    miden_core::program::StackInputs,
+    miden_core::program::StackOutputs,
+    miden_core::utils::range,
 };
-use miden_mast_package::{
-    Package,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+use {
+    miden_mast_package::Package,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
 };
 
-use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    ProcessorState,
-    advice::AdviceError,
-    continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
-    operation::OperationError,
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::AdviceInputs,
+    crate::AdviceProvider,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::ExecutionOptions,
+    crate::LoadedMastForest,
+    crate::ProcessorState,
+    crate::advice::AdviceError,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
+    crate::errors::MapExecErrNoCtx,
+    crate::operation::OperationError,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 mod basic_block;
@@ -39,7 +61,11 @@ mod operation;
 mod step;
 
 pub use basic_block::SystemEventError;
-pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
+pub use {
+    debug::DebugCallFrame,
+    debug::DebugCallFrameResolver,
+    debug::DebugFrameOrigin,
+};
 pub use memory::Memory;
 pub(crate) use step::BreakReason;
 pub use step::ResumeContext;

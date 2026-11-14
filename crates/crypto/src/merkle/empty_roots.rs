@@ -1,6 +1,10 @@
 use core::slice;
 
-use super::{Felt, Word, smt::InnerNode};
+use {
+    super::Felt,
+    super::Word,
+    super::smt::InnerNode,
+};
 
 // EMPTY NODES SUBTREES
 // ================================================================================================
@@ -1590,9 +1594,11 @@ const EMPTY_SUBTREES: [Word; 256] = [
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::{EMPTY_WORD, Eidos},
-        EMPTY_SUBTREES, EmptySubtreeRoots,
+    use {
+        super::super::EMPTY_WORD,
+        super::super::Eidos,
+        super::EMPTY_SUBTREES,
+        super::EmptySubtreeRoots,
     };
 
     #[test]
