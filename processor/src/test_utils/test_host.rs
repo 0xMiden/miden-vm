@@ -21,7 +21,7 @@ use {
     crate::MemMastForestStore,
     crate::ProcessorState,
     crate::SyncHost,
-    crate::Word,
+    miden_core::Word,
     crate::advice::AdviceMutation,
     crate::event::EventError,
     crate::event::TraceError,

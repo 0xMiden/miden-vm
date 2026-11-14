@@ -1,7 +1,7 @@
 use core::ops::Range;
 
 use {
-    miden_assembly_syntax::Felt,
+    miden_core::Felt,
     miden_assembly_syntax::ast::Immediate,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Spanned,

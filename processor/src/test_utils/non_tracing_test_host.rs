@@ -16,7 +16,7 @@ use {
     crate::LoadedMastForest,
     crate::ProcessorState,
     crate::SyncHost,
-    crate::Word,
+    miden_core::Word,
     crate::advice::AdviceMutation,
     crate::event::EventError,
 };

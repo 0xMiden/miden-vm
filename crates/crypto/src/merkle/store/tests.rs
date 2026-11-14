@@ -18,7 +18,7 @@ use {
     super::MerkleStore,
     super::NodeIndex,
     super::PartialMerkleTree,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::Felt,

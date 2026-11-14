@@ -7,10 +7,10 @@ use {
 use miden_core::WORD_SIZE;
 
 use {
-    super::Felt,
+    miden_core::Felt,
     super::INIT_MEM_VALUE,
     super::MemoryError,
-    super::Word,
+    miden_core::Word,
 };
 use crate::ContextId;
 

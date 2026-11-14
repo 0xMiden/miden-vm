@@ -14,8 +14,8 @@ use {
     super::count_and8,
 };
 use {
-    crate::Felt,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ZERO,
     crate::operation::OperationError,
     crate::trace::ChipletTraceFragment,
 };

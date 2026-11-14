@@ -3,7 +3,7 @@ use {
     alloc::vec::Vec,
 };
 
-use super::EMPTY_WORD;
+use crate::EMPTY_WORD;
 use {
     crate::Felt,
     crate::Word,

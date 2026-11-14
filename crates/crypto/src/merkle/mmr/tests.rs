@@ -5,7 +5,7 @@ use assert_matches::assert_matches;
 use {
     super::super::Eidos,
     super::super::InnerNodeInfo,
-    super::super::Word,
+    crate::Word,
     super::Mmr,
     super::MmrError,
     super::MmrPeaks,

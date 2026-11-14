@@ -143,9 +143,9 @@ mod batch_inversion {
     use p3_maybe_rayon::prelude::*;
 
     use {
-        super::Felt,
-        super::ONE,
-        super::ZERO,
+        crate::Felt,
+        crate::ONE,
+        crate::ZERO,
         super::field::Field,
     };
 

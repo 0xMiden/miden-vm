@@ -9,9 +9,9 @@ use {
 };
 
 use {
-    crate::Felt,
-    crate::Word,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::ZERO,
     crate::errors::OperationError,
     crate::processor::HasherInterface,
     crate::processor::Processor,

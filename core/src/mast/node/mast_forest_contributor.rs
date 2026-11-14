@@ -206,7 +206,7 @@ mod fingerprint_invariant_tests {
 
 #[cfg(test)]
 mod round_trip_tests {
-    use miden_crypto::Felt;
+    use crate::Felt;
 
     use {
         crate::Word,

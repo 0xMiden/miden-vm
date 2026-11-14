@@ -59,10 +59,10 @@ pub type Signature = falcon512_common::Signature<variant::Variant>;
 pub(super) mod variant {
     use {
         super::FalconVariant,
-        super::Felt,
+        crate::Felt,
         super::Nonce,
         super::Polynomial,
-        super::Word,
+        crate::Word,
         super::hash_to_point,
     };
     use {

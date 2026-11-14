@@ -7,8 +7,8 @@ use {
 };
 
 use {
-    miden_field::Felt,
-    miden_field::Word,
+    crate::Felt,
+    crate::Word,
 };
 use {
     miden_serde_utils::Deserializable,

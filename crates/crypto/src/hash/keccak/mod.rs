@@ -3,7 +3,7 @@ use core::mem::size_of;
 use sha3::Digest as Sha3Digest;
 
 use {
-    super::Felt,
+    crate::Felt,
     super::HasherExt,
     super::digest::DIGEST256_BYTES,
     super::digest::Digest256,

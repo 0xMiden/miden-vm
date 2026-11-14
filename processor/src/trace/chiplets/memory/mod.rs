@@ -25,13 +25,13 @@ use {
 };
 use {
     crate::ContextId,
-    crate::EMPTY_WORD,
-    crate::Felt,
+    miden_core::EMPTY_WORD,
+    miden_core::Felt,
     crate::MemoryError,
-    crate::ONE,
-    crate::WORD_SIZE,
-    crate::Word,
-    crate::ZERO,
+    miden_core::ONE,
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::ZERO,
     crate::field::batch_inversion_allow_zeros,
 };
 

@@ -5,7 +5,7 @@ use {
     super::SmtLeaf,
     super::SmtProofError,
     super::SparseMerklePath,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::merkle::InnerNodeInfo,
@@ -14,6 +14,7 @@ use {
     crate::utils::Deserializable,
     crate::utils::DeserializationError,
     crate::utils::Serializable,
+    crate::EMPTY_WORD,
 };
 
 /// A proof which can be used to assert presence (or absence) of key-value pairs
@@ -104,7 +105,7 @@ impl SmtProof {
     /// - [`SmtProofError::ConflictingRoots`] if the computed root doesn't match the expected root.
     /// - [`SmtProofError::ValueMismatch`] if the key has a value in the tree (i.e., is not empty).
     pub fn verify_unset(&self, key: &Word, root: &Word) -> Result<(), SmtProofError> {
-        self.verify_presence(key, &super::EMPTY_WORD, root)
+        self.verify_presence(key, &EMPTY_WORD, root)
     }
 
     /// Verifies that a specific key-value pair is not in the tree.

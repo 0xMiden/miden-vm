@@ -16,7 +16,7 @@ use {
     super::NodeIndex,
     super::PartialMerkleTree,
     super::RootPath,
-    super::Word,
+    crate::Word,
     super::mmr::Mmr,
     super::smt::SimpleSmt,
     super::smt::Smt,
@@ -721,7 +721,7 @@ mod arbitrary {
     use {
         super::MerkleStore,
         super::StoreNode,
-        super::Word,
+        crate::Word,
     };
 
     impl Arbitrary for MerkleStore {

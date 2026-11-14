@@ -9,7 +9,7 @@ use proptest::prelude::*;
 use {
     super::super::MerkleError,
     super::super::SimpleSmt,
-    super::super::Word,
+    crate::Word,
     super::NodeIndex,
 };
 use {

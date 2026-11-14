@@ -12,7 +12,7 @@ use {
     crate::PackageId,
     crate::TargetType,
     crate::Version,
-    crate::Word,
+    miden_core::Word,
 };
 
 /// A package dependency

@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use {
     super::NodeIndex,
-    super::Word,
+    crate::Word,
     super::smt::MAX_LEAF_ENTRIES,
 };
 

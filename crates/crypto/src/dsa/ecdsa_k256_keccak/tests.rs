@@ -8,8 +8,8 @@ mod signing_key {
 
     use k256::elliptic_curve::sec1::ToSec1Point;
     use {
-        miden_field::Felt,
-        miden_field::Word,
+        crate::Felt,
+        crate::Word,
     };
     #[cfg(feature = "std")]
     use miden_serde_utils::ByteReader;

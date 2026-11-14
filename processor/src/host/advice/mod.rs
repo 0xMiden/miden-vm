@@ -801,8 +801,8 @@ mod tests {
     use {
         crate::AdviceInputs,
         crate::ExecutionOptions,
-        crate::Felt,
-        crate::Word,
+        miden_core::Felt,
+        miden_core::Word,
         crate::advice::AdviceError,
         crate::advice::AdviceMap,
         crate::advice::AdviceMutation,

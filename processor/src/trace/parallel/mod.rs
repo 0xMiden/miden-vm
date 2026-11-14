@@ -13,7 +13,7 @@ use itertools::Itertools;
 use {
     miden_air_definitions::vm::AIRS,
     miden_air_definitions::vm::CoreCols,
-    miden_air_definitions::vm::Felt,
+    miden_core::Felt,
     miden_air_definitions::vm::MIDEN_AIR_COUNT,
     miden_air_definitions::vm::MidenAir,
     miden_air_definitions::vm::StackCols,

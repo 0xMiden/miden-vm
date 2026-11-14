@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use {
-    super::super::Word,
+    crate::Word,
     super::forest::Forest,
 };
 

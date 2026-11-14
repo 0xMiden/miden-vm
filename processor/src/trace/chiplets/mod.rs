@@ -24,10 +24,10 @@ use {
 };
 
 use {
-    crate::Felt,
-    crate::ONE,
+    miden_core::Felt,
+    miden_core::ONE,
     crate::Word,
-    crate::ZERO,
+    miden_core::ZERO,
     crate::crypto::merkle::MerklePath,
     crate::operation::OperationError,
     crate::trace::ChipletTraceFragment,

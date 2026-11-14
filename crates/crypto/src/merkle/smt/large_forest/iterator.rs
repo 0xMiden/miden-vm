@@ -20,7 +20,7 @@
 use alloc::boxed::Box;
 use core::iter::Peekable;
 
-use miden_field::Word;
+use crate::Word;
 
 use super::Result;
 use {

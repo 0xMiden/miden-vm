@@ -11,7 +11,7 @@ use {
     super::InputFile,
     super::MerkleData,
     super::SIMPLE_SMT_DEPTH,
-    super::Word,
+    miden_core::Word,
 };
 use {
     crate::crypto::merkle::EmptySubtreeRoots,

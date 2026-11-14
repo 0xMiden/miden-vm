@@ -1,5 +1,5 @@
 use {
-    miden_assembly_syntax::Felt,
+    miden_core::Felt,
     miden_assembly_syntax::ParsingError,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Span,

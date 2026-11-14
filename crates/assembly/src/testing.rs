@@ -6,7 +6,7 @@ use {
 };
 
 #[cfg(feature = "std")]
-use miden_assembly_syntax::Word;
+use miden_core::Word;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
 use {

@@ -272,7 +272,7 @@ mod tests {
     use {
         super::AdviceMutation,
         super::AdviceStack,
-        super::Felt,
+        miden_core::Felt,
     };
 
     /// The iterator helper must be indistinguishable from building the stack by hand, so that a

@@ -15,7 +15,7 @@ use {
     crate::DefaultHost,
     crate::ExecutionOptions,
     crate::FastProcessor,
-    crate::Felt,
+    miden_core::Felt,
     crate::StackInputs,
     crate::trace::build_trace,
 };

@@ -5,10 +5,10 @@ use {
 
 use {
     super::BATCH_SIZE,
-    super::Felt,
+    crate::Felt,
     super::GROUP_SIZE,
     super::Operation,
-    super::ZERO,
+    crate::ZERO,
 };
 
 // OPERATION BATCH

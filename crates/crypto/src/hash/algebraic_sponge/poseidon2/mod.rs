@@ -6,13 +6,13 @@ use {
     super::AlgebraicSponge,
     super::CAPACITY_RANGE,
     super::DIGEST_RANGE,
-    super::Felt,
+    crate::Felt,
     super::RATE_RANGE,
     super::RATE0_RANGE,
     super::RATE1_RANGE,
     super::Range,
     super::STATE_WIDTH,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::ZERO,

@@ -19,10 +19,10 @@ use {
 };
 use {
     crate::ExecutionError,
-    crate::Felt,
-    crate::ONE,
-    crate::Word,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::Word,
+    miden_core::ZERO,
     crate::continuation_stack::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::errors::MapExecErrNoCtx,

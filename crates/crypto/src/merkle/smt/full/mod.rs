@@ -4,7 +4,7 @@ use {
 };
 
 use {
-    super::EMPTY_WORD,
+    crate::EMPTY_WORD,
     super::EmptySubtreeRoots,
     super::InnerNode,
     super::InnerNodeInfo,
@@ -16,7 +16,7 @@ use {
     super::SparseMerklePath,
     super::SparseMerkleTree,
     super::SparseMerkleTreeReader,
-    super::Word,
+    crate::Word,
 };
 
 mod error;
@@ -724,7 +724,7 @@ mod arbitrary {
         super::Smt,
         super::SmtLeaf,
         super::SmtProof,
-        super::Word,
+        crate::Word,
     };
 
     // Deduped key/value pairs -> a full Smt built by construction (distinct keys guaranteed).

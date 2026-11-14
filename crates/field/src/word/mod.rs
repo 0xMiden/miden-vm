@@ -37,7 +37,7 @@ use {
 };
 use thiserror::Error;
 
-use super::Felt;
+use crate::Felt;
 use crate::utils::bytes_to_hex_string;
 
 #[cfg(test)]
@@ -797,8 +797,8 @@ mod arbitrary {
     use proptest::prelude::*;
 
     use {
-        super::Felt,
-        super::Word,
+        crate::Felt,
+        crate::Word,
     };
 
     impl Arbitrary for Word {

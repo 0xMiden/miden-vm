@@ -1,7 +1,7 @@
 use {
     crate::BaseHost,
     crate::ExecutionError,
-    crate::Felt,
+    miden_core::Felt,
     crate::errors::MapExecErrWithOpIdx,
     crate::errors::PackageSourceDebugContext,
     crate::operation::Operation,

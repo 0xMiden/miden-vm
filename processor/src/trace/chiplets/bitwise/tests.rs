@@ -17,7 +17,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use {
     super::Bitwise,
     super::ChipletTraceFragment,
-    super::Felt,
+    miden_core::Felt,
 };
 
 #[test]

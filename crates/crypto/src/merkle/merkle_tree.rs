@@ -13,7 +13,7 @@ use {
     super::MerkleError,
     super::MerklePath,
     super::NodeIndex,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::hash::eidos::PACKED_LANES,

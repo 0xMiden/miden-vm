@@ -29,8 +29,8 @@ use crate::crypto::merkle::NodeIndex;
 use {
     crate::ExecutionOptions,
     crate::StackInputs,
-    crate::Word,
-    crate::ZERO,
+    miden_core::Word,
+    miden_core::ZERO,
     crate::advice::AdviceInputs,
     crate::advice::AdviceProvider,
     crate::advice::AdviceStack,

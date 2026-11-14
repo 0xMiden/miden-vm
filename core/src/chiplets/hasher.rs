@@ -3,14 +3,14 @@
 use core::ops::Range;
 
 use {
-    miden_crypto::Word as Digest,
+    crate::Word as Digest,
     miden_crypto::hash::eidos::Eidos,
     miden_crypto::hash::eidos::EidosDomain,
     miden_crypto::hash::eidos::FeltSequence,
 };
 
 use {
-    super::Felt,
+    crate::Felt,
     super::eidos_compression,
 };
 

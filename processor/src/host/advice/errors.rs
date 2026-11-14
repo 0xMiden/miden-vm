@@ -10,8 +10,8 @@ use {
 };
 
 use {
-    crate::Felt,
-    crate::Word,
+    miden_core::Felt,
+    miden_core::Word,
     crate::crypto::merkle::MerkleError,
 };
 

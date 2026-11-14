@@ -4,8 +4,8 @@ use paste::paste;
 
 use {
     crate::ExecutionError,
-    crate::Felt,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ZERO,
     crate::operation::OperationError,
     crate::processor::Processor,
     crate::processor::StackInterface,

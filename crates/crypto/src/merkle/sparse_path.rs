@@ -14,7 +14,7 @@ use {
     super::MerkleError,
     super::MerklePath,
     super::NodeIndex,
-    super::Word,
+    crate::Word,
     super::smt::SMT_MAX_DEPTH,
 };
 use {

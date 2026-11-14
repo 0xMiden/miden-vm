@@ -569,7 +569,7 @@ mod arbitrary {
         super::CircuitEvaluation,
         super::ContextId,
         super::EvalNode,
-        super::Felt,
+        miden_core::Felt,
         super::QuadFelt,
         super::ReadNode,
         super::WireBus,

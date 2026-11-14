@@ -7,9 +7,9 @@ use miden_core::deferred::Digest;
 use {
     crate::ContextId,
     crate::ExecutionError,
-    crate::Felt,
+    miden_core::Felt,
     crate::MemoryError,
-    crate::Word,
+    miden_core::Word,
     crate::advice::AdviceError,
     crate::crypto::merkle::MerklePath,
     crate::errors::OperationError,

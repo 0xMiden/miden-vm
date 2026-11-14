@@ -9,9 +9,9 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Felt,
+    miden_core::Felt,
     miden_assembly_syntax::Path,
-    miden_assembly_syntax::Word,
+    miden_core::Word,
     miden_assembly_syntax::ast::ModuleIndex,
     miden_assembly_syntax::ast::SymbolResolutionError,
     miden_assembly_syntax::ast::constants::ConstEvalError,

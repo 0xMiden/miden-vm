@@ -2,8 +2,8 @@ use miden_air_definitions::vm::trace::RowIndex;
 use miden_utils_indexing::IndexVec;
 
 use {
-    super::Felt,
-    super::ZERO,
+    miden_core::Felt,
+    miden_core::ZERO,
 };
 use crate::operation::OperationError;
 

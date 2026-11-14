@@ -52,8 +52,8 @@ use {
 use {
     super::BLOCK_LEN,
     super::ChipletTraceFragment,
-    super::Digest,
-    super::Felt,
+    miden_core::Word as Digest,
+    miden_core::Felt,
     super::Hasher,
     super::HasherState,
     super::LINEAR_HASH,

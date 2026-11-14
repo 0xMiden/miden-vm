@@ -12,8 +12,8 @@ use core::error::Error;
 
 use itertools::Itertools;
 use {
-    miden_field::Felt,
-    miden_field::Word,
+    crate::Felt,
+    crate::Word,
 };
 use proptest::prelude::*;
 

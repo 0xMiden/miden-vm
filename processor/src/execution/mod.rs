@@ -16,7 +16,7 @@ use {
     crate::ExecutionError,
     crate::KernelDescriptor,
     crate::Stopper,
-    crate::Word,
+    miden_core::Word,
     crate::continuation_stack::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::continuation_stack::SourceInlineCallContext,

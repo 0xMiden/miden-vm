@@ -4,7 +4,7 @@ use {
 };
 
 use {
-    miden_crypto::Word,
+    crate::Word,
     miden_crypto::hash::eidos::EidosDomain,
 };
 

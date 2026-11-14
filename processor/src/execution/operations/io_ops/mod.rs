@@ -3,7 +3,7 @@ use {
     super::WORD_SIZE_FELT,
 };
 use {
-    crate::Felt,
+    miden_core::Felt,
     crate::errors::IoError,
     crate::processor::AdviceProviderInterface,
     crate::processor::MemoryInterface,
