@@ -165,30 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_pinned_old_eidos_proof() {
-        let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v0_31.root"));
-        let proof = StarkProof::new(
-            include_bytes!("../tests/fixtures/pvm_eidos_v0_31.bin").to_vec(),
-            HashFunction::Eidos,
-        );
-
-        assert!(verify_deferred(&proof, root).is_err());
-        assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
-    }
-
-    #[test]
-    fn rejects_pinned_v0_35_eidos_proof() {
-        let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v0_35.root"));
-        let proof = StarkProof::new(
-            include_bytes!("../tests/fixtures/pvm_eidos_v0_35.bin").to_vec(),
-            HashFunction::Eidos,
-        );
-
-        assert!(matches!(verify_deferred(&proof, root), Err(VerifyError::Verifier(_))));
-    }
-
-    #[test]
-    fn verifies_pinned_current_eidos_proof() {
+    fn current_eidos_proof_binds_root_and_relation() {
         let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v1_0.root"));
         let proof = StarkProof::new(
             include_bytes!("../tests/fixtures/pvm_eidos_v1_0.bin").to_vec(),
@@ -197,6 +174,16 @@ mod tests {
 
         verify_deferred(&proof, root).expect("current Eidos proof must verify");
         assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
+
+        // Keep the proof, root, PCS, and preprocessing commitment fixed; change only
+        // the relation binding absorbed by the transcript.
+        let mut relation_digest = PRECOMPILE_RELATION_DIGEST;
+        relation_digest[0] += Felt::ONE;
+        let config = eidos_config(precompile_pcs_params(), relation_digest);
+        assert!(matches!(
+            verify_stark_with_config(&config, commitments::EIDOS.into(), proof.bytes(), root),
+            Err(VerifyError::Verifier(_))
+        ));
     }
 
     #[test]
