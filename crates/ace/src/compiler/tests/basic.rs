@@ -16,8 +16,8 @@ use {
     miden_stark::air::symbolic::SymbolicAirBuilder,
 };
 use {
-    p3_matrix::Matrix,
-    p3_matrix::dense::RowMajorMatrix,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
 
 use {

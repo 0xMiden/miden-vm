@@ -11,7 +11,7 @@ use {
     miden_stark::air::PermutationAirBuilder,
     miden_stark::air::RowWindow,
 };
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::utils::RowMajorMatrix;
 
 use {
     crate::vm::trace::AUX_TRACE_RAND_CHALLENGES,
