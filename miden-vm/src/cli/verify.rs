@@ -19,7 +19,7 @@ use {
     miden_core::program::KernelDescriptor,
     miden_core::proof::PrecompileStatus,
     miden_core::program::ProgramInfo,
-    miden_vm::default_verification_precompile_limits,
+    miden_precompiles::default_verification_precompile_limits,
     miden_vm::internal::InputFile,
 };
 
@@ -28,6 +28,7 @@ use {
     super::data::ProgramHash,
     super::data::ProofFile,
     super::precompile_limits::PrecompileArgs,
+    miden_verifier::Verifier,
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -122,7 +123,7 @@ impl VerifyCmd {
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
         let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-        let outcome = miden_vm::Verifier::new()
+        let outcome = Verifier::new()
             .with_verification_precompile_limits(verification_limits)
             .verify(&claim, &proof)
             .into_diagnostic()

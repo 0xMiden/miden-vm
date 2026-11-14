@@ -27,12 +27,12 @@ pub use {
 #[cfg(test)]
 use miden_core::crypto::merkle::NodeIndex;
 use {
-    crate::ExecutionOptions,
+    miden_processor::ExecutionOptions,
     miden_core::program::StackInputs,
     miden_core::Word,
     miden_core::ZERO,
     miden_core::advice::AdviceInputs,
-    crate::advice::AdviceProvider,
+    miden_processor::advice::AdviceProvider,
     miden_core::advice::AdviceStack,
     miden_core::crypto::merkle::SmtWitness,
     miden_core::serde::BudgetedReader,
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn test_smt_witness_inputs_share_nodes_across_large_tree_versions() {
         use {
-            crate::advice::AdviceProvider,
+            miden_processor::advice::AdviceProvider,
             miden_core::crypto::merkle::PartialSmt,
             miden_core::crypto::merkle::Smt,
             miden_core::serde::Serializable,

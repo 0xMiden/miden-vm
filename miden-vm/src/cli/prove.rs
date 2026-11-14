@@ -21,7 +21,7 @@ use {
     miden_core::proof::HashFunction,
     miden_core::deferred::PrecompileLimits,
     miden_core::proof::PrecompileStatus,
-    miden_vm::Prover,
+    miden_prover::Prover,
     miden_vm::internal::InputFile,
 };
 
@@ -372,8 +372,8 @@ mod tests {
         miden_core::deferred::TRUE_DIGEST,
     };
     use {
-        miden_vm::ProverError,
-        miden_vm::default_verification_precompile_limits,
+        miden_prover::ProverError,
+        miden_precompiles::default_verification_precompile_limits,
     };
 
     use super::*;
