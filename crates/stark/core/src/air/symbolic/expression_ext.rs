@@ -1,8 +1,7 @@
 // Copyright (c) 2022 The Plonky3 Authors
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Derived from p3-air 0.8.0; see README.md for provenance and local changes.
+// Derived from p3-air 0.8.0; see mod.rs documentation for provenance.
 
-use super::{AuxInput, Base, Expr, ExpressionDomain, Extension, RawExpr};
 use p3_field::{
     Algebra, ExtensionField, Field,
     extension::{
@@ -10,6 +9,8 @@ use p3_field::{
         QuinticTrinomialExtensionField,
     },
 };
+
+use super::{AuxInput, Base, Expr, ExpressionDomain, Extension, RawExpr};
 
 /// Extension-field symbolic value sharing the base expression's representation.
 pub type SymbolicExpressionExt<F, EF> = Expr<F, EF, Extension>;

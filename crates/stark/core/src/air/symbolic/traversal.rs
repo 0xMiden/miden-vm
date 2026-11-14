@@ -39,8 +39,11 @@ impl<'a, F, EF> ExprList<'a, F, EF> {
         self.values.iter().map(|raw| ExprRef { raw })
     }
 }
-/// Complete borrowed view. Operation children belong to the result domain;
-/// dynamic base-to-extension conversions are represented by explicit lifts.
+/// Complete borrowed view of the scalar operation vocabulary.
+///
+/// Arithmetic and reduction children belong to the result domain. [`Self::Lift`] converts a
+/// dynamic base child to the extension domain; base-embedded constants normalize without a lift.
+/// Coefficient types are inferred from the normalized children rather than stored overload tags.
 #[derive(Debug)]
 pub enum ExprView<'a, F, EF> {
     BaseConstant(&'a F),
@@ -50,6 +53,7 @@ pub enum ExprView<'a, F, EF> {
     IsFirstRow,
     IsLastRow,
     IsTransition,
+    /// A dynamic base expression embedded into the extension algebra.
     Lift {
         value: ExprRef<'a, F, EF>,
     },
@@ -68,28 +72,35 @@ pub enum ExprView<'a, F, EF> {
     Neg {
         x: ExprRef<'a, F, EF>,
     },
+    /// Ordered sum, with zero as the empty identity.
     Sum {
         values: ExprList<'a, F, EF>,
     },
+    /// Ordered product, with one as the empty identity.
     Product {
         values: ExprList<'a, F, EF>,
     },
+    /// Sum of paired value/coefficient products; the two lists have equal lengths.
     LinearCombination {
         values: ExprList<'a, F, EF>,
         coefficients: ExprList<'a, F, EF>,
     },
+    /// Raise a value to the nonnegative integer `power`.
     Exp {
         x: ExprRef<'a, F, EF>,
         power: u64,
     },
+    /// Raise a value to `2^power_log`.
     ExpPowerOf2 {
         x: ExprRef<'a, F, EF>,
         power_log: usize,
     },
+    /// Multiply by `2^exponent`; negative exponents divide by powers of two.
     ScalePow2 {
         x: ExprRef<'a, F, EF>,
         exponent: i128,
     },
+    /// The polynomial `x * (x - 1)`.
     BoolCheck {
         x: ExprRef<'a, F, EF>,
     },

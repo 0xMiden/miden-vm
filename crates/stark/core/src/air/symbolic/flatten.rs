@@ -1,6 +1,6 @@
 // Copyright (c) 2022 The Plonky3 Authors
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Derived from p3-air 0.8.0; see README.md for provenance and local changes.
+// Derived from p3-air 0.8.0; see mod.rs documentation for provenance.
 
 //! Version-two wire graph. No cached degree is accepted from the wire: decoding
 //! checks topological references, domains, operation arities, and recomputes all bounds.

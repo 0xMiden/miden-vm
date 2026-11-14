@@ -105,21 +105,21 @@ rule table, and duplicate emitter/preparation path have already been removed.
 | A3 | Replace structural ACE/generated-code comparisons with independent semantic checks and delete redundant helpers | Implemented |
 | A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Implemented |
 | A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Implemented |
-| A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Approved, pending |
+| A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Implemented |
 | A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Approved, pending |
 | A8 | Regenerate affected current artifacts and run focused validation | Approved, pending |
 
 A1 normalizes the representation; A2 updates its source-identity namespace in a separate commit. Establish the semantic checks in A3/A7 before
 removing their historical/structural predecessors in A4/A5. A6 can run independently; A8 is
-last. The IDs allow approval of the complete plan or specific items.
+last. The IDs identify the separate implementation commits.
 
 ### A1. Normalize coefficients instead of recording the original overload
 
-The current `CoefficientDomain` tag records whether a coefficient came from a field value,
-a base expression, or the same expression type. This is source provenance, not additional
-mathematical information. The current optimizer already ignores some of these distinctions.
+Before A1, the `CoefficientDomain` tag recorded whether a coefficient came from a field value,
+a base expression, or the same expression type. It carried source provenance without additional
+mathematical information. The optimizer already ignored some of these distinctions.
 
-**Before — current implementation, abbreviated:**
+**Before — overload metadata, abbreviated:**
 
 ```rust
 Mul { x, y, coefficient_domain: CoefficientDomain }
@@ -129,7 +129,7 @@ pub struct SymbolicOperand<F, EF, D> { /* raw value, overload tag, marker */ }
 pub trait IntoSymbolicOperand<F, EF, D> { /* ... */ }
 ```
 
-**After — proposed shape:**
+**After — current shape:**
 
 ```rust
 Mul { x, y }
@@ -139,11 +139,10 @@ LinearCombination { values, coefficients }
 impl<..., T: Into<Self>> Mul<T> for Expr<...> { /* ... */ }
 ```
 
-This last `impl` is schematic Rust, not a literal proposed signature. Keep `Base`/`Extension`
-handles and their existing conversion boundaries. Remove the wrappers whose only remaining
-purpose is retaining the author's overload choice.
+This last `impl` abbreviates the field and domain bounds. `Base`/`Extension` handles keep their
+conversion boundaries. The wrappers that retained the author's overload choice are removed.
 
-Normalize constants through common constructors, including decoding:
+Constants use common constructors, including checked decoding:
 
 ```rust
 // Base result: same normalized constant child.
@@ -163,8 +162,8 @@ valued constant remains distinct. Dynamic base expressions still require an expl
 e * b  ->  Mul(e, Lift(b))
 ```
 
-For linear combinations, convert coefficients consistently into the result's symbolic domain.
-Otherwise deleting the tag still leaves different raw children, preventing the desired CSE.
+Linear-combination coefficients are converted into the result's symbolic domain. Deleting only
+the tag would leave different raw children and prevent the desired CSE.
 
 These two base combinations should normalize together:
 
@@ -173,7 +172,7 @@ B::dot_product(&xs, &[B::from(c0), B::from(c1)])
 <B as Algebra<Felt>>::mixed_dot_product(&xs, &[c0, c1])
 ```
 
-Their canonical native call can be:
+Their inferred native call is:
 
 ```rust
 <AB::Expr as Algebra<Felt>>::mixed_dot_product::<2>(&values, &[c0, c1])
@@ -191,7 +190,7 @@ Coefficient selection follows actual values and domains:
 Keep batched mixed combinations for long inputs. A public input is not a known constant just
 because its polynomial degree is zero. A dynamic base expression can vary across packed lanes.
 The builder promises `B: Algebra<Felt>` and `E: Algebra<B>`, not `E: Algebra<Felt>`; choose calls
-that those bounds permit. This proposal does not add support for arbitrary extension literals
+that those bounds permit. The emitter still rejects arbitrary extension literals
 that the current builder bounds cannot construct.
 
 **Supporting changes, all part of A1:**
@@ -210,13 +209,13 @@ that the current builder bounds cannot construct.
   handle's class would lose mixed-dot recovery after ordinary `Into<Self>` conversion.
 - Replace tests requiring different overload tags with normalization/CSE and dispatch tests.
 
-**Approval criteria:** the examples above normalize together and share emitted work; dynamic
+**Required behavior:** the examples above normalize together and share emitted work; dynamic
 base coefficients retain mixed dispatch; typed extension-to-base misuse stays rejected; all
 outputs preserve polynomial values. :codex-annotation{index="1"}
 
 The same rule applies to binary operations such as `x * c` and to linear combinations such
-as `x0*c0 + x1*c1`. We will remove the current policy that omits an overload tag from binary
-fingerprints but includes it for linear combinations. :codex-annotation{index="4"}
+as `x0*c0 + x1*c1`. Both hash paths now omit the removed overload metadata, so binary
+fingerprints and linear combinations follow the same policy. :codex-annotation{index="4"}
 
 ### A2. Separate source/setup identity from polynomial equivalence
 
@@ -231,7 +230,7 @@ The current code has three different identities:
 Retain the current kernel/setup association. Do not replace it with a shape- or degree-only
 hash, which could associate different constraints with the same setup description.
 
-The source fingerprint remains structural. It does not need to be equal for every equivalent
+The source fingerprint is structural. It does not need to be equal for every equivalent
 polynomial. For example, the following contract is sufficient:
 
 ```text
@@ -243,7 +242,7 @@ fingerprint(x.square()) == fingerprint(x * x) is NOT required
 The second line states an absent requirement, not a requirement that the hashes differ.
 We will not expand arbitrary polynomials or add a general equivalence/canonical-hashing engine.
 
-**Proposed identity policy:**
+**Current identity policy:**
 
 - Remove incidental overload metadata from all source hash paths as part of A1.
 - Keep actual constants, input namespaces, source base/extension domains, operation parameters,
@@ -260,7 +259,7 @@ We will not expand arbitrary polynomials or add a general equivalence/canonical-
 source/setup documentation, and any current artifacts affected by regeneration. The existing
 setup-association checks in `preprocessed.rs` remain in place unless separately redesigned.
 
-**Approval criteria:** correct current setup validates; a mismatched setup/kernel is rejected;
+**Required behavior:** correct current setup validates; a mismatched setup/kernel is rejected;
 current generated descriptor identities reproduce; no test demands equality of fingerprints
 for arbitrary equivalent representations. :codex-annotation{index="3"}
 
@@ -324,13 +323,13 @@ preparation correctness, deterministic emission for the same input, and current 
 checks. Do not remove `capture_constraints` or source evaluation helpers that current semantic
 tests still use.
 
-**Approval criteria:** different equivalent shapes are accepted; incorrect arithmetic, input
+**Required behavior:** different equivalent shapes are accepted; incorrect arithmetic, input
 binding, assertion mapping, or quotient handling still fails independent value checks.
 :codex-annotation{index="6"}
 
 ### A4. Delete historical AIR reference artifacts and comparisons
 
-Delete:
+Removed:
 
 ```text
 crates/air/generated/tests/native_air_reference.rs
@@ -340,12 +339,11 @@ crates/air/generated/tests/fixtures/native_air_reference/reference.txt
 crates/air/generated/tests/fixtures/native_air_reference/coverage.txt
 ```
 
-Remove their archived revision/lock hashes, generation environment variables, historical
-protocol-recording code, and unused formatting/observation helpers. There is no need to keep
-a test that compares only a prefix of an otherwise obsolete archive.
+The archived revision/lock hashes, generation environment variables, historical protocol recorder,
+and unused observation/formatting helpers are removed with them.
 
-Port useful scenarios from the small coverage fixture into current tests with direct expected
-values: every input namespace, selectors, mixed base/extension emissions, duplicate zero-gated
+The compiled `current_inputs` fixture retains the useful scenarios with direct hand-calculated
+expectations: every input namespace, selectors, mixed base/extension emissions, duplicate zero-gated
 assertions, and auxiliary exports. For example:
 
 ```text
@@ -356,13 +354,13 @@ generated emissions: [Base(0), Extension(r0), Base(0), Extension(r1)]
 Here `r0` and `r1` are calculated by the current independent numerical reference. No archived
 text file or previous checkout supplies the expectation.
 
-**Approval criteria:** no tests or generation tasks depend on an archived source checkout;
+**Required behavior:** no tests or generation tasks depend on an archived source checkout;
 the useful current scenarios remain tested after the historical files are removed.
 :codex-annotation{index="7"}
 
 ### A5. Delete old proof-version fixtures and preserve current rejection checks
 
-Delete both old binary/root pairs:
+Removed both old binary/root pairs:
 
 ```text
 crates/stark/precompiles/tests/fixtures/pvm_eidos_v0_31.bin
@@ -371,28 +369,28 @@ crates/stark/precompiles/tests/fixtures/pvm_eidos_v0_35.bin
 crates/stark/precompiles/tests/fixtures/pvm_eidos_v0_35.root
 ```
 
-Remove their rejection tests and now-unused fixture references from
-`crates/stark/precompiles/src/verifier.rs`. These files currently test rejection, not supported
-backwards compatibility, so preserve the useful negative behavior with a current proof.
+Their rejection tests and fixture references are removed from
+`crates/stark/precompiles/src/verifier.rs`. A current proof now checks the same useful rejection
+behavior after first verifying successfully with the correct root and relation binding.
 
-**Replacement sketch:**
+**Current verification cases, abbreviated:**
 
 ```rust
 assert!(verify_deferred(&current_proof, correct_root).is_ok());
 assert!(verify_deferred(&current_proof, incorrect_root).is_err());
-// Also test an altered current relation binding through a test-only configuration.
+// A test-only altered relation digest also rejects this same current proof.
 ```
 
 Reuse current proof generation/fixtures; do not add a production compatibility registry.
 Keep `fixture_root` and shared imports if current tests still need them.
 
-**Approval criteria:** archived versions are gone; current valid proofs verify; incorrect
+**Required behavior:** archived versions are gone; current valid proofs verify; incorrect
 current statements/bindings are rejected. Current `v1_0` fixtures remain active correctness
 fixtures and can be regenerated.
 
 ### A6. Consolidate documentation and preserve minimal provenance
 
-The recommended documentation layout is:
+The consolidated documentation layout is:
 
 ```text
 symbolic/mod.rs + Expr/ExprView Rustdoc       representation/API contracts and short provenance
@@ -422,7 +420,7 @@ references in that guide, `CHANGELOG.md`, and
 `crates/air/source/docs/expression-source-review.md`; remove dangling links and obsolete
 claims that historical comparisons are required.
 
-**Approval criteria:** one current architecture guide remains; API contracts are near their
+**Required behavior:** one current architecture guide remains; API contracts are near their
 owners; source provenance remains available; no link points to deleted documentation.
 :codex-annotation{index="8"}
 
@@ -501,7 +499,7 @@ A1–A7, rather than expecting the old test count to remain fixed.
 - [x] A3 — add independent current semantic checks; remove exact structural oracle and unused test helpers.
 - [x] A4 — delete archived AIR references; retain useful cases as current tests.
 - [x] A5 — delete old PVM proof-version artifacts; retain current negative verification coverage.
-- [ ] A6 — remove duplicated/historical documentation and preserve minimal provenance.
+- [x] A6 — remove duplicated/historical documentation and preserve minimal provenance.
 - [ ] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
 - [ ] A8 — regenerate affected current outputs and validate the completed implementation.
 

@@ -1,8 +1,29 @@
 // Copyright (c) 2022 The Plonky3 Authors
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Derived from p3-air 0.8.0; see README.md for provenance and local changes.
+// Derived from p3-air 0.8.0; see this module's documentation for provenance.
 
 //! Owned symbolic algebra with shared operations and typed source domains.
+//!
+//! [`Expr`] uses sealed [`Base`] and [`Extension`] markers over one representation. Leaves
+//! are inline; immutable operations and their checked degree caches are shared through `Arc`.
+//! [`ExprRef`] and [`ExprView`] expose borrowed inspection while construction validates domains,
+//! operation arities, and degree bounds. Base-to-extension conversions retain explicit lifts for
+//! dynamic values and normalize base-embedded constants into the result domain.
+//!
+//! Sums, products, linear combinations, powers, signed power-of-two scaling, and boolean checks
+//! preserve useful ring operations. Each operation produces one scalar expression. Quadratic
+//! extension squares, XOR, XOR3, and ANDN use the field traits' arithmetic expansions.
+//! Checked [`super::capture_with`] constructs expression-valued inputs; [`super::SymbolicSink`]
+//! retains every assertion in global emission order. Serialization preserves sharing and validates
+//! topology and domains while recomputing degree caches. Actual-height capacity queries use
+//! [`super::DegreeProfile`] independently of those diagnostic caches.
+//!
+//! # Provenance
+//!
+//! Derived from `p3-air` 0.8.0, upstream revision
+//! `a21e3ed42905040ad49c519e402f018381c12d0c` (`air/src/symbolic`). Original code is
+//! Copyright (c) 2022 The Plonky3 Authors, licensed under MIT OR Apache-2.0.
+//! The original license texts remain alongside this module as `LICENSE-MIT` and `LICENSE-APACHE`.
 mod expression;
 pub(crate) mod expression_ext;
 mod flatten;
@@ -55,6 +76,11 @@ impl Domain for Extension {
 
 /// A symbolic value. Leaves are inline so ring identities can be associated constants;
 /// operations, their operands, and checked degree caches are shared by `Arc`.
+///
+/// The domain marker records the authored algebra even when both domains evaluate in the same
+/// numerical field. Dynamic base operands are lifted explicitly into extension expressions;
+/// constant conversions normalize into the result domain without retaining the scalar overload.
+/// Structural identity does not decide polynomial equivalence.
 ///
 /// Auxiliary expressions cannot be used as base expressions:
 ///

@@ -5,6 +5,11 @@
 //! for Rust emission; its derived arithmetic [`ir::Graph`] serves ACE and algebraic analyses.
 //! Target-specific backends live with their targets; the remaining backends live here.
 //!
+//! Native Rust emission borrows expression views through a temporary index for structural
+//! common-subexpression elimination, use counts, and challenge preparation. Coefficient dispatch
+//! follows normalized operand values and domains. Equivalent arithmetic may have different graph
+//! shapes; correctness checks compare polynomial values, assertion classes, and global order.
+//!
 //! # Invariants
 //!
 //! 1. **Capture that feeds artifacts or oracle anchors consumes only hand-written definitions** — a
