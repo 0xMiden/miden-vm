@@ -48,7 +48,7 @@ use miden_stark::memory;
 use proptest::prelude::*;
 
 use {
-    crate::prover::HashFunction,
+    miden_core::proof::HashFunction,
     crate::prover::PrecompileProvingError,
     crate::prover::SessionInputError,
     crate::prover::WitnessLocation,

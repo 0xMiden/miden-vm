@@ -198,11 +198,11 @@ pub(crate) fn session_from_witnesses(
 
 pub(crate) fn prove(
     witnesses: Vec<PrecompileWitness>,
-    hash_fn: crate::prover::HashFunction,
+    hash_fn: miden_core::proof::HashFunction,
     verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
     max_prover_memory_bytes: u64,
-) -> Result<crate::prover::PrecompileProof, PrecompileProvingError> {
+) -> Result<miden_core::proof::PrecompileProof, PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
         import_witnesses_with_roots(
@@ -233,7 +233,7 @@ pub(crate) fn prove(
         let _span = tracing::info_span!("build_trace").entered();
         imported.session.finish(imported.root)
     };
-    Ok(crate::prover::PrecompileProof {
+    Ok(miden_core::proof::PrecompileProof {
         proof: traces.prove_stark(hash_fn)?,
         roots: imported.roots,
     })
@@ -256,8 +256,8 @@ pub mod testing {
     };
     use {
         crate::prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
-        crate::prover::HashFunction,
-        crate::prover::PrecompileProof,
+        miden_core::proof::HashFunction,
+        miden_core::proof::PrecompileProof,
         crate::prover::PrecompileProvingError,
         miden_core::deferred::PrecompileWitness,
         crate::prover::session::SessionTraces,

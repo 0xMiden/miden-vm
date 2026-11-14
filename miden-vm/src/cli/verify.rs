@@ -17,7 +17,7 @@ use miden_mast_package::Package;
 use {
     miden_core::program::ExecutionClaim,
     miden_core::program::KernelDescriptor,
-    miden_vm::PrecompileStatus,
+    miden_core::proof::PrecompileStatus,
     miden_core::program::ProgramInfo,
     miden_vm::default_verification_precompile_limits,
     miden_vm::internal::InputFile,
