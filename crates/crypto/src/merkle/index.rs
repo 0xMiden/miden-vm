@@ -158,7 +158,15 @@ impl NodeIndex {
     }
 
     /// Returns `true` if the n-th node on the path points to a right child.
+    ///
+    /// Returns `false` for any `n >= 64` since `position` is a `u64` and has no bit at
+    /// that index. Without this guard, a shift of 64 or more on a `u64` would panic in
+    /// debug builds and silently read the wrong bit in release builds (Rust masks the
+    /// shift amount to `n & 63`).
     pub const fn is_nth_bit_odd(&self, n: u8) -> bool {
+        if n >= 64 {
+            return false;
+        }
         (self.position >> n) & 1 == 1
     }
 
@@ -378,6 +386,39 @@ mod tests {
             let index = NodeIndex::new(depth, position).unwrap();
             assert!(index.to_scalar_index().is_ok());
         }
+
+        #[test]
+        fn arbitrary_n_wont_panic_on_is_nth_bit_odd(
+            index in node_index(),
+            n in prop::num::u8::ANY,
+        ) {
+            let result = index.is_nth_bit_odd(n);
+            if n >= 64 {
+                assert!(!result, "is_nth_bit_odd should return false for n >= 64, got true for n={n}");
+            }
+            if n < 64 {
+                let expected = (index.position() >> n) & 1 == 1;
+                assert_eq!(result, expected, "is_nth_bit_odd({n}) returned {result}, expected {expected}");
+            }
+        }
+    }
+
+    #[test]
+    fn is_nth_bit_odd_boundary() {
+        // depth=64 allows any u64 position; use u64::MAX to exercise all bits set.
+        let all_ones = NodeIndex::new(64, u64::MAX).unwrap();
+        // bit 63 is the highest valid bit for a u64 position.
+        assert!(all_ones.is_nth_bit_odd(63), "bit 63 of u64::MAX must be true");
+
+        let all_zeros = NodeIndex::new(64, 0).unwrap();
+        assert!(!all_zeros.is_nth_bit_odd(63), "bit 63 of 0 must be false");
+
+        // n = 64 is the first out-of-range value; must always return false.
+        assert!(!all_ones.is_nth_bit_odd(64), "is_nth_bit_odd(64) must return false");
+        assert!(!all_zeros.is_nth_bit_odd(64), "is_nth_bit_odd(64) must return false");
+
+        // u8::MAX = 255 must also return false.
+        assert!(!all_ones.is_nth_bit_odd(255), "is_nth_bit_odd(255) must return false");
     }
 
     #[test]
