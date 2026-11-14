@@ -16,7 +16,7 @@ use {
     crate::Map,
     crate::MetadataSet,
     miden_assembly_syntax::diagnostics::RelatedLabel,
-    crate::SemVer,
+    crate::semver::Version as SemVer,
     miden_assembly_syntax::debuginfo::SourceId,
     miden_assembly_syntax::debuginfo::Span,
     crate::Uri,
@@ -87,7 +87,7 @@ mod semver_serde {
 
     use {
         super::MaybeInherit,
-        super::SemVer,
+        crate::semver::Version as SemVer,
         miden_assembly_syntax::debuginfo::Span,
     };
 
@@ -131,7 +131,7 @@ mod semver_serde {
                 value
                     .parse()
                     .map(|version| Some(Span::unknown(MaybeInherit::Value(version))))
-                    .map_err(|error: miden_assembly_syntax::VersionError| {
+                    .map_err(|error: crate::semver::Error| {
                         E::custom(error.to_string())
                     })
             }

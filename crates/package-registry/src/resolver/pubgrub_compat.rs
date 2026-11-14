@@ -20,8 +20,8 @@ use {
     crate::semver::Comparator,
     crate::semver::Op,
     crate::semver::Prerelease,
-    crate::semver::Version,
-    crate::semver::VersionReq,
+    crate::SemVer as Version,
+    crate::VersionReq,
 };
 
 /// This needs to be bug-for-bug compatible with https://github.com/dtolnay/semver/blob/master/src/eval.rs
