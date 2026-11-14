@@ -19,10 +19,10 @@ use {
     miden_assembly_syntax::ast::SymbolResolution,
     miden_assembly_syntax::ast::SymbolResolutionError,
     miden_assembly_syntax::ast::SymbolTable,
-    miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 use {

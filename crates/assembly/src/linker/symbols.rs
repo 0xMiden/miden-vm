@@ -14,9 +14,9 @@ use {
     miden_assembly_syntax::ast::Ident,
     miden_assembly_syntax::ast::ImportKind,
     miden_assembly_syntax::ast::Visibility,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::module::ItemInfo,
 };
 

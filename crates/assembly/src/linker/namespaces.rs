@@ -16,10 +16,10 @@ use {
     miden_assembly_syntax::ast::ModuleIndex,
     miden_assembly_syntax::ast::SymbolResolutionError,
     miden_assembly_syntax::ast::Visibility,
-    miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::diagnostics::RelatedLabel,
 };
 
@@ -1025,7 +1025,7 @@ fn item_path(linker: &Linker, item: GlobalItemIndex) -> Arc<Path> {
 fn source_file(
     source_manager: &dyn SourceManager,
     span: SourceSpan,
-) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
+) -> Option<Arc<crate::debuginfo::SourceFile>> {
     source_manager.get(span.source_id()).ok()
 }
 
@@ -1039,10 +1039,10 @@ mod tests {
     use {
         miden_assembly_syntax::Parse,
         miden_assembly_syntax::Path,
-        miden_assembly_syntax::debuginfo::DefaultSourceManager,
-        miden_assembly_syntax::debuginfo::SourceLanguage,
-        miden_assembly_syntax::debuginfo::SourceManager,
-        miden_assembly_syntax::debuginfo::Span,
+        crate::debuginfo::DefaultSourceManager,
+        crate::debuginfo::SourceLanguage,
+        crate::debuginfo::SourceManager,
+        crate::debuginfo::Span,
     };
 
     use super::*;

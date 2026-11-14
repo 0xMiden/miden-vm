@@ -6,9 +6,9 @@ use alloc::string::String;
 use core::fmt;
 
 use {
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 pub use {

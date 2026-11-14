@@ -1,6 +1,6 @@
 use {
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::diagnostics::RelatedLabel,
     miden_assembly_syntax::diagnostics::Report,
 };

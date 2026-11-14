@@ -643,8 +643,8 @@ fn plain_exec_preserves_canonical_definitions() -> TestResult {
 #[test]
 fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
     use {
-        miden_assembly_syntax::debuginfo::SourceLanguage,
-        miden_assembly_syntax::debuginfo::Uri,
+        crate::debuginfo::SourceLanguage,
+        crate::debuginfo::Uri,
     };
     use {
         crate::serde::Deserializable,

@@ -5,10 +5,10 @@ use {
     miden_assembly_syntax::ast::InvokeKind,
     miden_assembly_syntax::ast::Path,
     miden_assembly_syntax::ast::SymbolResolution,
-    miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::module::ItemInfo,
 };
 use miden_core::Word;
@@ -117,7 +117,7 @@ impl<'a> SymbolResolver<'a> {
     fn source_file(
         &self,
         span: SourceSpan,
-    ) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
+    ) -> Option<Arc<crate::debuginfo::SourceFile>> {
         self.source_manager().get(span.source_id()).ok()
     }
 

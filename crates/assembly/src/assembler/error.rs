@@ -2,8 +2,8 @@ use alloc::sync::Arc;
 
 use {
     miden_assembly_syntax::Path,
-    miden_assembly_syntax::debuginfo::SourceFile,
-    miden_assembly_syntax::debuginfo::SourceSpan,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceSpan,
     miden_assembly_syntax::diagnostics::Diagnostic,
     miden_assembly_syntax::diagnostics::miette,
 };

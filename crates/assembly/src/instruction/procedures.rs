@@ -4,7 +4,7 @@ use {
     miden_core::Word,
     miden_assembly_syntax::ast::InvocationTarget,
     miden_assembly_syntax::ast::InvokeKind,
-    miden_assembly_syntax::debuginfo::SourceSpan,
+    crate::debuginfo::SourceSpan,
     miden_assembly_syntax::diagnostics::Report,
 };
 use {

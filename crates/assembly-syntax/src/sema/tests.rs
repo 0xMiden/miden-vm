@@ -6,8 +6,8 @@ use {
 };
 
 use {
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 use {

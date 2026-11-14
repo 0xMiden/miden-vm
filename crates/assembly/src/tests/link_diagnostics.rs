@@ -745,10 +745,10 @@ fn imported_error_message_alias_is_resolved_without_panicking() {
 
     use {
         crate::Assembler,
-        crate::DefaultSourceManager,
+        crate::debuginfo::DefaultSourceManager,
     };
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
 
     // Library module `b` exports a string constant and an alias to it.
     let module_b_src = r#"

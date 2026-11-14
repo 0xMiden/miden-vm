@@ -8,9 +8,9 @@ use {
     miden_assembly_syntax::ast::PathBuf,
     miden_assembly_syntax::ast::Visibility,
     miden_assembly_syntax::ast::types::FunctionType,
-    miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::diagnostics::Report,
 };
 use miden_core::Word;
@@ -370,9 +370,9 @@ mod tests {
         miden_assembly_syntax::ast::Attribute,
         miden_assembly_syntax::ast::Ident,
         miden_assembly_syntax::ast::MetaExpr,
-        miden_assembly_syntax::debuginfo::DefaultSourceManager,
-        miden_assembly_syntax::debuginfo::SourceLanguage,
-        miden_assembly_syntax::debuginfo::Uri,
+        crate::debuginfo::DefaultSourceManager,
+        crate::debuginfo::SourceLanguage,
+        crate::debuginfo::Uri,
     };
 
     use super::*;

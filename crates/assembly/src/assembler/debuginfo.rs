@@ -3,7 +3,7 @@ use {
     std::path::PathBuf,
 };
 
-use miden_assembly_syntax::debuginfo::Uri;
+use crate::debuginfo::Uri;
 use miden_mast_package::debug_info::PackageDebugInfo;
 
 pub(super) fn trim_paths(debug_info: &mut PackageDebugInfo, trimmer: &SourcePathTrimmer) {

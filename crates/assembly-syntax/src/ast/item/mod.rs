@@ -2,7 +2,7 @@ mod index;
 mod items;
 mod resolver;
 
-use miden_debug_types::Spanned;
+use crate::debuginfo::Spanned;
 
 pub use {
     self::index::GlobalItemIndex,
@@ -29,7 +29,7 @@ pub enum Declaration<'a> {
 }
 
 impl Spanned for Declaration<'_> {
-    fn span(&self) -> miden_debug_types::SourceSpan {
+    fn span(&self) -> crate::debuginfo::SourceSpan {
         match self {
             Self::Item(item) => item.span(),
             Self::Import(import) => import.local_name().span(),

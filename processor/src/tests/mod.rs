@@ -7,7 +7,7 @@ use {
 
 use {
     miden_assembly::Assembler,
-    miden_assembly::DefaultSourceManager,
+    miden_debug_types::DefaultSourceManager,
     miden_assembly::Path,
     miden_assembly::PathBuf,
     miden_assembly::ast::Module,

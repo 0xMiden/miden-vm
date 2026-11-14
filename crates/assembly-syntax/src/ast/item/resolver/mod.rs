@@ -4,10 +4,10 @@ mod symbol_table;
 use alloc::sync::Arc;
 
 use {
-    miden_debug_types::SourceManager,
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 use self::symbol_table::LocalSymbolTable;

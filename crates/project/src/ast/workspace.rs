@@ -5,8 +5,8 @@ use {
     super::*,
 };
 use {
-    crate::SourceId,
-    crate::Span,
+    miden_assembly_syntax::debuginfo::SourceId,
+    miden_assembly_syntax::debuginfo::Span,
     crate::Uri,
 };
 

@@ -18,10 +18,10 @@ use {
 
 use {
     crate::ModuleIndex,
-    crate::SourceFile,
-    crate::SourceSpan,
-    crate::Span,
-    crate::Spanned,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
     crate::ast,
     crate::ast::InvocationTarget,
     crate::ast::Invoke,

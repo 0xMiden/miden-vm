@@ -14,7 +14,7 @@ use {
 use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use {
     miden_assembly::Assembler,
-    miden_assembly::DefaultSourceManager,
+    miden_debug_types::DefaultSourceManager,
     miden_assembly::Linkage,
     miden_assembly::Path,
     miden_assembly::ast::DebugInlineCallInfo,

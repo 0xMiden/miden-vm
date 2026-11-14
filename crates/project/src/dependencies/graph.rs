@@ -18,7 +18,7 @@ use {
     miden_assembly_syntax::Report,
     miden_assembly_syntax::debuginfo::DefaultSourceManager,
     miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::debuginfo::Uri,
+    crate::Uri,
 };
 use {
     miden_core::serde::Deserializable,

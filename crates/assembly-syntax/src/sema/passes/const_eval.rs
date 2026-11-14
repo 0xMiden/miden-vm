@@ -9,8 +9,8 @@ use {
     miden_core::utils::hash_string_to_word,
 };
 use {
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 use {

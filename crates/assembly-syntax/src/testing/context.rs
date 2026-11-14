@@ -5,9 +5,9 @@ use {
 };
 
 use {
-    miden_debug_types::DefaultSourceManager,
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceManager,
+    crate::debuginfo::DefaultSourceManager,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceManager,
 };
 use {
     miden_utils_diagnostics::Report,

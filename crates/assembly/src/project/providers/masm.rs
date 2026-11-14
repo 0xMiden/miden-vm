@@ -1,4 +1,4 @@
-use miden_assembly_syntax::debuginfo::Spanned;
+use crate::debuginfo::Spanned;
 
 use super::*;
 

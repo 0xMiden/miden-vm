@@ -45,8 +45,8 @@ use {
     crate::Label,
     crate::RelatedError,
     crate::Report,
-    crate::SourceFile,
-    crate::SourceSpan,
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceSpan,
     crate::miette,
 };
 
