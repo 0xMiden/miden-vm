@@ -353,7 +353,7 @@ mod wire_tests {
         crate::DefaultHost,
         crate::ExecutionError,
         crate::FastProcessor,
-        crate::Felt,
+        miden_core::Felt,
         crate::StackInputs,
         crate::mast::MastNodeId,
     };

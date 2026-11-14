@@ -9,6 +9,7 @@ use {
     crate::Word,
     crate::ZERO,
     crate::hash::poseidon2::Poseidon2,
+    crate::Felt,
 };
 
 #[test]

@@ -10,7 +10,7 @@ use {
     super::InnerNodeInfo,
     super::MerkleError,
     super::NodeIndex,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::utils::ByteReader,

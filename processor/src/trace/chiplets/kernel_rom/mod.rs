@@ -11,9 +11,9 @@ use {
 
 use {
     super::ChipletTraceFragment,
-    super::Felt,
-    super::Word as Digest,
-    super::ZERO,
+    miden_core::Felt,
+    miden_core::Word as Digest,
+    miden_core::ZERO,
 };
 use crate::errors::OperationError;
 

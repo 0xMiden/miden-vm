@@ -1,7 +1,7 @@
 use alloc::collections::BTreeSet;
 
 use {
-    super::EMPTY_WORD,
+    crate::EMPTY_WORD,
     super::EmptySubtreeRoots,
     super::InnerNode,
     super::InnerNodeInfo,
@@ -14,7 +14,7 @@ use {
     super::SMT_MIN_DEPTH,
     super::SparseMerkleTree,
     super::SparseMerkleTreeReader,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::merkle::SparseMerklePath,

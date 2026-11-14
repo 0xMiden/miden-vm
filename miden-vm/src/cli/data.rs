@@ -30,7 +30,7 @@ use {
     miden_vm::ExecutionProof,
     miden_vm::Program,
     miden_vm::StackOutputs,
-    miden_vm::Word,
+    miden_core::Word,
     miden_vm::serde::SliceReader,
 };
 use {

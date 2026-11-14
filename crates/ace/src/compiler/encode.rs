@@ -7,7 +7,7 @@ use {
 };
 
 use {
-    miden_crypto::Felt,
+    miden_core::Felt,
     miden_crypto::field::ExtensionField,
 };
 

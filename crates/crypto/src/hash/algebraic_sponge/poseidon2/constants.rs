@@ -1,6 +1,6 @@
 // HASH FUNCTION DEFINING CONSTANTS
 // ================================================================================================
-use miden_field::Felt;
+use crate::Felt;
 use {
     p3_goldilocks::GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS,
     p3_goldilocks::GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12,

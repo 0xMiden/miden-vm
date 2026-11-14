@@ -255,7 +255,7 @@ use {
     super::SmtProof,
     super::SparseMerkleTree,
     super::SparseMerkleTreeReader,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::EMPTY_WORD,

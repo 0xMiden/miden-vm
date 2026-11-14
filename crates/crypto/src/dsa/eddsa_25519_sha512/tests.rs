@@ -6,8 +6,8 @@ mod signing_key {
     };
 
     use {
-        miden_field::Felt,
-        miden_field::Word,
+        crate::Felt,
+        crate::Word,
     };
     use {
         miden_serde_utils::Deserializable,
@@ -293,7 +293,7 @@ mod signature {
 
     /// Generates a deterministic 64-byte Ed25519 signature from the given RNG seed.
     fn make_sig_bytes(rng_seed: [u8; 32]) -> [u8; 64] {
-        use miden_field::Word;
+        use crate::Word;
 
         use crate::dsa::eddsa_25519_sha512::SigningKey;
         let mut rng = seeded_rng(rng_seed);

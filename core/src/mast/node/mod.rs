@@ -45,8 +45,8 @@ pub use {
 
 mod split_node;
 use {
-    miden_crypto::Felt,
-    miden_crypto::Word,
+    crate::Felt,
+    crate::Word,
 };
 use miden_formatting::prettier::PrettyPrint;
 pub use {

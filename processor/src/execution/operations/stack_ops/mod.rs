@@ -1,7 +1,7 @@
 use {
     crate::ExecutionError,
-    crate::Felt,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ZERO,
     crate::operation::BinaryValueErrorContext,
     crate::operation::OperationError,
     crate::processor::Processor,

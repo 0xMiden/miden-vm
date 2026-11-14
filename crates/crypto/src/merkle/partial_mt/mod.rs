@@ -7,14 +7,14 @@ use {
 use core::fmt;
 
 use {
-    super::EMPTY_WORD,
+    crate::EMPTY_WORD,
     super::Eidos,
     super::InnerNodeInfo,
     super::MerkleError,
     super::MerklePath,
     super::MerkleProof,
     super::NodeIndex,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::utils::ByteReader,

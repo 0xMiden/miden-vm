@@ -48,12 +48,12 @@ pub use sparse_path::SparseMerklePath;
 
 #[cfg(test)]
 const fn int_to_node(value: u64) -> Word {
-    use super::ZERO;
+    use crate::ZERO;
     Word::new([Felt::new_unchecked(value), ZERO, ZERO, ZERO])
 }
 
 #[cfg(test)]
 const fn int_to_leaf(value: u64) -> Word {
-    use super::ZERO;
+    use crate::ZERO;
     Word::new([Felt::new_unchecked(value), ZERO, ZERO, ZERO])
 }

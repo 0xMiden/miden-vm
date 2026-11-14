@@ -14,15 +14,15 @@ use miden_core::chiplets::eidos_compression;
 
 use {
     super::ChipletTraceFragment,
-    super::Felt,
+    miden_core::Felt,
     super::HasherState,
     super::MP_VERIFY,
     super::MR_UPDATE_NEW,
     super::MR_UPDATE_OLD,
-    super::ONE,
+    miden_core::ONE,
     super::STATE_WIDTH,
     super::Selectors,
-    super::ZERO,
+    miden_core::ZERO,
 };
 
 // HASHER OPERATION

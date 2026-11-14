@@ -9,7 +9,7 @@ use {
     alloc::string::ToString,
 };
 
-use miden_field::Word;
+use crate::Word;
 use {
     miden_serde_utils::ByteReader,
     miden_serde_utils::ByteWriter,

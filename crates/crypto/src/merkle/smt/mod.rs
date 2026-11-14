@@ -949,7 +949,7 @@ mod arbitrary {
     use {
         super::InnerNode,
         super::NodeMutation,
-        super::Word,
+        crate::Word,
     };
 
     impl Arbitrary for InnerNode {

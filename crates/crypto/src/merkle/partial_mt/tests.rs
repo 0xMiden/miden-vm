@@ -15,7 +15,7 @@ use {
     super::InnerNodeInfo,
     super::MerkleProof,
     super::Serializable,
-    super::Word,
+    crate::Word,
 };
 
 // TEST DATA

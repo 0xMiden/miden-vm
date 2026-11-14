@@ -8,7 +8,7 @@ use {
     crate::mast::MastForestContributor,
     crate::mast::MastNode,
     crate::mast::MastNodeId,
-    crate::mast::Word,
+    crate::Word,
     crate::mast::node::MastNodeBuilder,
     crate::serde::ByteReader,
     crate::serde::ByteWriter,

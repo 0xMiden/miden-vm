@@ -1,7 +1,7 @@
 use {
     crate::ExecutionError,
-    crate::Felt,
-    crate::ONE,
+    miden_core::Felt,
+    miden_core::ONE,
     crate::errors::OperationError,
     crate::processor::Processor,
     crate::processor::StackInterface,

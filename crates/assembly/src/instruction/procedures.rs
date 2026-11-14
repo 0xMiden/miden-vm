@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use {
-    miden_assembly_syntax::Word,
+    miden_core::Word,
     miden_assembly_syntax::ast::InvocationTarget,
     miden_assembly_syntax::ast::InvokeKind,
     miden_assembly_syntax::debuginfo::SourceSpan,

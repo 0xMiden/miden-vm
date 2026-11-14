@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use assert_matches::assert_matches;
 
 use {
-    super::EMPTY_WORD,
+    crate::EMPTY_WORD,
     super::LeafIndex,
     super::NodeIndex,
     super::SMT_DEPTH,

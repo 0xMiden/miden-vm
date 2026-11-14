@@ -29,7 +29,7 @@ use {
     super::SparseMerkleTreeReader,
     super::SubtreeLeaf,
     super::SubtreeLeavesIter,
-    super::Word,
+    crate::Word,
     super::build_subtree,
 };
 use {

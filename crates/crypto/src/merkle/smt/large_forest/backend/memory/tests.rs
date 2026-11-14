@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use miden_field::Felt;
+use crate::Felt;
 use proptest::prelude::*;
 use {
     rand::RngExt,

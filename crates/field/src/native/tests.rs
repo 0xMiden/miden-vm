@@ -34,7 +34,7 @@ use {
 };
 
 use {
-    super::Felt,
+    crate::Felt,
     super::Goldilocks,
     super::arb_felt_canonical,
     super::arb_felt_noncanonical,

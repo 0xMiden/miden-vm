@@ -1,9 +1,9 @@
 use core::fmt::Display;
 
 use {
-    super::Felt,
+    crate::Felt,
     super::MerkleError,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::utils::ByteReader,

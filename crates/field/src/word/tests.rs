@@ -10,9 +10,9 @@ use proptest::prelude::*;
 
 use {
     super::Deserializable,
-    super::Felt,
+    crate::Felt,
     super::Serializable,
-    super::Word,
+    crate::Word,
 };
 use crate::word;
 

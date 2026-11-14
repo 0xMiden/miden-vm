@@ -7,14 +7,14 @@ use {
 
 use {
     super::ChipletTraceFragment,
-    super::Felt,
+    miden_core::Felt,
     super::KERNEL_ROM_TRACE_WIDTH,
     super::KernelDescriptor,
     super::KernelRom,
 };
 use {
-    crate::ONE,
-    crate::ZERO,
+    miden_core::ONE,
+    miden_core::ZERO,
 };
 
 // CONSTANTS

@@ -1,7 +1,7 @@
 use {
-    crate::Felt,
-    crate::ONE,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::ZERO,
     crate::errors::OperationError,
     crate::field::BasedVectorSpace,
     crate::field::Field,

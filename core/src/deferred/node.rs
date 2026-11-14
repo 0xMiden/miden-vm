@@ -7,7 +7,7 @@ use {
 use core::mem::size_of;
 
 use {
-    miden_crypto::ZERO,
+    crate::ZERO,
     miden_crypto::hash::eidos::Eidos,
     miden_crypto::hash::eidos::EidosDomain,
     miden_crypto::hash::eidos::EidosFrame,

@@ -11,8 +11,8 @@ pub use {
     miden_crypto::hash::eidos::encoding::word_to_cv as unpack_word,
 };
 use {
-    miden_crypto::Felt,
-    miden_crypto::Word,
+    crate::Felt,
+    crate::Word,
     miden_crypto::hash::eidos::Eidos,
     miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
 };

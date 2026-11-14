@@ -7,8 +7,8 @@ use {
 
 use super::*;
 use {
-    crate::Felt,
-    crate::ZERO,
+    miden_core::Felt,
+    miden_core::ZERO,
 };
 
 #[derive(Debug)]

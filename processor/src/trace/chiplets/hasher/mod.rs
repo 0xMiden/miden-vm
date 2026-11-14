@@ -34,14 +34,14 @@ use rayon::prelude::*;
 
 use {
     super::ChipletTraceFragment,
-    super::Felt,
+    miden_core::Felt,
     super::HasherState,
     super::MerklePath,
-    super::ONE,
+    miden_core::ONE,
     super::OpBatch,
     super::RangeChecker,
-    super::Word as Digest,
-    super::ZERO,
+    miden_core::Word as Digest,
+    miden_core::ZERO,
     super::build_and8_lookup_trace,
 };
 use {

@@ -22,8 +22,8 @@ use {
 };
 
 use {
-    super::EMPTY_WORD,
-    super::Felt,
+    miden_core::EMPTY_WORD,
+    miden_core::Felt,
     super::Memory,
     super::segment::MemoryAccessType,
     super::segment::MemoryOperation,

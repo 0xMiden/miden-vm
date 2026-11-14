@@ -31,8 +31,8 @@ use {
 use {
     crate::BaseHost,
     crate::ContextId,
-    crate::Felt,
-    crate::Word,
+    miden_core::Felt,
+    miden_core::Word,
     crate::advice::AdviceError,
     crate::event::EventError,
     crate::event::EventId,

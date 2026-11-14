@@ -34,7 +34,7 @@ use {
 };
 
 use {
-    super::Felt,
+    miden_core::Felt,
     super::VmTrace,
 };
 

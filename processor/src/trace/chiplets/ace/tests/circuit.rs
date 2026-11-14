@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use super::*;
 use {
-    crate::Felt,
+    miden_core::Felt,
     crate::field::QuadFelt,
 };
 

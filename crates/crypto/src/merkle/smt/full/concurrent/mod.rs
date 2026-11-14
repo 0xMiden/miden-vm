@@ -16,7 +16,7 @@ use {
     super::Smt,
     super::SmtLeaf,
     super::SparseMerkleTreeReader,
-    super::Word,
+    crate::Word,
 };
 use {
     crate::merkle::smt::Map,

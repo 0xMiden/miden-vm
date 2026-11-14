@@ -30,12 +30,12 @@ use {
     crate::AceError,
     crate::ContextId,
     crate::ExecutionError,
-    crate::Felt,
+    miden_core::Felt,
     crate::MIN_STACK_DEPTH,
     crate::MemoryError,
-    crate::ONE,
-    crate::Word,
-    crate::ZERO,
+    miden_core::ONE,
+    miden_core::Word,
+    miden_core::ZERO,
     crate::advice::AdviceError,
     crate::continuation_stack::ContinuationStack,
     crate::crypto::merkle::MerklePath,
@@ -1740,8 +1740,8 @@ mod arbitrary {
     };
     use {
         crate::ContextId,
-        crate::Felt,
-        crate::Word,
+        miden_core::Felt,
+        miden_core::Word,
     };
 
     impl Arbitrary for SystemState {
@@ -2094,9 +2094,9 @@ mod arbitrary_replays {
     };
     use {
         crate::ContextId,
-        crate::Felt,
+        miden_core::Felt,
         crate::RowIndex,
-        crate::Word,
+        miden_core::Word,
         crate::crypto::merkle::MerklePath,
     };
 

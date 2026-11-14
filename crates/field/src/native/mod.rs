@@ -770,7 +770,7 @@ impl Deserializable for Felt {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::Felt;
+    use crate::Felt;
 
     impl Arbitrary for Felt {
         type Parameters = ();
@@ -843,7 +843,7 @@ mod arbitrary_boundary_tests {
     };
 
     use {
-        super::Felt,
+        crate::Felt,
         super::arbitrary::CANONICAL_EDGES,
         super::arbitrary::NONCANONICAL_EDGES,
         super::arbitrary::arb_felt_canonical,

@@ -146,13 +146,13 @@ mod tests {
 
         // push.3 leaves 3 on top; `swap drop` restores the operand stack to its
         // fixed depth of 16 so the program ends with a well-formed output stack.
-        assert_eq!(output.stack.get_element(0), Some(crate::Felt::from_u32(3)));
+        assert_eq!(output.stack.get_element(0), Some(miden_core::Felt::from_u32(3)));
     }
 
     #[test]
     fn program_executor_reports_invalid_advice_inputs() {
         let advice_inputs =
-            AdviceInputs::default().with_map([(crate::Word::default(), vec![crate::Felt::ONE])]);
+            AdviceInputs::default().with_map([(miden_core::Word::default(), vec![miden_core::Felt::ONE])]);
         let options = ExecutionOptions::default().with_max_advice_size_bytes(0);
 
         let result =
@@ -188,6 +188,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(output.stack.get_element(0), Some(crate::Felt::from_u32(3)));
+        assert_eq!(output.stack.get_element(0), Some(miden_core::Felt::from_u32(3)));
     }
 }

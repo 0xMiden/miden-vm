@@ -23,7 +23,7 @@ use {
     super::Deserializable,
     super::DeserializationError,
     super::FalconFelt,
-    super::Felt,
+    crate::Felt,
     super::Polynomial,
     super::Serializable,
     super::Signature,
