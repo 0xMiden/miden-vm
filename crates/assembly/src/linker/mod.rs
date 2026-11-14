@@ -62,7 +62,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Report,
+    crate::diagnostics::Report,
     miden_assembly_syntax::ast,
     miden_assembly_syntax::ast::AttributeSet,
     miden_assembly_syntax::ast::GlobalItemIndex,

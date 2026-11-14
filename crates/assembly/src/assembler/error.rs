@@ -4,8 +4,8 @@ use {
     miden_assembly_syntax::Path,
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
-    miden_assembly_syntax::diagnostics::Diagnostic,
-    miden_assembly_syntax::diagnostics::miette,
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::miette,
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]

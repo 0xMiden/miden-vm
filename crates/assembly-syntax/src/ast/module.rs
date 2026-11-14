@@ -23,7 +23,7 @@ use {
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,
 };
-use miden_utils_diagnostics::Report;
+use crate::diagnostics::Report;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;

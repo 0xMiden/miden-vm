@@ -13,14 +13,14 @@ use miden_assembly_syntax::debuginfo::Spanned;
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
 use {
-    crate::Diagnostic,
+    miden_assembly_syntax::diagnostics::Diagnostic,
     crate::Linkage,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Span,
     crate::Uri,
     crate::VersionReq,
     crate::VersionRequirement,
-    crate::miette,
+    miden_assembly_syntax::diagnostics::miette,
 };
 
 /// Represents a project/package dependency declaration

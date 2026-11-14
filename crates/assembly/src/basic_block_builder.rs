@@ -12,7 +12,7 @@ use {
     miden_assembly_syntax::ast::Instruction,
     crate::debuginfo::Location,
     crate::debuginfo::Span,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::Report,
 };
 use {
     miden_core::Felt,

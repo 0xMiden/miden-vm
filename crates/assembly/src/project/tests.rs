@@ -42,6 +42,7 @@ use super::*;
 use {
     crate::testing::TestContext,
     crate::testing::TestRegistry,
+    crate::diagnostics::Report,
 };
 
 #[test]

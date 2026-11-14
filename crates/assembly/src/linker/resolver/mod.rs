@@ -10,7 +10,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Report,
+    crate::diagnostics::Report,
     miden_assembly_syntax::ast,
     miden_assembly_syntax::ast::GlobalItemIndex,
     miden_assembly_syntax::ast::Ident,
@@ -28,10 +28,10 @@ use {
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::LabeledSpan,
-    miden_assembly_syntax::diagnostics::RelatedError,
-    miden_assembly_syntax::diagnostics::Severity,
-    miden_assembly_syntax::diagnostics::diagnostic,
+    crate::diagnostics::LabeledSpan,
+    crate::diagnostics::RelatedError,
+    crate::diagnostics::Severity,
+    crate::diagnostics::diagnostic,
     miden_assembly_syntax::module::ItemInfo,
 };
 

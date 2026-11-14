@@ -1,8 +1,8 @@
 use {
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::Report,
 };
 use {
     miden_core::Felt,

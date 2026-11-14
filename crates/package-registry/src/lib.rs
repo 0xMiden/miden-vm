@@ -18,7 +18,7 @@ use {
 };
 use core::fmt;
 
-use miden_assembly_syntax::Report;
+use miden_assembly_syntax::diagnostics::Report;
 pub use {
     miden_assembly_syntax::debuginfo::Span,
     miden_assembly_syntax::semver,

@@ -20,7 +20,7 @@ use {
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
+    crate::diagnostics::RelatedLabel,
 };
 
 use {

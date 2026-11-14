@@ -32,9 +32,9 @@ use {
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::IntoDiagnostic,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::Report,
     miden_assembly_syntax::module::ItemInfo,
 };
 use {

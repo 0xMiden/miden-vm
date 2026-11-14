@@ -11,7 +11,7 @@ use {
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::Report,
 };
 use miden_core::Word;
 

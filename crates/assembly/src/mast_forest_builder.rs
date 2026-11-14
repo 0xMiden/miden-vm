@@ -57,7 +57,7 @@ use {
     crate::diagnostics::Report,
     crate::diagnostics::WrapErr,
     crate::linker::LinkLibrary,
-    crate::report,
+    crate::diagnostics::report,
 };
 
 mod finalizer;

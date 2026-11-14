@@ -10,9 +10,9 @@ use {
     crate::debuginfo::SourceManager,
 };
 use {
-    miden_utils_diagnostics::Report,
-    miden_utils_diagnostics::reporting::ReportHandlerOpts,
-    miden_utils_diagnostics::reporting::set_hook,
+    crate::diagnostics::Report,
+    crate::diagnostics::reporting::ReportHandlerOpts,
+    crate::diagnostics::reporting::set_hook,
 };
 
 #[cfg(feature = "std")]

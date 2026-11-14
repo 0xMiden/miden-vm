@@ -4,7 +4,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Report,
+    miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::ast::types::EnumRef,
     miden_assembly_syntax::ast::types::RecTypeRef,
     miden_assembly_syntax::ast::types::StructRef,

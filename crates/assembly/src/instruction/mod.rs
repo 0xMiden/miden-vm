@@ -3,8 +3,8 @@ use {
     miden_assembly_syntax::ast::Instruction,
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::Report,
     miden_assembly_syntax::parser::IntValue,
     miden_assembly_syntax::parser::PushValue,
 };

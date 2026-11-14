@@ -7,7 +7,7 @@ use {
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
 };
-use miden_utils_diagnostics::Report;
+use crate::diagnostics::Report;
 use pretty_assertions::assert_eq;
 
 use {

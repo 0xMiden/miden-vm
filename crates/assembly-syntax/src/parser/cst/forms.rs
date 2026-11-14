@@ -36,7 +36,7 @@ use {
     super::fragments::lower_type_expr_from_alias_body,
 };
 use {
-    crate::Report,
+    crate::diagnostics::Report,
     crate::ast,
     crate::parser::ParsingError,
 };

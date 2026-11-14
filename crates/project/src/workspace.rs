@@ -10,7 +10,10 @@ use {
 };
 
 #[cfg(all(feature = "std", feature = "serde"))]
-use miden_assembly_syntax::debuginfo::SourceManager;
+use {
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::diagnostics::Label,
+};
 
 use crate::*;
 

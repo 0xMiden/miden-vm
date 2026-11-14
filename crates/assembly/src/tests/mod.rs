@@ -20,7 +20,7 @@ use {
     miden_assembly_syntax::MAX_REPEAT_COUNT,
     miden_assembly_syntax::ast::Ident,
     miden_assembly_syntax::ast::Path,
-    miden_assembly_syntax::diagnostics::WrapErr,
+    crate::diagnostics::WrapErr,
 };
 use {
     miden_core::Felt,
@@ -64,7 +64,7 @@ use {
     crate::diagnostics::Report,
     crate::fmp::fmp_initialization_sequence,
     crate::mast_forest_builder::MastForestBuilder,
-    crate::report,
+    crate::diagnostics::report,
     crate::testing::TestContext,
     crate::testing::assert_diagnostic,
     crate::testing::assert_diagnostic_lines,

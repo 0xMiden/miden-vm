@@ -255,7 +255,7 @@ impl FromStr for Ident {
     }
 }
 
-impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
+impl From<Ident> for crate::diagnostics::miette::SourceSpan {
     fn from(value: Ident) -> Self {
         value.span.into()
     }

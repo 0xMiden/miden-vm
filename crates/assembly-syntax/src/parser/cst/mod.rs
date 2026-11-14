@@ -15,14 +15,14 @@ use {
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
 };
-use miden_utils_diagnostics::LabeledSpan;
+use crate::diagnostics::LabeledSpan;
 
 use {
     self::context::LoweringContext,
     self::forms::lower_source_file,
 };
 use {
-    crate::Report,
+    crate::diagnostics::Report,
     crate::ast,
     crate::diagnostics::Diagnostic,
     crate::diagnostics::Severity,
