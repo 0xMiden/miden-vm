@@ -64,7 +64,7 @@ use {
     crate::package::debug_info::PackageDebugInfo,
 };
 use {
-    miden_project::Linkage,
+    crate::Linkage,
     crate::package::TargetType,
 };
 

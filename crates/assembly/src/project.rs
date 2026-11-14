@@ -29,7 +29,7 @@ use {
     miden_package_registry::Version as PackageVersion,
 };
 use {
-    miden_project::Linkage,
+    crate::Linkage,
     miden_project::Package as ProjectPackage,
     miden_project::PreassembledDependencyMetadata,
     miden_project::Profile,

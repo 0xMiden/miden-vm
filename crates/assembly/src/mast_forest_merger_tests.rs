@@ -10,7 +10,7 @@ use {
     crate::mast::MastNodeExt,
     crate::utils::Idx,
 };
-use miden_project::Linkage;
+use crate::Linkage;
 
 use {
     crate::Assembler,

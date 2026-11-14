@@ -15,7 +15,7 @@ use {
 };
 use {
     crate::execution::operations::stack_ops::op_push,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::processor::Processor,
     crate::processor::StackInterface,
     crate::processor::SystemInterface,

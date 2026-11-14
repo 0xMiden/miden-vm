@@ -51,7 +51,7 @@ use {
     crate::PathBuf,
     crate::ast,
     crate::ast::Ident,
-    crate::parser::ModuleParser,
+    crate::ModuleParser,
     crate::sema::LimitKind,
     crate::sema::SemanticAnalysisError,
 };

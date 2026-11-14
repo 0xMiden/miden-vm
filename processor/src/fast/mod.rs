@@ -37,14 +37,14 @@ use {
 
 use {
     miden_core::advice::AdviceInputs,
-    crate::AdviceProvider,
+    crate::advice::AdviceProvider,
     crate::ContextId,
     crate::ExecutionError,
     crate::ExecutionOptions,
     crate::LoadedMastForest,
     crate::ProcessorState,
     crate::advice::AdviceError,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::errors::MapExecErrNoCtx,
     crate::operation::OperationError,

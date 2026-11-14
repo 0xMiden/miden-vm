@@ -22,7 +22,7 @@ use {
 use tracing::instrument;
 
 use {
-    super::FastProcessor,
+    crate::FastProcessor,
     super::NoopTracer,
     super::external::maybe_use_caller_error_context,
     super::step::BreakReason,
@@ -42,12 +42,12 @@ use {
     crate::Stopper,
     crate::SyncHost,
     crate::advice::AdviceError,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
-    crate::continuation_stack::SourceInlineCallContext,
+    crate::SourceInlineCallContext,
     crate::errors::MapExecErr,
     crate::errors::MapExecErrNoCtx,
-    crate::errors::PackageSourceDebugContext,
+    crate::PackageSourceDebugContext,
     crate::errors::malformed_mast_forest_with_context,
     crate::execution::InternalBreakReason,
     crate::execution::execute_impl,
@@ -1341,7 +1341,7 @@ impl FastProcessor {
             None => host.get_mast_forest(&node_digest).ok_or_else(|| {
                 match (package_debug_info, source_node_id) {
                     (Some(debug_info), Some(source_node_id)) => {
-                        crate::errors::procedure_not_found_with_package_source_context(
+                        crate::procedure_not_found_with_package_source_context(
                             node_digest,
                             PackageSourceDebugContext::new(debug_info, source_node_id),
                             host,
@@ -1403,7 +1403,7 @@ impl FastProcessor {
                 } else {
                     return Err(match (package_debug_info, source_node_id) {
                         (Some(debug_info), Some(source_node_id)) => {
-                            crate::errors::procedure_not_found_with_package_source_context(
+                            crate::procedure_not_found_with_package_source_context(
                                 node_digest,
                                 PackageSourceDebugContext::new(debug_info, source_node_id),
                                 host,
@@ -1701,7 +1701,7 @@ impl FastProcessor {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use super::FastProcessor;
+    use crate::FastProcessor;
 
     #[test]
     fn sole_rayon_worker_requires_buffered_trace_building() {

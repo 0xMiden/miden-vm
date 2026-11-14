@@ -23,7 +23,7 @@ use {
     miden_core::ONE,
     miden_core::Word,
     miden_core::ZERO,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::errors::MapExecErrNoCtx,
     miden_core::mast::ExecutableMastForest,
@@ -456,7 +456,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             return Ok(());
         }
 
-        use Continuation::*;
+        use crate::Continuation::*;
 
         let result = (|| -> Result<(), ExecutionError> {
             let continuation = self.continuation.as_ref().ok_or(ExecutionError::Internal(

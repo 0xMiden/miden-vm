@@ -9,7 +9,7 @@ use miden_core::WORD_SIZE;
 use {
     miden_core::Felt,
     super::INIT_MEM_VALUE,
-    super::MemoryError,
+    crate::MemoryError,
     miden_core::Word,
 };
 use crate::ContextId;

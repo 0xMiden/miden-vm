@@ -177,7 +177,7 @@ impl TestContext {
     /// Add the modules of `library` to the [Assembler] constructed by this context.
     #[track_caller]
     pub fn add_library(&mut self, package: Arc<crate::package::Package>) -> Result<(), Report> {
-        self.assembler.link_package(package, miden_project::Linkage::Dynamic)
+        self.assembler.link_package(package, crate::Linkage::Dynamic)
     }
 
     /// Compile a [Program] from `source` using the [Assembler] constructed by this context.

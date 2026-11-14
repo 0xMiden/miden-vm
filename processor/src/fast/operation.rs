@@ -18,11 +18,11 @@ use {
 };
 
 use {
-    crate::AdviceProvider,
+    crate::advice::AdviceProvider,
     crate::ContextId,
     crate::ExecutionError,
     crate::errors::OperationError,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::fast::INITIAL_STACK_TOP_IDX,
     crate::fast::SystemCallState,
     crate::fast::memory::Memory,

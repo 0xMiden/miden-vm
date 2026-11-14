@@ -11,7 +11,7 @@ use {
     crate::ContextId,
     crate::MapExecErr,
     crate::Stopper,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::execution::ExecutionState,
     crate::execution::finalize_clock_cycle,
     crate::execution::finalize_clock_cycle_with_continuation,

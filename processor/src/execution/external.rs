@@ -11,9 +11,9 @@ use {
 
 use {
     crate::BreakReason,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
-    crate::continuation_stack::SourceInlineCallContext,
+    crate::SourceInlineCallContext,
     crate::execution::InternalBreakReason,
     miden_core::mast::ExecutableMastForest,
     miden_core::mast::MastNodeExt,

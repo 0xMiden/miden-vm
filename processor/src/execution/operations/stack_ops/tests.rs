@@ -18,7 +18,7 @@ use {
     super::op_swap_double_word,
 };
 use {
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::processor::Processor,
     crate::processor::StackInterface,
 };

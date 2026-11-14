@@ -144,9 +144,9 @@ mod tests {
     use miden_core::Felt;
 
     use {
-        super::format_value,
-        super::write_interval,
-        super::write_stack,
+        crate::format_value,
+        crate::write_interval,
+        crate::write_stack,
     };
 
     #[test]

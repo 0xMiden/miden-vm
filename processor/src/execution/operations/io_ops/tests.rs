@@ -24,7 +24,7 @@ use {
 use {
     miden_core::advice::AdviceInputs,
     crate::ContextId,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::fast::NoopTracer,
     crate::processor::Processor,
     crate::processor::StackInterface,
