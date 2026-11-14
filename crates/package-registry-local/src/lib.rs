@@ -18,8 +18,9 @@ use miden_core::{
 };
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
-    InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
-    PackageRegistry, PackageStore, PackageVersions, Version, VersionRequirement,
+    InMemoryPackageRegistry, InMemoryPackageStoreError, PackageCache, PackageId, PackageIndex,
+    PackageProvider, PackageRecord, PackageRegistry, PackageStore, PackageVersions, Version,
+    VersionRequirement,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,8 @@ pub enum LocalRegistryError {
     IndexParse(#[from] toml::de::Error),
     #[error("failed to serialize registry index: {0}")]
     IndexSerialize(#[from] toml::ser::Error),
+    #[error("failed to validate registry index: {0}")]
+    IndexValidation(#[source] InMemoryPackageStoreError),
     #[error("failed to decode package artifact '{path}': {error}")]
     PackageDecode { path: PathBuf, error: String },
     #[error("package artifact '{path}' is missing semantic version metadata")]
@@ -201,6 +204,7 @@ impl LocalPackageRegistry {
             } else {
                 let persisted = toml::from_str::<PersistedIndex>(contents)?;
                 InMemoryPackageRegistry::from_packages(persisted.packages)
+                    .map_err(LocalRegistryError::IndexValidation)?
             }
         } else {
             index_checksum = hash_index_contents(&[]);
@@ -275,6 +279,14 @@ impl LocalPackageRegistry {
 
     /// Get the path in the artifact store for `package` at `version`
     pub fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
+        let version = if version.digest.is_some() {
+            self.index
+                .get_by_version(package, version)
+                .map(PackageRecord::version)
+                .unwrap_or(version)
+        } else {
+            version
+        };
         self.artifact_path_for_summary(package, version)
     }
 
@@ -312,18 +324,19 @@ impl LocalPackageRegistry {
         package: &PackageId,
         version: &Version,
     ) -> Result<Arc<MastPackage>, LocalRegistryError> {
-        self.index.get_by_version(package, version).ok_or_else(|| {
+        let record = self.index.get_by_version(package, version).ok_or_else(|| {
             LocalRegistryError::MissingPackage {
                 package: package.clone(),
                 version: version.clone(),
             }
         })?;
+        let canonical_version = record.version();
 
         let digest = version.digest.ok_or_else(|| LocalRegistryError::MissingArtifactDigest {
             package: package.clone(),
             version: version.clone(),
         })?;
-        let path = self.artifact_path_for_package(package, &version.version, digest);
+        let path = self.artifact_path_for_package(package, &canonical_version.version, digest);
         let path = if path.exists() {
             path
         } else {
@@ -348,11 +361,11 @@ impl LocalPackageRegistry {
         })?;
 
         let actual_version = Version::new(loaded.version.clone(), loaded.dependency_commitment());
-        if loaded.name != *package || actual_version != *version {
+        if loaded.name != *package || actual_version != *canonical_version {
             return Err(LocalRegistryError::ArtifactMismatch {
                 path,
                 expected_package: package.clone(),
-                expected_version: Box::new(version.clone()),
+                expected_version: Box::new(canonical_version.clone()),
                 actual_package: loaded.name,
                 actual_version: Box::new(actual_version),
             });
@@ -419,7 +432,8 @@ impl LocalPackageRegistry {
         match self.save_with_locked_operation(operation) {
             Ok(()) => Ok(()),
             Err(error) => {
-                self.index = InMemoryPackageRegistry::from_packages(previous_packages);
+                self.index = InMemoryPackageRegistry::from_packages(previous_packages)
+                    .expect("previous registry state must remain valid");
                 Err(error)
             },
         }
@@ -865,6 +879,116 @@ mod tests {
         LocalPackageRegistry::load(index_path, artifact_dir).expect("failed to load registry")
     }
 
+    #[test]
+    fn load_rejects_duplicate_canonical_versions() {
+        let tempdir = TempDir::new().unwrap();
+        let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+
+        let first = "1.0.0+first".parse::<Version>().unwrap();
+        let second = "1.0.0+second".parse::<Version>().unwrap();
+        let persisted = PersistedIndex {
+            packages: BTreeMap::from_iter([(
+                PackageId::from("pkg"),
+                BTreeMap::from_iter([
+                    (
+                        first.version.clone(),
+                        PackageRecord::new(first, None::<(PackageId, VersionRequirement)>),
+                    ),
+                    (
+                        second.version.clone(),
+                        PackageRecord::new(second, None::<(PackageId, VersionRequirement)>),
+                    ),
+                ]),
+            )]),
+        };
+        fs::write(&index_path, toml::to_string_pretty(&persisted).unwrap()).unwrap();
+
+        let error = match LocalPackageRegistry::load(index_path, artifact_dir) {
+            Ok(_) => panic!("metadata-only variants must not survive index loading"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            LocalRegistryError::IndexValidation(
+                InMemoryPackageStoreError::DuplicateSemanticVersion { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn load_rejects_mismatched_version_key_and_record() {
+        let tempdir = TempDir::new().unwrap();
+        let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+
+        let key = "1.0.0+key".parse().unwrap();
+        let record_version = "2.0.0+record".parse::<Version>().unwrap();
+        let persisted = PersistedIndex {
+            packages: BTreeMap::from_iter([(
+                PackageId::from("pkg"),
+                BTreeMap::from_iter([(
+                    key,
+                    PackageRecord::new(record_version, None::<(PackageId, VersionRequirement)>),
+                )]),
+            )]),
+        };
+        fs::write(&index_path, toml::to_string_pretty(&persisted).unwrap()).unwrap();
+
+        let error = match LocalPackageRegistry::load(index_path, artifact_dir) {
+            Ok(_) => panic!("mismatched index key and record version must be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            LocalRegistryError::IndexValidation(
+                InMemoryPackageStoreError::MismatchedSemanticVersionKey { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn load_canonicalizes_metadata_only_key_and_record_difference() {
+        let tempdir = TempDir::new().unwrap();
+        let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+
+        let key = "1.0.0+key".parse().unwrap();
+        let record_version = "1.0.0+record".parse::<Version>().unwrap();
+        let persisted = PersistedIndex {
+            packages: BTreeMap::from_iter([(
+                PackageId::from("pkg"),
+                BTreeMap::from_iter([(
+                    key,
+                    PackageRecord::new(
+                        record_version.clone(),
+                        None::<(PackageId, VersionRequirement)>,
+                    ),
+                )]),
+            )]),
+        };
+        fs::write(&index_path, toml::to_string_pretty(&persisted).unwrap()).unwrap();
+
+        let registry = LocalPackageRegistry::load(index_path, artifact_dir)
+            .expect("metadata-only key and record difference should be accepted");
+        let record = registry
+            .get_by_semver(&PackageId::from("pkg"), &"1.0.0+query".parse().unwrap())
+            .expect("canonicalized record should remain queryable");
+
+        assert_eq!(record.semantic_version(), &record_version.version);
+        assert!(
+            registry
+                .available_versions(&PackageId::from("pkg"))
+                .expect("package should be indexed")
+                .contains_key(&"1.0.0".parse().unwrap())
+        );
+    }
+
     fn valid_debug_info_section() -> Section {
         Section::new(SectionId::DEBUG_INFO, PackageDebugInfoBuilder::default().build().to_bytes())
     }
@@ -1011,6 +1135,46 @@ mod tests {
             shown.dependencies.values().next().unwrap().to_string(),
             format!("1.0.0#{}", dep.dependency_commitment())
         );
+    }
+
+    #[test]
+    fn load_accepts_metadata_equivalent_version() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package = Arc::from(build_package("pkg", "1.0.0+first", []));
+        let registered = registry.cache_package(package).expect("package should register");
+        let equivalent = Version::new(
+            "1.0.0+second".parse().unwrap(),
+            registered.digest.expect("registered package should have a digest"),
+        );
+
+        assert_eq!(registered, equivalent);
+        assert!(
+            registry
+                .artifact_path(&PackageId::from("pkg"), &equivalent)
+                .is_some_and(|path| path.exists())
+        );
+        registry
+            .load_package(&PackageId::from("pkg"), &equivalent)
+            .expect("metadata-equivalent version should load the canonical artifact");
+    }
+
+    #[test]
+    fn digestless_version_does_not_load_canonical_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        registry
+            .cache_package(Arc::from(build_package("pkg", "1.0.0+first", [])))
+            .expect("package should register");
+        let digestless = "1.0.0+second".parse::<Version>().unwrap();
+
+        assert!(registry.artifact_path(&PackageId::from("pkg"), &digestless).is_none());
+        assert!(matches!(
+            registry.load_package(&PackageId::from("pkg"), &digestless),
+            Err(LocalRegistryError::MissingArtifactDigest { .. })
+        ));
     }
 
     #[test]
