@@ -5,11 +5,11 @@ use {
 use core::fmt;
 
 use {
-    miden_formatting::hex::ToHex,
-    miden_formatting::prettier::Document,
-    miden_formatting::prettier::PrettyPrint,
-    miden_formatting::prettier::const_text,
-    miden_formatting::prettier::text,
+    crate::utils::ToHex,
+    crate::prettier::Document,
+    crate::prettier::PrettyPrint,
+    crate::prettier::const_text,
+    crate::prettier::text,
 };
 
 use {

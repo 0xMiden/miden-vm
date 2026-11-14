@@ -12,7 +12,7 @@ use {
     core::str::FromStr,
 };
 
-use miden_assembly_syntax::DisplayHex;
+use miden_core::utils::DisplayHex;
 use {
     miden_core::serde::ByteReader,
     miden_core::serde::ByteWriter,
