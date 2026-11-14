@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Derived from p3-air 0.8.0; see mod.rs documentation for provenance.
 
-//! Version-two wire graph. No cached degree is accepted from the wire: decoding
+//! Version-three wire graph. No cached degree is accepted from the wire: decoding
 //! checks topological references, domains, operation arities, and recomputes all bounds.
-use super::{AuxInput, BaseInput, Domain, Expr, ExpressionDomain, Op, RawExpr};
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::marker::PhantomData;
+
 use p3_field::{ExtensionField, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-const VERSION: u8 = 2;
+use super::{AuxInput, BaseInput, Domain, Expr, ExpressionDomain, Op, RawExpr};
+
+const VERSION: u8 = 3;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireExpression<F, EF> {
@@ -36,14 +38,6 @@ enum WireOp<F, EF> {
     IsTransition,
     Lift {
         value: usize,
-    },
-    Add {
-        x: usize,
-        y: usize,
-    },
-    Sub {
-        x: usize,
-        y: usize,
     },
     Mul {
         x: usize,
@@ -101,14 +95,6 @@ impl<F: Field, EF: ExtensionField<F>> Encoder<F, EF> {
             RawExpr::IsTransition => WireOp::IsTransition,
             RawExpr::Node(node) => match &node.op {
                 Op::Lift(value) => WireOp::Lift { value: self.expression(value) },
-                Op::Add { x, y } => WireOp::Add {
-                    x: self.expression(x),
-                    y: self.expression(y),
-                },
-                Op::Sub { x, y } => WireOp::Sub {
-                    x: self.expression(x),
-                    y: self.expression(y),
-                },
                 Op::Mul { x, y } => WireOp::Mul {
                     x: self.expression(x),
                     y: self.expression(y),
@@ -153,13 +139,8 @@ fn decode<F: Field, EF: ExtensionField<F>, D: Domain>(
     let mut built: Vec<RawExpr<F, EF>> = Vec::with_capacity(wire.nodes.len());
     for node in wire.nodes {
         let expression = |index: usize| built.get(index).cloned();
-        let list = |indices: Vec<usize>| {
-            indices
-                .into_iter()
-                .map(expression)
-                .collect::<Option<Vec<_>>>()
-                .map(Vec::into_boxed_slice)
-        };
+        let list =
+            |indices: Vec<usize>| indices.into_iter().map(expression).collect::<Option<Vec<_>>>();
         let domain = node.domain;
         let raw = match node.op {
             WireOp::BaseConstant(value) => RawExpr::BaseConstant { value, domain },
@@ -200,23 +181,21 @@ fn decode<F: Field, EF: ExtensionField<F>, D: Domain>(
                 RawExpr::IsTransition
             },
             WireOp::Lift { value } => RawExpr::node(domain, Op::Lift(expression(value)?)).ok()?,
-            WireOp::Add { x, y } => {
-                RawExpr::node(domain, Op::Add { x: expression(x)?, y: expression(y)? }).ok()?
-            },
-            WireOp::Sub { x, y } => {
-                RawExpr::node(domain, Op::Sub { x: expression(x)?, y: expression(y)? }).ok()?
-            },
             WireOp::Mul { x, y } => {
                 RawExpr::node(domain, Op::Mul { x: expression(x)?, y: expression(y)? }).ok()?
             },
             WireOp::Neg { x } => RawExpr::node(domain, Op::Neg(expression(x)?)).ok()?,
-            WireOp::Sum { values } => RawExpr::node(domain, Op::Sum(list(values)?)).ok()?,
-            WireOp::Product { values } => RawExpr::node(domain, Op::Product(list(values)?)).ok()?,
+            WireOp::Sum { values } => {
+                RawExpr::node(domain, Op::Sum(list(values)?.into_boxed_slice())).ok()?
+            },
+            WireOp::Product { values } => {
+                RawExpr::node(domain, Op::Product(list(values)?.into_boxed_slice())).ok()?
+            },
             WireOp::LinearCombination { values, coefficients } => RawExpr::node(
                 domain,
                 Op::LinearCombination {
-                    values: list(values)?,
-                    coefficients: list(coefficients)?,
+                    values: list(values)?.into_boxed_slice(),
+                    coefficients: list(coefficients)?.into_boxed_slice(),
                 },
             )
             .ok()?,
@@ -254,6 +233,6 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Serialize for Expr<F, EF, D> {
 impl<'de, F: Field, EF: ExtensionField<F>, D: Domain> Deserialize<'de> for Expr<F, EF, D> {
     fn deserialize<S: Deserializer<'de>>(deserializer: S) -> Result<Self, S::Error> {
         decode(WireExpression::<F, EF>::deserialize(deserializer)?)
-            .ok_or_else(|| S::Error::custom("invalid version-two symbolic expression graph"))
+            .ok_or_else(|| S::Error::custom("invalid version-three symbolic expression graph"))
     }
 }

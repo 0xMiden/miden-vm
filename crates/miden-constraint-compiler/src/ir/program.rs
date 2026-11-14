@@ -58,9 +58,17 @@ pub(crate) fn lower_assertions_into(
     assertions: &[Assertion<Felt, QuadFelt>],
     graph: &mut GraphBuilder,
 ) -> CapturedConstraints {
+    let mut uses = HashMap::new();
+    for assertion in assertions {
+        match assertion {
+            Assertion::Base(value) => count_uses(value.as_ref(), &mut uses),
+            Assertion::Extension(value) => count_uses(value.as_ref(), &mut uses),
+        }
+    }
     let mut lower = Lowering {
         graph,
         memo: HashMap::new(),
+        uses,
         base: OpCounts::default(),
         ext: OpCounts::default(),
     };
@@ -92,11 +100,27 @@ pub(crate) fn lower_assertions_into(
     }
 }
 
+// Count edges in the authored DAG, including assertion roots. Children of a
+// shared operation are visited once, so a shared negation remains a boundary.
+fn count_uses(expression: ExprRef<'_, Felt, QuadFelt>, uses: &mut HashMap<usize, usize>) {
+    if let Some(identity) = expression.identity() {
+        let count = uses.entry(identity).or_default();
+        *count += 1;
+        if *count != 1 {
+            return;
+        }
+    }
+    for child in expression.children() {
+        count_uses(child, uses);
+    }
+}
+
 struct Lowering<'a> {
     graph: &'a mut GraphBuilder,
     // Every source expression stays alive throughout this walk. Shared Arc
     // addresses therefore cannot be reused and never define structural CSE.
     memo: HashMap<usize, NodeId>,
+    uses: HashMap<usize, usize>,
     base: OpCounts,
     ext: OpCounts,
 }
@@ -141,25 +165,44 @@ impl Lowering<'_> {
             ExprView::IsLastRow => self.graph.leaf(Leaf::IsLast),
             ExprView::IsTransition => self.graph.leaf(Leaf::IsTransition),
             ExprView::Lift { value } => self.expression(value),
-            ExprView::Add { x, y, .. }
-            | ExprView::Sub { x, y, .. }
-            | ExprView::Mul { x, y, .. } => {
+            ExprView::Mul { x, y } => {
                 let x = self.expression(x);
                 let y = self.expression(y);
-                let op = match expression.view() {
-                    ExprView::Add { .. } => OpKind::Add,
-                    ExprView::Sub { .. } => OpKind::Sub,
-                    _ => OpKind::Mul,
-                };
-                self.op(class, op, x, Some(y))
+                self.op(class, OpKind::Mul, x, Some(y))
             },
             ExprView::Neg { x } => {
                 let x = self.expression(x);
                 self.op(class, OpKind::Neg, x, None)
             },
             ExprView::Sum { values } => {
-                let values: Vec<_> = values.iter().map(|value| self.expression(value)).collect();
-                self.sum(class, &values)
+                let values: Vec<_> = values
+                    .iter()
+                    .map(|value| {
+                        // Constant negation is folded by construction. Recover its
+                        // shorter signed form so x - 1 does not introduce a separate
+                        // field constant p - 1 into the arithmetic circuit.
+                        if let ExprView::BaseConstant(constant) = value.view()
+                            && constant.as_canonical_u64() > Felt::ORDER / 2
+                        {
+                            return (self.scalar(class, -*constant), true);
+                        }
+                        let (value, negative) = match value.view() {
+                            ExprView::Neg { x }
+                                if value.identity().is_some_and(|id| self.uses[&id] == 1) =>
+                            {
+                                (x, true)
+                            },
+                            _ => (value, false),
+                        };
+                        (self.expression(value), negative)
+                    })
+                    .collect();
+                let (value, negative) = self.signed_sum(class, &values);
+                if negative {
+                    self.op(class, OpKind::Neg, value, None)
+                } else {
+                    value
+                }
             },
             ExprView::Product { values } => {
                 let values: Vec<_> = values.iter().map(|value| self.expression(value)).collect();
@@ -318,6 +361,26 @@ impl Lowering<'_> {
             },
         }
     }
+
+    // Keep the sum balanced while folding single-use signs into subtraction.
+    // A negative group is materialized only at its enclosing result boundary.
+    fn signed_sum(&mut self, class: Class, inputs: &[(NodeId, bool)]) -> (NodeId, bool) {
+        match inputs {
+            [] => (self.scalar(class, Felt::ZERO), false),
+            [value] => *value,
+            _ => {
+                let middle = inputs.len().next_power_of_two() / 2;
+                let (a, negative_a) = self.signed_sum(class, &inputs[..middle]);
+                let (b, negative_b) = self.signed_sum(class, &inputs[middle..]);
+                match (negative_a, negative_b) {
+                    (false, false) => (self.op(class, OpKind::Add, a, Some(b)), false),
+                    (false, true) => (self.op(class, OpKind::Sub, a, Some(b)), false),
+                    (true, false) => (self.op(class, OpKind::Sub, b, Some(a)), false),
+                    (true, true) => (self.op(class, OpKind::Add, a, Some(b)), true),
+                }
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -359,6 +422,58 @@ mod tests {
         for seed in [0, 42, u64::MAX] {
             assert_program_lowering(&program, seed);
         }
+    }
+
+    #[test]
+    fn signed_sums_lower_to_balanced_additions_and_subtractions() {
+        let (a, b, c, d) = (main(0), main(1), main(2), main(3));
+        for (expression, expected_op, expected_negations) in [
+            (a.clone() + b.clone(), OpKind::Add, 0),
+            (a.clone() - b.clone(), OpKind::Sub, 0),
+            (a.clone() - Felt::from_u64(3), OpKind::Sub, 0),
+            (-a.clone() + b.clone(), OpKind::Sub, 0),
+            (-a.clone() - b.clone(), OpKind::Neg, 1),
+            (a.clone() - b.clone() + c.clone() - d.clone(), OpKind::Sub, 0),
+            ([a.clone(), -b.clone(), c.clone(), -d.clone()].into_iter().sum(), OpKind::Add, 0),
+        ] {
+            let program = CapturedProgram::from_assertions(vec![Assertion::Base(expression)]);
+            let root = program.constraints().base_roots[0];
+            assert!(matches!(
+                program.graph().node(root),
+                Node::Op { op, .. } if op == expected_op
+            ));
+            assert_eq!(op_counts(program.graph()).0.neg, expected_negations);
+            for seed in [0, 42, u64::MAX] {
+                assert_program_lowering(&program, seed);
+            }
+        }
+
+        let extension = E::from(AuxInput::Challenge { index: 0 });
+        let program =
+            CapturedProgram::from_assertions(vec![Assertion::Extension(extension - E::from(a))]);
+        assert!(matches!(
+            program.graph().node(program.constraints().ext_roots[0]),
+            Node::Op { class: Class::Ext, op: OpKind::Sub, .. }
+        ));
+        assert_program_lowering(&program, 42);
+    }
+
+    #[test]
+    fn signed_sum_keeps_a_negation_shared_with_another_assertion() {
+        let negative = -main(0);
+        let program = CapturedProgram::from_assertions(vec![
+            Assertion::Base(negative.clone() + main(1)),
+            Assertion::Base(negative),
+        ]);
+        let roots = &program.constraints().base_roots;
+        assert!(matches!(
+            program.graph().node(roots[0]),
+            Node::Op { op: OpKind::Add, x, .. } if x == roots[1]
+        ));
+        assert!(matches!(program.graph().node(roots[1]), Node::Op { op: OpKind::Neg, .. }));
+        assert_eq!(op_counts(program.graph()).0.neg, 1);
+        assert_eq!(program.constraints().naive_base.neg, 1);
+        assert_program_lowering(&program, 42);
     }
 
     #[test]

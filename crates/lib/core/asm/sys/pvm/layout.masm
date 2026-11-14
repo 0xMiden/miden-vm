@@ -34,7 +34,7 @@ pub const AUX_BUS_BOUNDARY_PTR = 3225422824
 ### AUXILIARY_ACE_INPUTS_PTR: 120 felts at 3225422848..3225422968.
 pub const AUXILIARY_ACE_INPUTS_PTR = 3225422848
 
-### 14648 felts: 3225422968..3225437616.
+### 14680 felts: 3225422968..3225437648.
 pub const ACE_CIRCUIT_STREAM_PTR = 3225422968
 
 ### Public values occupy consecutive quadratic-extension slots.

@@ -227,6 +227,35 @@ mod tests {
     }
 
     #[test]
+    fn source_identity_ignores_unused_clones_during_additive_construction() {
+        for constant_tail in [false, true] {
+            let construct = |retain_clone: bool| {
+                capture_from_spec::<Felt, Felt>(
+                    raw(SymbolicExpression::ZERO).spec,
+                    |frame, _, sink| {
+                        let x = frame.main.current[0].dup();
+                        let prefix = x.dup() + Felt::ONE;
+                        let retained = retain_clone.then(|| prefix.dup());
+                        let tail = if constant_tail { SymbolicExpression::TWO } else { x };
+                        let root = prefix + tail;
+                        drop(retained);
+                        sink.assert_zero(root);
+                    },
+                )
+                .unwrap()
+                .descriptor
+            };
+            let original = construct(false);
+            let with_clone = construct(true);
+            assert_eq!(original.fingerprint(), with_clone.fingerprint());
+            assert_eq!(
+                original.analysis().degree_profile(),
+                with_clone.analysis().degree_profile()
+            );
+        }
+    }
+
+    #[test]
     fn identity_binds_schema_periodic_values_addresses_classes_and_global_order() {
         let reference = finish_capture(raw(input(RowOffset::Current))).unwrap().descriptor;
         let mut cases = vec![];

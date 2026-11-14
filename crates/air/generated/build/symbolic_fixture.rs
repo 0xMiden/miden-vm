@@ -26,6 +26,16 @@ impl LiftedAir for OperationFixture {
     ) {
         let x = frame.main.current[0].dup();
         let y = frame.main.current[1].dup();
+        sink.assert_zero(x.dup() - y.dup());
+        sink.assert_zero(-x.dup() - y.dup());
+        sink.assert_zero(-(-x.dup()));
+        sink.assert_zero(x.dup() + B::Expr::from_u64(3) - B::Expr::from_u64(5));
+        let negative = -y.dup();
+        sink.assert_zero(x.dup() + negative.dup());
+        sink.assert_zero(negative);
+        let signed: [B::Expr; 33] =
+            core::array::from_fn(|i| if i % 2 == 0 { x.dup() } else { -y.dup() });
+        sink.assert_zero(signed.into_iter().sum::<B::Expr>());
         sink.assert_zero(x.square());
         sink.assert_zero(x.cube());
         sink.assert_zero(x.exp_u64(7));

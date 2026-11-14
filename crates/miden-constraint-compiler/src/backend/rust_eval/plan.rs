@@ -85,15 +85,18 @@ impl<'g, 'a> Plan<'g, 'a> {
 
     fn operation(&self, id: usize) -> Option<(Class, OpKind, usize, Option<usize>)> {
         let op = match self.graph.node(id).view() {
-            ExprView::Add { .. } => OpKind::Add,
-            ExprView::Sub { .. } => OpKind::Sub,
             ExprView::Mul { .. } => OpKind::Mul,
             ExprView::Neg { .. } => OpKind::Neg,
-            // Explicit structured calls are opaque to scalar pattern recovery.
             _ => return None,
         };
         let inputs = self.graph.children(id);
         Some((self.graph.class(id), op, inputs[0], inputs.get(1).copied()))
+    }
+
+    /// Inline only signs that have no separate consumer or preparation boundary.
+    pub fn negated(&self, id: usize) -> Option<usize> {
+        (self.uses[id] == 1 && matches!(self.graph.node(id).view(), ExprView::Neg { .. }))
+            .then(|| self.graph.children(id)[0])
     }
 
     fn product(&self, id: usize) -> Option<(usize, usize)> {
@@ -103,19 +106,22 @@ impl<'g, 'a> Plan<'g, 'a> {
         }
     }
 
-    // Only Add is associative here. In particular, never flatten subtraction,
-    // cancel selector factors, or use bounded-integer facts about trace limbs.
+    // Flatten only unshared sums. Negation and prepared/shared sums retain
+    // their boundaries; no selector or witness facts enter this scheduling pass.
     fn terms(&self, id: usize, class: Class, root: bool, out: &mut Vec<usize>) {
         if out.len() >= MAX_TERMS {
             out.push(id);
             return;
         }
-        match self.operation(id) {
-            Some((c, OpKind::Add, x, Some(y))) if c == class && (root || self.uses[id] == 1) => {
-                self.terms(x, class, false, out);
-                self.terms(y, class, false, out);
-            },
-            _ => out.push(id),
+        if matches!(self.graph.node(id).view(), ExprView::Sum { .. })
+            && self.graph.class(id) == class
+            && (root || self.uses[id] == 1)
+        {
+            for &child in self.graph.children(id) {
+                self.terms(child, class, false, out);
+            }
+        } else {
+            out.push(id);
         }
     }
 
@@ -159,8 +165,11 @@ impl<'g, 'a> Plan<'g, 'a> {
         while start < terms.len() {
             let mut selected = None;
             for kind in [DotKind::Scalar, DotKind::Mixed, DotKind::Same] {
-                let pairs: Vec<_> =
-                    terms[start..].iter().map_while(|&id| self.pair(id, class, kind)).collect();
+                let pairs: Vec<_> = terms[start..]
+                    .iter()
+                    .take(MAX_TERMS)
+                    .map_while(|&id| self.pair(id, class, kind))
+                    .collect();
                 // Unit terms allow beta^0*x and non-product prefixes, but a dot
                 // must consume a real, single-use multiplication to be useful.
                 if pairs.len() >= MIN_DOT_TERMS
@@ -184,24 +193,28 @@ impl<'g, 'a> Plan<'g, 'a> {
     }
 
     pub fn rewrite(&self, id: usize) -> Option<Rewrite> {
-        let Some((class, op, x, Some(y))) = self.operation(id) else {
-            return None;
-        };
-        if op == OpKind::Mul && x == y {
-            return Some(Rewrite::Square(x));
-        }
-        if class == Class::Base {
-            if let Some(scalar) = self.constant(y) {
-                return Some(Rewrite::Scalar { value: x, scalar, op, reversed: false });
+        if let Some((class, op, x, Some(y))) = self.operation(id) {
+            if op == OpKind::Mul && x == y {
+                return Some(Rewrite::Square(x));
             }
-            if let Some(scalar) = self.constant(x) {
-                return Some(Rewrite::Scalar { value: y, scalar, op, reversed: true });
+            if class == Class::Base {
+                if let Some(scalar) = self.constant(y) {
+                    return Some(Rewrite::Scalar { value: x, scalar, op, reversed: false });
+                }
+                if let Some(scalar) = self.constant(x) {
+                    return Some(Rewrite::Scalar { value: y, scalar, op, reversed: true });
+                }
             }
-        }
-        if op != OpKind::Add {
             return None;
         }
-        if let (Some((a, b)), Some((c, d))) = (self.product(x), self.product(y)) {
+        if !matches!(self.graph.node(id).view(), ExprView::Sum { .. }) {
+            return None;
+        }
+        let class = self.graph.class(id);
+        let children = self.graph.children(id);
+        if let [x, y] = children
+            && let (Some((a, b)), Some((c, d))) = (self.product(*x), self.product(*y))
+        {
             for (common, left, other, right) in
                 [(a, b, c, d), (a, b, d, c), (b, a, c, d), (b, a, d, c)]
             {
@@ -218,10 +231,6 @@ impl<'g, 'a> Plan<'g, 'a> {
         }
         let mut terms = Vec::new();
         self.terms(id, class, true, &mut terms);
-        if terms.len() > MAX_TERMS {
-            // Keep a shared/materialized prefix and try its descendants later.
-            terms = vec![x, y];
-        }
         let pieces = self.pieces(&terms, class);
         if terms.len() >= 4 || pieces.iter().any(|p| matches!(p, Piece::Dot { .. })) {
             Some(Rewrite::Sum(pieces))

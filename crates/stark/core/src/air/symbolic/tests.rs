@@ -110,7 +110,7 @@ fn mixed_operators_normalize_constants_and_lift_dynamic_base_values() {
     let mut a = z();
     a += x();
     assert!(
-        matches!(a.view(), ExprView::Add { y, .. } if matches!(y.view(), ExprView::Lift { value } if value.domain() == ExpressionDomain::Base))
+        matches!(a.view(), ExprView::Sum { values } if matches!(values.get(1).unwrap().view(), ExprView::Lift { value } if value.domain() == ExpressionDomain::Base))
     );
     a *= F::new(3);
     assert!(
@@ -119,7 +119,7 @@ fn mixed_operators_normalize_constants_and_lift_dynamic_base_values() {
     let extension_scalar = EF::from_basis_coefficients_fn(|i| F::new(i as u64 + 1));
     a -= extension_scalar;
     assert!(
-        matches!(a.view(), ExprView::Sub { y, .. } if matches!(y.view(), ExprView::ExtensionConstant(_)))
+        matches!(a.view(), ExprView::Sum { values } if matches!(values.get(1).unwrap().view(), ExprView::ExtensionConstant(value) if *value == -extension_scalar))
     );
     assert_eq!(
         evaluate(&a),
@@ -355,12 +355,15 @@ fn fold_and_wire_preserve_sharing_at_the_operation_root() {
     });
     assert_eq!(ids.len(), 2);
     let wire = serde_json::to_value(&root).unwrap();
-    assert_eq!(wire["version"], 2);
+    assert_eq!(wire["version"], 3);
     assert!(!serde_json::to_string(&wire).unwrap().contains("degree_multiple"));
     let restored: B = serde_json::from_value(wire).unwrap();
     match restored.view() {
-        ExprView::Add { x, y, .. } => assert_eq!(x.identity(), y.identity()),
-        _ => panic!("expected addition"),
+        ExprView::Sum { values } => {
+            assert_eq!(values.len(), 2);
+            assert_eq!(values.get(0).unwrap().identity(), values.get(1).unwrap().identity());
+        },
+        _ => panic!("expected sum"),
     }
     assert_eq!(evaluate(&restored), evaluate(&root));
 }
@@ -393,7 +396,10 @@ fn current_wire_preserves_extension_domains_leaves_and_shared_operations() {
         let root = operation.clone() + operation;
         let restored = assert_wire_roundtrip(&root, expected.double());
         match restored.view() {
-            ExprView::Add { x, y } => {
+            ExprView::Sum { values } => {
+                assert_eq!(values.len(), 2);
+                let x = values.get(0).unwrap();
+                let y = values.get(1).unwrap();
                 assert_eq!(x.domain(), ExpressionDomain::Extension);
                 assert_eq!(y.domain(), ExpressionDomain::Extension);
                 assert!(x.identity().is_some());
@@ -415,15 +421,18 @@ fn current_wire_preserves_extension_domains_leaves_and_shared_operations() {
 }
 
 #[test]
-fn version_two_wire_rejects_bad_domains_references_lengths_and_degrees() {
+fn version_three_wire_rejects_bad_domains_references_lengths_and_degrees() {
     let original = serde_json::to_value(x() + y()).unwrap();
     let mut old = original.clone();
-    old["version"] = 1.into();
+    old["version"] = 2.into();
     assert!(serde_json::from_value::<B>(old).is_err());
     let mut forward = original.clone();
     let root = forward["root"].as_u64().unwrap();
-    forward["nodes"][root as usize]["op"]["Add"]["x"] = root.into();
+    forward["nodes"][root as usize]["op"]["Sum"]["values"][0] = root.into();
     assert!(serde_json::from_value::<B>(forward).is_err());
+    let mut obsolete = original.clone();
+    obsolete["nodes"][root as usize]["op"] = serde_json::json!({ "Add": { "x": 0, "y": 1 } });
+    assert!(serde_json::from_value::<B>(obsolete).is_err());
     let mut domain = original;
     domain["nodes"][root as usize]["domain"] = "Extension".into();
     assert!(serde_json::from_value::<B>(domain).is_err());
@@ -484,7 +493,7 @@ fn wire_normalizes_constant_embeddings_after_validating_domains() {
     let c = F::new(7);
     let expected = E::from(c);
     let lift = serde_json::json!({
-        "version": 2, "root": 1,
+        "version": 3, "root": 1,
         "nodes": [
             { "domain": "Base", "op": { "BaseConstant": c } },
             { "domain": "Extension", "op": { "Lift": { "value": 0 } } }
@@ -493,7 +502,7 @@ fn wire_normalizes_constant_embeddings_after_validating_domains() {
     let decoded: E = serde_json::from_value(lift.clone()).unwrap();
     assert_same_normal_form(&[expected.clone(), decoded]);
     let embedded = serde_json::json!({
-        "version": 2, "root": 0,
+        "version": 3, "root": 0,
         "nodes": [{ "domain": "Extension", "op": { "ExtensionConstant": EF::from(c) } }]
     });
     let decoded: E = serde_json::from_value(embedded.clone()).unwrap();
@@ -507,11 +516,11 @@ fn wire_normalizes_constant_embeddings_after_validating_domains() {
     assert!(serde_json::from_value::<B>(invalid_embed).is_err());
     // A constant operation cannot erase an illegal extension-to-base edge.
     let invalid_binary = serde_json::json!({
-        "version": 2, "root": 2,
+        "version": 3, "root": 2,
         "nodes": [
             { "domain": "Base", "op": { "BaseConstant": F::ZERO } },
             { "domain": "Extension", "op": { "ExtensionConstant": EF::from(c) } },
-            { "domain": "Base", "op": { "Add": { "x": 0, "y": 1 } } }
+            { "domain": "Base", "op": { "Sum": { "values": [0, 1] } } }
         ]
     });
     assert!(serde_json::from_value::<B>(invalid_binary).is_err());
@@ -530,14 +539,14 @@ fn wire_scalar_domains_cannot_bypass_typed_handles() {
     let expression = x() + F::new(3);
     let mut wire = serde_json::to_value(&expression).unwrap();
     let root = wire["root"].as_u64().unwrap() as usize;
-    let scalar = wire["nodes"][root]["op"]["Add"]["y"].as_u64().unwrap() as usize;
+    let scalar = wire["nodes"][root]["op"]["Sum"]["values"][1].as_u64().unwrap() as usize;
     wire["nodes"][scalar]["domain"] = serde_json::json!("Extension");
     assert!(serde_json::from_value::<B>(wire).is_err());
 
     let expression = z() + EF::from(F::new(3));
     let mut wire = serde_json::to_value(&expression).unwrap();
     let root = wire["root"].as_u64().unwrap() as usize;
-    let scalar = wire["nodes"][root]["op"]["Add"]["y"].as_u64().unwrap() as usize;
+    let scalar = wire["nodes"][root]["op"]["Sum"]["values"][1].as_u64().unwrap() as usize;
     wire["nodes"][scalar]["domain"] = serde_json::json!("Base");
     wire["nodes"][scalar]["op"] = serde_json::json!({ "BaseConstant": F::new(3) });
     assert!(serde_json::from_value::<E>(wire).is_err());
@@ -565,4 +574,109 @@ fn constant_aggregates_and_formal_identities_fold_before_emission() {
     let [c0, c1] = <B as Algebra<F>>::quadratic_extension_square(&values, F::new(7));
     assert!(matches!(c0.view(), ExprView::BaseConstant(c) if *c == F::new(67)));
     assert!(matches!(c1.view(), ExprView::BaseConstant(c) if *c == F::new(12)));
+}
+
+#[test]
+fn addition_and_subtraction_use_ordered_sums_and_negation() {
+    let expression = x() + y() - B::is_first_row();
+    match expression.view() {
+        ExprView::Sum { values } => {
+            assert_eq!(values.len(), 2);
+            assert!(
+                matches!(values.get(0).unwrap().view(), ExprView::Sum { values } if values.len() == 2)
+            );
+            assert!(
+                matches!(values.get(1).unwrap().view(), ExprView::Neg { x } if matches!(x.view(), ExprView::IsFirstRow))
+            );
+        },
+        _ => panic!("expected ordered signed sum"),
+    }
+    assert_wire_roundtrip(&expression, EF::from(F::new(4)));
+    let nested = x() + (y() + B::is_first_row());
+    assert!(
+        matches!(nested.view(), ExprView::Sum { values } if values.len() == 2 && matches!(values.get(1).unwrap().view(), ExprView::Sum { values } if values.len() == 2))
+    );
+    let explicit: B = [x() + y(), B::is_first_row()].into_iter().sum();
+    assert!(
+        matches!(explicit.view(), ExprView::Sum { values } if values.len() == 2 && matches!(values.get(0).unwrap().view(), ExprView::Sum { values } if values.len() == 2))
+    );
+}
+
+#[test]
+fn sums_collect_partial_constants_and_remove_zero_terms() {
+    let expression: B =
+        [B::ZERO, x(), B::from_u64(2), y(), B::from_u64(3), B::ZERO].into_iter().sum();
+    assert!(
+        matches!(expression.view(), ExprView::Sum { values } if values.len() == 3 && matches!(values.get(2).unwrap().view(), ExprView::BaseConstant(value) if *value == F::new(5)))
+    );
+    assert_wire_roundtrip(&expression, EF::from(F::new(10)));
+    assert_same_normal_form(&[x() + F::new(3) - F::new(3), x()]);
+    assert_same_normal_form(&[B::sum_array::<1>(&[x()]), x()]);
+    let extension_constant = EF::from_basis_coefficients_fn(|_| F::new(7));
+    assert_same_normal_form(&[
+        z() + extension_constant + EF::from(F::new(2)) - extension_constant,
+        z() + F::new(2),
+    ]);
+}
+
+#[test]
+fn negation_folds_constants_and_unwraps_double_negation() {
+    let shared = x() * y();
+    let double = -(-shared.clone());
+    assert_eq!(double.as_ref().identity(), shared.as_ref().identity());
+    assert_same_normal_form(&[-B::from_u64(3), B::from(-F::new(3))]);
+    let sum = x() + y();
+    let negative = -sum.clone();
+    assert!(
+        matches!(negative.view(), ExprView::Neg { x } if x.identity() == sum.as_ref().identity())
+    );
+    assert_wire_roundtrip(&negative, -EF::from(F::new(5)));
+}
+
+#[test]
+fn shared_sums_remain_shared_children() {
+    let shared = x() + y();
+    let expression = shared.clone() + B::is_first_row();
+    match expression.view() {
+        ExprView::Sum { values } => {
+            assert_eq!(values.len(), 2);
+            assert_eq!(values.get(0).unwrap().identity(), shared.as_ref().identity());
+        },
+        _ => panic!("expected sum with shared prefix"),
+    }
+    assert_wire_roundtrip(&expression, EF::from(F::new(6)));
+    assert_eq!(expression.poly_degree(8, &[]), 7);
+}
+
+#[test]
+fn binary_sum_grouping_is_independent_of_other_live_references() {
+    let shared = x() + y();
+    let with_reference = shared.clone() + B::is_first_row();
+    let consumed = (x() + y()) + B::is_first_row();
+    assert_same_normal_form(&[with_reference, consumed]);
+    let shared = x() + F::new(3);
+    assert_same_normal_form(&[shared.clone() + F::new(5), (x() + F::new(3)) + F::new(5)]);
+    assert_eq!(evaluate(&shared), EF::from(F::new(5)));
+}
+
+#[test]
+fn growing_binary_sums_keep_bounded_nodes_and_update_cached_degree() {
+    let mut expression = x() + y();
+    for _ in 0..32 {
+        expression += B::is_first_row();
+        assert!(matches!(expression.view(), ExprView::Sum { values } if values.len() == 2));
+        assert_eq!(expression.degree_multiple(), 1);
+    }
+    let mut sum_count = 0;
+    expression.as_ref().fold(|_, view, _: &[()]| {
+        if let ExprView::Sum { values } = view {
+            assert_eq!(values.len(), 2);
+            sum_count += 1;
+        }
+    });
+    assert_eq!(sum_count, 33);
+    expression += x().cube();
+    assert_eq!(expression.degree_multiple(), 3);
+    assert_eq!(expression.checked_poly_degree(8, &[]), Ok(21));
+    assert_eq!(evaluate(&expression), EF::from(F::new(45)));
 }

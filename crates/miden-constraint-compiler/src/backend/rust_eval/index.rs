@@ -190,8 +190,6 @@ fn parameters(view: View<'_>) -> Vec<u8> {
         ExprView::ExpPowerOf2 { power_log, .. } => word(&mut bytes, power_log),
         ExprView::ScalePow2 { exponent, .. } => bytes.extend_from_slice(&exponent.to_le_bytes()),
         ExprView::Lift { .. }
-        | ExprView::Add { .. }
-        | ExprView::Sub { .. }
         | ExprView::Mul { .. }
         | ExprView::LinearCombination { .. }
         | ExprView::Neg { .. }

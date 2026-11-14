@@ -81,9 +81,9 @@ pub struct AirEvaluator<'a> {
 
 /// Emit deterministic, prepared native evaluators directly from authored expressions.
 ///
-/// Arithmetic-only regions retain the existing scalar optimizer. Explicit sums,
-/// products, powers, and linear combinations remain opaque
-/// operation boundaries, and their results are shared across all uses.
+/// Sums retain shared and prepared boundaries while exposing unshared product
+/// regions to the scalar optimizer. Products, powers, and linear combinations
+/// retain their structured operation boundaries.
 ///
 /// # Panics
 /// Panics if source roots, classes, global positions, or addresses disagree with the descriptor,
@@ -436,14 +436,9 @@ impl<'g, 'a> Emitter<'g, 'a> {
     ) -> String {
         let ty = self.ty(class);
         match view {
-            ExprView::Add { .. } => self.binary(class, OpKind::Add, inputs[0], inputs[1]),
-            ExprView::Sub { .. } => self.binary(class, OpKind::Sub, inputs[0], inputs[1]),
             ExprView::Mul { .. } => self.binary(class, OpKind::Mul, inputs[0], inputs[1]),
             ExprView::Neg { .. } => format!("-{}", self.expr(inputs[0], class)),
-            ExprView::Sum { .. } => {
-                let values: Vec<_> = inputs.iter().map(|&id| self.expr(id, class)).collect();
-                format!("{ty}::sum_array::<{}>(&[{}])", values.len(), values.join(", "))
-            },
+            ExprView::Sum { .. } => self.signed_sum(class, inputs),
             ExprView::Product { .. } => {
                 let values: Vec<_> = inputs.iter().map(|&id| self.expr(id, class)).collect();
                 format!("[{}].into_iter().product::<{ty}>()", values.join(", "))
@@ -493,6 +488,87 @@ impl<'g, 'a> Emitter<'g, 'a> {
                 format!("{method}(&[{}], &[{}])", values.join(", "), coefficients.join(", "))
             },
             _ => unreachable!("leaf or lift passed to operation emitter"),
+        }
+    }
+
+    /// Render a small sum through signed operators, retaining narrow base operands
+    /// and materializing only negations that have a separate consumer.
+    fn signed_sum(&mut self, class: Class, inputs: &[usize]) -> String {
+        let mut terms = Vec::with_capacity(inputs.len());
+        for &id in inputs {
+            let (mut negative, value) = match self.plan.negated(id) {
+                Some(value) => (true, value),
+                None => (false, id),
+            };
+            let literal = self.graph.constant(value).map(|value| {
+                if value > Felt::ORDER / 2 {
+                    negative = !negative;
+                    Felt::ORDER - value
+                } else {
+                    value
+                }
+            });
+            let token = match literal {
+                Some(value) => Token {
+                    class: Class::Base,
+                    code: format!("{}::from(Felt::from_u64({value}))", self.types().base),
+                },
+                None => self.token(value),
+            };
+            terms.push((negative, token, literal));
+        }
+        let mut terms = terms.into_iter();
+        let Some((negative, token, _)) = terms.next() else {
+            return format!("{}::ZERO", self.ty(class));
+        };
+        let mut result_class = token.class;
+        let mut result = if negative {
+            format!("-{}", operand(&token))
+        } else {
+            operand(&token)
+        };
+        for (negative, token, literal) in terms {
+            let symbol = if negative { '-' } else { '+' };
+            let right = if result_class == Class::Base && token.class == Class::Base {
+                literal.map_or_else(|| operand(&token), |value| format!("Felt::from_u64({value})"))
+            } else {
+                operand(&token)
+            };
+            match (result_class, token.class, negative) {
+                (Class::Base, Class::Ext, false) => result = format!("{right} + ({result})"),
+                (Class::Base, Class::Ext, true) => {
+                    result = format!("{}::from({result}) - {right}", self.types().ext);
+                },
+                _ => result = format!("{result} {symbol} {right}"),
+            }
+            result_class = plan::join(result_class, token.class);
+        }
+        if class == Class::Ext && result_class == Class::Base {
+            format!("{}::from({result})", self.types().ext)
+        } else {
+            result
+        }
+    }
+
+    /// Bound arrays even when a source sum has accumulated many operands.
+    fn sum_values(&mut self, class: Class, values: &[String]) -> String {
+        if values.len() > MAX_TERMS {
+            let partials: Vec<_> = values
+                .chunks(MAX_TERMS)
+                .map(|chunk| {
+                    let rhs = self.sum_values(class, chunk);
+                    operand(&self.hoist(class, rhs))
+                })
+                .collect();
+            return self.sum_values(class, &partials);
+        }
+        match values.len() {
+            0 => format!("{}::ZERO", self.ty(class)),
+            1 => values[0].clone(),
+            2 | 3 => {
+                values.iter().map(|value| format!("({value})")).collect::<Vec<_>>().join(" + ")
+            },
+            n => format!("{}::sum_array::<{n}>(&[{}])", self.ty(class), values.join(", ")),
         }
     }
 
@@ -563,7 +639,8 @@ impl<'g, 'a> Emitter<'g, 'a> {
                 }
             },
             Rewrite::Sum(pieces) => {
-                let mut values = Vec::with_capacity(pieces.len());
+                let mut values = Vec::with_capacity(pieces.len().min(MAX_TERMS));
+                let mut partials = Vec::new();
                 for piece in pieces {
                     values.push(match piece {
                         Piece::Node(id) => self.expr(id, class),
@@ -592,19 +669,30 @@ impl<'g, 'a> Emitter<'g, 'a> {
                                     self.types().base
                                 ),
                             };
-                            format!("{method}(&[{}], &[{}])", terms.join(", "), coeffs.join(", "))
+                            let rhs = format!(
+                                "{method}(&[{}], &[{}])",
+                                terms.join(", "),
+                                coeffs.join(", ")
+                            );
+                            // Finish this dot before loading the next region's
+                            // operands, keeping its inputs out of later live ranges.
+                            operand(&self.hoist(class, rhs))
                         },
                     });
+                    if values.len() == MAX_TERMS {
+                        let rhs = self.sum_values(class, &values);
+                        partials.push(operand(&self.hoist(class, rhs)));
+                        values.clear();
+                    }
                 }
-                match values.len() {
-                    1 => values.pop().unwrap(),
-                    2 | 3 => values
-                        .into_iter()
-                        .map(|value| format!("({value})"))
-                        .collect::<Vec<_>>()
-                        .join(" + "),
-                    n => format!("{ty}::sum_array::<{n}>(&[{}])", values.join(", ")),
+                if partials.is_empty() {
+                    return self.sum_values(class, &values);
                 }
+                if !values.is_empty() {
+                    let rhs = self.sum_values(class, &values);
+                    partials.push(operand(&self.hoist(class, rhs)));
+                }
+                self.sum_values(class, &partials)
             },
         }
     }
@@ -1042,6 +1130,45 @@ mod tests {
     }
 
     #[test]
+    fn small_signed_sums_emit_subtraction_without_negation_bindings() {
+        for expression in [
+            main(0) - main(1),
+            -main(0) - main(1),
+            main(0) - main(1) + main(2),
+            main(0) - B::ONE,
+        ] {
+            let output = emit(&[Assertion::Base(expression)]);
+            assert!(row(&output).contains(" - "), "{output}");
+            assert!(!row(&output).contains("sum_array"), "{output}");
+            assert!(
+                !row(&output).lines().any(|line| {
+                    line.contains(" = -") && !line.contains(" - ") && !line.contains(" + ")
+                }),
+                "single-use signs should stay in the sum: {output}"
+            );
+        }
+        let output = emit(&[Assertion::Base(main(0) - B::ONE)]);
+        assert!(row(&output).contains(" - Felt::from_u64(1)"), "{output}");
+    }
+
+    #[test]
+    fn signed_sums_preserve_shared_negations_and_mixed_operand_types() {
+        let negative = -main(0);
+        let output = emit(&[Assertion::Base(negative.dup()), Assertion::Base(main(1) + negative)]);
+        assert_eq!(row(&output).matches(" = -").count(), 1, "{output}");
+        assert!(!row(&output).contains("sum_array"), "{output}");
+
+        let output = emit(&[
+            Assertion::Extension(aux(0) - main(0)),
+            Assertion::Extension(E::from(main(0)) - aux(0)),
+            Assertion::Extension(aux(1) + main(1)),
+        ]);
+        assert!(!row(&output).contains("sum_array"), "{output}");
+        assert!(row(&output).contains(" - h"), "{output}");
+        assert_eq!(row(&output).matches("AB::ExtExpr::from(").count(), 1, "{output}");
+    }
+
+    #[test]
     fn scalar_sum_patterns_recover_homogeneous_scalar_and_mixed_dots() {
         let values: Vec<_> = (0..8).map(main).collect();
         let plain = base_sum(values[..4].iter().cloned());
@@ -1121,6 +1248,22 @@ mod tests {
             row(&output).lines().filter(|line| line.contains("builder.emit_base")).collect();
         assert_eq!(assertions.len(), 3);
         assert_eq!(assertions[1], assertions[2], "shared assertion roots must reuse the binding");
+    }
+
+    #[test]
+    fn long_flat_product_sums_keep_dot_arrays_bounded() {
+        let output =
+            emit(&[Assertion::Base(base_sum((0..40).map(|i| main(2 * i) * main(2 * i + 1))))]);
+        assert!(output.contains("dot_product::<16>"), "{output}");
+        let row = row(&output);
+        assert!(
+            row.find("dot_product::<16>").unwrap() < row.find("m0[32]").unwrap(),
+            "finish the first dot before loading the next chunk: {output}"
+        );
+        for n in 17..=40 {
+            assert!(!output.contains(&format!("dot_product::<{n}>")), "{output}");
+            assert!(!output.contains(&format!("sum_array::<{n}>")), "{output}");
+        }
     }
 
     #[test]

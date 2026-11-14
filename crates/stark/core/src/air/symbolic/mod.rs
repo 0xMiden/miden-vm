@@ -10,6 +10,10 @@
 //! operation arities, and degree bounds. Base-to-extension conversions retain explicit lifts for
 //! dynamic values and normalize base-embedded constants into the result domain.
 //!
+//! Addition and subtraction use ordered sums and negation. Binary operators retain small sum
+//! nodes so accumulation stays linear and preserves reusable or prepared intermediates. Explicit
+//! reductions collect their direct terms; use-aware flattening belongs to the compiler.
+//!
 //! Sums, products, linear combinations, powers, signed power-of-two scaling, and boolean checks
 //! preserve useful ring operations. Each operation produces one scalar expression. Quadratic
 //! extension squares, XOR, XOR3, and ANDN use the field traits' arithmetic expansions.
@@ -123,14 +127,6 @@ struct Node<F, EF> {
 #[derive(Debug)]
 enum Op<F, EF> {
     Lift(RawExpr<F, EF>),
-    Add {
-        x: RawExpr<F, EF>,
-        y: RawExpr<F, EF>,
-    },
-    Sub {
-        x: RawExpr<F, EF>,
-        y: RawExpr<F, EF>,
-    },
     Mul {
         x: RawExpr<F, EF>,
         y: RawExpr<F, EF>,
@@ -229,8 +225,79 @@ impl<F: Field, EF: ExtensionField<F>> RawExpr<F, EF> {
         {
             return Ok(Self::from_constant(domain, value));
         }
+        match op {
+            Op::Neg(value) => return Ok(value.negated()),
+            Op::Sum(values) => return Ok(Self::sum(domain, values.into_vec())),
+            _ => {},
+        }
         let degree_multiple = traversal::op_degree(&op, |value| Ok(value.degree_multiple()))?;
         Ok(RawExpr::Node(Arc::new(Node { domain, degree_multiple, op })))
+    }
+
+    fn negated(self) -> Self {
+        let domain = self.domain();
+        if let Some(value) = self.constant() {
+            return Self::from_constant(domain, -value);
+        }
+        if let RawExpr::Node(node) = &self
+            && let Op::Neg(value) = &node.op
+        {
+            return value.clone();
+        }
+        let degree_multiple = self.degree_multiple();
+        RawExpr::Node(Arc::new(Node {
+            domain,
+            degree_multiple,
+            op: Op::Neg(self),
+        }))
+    }
+
+    /// Fold only direct terms. Retaining nested sums makes construction independent
+    /// of Arc ownership and keeps binary accumulation linear in the number of terms.
+    fn sum(domain: ExpressionDomain, values: impl IntoIterator<Item = Self>) -> Self {
+        let values = values.into_iter();
+        let mut terms = Vec::with_capacity(values.size_hint().0);
+        let mut constant = EF::ZERO;
+        let mut degree_multiple = 0;
+        for value in values {
+            assert_eq!(value.domain(), domain, "invalid symbolic sum domain");
+            if let Some(value) = value.constant() {
+                constant += value;
+            } else {
+                degree_multiple = degree_multiple.max(value.degree_multiple());
+                terms.push(value);
+            }
+        }
+        if !constant.is_zero() {
+            terms.push(Self::from_constant(domain, constant));
+        }
+        match terms.len() {
+            0 => Self::from_constant(domain, EF::ZERO),
+            1 => terms.pop().unwrap(),
+            _ => RawExpr::Node(Arc::new(Node {
+                domain,
+                degree_multiple,
+                op: Op::Sum(terms.into_boxed_slice()),
+            })),
+        }
+    }
+
+    fn additive(self, rhs: Self) -> Self {
+        let domain = self.domain();
+        // Updating a two-term sum's constant tail is bounded work, even when
+        // the prefix is shared. Larger sums retain their explicit boundaries.
+        if let Some(right) = rhs.constant()
+            && let RawExpr::Node(node) = &self
+            && let Op::Sum(values) = &node.op
+            && values.len() == 2
+            && let Some(left) = values[1].constant()
+        {
+            return Self::sum(
+                domain,
+                [values[0].clone(), Self::from_constant(domain, left + right)],
+            );
+        }
+        Self::sum(domain, [self, rhs])
     }
 }
 fn validate_op<F: Field, EF: ExtensionField<F>>(
@@ -242,7 +309,7 @@ fn validate_op<F: Field, EF: ExtensionField<F>>(
         Op::Lift(value) => {
             domain == ExpressionDomain::Extension && value.domain() == ExpressionDomain::Base
         },
-        Op::Add { x, y } | Op::Sub { x, y } | Op::Mul { x, y } => same(x) && same(y),
+        Op::Mul { x, y } => same(x) && same(y),
         Op::Neg(x) | Op::Exp { x, .. } | Op::ExpPowerOf2 { x, .. } | Op::BoolCheck(x) => same(x),
         Op::ScalePow2 { x, exponent } => {
             if exponent.unsigned_abs() > u128::from(u64::MAX) {
@@ -329,37 +396,30 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         }
     }
     fn binary(self, rhs: Self, kind: Binary) -> Self {
+        match kind {
+            Binary::Add => {
+                return Self::from_raw(self.raw.additive(rhs.raw));
+            },
+            Binary::Sub => {
+                return Self::from_raw(self.raw.additive(rhs.raw.negated()));
+            },
+            Binary::Mul => {},
+        }
         if let (Some(x), Some(y)) = (self.raw.constant(), rhs.raw.constant()) {
-            let value = match kind {
-                Binary::Add => x + y,
-                Binary::Sub => x - y,
-                Binary::Mul => x * y,
-            };
-            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, x * y));
         }
-        if rhs.raw.constant().is_some_and(|value| value.is_zero()) {
-            return match kind {
-                Binary::Add | Binary::Sub => self,
-                Binary::Mul => Self::ZERO,
-            };
+        if self.raw.constant().is_some_and(|value| value.is_zero())
+            || rhs.raw.constant().is_some_and(|value| value.is_zero())
+        {
+            return Self::ZERO;
         }
-        if matches!(kind, Binary::Mul) && rhs.raw.constant().is_some_and(|value| value.is_one()) {
+        if rhs.raw.constant().is_some_and(|value| value.is_one()) {
             return self;
         }
-        let left_zero = self.raw.constant().is_some_and(|value| value.is_zero());
-        let left_one = self.raw.constant().is_some_and(|value| value.is_one());
-        if left_zero || (left_one && matches!(kind, Binary::Mul)) {
-            if left_zero && matches!(kind, Binary::Mul) {
-                return Self::ZERO;
-            }
-            return if matches!(kind, Binary::Sub) { -rhs } else { rhs };
+        if self.raw.constant().is_some_and(|value| value.is_one()) {
+            return rhs;
         }
-        let op = match kind {
-            Binary::Add => Op::Add { x: self.raw, y: rhs.raw },
-            Binary::Sub => Op::Sub { x: self.raw, y: rhs.raw },
-            Binary::Mul => Op::Mul { x: self.raw, y: rhs.raw },
-        };
-        Self::operation(op)
+        Self::operation(Op::Mul { x: self.raw, y: rhs.raw })
     }
     fn unary(
         self,
@@ -371,19 +431,8 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         }
         Self::operation(op(self.raw))
     }
-    fn sum_values(values: Vec<RawExpr<F, EF>>) -> Self {
-        if values.is_empty() {
-            return Self::ZERO;
-        }
-        if values.len() == 1 {
-            return Self::from_raw(values.into_iter().next().unwrap());
-        }
-        if let Some(value) =
-            values.iter().try_fold(EF::ZERO, |sum, value| Some(sum + value.constant()?))
-        {
-            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
-        }
-        Self::operation(Op::Sum(values.into_boxed_slice()))
+    fn sum_values(values: impl IntoIterator<Item = RawExpr<F, EF>>) -> Self {
+        Self::from_raw(RawExpr::sum(D::DOMAIN, values))
     }
     fn product_values(values: Vec<RawExpr<F, EF>>) -> Self {
         if values.is_empty() {
@@ -531,7 +580,7 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> PrimeCharacteristicRing for Exp
     }
     fn sum_array<const N: usize>(input: &[Self]) -> Self {
         assert_eq!(N, input.len());
-        Self::sum_values(input.iter().map(|value| value.raw.clone()).collect())
+        Self::sum_values(input.iter().map(|value| value.raw.clone()))
     }
     fn dot_product<const N: usize>(lhs: &[Self; N], rhs: &[Self; N]) -> Self {
         Self::linear_combination(
@@ -555,7 +604,8 @@ macro_rules! binary_operator {
             for Expr<F, EF, D>
         {
             fn $assign_method(&mut self, rhs: T) {
-                *self = self.clone().binary(rhs.into(), Binary::$kind);
+                let value = core::mem::take(self);
+                *self = value.binary(rhs.into(), Binary::$kind);
             }
         }
     };
@@ -566,12 +616,12 @@ binary_operator!(Mul, mul, Mul, MulAssign, mul_assign);
 impl<F: Field, EF: ExtensionField<F>, D: Domain> ops::Neg for Expr<F, EF, D> {
     type Output = Self;
     fn neg(self) -> Self {
-        self.unary(Op::Neg, |value| -value)
+        Self::from_raw(self.raw.negated())
     }
 }
 impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> Sum<T> for Expr<F, EF, D> {
     fn sum<I: Iterator<Item = T>>(iter: I) -> Self {
-        Self::sum_values(iter.map(|value| value.into().raw).collect())
+        Self::sum_values(iter.map(|value| value.into().raw))
     }
 }
 impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> Product<T> for Expr<F, EF, D> {

@@ -560,20 +560,13 @@ impl<F: Field> DegreeWalker<'_, F> {
                 encoded.extend_from_slice(&x.fingerprint);
                 self.ops[x.degree]
             },
-            ExprView::Add { x, y, .. }
-            | ExprView::Sub { x, y, .. }
-            | ExprView::Mul { x, y, .. } => {
+            ExprView::Mul { x, y } => {
                 let x = self.expression(x)?;
                 let y = self.expression(y)?;
-                let (tag, op) = match e.view() {
-                    ExprView::Add { .. } => (14, DegreeOp::Max(x.degree, y.degree)),
-                    ExprView::Sub { .. } => (15, DegreeOp::Max(x.degree, y.degree)),
-                    _ => (16, DegreeOp::Sum(x.degree, y.degree)),
-                };
-                encoded.push(tag);
+                encoded.push(16);
                 encoded.extend_from_slice(&x.fingerprint);
                 encoded.extend_from_slice(&y.fingerprint);
-                op
+                DegreeOp::Sum(x.degree, y.degree)
             },
             ExprView::Sum { values } | ExprView::Product { values } => {
                 let product = matches!(e.view(), ExprView::Product { .. });

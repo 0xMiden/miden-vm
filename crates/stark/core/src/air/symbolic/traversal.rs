@@ -57,14 +57,6 @@ pub enum ExprView<'a, F, EF> {
     Lift {
         value: ExprRef<'a, F, EF>,
     },
-    Add {
-        x: ExprRef<'a, F, EF>,
-        y: ExprRef<'a, F, EF>,
-    },
-    Sub {
-        x: ExprRef<'a, F, EF>,
-        y: ExprRef<'a, F, EF>,
-    },
     Mul {
         x: ExprRef<'a, F, EF>,
         y: ExprRef<'a, F, EF>,
@@ -72,7 +64,8 @@ pub enum ExprView<'a, F, EF> {
     Neg {
         x: ExprRef<'a, F, EF>,
     },
-    /// Ordered sum, with zero as the empty identity.
+    /// Ordered sum, with zero as the empty identity. Nested sums retain construction
+    /// boundaries for sharing and preparation; the compiler may flatten them.
     Sum {
         values: ExprList<'a, F, EF>,
     },
@@ -131,8 +124,6 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
             RawExpr::IsTransition => ExprView::IsTransition,
             RawExpr::Node(node) => match &node.op {
                 Op::Lift(value) => ExprView::Lift { value: child(value) },
-                Op::Add { x, y } => ExprView::Add { x: child(x), y: child(y) },
-                Op::Sub { x, y } => ExprView::Sub { x: child(x), y: child(y) },
                 Op::Mul { x, y } => ExprView::Mul { x: child(x), y: child(y) },
                 Op::Neg(x) => ExprView::Neg { x: child(x) },
                 Op::Sum(values) => ExprView::Sum { values: ExprList { values } },
@@ -226,9 +217,18 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
     ) -> Result<usize, ExpressionError> {
         self.checked_degree_with(|_, view| {
             Ok(match view {
-                ExprView::BaseInput(input) => input.poly_degree(trace_len, periodic_periods),
-                ExprView::AuxInput(input) => input.poly_degree(trace_len),
-                ExprView::IsFirstRow | ExprView::IsLastRow => trace_len.saturating_sub(1),
+                ExprView::BaseInput(BaseInput::Public { .. }) => 0,
+                ExprView::BaseInput(BaseInput::Periodic { index }) => {
+                    let period =
+                        periodic_periods.get(index).copied().unwrap_or(trace_len).min(trace_len);
+                    trace_len
+                        .checked_div(period)
+                        .map_or_else(|| trace_len.saturating_sub(1), |cycles| trace_len - cycles)
+                },
+                ExprView::BaseInput(_)
+                | ExprView::AuxInput(AuxInput::Trace { .. })
+                | ExprView::IsFirstRow
+                | ExprView::IsLastRow => trace_len.saturating_sub(1),
                 ExprView::IsTransition => 1,
                 _ => 0,
             })
@@ -246,8 +246,6 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
     ) -> R {
         self.fold(|expression, view, values: &[R]| match view {
             ExprView::Lift { .. } => values[0].dup(),
-            ExprView::Add { .. } => values[0].dup() + values[1].dup(),
-            ExprView::Sub { .. } => values[0].dup() - values[1].dup(),
             ExprView::Mul { .. } => values[0].dup() * values[1].dup(),
             ExprView::Neg { .. } => -values[0].dup(),
             ExprView::Sum { .. } => values.iter().cloned().sum(),
@@ -289,9 +287,7 @@ impl<'a, F, EF> Iterator for ExprChildren<'a, F, EF> {
             | ExprView::ExpPowerOf2 { x, .. }
             | ExprView::ScalePow2 { x, .. }
             | ExprView::BoolCheck { x } => (index == 0).then_some(x),
-            ExprView::Add { x, y, .. }
-            | ExprView::Sub { x, y, .. }
-            | ExprView::Mul { x, y, .. } => match index {
+            ExprView::Mul { x, y, .. } => match index {
                 0 => Some(x),
                 1 => Some(y),
                 _ => None,
@@ -316,7 +312,6 @@ pub(super) fn op_degree<'a, F, EF>(
     let add = |a: usize, b: usize| a.checked_add(b).ok_or(ExpressionError::DegreeOverflow);
     match op {
         Op::Lift(x) | Op::Neg(x) | Op::ScalePow2 { x, .. } => degree(x),
-        Op::Add { x, y, .. } | Op::Sub { x, y, .. } => Ok(degree(x)?.max(degree(y)?)),
         Op::Mul { x, y, .. } => add(degree(x)?, degree(y)?),
         Op::Sum(values) => values.iter().try_fold(0, |acc, value| Ok(acc.max(degree(value)?))),
         Op::Product(values) => values.iter().try_fold(0, |acc, value| add(acc, degree(value)?)),
@@ -377,16 +372,6 @@ pub(super) fn to_base<F: Field, EF: ExtensionField<F>>(
                     Op::Neg(x) => {
                         RawExpr::node(ExpressionDomain::Base, Op::Neg(walk(x, cache)?)).ok()
                     },
-                    Op::Add { x, y, .. } => RawExpr::node(
-                        ExpressionDomain::Base,
-                        Op::Add { x: walk(x, cache)?, y: walk(y, cache)? },
-                    )
-                    .ok(),
-                    Op::Sub { x, y, .. } => RawExpr::node(
-                        ExpressionDomain::Base,
-                        Op::Sub { x: walk(x, cache)?, y: walk(y, cache)? },
-                    )
-                    .ok(),
                     Op::Mul { x, y, .. } => RawExpr::node(
                         ExpressionDomain::Base,
                         Op::Mul { x: walk(x, cache)?, y: walk(y, cache)? },
