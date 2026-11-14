@@ -1514,7 +1514,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "miden-ace"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-crypto",
  "thiserror",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air-definitions"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-ace",
  "miden-core",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "log",
  "miden-assembly-syntax-cst",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive_more",
  "log",
@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "blake3",
  "cc",
@@ -1657,7 +1657,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1683,14 +1683,14 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-abi"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-field",
 ]
 
 [[package]]
 name = "miden-field"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "hashbrown 0.17.1",
  "miden-assembly-syntax",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "itertools 0.15.0",
  "miden-ace",
@@ -1811,7 +1811,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1836,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1846,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stark"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1887,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-serde-utils",
  "proptest",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "lock_api",
  "loom",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "miden-wasm-event-handlers"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-crypto",
  "miden-event-handler-abi",
@@ -1919,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
