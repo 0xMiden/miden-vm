@@ -7,7 +7,7 @@ use core::ops::ControlFlow;
 
 use {
     miden_assembly_syntax::ast::constants::eval::CachedConstantValue,
-    miden_assembly_syntax::diagnostics::RelatedError,
+    crate::diagnostics::RelatedError,
     miden_assembly_syntax::module::ItemInfo,
     miden_assembly_syntax::sema::ConstEvalVisitor,
 };

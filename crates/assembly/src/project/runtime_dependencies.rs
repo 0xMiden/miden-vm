@@ -4,7 +4,7 @@ use {
     alloc::sync::Arc,
 };
 
-use miden_assembly_syntax::diagnostics::Report;
+use crate::diagnostics::Report;
 use {
     miden_mast_package::Dependency as PackageDependency,
     miden_mast_package::Package as MastPackage,

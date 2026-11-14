@@ -13,8 +13,8 @@ use {
     crate::debuginfo::SourceSpan,
 };
 use {
-    miden_utils_diagnostics::Diagnostic,
-    miden_utils_diagnostics::miette,
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::miette,
 };
 
 use {

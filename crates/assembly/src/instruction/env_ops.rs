@@ -5,7 +5,7 @@ use {
     miden_assembly_syntax::ast::Immediate,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::Report,
     miden_assembly_syntax::parser::ParsingError,
     miden_assembly_syntax::parser::WordValue,
 };

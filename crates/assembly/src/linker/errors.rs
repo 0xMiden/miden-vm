@@ -17,10 +17,10 @@ use {
     miden_assembly_syntax::ast::constants::ConstEvalError,
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
-    miden_assembly_syntax::diagnostics::Diagnostic,
-    miden_assembly_syntax::diagnostics::RelatedError,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    miden_assembly_syntax::diagnostics::miette,
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::RelatedError,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::miette,
 };
 
 // LINKER ERROR

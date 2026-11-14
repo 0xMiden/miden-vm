@@ -19,8 +19,8 @@ use {
     crate::debuginfo::Uri,
 };
 use {
-    miden_utils_diagnostics::IntoDiagnostic,
-    miden_utils_diagnostics::Report,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
 };
 
 pub use {
@@ -140,8 +140,8 @@ impl ModuleParser {
     {
         use crate::debuginfo::SourceManagerExt;
         use {
-            miden_utils_diagnostics::IntoDiagnostic,
-            miden_utils_diagnostics::WrapErr,
+            crate::diagnostics::IntoDiagnostic,
+            crate::diagnostics::WrapErr,
         };
 
         let file_path = file_path.as_ref();
@@ -214,7 +214,7 @@ pub fn read_modules_from_root(
     source_manager: Arc<dyn SourceManager>,
     warnings_as_errors: bool,
 ) -> Result<(Box<ast::Module>, Vec<Box<ast::Module>>), Report> {
-    use miden_utils_diagnostics::report;
+    use crate::diagnostics::report;
 
     let root = root.as_ref();
     let root = Arc::<std::path::Path>::from(

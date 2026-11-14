@@ -8,7 +8,7 @@ use {
 };
 use std::path::Path as FsPath;
 
-use miden_assembly_syntax::diagnostics::Report;
+use crate::diagnostics::Report;
 use {
     miden_core::Word,
     crate::utils::hash_string_to_word,

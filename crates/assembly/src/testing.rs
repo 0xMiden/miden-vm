@@ -16,9 +16,9 @@ use {
     miden_assembly_syntax::ast::ModuleKind,
     crate::debuginfo::DefaultSourceManager,
     crate::debuginfo::SourceManager,
-    miden_assembly_syntax::diagnostics::Report,
-    miden_assembly_syntax::diagnostics::reporting::ReportHandlerOpts,
-    miden_assembly_syntax::diagnostics::reporting::set_hook,
+    crate::diagnostics::Report,
+    crate::diagnostics::reporting::ReportHandlerOpts,
+    crate::diagnostics::reporting::set_hook,
 };
 pub use {
     miden_assembly_syntax::assert_diagnostic,

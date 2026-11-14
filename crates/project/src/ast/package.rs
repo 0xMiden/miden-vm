@@ -15,7 +15,7 @@ use {
 use {
     crate::Map,
     crate::MetadataSet,
-    crate::RelatedLabel,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
     crate::SemVer,
     miden_assembly_syntax::debuginfo::SourceId,
     miden_assembly_syntax::debuginfo::Span,

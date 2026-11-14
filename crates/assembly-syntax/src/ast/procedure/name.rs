@@ -17,9 +17,9 @@ use {
     crate::debuginfo::Spanned,
 };
 use {
-    miden_utils_diagnostics::IntoDiagnostic,
-    miden_utils_diagnostics::Report,
-    miden_utils_diagnostics::miette,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
+    crate::diagnostics::miette,
 };
 
 use {

@@ -2,8 +2,8 @@ use {
     miden_assembly_syntax::ParsingError,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::Report,
 };
 use {
     miden_core::Felt,

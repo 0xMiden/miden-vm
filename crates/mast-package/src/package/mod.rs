@@ -23,7 +23,7 @@ use {
 
 use {
     miden_assembly_syntax::Path,
-    miden_assembly_syntax::Report,
+    miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::ast,
     miden_assembly_syntax::ast::QualifiedProcedureName,
     miden_assembly_syntax::module::ModuleDescriptor,

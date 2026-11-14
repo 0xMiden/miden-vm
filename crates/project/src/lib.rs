@@ -23,7 +23,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Report,
+    miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Span,
     miden_assembly_syntax::diagnostics::Diagnostic,

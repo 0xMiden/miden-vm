@@ -15,7 +15,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Report,
+    miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::debuginfo::DefaultSourceManager,
     miden_assembly_syntax::debuginfo::SourceManager,
     crate::Uri,

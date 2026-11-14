@@ -5,7 +5,7 @@ use {
     miden_assembly_syntax::ast::InvocationTarget,
     miden_assembly_syntax::ast::InvokeKind,
     crate::debuginfo::SourceSpan,
-    miden_assembly_syntax::diagnostics::Report,
+    crate::diagnostics::Report,
 };
 use {
     miden_core::operations::AssemblyOp,

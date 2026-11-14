@@ -41,13 +41,13 @@ pub use {
     self::workspace::WorkspaceFile,
 };
 use {
-    crate::Diagnostic,
-    crate::Label,
-    crate::RelatedError,
-    crate::Report,
+    miden_assembly_syntax::diagnostics::Diagnostic,
+    miden_assembly_syntax::diagnostics::Label,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::debuginfo::SourceFile,
     miden_assembly_syntax::debuginfo::SourceSpan,
-    crate::miette,
+    miden_assembly_syntax::diagnostics::miette,
 };
 
 /// Represents all possible variants of `miden-project.toml`
