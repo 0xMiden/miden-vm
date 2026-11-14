@@ -103,7 +103,7 @@ rule table, and duplicate emitter/preparation path have already been removed.
 | A1 | Normalize coefficient values/conversions and remove original-overload metadata end to end | Implemented |
 | A2 | Use a clear current source/setup fingerprint policy without semantic-equality or historical-version promises | Implemented |
 | A3 | Replace structural ACE/generated-code comparisons with independent semantic checks and delete redundant helpers | Implemented |
-| A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Approved, pending |
+| A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Implemented |
 | A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Approved, pending |
 | A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Approved, pending |
 | A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Approved, pending |
@@ -499,7 +499,7 @@ A1–A7, rather than expecting the old test count to remain fixed.
 - [x] A1 — normalize constants/conversions and infer coefficient dispatch; delete overload metadata.
 - [x] A2 — keep a clear structural source/setup identity, with no polynomial-canonical or historical-version promise.
 - [x] A3 — add independent current semantic checks; remove exact structural oracle and unused test helpers.
-- [ ] A4 — delete archived AIR references; retain useful cases as current tests.
+- [x] A4 — delete archived AIR references; retain useful cases as current tests.
 - [ ] A5 — delete old PVM proof-version artifacts; retain current negative verification coverage.
 - [ ] A6 — remove duplicated/historical documentation and preserve minimal provenance.
 - [ ] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
