@@ -11,8 +11,8 @@ fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
         crate::ast::types::Type,
     };
     use {
-        miden_mast_package::Package,
-        miden_mast_package::PackageExport,
+        crate::package::Package,
+        crate::package::PackageExport,
     };
 
     let context = TestContext::new();
@@ -66,7 +66,7 @@ fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
 #[test]
 fn variadic_procedure_signatures_resolve() -> TestResult {
     use crate::ast::types::Type;
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -117,7 +117,7 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("a struct recursing through a pointer should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
 
     let node = package
         .manifest
@@ -146,8 +146,8 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
 #[test]
 fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
     use {
-        miden_mast_package::Package,
-        miden_mast_package::PackageExport,
+        crate::package::Package,
+        crate::package::PackageExport,
     };
 
     let context = TestContext::new();
@@ -223,7 +223,7 @@ fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("mutually recursive structs should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
 
     let find = |suffix: &str| {
         package
@@ -310,7 +310,7 @@ fn a_finite_cycle_through_an_alias_resolves() -> TestResult {
             .assemble_library("lib", None, module, [])
             .expect("a finite cycle through an alias should resolve");
 
-        use miden_mast_package::PackageExport;
+        use crate::package::PackageExport;
         let b = package
             .manifest
             .exports()
@@ -349,7 +349,7 @@ fn an_alias_used_twice_in_one_aggregate_resolves() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("an alias used twice should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
     let b = package
         .manifest
         .exports()

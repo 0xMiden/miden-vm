@@ -21,11 +21,11 @@ use {
     miden_core::operations::Operation,
 };
 use {
-    miden_mast_package::debug_info::DebugFunctionIdx,
-    miden_mast_package::debug_info::DebugLocIdx,
-    miden_mast_package::debug_info::DebugSourceAsmOp,
-    miden_mast_package::debug_info::DebugSourceInlineCall,
-    miden_mast_package::debug_info::DebugSourceVar,
+    crate::package::debug_info::DebugFunctionIdx,
+    crate::package::debug_info::DebugLocIdx,
+    crate::package::debug_info::DebugSourceAsmOp,
+    crate::package::debug_info::DebugSourceInlineCall,
+    crate::package::debug_info::DebugSourceVar,
 };
 
 use {

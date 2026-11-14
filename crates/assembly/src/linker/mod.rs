@@ -86,7 +86,7 @@ use {
     miden_core::advice::AdviceMap,
     miden_core::program::KernelDescriptor,
 };
-use miden_mast_package::Package as MastPackage;
+use crate::package::Package as MastPackage;
 use {
     smallvec::SmallVec,
     smallvec::smallvec,

@@ -34,9 +34,9 @@ use {
     crate::debuginfo::SourceFile,
 };
 use miden_core::program::Program;
-use miden_mast_package::PackageId;
+use crate::package::PackageId;
 #[cfg(all(test, feature = "std"))]
-use miden_project::TargetType;
+use crate::package::TargetType;
 
 use crate::assembler::Assembler;
 #[cfg(feature = "std")]
@@ -181,7 +181,7 @@ impl TestContext {
     #[cfg(all(test, feature = "std"))]
     pub(crate) fn add_library(
         &mut self,
-        package: Arc<miden_mast_package::Package>,
+        package: Arc<crate::package::Package>,
     ) -> Result<(), Report> {
         self.assembler.link_package(package, miden_project::Linkage::Dynamic)
     }
@@ -205,7 +205,7 @@ impl TestContext {
         version: Option<&str>,
         root: Box<Module>,
         support: impl IntoIterator<Item = Box<Module>>,
-    ) -> Result<Box<miden_mast_package::Package>, Report> {
+    ) -> Result<Box<crate::package::Package>, Report> {
         let version = version.unwrap_or("0.0.0").parse().unwrap();
         let mut package = self.assembler().assemble_library(name, root, support)?;
         package.version = version;
@@ -226,8 +226,8 @@ mod package_features {
     };
 
     use {
-        miden_mast_package::Package,
-        miden_mast_package::PackageId,
+        crate::package::Package,
+        crate::package::PackageId,
     };
     use {
         miden_package_registry::PackageCache,
@@ -485,7 +485,7 @@ mod package_features {
             use alloc::string::ToString;
 
             use miden_assembly_syntax::source_file;
-            use miden_mast_package::Dependency;
+            use crate::package::Dependency;
 
             let export_path = Path::new(export);
             let (export_leaf, export_module) = export_path.split_last().unwrap();

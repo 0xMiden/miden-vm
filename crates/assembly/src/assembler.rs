@@ -48,24 +48,24 @@ use {
     crate::serde::Serializable,
 };
 use {
-    miden_mast_package::ConstantExport,
-    miden_mast_package::Package,
-    miden_mast_package::PackageDebugInfoError,
-    miden_mast_package::PackageExport,
-    miden_mast_package::PackageId,
-    miden_mast_package::PackageModule,
-    miden_mast_package::PackageSubmodule,
-    miden_mast_package::ProcedureExport,
-    miden_mast_package::Section,
-    miden_mast_package::SectionId,
-    miden_mast_package::TypeExport,
-    miden_mast_package::debug_info::DebugFunctionIdx,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
+    crate::package::ConstantExport,
+    crate::package::Package,
+    crate::package::PackageDebugInfoError,
+    crate::package::PackageExport,
+    crate::package::PackageId,
+    crate::package::PackageModule,
+    crate::package::PackageSubmodule,
+    crate::package::ProcedureExport,
+    crate::package::Section,
+    crate::package::SectionId,
+    crate::package::TypeExport,
+    crate::package::debug_info::DebugFunctionIdx,
+    crate::package::debug_info::DebugSourceNodeId,
+    crate::package::debug_info::PackageDebugInfo,
 };
 use {
     miden_project::Linkage,
-    miden_project::TargetType,
+    crate::package::TargetType,
 };
 
 use {
@@ -1131,7 +1131,7 @@ impl Assembler {
         let package = Box::new(
             Package::create_with_modules(
                 name,
-                miden_mast_package::Version::new(0, 0, 0),
+                crate::package::Version::new(0, 0, 0),
                 kind,
                 mast,
                 exports.into_values(),
@@ -1186,7 +1186,7 @@ impl Assembler {
         let package = Box::new(
             Package::create(
                 name,
-                miden_mast_package::Version::new(0, 0, 0),
+                crate::package::Version::new(0, 0, 0),
                 TargetType::Executable,
                 mast,
                 vec![PackageExport::Procedure(

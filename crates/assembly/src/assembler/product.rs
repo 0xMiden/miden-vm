@@ -1,6 +1,6 @@
 use {
-    miden_mast_package::Dependency,
-    miden_mast_package::debug_info::PackageDebugInfo,
+    crate::package::Dependency,
+    crate::package::debug_info::PackageDebugInfo,
 };
 
 use super::*;
@@ -97,8 +97,8 @@ fn linked_kernel_package_section(package: &Package) -> Section {
 #[cfg(test)]
 mod tests {
     use {
-        miden_mast_package::debug_info::MAX_DEBUG_INFO_STRING_SIZE,
-        miden_mast_package::debug_info::PackageDebugInfoBuilder,
+        crate::package::debug_info::MAX_DEBUG_INFO_STRING_SIZE,
+        crate::package::debug_info::PackageDebugInfoBuilder,
     };
 
     use super::*;

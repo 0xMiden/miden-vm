@@ -1,5 +1,5 @@
 use crate::serde::Serializable;
-use miden_mast_package::Package;
+use crate::package::Package;
 use {
     proptest::prelude::*,
     proptest::test_runner::Config,

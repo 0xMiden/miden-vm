@@ -13,9 +13,9 @@ use {
     crate::utils::hash_string_to_word,
 };
 use {
-    miden_mast_package::Package as MastPackage,
-    miden_mast_package::Section,
-    miden_mast_package::SectionId,
+    crate::package::Package as MastPackage,
+    crate::package::Section,
+    crate::package::SectionId,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;

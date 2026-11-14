@@ -25,15 +25,15 @@ use {
     crate::utils::IndexVec,
 };
 use {
-    miden_mast_package::debug_info::DebugFunctionIdx,
-    miden_mast_package::debug_info::DebugInfoBuilder,
-    miden_mast_package::debug_info::DebugSourceAsmOp,
-    miden_mast_package::debug_info::DebugSourceInlineCall,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::DebugSourceVar,
-    miden_mast_package::debug_info::PackageDebugInfo,
-    miden_mast_package::debug_info::PackageDebugInfoBuilder,
-    miden_mast_package::debug_info::SourceNode,
+    crate::package::debug_info::DebugFunctionIdx,
+    crate::package::debug_info::DebugInfoBuilder,
+    crate::package::debug_info::DebugSourceAsmOp,
+    crate::package::debug_info::DebugSourceInlineCall,
+    crate::package::debug_info::DebugSourceNodeId,
+    crate::package::debug_info::DebugSourceVar,
+    crate::package::debug_info::PackageDebugInfo,
+    crate::package::debug_info::PackageDebugInfoBuilder,
+    crate::package::debug_info::SourceNode,
 };
 
 use {
