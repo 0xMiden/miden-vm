@@ -1,15 +1,28 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::String,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::vec::Vec,
 };
 use core::fmt;
 
-use super::{
-    EMPTY_WORD, Eidos, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Word,
+use {
+    super::EMPTY_WORD,
+    super::Eidos,
+    super::InnerNodeInfo,
+    super::MerkleError,
+    super::MerklePath,
+    super::MerkleProof,
+    super::NodeIndex,
+    super::Word,
 };
-use crate::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, word_to_hex,
+use {
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
+    crate::utils::word_to_hex,
 };
 
 #[cfg(test)]
@@ -27,9 +40,11 @@ mod arbitrary {
     use proptest::prelude::*;
 
     use super::PartialMerkleTree;
-    use crate::{
-        Word,
-        merkle::{MerklePath, MerkleTree, NodeIndex},
+    use {
+        crate::Word,
+        crate::merkle::MerklePath,
+        crate::merkle::MerkleTree,
+        crate::merkle::NodeIndex,
     };
 
     impl Arbitrary for PartialMerkleTree {

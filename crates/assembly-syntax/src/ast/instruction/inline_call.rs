@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 
 use miden_debug_types::FileLineCol;
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use {
+    serde::Deserialize,
+    serde::Serialize,
+};
 
 /// Debug information describing one source-level function in an active inline call chain.
 #[derive(Clone, Debug, Eq, PartialEq)]

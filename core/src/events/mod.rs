@@ -1,12 +1,25 @@
-use alloc::{borrow::Cow, string::String};
-use core::fmt::{Display, Formatter};
-
-use miden_crypto::{
-    field::PrimeField64,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    alloc::borrow::Cow,
+    alloc::string::String,
+};
+use {
+    core::fmt::Display,
+    core::fmt::Formatter,
 };
 
-use crate::{Felt, utils::hash_string_to_word};
+use {
+    miden_crypto::field::PrimeField64,
+    miden_crypto::utils::ByteReader,
+    miden_crypto::utils::ByteWriter,
+    miden_crypto::utils::Deserializable,
+    miden_crypto::utils::DeserializationError,
+    miden_crypto::utils::Serializable,
+};
+
+use {
+    crate::Felt,
+    crate::utils::hash_string_to_word,
+};
 
 mod sys_events;
 pub use sys_events::SystemEvent;

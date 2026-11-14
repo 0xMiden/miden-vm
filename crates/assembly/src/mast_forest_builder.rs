@@ -1,47 +1,83 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    ast::DebugInlineCallInfo,
-    debuginfo::{FileLineCol, SourceManager},
+use {
+    miden_assembly_syntax::ast::DebugInlineCallInfo,
+    miden_assembly_syntax::debuginfo::FileLineCol,
+    miden_assembly_syntax::debuginfo::SourceManager,
 };
-use miden_core::{
-    Felt, Word,
-    advice::AdviceMap,
-    chiplets::hasher,
-    mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, JoinNode, LoopNode, MastForest,
-        MastForestRootMap, MastNode, MastNodeExt, OpBatch, SplitNode, error_code_from_msg,
-    },
-    operations::{AssemblyOp, Operation},
-    serde::Serializable,
-    utils::{IndexVec, bytes_to_packed_u32_elements},
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::advice::AdviceMap,
+    miden_core::chiplets::hasher,
+    miden_core::mast::BasicBlockNode,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::CallNode,
+    miden_core::mast::DynNode,
+    miden_core::mast::JoinNode,
+    miden_core::mast::LoopNode,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastForestRootMap,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::OpBatch,
+    miden_core::mast::SplitNode,
+    miden_core::mast::error_code_from_msg,
+    miden_core::operations::AssemblyOp,
+    miden_core::operations::Operation,
+    miden_core::serde::Serializable,
+    miden_core::utils::IndexVec,
+    miden_core::utils::bytes_to_packed_u32_elements,
 };
-use miden_mast_package::{
-    ManifestValidationError,
-    debug_info::{
-        DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugLocIdx, DebugSourceAsmOp,
-        DebugSourceInlineCall, DebugSourceVar, FunctionInfo, PackageDebugInfo,
-    },
+use {
+    miden_mast_package::ManifestValidationError,
+    miden_mast_package::debug_info::DebugFunctionIdx,
+    miden_mast_package::debug_info::DebugInfoBuilder,
+    miden_mast_package::debug_info::DebugInfoTableRemapping,
+    miden_mast_package::debug_info::DebugLocIdx,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceInlineCall,
+    miden_mast_package::debug_info::DebugSourceVar,
+    miden_mast_package::debug_info::FunctionInfo,
+    miden_mast_package::debug_info::PackageDebugInfo,
 };
 
-use super::{GlobalItemIndex, LinkerError, Procedure};
-use crate::{
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
-    linker::LinkLibrary,
-    report,
+use {
+    super::GlobalItemIndex,
+    super::LinkerError,
+    super::Procedure,
+};
+use {
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
+    crate::diagnostics::WrapErr,
+    crate::linker::LinkLibrary,
+    crate::report,
 };
 
 mod finalizer;
-use finalizer::{BuiltMastForest, MastForestFinalizer};
+use {
+    finalizer::BuiltMastForest,
+    finalizer::MastForestFinalizer,
+};
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
-use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind};
-pub(crate) use pending_record::{MastNodeRef, SourceNodeRef};
+use {
+    pending_record::MastNodeKey,
+    pending_record::PendingMastNode,
+    pending_record::PendingMastNodeDraft,
+    pending_record::PendingMastNodeKind,
+};
+pub(crate) use {
+    pending_record::MastNodeRef,
+    pending_record::SourceNodeRef,
+};
 mod static_import;
 
 /// One use of an interned execution node together with its exact source/debug occurrence.
@@ -1759,30 +1795,50 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeSet,
-        string::{String, ToString},
-        sync::Arc,
+    use {
+        alloc::collections::BTreeSet,
+        alloc::string::String,
+        alloc::string::ToString,
+        alloc::sync::Arc,
     };
 
-    use miden_assembly_syntax::{
-        ast::{DebugVarInfo, DebugVarLocation},
-        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+    use {
+        miden_assembly_syntax::ast::DebugVarInfo,
+        miden_assembly_syntax::ast::DebugVarLocation,
+        miden_assembly_syntax::debuginfo::ByteIndex,
+        miden_assembly_syntax::debuginfo::ColumnNumber,
+        miden_assembly_syntax::debuginfo::LineNumber,
+        miden_assembly_syntax::debuginfo::Location,
+        miden_assembly_syntax::debuginfo::Uri,
     };
-    use miden_core::{
-        mast::{MastNodeBuilder, MastNodeId},
-        operations::Operation,
-        serde::Serializable,
-        utils::Idx,
+    use {
+        miden_core::mast::MastNodeBuilder,
+        miden_core::mast::MastNodeId,
+        miden_core::operations::Operation,
+        miden_core::serde::Serializable,
+        miden_core::utils::Idx,
     };
-    use miden_mast_package::{
-        Package, PackageExport, PackageId, PathBuf, ProcedureExport, Section, SectionId,
-        TargetType, Version,
-        debug_info::{
-            DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
-            DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
-            PackageDebugInfo, PackageDebugInfoBuilder,
-        },
+    use {
+        miden_mast_package::Package,
+        miden_mast_package::PackageExport,
+        miden_mast_package::PackageId,
+        miden_mast_package::PathBuf,
+        miden_mast_package::ProcedureExport,
+        miden_mast_package::Section,
+        miden_mast_package::SectionId,
+        miden_mast_package::TargetType,
+        miden_mast_package::Version,
+        miden_mast_package::debug_info::DebugFieldInfo,
+        miden_mast_package::debug_info::DebugPrimitiveType,
+        miden_mast_package::debug_info::DebugSourceAsmOp,
+        miden_mast_package::debug_info::DebugSourceInlineCall,
+        miden_mast_package::debug_info::DebugSourceNode,
+        miden_mast_package::debug_info::DebugSourceVar,
+        miden_mast_package::debug_info::DebugTypeIdx,
+        miden_mast_package::debug_info::DebugTypeInfo,
+        miden_mast_package::debug_info::FunctionInfo,
+        miden_mast_package::debug_info::PackageDebugInfo,
+        miden_mast_package::debug_info::PackageDebugInfoBuilder,
     };
     use proptest::prelude::*;
 

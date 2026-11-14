@@ -11,19 +11,38 @@
 //!
 //! [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
 
-use super::falcon512_common::{self, FalconVariant, MODULUS, N, PREVERSIONED_NONCE_LEN};
-#[cfg(test)]
-use super::falcon512_common::{
-    FalconFelt, LOG_N, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SIG_SERIALIZED_LEN,
+use {
+    super::falcon512_common,
+    super::falcon512_common::FalconVariant,
+    super::falcon512_common::MODULUS,
+    super::falcon512_common::N,
+    super::falcon512_common::PREVERSIONED_NONCE_LEN,
 };
-use crate::{Felt, Word};
+#[cfg(test)]
+use {
+    super::falcon512_common::FalconFelt,
+    super::falcon512_common::LOG_N,
+    super::falcon512_common::SIG_NONCE_LEN,
+    super::falcon512_common::SIG_POLY_BYTE_LEN,
+    super::falcon512_common::SIG_SERIALIZED_LEN,
+};
+use {
+    crate::Felt,
+    crate::Word,
+};
 
 mod hash_to_point;
 
 #[cfg(test)]
 mod tests;
 
-pub use super::falcon512_common::{PK_LEN, Polynomial, SK_LEN, SignatureHeader, SignaturePoly};
+pub use {
+    super::falcon512_common::PK_LEN,
+    super::falcon512_common::Polynomial,
+    super::falcon512_common::SK_LEN,
+    super::falcon512_common::SignatureHeader,
+    super::falcon512_common::SignaturePoly,
+};
 
 /// Nonce used by deterministic Falcon512-Eidos signatures.
 pub type Nonce = falcon512_common::Nonce<variant::Variant>;
@@ -38,10 +57,18 @@ pub type SecretKey = falcon512_common::SecretKey<variant::Variant>;
 pub type Signature = falcon512_common::Signature<variant::Variant>;
 
 pub(super) mod variant {
-    use super::{FalconVariant, Felt, Nonce, Polynomial, Word, hash_to_point};
-    use crate::{
-        dsa::falcon512_common::FalconFelt,
-        hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
+    use {
+        super::FalconVariant,
+        super::Felt,
+        super::Nonce,
+        super::Polynomial,
+        super::Word,
+        super::hash_to_point,
+    };
+    use {
+        crate::dsa::falcon512_common::FalconFelt,
+        crate::hash::eidos::Eidos,
+        crate::hash::eidos::domains::FALCON_PUBLIC_KEY,
     };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

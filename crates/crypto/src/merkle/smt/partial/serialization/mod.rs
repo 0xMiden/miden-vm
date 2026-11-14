@@ -4,16 +4,26 @@
 pub mod property_tests;
 mod tests;
 
-use alloc::{collections::BTreeMap, string::ToString};
-
-use miden_field::Word;
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use {
+    alloc::collections::BTreeMap,
+    alloc::string::ToString,
 };
 
-use crate::merkle::{
-    EmptySubtreeRoots, NodeIndex,
-    smt::{LeafIndex, SMT_DEPTH, SmtLeaf},
+use miden_field::Word;
+use {
+    miden_serde_utils::ByteReader,
+    miden_serde_utils::ByteWriter,
+    miden_serde_utils::Deserializable,
+    miden_serde_utils::DeserializationError,
+    miden_serde_utils::Serializable,
+};
+
+use {
+    crate::merkle::EmptySubtreeRoots,
+    crate::merkle::NodeIndex,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::SMT_DEPTH,
+    crate::merkle::smt::SmtLeaf,
 };
 
 // UNIQUE NODES
@@ -277,9 +287,11 @@ mod unique_nodes_arbitrary {
     use proptest::prelude::*;
 
     use super::UniqueNodes;
-    use crate::{
-        Felt, Word,
-        merkle::{NodeIndex, smt::Smt},
+    use {
+        crate::Felt,
+        crate::Word,
+        crate::merkle::NodeIndex,
+        crate::merkle::smt::Smt,
     };
 
     impl Arbitrary for UniqueNodes {

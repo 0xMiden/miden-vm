@@ -1,15 +1,26 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::fmt;
 
-use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::{Diagnostic, miette};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceSpan,
+};
+use {
+    miden_utils_diagnostics::Diagnostic,
+    miden_utils_diagnostics::miette,
+};
 
-use crate::{
-    Path,
-    ast::{SymbolResolutionError, constants::ConstEvalError},
+use {
+    crate::Path,
+    crate::ast::SymbolResolutionError,
+    crate::ast::constants::ConstEvalError,
 };
 
 /// The high-level error type for all semantic analysis errors.

@@ -4,9 +4,16 @@
 use alloc::vec::Vec;
 
 use miden_core::deferred::PrecompileError;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use {
+    miden_utils_diagnostics::Diagnostic,
+    miden_utils_diagnostics::miette,
+};
 
-use crate::{Felt, Word, crypto::merkle::MerkleError};
+use {
+    crate::Felt,
+    crate::Word,
+    crate::crypto::merkle::MerkleError,
+};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {

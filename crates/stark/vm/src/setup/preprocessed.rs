@@ -1,10 +1,20 @@
 //! Process-wide fixed VM preprocessing cache.
 use alloc::boxed::Box;
-use core::any::{Any, TypeId};
+use {
+    core::any::Any,
+    core::any::TypeId,
+};
 
 use miden_air::vm::MidenMultiAir;
-use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{Preprocessed, StarkConfig, air::Statement};
+use {
+    miden_core::Felt,
+    miden_core::field::QuadFelt,
+};
+use {
+    miden_stark::Preprocessed,
+    miden_stark::StarkConfig,
+    miden_stark::air::Statement,
+};
 
 type PreprocessedSetup<SC> = Preprocessed<Felt, <SC as StarkConfig<Felt, QuadFelt>>::Lmcs>;
 type SetupCell<SC> = std::sync::OnceLock<Option<std::sync::Arc<PreprocessedSetup<SC>>>>;
@@ -52,7 +62,10 @@ mod tests {
     use alloc::vec;
     use std::sync::Arc;
 
-    use miden_air::vm::{NUM_PUBLIC_VALUES, config as air_config};
+    use {
+        miden_air::vm::NUM_PUBLIC_VALUES,
+        miden_air::vm::config as air_config,
+    };
     use miden_stark::pcs::PcsParams;
 
     use super::*;

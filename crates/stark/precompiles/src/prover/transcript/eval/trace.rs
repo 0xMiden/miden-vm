@@ -35,45 +35,81 @@
 //! Row order is free (children flow over the bus), so the root sits at row 0 with
 //! `out_mult = 0`. Non-root zero leaves merge into one row with their summed consumer count.
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::vec::Vec,
+};
 
-use miden_core::{
-    Felt,
-    deferred::{DEFERRED_AND_FRAME, Digest, fold_deferred_root},
-    utils::RowMajorMatrix,
+use {
+    miden_core::Felt,
+    miden_core::deferred::DEFERRED_AND_FRAME,
+    miden_core::deferred::Digest,
+    miden_core::deferred::fold_deferred_root,
+    miden_core::utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
-use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
+use {
+    miden_precompiles::CurveId,
+    miden_precompiles::CurvePrecompile,
+    miden_precompiles::UintDomain,
+    miden_precompiles::UintPrecompile,
+};
 
-use crate::prover::{
-    ec::{
-        EcRequire,
-        msm::trace::{EcExprPtr, EcMsmRequires},
-        trace::{EcGroupPtr, EcPointPtr},
-    },
-    relations::ProvideMult,
-    transcript::{
-        eidos::{
-            EidosDigest,
-            trace::{AbsorptionId, EidosRequires},
-        },
-        eval::{
-            COL_A_PTR, COL_ABSORPTION_ID, COL_ACT, COL_B_PTR, COL_BOUND_PTR,
-            COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM1,
-            COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP,
-            COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_SUB, COL_IS_UINT_ADD,
-            COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_UINT_SUB, COL_LHS_BEGIN, COL_LHS_END,
-            COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PTR, COL_RHS_BEGIN,
-            COL_RHS_END, COL_UINT_DOMAIN_SELECTOR, COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH,
-            NUM_MAIN_COLS,
-        },
-        nodes::{EcOpId, UintOpId},
-    },
-    uint::{
-        UintRequire,
-        trace::{UintPtr, UintStoreRequires},
-    },
+use {
+    crate::prover::ec::EcRequire,
+    crate::prover::ec::msm::trace::EcExprPtr,
+    crate::prover::ec::msm::trace::EcMsmRequires,
+    crate::prover::ec::trace::EcGroupPtr,
+    crate::prover::ec::trace::EcPointPtr,
+    crate::prover::relations::ProvideMult,
+    crate::prover::transcript::eidos::EidosDigest,
+    crate::prover::transcript::eidos::trace::AbsorptionId,
+    crate::prover::transcript::eidos::trace::EidosRequires,
+    crate::prover::transcript::eval::COL_A_PTR,
+    crate::prover::transcript::eval::COL_ABSORPTION_ID,
+    crate::prover::transcript::eval::COL_ACT,
+    crate::prover::transcript::eval::COL_B_PTR,
+    crate::prover::transcript::eval::COL_BOUND_PTR,
+    crate::prover::transcript::eval::COL_EC_CONTEXT_GROUP_PTR,
+    crate::prover::transcript::eval::COL_EC_CREATE_COORD_BOUND_PTR,
+    crate::prover::transcript::eval::COL_EC_CREATE_GROUP_PTR,
+    crate::prover::transcript::eval::COL_EC_CREATE_POINT_PTR,
+    crate::prover::transcript::eval::COL_EC_CREATE_X_PTR,
+    crate::prover::transcript::eval::COL_EC_CREATE_Y_PTR,
+    crate::prover::transcript::eval::COL_FRAME_PARAM1,
+    crate::prover::transcript::eval::COL_H_BEGIN,
+    crate::prover::transcript::eval::COL_H_END,
+    crate::prover::transcript::eval::COL_IS_AND,
+    crate::prover::transcript::eval::COL_IS_EC_CREATE,
+    crate::prover::transcript::eval::COL_IS_EC_MSM,
+    crate::prover::transcript::eval::COL_IS_EC_OP,
+    crate::prover::transcript::eval::COL_IS_EC_PAI,
+    crate::prover::transcript::eval::COL_IS_IS,
+    crate::prover::transcript::eval::COL_IS_MSM_LAST,
+    crate::prover::transcript::eval::COL_IS_MUL,
+    crate::prover::transcript::eval::COL_IS_SUB,
+    crate::prover::transcript::eval::COL_IS_UINT_ADD,
+    crate::prover::transcript::eval::COL_IS_UINT_LEAF,
+    crate::prover::transcript::eval::COL_IS_UINT_OP,
+    crate::prover::transcript::eval::COL_IS_UINT_SUB,
+    crate::prover::transcript::eval::COL_LHS_BEGIN,
+    crate::prover::transcript::eval::COL_LHS_END,
+    crate::prover::transcript::eval::COL_MSM_EXPR,
+    crate::prover::transcript::eval::COL_MSM_IDX,
+    crate::prover::transcript::eval::COL_MSM_IS_HEAD,
+    crate::prover::transcript::eval::COL_OUT_MULT,
+    crate::prover::transcript::eval::COL_PTR,
+    crate::prover::transcript::eval::COL_RHS_BEGIN,
+    crate::prover::transcript::eval::COL_RHS_END,
+    crate::prover::transcript::eval::COL_UINT_DOMAIN_SELECTOR,
+    crate::prover::transcript::eval::COL_UINT_VALUE_BOUND_PTR,
+    crate::prover::transcript::eval::DIGEST_WIDTH,
+    crate::prover::transcript::eval::NUM_MAIN_COLS,
+    crate::prover::transcript::nodes::EcOpId,
+    crate::prover::transcript::nodes::UintOpId,
+    crate::prover::uint::UintRequire,
+    crate::prover::uint::trace::UintPtr,
+    crate::prover::uint::trace::UintStoreRequires,
 };
 
 /// A handle to a `Binding(hash, True)` claim, issued by the eval requires.

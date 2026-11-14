@@ -5,15 +5,38 @@
 //! validating the ACE pipeline from both within ace-codegen tests and from
 //! downstream integration tests (e.g. in miden-air).
 
-use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
-use miden_stark::air::symbolic::{
-    BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-    SymbolicExpressionExt, eval_air,
+use {
+    miden_core::Felt,
+    miden_core::field::QuadFelt,
 };
-use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
+use {
+    miden_crypto::field::ExtensionField,
+    miden_crypto::field::Field,
+    miden_crypto::field::PrimeCharacteristicRing,
+    miden_crypto::field::TwoAdicField,
+};
+use {
+    miden_stark::air::symbolic::BaseEntry,
+    miden_stark::air::symbolic::BaseLeaf,
+    miden_stark::air::symbolic::ConstraintLayout,
+    miden_stark::air::symbolic::ExtEntry,
+    miden_stark::air::symbolic::ExtLeaf,
+    miden_stark::air::symbolic::SymbolicExpression,
+    miden_stark::air::symbolic::SymbolicExpressionExt,
+    miden_stark::air::symbolic::eval_air,
+};
+use {
+    p3_dft::Radix2DitParallel,
+    p3_dft::TwoAdicSubgroupDft,
+};
 
-use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
+use {
+    crate::AceError,
+    crate::InputCounts,
+    crate::InputKey,
+    crate::InputLayout,
+    crate::compiler::AceDag,
+};
 
 /// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
 ///

@@ -1,12 +1,22 @@
-use alloc::{format, string::String, vec::Vec};
+use {
+    alloc::format,
+    alloc::string::String,
+    alloc::vec::Vec,
+};
 
 use miden_assembly_syntax::diagnostics::Report;
-use miden_core::{
-    Word,
-    serde::{Deserializable, Serializable, SliceReader},
-    utils::hash_string_to_word,
+use {
+    miden_core::Word,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
+    miden_core::serde::SliceReader,
+    miden_core::utils::hash_string_to_word,
 };
-use miden_mast_package::{Package as MastPackage, Section, SectionId};
+use {
+    miden_mast_package::Package as MastPackage,
+    miden_mast_package::Section,
+    miden_mast_package::SectionId,
+};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 

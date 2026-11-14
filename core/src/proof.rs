@@ -1,20 +1,27 @@
-use alloc::{
-    collections::BTreeSet,
-    string::{String, ToString},
-    vec::Vec,
+use {
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::vec::Vec,
 };
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
-use crate::{
-    Word,
-    crypto::hash::Blake3_256,
-    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileWitness, fold_deferred_root},
-    serde::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader,
-    },
+use {
+    crate::Word,
+    crate::crypto::hash::Blake3_256,
+    crate::deferred::DeferredRoot,
+    crate::deferred::MAX_PRECOMPILE_ROOTS,
+    crate::deferred::PrecompileWitness,
+    crate::deferred::fold_deferred_root,
+    crate::serde::BudgetedReader,
+    crate::serde::ByteReader,
+    crate::serde::ByteWriter,
+    crate::serde::Deserializable,
+    crate::serde::DeserializationError,
+    crate::serde::Serializable,
+    crate::serde::SliceReader,
 };
 
 // CONSTANTS
@@ -600,10 +607,13 @@ fn has_duplicate(roots: &[Word]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        Felt,
-        deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST},
-        serde::ByteWriter,
+    use {
+        crate::Felt,
+        crate::deferred::DEFERRED_AND_FRAME,
+        crate::deferred::Node,
+        crate::deferred::PrecompileWitnessEntry,
+        crate::deferred::TRUE_DIGEST,
+        crate::serde::ByteWriter,
     };
 
     fn dummy_stark_proof(bytes: &[u8]) -> StarkProof {
@@ -959,11 +969,20 @@ mod tests {
 mod proof_arbitrary {
     use proptest::prelude::*;
 
-    use super::{
-        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
-        PrecompileStatus, PrecompileWitness, StarkProof, VmProof,
+    use {
+        super::ExecutionProof,
+        super::ExecutionProofCompatibility,
+        super::HashFunction,
+        super::PrecompileProof,
+        super::PrecompileStatus,
+        super::PrecompileWitness,
+        super::StarkProof,
+        super::VmProof,
     };
-    use crate::{Felt, Word};
+    use {
+        crate::Felt,
+        crate::Word,
+    };
 
     impl Arbitrary for StarkProof {
         type Parameters = ();

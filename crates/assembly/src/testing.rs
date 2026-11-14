@@ -1,25 +1,38 @@
 #[cfg(any(feature = "std", feature = "testing"))]
 use alloc::vec::Vec;
-use alloc::{boxed::Box, sync::Arc};
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+};
 
 #[cfg(feature = "std")]
 use miden_assembly_syntax::Word;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
-use miden_assembly_syntax::{
-    Parse, Path,
-    ast::{Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceManager},
-    diagnostics::{
-        Report,
-        reporting::{ReportHandlerOpts, set_hook},
-    },
+use {
+    miden_assembly_syntax::Parse,
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::ast::Module,
+    miden_assembly_syntax::ast::ModuleKind,
+    miden_assembly_syntax::debuginfo::DefaultSourceManager,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::diagnostics::Report,
+    miden_assembly_syntax::diagnostics::reporting::ReportHandlerOpts,
+    miden_assembly_syntax::diagnostics::reporting::set_hook,
 };
-pub use miden_assembly_syntax::{
-    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
+pub use {
+    miden_assembly_syntax::assert_diagnostic,
+    miden_assembly_syntax::assert_diagnostic_lines,
+    miden_assembly_syntax::parse_module,
+    miden_assembly_syntax::regex,
+    miden_assembly_syntax::source_file,
+    miden_assembly_syntax::testing::Pattern,
 };
 #[cfg(feature = "testing")]
-use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
+use {
+    miden_assembly_syntax::ast::Form,
+    miden_assembly_syntax::debuginfo::SourceFile,
+};
 use miden_core::program::Program;
 use miden_mast_package::PackageId;
 #[cfg(feature = "std")]
@@ -199,16 +212,27 @@ pub use self::package_features::TestRegistry;
 
 #[cfg(feature = "std")]
 mod package_features {
-    use std::{
-        collections::BTreeMap,
-        string::String,
-        sync::{Arc, Mutex},
+    use {
+        std::collections::BTreeMap,
+        std::string::String,
+        std::sync::Arc,
+        std::sync::Mutex,
     };
 
-    use miden_mast_package::{Package, PackageId};
-    use miden_package_registry::{
-        PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
-        PackageVersions, Version, VersionRequirement,
+    use {
+        miden_mast_package::Package,
+        miden_mast_package::PackageId,
+    };
+    use {
+        miden_package_registry::PackageCache,
+        miden_package_registry::PackageIndex,
+        miden_package_registry::PackageProvider,
+        miden_package_registry::PackageRecord,
+        miden_package_registry::PackageRegistry,
+        miden_package_registry::PackageStore,
+        miden_package_registry::PackageVersions,
+        miden_package_registry::Version,
+        miden_package_registry::VersionRequirement,
     };
 
     use super::*;

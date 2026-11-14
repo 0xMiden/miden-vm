@@ -1,12 +1,25 @@
-use alloc::{string::String, sync::Arc};
+use {
+    alloc::string::String,
+    alloc::sync::Arc,
+};
 use core::assert_matches;
 
-use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceId,
+    miden_debug_types::SourceLanguage,
+    miden_debug_types::Uri,
+};
 
 use super::*;
-use crate::{
-    MAX_CONTROL_FLOW_NESTING,
-    ast::{Form, Immediate, Instruction, MAX_TYPE_EXPR_NESTING, Op, Visibility},
+use {
+    crate::MAX_CONTROL_FLOW_NESTING,
+    crate::ast::Form,
+    crate::ast::Immediate,
+    crate::ast::Instruction,
+    crate::ast::MAX_TYPE_EXPR_NESTING,
+    crate::ast::Op,
+    crate::ast::Visibility,
 };
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
@@ -86,9 +99,11 @@ fn assert_parses(source: Arc<SourceFile>) {
 
 #[cfg(feature = "std")]
 fn temp_parser_dir(test_name: &str) -> std::path::PathBuf {
-    use std::{
-        env, fs,
-        time::{SystemTime, UNIX_EPOCH},
+    use {
+        std::env,
+        std::fs,
+        std::time::SystemTime,
+        std::time::UNIX_EPOCH,
     };
     let id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -102,7 +117,10 @@ fn temp_parser_dir(test_name: &str) -> std::path::PathBuf {
 
 #[test]
 fn overlong_path_component_is_rejected_without_panic() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     use crate::debuginfo::DefaultSourceManager;
 
@@ -1143,7 +1161,10 @@ end
 
 #[test]
 fn parser_rejects_oversized_bit_size_without_panic() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let source = test_source_file(
         "\

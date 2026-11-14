@@ -2,8 +2,14 @@
 
 use miden_crypto::field::Field;
 
-use super::dag::{DagBuilder, NodeId};
-use crate::{InputKey, InputLayout};
+use {
+    super::dag::DagBuilder,
+    super::dag::NodeId,
+};
+use {
+    crate::InputKey,
+    crate::InputLayout,
+};
 
 /// Lower a challenge index into DAG nodes.
 ///

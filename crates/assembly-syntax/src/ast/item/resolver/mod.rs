@@ -3,17 +3,28 @@ mod symbol_table;
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
 use self::symbol_table::LocalSymbolTable;
-pub use self::{
-    error::SymbolResolutionError,
-    symbol_table::{LocalSymbol, SymbolTable},
+pub use {
+    self::error::SymbolResolutionError,
+    self::symbol_table::LocalSymbol,
+    self::symbol_table::SymbolTable,
 };
-use super::{GlobalItemIndex, ModuleIndex};
-use crate::{
-    Path, Word,
-    ast::{Ident, ItemIndex},
+use {
+    super::GlobalItemIndex,
+    super::ModuleIndex,
+};
+use {
+    crate::Path,
+    crate::Word,
+    crate::ast::Ident,
+    crate::ast::ItemIndex,
 };
 
 /// Represents the result of resolving a symbol

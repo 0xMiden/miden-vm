@@ -1,15 +1,24 @@
 //! Operations that log and clear the rolling precompile accumulator.
 
-use miden_core::{
-    chiplets::hasher::{BLOCK_HI_RANGE, BLOCK_LO_RANGE, CV_RANGE, STATE_WIDTH},
-    deferred::DEFERRED_AND_INIT_CV,
+use {
+    miden_core::chiplets::hasher::BLOCK_HI_RANGE,
+    miden_core::chiplets::hasher::BLOCK_LO_RANGE,
+    miden_core::chiplets::hasher::CV_RANGE,
+    miden_core::chiplets::hasher::STATE_WIDTH,
+    miden_core::deferred::DEFERRED_AND_INIT_CV,
 };
 
-use crate::{
-    Felt, Word, ZERO,
-    errors::OperationError,
-    processor::{HasherInterface, Processor, StackInterface, SystemInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+use {
+    crate::Felt,
+    crate::Word,
+    crate::ZERO,
+    crate::errors::OperationError,
+    crate::processor::HasherInterface,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
+    crate::tracer::OperationHelperRegisters,
+    crate::tracer::Tracer,
 };
 
 // LOG DEFERRED OPERATION

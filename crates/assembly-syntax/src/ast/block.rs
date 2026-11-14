@@ -1,7 +1,11 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
 use super::Op;
 
@@ -60,7 +64,10 @@ impl fmt::Debug for Block {
 
 impl crate::prettier::PrettyPrint for Block {
     fn render(&self) -> crate::prettier::Document {
-        use crate::{ast::Instruction, prettier::*};
+        use {
+            crate::ast::Instruction,
+            crate::prettier::*,
+        };
 
         // If a block is empty, pretty-print it with a `nop` instruction
         let default_body = [Op::Inst(Span::new(self.span, Instruction::Nop))];

@@ -1,22 +1,42 @@
-use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
+use {
+    alloc::collections::BTreeSet,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::ops::ControlFlow;
 
-use miden_assembly_syntax::{
-    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, module::ItemInfo,
-    sema::ConstEvalVisitor,
+use {
+    miden_assembly_syntax::ast::constants::eval::CachedConstantValue,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::module::ItemInfo,
+    miden_assembly_syntax::sema::ConstEvalVisitor,
 };
-use miden_core::{Felt, events::EventId};
+use {
+    miden_core::Felt,
+    miden_core::events::EventId,
+};
 
-use crate::{
-    ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
-    ast::{
-        self, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
-        constants::ConstEnvironment,
-        visit::{self, VisitMut},
-    },
-    linker::{
-        LinkerError, Resolver, ResolverCache, SymbolItem, SymbolResolutionContext, SymbolResolver,
-    },
+use {
+    crate::ModuleIndex,
+    crate::SourceFile,
+    crate::SourceSpan,
+    crate::Span,
+    crate::Spanned,
+    crate::ast,
+    crate::ast::InvocationTarget,
+    crate::ast::Invoke,
+    crate::ast::InvokeKind,
+    crate::ast::Procedure,
+    crate::ast::SymbolResolution,
+    crate::ast::constants::ConstEnvironment,
+    crate::ast::visit,
+    crate::ast::visit::VisitMut,
+    crate::linker::LinkerError,
+    crate::linker::Resolver,
+    crate::linker::ResolverCache,
+    crate::linker::SymbolItem,
+    crate::linker::SymbolResolutionContext,
+    crate::linker::SymbolResolver,
 };
 
 // MODULE REWRITE CHECK

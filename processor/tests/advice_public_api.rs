@@ -1,6 +1,7 @@
-use miden_processor::{
-    Felt,
-    advice::{AdviceInputs, AdviceStack},
+use {
+    miden_processor::Felt,
+    miden_processor::advice::AdviceInputs,
+    miden_processor::advice::AdviceStack,
 };
 
 #[test]

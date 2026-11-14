@@ -1,16 +1,21 @@
-use alloc::{
-    collections::{
-        BTreeMap,
-        btree_map::{Entry, IntoIter},
-    },
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::btree_map::Entry,
+    alloc::collections::btree_map::IntoIter,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use crate::{
-    Felt, WORD_SIZE, Word,
-    chiplets::hasher,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    crate::Felt,
+    crate::WORD_SIZE,
+    crate::Word,
+    crate::chiplets::hasher,
+    crate::serde::ByteReader,
+    crate::serde::ByteWriter,
+    crate::serde::Deserializable,
+    crate::serde::DeserializationError,
+    crate::serde::Serializable,
 };
 
 // ADVICE MAP

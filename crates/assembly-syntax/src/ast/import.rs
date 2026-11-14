@@ -1,8 +1,19 @@
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use super::{Ident, Path, Visibility};
+use {
+    super::Ident,
+    super::Path,
+    super::Visibility,
+};
 
 /// The explicit source form used by an import declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

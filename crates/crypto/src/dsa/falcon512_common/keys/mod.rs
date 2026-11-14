@@ -1,10 +1,15 @@
-use super::{
-    Signature,
-    math::{FalconFelt, Polynomial},
+use {
+    super::Signature,
+    super::math::FalconFelt,
+    super::math::Polynomial,
 };
-use crate::{
-    Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    crate::Felt,
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 
 mod public_key;
@@ -12,7 +17,10 @@ pub use public_key::PublicKey;
 
 mod secret_key;
 pub use secret_key::SecretKey;
-pub(crate) use secret_key::{WIDTH_BIG_POLY_COEFFICIENT, WIDTH_SMALL_POLY_COEFFICIENT};
+pub(crate) use {
+    secret_key::WIDTH_BIG_POLY_COEFFICIENT,
+    secret_key::WIDTH_SMALL_POLY_COEFFICIENT,
+};
 
 // TESTS
 // ================================================================================================
@@ -22,10 +30,15 @@ mod tests {
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
 
-    use super::{super::TestVariant, SecretKey};
-    use crate::{
-        ONE, Word,
-        utils::{Deserializable, Serializable},
+    use {
+        super::super::TestVariant,
+        super::SecretKey,
+    };
+    use {
+        crate::ONE,
+        crate::Word,
+        crate::utils::Deserializable,
+        crate::utils::Serializable,
     };
 
     type TestSecretKey = SecretKey<TestVariant>;

@@ -1,15 +1,27 @@
-use alloc::{string::String, sync::Arc};
-
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use {
+    alloc::string::String,
+    alloc::sync::Arc,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
 
-use crate::{
-    Felt,
-    ast::Ident,
-    parser::{IntValue, WordValue},
-    prettier,
+use {
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
+
+use {
+    crate::Felt,
+    crate::ast::Ident,
+    crate::parser::IntValue,
+    crate::parser::WordValue,
+    crate::prettier,
 };
 
 /// Represents a metadata expression of an [crate::ast::Attribute]
@@ -108,7 +120,11 @@ impl proptest::arbitrary::Arbitrary for MetaExpr {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
+        use {
+            proptest::arbitrary::any,
+            proptest::prop_oneof,
+            proptest::strategy::Strategy,
+        };
 
         prop_oneof![
             any::<Ident>().prop_map(Self::Ident),

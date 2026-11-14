@@ -1,17 +1,44 @@
-use alloc::{format, vec::Vec};
-use core::hash::{Hash, Hasher};
+use {
+    alloc::format,
+    alloc::vec::Vec,
+};
+use {
+    core::hash::Hash,
+    core::hash::Hasher,
+};
 
 use p3_challenger::UniformSamplingField;
-use p3_field::{
-    Field, InjectiveMonomial, PermutationMonomial, PrimeCharacteristicRing, PrimeField,
-    PrimeField64, TwoAdicField,
-    extension::{Binomial, BinomiallyExtendable, ExtensionAlgebra, HasTwoAdicBinomialExtension},
-    integers::QuotientMap,
+use {
+    p3_field::Field,
+    p3_field::InjectiveMonomial,
+    p3_field::PermutationMonomial,
+    p3_field::PrimeCharacteristicRing,
+    p3_field::PrimeField,
+    p3_field::PrimeField64,
+    p3_field::TwoAdicField,
+    p3_field::extension::Binomial,
+    p3_field::extension::BinomiallyExtendable,
+    p3_field::extension::ExtensionAlgebra,
+    p3_field::extension::HasTwoAdicBinomialExtension,
+    p3_field::integers::QuotientMap,
 };
-use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use rand::{SeedableRng, distr::Distribution, rngs::SmallRng};
+use {
+    proptest::prelude::*,
+    proptest::strategy::ValueTree,
+    proptest::test_runner::TestRunner,
+};
+use {
+    rand::SeedableRng,
+    rand::distr::Distribution,
+    rand::rngs::SmallRng,
+};
 
-use super::{Felt, Goldilocks, arb_felt_canonical, arb_felt_noncanonical};
+use {
+    super::Felt,
+    super::Goldilocks,
+    super::arb_felt_canonical,
+    super::arb_felt_noncanonical,
+};
 
 /// A minimal hasher used to validate that `Felt` hashes identically to `Goldilocks`.
 #[derive(Default)]

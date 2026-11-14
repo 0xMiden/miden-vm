@@ -1,21 +1,36 @@
 //! Utilities used in this crate which can also be generally useful downstream.
 
-use alloc::{boxed::Box, string::String, vec::Vec};
-use core::{
-    fmt::{self, Write},
-    mem::{ManuallyDrop, MaybeUninit},
+use {
+    alloc::boxed::Box,
+    alloc::string::String,
+    alloc::vec::Vec,
+};
+use {
+    core::fmt,
+    core::fmt::Write,
+    core::mem::ManuallyDrop,
+    core::mem::MaybeUninit,
 };
 
 // Re-export serialization traits from miden-serde-utils
 #[cfg(feature = "std")]
 pub use miden_serde_utils::ReadAdapter;
-pub use miden_serde_utils::{
-    BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-    SliceReader,
+pub use {
+    miden_serde_utils::BudgetedReader,
+    miden_serde_utils::ByteReader,
+    miden_serde_utils::ByteWriter,
+    miden_serde_utils::Deserializable,
+    miden_serde_utils::DeserializationError,
+    miden_serde_utils::Serializable,
+    miden_serde_utils::SliceReader,
 };
 use p3_maybe_rayon::prelude::*;
 
-use crate::{Felt, Word, field::QuotientMap};
+use {
+    crate::Felt,
+    crate::Word,
+    crate::field::QuotientMap,
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -55,7 +70,11 @@ pub fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
     Ok(())
 }
 
-pub use miden_field::utils::{HexParseError, bytes_to_hex_string, hex_to_bytes};
+pub use {
+    miden_field::utils::HexParseError,
+    miden_field::utils::bytes_to_hex_string,
+    miden_field::utils::hex_to_bytes,
+};
 
 /// Reads a fixed-size byte array from `source`, wrapped in [`Zeroizing`](zeroize::Zeroizing) so
 /// the buffer is wiped on drop regardless of how the calling function exits, including `?` early

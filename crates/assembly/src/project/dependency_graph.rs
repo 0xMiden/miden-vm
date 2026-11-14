@@ -1,24 +1,40 @@
-use alloc::{
-    collections::BTreeSet,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeSet,
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 use std::path::Path as FsPath;
 
 use miden_assembly_syntax::diagnostics::Report;
-use miden_core::{Word, utils::hash_string_to_word};
-use miden_package_registry::{PackageId, PackageRegistry, PackageRegistryAndProvider};
-use miden_project::{
-    Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
-    ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
-    Target,
+use {
+    miden_core::Word,
+    miden_core::utils::hash_string_to_word,
+};
+use {
+    miden_package_registry::PackageId,
+    miden_package_registry::PackageRegistry,
+    miden_package_registry::PackageRegistryAndProvider,
+};
+use {
+    miden_project::Package as ProjectPackage,
+    miden_project::ProjectDependencyGraph,
+    miden_project::ProjectDependencyGraphBuilder,
+    miden_project::ProjectDependencyNode,
+    miden_project::ProjectDependencyNodeProvenance,
+    miden_project::ProjectSource,
+    miden_project::ProjectSourceOrigin,
+    miden_project::Target,
 };
 
-use super::{
-    PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
-    SourceProviderRegistry, providers::TargetAssemblyContext,
+use {
+    super::PackageBuildProvenance,
+    super::PackageBuildSettings,
+    super::ProjectSourceProvenanceInputs,
+    super::SourceProviderRegistry,
+    super::providers::TargetAssemblyContext,
 };
 use crate::SourceManager;
 

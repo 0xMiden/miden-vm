@@ -1,30 +1,46 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 use core::fmt::Debug;
 
-use miden_core::{
-    Word,
-    mast::{
-        BasicBlockNode, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
-        SubtreeIterator,
-    },
+use {
+    miden_core::Word,
+    miden_core::mast::BasicBlockNode,
+    miden_core::mast::ExecutableMastForest,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::mast::SubtreeIterator,
 };
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
+use {
+    miden_mast_package::debug_info::DebugFunctionIdx,
+    miden_mast_package::debug_info::DebugInfoTableRemapping,
+    miden_mast_package::debug_info::DebugSourceAsmOp,
+    miden_mast_package::debug_info::DebugSourceInlineCall,
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::DebugSourceVar,
+    miden_mast_package::debug_info::FunctionInfo,
+    miden_mast_package::debug_info::PackageDebugInfo,
 };
 
-use super::{
-    MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
-    SourceNodeRef, remap_inline_ranges,
+use {
+    super::MastForestBuilder,
+    super::MastNodeRef,
+    super::MastNodeUse,
+    super::PendingMastNodeDraft,
+    super::PendingMastNodeKind,
+    super::SourceNodeRef,
+    super::remap_inline_ranges,
 };
-use crate::{
-    GlobalItemIndex,
-    diagnostics::{IntoDiagnostic, Report},
-    linker::LinkLibrary,
+use {
+    crate::GlobalItemIndex,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
+    crate::linker::LinkLibrary,
 };
 
 #[derive(Clone, Copy)]

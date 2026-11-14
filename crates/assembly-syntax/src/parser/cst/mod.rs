@@ -4,15 +4,30 @@ mod forms;
 mod fragments;
 mod instructions;
 
-use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
+use {
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{SourceFile, SourceSpan};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceSpan,
+};
 use miden_utils_diagnostics::LabeledSpan;
 
-use self::{context::LoweringContext, forms::lower_source_file};
-use crate::{
-    Report, ast,
-    diagnostics::{Diagnostic, Severity, miette, miette::MietteDiagnostic},
+use {
+    self::context::LoweringContext,
+    self::forms::lower_source_file,
+};
+use {
+    crate::Report,
+    crate::ast,
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::Severity,
+    crate::diagnostics::miette,
+    crate::diagnostics::miette::MietteDiagnostic,
 };
 
 /// User-facing syntax diagnostics produced by the CST-backed parser entry point.

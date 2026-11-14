@@ -1,28 +1,45 @@
-use alloc::{vec, vec::Vec};
-
-use miden_air_definitions::vm::trace::{
-    CHIPLETS_WIDTH,
-    and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
-    chiplets::{
-        KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS,
-        ace::ACE_CHIPLET_NUM_COLS,
-        bitwise::TRACE_WIDTH as BITWISE_WIDTH,
-        hasher::{CONTROLLER_TRACE_ALIGNMENT, HasherState, TRACE_WIDTH as HASHER_WIDTH},
-        memory::TRACE_WIDTH as MEMORY_WIDTH,
-    },
-    eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
+use {
+    alloc::vec,
+    alloc::vec::Vec,
 };
-use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch};
 
-use crate::{
-    Felt, ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
-    operation::OperationError,
-    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
+use {
+    miden_air_definitions::vm::trace::CHIPLETS_WIDTH,
+    miden_air_definitions::vm::trace::and8_lookup::BYTE_LOOKUP_COUNT_LEN,
+    miden_air_definitions::vm::trace::and8_lookup::BytePairRelation,
+    miden_air_definitions::vm::trace::and8_lookup::byte_pair_count_index,
+    miden_air_definitions::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::NUM_BITWISE_SELECTORS,
+    miden_air_definitions::vm::trace::chiplets::ace::ACE_CHIPLET_NUM_COLS,
+    miden_air_definitions::vm::trace::chiplets::bitwise::TRACE_WIDTH as BITWISE_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+    miden_air_definitions::vm::trace::chiplets::hasher::HasherState,
+    miden_air_definitions::vm::trace::chiplets::hasher::TRACE_WIDTH as HASHER_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::memory::TRACE_WIDTH as MEMORY_WIDTH,
+    miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
+};
+use {
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::mast::OpBatch,
+};
+
+use {
+    crate::Felt,
+    crate::ONE,
+    crate::Word,
+    crate::ZERO,
+    crate::crypto::merkle::MerklePath,
+    crate::operation::OperationError,
+    crate::trace::ChipletTraceFragment,
+    crate::trace::RowIndex,
+    crate::trace::range::RangeChecker,
 };
 
 mod aead_stream;
-pub(crate) use aead_stream::{AEAD_STREAM_CYCLE_LEN, AeadStream};
+pub(crate) use {
+    aead_stream::AEAD_STREAM_CYCLE_LEN,
+    aead_stream::AeadStream,
+};
 
 mod and8_trace;
 pub(crate) use and8_trace::build_and8_lookup_trace;
@@ -38,16 +55,26 @@ const _: () = assert!(CONTROLLER_TRACE_ALIGNMENT.is_multiple_of(AEAD_STREAM_CYCL
 
 mod hasher;
 pub(crate) use hasher::Hasher;
-pub use hasher::{
-    build_external_eidos_compression_traces, build_ordered_external_eidos_compression_traces,
+pub use {
+    hasher::build_external_eidos_compression_traces,
+    hasher::build_ordered_external_eidos_compression_traces,
 };
 
 mod memory;
 pub(crate) use memory::Memory;
 
 mod ace;
-pub(crate) use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
-pub use ace::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES};
+pub(crate) use {
+    ace::Ace,
+    ace::CircuitEvaluation,
+    ace::MAX_NUM_ACE_WIRES,
+    ace::PTR_OFFSET_ELEM,
+    ace::PTR_OFFSET_WORD,
+};
+pub use {
+    ace::MAX_EVAL_CIRCUIT_INVOCATIONS,
+    ace::MAX_EVAL_CIRCUIT_WIRES,
+};
 
 mod kernel_rom;
 pub(crate) use kernel_rom::KernelRom;

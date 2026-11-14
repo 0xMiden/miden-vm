@@ -4,11 +4,26 @@ use core::mem;
 use num::Integer;
 use p3_maybe_rayon::prelude::*;
 
-use super::{
-    EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
-    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, Word,
+use {
+    super::EmptySubtreeRoots,
+    super::InnerNode,
+    super::InnerNodes,
+    super::Leaves,
+    super::MerkleError,
+    super::MutationSet,
+    super::NodeIndex,
+    super::SMT_DEPTH,
+    super::Smt,
+    super::SmtLeaf,
+    super::SparseMerkleTreeReader,
+    super::Word,
 };
-use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError};
+use {
+    crate::merkle::smt::Map,
+    crate::merkle::smt::NodeMutation,
+    crate::merkle::smt::NodeMutations,
+    crate::merkle::smt::SmtLeafError,
+};
 
 #[cfg(test)]
 mod tests;

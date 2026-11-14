@@ -1,18 +1,31 @@
-use miden_core::{Felt, field::QuadFelt};
-use miden_stark::lookup::{LookupAir, ProverLookupBuilder};
-use p3_security::budget::{AirShape, LookupShape};
+use {
+    miden_core::Felt,
+    miden_core::field::QuadFelt,
+};
+use {
+    miden_stark::lookup::LookupAir,
+    miden_stark::lookup::ProverLookupBuilder,
+};
+use {
+    p3_security::budget::AirShape,
+    p3_security::budget::LookupShape,
+};
 
-use crate::precompiles::{
-    ChipletAir,
-    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-    hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
-        sha512::Sha512Air,
-    },
-    primitives::byte_pair_lut::BytePairLutAir,
-    relations::MAX_MESSAGE_WIDTH,
-    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
+use {
+    crate::precompiles::ChipletAir,
+    crate::precompiles::ec::add::EcGroupAddAir,
+    crate::precompiles::ec::msm::EcMsmAir,
+    crate::precompiles::ec::point_store_groups::EcPointStoreGroupsAir,
+    crate::precompiles::hash::chunk_node_sponge::ChunkNodeSpongeAir,
+    crate::precompiles::hash::keccak::round::KeccakRoundAir,
+    crate::precompiles::hash::sha256::Sha256Air,
+    crate::precompiles::hash::sha512::Sha512Air,
+    crate::precompiles::primitives::byte_pair_lut::BytePairLutAir,
+    crate::precompiles::relations::MAX_MESSAGE_WIDTH,
+    crate::precompiles::transcript::eidos::EidosCompressionAir,
+    crate::precompiles::transcript::eval::TranscriptEvalAir,
+    crate::precompiles::uint::add::UintAddAir,
+    crate::precompiles::uint::store_mul::UintStoreMulAir,
 };
 
 /// Derive the full member's security shape for tooling and differential validation.

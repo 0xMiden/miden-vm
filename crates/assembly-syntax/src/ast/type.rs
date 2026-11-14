@@ -1,11 +1,34 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::string::String,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-use midenc_hir_type::{AddressSpace, Type, TypeRepr, TypeTemplate};
+use {
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
+use {
+    midenc_hir_type::AddressSpace,
+    midenc_hir_type::Type,
+    midenc_hir_type::TypeRepr,
+    midenc_hir_type::TypeTemplate,
+};
 
-use super::{
-    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
-    SymbolResolutionError, Visibility, types,
+use {
+    super::ConstantExpr,
+    super::DocString,
+    super::GlobalItemIndex,
+    super::Ident,
+    super::ItemIndex,
+    super::Path,
+    super::SymbolResolution,
+    super::SymbolResolutionError,
+    super::Visibility,
+    super::types,
 };
 
 /// Maximum allowed nesting depth of type expressions during parsing and resolution.
@@ -1170,7 +1193,10 @@ impl Variant {
     /// time this is called. If the discriminant has not been fully folded, then an error will be
     /// returned.
     pub fn assert_instance_of(&self, ty: &Type) -> Result<(), crate::SemanticAnalysisError> {
-        use crate::{FIELD_MODULUS, SemanticAnalysisError};
+        use {
+            crate::FIELD_MODULUS,
+            crate::SemanticAnalysisError,
+        };
 
         let value = match &self.discriminant {
             ConstantExpr::Int(value) => value.as_int(),
@@ -1280,13 +1306,25 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, sync::Arc};
+    use {
+        alloc::string::ToString,
+        alloc::sync::Arc,
+    };
     use core::str::FromStr;
 
-    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
+    use {
+        miden_debug_types::DefaultSourceManager,
+        miden_debug_types::SourceFile,
+        miden_debug_types::SourceId,
+        miden_debug_types::SourceLanguage,
+        miden_debug_types::Uri,
+    };
 
     use super::*;
-    use crate::{ast::Form, prettier::PrettyPrint};
+    use {
+        crate::ast::Form,
+        crate::prettier::PrettyPrint,
+    };
 
     struct DummyResolver {
         source_manager: Arc<dyn SourceManager>,
@@ -1480,7 +1518,12 @@ mod tests {
 
     #[test]
     fn type_expr_conversion_of_a_recursive_struct_terminates() {
-        use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+        use {
+            midenc_hir_type::RecursiveTypeBuilder,
+            midenc_hir_type::StructTemplate,
+            midenc_hir_type::TypeRepr,
+            midenc_hir_type::TypeTemplate,
+        };
 
         let mut builder = RecursiveTypeBuilder::new();
         builder.define_struct(

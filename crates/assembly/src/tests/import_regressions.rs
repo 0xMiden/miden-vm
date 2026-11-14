@@ -5,7 +5,10 @@ use super::*;
 
 #[test]
 fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
@@ -24,7 +27,10 @@ fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
 
 #[test]
 fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
@@ -52,7 +58,10 @@ fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
 
 #[test]
 fn asm_import_direct_digest_invoke_assembles_without_source_import() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let program = r#"
         begin
@@ -206,7 +215,10 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
 
 #[test]
 fn asm_import_source_digest_import_is_rejected_without_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let program = r#"
         use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -229,7 +241,10 @@ fn asm_import_source_digest_import_is_rejected_without_panicking() {
 
 #[test]
 fn invoking_local_type_alias_returns_error_instead_of_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
 
@@ -256,7 +271,10 @@ fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
 
 #[test]
 fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
     let context = TestContext::new();
     let lib_src = source_file!(

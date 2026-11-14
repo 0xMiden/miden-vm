@@ -10,23 +10,38 @@
 //! depths, i.e. as part of adding a new element to the forest the trees with same depth are
 //! merged, creating a new tree with depth d+1, this process is continued until the property is
 //! reestablished.
-use alloc::{
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use core::{iter::FusedIterator, ops::Index, slice};
+use {
+    core::iter::FusedIterator,
+    core::ops::Index,
+    core::slice,
+};
 
-use super::{
-    super::{InnerNodeInfo, MerklePath},
-    MmrDelta, MmrError, MmrPath, MmrPeaks, MmrProof,
-    forest::{Forest, TreeSizeIterator},
-    nodes_from_mask,
+use {
+    super::super::InnerNodeInfo,
+    super::super::MerklePath,
+    super::MmrDelta,
+    super::MmrError,
+    super::MmrPath,
+    super::MmrPeaks,
+    super::MmrProof,
+    super::forest::Forest,
+    super::forest::TreeSizeIterator,
+    super::nodes_from_mask,
 };
-use crate::{
-    Word,
-    hash::eidos::Eidos,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    crate::Word,
+    crate::hash::eidos::Eidos,
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 
 // NODE STORE
@@ -744,13 +759,25 @@ impl Iterator for MmrNodes<'_> {
 // ================================================================================================
 #[cfg(test)]
 mod tests {
-    use alloc::{sync::Arc, vec::Vec};
+    use {
+        alloc::sync::Arc,
+        alloc::vec::Vec,
+    };
 
-    use super::{super::nodes_from_mask, NODE_CHUNK_CAPACITY};
-    use crate::{
-        Felt, Word, ZERO,
-        merkle::mmr::{Forest, Mmr, MmrError},
-        utils::{Deserializable, DeserializationError, Serializable},
+    use {
+        super::super::nodes_from_mask,
+        super::NODE_CHUNK_CAPACITY,
+    };
+    use {
+        crate::Felt,
+        crate::Word,
+        crate::ZERO,
+        crate::merkle::mmr::Forest,
+        crate::merkle::mmr::Mmr,
+        crate::merkle::mmr::MmrError,
+        crate::utils::Deserializable,
+        crate::utils::DeserializationError,
+        crate::utils::Serializable,
     };
 
     fn leaves(count: u64) -> impl Iterator<Item = Word> {

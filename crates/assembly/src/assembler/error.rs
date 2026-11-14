@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
-    Path,
-    debuginfo::{SourceFile, SourceSpan},
-    diagnostics::{Diagnostic, miette},
+use {
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::diagnostics::Diagnostic,
+    miden_assembly_syntax::diagnostics::miette,
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]

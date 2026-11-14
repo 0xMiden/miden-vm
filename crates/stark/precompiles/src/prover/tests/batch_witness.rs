@@ -1,33 +1,65 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
-
-use miden_air::precompiles::{ChipletMultiAir, policy::precompile_pcs_params};
-use miden_core::{
-    Felt,
-    deferred::{
-        DeferredError, Digest, MAX_PRECOMPILE_ROOTS, Node, Precompile, PrecompileError,
-        PrecompileLimitError, PrecompileWitness, PrecompileWitnessEntry, PreparationError,
-        PreparedWitness, TRUE_DIGEST, WorkLimit, fold_deferred_root,
-    },
-    field::QuadFelt,
+use {
+    alloc::collections::BTreeMap,
+    alloc::sync::Arc,
+    alloc::vec,
+    alloc::vec::Vec,
 };
-use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
-use miden_precompiles::{
-    CURVE_WORK, CurveId, CurvePrecompile, HASH_WORK, Keccak256Precompile, MSM_WORK, UINT_WORK,
-    UintDomain, UintPrecompile,
+
+use {
+    miden_air::precompiles::ChipletMultiAir,
+    miden_air::precompiles::policy::precompile_pcs_params,
+};
+use {
+    miden_core::Felt,
+    miden_core::deferred::DeferredError,
+    miden_core::deferred::Digest,
+    miden_core::deferred::MAX_PRECOMPILE_ROOTS,
+    miden_core::deferred::Node,
+    miden_core::deferred::Precompile,
+    miden_core::deferred::PrecompileError,
+    miden_core::deferred::PrecompileLimitError,
+    miden_core::deferred::PrecompileWitness,
+    miden_core::deferred::PrecompileWitnessEntry,
+    miden_core::deferred::PreparationError,
+    miden_core::deferred::PreparedWitness,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::deferred::WorkLimit,
+    miden_core::deferred::fold_deferred_root,
+    miden_core::field::QuadFelt,
+};
+use {
+    miden_crypto::hash::eidos::DomainTag,
+    miden_crypto::hash::eidos::DomainVersion,
+    miden_crypto::hash::eidos::EidosFrame,
+    miden_crypto::hash::eidos::namespace,
+};
+use {
+    miden_precompiles::CURVE_WORK,
+    miden_precompiles::CurveId,
+    miden_precompiles::CurvePrecompile,
+    miden_precompiles::HASH_WORK,
+    miden_precompiles::Keccak256Precompile,
+    miden_precompiles::MSM_WORK,
+    miden_precompiles::UINT_WORK,
+    miden_precompiles::UintDomain,
+    miden_precompiles::UintPrecompile,
 };
 use miden_stark::memory;
 use proptest::prelude::*;
 
-use crate::{
-    prover::{
-        HashFunction, PrecompileProvingError, SessionInputError, WitnessLocation,
-        deferred::{
-            capacity::{self, IMPORT_BYTES_PER_NODE, SESSION_BYTES},
-            session::{import_witnesses, import_witnesses_with_roots, session_from_witnesses},
-        },
-        hash::keccak::sponge::trace::keccak_oracle,
-    },
-    verifier::verify_deferred,
+use {
+    crate::prover::HashFunction,
+    crate::prover::PrecompileProvingError,
+    crate::prover::SessionInputError,
+    crate::prover::WitnessLocation,
+    crate::prover::deferred::capacity,
+    crate::prover::deferred::capacity::IMPORT_BYTES_PER_NODE,
+    crate::prover::deferred::capacity::SESSION_BYTES,
+    crate::prover::deferred::session::import_witnesses,
+    crate::prover::deferred::session::import_witnesses_with_roots,
+    crate::prover::deferred::session::session_from_witnesses,
+    crate::prover::hash::keccak::sponge::trace::keccak_oracle,
+    crate::verifier::verify_deferred,
 };
 
 /// Raw committed test graphs, with no runtime evaluator. The shared fixture also supports the
@@ -908,7 +940,11 @@ fn distinct_hash_claims_count_shared_payload_demand() {
 
 #[test]
 fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
-    use PrecompileLimitError::{Count, ItemSize, TotalSize};
+    use {
+        PrecompileLimitError::Count,
+        PrecompileLimitError::ItemSize,
+        PrecompileLimitError::TotalSize,
+    };
     use miden_crypto::hash::sha2::Sha512;
     use miden_precompiles::Sha512Precompile;
 
@@ -1004,7 +1040,11 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
 
 #[test]
 fn default_msm_limits_charge_zero_scalars_and_repeated_bases() {
-    use PrecompileLimitError::{Count, ItemSize, TotalSize};
+    use {
+        PrecompileLimitError::Count,
+        PrecompileLimitError::ItemSize,
+        PrecompileLimitError::TotalSize,
+    };
 
     for (count, terms, expected_error) in [
         (64, 4, None),

@@ -17,29 +17,53 @@ mod target;
 mod tests;
 mod workspace;
 
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
+use {
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::diagnostics::Diagnostic,
+    miden_assembly_syntax::diagnostics::miette,
 };
 // Re-exported for consistency
-pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
+pub use {
+    miden_assembly_syntax::Word,
+    miden_assembly_syntax::debuginfo::Uri,
+    miden_assembly_syntax::semver,
+};
 #[cfg(feature = "serde")]
-use miden_assembly_syntax::{
-    debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
+use {
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceId,
+    miden_assembly_syntax::diagnostics::Label,
+    miden_assembly_syntax::diagnostics::RelatedError,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
 };
 pub use miden_mast_package::TargetType;
-pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
+pub use {
+    miden_package_registry::SemVer,
+    miden_package_registry::Version,
+    miden_package_registry::VersionReq,
+    miden_package_registry::VersionRequirement,
+};
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use {
+    serde::Deserialize,
+    serde::Serialize,
+};
 pub use toml::Value;
 
-pub use self::{
-    dependencies::*, linkage::Linkage, package::Package, profile::Profile, target::Target,
-    workspace::Workspace,
+pub use {
+    self::dependencies::*,
+    self::linkage::Linkage,
+    self::package::Package,
+    self::profile::Profile,
+    self::target::Target,
+    self::workspace::Workspace,
 };
 
 /// An alias for [`alloc::collections::BTreeMap`].

@@ -1,8 +1,18 @@
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::string::String,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceFile, SourceId, SourceSpan, Span, Uri},
+use {
+    miden_assembly_syntax::Report,
+    miden_assembly_syntax::debuginfo::SourceFile,
+    miden_assembly_syntax::debuginfo::SourceId,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Uri,
 };
 
 /// This type is used to represent package information which may be inherited within a workspace.
@@ -27,11 +37,17 @@ impl<T> MaybeInherit<T> {
 #[cfg(feature = "serde")]
 mod maybe_inherit {
     use alloc::string::String;
-    use core::{fmt, marker::PhantomData};
+    use {
+        core::fmt,
+        core::marker::PhantomData,
+    };
 
-    use serde::{
-        Deserialize,
-        de::{self, IntoDeserializer, MapAccess, Visitor},
+    use {
+        serde::Deserialize,
+        serde::de,
+        serde::de::IntoDeserializer,
+        serde::de::MapAccess,
+        serde::de::Visitor,
     };
 
     use super::MaybeInherit;

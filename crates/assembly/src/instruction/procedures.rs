@@ -1,19 +1,25 @@
 use alloc::vec::Vec;
 
-use miden_assembly_syntax::{
-    Word,
-    ast::{InvocationTarget, InvokeKind},
-    debuginfo::SourceSpan,
-    diagnostics::Report,
+use {
+    miden_assembly_syntax::Word,
+    miden_assembly_syntax::ast::InvocationTarget,
+    miden_assembly_syntax::ast::InvokeKind,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::diagnostics::Report,
 };
-use miden_core::operations::{AssemblyOp, Operation};
+use {
+    miden_core::operations::AssemblyOp,
+    miden_core::operations::Operation,
+};
 use miden_mast_package::debug_info::DebugSourceInlineCall;
 use smallvec::SmallVec;
 
-use crate::{
-    Assembler, GlobalItemIndex,
-    basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::{MastForestBuilder, MastNodeUse},
+use {
+    crate::Assembler,
+    crate::GlobalItemIndex,
+    crate::basic_block_builder::BasicBlockBuilder,
+    crate::mast_forest_builder::MastForestBuilder,
+    crate::mast_forest_builder::MastNodeUse,
 };
 
 /// Procedure Invocation

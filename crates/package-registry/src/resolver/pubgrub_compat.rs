@@ -1,16 +1,28 @@
 //! This module is borrowed/modified from [semver-pubgrub](https://github.com/pubgrub-rs/semver-pubgrub/blob/main/src/lib.rs).
 use alloc::format;
-use core::{
-    borrow::Borrow,
-    cmp::{max, min},
-    fmt::{self, Display},
-    num::NonZeroU64,
-    ops::Bound,
+use {
+    core::borrow::Borrow,
+    core::cmp::max,
+    core::cmp::min,
+    core::fmt,
+    core::fmt::Display,
+    core::num::NonZeroU64,
+    core::ops::Bound,
 };
 
-use pubgrub::{Range, VersionSet};
+use {
+    pubgrub::Range,
+    pubgrub::VersionSet,
+};
 
-use crate::semver::{BuildMetadata, Comparator, Op, Prerelease, Version, VersionReq};
+use {
+    crate::semver::BuildMetadata,
+    crate::semver::Comparator,
+    crate::semver::Op,
+    crate::semver::Prerelease,
+    crate::semver::Version,
+    crate::semver::VersionReq,
+};
 
 /// This needs to be bug-for-bug compatible with https://github.com/dtolnay/semver/blob/master/src/eval.rs
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -794,7 +806,12 @@ pub(crate) fn simplified_bounds_to_normal(
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, eprintln, format, ops::RangeBounds};
+    use {
+        std::collections::HashSet,
+        std::eprintln,
+        std::format,
+        std::ops::RangeBounds,
+    };
 
     use super::*;
     const OPS: &[&str] = &["^", "~", "=", "<", ">", "<=", ">="];

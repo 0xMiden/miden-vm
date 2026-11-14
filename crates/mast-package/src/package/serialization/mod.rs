@@ -38,30 +38,51 @@
 //! embedded kernel through the package API uses the untrusted reader, so nested package-owned debug
 //! information is validated and retained under the same policy.
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::format,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
-use miden_core::{
-    Word,
-    mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
-    serde::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader,
-    },
+use {
+    miden_assembly_syntax::ast,
+    miden_assembly_syntax::ast::AttributeSet,
+    miden_assembly_syntax::ast::PathBuf,
+};
+use {
+    miden_core::Word,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::mast::UntrustedMastForest,
+    miden_core::serde::BudgetedReader,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+    miden_core::serde::SliceReader,
 };
 
-use super::{
-    ConstantExport, PackageId, PackageModule, PackageSubmodule, ProcedureExport, TargetType,
-    TypeExport,
+use {
+    super::ConstantExport,
+    super::PackageId,
+    super::PackageModule,
+    super::PackageSubmodule,
+    super::ProcedureExport,
+    super::TargetType,
+    super::TypeExport,
 };
-use crate::{
-    Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
-    debug_info::DebugSourceNodeId,
+use {
+    crate::Dependency,
+    crate::ManifestValidationError,
+    crate::Package,
+    crate::PackageExport,
+    crate::PackageManifest,
+    crate::Section,
+    crate::debug_info::DebugSourceNodeId,
 };
 
 #[cfg(test)]

@@ -1,46 +1,76 @@
-use alloc::{
-    boxed::Box,
-    collections::BTreeSet,
-    string::{String, ToString},
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::vec::Vec,
 };
-use core::{assert_matches, fmt::Write, str::FromStr};
-use std::{eprintln, sync::Arc};
+use {
+    core::assert_matches,
+    core::fmt::Write,
+    core::str::FromStr,
+};
+use {
+    std::eprintln,
+    std::sync::Arc,
+};
 
-use miden_assembly_syntax::{
-    MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT,
-    ast::{Ident, Path},
-    diagnostics::WrapErr,
+use {
+    miden_assembly_syntax::MAX_CONTROL_FLOW_NESTING,
+    miden_assembly_syntax::MAX_REPEAT_COUNT,
+    miden_assembly_syntax::ast::Ident,
+    miden_assembly_syntax::ast::Path,
+    miden_assembly_syntax::diagnostics::WrapErr,
 };
-use miden_core::{
-    Felt, Word,
-    events::EventId,
-    field::PrimeField64,
-    mast::{MastNode, MastNodeExt},
-    operations::{AssemblyOp, Operation},
-    program::Program,
-    serde::{Deserializable, Serializable},
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::events::EventId,
+    miden_core::field::PrimeField64,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::operations::AssemblyOp,
+    miden_core::operations::Operation,
+    miden_core::program::Program,
+    miden_core::serde::Deserializable,
+    miden_core::serde::Serializable,
 };
-use miden_mast_package::{
-    MastForest, Package, PackageExport, PackageModule, PackageSubmodule, ProcedureExport,
-    TargetType,
+use {
+    miden_mast_package::MastForest,
+    miden_mast_package::Package,
+    miden_mast_package::PackageExport,
+    miden_mast_package::PackageModule,
+    miden_mast_package::PackageSubmodule,
+    miden_mast_package::ProcedureExport,
+    miden_mast_package::TargetType,
 };
 use miden_project::Linkage;
 
-use crate::{
-    Assembler, PathBuf, SourceSpan, Span,
-    assembler::MAX_PROC_LOCALS,
-    ast::{
-        Block, Instruction, Module, Op, Procedure, ProcedureName, QualifiedProcedureName,
-        Visibility,
-    },
-    diagnostics::{IntoDiagnostic, Report},
-    fmp::fmp_initialization_sequence,
-    mast_forest_builder::MastForestBuilder,
-    report,
-    testing::{
-        TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
-    },
+use {
+    crate::Assembler,
+    crate::PathBuf,
+    crate::SourceSpan,
+    crate::Span,
+    crate::assembler::MAX_PROC_LOCALS,
+    crate::ast::Block,
+    crate::ast::Instruction,
+    crate::ast::Module,
+    crate::ast::Op,
+    crate::ast::Procedure,
+    crate::ast::ProcedureName,
+    crate::ast::QualifiedProcedureName,
+    crate::ast::Visibility,
+    crate::diagnostics::IntoDiagnostic,
+    crate::diagnostics::Report,
+    crate::fmp::fmp_initialization_sequence,
+    crate::mast_forest_builder::MastForestBuilder,
+    crate::report,
+    crate::testing::TestContext,
+    crate::testing::assert_diagnostic,
+    crate::testing::assert_diagnostic_lines,
+    crate::testing::parse_module,
+    crate::testing::regex,
+    crate::testing::source_file,
 };
 
 type TestResult = Result<(), Report>;

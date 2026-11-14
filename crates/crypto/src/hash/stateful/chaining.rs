@@ -6,7 +6,10 @@
 use p3_field::Field;
 use p3_symmetric::CryptographicHasher;
 
-use super::{Alignable, StatefulHasher};
+use {
+    super::Alignable,
+    super::StatefulHasher,
+};
 
 /// An adapter that chains state with new input, hashing `state || encode(input)`.
 ///
@@ -173,7 +176,10 @@ mod tests {
     use core::array;
 
     use p3_bn254::Bn254;
-    use p3_field::{Field, RawDataSerializable};
+    use {
+        p3_field::Field,
+        p3_field::RawDataSerializable,
+    };
     use p3_goldilocks::Goldilocks;
     use p3_mersenne_31::Mersenne31;
 

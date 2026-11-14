@@ -1,19 +1,33 @@
 use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
-use miden_ace::instruction::{Op, decode_instruction};
-use miden_air_definitions::vm::{
-    AceCols, QuadFeltExpr,
-    trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
+use {
+    miden_ace::instruction::Op,
+    miden_ace::instruction::decode_instruction,
 };
-use miden_core::{
-    Felt, Word,
-    field::{BasedVectorSpace, QuadFelt},
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    miden_air_definitions::vm::AceCols,
+    miden_air_definitions::vm::QuadFeltExpr,
+    miden_air_definitions::vm::trace::RowIndex,
+    miden_air_definitions::vm::trace::chiplets::ace::ACE_CHIPLET_NUM_COLS,
+};
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::field::BasedVectorSpace,
+    miden_core::field::QuadFelt,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
 };
 
 use super::MAX_NUM_ACE_WIRES;
-use crate::{ContextId, errors::AceError};
+use {
+    crate::ContextId,
+    crate::errors::AceError,
+};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
 /// pointer of the word that was loaded.
@@ -551,7 +565,15 @@ mod serialization_tests {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::{CircuitEvaluation, ContextId, EvalNode, Felt, QuadFelt, ReadNode, WireBus};
+    use {
+        super::CircuitEvaluation,
+        super::ContextId,
+        super::EvalNode,
+        super::Felt,
+        super::QuadFelt,
+        super::ReadNode,
+        super::WireBus,
+    };
     use crate::RowIndex;
 
     fn quad() -> impl Strategy<Value = QuadFelt> {

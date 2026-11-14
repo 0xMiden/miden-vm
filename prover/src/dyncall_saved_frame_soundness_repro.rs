@@ -19,13 +19,30 @@
 //! caller (the enclosing procedure) to depth `D`, and the enclosing call's own END restores the
 //! root to 16 -- erasing the excursion before the last-row `b0 = 16` boundary.
 
-use alloc::{format, vec, vec::Vec};
+use {
+    alloc::format,
+    alloc::vec,
+    alloc::vec::Vec,
+};
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{Felt, Word, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use {
+    miden_core::Felt,
+    miden_core::Word,
+    miden_core::field::Field,
+    miden_core::operations::opcodes,
+    miden_core::utils::RowMajorMatrix,
+};
+use {
+    miden_processor::DefaultHost,
+    miden_processor::FastProcessor,
+    miden_processor::StackInputs,
+};
 
-use crate::repro_harness::{ReproTrace, core_row_mut};
+use {
+    crate::repro_harness::ReproTrace,
+    crate::repro_harness::core_row_mut,
+};
 
 const ADDR: u64 = 40;
 /// The forged caller depth. Any value != 16 exercises the gap.

@@ -1,32 +1,53 @@
 use alloc::vec::Vec;
-use core::{borrow::Borrow, mem::size_of};
-
-use miden_air_definitions::vm::{
-    BitwiseOpCols, ChipletCols,
-    trace::{
-        CHIPLETS_WIDTH, TRACE_WIDTH,
-        chiplets::{
-            KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
-            NUM_MEMORY_SELECTORS,
-            bitwise::{BITWISE_XOR, OP_CYCLE_LEN},
-            hasher::{
-                CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_TRACE_ALIGNMENT, LINEAR_HASH, PADDING,
-                STATE_WIDTH,
-            },
-            memory,
-        },
-    },
-};
-use miden_core::{
-    Felt, ONE, Word, ZERO,
-    mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest},
-    program::{Program, StackInputs},
+use {
+    core::borrow::Borrow,
+    core::mem::size_of,
 };
 
-use super::{AEAD_STREAM_CYCLE_LEN, Chiplets};
-use crate::{
-    AdviceInputs, ContextId, DefaultHost, ExecutionOptions, FastProcessor, KernelDescriptor,
-    RowIndex, operation::Operation, trace::trace_state::AeadStreamReplayEntry,
+use {
+    miden_air_definitions::vm::BitwiseOpCols,
+    miden_air_definitions::vm::ChipletCols,
+    miden_air_definitions::vm::trace::CHIPLETS_WIDTH,
+    miden_air_definitions::vm::trace::TRACE_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::NUM_BITWISE_SELECTORS,
+    miden_air_definitions::vm::trace::chiplets::NUM_KERNEL_ROM_SELECTORS,
+    miden_air_definitions::vm::trace::chiplets::NUM_MEMORY_SELECTORS,
+    miden_air_definitions::vm::trace::chiplets::bitwise::BITWISE_XOR,
+    miden_air_definitions::vm::trace::chiplets::bitwise::OP_CYCLE_LEN,
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP,
+    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+    miden_air_definitions::vm::trace::chiplets::hasher::LINEAR_HASH,
+    miden_air_definitions::vm::trace::chiplets::hasher::PADDING,
+    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+    miden_air_definitions::vm::trace::chiplets::memory,
+};
+use {
+    miden_core::Felt,
+    miden_core::ONE,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::CallNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::program::Program,
+    miden_core::program::StackInputs,
+};
+
+use {
+    super::AEAD_STREAM_CYCLE_LEN,
+    super::Chiplets,
+};
+use {
+    crate::AdviceInputs,
+    crate::ContextId,
+    crate::DefaultHost,
+    crate::ExecutionOptions,
+    crate::FastProcessor,
+    crate::KernelDescriptor,
+    crate::RowIndex,
+    crate::operation::Operation,
+    crate::trace::trace_state::AeadStreamReplayEntry,
 };
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];

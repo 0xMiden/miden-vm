@@ -1,16 +1,27 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
-    ast::{Attribute, AttributeSet, MetaExpr, Path, PathBuf, Visibility, types::FunctionType},
-    debuginfo::{SourceManager, SourceSpan, Spanned},
-    diagnostics::Report,
+use {
+    miden_assembly_syntax::ast::Attribute,
+    miden_assembly_syntax::ast::AttributeSet,
+    miden_assembly_syntax::ast::MetaExpr,
+    miden_assembly_syntax::ast::Path,
+    miden_assembly_syntax::ast::PathBuf,
+    miden_assembly_syntax::ast::Visibility,
+    miden_assembly_syntax::ast::types::FunctionType,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::diagnostics::Report,
 };
 use miden_core::Word;
 
-use super::{
-    GlobalItemIndex,
-    assembler::{MAX_PROC_LOCALS, error::AssemblerError},
-    mast_forest_builder::{MastNodeRef, MastNodeUse, SourceNodeRef},
+use {
+    super::GlobalItemIndex,
+    super::assembler::MAX_PROC_LOCALS,
+    super::assembler::error::AssemblerError,
+    super::mast_forest_builder::MastNodeRef,
+    super::mast_forest_builder::MastNodeUse,
+    super::mast_forest_builder::SourceNodeRef,
 };
 
 // PROCEDURE CONTEXT
@@ -349,12 +360,19 @@ impl Spanned for Procedure {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{sync::Arc, vec};
+    use {
+        alloc::sync::Arc,
+        alloc::vec,
+    };
 
-    use miden_assembly_syntax::{
-        PathBuf,
-        ast::{Attribute, Ident, MetaExpr},
-        debuginfo::{DefaultSourceManager, SourceLanguage, Uri},
+    use {
+        miden_assembly_syntax::PathBuf,
+        miden_assembly_syntax::ast::Attribute,
+        miden_assembly_syntax::ast::Ident,
+        miden_assembly_syntax::ast::MetaExpr,
+        miden_assembly_syntax::debuginfo::DefaultSourceManager,
+        miden_assembly_syntax::debuginfo::SourceLanguage,
+        miden_assembly_syntax::debuginfo::Uri,
     };
 
     use super::*;

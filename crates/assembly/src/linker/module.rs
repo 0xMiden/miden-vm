@@ -1,16 +1,38 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::{cell::Cell, ops::Index};
-
-use miden_assembly_syntax::{
-    Path,
-    ast::{
-        ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
-        SymbolResolution, SymbolResolutionError, SymbolTable,
-    },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
+use {
+    core::cell::Cell,
+    core::ops::Index,
 };
 
-use super::{AdviceMap, Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
+use {
+    miden_assembly_syntax::Path,
+    miden_assembly_syntax::ast::ItemIndex,
+    miden_assembly_syntax::ast::LocalSymbol,
+    miden_assembly_syntax::ast::LocalSymbolResolver,
+    miden_assembly_syntax::ast::ModuleIndex,
+    miden_assembly_syntax::ast::ModuleKind,
+    miden_assembly_syntax::ast::SubmoduleDecl,
+    miden_assembly_syntax::ast::SymbolResolution,
+    miden_assembly_syntax::ast::SymbolResolutionError,
+    miden_assembly_syntax::ast::SymbolTable,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+};
+
+use {
+    super::AdviceMap,
+    super::Import,
+    super::LinkStatus,
+    super::Symbol,
+    super::SymbolResolver,
+    super::namespaces::ResolvedUse,
+};
 
 /// The source from which a [LinkModule] was derived.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

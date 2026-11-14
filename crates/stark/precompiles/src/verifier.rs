@@ -1,29 +1,45 @@
 //! Native verification against an explicit precompile root.
 
-use alloc::{vec, vec::Vec};
+use {
+    alloc::vec,
+    alloc::vec::Vec,
+};
 
-use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs_params};
-use miden_core::{
-    Felt,
-    deferred::DeferredRoot,
-    field::QuadFelt,
-    proof::{HashFunction, MAX_STARK_PROOF_BYTES, StarkProof},
+use {
+    miden_air::precompiles::ChipletAir,
+    miden_air::precompiles::ChipletMultiAir,
+    miden_air::precompiles::policy::precompile_pcs_params,
+};
+use {
+    miden_core::Felt,
+    miden_core::deferred::DeferredRoot,
+    miden_core::field::QuadFelt,
+    miden_core::proof::HashFunction,
+    miden_core::proof::MAX_STARK_PROOF_BYTES,
+    miden_core::proof::StarkProof,
 };
 use miden_serde_utils::deserialize_schema_exact;
-use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
-    air::Statement,
-    config::{blake3_256_config, keccak_config, observe_protocol_params},
-    lmcs::Lmcs as LmcsTrait,
-    proof::StarkProofData,
+use {
+    miden_stark::PreprocessedValidationError,
+    miden_stark::StarkConfig,
+    miden_stark::VerifierError,
+    miden_stark::VerifierInstance,
+    miden_stark::air::Statement,
+    miden_stark::config::blake3_256_config,
+    miden_stark::config::keccak_config,
+    miden_stark::config::observe_protocol_params,
+    miden_stark::lmcs::Lmcs as LmcsTrait,
+    miden_stark::proof::StarkProofData,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
-use crate::setup::{
-    commitments,
-    config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
-    security::{self, ProofSecurityParameters},
+use {
+    crate::setup::commitments,
+    crate::setup::config::PRECOMPILE_RELATION_DIGEST,
+    crate::setup::config::eidos_config,
+    crate::setup::security,
+    crate::setup::security::ProofSecurityParameters,
 };
 
 /// Verifies a precompile STARK against an explicit deferred root and returns its authenticated
@@ -140,9 +156,17 @@ pub enum VerifyError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use {
+        alloc::vec,
+        alloc::vec::Vec,
+    };
 
-    use miden_core::{Felt, Word, deferred::TRUE_DIGEST, proof::MAX_STARK_PROOF_BYTES};
+    use {
+        miden_core::Felt,
+        miden_core::Word,
+        miden_core::deferred::TRUE_DIGEST,
+        miden_core::proof::MAX_STARK_PROOF_BYTES,
+    };
 
     use super::*;
 

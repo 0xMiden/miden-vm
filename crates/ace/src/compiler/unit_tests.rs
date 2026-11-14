@@ -1,16 +1,23 @@
 //! Unit tests for internal DAG + circuit helpers.
 
-use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::{Field, PrimeCharacteristicRing};
+use {
+    miden_core::Felt,
+    miden_core::field::QuadFelt,
+};
+use {
+    miden_crypto::field::Field,
+    miden_crypto::field::PrimeCharacteristicRing,
+};
 use proptest::prelude::*;
 
-use crate::{
-    InputCounts, InputKey, InputLayout,
-    compiler::{
-        AceCircuit,
-        circuit::emit_circuit,
-        dag::{DagBuilder, normalize_dag},
-    },
+use {
+    crate::InputCounts,
+    crate::InputKey,
+    crate::InputLayout,
+    crate::compiler::AceCircuit,
+    crate::compiler::circuit::emit_circuit,
+    crate::compiler::dag::DagBuilder,
+    crate::compiler::dag::normalize_dag,
 };
 
 /// Minimal layout with only public inputs populated.

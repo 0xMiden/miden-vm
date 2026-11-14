@@ -1,14 +1,26 @@
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, btree_map::Entry},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::btree_map::Entry,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
-use core::{error::Error, fmt, fmt::Debug};
+use {
+    core::error::Error,
+    core::fmt,
+    core::fmt::Debug,
+};
 
-use miden_core::events::{EventId, EventName};
+use {
+    miden_core::events::EventId,
+    miden_core::events::EventName,
+};
 
-use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
+use {
+    crate::ExecutionError,
+    crate::ProcessorState,
+    crate::advice::AdviceMutation,
+};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -353,17 +365,35 @@ impl Debug for TraceHandlerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{sync::Arc, vec::Vec};
-
-    use miden_core::events::{EventId, EventName, SystemEvent};
-
-    use super::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
-        TraceHandlerRegistry,
+    use {
+        alloc::sync::Arc,
+        alloc::vec::Vec,
     };
-    use crate::{
-        BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, ProcessorState,
-        StackInputs, advice::AdviceMutation,
+
+    use {
+        miden_core::events::EventId,
+        miden_core::events::EventName,
+        miden_core::events::SystemEvent,
+    };
+
+    use {
+        super::EventError,
+        super::EventHandler,
+        super::EventHandlerRegistry,
+        super::NoopEventHandler,
+        super::TraceError,
+        super::TraceHandler,
+        super::TraceHandlerRegistry,
+    };
+    use {
+        crate::BaseHost,
+        crate::DefaultHost,
+        crate::ExecutionError,
+        crate::FastProcessor,
+        crate::HostError,
+        crate::ProcessorState,
+        crate::StackInputs,
+        crate::advice::AdviceMutation,
     };
 
     #[derive(Debug, thiserror::Error)]

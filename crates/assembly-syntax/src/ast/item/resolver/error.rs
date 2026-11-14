@@ -3,11 +3,17 @@
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+};
 
-use crate::{
-    ast::ItemIndex,
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+use {
+    crate::ast::ItemIndex,
+    crate::diagnostics::Diagnostic,
+    crate::diagnostics::RelatedLabel,
+    crate::diagnostics::miette,
 };
 
 /// Represents an error that occurs during symbol resolution

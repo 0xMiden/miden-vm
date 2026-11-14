@@ -1,32 +1,59 @@
-use alloc::{
-    boxed::Box,
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
 };
 use core::fmt;
 
-use miden_core::{
-    advice::AdviceMap,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    miden_core::advice::AdviceMap,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
 };
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 use miden_utils_diagnostics::Report;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;
 
-use super::{
-    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Path,
-    Procedure, ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant,
-    Visibility,
+use {
+    super::Constant,
+    super::Declaration,
+    super::DocString,
+    super::EnumType,
+    super::FunctionType,
+    super::Import,
+    super::Item,
+    super::ItemIndex,
+    super::Path,
+    super::Procedure,
+    super::ProcedureName,
+    super::QualifiedProcedureName,
+    super::SubmoduleDecl,
+    super::TypeAlias,
+    super::TypeDecl,
+    super::Variant,
+    super::Visibility,
 };
-use crate::{
-    PathBuf,
-    ast::{self, Ident},
-    parser::ModuleParser,
-    sema::{LimitKind, SemanticAnalysisError},
+use {
+    crate::PathBuf,
+    crate::ast,
+    crate::ast::Ident,
+    crate::parser::ModuleParser,
+    crate::sema::LimitKind,
+    crate::sema::SemanticAnalysisError,
 };
 
 // MODULE KIND

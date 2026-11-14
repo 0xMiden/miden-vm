@@ -5,11 +5,12 @@ use alloc::boxed::Box;
 use miden_serde_utils::Deserializable;
 use rocksdb as db;
 
-use crate::{
-    Word,
-    merkle::smt::{
-        LineageId, SmtLeaf, TreeEntry, large_forest::backend::persistent::keys::LeafKey,
-    },
+use {
+    crate::Word,
+    crate::merkle::smt::LineageId,
+    crate::merkle::smt::SmtLeaf,
+    crate::merkle::smt::TreeEntry,
+    crate::merkle::smt::large_forest::backend::persistent::keys::LeafKey,
 };
 
 // TYPE ALIASES

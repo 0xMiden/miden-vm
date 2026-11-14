@@ -5,15 +5,29 @@ use core::borrow::Borrow;
 
 use once_cell::sync::Lazy;
 
-use super::{
-    Eidos, EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree,
-    NodeIndex, PartialMerkleTree, RootPath, Word,
-    mmr::Mmr,
-    smt::{SimpleSmt, Smt},
+use {
+    super::Eidos,
+    super::EmptySubtreeRoots,
+    super::InnerNodeInfo,
+    super::MerkleError,
+    super::MerklePath,
+    super::MerkleProof,
+    super::MerkleTree,
+    super::NodeIndex,
+    super::PartialMerkleTree,
+    super::RootPath,
+    super::Word,
+    super::mmr::Mmr,
+    super::smt::SimpleSmt,
+    super::smt::Smt,
 };
-use crate::{
-    Map,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use {
+    crate::Map,
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 
 #[cfg(test)]
@@ -704,7 +718,11 @@ mod arbitrary {
 
     use proptest::prelude::*;
 
-    use super::{MerkleStore, StoreNode, Word};
+    use {
+        super::MerkleStore,
+        super::StoreNode,
+        super::Word,
+    };
 
     impl Arbitrary for MerkleStore {
         type Parameters = ();

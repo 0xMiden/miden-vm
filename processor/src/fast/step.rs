@@ -1,14 +1,27 @@
 //! This module defines items relevant to controlling execution stopping conditions.
 
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::ops::ControlFlow;
 
-use miden_core::{mast::MastForest, program::KernelDescriptor};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use {
+    miden_core::mast::MastForest,
+    miden_core::program::KernelDescriptor,
+};
+use {
+    miden_mast_package::debug_info::DebugSourceNodeId,
+    miden_mast_package::debug_info::PackageDebugInfo,
+};
 
-use crate::{
-    ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
+use {
+    crate::ExecutionError,
+    crate::FastProcessor,
+    crate::SourceInlineCallContext,
+    crate::Stopper,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
 };
 
 // RESUME CONTEXT

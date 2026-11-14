@@ -1,17 +1,24 @@
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    string::{String, ToString},
-    sync::Arc,
+use {
+    alloc::boxed::Box,
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::string::String,
+    alloc::string::ToString,
+    alloc::sync::Arc,
 };
 use core::ops::ControlFlow;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use crate::{
-    PathBuf,
-    ast::*,
-    sema::{AnalysisContext, SemanticAnalysisError},
+use {
+    crate::PathBuf,
+    crate::ast::*,
+    crate::sema::AnalysisContext,
+    crate::sema::SemanticAnalysisError,
 };
 
 const MAX_ALIAS_EXPANSION_DEPTH: usize = 128;

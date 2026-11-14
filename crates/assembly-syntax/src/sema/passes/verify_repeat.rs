@@ -2,10 +2,14 @@ use core::ops::ControlFlow;
 
 use miden_debug_types::Spanned;
 
-use crate::{
-    MAX_REPEAT_COUNT,
-    ast::{Immediate, Op, Visit, visit::visit_op},
-    sema::{AnalysisContext, SemanticAnalysisError},
+use {
+    crate::MAX_REPEAT_COUNT,
+    crate::ast::Immediate,
+    crate::ast::Op,
+    crate::ast::Visit,
+    crate::ast::visit::visit_op,
+    crate::sema::AnalysisContext,
+    crate::sema::SemanticAnalysisError,
 };
 
 pub struct VerifyRepeatCounts<'a> {

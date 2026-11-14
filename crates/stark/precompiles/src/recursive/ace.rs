@@ -18,8 +18,9 @@ use miden_air::precompiles::ChipletAir;
 use miden_air::precompiles::NUM_CHIPLETS;
 pub use miden_air::precompiles::protocol::PvmRecursiveAceCircuit;
 #[cfg(test)]
-use miden_air_definitions::compiler::precompiles::{
-    build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
+use {
+    miden_air_definitions::compiler::precompiles::build_canonical_precompile_ace_circuit,
+    miden_air_definitions::compiler::precompiles::build_pvm_recursive_verifier_ace_circuit,
 };
 
 /// Returns the process-wide canonical circuit shared by every proof order.
@@ -86,17 +87,29 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{format, string::String, vec::Vec};
+    use {
+        alloc::format,
+        alloc::string::String,
+        alloc::vec::Vec,
+    };
 
     use miden_ace::InputKey;
     use miden_air::precompiles::policy::precompile_pcs_params;
     use miden_air_definitions::precompiles::ace::LMCS_ALIGNMENT;
-    use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
+    use {
+        miden_core::Felt,
+        miden_core::Word,
+        miden_core::crypto::hash::Eidos,
+        miden_core::field::QuadFelt,
+    };
     use miden_crypto::field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::recursive::ace_constants::{
-        PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST, relation_digest_for_circuit,
+    use {
+        crate::recursive::ace_constants::PVM_ACE_CIRCUIT_DIGEST,
+        crate::recursive::ace_constants::PVM_CIRCUIT_SHAPE,
+        crate::recursive::ace_constants::PVM_RELATION_DIGEST,
+        crate::recursive::ace_constants::relation_digest_for_circuit,
     };
 
     const PVM_WRAPPER_PATH: &str =
@@ -415,7 +428,10 @@ mod tests {
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
         use miden_air::precompiles::ChipletMultiAir;
-        use miden_stark::air::{BaseAir, MultiAir};
+        use {
+            miden_stark::air::BaseAir,
+            miden_stark::air::MultiAir,
+        };
 
         use crate::recursive::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
@@ -538,7 +554,10 @@ mod tests {
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
-        use miden_stark::air::{BaseAir, LiftedAir};
+        use {
+            miden_stark::air::BaseAir,
+            miden_stark::air::LiftedAir,
+        };
 
         assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
@@ -779,7 +798,10 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
-        use miden_air::precompiles::{ChipletAir, ChipletMultiAir};
+        use {
+            miden_air::precompiles::ChipletAir,
+            miden_air::precompiles::ChipletMultiAir,
+        };
         use miden_air_definitions::precompiles::logup::NUM_PUBLIC_VALUES;
         use miden_stark::air::Statement;
 

@@ -63,14 +63,20 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResult {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use {
+        std::panic::AssertUnwindSafe,
+        std::panic::catch_unwind,
+    };
 
-    use miden_assembly_syntax::{
-        ast::{
-            DebugVarInfo, DebugVarLocation, Instruction, Op,
-            types::{ArrayType, Type},
-        },
-        debuginfo::{SourceSpan, Span},
+    use {
+        miden_assembly_syntax::ast::DebugVarInfo,
+        miden_assembly_syntax::ast::DebugVarLocation,
+        miden_assembly_syntax::ast::Instruction,
+        miden_assembly_syntax::ast::Op,
+        miden_assembly_syntax::ast::types::ArrayType,
+        miden_assembly_syntax::ast::types::Type,
+        miden_assembly_syntax::debuginfo::SourceSpan,
+        miden_assembly_syntax::debuginfo::Span,
     };
 
     let context = TestContext::default();

@@ -7,8 +7,17 @@
 
 use std::collections::BTreeMap;
 
-use super::{InputFile, MerkleData, SIMPLE_SMT_DEPTH, Word};
-use crate::crypto::merkle::{EmptySubtreeRoots, MerkleError, NodeIndex};
+use {
+    super::InputFile,
+    super::MerkleData,
+    super::SIMPLE_SMT_DEPTH,
+    super::Word,
+};
+use {
+    crate::crypto::merkle::EmptySubtreeRoots,
+    crate::crypto::merkle::MerkleError,
+    crate::crypto::merkle::NodeIndex,
+};
 
 /// Emits each final parent immediately; an error from `merge` stops construction.
 pub(super) fn add_tree(

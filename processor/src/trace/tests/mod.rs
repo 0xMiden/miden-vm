@@ -1,17 +1,23 @@
 use alloc::vec::Vec;
 
 use miden_air_definitions::vm::PublicInputs;
-use miden_core::{
-    deferred::TRUE_DIGEST,
-    mast::{BasicBlockNodeBuilder, MastForest},
-    operations::Operation,
-    program::Program,
+use {
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::mast::BasicBlockNodeBuilder,
+    miden_core::mast::MastForest,
+    miden_core::operations::Operation,
+    miden_core::program::Program,
 };
 
 use super::VmTrace;
-use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
-    trace::build_trace,
+use {
+    crate::AdviceInputs,
+    crate::DefaultHost,
+    crate::ExecutionOptions,
+    crate::FastProcessor,
+    crate::Felt,
+    crate::StackInputs,
+    crate::trace::build_trace,
 };
 
 mod chiplets;
@@ -183,7 +189,10 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
 
 #[test]
 fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
-    use miden_core::{deferred::Node, serde::Serializable};
+    use {
+        miden_core::deferred::Node,
+        miden_core::serde::Serializable,
+    };
 
     use crate::ExecutionWitness;
 

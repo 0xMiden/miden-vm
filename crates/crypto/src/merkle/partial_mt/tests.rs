@@ -1,10 +1,21 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use {
+    alloc::collections::BTreeMap,
+    alloc::vec::Vec,
+};
 
-use super::{
-    super::{
-        MerkleError, MerkleTree, NodeIndex, PartialMerkleTree, int_to_node, store::MerkleStore,
-    },
-    Deserializable, DeserializationError, InnerNodeInfo, MerkleProof, Serializable, Word,
+use {
+    super::super::MerkleError,
+    super::super::MerkleTree,
+    super::super::NodeIndex,
+    super::super::PartialMerkleTree,
+    super::super::int_to_node,
+    super::super::store::MerkleStore,
+    super::Deserializable,
+    super::DeserializationError,
+    super::InnerNodeInfo,
+    super::MerkleProof,
+    super::Serializable,
+    super::Word,
 };
 
 // TEST DATA

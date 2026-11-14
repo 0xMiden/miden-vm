@@ -1,11 +1,21 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{string::String, sync::Arc, vec::Vec};
-use core::{fmt, ops::Range};
+use {
+    alloc::string::String,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
+use {
+    core::fmt,
+    core::ops::Range,
+};
 
 use miden_debug_types::SourceSpan;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use {
+    miden_utils_diagnostics::Diagnostic,
+    miden_utils_diagnostics::miette,
+};
 
 // LITERAL ERROR KIND
 // ================================================================================================

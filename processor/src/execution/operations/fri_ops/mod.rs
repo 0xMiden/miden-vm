@@ -1,9 +1,14 @@
-use crate::{
-    Felt, ONE, ZERO,
-    errors::OperationError,
-    field::{BasedVectorSpace, Field, QuadFelt},
-    processor::{Processor, StackInterface},
-    tracer::OperationHelperRegisters,
+use {
+    crate::Felt,
+    crate::ONE,
+    crate::ZERO,
+    crate::errors::OperationError,
+    crate::field::BasedVectorSpace,
+    crate::field::Field,
+    crate::field::QuadFelt,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]

@@ -1,24 +1,44 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::{Path, PathBuf},
+use {
+    std::collections::BTreeMap,
+    std::collections::HashMap,
+    std::path::Path,
+    std::path::PathBuf,
 };
 
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_core::{
-    Felt, WORD_SIZE,
-    field::{PrimeField64, QuotientMap},
-    serde::read_file_bounded,
+use {
+    miden_assembly::diagnostics::IntoDiagnostic,
+    miden_assembly::diagnostics::Report,
+    miden_assembly::diagnostics::WrapErr,
+};
+use {
+    miden_core::Felt,
+    miden_core::WORD_SIZE,
+    miden_core::field::PrimeField64,
+    miden_core::field::QuotientMap,
+    miden_core::serde::read_file_bounded,
 };
 use serde::Deserialize;
-pub use tracing::{Level, event, instrument};
+pub use {
+    tracing::Level,
+    tracing::event,
+    tracing::instrument,
+};
 
 #[cfg(test)]
 use crate::crypto::merkle::NodeIndex;
-use crate::{
-    ExecutionOptions, StackInputs, Word, ZERO,
-    advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    crypto::merkle::SmtWitness,
-    serde::{BudgetedReader, ByteReader, Deserializable, SliceReader},
+use {
+    crate::ExecutionOptions,
+    crate::StackInputs,
+    crate::Word,
+    crate::ZERO,
+    crate::advice::AdviceInputs,
+    crate::advice::AdviceProvider,
+    crate::advice::AdviceStack,
+    crate::crypto::merkle::SmtWitness,
+    crate::serde::BudgetedReader,
+    crate::serde::ByteReader,
+    crate::serde::Deserializable,
+    crate::serde::SliceReader,
 };
 
 mod merkle_builder;
@@ -361,9 +381,10 @@ mod budget_tests;
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        time::{SystemTime, UNIX_EPOCH},
+    use {
+        std::fs,
+        std::time::SystemTime,
+        std::time::UNIX_EPOCH,
     };
 
     use super::*;
@@ -452,9 +473,11 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_preserve_multiple_versions_and_leaf_preimages() {
-        use crate::{
-            crypto::merkle::{LeafIndex, PartialSmt, Smt},
-            serde::Serializable,
+        use {
+            crate::crypto::merkle::LeafIndex,
+            crate::crypto::merkle::PartialSmt,
+            crate::crypto::merkle::Smt,
+            crate::serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -502,10 +525,11 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_share_nodes_across_large_tree_versions() {
-        use crate::{
-            advice::AdviceProvider,
-            crypto::merkle::{PartialSmt, Smt},
-            serde::Serializable,
+        use {
+            crate::advice::AdviceProvider,
+            crate::crypto::merkle::PartialSmt,
+            crate::crypto::merkle::Smt,
+            crate::serde::Serializable,
         };
 
         let step = u64::MAX / 2048;
@@ -571,9 +595,10 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_charge_the_combined_advice_budget() {
-        use crate::{
-            crypto::merkle::{PartialSmt, Smt},
-            serde::Serializable,
+        use {
+            crate::crypto::merkle::PartialSmt,
+            crate::crypto::merkle::Smt,
+            crate::serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -610,7 +635,10 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_limit_total_encoded_bytes() {
-        use crate::{crypto::merkle::PartialSmt, serde::Serializable};
+        use {
+            crate::crypto::merkle::PartialSmt,
+            crate::serde::Serializable,
+        };
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
         let copies = 600;
@@ -637,7 +665,10 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_reject_invalid_hex_and_trailing_bytes() {
-        use crate::{crypto::merkle::PartialSmt, serde::Serializable};
+        use {
+            crate::crypto::merkle::PartialSmt,
+            crate::serde::Serializable,
+        };
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
         let mut wrong_version = bytes.clone();

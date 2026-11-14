@@ -4,7 +4,12 @@ use std::collections::HashMap;
 
 use miden_crypto::field::Field;
 
-use super::{AceDag, DagBuilder, NodeId, NodeKind};
+use {
+    super::AceDag,
+    super::DagBuilder,
+    super::NodeId,
+    super::NodeKind,
+};
 
 /// Normalize identities that depend on final node fanout.
 ///
@@ -209,7 +214,10 @@ mod tests {
     use miden_core::field::QuadFelt;
 
     use super::normalize_dag;
-    use crate::{InputKey, compiler::dag::DagBuilder};
+    use {
+        crate::InputKey,
+        crate::compiler::dag::DagBuilder,
+    };
 
     #[test]
     fn factors_single_use_products() {

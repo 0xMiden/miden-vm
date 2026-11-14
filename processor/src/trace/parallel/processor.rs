@@ -1,32 +1,55 @@
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 use core::ops::ControlFlow;
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{
-    Felt, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredError, Digest, PrecompileError, TRUE_DIGEST},
-    field::PrimeField64,
-    mast::SparseMastForest,
-    program::{KernelDescriptor, MIN_STACK_DEPTH},
-    utils::range,
+use {
+    miden_core::Felt,
+    miden_core::WORD_SIZE,
+    miden_core::Word,
+    miden_core::ZERO,
+    miden_core::deferred::DeferredError,
+    miden_core::deferred::Digest,
+    miden_core::deferred::PrecompileError,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::field::PrimeField64,
+    miden_core::mast::SparseMastForest,
+    miden_core::program::KernelDescriptor,
+    miden_core::program::MIN_STACK_DEPTH,
+    miden_core::utils::range,
 };
 use miden_mast_package::debug_info::DebugSourceNodeId;
 
-use super::super::trace_state::{
-    AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
-    MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+use {
+    super::super::trace_state::AdviceReplay,
+    super::super::trace_state::ExecutionContextReplay,
+    super::super::trace_state::HasherResponseReplay,
+    super::super::trace_state::MastForestResolutionReplay,
+    super::super::trace_state::MemoryReadsReplay,
+    super::super::trace_state::StackOverflowReplay,
+    super::super::trace_state::StackState,
+    super::super::trace_state::SystemState,
 };
-use crate::{
-    BreakReason, ContextId, ExecutionError, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
-    errors::OperationError,
-    execution::{
-        InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,
-        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
-    },
-    host::default::NoopHost,
-    processor::{Processor, StackInterface, SystemInterface},
-    tracer::Tracer,
+use {
+    crate::BreakReason,
+    crate::ContextId,
+    crate::ExecutionError,
+    crate::Stopper,
+    crate::continuation_stack::Continuation,
+    crate::continuation_stack::ContinuationStack,
+    crate::errors::OperationError,
+    crate::execution::InternalBreakReason,
+    crate::execution::execute_impl_noop_host,
+    crate::execution::finish_emit_op_execution,
+    crate::execution::finish_load_mast_forest_from_dyn_start,
+    crate::execution::finish_load_mast_forest_from_external,
+    crate::host::default::NoopHost,
+    crate::processor::Processor,
+    crate::processor::StackInterface,
+    crate::processor::SystemInterface,
+    crate::tracer::Tracer,
 };
 
 // REPLAY PROCESSOR
@@ -544,9 +567,15 @@ impl Stopper for ReplayStopper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::trace_state::{
-        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
-        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    use {
+        crate::trace::trace_state::AdviceReplay,
+        crate::trace::trace_state::ExecutionContextReplay,
+        crate::trace::trace_state::HasherResponseReplay,
+        crate::trace::trace_state::MastForestResolutionReplay,
+        crate::trace::trace_state::MemoryReadsReplay,
+        crate::trace::trace_state::StackOverflowReplay,
+        crate::trace::trace_state::StackState,
+        crate::trace::trace_state::SystemState,
     };
 
     fn build_replay_processor() -> ReplayProcessor {

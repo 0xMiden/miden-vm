@@ -1,16 +1,27 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
-use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
-use miden_utils_diagnostics::{
-    Report,
-    reporting::{ReportHandlerOpts, set_hook},
+use {
+    miden_debug_types::DefaultSourceManager,
+    miden_debug_types::SourceFile,
+    miden_debug_types::SourceManager,
+};
+use {
+    miden_utils_diagnostics::Report,
+    miden_utils_diagnostics::reporting::ReportHandlerOpts,
+    miden_utils_diagnostics::reporting::set_hook,
 };
 
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
-use crate::{
-    Path,
-    ast::{Form, Module, ModuleKind},
+use {
+    crate::Path,
+    crate::ast::Form,
+    crate::ast::Module,
+    crate::ast::ModuleKind,
 };
 
 /// A [SyntaxTestContext] provides common functionality for all syntax-related tests

@@ -4,13 +4,17 @@
 //! packed chaining value. This module owns the VM stack contract and delegates
 //! raw compression and encoding to the canonical interfaces in `miden-crypto`.
 
-pub use miden_crypto::hash::eidos::encoding::{
-    felts_to_block as unpack_block, mask_and_pack_felt as pack, unpack_felt as unpack,
-    word_to_cv as unpack_word,
+pub use {
+    miden_crypto::hash::eidos::encoding::felts_to_block as unpack_block,
+    miden_crypto::hash::eidos::encoding::mask_and_pack_felt as pack,
+    miden_crypto::hash::eidos::encoding::unpack_felt as unpack,
+    miden_crypto::hash::eidos::encoding::word_to_cv as unpack_word,
 };
-use miden_crypto::{
-    Felt, Word,
-    hash::eidos::{Eidos, domains::GENERIC_FELT_SEQUENCE},
+use {
+    miden_crypto::Felt,
+    miden_crypto::Word,
+    miden_crypto::hash::eidos::Eidos,
+    miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
 };
 
 /// Number of Felts in one Eidos compression stack window.
@@ -111,12 +115,17 @@ pub fn compress_raw_xof_lanes(state: &[Felt; STATE_WIDTH]) -> [u32; 16] {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::eidos::{
-        EidosFrame, domain::EidosDomain, domains::GenericFeltSequenceDomain,
+    use {
+        miden_crypto::hash::eidos::EidosFrame,
+        miden_crypto::hash::eidos::domain::EidosDomain,
+        miden_crypto::hash::eidos::domains::GenericFeltSequenceDomain,
     };
 
     use super::*;
-    use crate::{operations::opcodes, program::domain::KernelCommitmentDomain};
+    use {
+        crate::operations::opcodes,
+        crate::program::domain::KernelCommitmentDomain,
+    };
 
     #[test]
     fn raw_initializers_match_canonical_framing() {

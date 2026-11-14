@@ -4,20 +4,38 @@ use core::mem;
 use num::Integer;
 use p3_maybe_rayon::prelude::*;
 
-use super::{
-    IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LargeSmtResult, LoadedLeaves, MutatedLeaves,
-    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, StorageUpdates, Subtree, SubtreeUpdate,
+use {
+    super::IN_MEMORY_DEPTH,
+    super::LargeSmt,
+    super::LargeSmtError,
+    super::LargeSmtResult,
+    super::LoadedLeaves,
+    super::MutatedLeaves,
+    super::ROOT_MEMORY_INDEX,
+    super::SMT_DEPTH,
+    super::SmtStorage,
+    super::StorageUpdates,
+    super::Subtree,
+    super::SubtreeUpdate,
 };
-use crate::{
-    Word,
-    merkle::smt::{
-        EmptySubtreeRoots, LeafIndex, Map, MerkleError, MutationSet, NodeIndex, NodeMutation,
-        NodeMutations, SmtLeaf, SparseMerkleTree, SparseMerkleTreeReader,
-        full::concurrent::{
-            SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, fetch_sibling_pair,
-            process_sorted_pairs_to_leaves,
-        },
-    },
+use {
+    crate::Word,
+    crate::merkle::smt::EmptySubtreeRoots,
+    crate::merkle::smt::LeafIndex,
+    crate::merkle::smt::Map,
+    crate::merkle::smt::MerkleError,
+    crate::merkle::smt::MutationSet,
+    crate::merkle::smt::NodeIndex,
+    crate::merkle::smt::NodeMutation,
+    crate::merkle::smt::NodeMutations,
+    crate::merkle::smt::SmtLeaf,
+    crate::merkle::smt::SparseMerkleTree,
+    crate::merkle::smt::SparseMerkleTreeReader,
+    crate::merkle::smt::full::concurrent::SUBTREE_DEPTH,
+    crate::merkle::smt::full::concurrent::SubtreeLeaf,
+    crate::merkle::smt::full::concurrent::SubtreeLeavesIter,
+    crate::merkle::smt::full::concurrent::fetch_sibling_pair,
+    crate::merkle::smt::full::concurrent::process_sorted_pairs_to_leaves,
 };
 
 // TYPES

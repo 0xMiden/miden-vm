@@ -1,15 +1,28 @@
-use alloc::{format, string::ToString};
-
-use miden_core::{
-    deferred::{Digest, TRUE_DIGEST},
-    program::ExecutionClaim,
-    serde::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader,
-    },
+use {
+    alloc::format,
+    alloc::string::ToString,
 };
 
-use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
+use {
+    miden_core::deferred::Digest,
+    miden_core::deferred::TRUE_DIGEST,
+    miden_core::program::ExecutionClaim,
+    miden_core::serde::BudgetedReader,
+    miden_core::serde::ByteReader,
+    miden_core::serde::ByteWriter,
+    miden_core::serde::Deserializable,
+    miden_core::serde::DeserializationError,
+    miden_core::serde::Serializable,
+    miden_core::serde::SliceReader,
+};
+
+use {
+    crate::AdviceProvider,
+    crate::ProgramInfo,
+    crate::StackInputs,
+    crate::StackOutputs,
+    crate::fast::ExecutionOutput,
+};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -30,16 +43,27 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air_definitions::vm::{
-    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
+pub use {
+    miden_air_definitions::vm::ChipletsLengths,
+    miden_air_definitions::vm::TraceLenSummary,
+    miden_air_definitions::vm::TraceLenSummaryError,
+    miden_air_definitions::vm::VmTrace,
+    miden_air_definitions::vm::trace::RowIndex,
 };
 pub use miden_core::deferred::PrecompileWitness;
-pub use parallel::{CORE_TRACE_WIDTH, build_trace};
+pub use {
+    parallel::CORE_TRACE_WIDTH,
+    parallel::build_trace,
+};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
 // uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
 #[cfg(feature = "std")]
-pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+pub(crate) use {
+    parallel::MAX_TRACE_LEN,
+    parallel::build_hasher_chiplet,
+    parallel::build_trace_with_prebuilt_hasher,
+};
 #[cfg(feature = "std")]
 pub(crate) use trace_state::ResolvedHasherOp;
 
@@ -309,19 +333,31 @@ impl Deserializable for VmWitness {
 #[cfg(test)]
 mod wire_tests {
     use miden_assembly::Assembler;
-    use miden_core::{
-        deferred::TRUE_DIGEST,
-        mast::{BasicBlockNodeBuilder, MastForest},
-        operations::Operation,
-        program::Program,
+    use {
+        miden_core::deferred::TRUE_DIGEST,
+        miden_core::mast::BasicBlockNodeBuilder,
+        miden_core::mast::MastForest,
+        miden_core::operations::Operation,
+        miden_core::program::Program,
     };
     use rstest::rstest;
 
-    use super::{
-        ExecutionWitness, Serializable, build_trace,
-        trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
+    use {
+        super::ExecutionWitness,
+        super::Serializable,
+        super::build_trace,
+        super::trace_state::AeadStreamReplayEntry,
+        super::trace_state::BitwiseOp,
+        super::trace_state::BitwiseReplayEntry,
     };
-    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use {
+        crate::DefaultHost,
+        crate::ExecutionError,
+        crate::FastProcessor,
+        crate::Felt,
+        crate::StackInputs,
+        crate::mast::MastNodeId,
+    };
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -409,7 +445,11 @@ mod wire_tests {
 
     #[test]
     fn witness_reader_checks_sparse_hashes_and_preserves_trusted_path() {
-        use miden_core::{Word, mast::SparseMastForest, serde::ByteReader};
+        use {
+            miden_core::Word,
+            miden_core::mast::SparseMastForest,
+            miden_core::serde::ByteReader,
+        };
 
         let mut witness = execution_witness("begin push.1 drop end");
         let forest = &mut witness.vm.trace.mast_forest_store[0];

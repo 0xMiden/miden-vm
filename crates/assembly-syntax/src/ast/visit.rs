@@ -55,10 +55,11 @@ use core::ops::ControlFlow;
 use miden_debug_types::Span;
 
 use super::immediate::ErrorMsg;
-use crate::{
-    Felt,
-    ast::*,
-    parser::{PushValue, WordValue},
+use {
+    crate::Felt,
+    crate::ast::*,
+    crate::parser::PushValue,
+    crate::parser::WordValue,
 };
 
 /// Represents an immutable AST visitor, whose "early return" type is `T` (by default `()`).

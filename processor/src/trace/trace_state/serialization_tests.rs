@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_core::serde::{BudgetedReader, SliceReader};
+use {
+    miden_core::serde::BudgetedReader,
+    miden_core::serde::SliceReader,
+};
 
 use super::*;
 use crate::mast::MastForestId;

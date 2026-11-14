@@ -6,40 +6,70 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use std::{borrow::Cow, vec, vec::Vec};
+use {
+    std::borrow::Cow,
+    std::vec,
+    std::vec::Vec,
+};
 
-use miden_core::{
-    Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+use {
+    miden_core::Felt,
+    miden_core::field::Algebra,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::QuadFelt,
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
+use {
+    miden_stark::air::BaseAir,
+    miden_stark::air::ConstraintDegrees,
+    miden_stark::air::LiftedAir,
+    miden_stark::lookup::debug::ValidateLayout,
+    miden_stark::lookup::debug::ValidateLookupAir,
 };
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use {
+    rand::RngExt,
+    rand::SeedableRng,
+    rand::rngs::StdRng,
+};
 
-use crate::prover::{
-    hash::{
-        chunk::trace::ChunkRequires,
-        keccak::{
-            round::RoundRequires,
-            sponge::{
-                CHUNK_BYTES_RANGE, COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_PAD_BLOCK,
-                COL_OFFSET_PRODUCT, COL_PAD_HI, COL_PAD_LO, COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI,
-                COL_STATE_OUT_LO, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
-                NUM_PERIODIC_COLS, OFFSET_BITS_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
-                STATE_PREV_BYTES_RANGE,
-                trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
-            },
-        },
-    },
-    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
-    primitives::byte_pair_lut::BytePairLutRequires,
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{ChipletAir, Session},
-    tests::bus_balance::session_stack_residual,
-    transcript::eidos::trace::EidosRequires,
+use {
+    crate::prover::hash::chunk::trace::ChunkRequires,
+    crate::prover::hash::keccak::round::RoundRequires,
+    crate::prover::hash::keccak::sponge::CHUNK_BYTES_RANGE,
+    crate::prover::hash::keccak::sponge::COL_CHUNK_PTR,
+    crate::prover::hash::keccak::sponge::COL_IS_CHUNK_AVAIL,
+    crate::prover::hash::keccak::sponge::COL_IS_PAD_BLOCK,
+    crate::prover::hash::keccak::sponge::COL_OFFSET_PRODUCT,
+    crate::prover::hash::keccak::sponge::COL_PAD_HI,
+    crate::prover::hash::keccak::sponge::COL_PAD_LO,
+    crate::prover::hash::keccak::sponge::COL_SPONGE_SEQ_ID,
+    crate::prover::hash::keccak::sponge::COL_STATE_OUT_HI,
+    crate::prover::hash::keccak::sponge::COL_STATE_OUT_LO,
+    crate::prover::hash::keccak::sponge::KeccakSpongeAir,
+    crate::prover::hash::keccak::sponge::KeccakSpongeMsg,
+    crate::prover::hash::keccak::sponge::NUM_AUX_COLS,
+    crate::prover::hash::keccak::sponge::NUM_MAIN_COLS,
+    crate::prover::hash::keccak::sponge::NUM_PERIODIC_COLS,
+    crate::prover::hash::keccak::sponge::OFFSET_BITS_RANGE,
+    crate::prover::hash::keccak::sponge::SPONGE_PERIOD,
+    crate::prover::hash::keccak::sponge::STATE_NEW_BYTES_RANGE,
+    crate::prover::hash::keccak::sponge::STATE_PREV_BYTES_RANGE,
+    crate::prover::hash::keccak::sponge::trace::Invocation,
+    crate::prover::hash::keccak::sponge::trace::SpongeRequires,
+    crate::prover::hash::keccak::sponge::trace::generate_trace,
+    crate::prover::hash::keccak::sponge::trace::keccak_oracle,
+    crate::prover::logup::Challenges,
+    crate::prover::logup::LookupMessage,
+    crate::prover::logup::NUM_LOGUP_VALUES,
+    crate::prover::logup::NUM_RANDOMNESS,
+    crate::prover::primitives::byte_pair_lut::BytePairLutRequires,
+    crate::prover::relations::BusId,
+    crate::prover::relations::MAX_MESSAGE_WIDTH,
+    crate::prover::relations::NUM_BUS_IDS,
+    crate::prover::session::ChipletAir,
+    crate::prover::session::Session,
+    crate::prover::tests::bus_balance::session_stack_residual,
+    crate::prover::transcript::eidos::trace::EidosRequires,
 };
 
 fn build_sponge_requires(invs: &[Invocation]) -> (SpongeRequires, ChunkRequires, EidosRequires) {
@@ -460,8 +490,15 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
     // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
     // wrapper overrides that method to inject the corruption.
-    use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+    use {
+        miden_core::field::PrimeCharacteristicRing,
+        miden_core::utils::RowMajorMatrix,
+    };
+    use {
+        miden_stark::air::BaseAir,
+        miden_stark::air::LiftedAir,
+        miden_stark::air::LiftedAirBuilder,
+    };
 
     use crate::prover::hash::keccak::sponge::NUM_AUX_COLS;
 
@@ -633,7 +670,10 @@ fn compact_offset_bits_and_product_are_constrained() {
 
 #[test]
 fn noncanonical_prefix_digits_preserving_packed_words_fail_global_byte_checks() {
-    use crate::prover::hash::chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET};
+    use {
+        crate::prover::hash::chunk_node_sponge::ChunkNodeSpongeAir,
+        crate::prover::hash::chunk_node_sponge::SPONGE_COL_OFFSET,
+    };
 
     let mut session = Session::new();
     let (_, claim) = session.keccak(&[0x5a; 7]);
@@ -676,7 +716,10 @@ fn noncanonical_prefix_digits_preserving_packed_words_fail_global_byte_checks() 
 
 #[test]
 fn dead_padding_state_remains_bus_inert() {
-    use crate::prover::hash::chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET};
+    use {
+        crate::prover::hash::chunk_node_sponge::ChunkNodeSpongeAir,
+        crate::prover::hash::chunk_node_sponge::SPONGE_COL_OFFSET,
+    };
 
     let mut session = Session::new();
     let (_, claim) = session.keccak(&[0x5a; 300]);

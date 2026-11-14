@@ -1,6 +1,11 @@
 //! Data structures related to Merkle trees based on Eidos hash function.
 
-use super::{EMPTY_WORD, Felt, Word, hash::eidos::Eidos};
+use {
+    super::EMPTY_WORD,
+    super::Felt,
+    super::Word,
+    super::hash::eidos::Eidos,
+};
 
 // SUBMODULES
 // ================================================================================================
@@ -24,10 +29,18 @@ pub mod store;
 pub use empty_roots::EmptySubtreeRoots;
 pub use error::MerkleError;
 pub use index::NodeIndex;
-pub use merkle_tree::{MerkleTree, path_to_text, tree_to_text};
+pub use {
+    merkle_tree::MerkleTree,
+    merkle_tree::path_to_text,
+    merkle_tree::tree_to_text,
+};
 pub use node::InnerNodeInfo;
 pub use partial_mt::PartialMerkleTree;
-pub use path::{MerklePath, MerkleProof, RootPath};
+pub use {
+    path::MerklePath,
+    path::MerkleProof,
+    path::RootPath,
+};
 pub use sparse_path::SparseMerklePath;
 
 // HELPER FUNCTIONS

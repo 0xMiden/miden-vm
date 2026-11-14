@@ -1,16 +1,29 @@
-use alloc::{boxed::Box, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::vec::Vec,
+};
 use core::fmt;
 
-use miden_formatting::{
-    hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, text},
+use {
+    miden_formatting::hex::ToHex,
+    miden_formatting::prettier::Document,
+    miden_formatting::prettier::PrettyPrint,
+    miden_formatting::prettier::const_text,
+    miden_formatting::prettier::text,
 };
 
-use super::{MastForestContributor, MastNodeContext, MastNodeExt};
-use crate::{
-    Felt, Word,
-    mast::{MastForest, MastForestError, MastNodeId},
-    utils::LookupByIdx,
+use {
+    super::MastForestContributor,
+    super::MastNodeContext,
+    super::MastNodeExt,
+};
+use {
+    crate::Felt,
+    crate::Word,
+    crate::mast::MastForest,
+    crate::mast::MastForestError,
+    crate::mast::MastNodeId,
+    crate::utils::LookupByIdx,
 };
 
 // EXTERNAL NODE

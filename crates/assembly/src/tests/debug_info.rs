@@ -642,8 +642,14 @@ fn plain_exec_preserves_canonical_definitions() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
-    use miden_assembly_syntax::debuginfo::{SourceLanguage, Uri};
-    use miden_core::serde::{Deserializable, Serializable};
+    use {
+        miden_assembly_syntax::debuginfo::SourceLanguage,
+        miden_assembly_syntax::debuginfo::Uri,
+    };
+    use {
+        miden_core::serde::Deserializable,
+        miden_core::serde::Serializable,
+    };
 
     let source = "proc leaf push.42 end\nproc wrapper exec.leaf end\nbegin\n exec.wrapper\n drop\n exec.wrapper\n drop\nend";
     let assemble = |text: &str| {
@@ -757,7 +763,10 @@ fn plain_exec_inline_ranges_cover_only_inlined_operations() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_imported_alias_identity() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use {
+        miden_core::serde::Deserializable,
+        miden_core::serde::Serializable,
+    };
 
     let context = TestContext::default();
     let library = Assembler::new(context.source_manager()).assemble_library(
@@ -818,7 +827,10 @@ fn plain_exec_preserves_imported_alias_identity() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_reexported_function_identity() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use {
+        miden_core::serde::Deserializable,
+        miden_core::serde::Serializable,
+    };
 
     let context = TestContext::default();
     let root =
@@ -881,7 +893,10 @@ fn plain_exec_preserves_reexported_function_identity() -> TestResult {
 #[test]
 fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
     use miden_core::serde::Serializable;
-    use miden_mast_package::{SectionId, debug_info::PackageDebugInfoBuilder};
+    use {
+        miden_mast_package::SectionId,
+        miden_mast_package::debug_info::PackageDebugInfoBuilder,
+    };
 
     let context = TestContext::default();
     let mut library = Assembler::new(context.source_manager()).assemble_library(
@@ -921,7 +936,10 @@ fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_dynamic_dependency_reexports() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use {
+        miden_core::serde::Deserializable,
+        miden_core::serde::Serializable,
+    };
 
     let context = TestContext::default();
     let dependency = Assembler::new(context.source_manager()).assemble_library(

@@ -1,8 +1,14 @@
-use super::{
-    parsing::{MaybeInherit, SetSourceId, Validate},
-    *,
+use {
+    super::parsing::MaybeInherit,
+    super::parsing::SetSourceId,
+    super::parsing::Validate,
+    super::*,
 };
-use crate::{SourceId, Span, Uri};
+use {
+    crate::SourceId,
+    crate::Span,
+    crate::Uri,
+};
 
 /// Represents the contents of the `[workspace]` table
 #[derive(Debug, Clone)]
@@ -63,7 +69,10 @@ impl WorkspaceFile {
     ///   up to the caller to compute the concrete property values and validate them at that point.
     #[cfg(feature = "serde")]
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use parsing::{SetSourceId, Validate};
+        use {
+            parsing::SetSourceId,
+            parsing::Validate,
+        };
 
         let source_id = source.id();
 

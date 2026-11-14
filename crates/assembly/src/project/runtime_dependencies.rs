@@ -1,7 +1,14 @@
-use alloc::{collections::BTreeMap, format, sync::Arc};
+use {
+    alloc::collections::BTreeMap,
+    alloc::format,
+    alloc::sync::Arc,
+};
 
 use miden_assembly_syntax::diagnostics::Report;
-use miden_mast_package::{Dependency as PackageDependency, Package as MastPackage};
+use {
+    miden_mast_package::Dependency as PackageDependency,
+    miden_mast_package::Package as MastPackage,
+};
 use miden_package_registry::PackageId;
 use miden_project::Linkage;
 

@@ -1,8 +1,15 @@
-use alloc::{sync::Arc, vec::Vec};
+use {
+    alloc::sync::Arc,
+    alloc::vec::Vec,
+};
 
 use miden_assembly_syntax::module::ModuleDescriptor;
 use miden_core::Word;
-use miden_mast_package::{ManifestValidationError, MastForest, Package};
+use {
+    miden_mast_package::ManifestValidationError,
+    miden_mast_package::MastForest,
+    miden_mast_package::Package,
+};
 pub use miden_project::Linkage;
 
 /// Represents an assembled module or modules to use when resolving references while linking,

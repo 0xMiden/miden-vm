@@ -2,7 +2,11 @@ use alloc::string::String;
 
 use thiserror::Error;
 
-use super::{NodeIndex, Word, smt::MAX_LEAF_ENTRIES};
+use {
+    super::NodeIndex,
+    super::Word,
+    super::smt::MAX_LEAF_ENTRIES,
+};
 
 #[derive(Debug, Error)]
 pub enum MerkleError {

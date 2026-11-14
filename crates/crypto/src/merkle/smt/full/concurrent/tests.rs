@@ -1,23 +1,44 @@
 #![cfg(feature = "std")]
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
+use {
+    alloc::collections::BTreeMap,
+    alloc::collections::BTreeSet,
+    alloc::vec::Vec,
 };
 
 use assert_matches::assert_matches;
 use proptest::prelude::*;
-use rand::{RngExt, SeedableRng, prelude::IteratorRandom};
+use {
+    rand::RngExt,
+    rand::SeedableRng,
+    rand::prelude::IteratorRandom,
+};
 use rand_chacha::ChaCha20Rng;
 
-use super::{
-    COLS_PER_SUBTREE, InnerNode, Map, NodeIndex, NodeMutations, PairComputations, SMT_DEPTH,
-    SUBTREE_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, SubtreeLeaf, SubtreeLeavesIter, Word,
-    build_subtree,
+use {
+    super::COLS_PER_SUBTREE,
+    super::InnerNode,
+    super::Map,
+    super::NodeIndex,
+    super::NodeMutations,
+    super::PairComputations,
+    super::SMT_DEPTH,
+    super::SUBTREE_DEPTH,
+    super::Smt,
+    super::SmtLeaf,
+    super::SparseMerkleTreeReader,
+    super::SubtreeLeaf,
+    super::SubtreeLeavesIter,
+    super::Word,
+    super::build_subtree,
 };
-use crate::{
-    EMPTY_WORD, Felt, ONE, ZERO,
-    merkle::{MerkleError, smt::LeafIndex},
+use {
+    crate::EMPTY_WORD,
+    crate::Felt,
+    crate::ONE,
+    crate::ZERO,
+    crate::merkle::MerkleError,
+    crate::merkle::smt::LeafIndex,
 };
 
 fn smtleaf_to_subtree_leaf(leaf: &SmtLeaf) -> SubtreeLeaf {
@@ -754,9 +775,10 @@ fn test_with_entries_all_empty_values_in_shared_leaf() {
 
 #[test]
 fn test_read_from_too_many_leaf_entries() {
-    use crate::{
-        merkle::smt::MAX_LEAF_ENTRIES,
-        utils::{ByteWriter, Deserializable},
+    use {
+        crate::merkle::smt::MAX_LEAF_ENTRIES,
+        crate::utils::ByteWriter,
+        crate::utils::Deserializable,
     };
     let leaf_felt = Felt::new_unchecked(7);
     let n = MAX_LEAF_ENTRIES + 1;

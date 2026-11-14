@@ -1,28 +1,45 @@
-use alloc::{collections::BTreeMap, vec::Vec};
-use core::{borrow::BorrowMut, fmt::Debug};
-
-use miden_air_definitions::vm::{
-    MemoryCols,
-    trace::{
-        RowIndex,
-        chiplets::memory::{
-            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
-            TRACE_WIDTH as MEMORY_TRACE_WIDTH,
-        },
-    },
+use {
+    alloc::collections::BTreeMap,
+    alloc::vec::Vec,
+};
+use {
+    core::borrow::BorrowMut,
+    core::fmt::Debug,
 };
 
-use super::{
-    super::utils::{split_element_u32_into_u16, split_u32_into_u16},
-    ChipletTraceFragment, RangeChecker,
+use {
+    miden_air_definitions::vm::MemoryCols,
+    miden_air_definitions::vm::trace::RowIndex,
+    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_ELEMENT,
+    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_WORD,
+    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_READ,
+    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_WRITE,
+    miden_air_definitions::vm::trace::chiplets::memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
 };
-use crate::{
-    ContextId, EMPTY_WORD, Felt, MemoryError, ONE, WORD_SIZE, Word, ZERO,
-    field::batch_inversion_allow_zeros,
+
+use {
+    super::super::utils::split_element_u32_into_u16,
+    super::super::utils::split_u32_into_u16,
+    super::ChipletTraceFragment,
+    super::RangeChecker,
+};
+use {
+    crate::ContextId,
+    crate::EMPTY_WORD,
+    crate::Felt,
+    crate::MemoryError,
+    crate::ONE,
+    crate::WORD_SIZE,
+    crate::Word,
+    crate::ZERO,
+    crate::field::batch_inversion_allow_zeros,
 };
 
 mod segment;
-use segment::{MemoryOperation, MemorySegmentTrace};
+use {
+    segment::MemoryOperation,
+    segment::MemorySegmentTrace,
+};
 
 #[cfg(test)]
 mod tests;

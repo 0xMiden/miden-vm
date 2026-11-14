@@ -1,10 +1,27 @@
-use alloc::{string::String, sync::Arc};
+use {
+    alloc::string::String,
+    alloc::sync::Arc,
+};
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
-use super::{
-    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Path, Procedure,
-    SubmoduleDecl, TypeAlias, TypeDecl,
+use {
+    super::AdviceMapEntry,
+    super::Block,
+    super::Constant,
+    super::EnumType,
+    super::Ident,
+    super::ImportDecl,
+    super::Item,
+    super::Path,
+    super::Procedure,
+    super::SubmoduleDecl,
+    super::TypeAlias,
+    super::TypeDecl,
 };
 
 /// This type represents the top-level forms of a Miden Assembly module

@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
 use super::*;
-use crate::{Felt, field::QuadFelt};
+use {
+    crate::Felt,
+    crate::field::QuadFelt,
+};
 
 /// A `Circuit` is a DAG representing a multivariate polynomial over its inputs.
 /// The nodes are laid out linearly, starting with the leaves and ending with the evaluation.

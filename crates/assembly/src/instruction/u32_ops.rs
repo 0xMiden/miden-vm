@@ -1,18 +1,27 @@
-use miden_assembly_syntax::{
-    ParsingError,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{RelatedLabel, Report},
+use {
+    miden_assembly_syntax::ParsingError,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::diagnostics::RelatedLabel,
+    miden_assembly_syntax::diagnostics::Report,
 };
-use miden_core::{
-    Felt, ZERO,
-    events::SystemEvent,
-    operations::Operation::{self, *},
+use {
+    miden_core::Felt,
+    miden_core::ZERO,
+    miden_core::events::SystemEvent,
+    miden_core::operations::Operation,
+    miden_core::operations::Operation::*,
 };
 
-use super::{field_ops::append_pow2_op, push_u32_value};
-use crate::{
-    MAX_U32_ROTATE_VALUE, MAX_U32_SHIFT_VALUE, ProcedureContext,
-    basic_block_builder::BasicBlockBuilder,
+use {
+    super::field_ops::append_pow2_op,
+    super::push_u32_value,
+};
+use {
+    crate::MAX_U32_ROTATE_VALUE,
+    crate::MAX_U32_SHIFT_VALUE,
+    crate::ProcedureContext,
+    crate::basic_block_builder::BasicBlockBuilder,
 };
 
 /// This enum is intended to determine the mode of operation passed to the parsing function

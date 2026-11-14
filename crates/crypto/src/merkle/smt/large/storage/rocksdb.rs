@@ -1,28 +1,53 @@
-use alloc::{boxed::Box, vec::Vec};
+use {
+    alloc::boxed::Box,
+    alloc::vec::Vec,
+};
 use core::fmt;
-use std::{mem::ManuallyDrop, path::PathBuf, sync::Arc};
-
-use rocksdb::{
-    BlockBasedOptions, Cache, ColumnFamilyDescriptor, DB, DBCompactionStyle, DBCompressionType,
-    DBIteratorWithThreadMode, FlushOptions, IteratorMode, Options, ReadOptions, WriteBatch,
-    WriteBufferManager, WriteOptions,
+use {
+    std::mem::ManuallyDrop,
+    std::path::PathBuf,
+    std::sync::Arc,
 };
 
-use super::{
-    SmtStorage, SmtStorageReader, StorageError, StorageResult, StorageUpdateParts, StorageUpdates,
-    SubtreeUpdate,
+use {
+    rocksdb::BlockBasedOptions,
+    rocksdb::Cache,
+    rocksdb::ColumnFamilyDescriptor,
+    rocksdb::DB,
+    rocksdb::DBCompactionStyle,
+    rocksdb::DBCompressionType,
+    rocksdb::DBIteratorWithThreadMode,
+    rocksdb::FlushOptions,
+    rocksdb::IteratorMode,
+    rocksdb::Options,
+    rocksdb::ReadOptions,
+    rocksdb::WriteBatch,
+    rocksdb::WriteBufferManager,
+    rocksdb::WriteOptions,
 };
-use crate::{
-    EMPTY_WORD, Word,
-    merkle::{
-        NodeIndex,
-        smt::{
-            InnerNode, Map, SmtLeaf,
-            large::{IN_MEMORY_DEPTH, LargeSmt, subtree::Subtree},
-            persistent_hash::ensure_hash_scheme,
-        },
-    },
-    utils::{Deserializable, Serializable},
+
+use {
+    super::SmtStorage,
+    super::SmtStorageReader,
+    super::StorageError,
+    super::StorageResult,
+    super::StorageUpdateParts,
+    super::StorageUpdates,
+    super::SubtreeUpdate,
+};
+use {
+    crate::EMPTY_WORD,
+    crate::Word,
+    crate::merkle::NodeIndex,
+    crate::merkle::smt::InnerNode,
+    crate::merkle::smt::Map,
+    crate::merkle::smt::SmtLeaf,
+    crate::merkle::smt::large::IN_MEMORY_DEPTH,
+    crate::merkle::smt::large::LargeSmt,
+    crate::merkle::smt::large::subtree::Subtree,
+    crate::merkle::smt::persistent_hash::ensure_hash_scheme,
+    crate::utils::Deserializable,
+    crate::utils::Serializable,
 };
 
 const DEFAULT_CACHE_SIZE: usize = 1 << 30;
@@ -1891,7 +1916,11 @@ impl Iterator for RocksDbSnapshotSubtreeIterator<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merkle::smt::{EmptySubtreeRoots, SMT_DEPTH, persistent_hash::HASH_SCHEME_KEY};
+    use {
+        crate::merkle::smt::EmptySubtreeRoots,
+        crate::merkle::smt::SMT_DEPTH,
+        crate::merkle::smt::persistent_hash::HASH_SCHEME_KEY,
+    };
 
     fn open_raw_db(path: &std::path::Path) -> DB {
         let options = Options::default();

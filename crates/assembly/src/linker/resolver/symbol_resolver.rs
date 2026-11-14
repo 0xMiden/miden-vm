@@ -1,18 +1,27 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
-    ast::{InvocationTarget, InvokeKind, Path, SymbolResolution},
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    module::ItemInfo,
+use {
+    miden_assembly_syntax::ast::InvocationTarget,
+    miden_assembly_syntax::ast::InvokeKind,
+    miden_assembly_syntax::ast::Path,
+    miden_assembly_syntax::ast::SymbolResolution,
+    miden_assembly_syntax::debuginfo::SourceManager,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
+    miden_assembly_syntax::debuginfo::Spanned,
+    miden_assembly_syntax::module::ItemInfo,
 };
 use miden_core::Word;
 
-use crate::{
-    GlobalItemIndex, LinkerError, ModuleIndex,
-    linker::{
-        Linker, SymbolItem,
-        namespaces::{NamespaceGraph, ResolvedImports, ResolvedUse},
-    },
+use {
+    crate::GlobalItemIndex,
+    crate::LinkerError,
+    crate::ModuleIndex,
+    crate::linker::Linker,
+    crate::linker::SymbolItem,
+    crate::linker::namespaces::NamespaceGraph,
+    crate::linker::namespaces::ResolvedImports,
+    crate::linker::namespaces::ResolvedUse,
 };
 
 // HELPER STRUCTS

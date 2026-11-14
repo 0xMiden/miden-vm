@@ -4,11 +4,16 @@
 //! chunks. They are intentionally centralized to keep DAG lowering and tests
 //! aligned.
 
-use miden_crypto::field::{ExtensionField, Field};
+use {
+    miden_crypto::field::ExtensionField,
+    miden_crypto::field::Field,
+};
 
-use crate::{
-    compiler::dag::{DagBuilder, NodeId},
-    layout::{InputKey, InputLayout},
+use {
+    crate::compiler::dag::DagBuilder,
+    crate::compiler::dag::NodeId,
+    crate::layout::InputKey,
+    crate::layout::InputLayout,
 };
 
 /// Build DAG nodes that recombine quotient chunks.

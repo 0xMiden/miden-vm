@@ -1,6 +1,10 @@
 use alloc::string::String;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use {
+    miden_debug_types::SourceSpan,
+    miden_debug_types::Span,
+    miden_debug_types::Spanned,
+};
 
 use crate::prettier::PrettyPrint;
 
