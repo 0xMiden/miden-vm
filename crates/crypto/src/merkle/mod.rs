@@ -1,11 +1,10 @@
+#[cfg(test)]
+use crate::Felt;
+#[cfg(test)]
+use crate::Word;
 //! Data structures related to Merkle trees based on Eidos hash function.
 
-use {
-    super::EMPTY_WORD,
-    super::Felt,
-    super::Word,
-    super::hash::eidos::Eidos,
-};
+
 
 // SUBMODULES
 // ================================================================================================

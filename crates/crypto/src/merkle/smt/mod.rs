@@ -18,7 +18,6 @@ use {
     super::SparseMerklePath,
 };
 use {
-    crate::EMPTY_WORD,
     crate::Map,
     crate::Set,
     crate::Word,

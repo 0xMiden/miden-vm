@@ -39,7 +39,6 @@ use {
 };
 
 use {
-    crate::advice::AdviceInputs,
     crate::advice::AdviceProvider,
     crate::continuation_stack::ContinuationStack,
     crate::errors::MapExecErr,

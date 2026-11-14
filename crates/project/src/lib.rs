@@ -26,8 +26,6 @@ use {
     miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::diagnostics::Diagnostic,
-    miden_assembly_syntax::diagnostics::miette,
 };
 // Re-exported for consistency
 pub use {
@@ -39,9 +37,6 @@ pub use {
 use {
     miden_assembly_syntax::debuginfo::SourceFile,
     miden_assembly_syntax::debuginfo::SourceId,
-    miden_assembly_syntax::diagnostics::Label,
-    miden_assembly_syntax::diagnostics::RelatedError,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
 };
 pub use miden_mast_package::TargetType;
 pub use {

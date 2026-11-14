@@ -18,17 +18,12 @@ use {
     miden_air_definitions::vm::trace::chiplets::memory::TRACE_WIDTH as MEMORY_WIDTH,
     miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
-use {
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::mast::OpBatch,
-};
+use miden_core::field::PrimeCharacteristicRing;
 
 use {
     miden_core::Felt,
     miden_core::ONE,
-    crate::Word,
     miden_core::ZERO,
-    crate::crypto::merkle::MerklePath,
     crate::operation::OperationError,
     crate::trace::ChipletTraceFragment,
     miden_air_definitions::vm::trace::RowIndex,

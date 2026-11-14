@@ -26,10 +26,7 @@ use {
     super::falcon512_common::SIG_POLY_BYTE_LEN,
     super::falcon512_common::SIG_SERIALIZED_LEN,
 };
-use {
-    crate::Felt,
-    crate::Word,
-};
+
 
 mod hash_to_point;
 
