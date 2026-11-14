@@ -18,9 +18,9 @@ use {
     miden_processor::FastProcessor,
 };
 use {
-    miden_vm::HashFunction,
+    miden_core::proof::HashFunction,
     miden_core::deferred::PrecompileLimits,
-    miden_vm::PrecompileStatus,
+    miden_core::proof::PrecompileStatus,
     miden_vm::Prover,
     miden_vm::internal::InputFile,
 };

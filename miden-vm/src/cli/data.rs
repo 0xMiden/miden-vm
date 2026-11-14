@@ -27,7 +27,7 @@ use {
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
 use {
-    miden_vm::ExecutionProof,
+    miden_core::proof::ExecutionProof,
     miden_core::program::Program,
     miden_core::program::StackOutputs,
     miden_core::Word,
