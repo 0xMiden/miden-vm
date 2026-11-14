@@ -1,59 +1,30 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 use core::fmt;
 
-use {
-    miden_core::advice::AdviceMap,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
+use miden_core::{
+    advice::AdviceMap,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-use crate::diagnostics::Report;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;
 
-use {
-    super::Constant,
-    super::Declaration,
-    super::DocString,
-    super::EnumType,
-    super::FunctionType,
-    super::Import,
-    super::Item,
-    super::ItemIndex,
-    crate::Path,
-    super::Procedure,
-    super::ProcedureName,
-    super::QualifiedProcedureName,
-    super::SubmoduleDecl,
-    super::TypeAlias,
-    super::TypeDecl,
-    super::Variant,
-    super::Visibility,
+use super::{
+    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Procedure,
+    ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant, Visibility,
 };
-use {
-    crate::PathBuf,
-    crate::ast,
-    crate::ast::Ident,
-    crate::ModuleParser,
-    crate::sema::LimitKind,
-    crate::sema::SemanticAnalysisError,
+use crate::{
+    ModuleParser, Path, PathBuf,
+    ast::{self, Ident},
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::Report,
+    sema::{LimitKind, SemanticAnalysisError},
 };
 
 // MODULE KIND

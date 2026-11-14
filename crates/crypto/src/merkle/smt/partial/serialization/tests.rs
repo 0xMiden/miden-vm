@@ -1,34 +1,16 @@
 #![cfg(test)]
 //! Handwritten tests for partial SMT serialization.
 
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
-use {
-    crate::Felt,
-    crate::Word,
-};
-use {
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
-};
-
-use {
-    crate::merkle::EmptySubtreeRoots,
-    crate::merkle::NodeIndex,
-    crate::merkle::SparseMerklePath,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::PartialSmt,
-    crate::merkle::smt::SMT_DEPTH,
-    crate::merkle::smt::Smt,
-    crate::merkle::smt::SmtLeaf,
-    crate::merkle::smt::SmtProof,
-    crate::merkle::smt::SmtWitness,
-    crate::merkle::smt::UniqueNodes,
-    crate::merkle::store::MerkleStore,
+use crate::{
+    Felt, Word,
+    merkle::{
+        EmptySubtreeRoots, NodeIndex, SparseMerklePath,
+        smt::{LeafIndex, PartialSmt, SMT_DEPTH, Smt, SmtLeaf, SmtProof, SmtWitness, UniqueNodes},
+        store::MerkleStore,
+    },
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 /// Hand-writes a UniqueNodes payload: root, then `levels` as (depth, [(position, value)])

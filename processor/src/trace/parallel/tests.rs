@@ -1,53 +1,32 @@
-use {
-    alloc::string::String,
-    alloc::sync::Arc,
-};
+use alloc::{string::String, sync::Arc};
 
-use {
-    miden_air_definitions::vm::MidenAir,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
+use miden_air_definitions::vm::{
+    MidenAir, VmTrace,
+    trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::field::QuadFelt,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::CallNodeBuilder,
-    miden_core::mast::DynNodeBuilder,
-    miden_core::mast::ExternalNodeBuilder,
-    miden_core::mast::JoinNodeBuilder,
-    miden_core::mast::LoopNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastForestId,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    miden_core::mast::SplitNodeBuilder,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::KernelDescriptor,
-    miden_core::program::Program,
-    miden_core::program::StackInputs,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    crypto::merkle::MerklePath,
+    field::QuadFelt,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestId, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
+    },
+    operations::{Operation, opcodes},
+    program::{KernelDescriptor, Program, StackInputs},
+    utils::RowMajorMatrix,
 };
 use miden_stark::lookup::build_logup_aux_trace;
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
-use {
-    rstest::fixture,
-    rstest::rstest,
-};
+use rstest::{fixture, rstest};
 
 use super::*;
-use {
-    miden_core::advice::AdviceInputs,
-    crate::DefaultHost,
-    crate::ExecutionOptions,
-    crate::FastProcessor,
-    crate::HostLibrary,
-    crate::trace::trace_state::MemoryReadsReplay,
-    miden_air_definitions::vm::VmTrace,
+use crate::{
+    DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    trace::trace_state::MemoryReadsReplay,
 };
 
 const DEFAULT_STACK: &[Felt] =

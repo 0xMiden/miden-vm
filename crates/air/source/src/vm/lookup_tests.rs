@@ -1,24 +1,17 @@
 //! VM lookup integration checks for the shared LogUp framework.
 
-use {
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::QuadFelt,
+use miden_core::{
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_stark::lookup::Challenges,
-    miden_stark::lookup::accumulate_slow,
-    miden_stark::lookup::build_logup_aux_trace,
-    miden_stark::lookup::build_logup_aux_trace_with_width,
-};
-use {
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_stark::{
+    air::LiftedAir,
+    lookup::{
+        Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
+    },
 };
 
-use {
-    crate::vm::Felt,
-    miden_stark::air::LiftedAir,
-};
+use crate::vm::Felt;
 
 /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
 /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many
@@ -26,13 +19,11 @@ use {
 /// boundaries and the cyclic closing edge.
 #[test]
 fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
-    use miden_stark::lookup::build_lookup_fractions;
+    use miden_stark::{air::BaseAir, lookup::build_lookup_fractions};
 
-    use {
-        miden_stark::air::BaseAir,
-        crate::vm::MidenAir,
-        crate::vm::logup::BusId,
-        crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+    use crate::vm::{
+        MidenAir,
+        logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     };
 
     let air = MidenAir::AND8_LOOKUP;

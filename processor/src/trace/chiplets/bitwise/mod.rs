@@ -1,24 +1,14 @@
 use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
-use {
-    miden_air_definitions::vm::BitwiseOpCols,
-    miden_air_definitions::vm::trace::chiplets::bitwise::BITWISE_AND,
-    miden_air_definitions::vm::trace::chiplets::bitwise::BITWISE_XOR,
-    miden_air_definitions::vm::trace::chiplets::bitwise::OP_CYCLE_LEN,
-    miden_air_definitions::vm::trace::chiplets::bitwise::TRACE_WIDTH,
+use miden_air_definitions::vm::{
+    BitwiseOpCols,
+    trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
 };
+use miden_core::{Felt, ZERO};
 
-use {
-    super::assert_u32,
-    super::count_and8,
-};
-use {
-    miden_core::Felt,
-    miden_core::ZERO,
-    crate::operation::OperationError,
-    crate::trace::ChipletTraceFragment,
-};
+use super::{assert_u32, count_and8};
+use crate::{operation::OperationError, trace::ChipletTraceFragment};
 
 #[cfg(test)]
 mod tests;

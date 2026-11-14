@@ -1,45 +1,28 @@
 use alloc::boxed::Box;
 
-use {
-    miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH},
 };
-use {
-    miden_core::chiplets::eidos_compression,
-    miden_core::chiplets::hasher::CV_RANGE,
-    miden_core::crypto::merkle::MerklePath,
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    chiplets::{eidos_compression, hasher::CV_RANGE},
+    crypto::merkle::MerklePath,
+    field::{BasedVectorSpace, QuadFelt},
 };
 
-use {
-    super::DOUBLE_WORD_SIZE,
-    super::WORD_SIZE_FELT,
-};
-use {
-    crate::BaseHost,
-    crate::ContextId,
-    crate::ExecutionError,
-    miden_core::Felt,
-    crate::MemoryError,
-    miden_core::ONE,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_core::Word,
-    miden_core::ZERO,
-    crate::errors::CryptoError,
-    crate::errors::IoError,
-    crate::errors::MapExecErrWithOpIdx,
-    crate::errors::MerklePathVerificationFailedInner,
-    crate::errors::OperationError,
-    crate::PackageSourceDebugContext,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::QuadFelt,
-    crate::processor::AdviceProviderInterface,
-    crate::processor::HasherInterface,
-    crate::processor::MemoryInterface,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::processor::SystemInterface,
-    crate::tracer::OperationHelperRegisters,
-    crate::tracer::Tracer,
+use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
+use crate::{
+    BaseHost, ContextId, ExecutionError, MemoryError, PackageSourceDebugContext,
+    errors::{
+        CryptoError, IoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner,
+        OperationError,
+    },
+    processor::{
+        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
+        SystemInterface,
+    },
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]

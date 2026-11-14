@@ -1,28 +1,11 @@
-use {
-    alloc::string::String,
-    alloc::vec::Vec,
-};
-use {
-    core::fmt,
-    core::slice,
-};
+use alloc::{string::String, vec::Vec};
+use core::{fmt, slice};
 
-use {
-    crate::hash::eidos::Eidos,
-    super::InnerNodeInfo,
-    super::MerkleError,
-    super::MerklePath,
-    super::NodeIndex,
-    crate::Word,
-};
-use {
-    crate::hash::eidos::PACKED_LANES,
-    crate::hash::eidos::PackedDigest,
-    crate::hash::eidos::pack_digest_lanes,
-    crate::hash::eidos::unpack_digest_lane,
-    crate::utils::assume_init_vec,
-    crate::utils::uninit_vector,
-    crate::utils::word_to_hex,
+use super::{InnerNodeInfo, MerkleError, MerklePath, NodeIndex};
+use crate::{
+    Word,
+    hash::eidos::{Eidos, PACKED_LANES, PackedDigest, pack_digest_lanes, unpack_digest_lane},
+    utils::{assume_init_vec, uninit_vector, word_to_hex},
 };
 
 // MERKLE TREE
@@ -317,10 +300,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use {
-        crate::Felt,
-        crate::merkle::int_to_leaf,
-        crate::merkle::int_to_node,
+    use crate::{
+        Felt,
+        merkle::{int_to_leaf, int_to_node},
     };
 
     const LEAVES4: [Word; Word::NUM_ELEMENTS] =

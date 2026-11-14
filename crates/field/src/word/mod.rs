@@ -1,44 +1,30 @@
 //! A [Word] type used in the Miden protocol and associated utilities.
 
-use {
-    alloc::string::String,
-    alloc::vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 #[cfg(not(all(target_family = "wasm", miden)))]
 use core::fmt::Display;
-use {
-    core::cmp::Ordering,
-    core::hash::Hash,
-    core::hash::Hasher,
-    core::mem::size_of,
-    core::ops::Deref,
-    core::ops::DerefMut,
-    core::ops::Index,
-    core::ops::IndexMut,
-    core::ops::Range,
-    core::slice,
+use core::{
+    cmp::Ordering,
+    hash::{Hash, Hasher},
+    mem::size_of,
+    ops::{Deref, DerefMut, Index, IndexMut, Range},
+    slice,
 };
 
 #[cfg(not(all(target_family = "wasm", miden)))]
-use {
-    miden_serde_utils::ByteReader,
-    miden_serde_utils::ByteWriter,
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::DeserializationError,
-    miden_serde_utils::Serializable,
+use miden_serde_utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 #[cfg(not(all(target_family = "wasm", miden)))]
 use p3_field::integers::QuotientMap;
 #[cfg(not(all(target_family = "wasm", miden)))]
-use {
-    rand::Rng,
-    rand::distr::Distribution,
-    rand::distr::StandardUniform,
+use rand::{
+    Rng,
+    distr::{Distribution, StandardUniform},
 };
 use thiserror::Error;
 
-use crate::Felt;
-use crate::utils::bytes_to_hex_string;
+use crate::{Felt, utils::bytes_to_hex_string};
 
 #[cfg(test)]
 mod tests;
@@ -796,10 +782,7 @@ macro_rules! word {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use {
-        crate::Felt,
-        crate::Word,
-    };
+    use crate::{Felt, Word};
 
     impl Arbitrary for Word {
         type Parameters = ();

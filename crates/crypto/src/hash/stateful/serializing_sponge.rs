@@ -5,12 +5,8 @@
 
 use core::mem::size_of;
 
+use super::{Alignable, StatefulHasher};
 use crate::field::Field;
-
-use {
-    super::Alignable,
-    super::StatefulHasher,
-};
 
 /// An adapter that serializes field elements to binary and delegates to an inner `StatefulHasher`.
 ///
@@ -231,14 +227,13 @@ mod tests {
     use alloc::vec::Vec;
 
     use p3_bn254::Bn254;
-    use crate::field::Field;
     use p3_goldilocks::Goldilocks;
     use p3_mersenne_31::Mersenne31;
 
     use super::*;
-    use {
-        crate::hash::stateful::StatefulSponge,
-        crate::hash::stateful::testing::MockBinaryPermutation,
+    use crate::{
+        field::Field,
+        hash::stateful::{StatefulSponge, testing::MockBinaryPermutation},
     };
 
     /// Verifies implicit zero-padding equals explicit zeros for serialized fields.

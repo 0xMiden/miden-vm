@@ -15,41 +15,22 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
-use {
-    miden_air_definitions::vm::ChipletActiveFlags,
-    miden_air_definitions::vm::ChipletCols,
-    miden_air_definitions::vm::trace::chiplets::hasher::DIGEST_LEN,
-    miden_air_definitions::vm::trace::chiplets::hasher::MR_UPDATE_NEW,
-    miden_air_definitions::vm::trace::chiplets::hasher::NUM_SELECTORS,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+use miden_air_definitions::vm::{
+    ChipletActiveFlags, ChipletCols,
+    trace::chiplets::hasher::{DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH},
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceInputs,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::DenseMastForestBuilder,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::Program,
-    miden_core::program::StackOutputs,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    crypto::merkle::{MerklePath, MerkleStore},
+    mast::{BasicBlockNodeBuilder, DenseMastForestBuilder},
+    operations::{Operation, opcodes},
+    program::{Program, StackInputs, StackOutputs},
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::crypto::merkle::MerkleStore,
-};
-use {
-    miden_processor::DefaultHost,
-    miden_processor::FastProcessor,
-    miden_core::program::StackInputs,
-};
+use miden_processor::{DefaultHost, FastProcessor};
 
-use {
-    crate::repro_harness::ReproTrace,
-    crate::repro_harness::core_row_mut,
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 /// The controller overlay follows the top-level chiplet selector.
 const CONTROLLER_OFFSET: usize = 1;

@@ -1,12 +1,11 @@
 // HASH FUNCTION DEFINING CONSTANTS
 // ================================================================================================
-use crate::Felt;
-use {
-    p3_goldilocks::GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS,
-    p3_goldilocks::GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12,
+use p3_goldilocks::{
+    GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS, GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12,
 };
 
 use super::STATE_WIDTH;
+use crate::Felt;
 
 /// Number of either initial or terminal external rounds.
 pub(crate) const NUM_EXTERNAL_ROUNDS_HALF: usize = GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS;
@@ -179,11 +178,9 @@ pub(crate) const ARK_EXT_TERMINAL: [[Felt; STATE_WIDTH]; 4] = [
 
 #[cfg(test)]
 mod tests {
-    use {
-        p3_goldilocks::GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_FINAL,
-        p3_goldilocks::GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_INITIAL,
-        p3_goldilocks::GOLDILOCKS_POSEIDON2_RC_12_INTERNAL,
-        p3_goldilocks::MATRIX_DIAG_12_GOLDILOCKS,
+    use p3_goldilocks::{
+        GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_FINAL, GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_INITIAL,
+        GOLDILOCKS_POSEIDON2_RC_12_INTERNAL, MATRIX_DIAG_12_GOLDILOCKS,
     };
 
     use super::*;

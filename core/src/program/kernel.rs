@@ -1,20 +1,11 @@
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 
-use {
-    crate::Word,
-    miden_crypto::hash::eidos::EidosDomain,
-};
+use miden_crypto::hash::eidos::EidosDomain;
 
-use {
-    crate::chiplets::hasher,
-    crate::serde::ByteReader,
-    crate::serde::ByteWriter,
-    crate::serde::Deserializable,
-    crate::serde::DeserializationError,
-    crate::serde::Serializable,
+use crate::{
+    Word,
+    chiplets::hasher,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // CONSTANTS
@@ -154,14 +145,10 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::KernelDescriptor;
-    use {
-        crate::Felt,
-        crate::Word,
-        crate::program::domain,
-        crate::serde::ByteWriter,
-        crate::serde::Deserializable,
-        crate::serde::Serializable,
-        crate::serde::SliceReader,
+    use crate::{
+        Felt, Word,
+        program::domain,
+        serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
 
     #[test]

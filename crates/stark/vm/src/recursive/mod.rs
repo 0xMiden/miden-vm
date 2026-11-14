@@ -21,49 +21,33 @@
 //! stores the flattened kernel procedure digests under the kernel commitment as well. Query rows,
 //! the Merkle store, and the ACE circuit are content-addressed too.
 
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::vec,
+use alloc::{
+    string::{String, ToString},
+    vec,
 };
 
-use {
-    miden_air::vm::MIDEN_AIR_COUNT,
-    miden_air::vm::MidenMultiAir,
-    miden_air::vm::config,
-};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir, config};
 use miden_air_definitions::vm::PublicInputs;
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceInputs,
-    miden_core::field::QuadFelt,
-    miden_core::program::ExecutionClaim,
-    miden_core::proof::ExecutionProof,
-    miden_core::proof::HashFunction,
-    miden_core::proof::MAX_STARK_PROOF_BYTES,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    field::QuadFelt,
+    program::ExecutionClaim,
+    proof::{ExecutionProof, HashFunction, MAX_STARK_PROOF_BYTES},
 };
 use miden_serde_utils::deserialize_schema_exact;
-use {
-    miden_stark::PreprocessedValidationError,
-    miden_stark::StarkConfig,
-    miden_stark::VerifierInstance,
-    miden_stark::air::Statement,
-    miden_stark::config::observe_protocol_params,
-    miden_stark::proof::StarkProof,
-    miden_stark::proof::StarkProofData,
-    miden_stark::recursive::advice::AdviceError,
-    miden_stark::recursive::advice::MerkleAdvice,
-    miden_stark::recursive::advice::append_proof_payload,
-    miden_stark::recursive::advice::build_merkle_advice,
-    miden_stark::recursive::advice::package_for_request,
-    miden_stark::recursive::advice::security_parameter_words,
-    miden_stark::verifier::VerifierError as CryptoVerifierError,
+use miden_stark::{
+    PreprocessedValidationError, StarkConfig, VerifierInstance,
+    air::Statement,
+    config::observe_protocol_params,
+    proof::{StarkProof, StarkProofData},
+    recursive::advice::{
+        AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
+        security_parameter_words,
+    },
+    verifier::VerifierError as CryptoVerifierError,
 };
-use {
-    serde_wincode::SerdeCompat,
-    serde_wincode::wincode,
-};
+use serde_wincode::{SerdeCompat, wincode};
 
 use crate::setup::config::eidos_config;
 
@@ -338,22 +322,12 @@ fn build_merkle_data(
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::vec,
-        alloc::vec::Vec,
-    };
+    use alloc::{vec, vec::Vec};
 
-    use {
-        miden_core::crypto::merkle::InnerNodeInfo,
-        miden_core::crypto::merkle::MerkleStore,
-        miden_core::program::KernelDescriptor,
-        miden_core::program::ProgramInfo,
-        miden_core::program::StackInputs,
-        miden_core::program::StackOutputs,
-        miden_core::program::proof_request_key,
-        miden_core::proof::PrecompileStatus,
-        miden_core::proof::StarkProof as CoreStarkProof,
-        miden_core::proof::VmProof,
+    use miden_core::{
+        crypto::merkle::{InnerNodeInfo, MerkleStore},
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs, proof_request_key},
+        proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
     use miden_stark::Preprocessed;
 
@@ -461,11 +435,10 @@ mod tests {
     /// Pins the complete packaged advice from a fixed, independently verified VM proof.
     #[test]
     fn packaged_advice_matches_current_fixture() {
-        use {
-            miden_core::serde::Deserializable,
-            miden_core::serde::Serializable,
+        use miden_core::{
+            crypto::hash::Blake3_256,
+            serde::{Deserializable, Serializable},
         };
-        use miden_core::crypto::hash::Blake3_256;
 
         let vm = VmProof::read_from_bytes(include_bytes!("../../tests/fixtures/vm_eidos_v1_0.bin"))
             .expect("valid VM proof fixture encoding");

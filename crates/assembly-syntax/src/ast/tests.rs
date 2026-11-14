@@ -1,28 +1,15 @@
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-};
-use crate::diagnostics::Report;
 use pretty_assertions::assert_eq;
 
-use {
-    crate::Felt,
-    crate::PathBuf,
-    crate::assert_diagnostic,
-    crate::assert_diagnostic_lines,
-    crate::ast::types::Type,
-    crate::ast::*,
-    crate::parser::IntValue,
-    crate::parser::PushValue,
-    crate::parser::WordValue,
-    crate::regex,
-    crate::source_file,
-    crate::testing::SyntaxTestContext,
+use crate::{
+    Felt, PathBuf, assert_diagnostic, assert_diagnostic_lines,
+    ast::{types::Type, *},
+    debuginfo::{SourceSpan, Span},
+    diagnostics::Report,
+    parser::{IntValue, PushValue, WordValue},
+    regex, source_file,
+    testing::SyntaxTestContext,
 };
 
 macro_rules! id {

@@ -1,14 +1,7 @@
-use {
-    super::parsing::SetSourceId,
-    super::*,
-};
-use {
-    crate::Linkage,
-    miden_assembly_syntax::debuginfo::SourceId,
-    miden_assembly_syntax::debuginfo::Span,
-    crate::Uri,
-    crate::VersionRequirement,
-};
+use miden_assembly_syntax::debuginfo::{SourceId, Span};
+
+use super::{parsing::SetSourceId, *};
+use crate::{Linkage, Uri, VersionRequirement};
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]
@@ -120,11 +113,9 @@ mod serialization {
     use alloc::sync::Arc;
 
     use miden_assembly_syntax::debuginfo::Span;
-    use {
-        serde::Deserialize,
-        serde::de::IntoDeserializer,
-        serde::de::MapAccess,
-        serde::de::Visitor,
+    use serde::{
+        Deserialize,
+        de::{IntoDeserializer, MapAccess, Visitor},
     };
 
     use super::DependencySpec;

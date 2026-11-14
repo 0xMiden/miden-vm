@@ -1,17 +1,14 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::Word,
-    crate::mast::MastNode,
-    crate::mast::OpBatch,
-    crate::utils::newtype_id,
-};
-use {
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceInlineCall,
-    crate::package::debug_info::DebugSourceVar,
-    crate::package::debug_info::SourceNodeIdMarker,
+use miden_core::Word;
+
+use crate::{
+    mast::{MastNode, OpBatch},
+    package::debug_info::{
+        DebugFunctionIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+        SourceNodeIdMarker,
+    },
+    utils::newtype_id,
 };
 
 /// Content-equivalence key used while interning pending MAST nodes.

@@ -1,34 +1,19 @@
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
-use {
-    crate::MAX_REPEAT_COUNT,
-    crate::Path,
-    crate::ast::Constant,
-    crate::ast::ConstantExpr,
-    crate::ast::ImportKind,
-    crate::ast::Item,
-    crate::ast::Module,
-    crate::ast::ModuleKind,
-    crate::ast::SymbolResolutionError,
-    crate::ast::TypeAlias,
-    crate::ast::TypeExpr,
-    crate::ast::Visibility,
-    crate::ast::constants::ConstEvalError,
-    crate::ast::types,
-    crate::diagnostics::reporting::PrintDiagnostic,
-    crate::sema::SemanticAnalysisError,
-    crate::sema::SyntaxError,
-    crate::testing::SyntaxTestContext,
+use crate::{
+    MAX_REPEAT_COUNT, Path,
+    ast::{
+        Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
+        TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
+    },
+    debuginfo::{Span, Spanned},
+    diagnostics::reporting::PrintDiagnostic,
+    sema::{SemanticAnalysisError, SyntaxError},
+    testing::SyntaxTestContext,
 };
 
 fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {

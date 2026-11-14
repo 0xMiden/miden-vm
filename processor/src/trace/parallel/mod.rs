@@ -1,88 +1,48 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
-use {
-    core::borrow::Borrow,
-    core::borrow::BorrowMut,
-};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
-use {
-    miden_air_definitions::vm::AIRS,
-    miden_air_definitions::vm::CoreCols,
-    miden_core::Felt,
-    miden_air_definitions::vm::MIDEN_AIR_COUNT,
-    miden_air_definitions::vm::MidenAir,
-    miden_air_definitions::vm::StackCols,
-    miden_air_definitions::vm::SystemCols,
-    miden_air_definitions::vm::trace::DECODER_TRACE_WIDTH,
-    miden_air_definitions::vm::trace::MIN_TRACE_LEN,
-    miden_air_definitions::vm::trace::MainTrace,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::STACK_TRACE_WIDTH,
-    miden_air_definitions::vm::trace::SYS_TRACE_WIDTH,
-    miden_air_definitions::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT,
-    miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
-    miden_air_definitions::vm::trace::decoder::NUM_OP_BITS,
+use miden_air_definitions::vm::{
+    AIRS, ChipletsLengths, CoreCols, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
+    TraceLenSummary, VmTrace,
+    trace::{
+        DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
+        SYS_TRACE_WIDTH,
+        and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
+        decoder::NUM_OP_BITS,
+    },
 };
-use {
-    miden_core::ONE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::batch_inversion_allow_zeros,
-    miden_core::mast::MastForestId,
-    miden_core::mast::SparseMastForest,
-    miden_core::operations::opcodes,
-    miden_core::program::KernelDescriptor,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::utils::Idx,
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    mast::{MastForestId, SparseMastForest},
+    operations::opcodes,
+    program::{KernelDescriptor, MIN_STACK_DEPTH},
+    utils::Idx,
 };
 use miden_stark::memory::ProvingBudget;
 use rayon::prelude::*;
 use tracing::instrument;
 
-use {
-    super::chiplets,
-    super::chiplets::Chiplets,
-    super::execution_tracer::TraceReplay,
-    super::trace_state::AceReplay,
-    super::trace_state::BitwiseOp,
-    super::trace_state::BitwiseReplay,
-    super::trace_state::BitwiseReplayEntry,
-    super::trace_state::CoreTraceFragmentContext,
-    super::trace_state::CoreTraceState,
-    super::trace_state::ExecutionReplay,
-    super::trace_state::HasherRequestReplay,
-    super::trace_state::KernelReplay,
-    super::trace_state::MemoryWritesReplay,
-    super::trace_state::RangeCheckerReplay,
-    super::trace_state::ResolvedBasicBlockGroups,
-    super::trace_state::ResolvedHasherOp,
+use super::{
+    chiplets::{self, Chiplets},
+    execution_tracer::TraceReplay,
+    trace_state::{
+        AceReplay, BitwiseOp, BitwiseReplay, BitwiseReplayEntry, CoreTraceFragmentContext,
+        CoreTraceState, ExecutionReplay, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
+        RangeCheckerReplay, ResolvedBasicBlockGroups, ResolvedHasherOp,
+    },
 };
-use {
-    crate::ContextId,
-    crate::ExecutionError,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::errors::MapExecErrNoCtx,
-    miden_air_definitions::vm::ChipletsLengths,
-    miden_air_definitions::vm::TraceLenSummary,
-    miden_air_definitions::vm::VmTrace,
-    crate::VmWitness,
-    crate::trace::chiplets::Ace,
-    crate::trace::chiplets::AeadStream,
-    crate::trace::chiplets::Bitwise,
-    crate::trace::chiplets::Hasher,
-    crate::trace::chiplets::KernelRom,
-    crate::trace::chiplets::Memory,
-    crate::trace::parallel::processor::ReplayProcessor,
-    crate::trace::parallel::tracer::CoreTraceGenerationTracer,
-    crate::trace::range::RangeChecker,
-    crate::trace::utils::RowMajorTraceWriter,
+use crate::{
+    ContextId, Continuation, ExecutionError, VmWitness,
+    continuation_stack::ContinuationStack,
+    errors::MapExecErrNoCtx,
+    trace::{
+        chiplets::{Ace, AeadStream, Bitwise, Hasher, KernelRom, Memory},
+        parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
+        range::RangeChecker,
+        utils::RowMajorTraceWriter,
+    },
 };
 
 /// Per-row payload written by the core tracer (system + decoder + stack).

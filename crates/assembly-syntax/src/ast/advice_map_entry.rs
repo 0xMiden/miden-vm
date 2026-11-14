@@ -1,18 +1,11 @@
-use {
-    alloc::string::String,
-    alloc::vec::Vec,
-};
-
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-};
+use alloc::{string::String, vec::Vec};
 
 use super::DocString;
-use {
-    crate::Felt,
-    crate::ast::Ident,
-    crate::parser::WordValue,
+use crate::{
+    Felt,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span},
+    parser::WordValue,
 };
 
 // Advice Map data that the host populates before the VM starts.

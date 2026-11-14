@@ -1,30 +1,17 @@
-use {
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
-    miden_air_definitions::vm::trace::decoder::NUM_USER_OP_HELPERS,
+use miden_air_definitions::vm::trace::{
+    RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS,
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::Field,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::PrimeField64,
-    miden_core::field::QuadFelt,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNodeId,
+use miden_core::{
+    Felt, Word, ZERO,
+    crypto::merkle::MerklePath,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    mast::{ExecutableMastForest, MastNodeId},
 };
 
-use {
-    crate::AceError,
-    crate::ContextId,
-    crate::ExecutionError,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::trace::chiplets::CircuitEvaluation,
-    crate::trace::utils::split_u32_into_u16,
+use crate::{
+    AceError, ContextId, Continuation, ExecutionError,
+    continuation_stack::ContinuationStack,
+    trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
 
 // TRACER TRAIT

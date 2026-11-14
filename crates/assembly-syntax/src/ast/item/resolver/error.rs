@@ -3,17 +3,10 @@
 
 use alloc::sync::Arc;
 
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-};
-
-use {
-    crate::ast::ItemIndex,
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::RelatedLabel,
-    crate::diagnostics::miette,
+use crate::{
+    ast::ItemIndex,
+    debuginfo::{SourceFile, SourceManager, SourceSpan},
+    diagnostics::{Diagnostic, RelatedLabel, miette},
 };
 
 /// Represents an error that occurs during symbol resolution

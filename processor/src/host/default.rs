@@ -1,43 +1,19 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
-use {
-    miden_core::Word,
-    miden_core::events::EventId,
-    miden_core::events::EventName,
-    miden_core::mast::MastForest,
+use miden_core::{
+    Word,
+    events::{EventId, EventName},
+    mast::MastForest,
 };
-use {
-    miden_debug_types::DefaultSourceManager,
-    miden_debug_types::Location,
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceManager,
-    miden_debug_types::SourceSpan,
-};
-use {
-    miden_mast_package::PackageDebugInfoError,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_mast_package::{PackageDebugInfoError, debug_info::PackageDebugInfo};
 
-use {
-    super::handlers::EventError,
-    super::handlers::EventHandler,
-    super::handlers::EventHandlerRegistry,
-    super::handlers::TraceError,
-    super::handlers::TraceHandler,
-    super::handlers::TraceHandlerRegistry,
+use super::handlers::{
+    EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
 };
-use {
-    crate::BaseHost,
-    crate::ExecutionError,
-    crate::LoadedMastForest,
-    crate::MastForestStore,
-    crate::MemMastForestStore,
-    crate::ProcessorState,
-    crate::SyncHost,
-    crate::advice::AdviceMutation,
+use crate::{
+    BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
+    ProcessorState, SyncHost, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -357,15 +333,9 @@ impl From<&Arc<MastForest>> for HostLibrary {
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_core::mast::BasicBlockNodeBuilder,
-        miden_core::operations::Operation,
-    };
+    use miden_core::{mast::BasicBlockNodeBuilder, operations::Operation};
 
-    use {
-        super::super::handlers::NoopEventHandler,
-        super::*,
-    };
+    use super::{super::handlers::NoopEventHandler, *};
     use crate::HostError;
 
     /// Builds a library with one procedure and one handler per event name.

@@ -1,29 +1,18 @@
-use {
-    crate::ast::ImmU16,
-    crate::ast::Instruction,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::RelatedLabel,
-    crate::diagnostics::Report,
-    miden_assembly_syntax::parser::IntValue,
-    miden_assembly_syntax::parser::PushValue,
-};
-use {
-    miden_core::Felt,
-    miden_core::WORD_SIZE,
-    miden_core::ZERO,
-    miden_core::events::SystemEvent,
-    miden_core::operations::AssemblyOp,
-    miden_core::operations::Operation,
+use miden_assembly_syntax::parser::{IntValue, PushValue};
+use miden_core::{
+    Felt, WORD_SIZE, ZERO,
+    events::SystemEvent,
+    operations::{AssemblyOp, Operation},
 };
 
-use {
-    crate::Assembler,
-    crate::ProcedureContext,
-    crate::ast::InvokeKind,
-    crate::basic_block_builder::BasicBlockBuilder,
-    crate::mast_forest_builder::MastNodeUse,
-    crate::push_value_ops,
+use crate::{
+    Assembler, ProcedureContext,
+    ast::{ImmU16, Instruction, InvokeKind},
+    basic_block_builder::BasicBlockBuilder,
+    debuginfo::{Span, Spanned},
+    diagnostics::{RelatedLabel, Report},
+    mast_forest_builder::MastNodeUse,
+    push_value_ops,
 };
 
 mod crypto_ops;

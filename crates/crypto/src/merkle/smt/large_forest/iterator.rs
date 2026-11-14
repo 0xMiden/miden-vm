@@ -20,13 +20,10 @@
 use alloc::boxed::Box;
 use core::iter::Peekable;
 
-use crate::Word;
-
 use super::Result;
-use {
-    crate::Set,
-    crate::merkle::smt::large_forest::history::HistoryView,
-    crate::merkle::smt::large_forest::root::TreeEntry,
+use crate::{
+    Set, Word,
+    merkle::smt::large_forest::{history::HistoryView, root::TreeEntry},
 };
 
 // ENTRIES ITERATOR

@@ -1,58 +1,34 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::VecDeque,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
+
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
+};
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
+    mast::{
+        BasicBlockNode, ExecutableMastForest, MastForestId, MastNode, MastNodeExt, MastNodeId,
+        OpBatch, SparseMastForest,
+    },
+    program::MIN_STACK_DEPTH,
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
+    utils::Idx,
 };
 
-use {
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::hasher::HasherState,
-    miden_air_definitions::vm::trace::chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
-};
-use {
-    miden_core::mast::BasicBlockNode,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::OpBatch,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-    miden_core::serde::read_bounded_len,
-};
-
-use {
-    crate::AceError,
-    crate::ContextId,
-    crate::ExecutionError,
-    miden_core::Felt,
-    miden_core::program::MIN_STACK_DEPTH,
-    crate::MemoryError,
-    miden_core::ONE,
-    miden_core::Word,
-    miden_core::ZERO,
-    crate::advice::AdviceError,
-    crate::continuation_stack::ContinuationStack,
-    miden_core::crypto::merkle::MerklePath,
-    crate::errors::OperationError,
-    miden_core::mast::MastForestId,
-    miden_core::mast::MastNodeId,
-    miden_core::mast::SparseMastForest,
-    crate::processor::AdviceProviderInterface,
-    crate::processor::HasherInterface,
-    crate::processor::MemoryInterface,
-    crate::processor::Processor,
-    crate::processor::SystemInterface,
-    crate::trace::chiplets::AEAD_STREAM_CYCLE_LEN,
-    crate::trace::chiplets::CircuitEvaluation,
-    crate::trace::chiplets::MAX_EVAL_CIRCUIT_INVOCATIONS,
-    crate::tracer::merkle_index_helper_values,
-    miden_core::utils::Idx,
+use crate::{
+    AceError, ContextId, ExecutionError, MemoryError,
+    advice::AdviceError,
+    continuation_stack::ContinuationStack,
+    errors::OperationError,
+    processor::{
+        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
+    },
+    trace::chiplets::{AEAD_STREAM_CYCLE_LEN, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
+    tracer::merkle_index_helper_values,
 };
 
 mod serde;
@@ -1716,33 +1692,16 @@ mod arbitrary {
     extern crate alloc;
 
     use miden_air_definitions::vm::trace::RowIndex;
+    use miden_core::{Felt, Word, program::MIN_STACK_DEPTH};
     use proptest::prelude::*;
 
-    use {
-        super::AdviceReplay,
-        super::BitwiseOp,
-        super::BitwiseReplay,
-        super::BlockAddressReplay,
-        super::BlockStackReplay,
-        super::CoreTraceState,
-        super::DecoderState,
-        super::ExecutionContextReplay,
-        super::ExecutionContextSystemInfo,
-        super::KernelReplay,
-        miden_core::program::MIN_STACK_DEPTH,
-        super::MemoryReadsReplay,
-        super::MemoryWritesReplay,
-        super::NodeEndData,
-        super::RangeCheckReplayValues,
-        super::RangeCheckerReplay,
-        super::StackState,
-        super::SystemState,
+    use super::{
+        AdviceReplay, BitwiseOp, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceState, DecoderState, ExecutionContextReplay, ExecutionContextSystemInfo,
+        KernelReplay, MemoryReadsReplay, MemoryWritesReplay, NodeEndData, RangeCheckReplayValues,
+        RangeCheckerReplay, StackState, SystemState,
     };
-    use {
-        crate::ContextId,
-        miden_core::Felt,
-        miden_core::Word,
-    };
+    use crate::ContextId;
 
     impl Arbitrary for SystemState {
         type Parameters = ();
@@ -2070,35 +2029,21 @@ mod arbitrary {
 
 #[cfg(any(test, feature = "arbitrary"))]
 mod arbitrary_replays {
-    use {
-        miden_core::mast::MastForestId,
-        miden_core::mast::MastNodeId,
+    use miden_air_definitions::vm::trace::RowIndex;
+    use miden_core::{
+        Felt, Word,
+        crypto::merkle::MerklePath,
+        mast::{MastForestId, MastNodeId},
     };
     use proptest::prelude::*;
 
-    use {
-        super::AdviceReplay,
-        super::BlockAddressReplay,
-        super::BlockStackReplay,
-        super::CoreTraceFragmentContext,
-        super::CoreTraceState,
-        super::ExecutionContextReplay,
-        super::ExecutionReplay,
-        super::HasherOp,
-        super::HasherRequestReplay,
-        super::HasherResponseReplay,
-        super::MastForestResolutionReplay,
-        super::MemoryReadsReplay,
-        super::STATE_WIDTH,
-        super::StackOverflowReplay,
+    use super::{
+        AdviceReplay, BlockAddressReplay, BlockStackReplay, CoreTraceFragmentContext,
+        CoreTraceState, ExecutionContextReplay, ExecutionReplay, HasherOp, HasherRequestReplay,
+        HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
+        StackOverflowReplay,
     };
-    use {
-        crate::ContextId,
-        miden_core::Felt,
-        miden_air_definitions::vm::trace::RowIndex,
-        miden_core::Word,
-        miden_core::crypto::merkle::MerklePath,
-    };
+    use crate::ContextId;
 
     impl Arbitrary for StackOverflowReplay {
         type Parameters = ();

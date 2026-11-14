@@ -4,39 +4,18 @@ mod error;
 mod tests;
 mod value;
 
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeSet,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceLanguage,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::Uri,
+pub use self::{
+    cst::parse_inline_masm,
+    error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
+    value::{IntValue, PushValue, WordValue},
 };
-use {
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::Report,
-};
-
-pub use {
-    self::cst::parse_inline_masm,
-    self::error::BinErrorKind,
-    self::error::HexErrorKind,
-    self::error::LiteralErrorKind,
-    self::error::ParsingError,
-    self::value::IntValue,
-    self::value::PushValue,
-    self::value::WordValue,
-};
-use {
-    crate::Path,
-    crate::ast,
-    crate::sema,
+use crate::{
+    Path, ast,
+    debuginfo::{SourceFile, SourceLanguage, SourceManager, Uri},
+    diagnostics::{IntoDiagnostic, Report},
+    sema,
 };
 
 /// Maximum allowed nesting depth of parenthesized constant expressions.
@@ -138,10 +117,9 @@ impl ModuleParser {
     where
         P: AsRef<std::path::Path>,
     {
-        use crate::debuginfo::SourceManagerExt;
-        use {
-            crate::diagnostics::IntoDiagnostic,
-            crate::diagnostics::WrapErr,
+        use crate::{
+            debuginfo::SourceManagerExt,
+            diagnostics::{IntoDiagnostic, WrapErr},
         };
 
         let file_path = file_path.as_ref();
@@ -298,10 +276,7 @@ pub fn walk_module_tree<F>(
 where
     F: FnMut(Box<ast::Module>) -> Result<(), Report>,
 {
-    use {
-        crate::debuginfo::Spanned,
-        crate::debuginfo::Uri,
-    };
+    use crate::debuginfo::{Spanned, Uri};
 
     struct ModuleEntry {
         pub name: ast::Ident,

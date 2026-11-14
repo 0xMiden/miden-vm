@@ -1,52 +1,31 @@
-use {
-    alloc::borrow::Cow,
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    borrow::Cow,
+    boxed::Box,
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    miden_assembly_syntax_cst::SyntaxKind,
-    miden_assembly_syntax_cst::SyntaxToken,
-    miden_assembly_syntax_cst::ast::AdviceMap as CstAdviceMap,
-    miden_assembly_syntax_cst::ast::AstNode,
-    miden_assembly_syntax_cst::ast::Attribute as CstAttribute,
-    miden_assembly_syntax_cst::ast::Expr as CstExpr,
-    miden_assembly_syntax_cst::ast::Signature as CstSignature,
-    miden_assembly_syntax_cst::ast::TypeBody as CstTypeBody,
-    miden_assembly_syntax_cst::rowan,
+use miden_assembly_syntax_cst::{
+    SyntaxKind, SyntaxToken,
+    ast::{
+        AdviceMap as CstAdviceMap, AstNode, Attribute as CstAttribute, Expr as CstExpr,
+        Signature as CstSignature, TypeBody as CstTypeBody,
+    },
+    rowan,
 };
-use {
-    miden_core::Felt,
-    miden_core::field::PrimeField64,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
+use miden_core::{Felt, field::PrimeField64};
 
-use {
-    super::super::MAX_CONSTANT_EXPR_NESTING,
-    super::context::LoweringContext,
-};
-use {
-    crate::Path,
-    crate::ast,
-    crate::ast::MAX_TYPE_EXPR_NESTING,
-    crate::PathBuf,
-    crate::ast::types::AddressSpace,
-    crate::ast::types::Type,
-    crate::ast::types::TypeRepr,
-    crate::parser::BinErrorKind,
-    crate::parser::HexErrorKind,
-    crate::parser::IntValue,
-    crate::parser::LiteralErrorKind,
-    crate::parser::ParsingError,
-    crate::parser::WordValue,
+use super::{super::MAX_CONSTANT_EXPR_NESTING, context::LoweringContext};
+use crate::{
+    Path, PathBuf,
+    ast::{
+        self, MAX_TYPE_EXPR_NESTING,
+        types::{AddressSpace, Type, TypeRepr},
+    },
+    debuginfo::{SourceSpan, Span, Spanned},
+    parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
 /// Lowers a CST expression fragment into the constant-expression AST.
@@ -1547,39 +1526,22 @@ fn close_text(kind: SyntaxKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::collections::BTreeSet,
-        alloc::string::ToString,
-        alloc::sync::Arc,
-    };
+    use alloc::{collections::BTreeSet, string::ToString, sync::Arc};
 
-    use {
-        miden_assembly_syntax_cst::ast::AstNode,
-        miden_assembly_syntax_cst::ast::Item as CstItem,
-        miden_assembly_syntax_cst::ast::SourceFile as CstSourceFile,
-        miden_assembly_syntax_cst::parse_source_file,
-    };
-    use {
-        crate::debuginfo::SourceFile,
-        crate::debuginfo::SourceId,
-        crate::debuginfo::SourceLanguage,
-        crate::debuginfo::Uri,
+    use miden_assembly_syntax_cst::{
+        ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
+        parse_source_file,
     };
     use pretty_assertions::assert_eq;
 
-    use {
-        super::ParsedNumeric,
-        super::lower_advice_map_decl,
-        super::lower_attribute,
-        super::lower_function_type_from_signature,
-        super::lower_type_expr_from_alias_body,
-        super::parse_numeric_token,
+    use super::{
+        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body, parse_numeric_token,
     };
-    use {
-        crate::Word,
-        crate::ast,
-        crate::parser::ParsingError,
-        crate::parser::cst::context::LoweringContext,
+    use crate::{
+        Word, ast,
+        debuginfo::{SourceFile, SourceId, SourceLanguage, Uri},
+        parser::{ParsingError, cst::context::LoweringContext},
     };
 
     #[test]
@@ -1625,9 +1587,7 @@ end
                     ),
                 ],
                 vec![
-                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
-                        ast::types::Type::I1
-                    )),
+                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::I1)),
                     ast::TypeExpr::Array(ast::ArrayType::new(
                         ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                             ast::types::Type::U32
@@ -1892,9 +1852,8 @@ end
     #[test]
     fn mast_root_literal_matches_word_to_hex_byte_order() {
         use miden_core::Felt;
-        use crate::debuginfo::SourceSpan;
 
-        use crate::parser::WordValue;
+        use crate::{debuginfo::SourceSpan, parser::WordValue};
 
         // Non-symmetric field elements (issue #3885): every byte position is distinct, so any
         // byte-order/transposition bug in the hex <-> Word conversion flips the resulting root.

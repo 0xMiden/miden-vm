@@ -1,26 +1,13 @@
 #![cfg(test)]
 mod signing_key {
-    use {
-        alloc::string::String,
-        alloc::string::ToString,
-    };
+    use alloc::string::{String, ToString};
 
-    use {
-        crate::Felt,
-        crate::Word,
-    };
-    use {
-        crate::utils::Deserializable,
-        crate::utils::Serializable,
-    };
-
-    use {
-        crate::SequentialCommit,
-        crate::dsa::eddsa_25519_sha512::PublicKey,
-        crate::dsa::eddsa_25519_sha512::SigningKey,
-        crate::dsa::eddsa_25519_sha512::UncheckedVerificationError,
-        crate::hash::eidos::Eidos,
-        crate::rand::test_utils::seeded_rng,
+    use crate::{
+        Felt, SequentialCommit, Word,
+        dsa::eddsa_25519_sha512::{PublicKey, SigningKey, UncheckedVerificationError},
+        hash::eidos::Eidos,
+        rand::test_utils::seeded_rng,
+        utils::{Deserializable, Serializable},
     };
 
     #[test]
@@ -159,23 +146,17 @@ mod signing_key {
 }
 
 mod verification {
-    use {
-        curve25519_dalek::constants::ED25519_BASEPOINT_POINT,
-        curve25519_dalek::constants::EIGHT_TORSION,
-        curve25519_dalek::scalar::Scalar,
-        curve25519_dalek::traits::IsIdentity,
+    use curve25519_dalek::{
+        constants::{ED25519_BASEPOINT_POINT, EIGHT_TORSION},
+        scalar::Scalar,
+        traits::IsIdentity,
     };
     use ed25519_dalek::Verifier;
 
-    use {
-        crate::Felt,
-        crate::Word,
-        crate::dsa::eddsa_25519_sha512::PublicKey,
-        crate::dsa::eddsa_25519_sha512::Signature,
-        crate::dsa::eddsa_25519_sha512::UncheckedVerificationError,
-        crate::utils::Deserializable,
-        crate::utils::DeserializationError,
-        crate::utils::Serializable,
+    use crate::{
+        Felt, Word,
+        dsa::eddsa_25519_sha512::{PublicKey, Signature, UncheckedVerificationError},
+        utils::{Deserializable, DeserializationError, Serializable},
     };
 
     #[test]
@@ -276,10 +257,7 @@ mod verification {
 }
 
 mod signature {
-    use {
-        crate::dsa::eddsa_25519_sha512::Signature,
-        crate::rand::test_utils::seeded_rng,
-    };
+    use crate::{dsa::eddsa_25519_sha512::Signature, rand::test_utils::seeded_rng};
 
     /// Wraps `sig_bytes` in a DER BIT STRING: tag `0x03`, length, zero unused-bits byte, payload.
     fn encode_bitstring(sig_bytes: &[u8; 64]) -> alloc::vec::Vec<u8> {
@@ -293,9 +271,7 @@ mod signature {
 
     /// Generates a deterministic 64-byte Ed25519 signature from the given RNG seed.
     fn make_sig_bytes(rng_seed: [u8; 32]) -> [u8; 64] {
-        use crate::Word;
-
-        use crate::dsa::eddsa_25519_sha512::SigningKey;
+        use crate::{Word, dsa::eddsa_25519_sha512::SigningKey};
         let mut rng = seeded_rng(rng_seed);
         let sk = SigningKey::with_rng(&mut rng);
         sk.sign(Word::default()).inner.to_bytes()
@@ -377,15 +353,10 @@ mod signature {
 }
 
 mod key_exchange_key {
-    use {
-        crate::utils::Deserializable,
-        crate::utils::Serializable,
-    };
-
-    use {
-        crate::dsa::eddsa_25519_sha512::KeyExchangeKey,
-        crate::dsa::eddsa_25519_sha512::PublicKey,
-        crate::rand::test_utils::seeded_rng,
+    use crate::{
+        dsa::eddsa_25519_sha512::{KeyExchangeKey, PublicKey},
+        rand::test_utils::seeded_rng,
+        utils::{Deserializable, Serializable},
     };
 
     #[test]

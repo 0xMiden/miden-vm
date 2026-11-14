@@ -1,26 +1,17 @@
 use alloc::collections::BTreeMap;
 
+use miden_assembly_syntax::{
+    debuginfo::{SourceId, Span},
+    diagnostics::RelatedLabel,
+};
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
 
-use {
-    super::parsing::MaybeInherit,
-    super::parsing::SetSourceId,
-    super::parsing::Validate,
-    super::*,
+use super::{
+    parsing::{MaybeInherit, SetSourceId, Validate},
+    *,
 };
-use {
-    crate::Map,
-    crate::MetadataSet,
-    miden_assembly_syntax::diagnostics::RelatedLabel,
-    crate::semver::Version as SemVer,
-    miden_assembly_syntax::debuginfo::SourceId,
-    miden_assembly_syntax::debuginfo::Span,
-    crate::Uri,
-};
+use crate::{Map, MetadataSet, Uri, semver::Version as SemVer};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -68,28 +59,18 @@ pub struct PackageDetail {
 
 #[cfg(feature = "serde")]
 mod semver_serde {
-    use {
-        alloc::string::String,
-        alloc::string::ToString,
-    };
-    use {
-        core::fmt,
-        core::marker::PhantomData,
+    use alloc::string::{String, ToString};
+    use core::{fmt, marker::PhantomData};
+
+    use miden_assembly_syntax::debuginfo::Span;
+    use serde::{
+        Serialize,
+        de::{self, MapAccess, Visitor},
+        ser::SerializeMap,
     };
 
-    use {
-        serde::Serialize,
-        serde::de,
-        serde::de::MapAccess,
-        serde::de::Visitor,
-        serde::ser::SerializeMap,
-    };
-
-    use {
-        super::MaybeInherit,
-        crate::semver::Version as SemVer,
-        miden_assembly_syntax::debuginfo::Span,
-    };
+    use super::MaybeInherit;
+    use crate::semver::Version as SemVer;
 
     pub fn serialize<S>(
         value: &Option<Span<MaybeInherit<SemVer>>>,
@@ -131,9 +112,7 @@ mod semver_serde {
                 value
                     .parse()
                     .map(|version| Some(Span::unknown(MaybeInherit::Value(version))))
-                    .map_err(|error: crate::semver::Error| {
-                        E::custom(error.to_string())
-                    })
+                    .map_err(|error: crate::semver::Error| E::custom(error.to_string()))
             }
 
             fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
@@ -269,10 +248,7 @@ impl ProjectFile {
     /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
     ///   up to the caller to compute the concrete property values and validate them at that point.
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use {
-            parsing::SetSourceId,
-            parsing::Validate,
-        };
+        use parsing::{SetSourceId, Validate};
 
         let source_id = source.id();
 
@@ -369,10 +345,7 @@ impl ProjectFile {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Vec<crate::Dependency>, Report> {
-        use {
-            crate::Dependency,
-            crate::DependencyVersionScheme,
-        };
+        use crate::{Dependency, DependencyVersionScheme};
 
         let mut dependencies = Vec::with_capacity(self.config.dependencies.len());
         for dependency in self.config.dependencies.values() {

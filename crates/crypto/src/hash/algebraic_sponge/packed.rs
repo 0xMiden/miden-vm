@@ -5,15 +5,11 @@
 //! per SIMD lane. Poseidon2 delegates to Plonky3's vectorized packed-Goldilocks permutation.
 
 use miden_field::PackedFelt;
-use {
-    p3_symmetric::CryptographicPermutation,
-    p3_symmetric::Permutation,
-};
+use p3_symmetric::{CryptographicPermutation, Permutation};
 
-use {
-    super::STATE_WIDTH,
-    super::poseidon2::Poseidon2Permutation256,
-    super::poseidon2::p3_permute_packed,
+use super::{
+    STATE_WIDTH,
+    poseidon2::{Poseidon2Permutation256, p3_permute_packed},
 };
 
 impl Permutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutation256 {
@@ -26,13 +22,10 @@ impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutatio
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_field::PackedValue,
-        crate::field::PrimeCharacteristicRing,
-    };
+    use miden_field::PackedValue;
 
     use super::*;
-    use crate::Felt;
+    use crate::{Felt, field::PrimeCharacteristicRing};
 
     const LANES: usize = PackedFelt::WIDTH;
 

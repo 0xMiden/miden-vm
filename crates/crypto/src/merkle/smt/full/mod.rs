@@ -1,29 +1,12 @@
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 
-use {
-    crate::EMPTY_WORD,
-    super::EmptySubtreeRoots,
-    super::InnerNode,
-    super::InnerNodeInfo,
-    super::InnerNodes,
-    super::LeafIndex,
-    super::MerkleError,
-    super::MutationSet,
-    super::NodeIndex,
-    super::SparseMerklePath,
-    super::SparseMerkleTree,
-    super::SparseMerkleTreeReader,
-    crate::Word,
+use super::{
+    EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError, MutationSet,
+    NodeIndex, SparseMerklePath, SparseMerkleTree, SparseMerkleTreeReader,
 };
 
 mod error;
-pub use {
-    error::SmtLeafError,
-    error::SmtProofError,
-};
+pub use error::{SmtLeafError, SmtProofError};
 
 mod leaf;
 pub use leaf::SmtLeaf;
@@ -31,12 +14,9 @@ pub use leaf::SmtLeaf;
 mod proof;
 pub use proof::SmtProof;
 
-use {
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use crate::{
+    EMPTY_WORD, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // Concurrent implementation
@@ -711,21 +691,12 @@ impl Smt {
 mod arbitrary {
     extern crate alloc;
 
-    use {
-        alloc::collections::BTreeMap,
-        alloc::vec::Vec,
-    };
+    use alloc::{collections::BTreeMap, vec::Vec};
 
     use proptest::prelude::*;
 
-    use {
-        super::LeafIndex,
-        super::SMT_DEPTH,
-        super::Smt,
-        super::SmtLeaf,
-        super::SmtProof,
-        crate::Word,
-    };
+    use super::{LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof};
+    use crate::Word;
 
     // Deduped key/value pairs -> a full Smt built by construction (distinct keys guaranteed).
     pub(super) fn smt_from_pairs(pairs: Vec<(Word, Word)>) -> Smt {

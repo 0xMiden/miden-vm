@@ -1,27 +1,16 @@
 use alloc::sync::Arc;
 
-use {
-    crate::ast::InvocationTarget,
-    crate::ast::InvokeKind,
-    crate::Path,
-    crate::ast::SymbolResolution,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    miden_assembly_syntax::module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 use miden_core::Word;
 
-use {
-    crate::ast::GlobalItemIndex,
-    crate::LinkerError,
-    crate::ast::ModuleIndex,
-    crate::linker::Linker,
-    crate::linker::SymbolItem,
-    crate::linker::namespaces::NamespaceGraph,
-    crate::linker::namespaces::ResolvedImports,
-    crate::linker::namespaces::ResolvedUse,
+use crate::{
+    LinkerError, Path,
+    ast::{GlobalItemIndex, InvocationTarget, InvokeKind, ModuleIndex, SymbolResolution},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    linker::{
+        Linker, SymbolItem,
+        namespaces::{NamespaceGraph, ResolvedImports, ResolvedUse},
+    },
 };
 
 // HELPER STRUCTS
@@ -114,10 +103,7 @@ impl<'a> SymbolResolver<'a> {
         }
     }
 
-    fn source_file(
-        &self,
-        span: SourceSpan,
-    ) -> Option<Arc<crate::debuginfo::SourceFile>> {
+    fn source_file(&self, span: SourceSpan) -> Option<Arc<crate::debuginfo::SourceFile>> {
         self.source_manager().get(span.source_id()).ok()
     }
 

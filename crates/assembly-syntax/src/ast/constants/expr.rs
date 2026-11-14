@@ -1,30 +1,15 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use {
-    crate::Felt,
-    crate::Path,
-    crate::ast::ConstantValue,
-    crate::ast::Ident,
-    crate::parser::IntValue,
-    crate::parser::WordValue,
+use crate::{
+    Felt, Path,
+    ast::{ConstantValue, Ident},
+    debuginfo::{SourceSpan, Span, Spanned},
+    parser::{IntValue, WordValue},
 };
 
 // CONSTANT EXPRESSION
@@ -156,10 +141,7 @@ impl ConstantExpr {
     }
 
     fn render_operand(&self, parent_precedence: u8, is_rhs: bool) -> crate::prettier::Document {
-        use {
-            crate::prettier::PrettyPrint,
-            crate::prettier::const_text,
-        };
+        use crate::prettier::{PrettyPrint, const_text};
 
         let rendered = self.render();
         let Self::BinaryOp { op, .. } = self else {
@@ -281,11 +263,7 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::arbitrary::any,
-            proptest::prop_oneof,
-            proptest::strategy::Strategy,
-        };
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
 
         prop_oneof![
             any::<IntValue>().prop_map(|n| Self::Int(Span::unknown(n))),
@@ -400,10 +378,9 @@ impl proptest::arbitrary::Arbitrary for ConstantOp {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::prop_oneof,
-            proptest::strategy::Just,
-            proptest::strategy::Strategy,
+        use proptest::{
+            prop_oneof,
+            strategy::{Just, Strategy},
         };
 
         prop_oneof![
@@ -462,10 +439,9 @@ impl proptest::arbitrary::Arbitrary for HashKind {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::prop_oneof,
-            proptest::strategy::Just,
-            proptest::strategy::Strategy,
+        use proptest::{
+            prop_oneof,
+            strategy::{Just, Strategy},
         };
 
         prop_oneof![Just(Self::Word), Just(Self::Event),].boxed()

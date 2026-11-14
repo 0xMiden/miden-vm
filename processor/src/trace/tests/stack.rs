@@ -11,19 +11,16 @@
 
 use alloc::vec::Vec;
 
-use miden_air_definitions::vm::logup::StackOverflowMsg;
-use {
-    miden_core::Felt,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
+use miden_air_definitions::vm::{logup::StackOverflowMsg, trace::RowIndex};
+use miden_core::{
+    Felt,
+    operations::{Operation, opcodes},
 };
 
-use {
-    super::build_trace_from_ops,
-    super::lookup_harness::Expectations,
-    super::lookup_harness::InteractionLog,
+use super::{
+    build_trace_from_ops,
+    lookup_harness::{Expectations, InteractionLog},
 };
-use miden_air_definitions::vm::trace::RowIndex;
 
 #[test]
 fn stack_overflow_bus_emits_per_interaction_row() {

@@ -1,33 +1,18 @@
-use {
-    miden_core::Felt,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::Field,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::QuadFelt,
-    miden_core::field::TwoAdicField,
-    miden_core::program::StackInputs,
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
+    program::StackInputs,
 };
 use proptest::prelude::*;
 
-use {
-    super::super::stack_ops::op_push,
-    super::EIGHT,
-    super::TAU_INV,
-    super::TAU2_INV,
-    super::TAU3_INV,
-    super::TWO_INV,
-    super::bit_reverse_coset,
-    super::compute_evaluation_points,
-    super::fold4 as fri_fold4,
-    super::get_coset_flags,
-    super::get_tau_factor,
-    super::op_fri_ext2fold4,
-    super::reorder_bitrev4,
+use super::{
+    super::stack_ops::op_push, EIGHT, TAU_INV, TAU2_INV, TAU3_INV, TWO_INV, bit_reverse_coset,
+    compute_evaluation_points, fold4 as fri_fold4, get_coset_flags, get_tau_factor,
+    op_fri_ext2fold4, reorder_bitrev4,
 };
-use {
-    crate::FastProcessor,
-    crate::processor::Processor,
-    crate::processor::SystemInterface,
+use crate::{
+    FastProcessor,
+    processor::{Processor, SystemInterface},
 };
 
 // FRI FOLDING TESTS

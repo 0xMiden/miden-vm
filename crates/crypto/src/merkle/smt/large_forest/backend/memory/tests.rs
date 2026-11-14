@@ -9,30 +9,21 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use crate::Felt;
 use proptest::prelude::*;
-use {
-    rand::RngExt,
-    rand::SeedableRng,
-};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use {
-    crate::EMPTY_WORD,
-    crate::Word,
-    crate::merkle::smt::Backend,
-    crate::merkle::smt::BackendError,
-    crate::merkle::smt::BackendReader,
-    crate::merkle::smt::Smt,
-    crate::merkle::smt::SmtForestUpdateBatch,
-    crate::merkle::smt::SmtUpdateBatch,
-    crate::merkle::smt::VersionId,
-    crate::merkle::smt::large_forest::InMemoryBackend,
-    crate::merkle::smt::large_forest::backend::Result,
-    crate::merkle::smt::large_forest::root::LineageId,
-    crate::merkle::smt::large_forest::root::TreeEntry,
-    crate::merkle::smt::large_forest::root::TreeWithRoot,
-    crate::merkle::smt::large_forest::test_utils::arbitrary_word,
+use crate::{
+    EMPTY_WORD, Felt, Word,
+    merkle::smt::{
+        Backend, BackendError, BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
+        large_forest::{
+            InMemoryBackend,
+            backend::Result,
+            root::{LineageId, TreeEntry, TreeWithRoot},
+            test_utils::arbitrary_word,
+        },
+    },
 };
 
 // CONSTRUCTION

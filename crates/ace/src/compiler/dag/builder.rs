@@ -2,12 +2,7 @@ use std::collections::HashMap;
 
 use miden_core::field::Field;
 
-use {
-    super::ir::DagId,
-    super::ir::DagSnapshot,
-    super::ir::NodeId,
-    super::ir::NodeKind,
-};
+use super::ir::{DagId, DagSnapshot, NodeId, NodeKind};
 use crate::layout::InputKey;
 
 /// A hash-consed DAG builder.
@@ -309,10 +304,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_core::Felt,
-        miden_core::field::QuadFelt,
-    };
+    use miden_core::{Felt, field::QuadFelt};
 
     use super::DagBuilder;
     use crate::layout::InputKey;

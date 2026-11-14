@@ -1,16 +1,7 @@
-use {
-    p3_symmetric::CryptographicHasher,
-    p3_symmetric::PseudoCompressionFunction,
-};
+use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 
 use super::*;
-use {
-    crate::ONE,
-    crate::Word,
-    crate::ZERO,
-    crate::hash::poseidon2::Poseidon2,
-    crate::Felt,
-};
+use crate::{Felt, ONE, Word, ZERO, hash::poseidon2::Poseidon2};
 
 #[test]
 fn permutation_test_vector() {

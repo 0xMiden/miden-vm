@@ -1,38 +1,22 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use {
-    miden_core::FMP_ADDR,
-    miden_core::FMP_INIT_VALUE,
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
 };
-use {
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
-use {
-    crate::BaseHost,
-    crate::BreakReason,
-    crate::ContextId,
-    crate::MapExecErr,
-    crate::Stopper,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::SourceInlineCallContext,
-    crate::execution::ExecutionState,
-    crate::execution::InternalBreakReason,
-    crate::execution::finalize_clock_cycle,
-    crate::execution::finalize_clock_cycle_with_continuation,
-    crate::execution::get_next_ctx_id,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeId,
-    crate::option_map_break_reason,
-    crate::processor::MemoryInterface,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::processor::SystemInterface,
-    crate::tracer::Tracer,
+use crate::{
+    BaseHost, BreakReason, ContextId, Continuation, MapExecErr, SourceInlineCallContext, Stopper,
+    continuation_stack::ContinuationStack,
+    execution::{
+        ExecutionState, InternalBreakReason, finalize_clock_cycle,
+        finalize_clock_cycle_with_continuation, get_next_ctx_id,
+    },
+    option_map_break_reason,
+    processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
+    tracer::Tracer,
 };
 
 // DYN NODE PROCESSING

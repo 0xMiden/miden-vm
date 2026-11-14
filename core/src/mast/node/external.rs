@@ -1,29 +1,12 @@
-use {
-    alloc::boxed::Box,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use {
-    crate::utils::ToHex,
-    crate::prettier::Document,
-    crate::prettier::PrettyPrint,
-    crate::prettier::const_text,
-    crate::prettier::text,
-};
-
-use {
-    super::MastForestContributor,
-    super::MastNodeContext,
-    super::MastNodeExt,
-};
-use {
-    crate::Felt,
-    crate::Word,
-    crate::mast::MastForest,
-    crate::mast::MastForestError,
-    crate::mast::MastNodeId,
-    crate::utils::LookupByIdx,
+use super::{MastForestContributor, MastNodeContext, MastNodeExt};
+use crate::{
+    Felt, Word,
+    mast::{MastForest, MastForestError, MastNodeId},
+    prettier::{Document, PrettyPrint, const_text, text},
+    utils::{LookupByIdx, ToHex},
 };
 
 // EXTERNAL NODE

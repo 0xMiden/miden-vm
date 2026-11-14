@@ -2,24 +2,15 @@ mod index;
 mod items;
 mod resolver;
 
+pub use self::{
+    index::{GlobalItemIndex, ItemIndex, ModuleIndex},
+    items::Item,
+    resolver::{
+        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError, SymbolTable,
+    },
+};
+use super::{Ident, Import, Visibility};
 use crate::debuginfo::Spanned;
-
-pub use {
-    self::index::GlobalItemIndex,
-    self::index::ItemIndex,
-    self::index::ModuleIndex,
-    self::items::Item,
-    self::resolver::LocalSymbol,
-    self::resolver::LocalSymbolResolver,
-    self::resolver::SymbolResolution,
-    self::resolver::SymbolResolutionError,
-    self::resolver::SymbolTable,
-};
-use {
-    super::Ident,
-    super::Import,
-    super::Visibility,
-};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Declaration<'a> {

@@ -1,19 +1,7 @@
-use {
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::hasher::HasherState,
-};
-use miden_core::deferred::Digest;
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_core::{Felt, Word, crypto::merkle::MerklePath, deferred::Digest};
 
-use {
-    crate::ContextId,
-    crate::ExecutionError,
-    miden_core::Felt,
-    crate::MemoryError,
-    miden_core::Word,
-    crate::advice::AdviceError,
-    miden_core::crypto::merkle::MerklePath,
-    crate::errors::OperationError,
-};
+use crate::{ContextId, ExecutionError, MemoryError, advice::AdviceError, errors::OperationError};
 
 // PROCESSOR
 // ================================================================================================

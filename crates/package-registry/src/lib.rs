@@ -11,42 +11,29 @@ mod resolver;
 mod version;
 mod version_requirement;
 
-use {
-    alloc::collections::BTreeMap,
-    alloc::string::String,
-    alloc::sync::Arc,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use core::fmt;
 
 use miden_assembly_syntax::diagnostics::Report;
-pub use {
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::semver,
-    miden_assembly_syntax::semver::Error as SemVerError,
-    miden_assembly_syntax::semver::Version as SemVer,
-    miden_assembly_syntax::semver::VersionReq,
+pub use miden_assembly_syntax::{
+    debuginfo::Span,
+    semver,
+    semver::{Error as SemVerError, Version as SemVer, VersionReq},
 };
 pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "resolver")]
-pub use {
-    self::resolver::DependencyResolutionError,
-    self::resolver::InMemoryPackageRegistry,
-    self::resolver::PackagePriority,
-    self::resolver::PackageResolver,
-    self::resolver::VersionSet,
+pub use self::resolver::{
+    DependencyResolutionError, InMemoryPackageRegistry, PackagePriority, PackageResolver,
+    VersionSet,
 };
-pub use {
-    self::version::InvalidVersionError,
-    self::version::Version,
-    self::version_requirement::VersionRequirement,
+pub use self::{
+    version::{InvalidVersionError, Version},
+    version_requirement::VersionRequirement,
 };
 
 /// A type alias for an ordered map of package requirements.
@@ -275,29 +262,16 @@ impl PackageStore for NoPackageStore {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::vec,
-        alloc::vec::Vec,
-    };
+    use alloc::{vec, vec::Vec};
 
-    use {
-        miden_assembly_syntax::ast::Path as AstPath,
-        miden_assembly_syntax::ast::PathBuf,
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
+    use miden_core::{
+        mast::{
+            BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId,
+        },
+        operations::Operation,
     };
-    use {
-        miden_core::mast::BasicBlockNodeBuilder,
-        miden_core::mast::DenseMastForestBuilder,
-        miden_core::mast::MastForest,
-        miden_core::mast::MastNodeExt,
-        miden_core::mast::MastNodeId,
-        miden_core::operations::Operation,
-    };
-    use {
-        miden_mast_package::Package,
-        miden_mast_package::PackageExport,
-        miden_mast_package::ProcedureExport,
-        miden_mast_package::TargetType,
-    };
+    use miden_mast_package::{Package, PackageExport, ProcedureExport, TargetType};
 
     use super::*;
 

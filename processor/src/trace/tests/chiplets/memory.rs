@@ -23,26 +23,20 @@
 
 use alloc::vec::Vec;
 
-use {
-    miden_air_definitions::vm::logup::MemoryMsg,
-    miden_air_definitions::vm::logup::MemoryResponseMsg,
-    miden_air_definitions::vm::trace::MainTrace,
+use miden_air_definitions::vm::{
+    logup::{MemoryMsg, MemoryResponseMsg},
+    trace::{MainTrace, RowIndex},
 };
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::ZERO,
-    miden_core::chiplets::eidos_compression,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
+use miden_core::{
+    Felt, ONE, ZERO,
+    chiplets::eidos_compression,
+    operations::{Operation, opcodes},
 };
 
-use {
-    super::super::build_trace_from_ops,
-    super::super::lookup_harness::Expectations,
-    super::super::lookup_harness::InteractionLog,
+use super::super::{
+    build_trace_from_ops,
+    lookup_harness::{Expectations, InteractionLog},
 };
-use miden_air_definitions::vm::trace::RowIndex;
 
 const FOUR: Felt = Felt::new_unchecked(4);
 const TWO: Felt = Felt::new_unchecked(2);

@@ -1,11 +1,7 @@
-use {
-    crate::DisplayHex,
-    crate::ast::EventImmediate,
-    crate::ast::Immediate,
-    crate::ast::Instruction,
-    crate::ast::InvocationTarget,
-    crate::prettier::Document,
-    crate::prettier::PrettyPrint,
+use crate::{
+    DisplayHex,
+    ast::{EventImmediate, Immediate, Instruction, InvocationTarget},
+    prettier::{Document, PrettyPrint},
 };
 
 impl PrettyPrint for Instruction {
@@ -423,13 +419,12 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 #[cfg(test)]
 mod tests {
     use miden_core::crypto::hash::Eidos;
-    use crate::debuginfo::Span;
 
-    use {
-        crate::Felt,
-        crate::ast::*,
-        crate::parser::IntValue,
-        crate::parser::PushValue,
+    use crate::{
+        Felt,
+        ast::*,
+        debuginfo::Span,
+        parser::{IntValue, PushValue},
     };
 
     #[test]

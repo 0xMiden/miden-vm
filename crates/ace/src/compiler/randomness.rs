@@ -2,14 +2,8 @@
 
 use miden_core::field::Field;
 
-use {
-    super::dag::DagBuilder,
-    super::dag::NodeId,
-};
-use {
-    crate::InputKey,
-    crate::InputLayout,
-};
+use super::dag::{DagBuilder, NodeId};
+use crate::{InputKey, InputLayout};
 
 /// Lower a challenge index into DAG nodes.
 ///

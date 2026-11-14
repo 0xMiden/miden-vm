@@ -1,17 +1,8 @@
 //! Memory budgets for the production VM relation.
 
-use {
-    miden_air::vm::MIDEN_AIR_COUNT,
-    miden_air::vm::MidenMultiAir,
-};
-use {
-    miden_core::Felt,
-    miden_core::field::QuadFelt,
-};
-pub use {
-    miden_stark::memory::ProverMemoryModel,
-    miden_stark::memory::ProvingBudget,
-};
+use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir};
+use miden_core::{Felt, field::QuadFelt};
+pub use miden_stark::memory::{ProverMemoryModel, ProvingBudget};
 use miden_stark::pcs::PcsParams;
 
 /// Derives the shared STARK model from generated production AIR metadata.
@@ -42,15 +33,12 @@ pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_air::vm::AIRS,
-        miden_stark::air::BaseAir,
-        miden_stark::air::LiftedAir,
-        miden_air::vm::MidenAir,
-        miden_air::vm::config::pcs_params,
-    };
+    use miden_air::vm::{AIRS, MidenAir, config::pcs_params};
     use miden_air_definitions::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
-    use miden_stark::log_quotient_degree;
+    use miden_stark::{
+        air::{BaseAir, LiftedAir},
+        log_quotient_degree,
+    };
 
     use super::*;
 

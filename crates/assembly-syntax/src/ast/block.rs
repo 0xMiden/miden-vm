@@ -1,13 +1,8 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
 use super::Op;
+use crate::debuginfo::{SourceSpan, Span, Spanned};
 
 // BASIC BLOCK
 // ================================================================================================
@@ -64,10 +59,7 @@ impl fmt::Debug for Block {
 
 impl crate::prettier::PrettyPrint for Block {
     fn render(&self) -> crate::prettier::Document {
-        use {
-            crate::ast::Instruction,
-            crate::prettier::*,
-        };
+        use crate::{ast::Instruction, prettier::*};
 
         // If a block is empty, pretty-print it with a `nop` instruction
         let default_body = [Op::Inst(Span::new(self.span, Instruction::Nop))];

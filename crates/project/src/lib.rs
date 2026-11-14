@@ -17,48 +17,25 @@ mod target;
 mod tests;
 mod workspace;
 
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
-use {
-    miden_assembly_syntax::diagnostics::Report,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-};
-// Re-exported for consistency
-pub use {
-    miden_assembly_syntax::Word,
-    miden_assembly_syntax::debuginfo::Uri,
-    miden_assembly_syntax::semver,
-};
 #[cfg(feature = "serde")]
-use {
-    miden_assembly_syntax::debuginfo::SourceFile,
-    miden_assembly_syntax::debuginfo::SourceId,
+use miden_assembly_syntax::debuginfo::{SourceFile, SourceId};
+// Re-exported for consistency
+pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
+use miden_assembly_syntax::{
+    debuginfo::{SourceSpan, Span},
+    diagnostics::Report,
 };
 pub use miden_mast_package::TargetType;
-pub use {
-    miden_package_registry::SemVer,
-    miden_package_registry::Version,
-    miden_package_registry::VersionReq,
-    miden_package_registry::VersionRequirement,
-};
+pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
 pub use toml::Value;
 
-pub use {
-    self::dependencies::*,
-    self::linkage::Linkage,
-    self::package::Package,
-    self::profile::Profile,
-    self::target::Target,
-    self::workspace::Workspace,
+pub use self::{
+    dependencies::*, linkage::Linkage, package::Package, profile::Profile, target::Target,
+    workspace::Workspace,
 };
 
 /// An alias for [`alloc::collections::BTreeMap`].

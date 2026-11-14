@@ -1,11 +1,9 @@
 use alloc::sync::Arc;
 
-use {
-    crate::Path,
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceSpan,
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::miette,
+use crate::{
+    Path,
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, miette},
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]

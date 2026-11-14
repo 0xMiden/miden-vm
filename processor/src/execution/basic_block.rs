@@ -1,26 +1,21 @@
 use core::ops::ControlFlow;
 
+use miden_core::{
+    mast::{BasicBlockNode, ExecutableMastForest, MastNodeId},
+    operations::Operation,
+};
 use miden_mast_package::debug_info::DebugSourceNodeId;
 
-use {
-    crate::BaseHost,
-    crate::BreakReason,
-    crate::Stopper,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::PackageSourceDebugContext,
-    crate::execution::ExecutionState,
-    crate::execution::InternalBreakReason,
-    crate::execution::execute_op,
-    crate::execution::finalize_clock_cycle_with_continuation,
-    crate::execution::finalize_clock_cycle_with_continuation_and_op_helpers,
-    miden_core::mast::BasicBlockNode,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNodeId,
-    miden_core::operations::Operation,
-    crate::option_map_break_reason,
-    crate::processor::Processor,
-    crate::tracer::Tracer,
+use crate::{
+    BaseHost, BreakReason, Continuation, PackageSourceDebugContext, Stopper,
+    continuation_stack::ContinuationStack,
+    execution::{
+        ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
+        finalize_clock_cycle_with_continuation_and_op_helpers,
+    },
+    option_map_break_reason,
+    processor::Processor,
+    tracer::Tracer,
 };
 
 // BASIC BLOCK PROCESSING

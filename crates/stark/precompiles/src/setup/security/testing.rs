@@ -1,28 +1,13 @@
 //! Independent Eidos security references and MASM comparison constants.
-use {
-    miden_air::precompiles::policy::LOG_BLOWUP,
-    miden_air::precompiles::policy::LOG_FOLDING_ARITY,
-};
+use miden_air::precompiles::policy::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 use miden_core::proof::HashFunction;
-use {
-    miden_stark::security::CHALLENGE_FIELD_BITS,
-    miden_stark::security::COLLISION_RESISTANCE,
-    miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS,
-    miden_stark::security::security_report_with_hash,
+use miden_stark::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, EIDOS_CHALLENGE_SAMPLE_BITS, InstanceShape,
+    LookupShape, ProtocolParams, SecurityReport, SecurityTerm, security_report_with_hash,
 };
-use {
-    p3_security::budget::report::LOOKUP_LABEL,
-    p3_security::fixed,
-};
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
-use {
-    super::AIR_SHAPE,
-    miden_stark::security::InstanceShape,
-    miden_stark::security::LookupShape,
-    miden_stark::security::ProtocolParams,
-    miden_stark::security::SecurityReport,
-    miden_stark::security::SecurityTerm,
-};
+use super::AIR_SHAPE;
 
 /// Lookup shape generated from the authored AIR metadata.
 pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {

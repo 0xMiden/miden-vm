@@ -735,20 +735,17 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
 
 #[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-        std::sync::Arc,
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
     };
 
     use miden_assembly_syntax::Parse;
 
-    use {
-        crate::Assembler,
-        crate::debuginfo::DefaultSourceManager,
-    };
+    use crate::{Assembler, debuginfo::DefaultSourceManager};
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
 
     // Library module `b` exports a string constant and an alias to it.
     let module_b_src = r#"

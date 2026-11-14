@@ -1,17 +1,11 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
-use {
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
-    miden_air_definitions::vm::trace::decoder::NUM_HASHER_COLUMNS,
-    miden_air_definitions::vm::trace::decoder::NUM_OP_BATCH_ENCODING_COLS,
-    miden_air_definitions::vm::trace::decoder::NUM_OP_BITS,
-    miden_air_definitions::vm::trace::decoder::OP_BATCH_1_GROUPS,
-    miden_air_definitions::vm::trace::decoder::OP_BATCH_2_GROUPS,
-    miden_air_definitions::vm::trace::decoder::OP_BATCH_4_GROUPS,
-    miden_air_definitions::vm::trace::decoder::OP_BATCH_8_GROUPS,
+use miden_air_definitions::vm::trace::{
+    chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
+    decoder::{
+        NUM_HASHER_COLUMNS, NUM_OP_BATCH_ENCODING_COLS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
+        OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
+    },
 };
 
 /// Column index of `ctx` within the per-section system trace extracted by
@@ -28,41 +22,23 @@ const GROUP_COUNT_COL_IDX: usize = 17;
 const OP_INDEX_COL_IDX: usize = 18;
 const OP_BATCH_ENCODING_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_ENCODING_COLS;
 const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 21..23;
-use {
-    miden_core::EMPTY_WORD,
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::WORD_SIZE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::events::EventName,
-    miden_core::events::SystemEvent,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::CallNodeBuilder,
-    miden_core::mast::DynNodeBuilder,
-    miden_core::mast::JoinNodeBuilder,
-    miden_core::mast::LoopNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::OP_BATCH_SIZE,
-    miden_core::mast::SplitNodeBuilder,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::KernelDescriptor,
-    miden_core::program::Program,
-    miden_core::program::StackInputs,
+use miden_air_definitions::vm::VmTrace;
+use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    advice::AdviceInputs,
+    events::{EventName, SystemEvent},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
+        MastForest, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
+    },
+    operations::{Operation, opcodes},
+    program::{KernelDescriptor, Program, StackInputs},
 };
 
-use {
-    miden_core::advice::AdviceInputs,
-    crate::DefaultHost,
-    crate::ExecutionOptions,
-    crate::FastProcessor,
-    crate::ProcessorState,
-    crate::event::NoopEventHandler,
-    crate::event::TraceError,
-    miden_air_definitions::vm::VmTrace,
-    crate::trace::build_trace,
+use crate::{
+    DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
+    event::{NoopEventHandler, TraceError},
+    trace::build_trace,
 };
 
 // CONSTANTS
@@ -1707,10 +1683,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 
 /// Extracts the decoder trace columns from the execution trace.
 fn extract_decoder_trace(trace: &VmTrace) -> DecoderTrace {
-    use {
-        miden_air_definitions::vm::trace::DECODER_TRACE_WIDTH,
-        miden_air_definitions::vm::trace::SYS_TRACE_WIDTH,
-    };
+    use miden_air_definitions::vm::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     let main_segment = trace.main_trace();
     let start = SYS_TRACE_WIDTH;

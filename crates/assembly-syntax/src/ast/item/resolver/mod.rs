@@ -3,28 +3,16 @@ mod symbol_table;
 
 use alloc::sync::Arc;
 
-use {
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
 use self::symbol_table::LocalSymbolTable;
-pub use {
-    self::error::SymbolResolutionError,
-    self::symbol_table::LocalSymbol,
-    self::symbol_table::SymbolTable,
+pub use self::{
+    error::SymbolResolutionError,
+    symbol_table::{LocalSymbol, SymbolTable},
 };
-use {
-    super::GlobalItemIndex,
-    super::ModuleIndex,
-};
-use {
-    crate::Path,
-    crate::Word,
-    crate::ast::Ident,
-    crate::ast::ItemIndex,
+use super::{GlobalItemIndex, ModuleIndex};
+use crate::{
+    Path, Word,
+    ast::{Ident, ItemIndex},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 /// Represents the result of resolving a symbol

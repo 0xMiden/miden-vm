@@ -1,24 +1,10 @@
-use {
-    alloc::collections::BTreeSet,
-    alloc::string::String,
-};
+use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
 use super::ProcedureName;
-use {
-    crate::ast::Attribute,
-    crate::ast::AttributeSet,
-    crate::ast::Block,
-    crate::ast::DocString,
-    crate::ast::FunctionType,
-    crate::ast::Invoke,
-    crate::ast::Visibility,
+use crate::{
+    ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 // PROCEDURE

@@ -1,24 +1,15 @@
 //! This module contains utility types for working with roots and trees as part of the forest.
 
-use {
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
-};
 #[cfg(test)]
-use {
-    rand::Rng,
-    rand::RngExt,
-    rand::distr::Distribution,
-    rand::distr::StandardUniform,
+use rand::{
+    Rng, RngExt,
+    distr::{Distribution, StandardUniform},
 };
 
-use {
-    crate::Word,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::SMT_DEPTH,
+use crate::{
+    Word,
+    merkle::smt::{LeafIndex, SMT_DEPTH},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // TYPES

@@ -1,32 +1,16 @@
-use {
-    alloc::boxed::Box,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use {
-    crate::utils::ToHex,
-    crate::prettier::Document,
-    crate::prettier::PrettyPrint,
-    crate::prettier::const_text,
-    crate::prettier::text,
+use super::{
+    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
-
-use {
-    super::MastForestContributor,
-    super::MastNodeContext,
-    super::MastNodeExt,
-    super::fingerprint_with_child_fingerprints,
-};
-use {
-    crate::Felt,
-    crate::Word,
-    crate::chiplets::hasher,
-    crate::mast::MastForest,
-    crate::mast::MastForestError,
-    crate::mast::MastNodeId,
-    crate::operations::opcodes,
-    crate::utils::LookupByIdx,
+use crate::{
+    Felt, Word,
+    chiplets::hasher,
+    mast::{MastForest, MastForestError, MastNodeId},
+    operations::opcodes,
+    prettier::{Document, PrettyPrint, const_text, text},
+    utils::{LookupByIdx, ToHex},
 };
 
 // CALL NODE

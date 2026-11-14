@@ -1,27 +1,15 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
-
-use {
-    crate::debuginfo::DefaultSourceManager,
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-};
-use {
-    crate::diagnostics::Report,
-    crate::diagnostics::reporting::ReportHandlerOpts,
-    crate::diagnostics::reporting::set_hook,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
-use {
-    crate::Path,
-    crate::ast::Form,
-    crate::ast::Module,
-    crate::ast::ModuleKind,
+use crate::{
+    Path,
+    ast::{Form, Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
+    diagnostics::{
+        Report,
+        reporting::{ReportHandlerOpts, set_hook},
+    },
 };
 
 /// A [SyntaxTestContext] provides common functionality for all syntax-related tests

@@ -1,22 +1,11 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-};
+use alloc::{boxed::Box, sync::Arc};
 
-use crate::ast;
-use {
-    crate::mast::MastForest,
-    crate::mast::MastForestRootMap,
-    crate::mast::MastNodeExt,
-    crate::utils::Idx,
-};
-use crate::Linkage;
-
-use {
-    crate::Assembler,
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::Report,
-    crate::testing::TestContext,
+use crate::{
+    Assembler, Linkage, ast,
+    diagnostics::{IntoDiagnostic, Report},
+    mast::{MastForest, MastForestRootMap, MastNodeExt},
+    testing::TestContext,
+    utils::Idx,
 };
 
 fn merge_programs(

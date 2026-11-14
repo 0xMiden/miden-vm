@@ -1,20 +1,9 @@
-use {
-    std::collections::BTreeMap,
-    std::collections::BTreeSet,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-use {
-    miden_processor::ExecutionOptions,
-    miden_processor::FastProcessor,
-};
+use miden_core::crypto::merkle::{MerkleStore, MerkleTree, PartialMerkleTree, SimpleSmt};
+use miden_processor::{ExecutionOptions, FastProcessor};
 
 use super::*;
-use {
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::MerkleTree,
-    miden_core::crypto::merkle::PartialMerkleTree,
-    miden_core::crypto::merkle::SimpleSmt,
-};
 
 // Keep an independent full-tree oracle for the streamed construction path.
 fn legacy_advice_inputs(inputs: &InputFile) -> Result<AdviceInputs, String> {
@@ -156,10 +145,9 @@ fn right_edge_depth_64_partition() -> Vec<((u8, u64), String)> {
 
 #[test]
 fn witness_and_legacy_trees_share_the_same_budget() {
-    use {
-        miden_core::crypto::merkle::PartialSmt,
-        miden_core::crypto::merkle::Smt,
-        miden_core::serde::Serializable,
+    use miden_core::{
+        crypto::merkle::{PartialSmt, Smt},
+        serde::Serializable,
     };
 
     let key = Word::from([1, 2, 3, 7u32]);

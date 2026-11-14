@@ -3,13 +3,10 @@
 //! This module provides [`ChainingHasher`] which wraps a regular hasher and
 //! implements stateful hashing via chaining: `H(state || input)`.
 
-use crate::field::Field;
 use p3_symmetric::CryptographicHasher;
 
-use {
-    super::Alignable,
-    super::StatefulHasher,
-};
+use super::{Alignable, StatefulHasher};
+use crate::field::Field;
 
 /// An adapter that chains state with new input, hashing `state || encode(input)`.
 ///
@@ -176,15 +173,14 @@ mod tests {
     use core::array;
 
     use p3_bn254::Bn254;
-    use {
-        crate::field::Field,
-        crate::field::RawDataSerializable,
-    };
     use p3_goldilocks::Goldilocks;
     use p3_mersenne_31::Mersenne31;
 
     use super::*;
-    use crate::hash::stateful::testing::MockBinaryHasher;
+    use crate::{
+        field::{Field, RawDataSerializable},
+        hash::stateful::testing::MockBinaryHasher,
+    };
 
     /// Verifies ChainingHasher produces same result as manual H(state || input) chaining.
     fn test_scalar_matches_manual<F: Field + RawDataSerializable>() {

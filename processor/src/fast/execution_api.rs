@@ -1,61 +1,35 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use {
-    miden_core::Word,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNodeId,
-    miden_core::program::KernelDescriptor,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::program::Program,
-    miden_core::program::StackInputs,
-    miden_core::program::StackOutputs,
+#[cfg(feature = "std")]
+use miden_core::deferred::PrecompileWitness;
+use miden_core::{
+    Word,
+    mast::{MastForest, MastNodeId},
+    program::{KernelDescriptor, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
 };
-use {
-    miden_mast_package::debug_info::DebugSourceGraphLookupError,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
+use miden_mast_package::debug_info::{
+    DebugSourceGraphLookupError, DebugSourceNodeId, PackageDebugInfo,
 };
 use tracing::instrument;
 
-use {
-    crate::FastProcessor,
-    super::NoopTracer,
-    super::external::maybe_use_caller_error_context,
-    super::step::BreakReason,
-    super::step::NeverStopper,
-    super::step::ResumeContext,
-    super::step::StepStopper,
+use super::{
+    NoopTracer,
+    external::maybe_use_caller_error_context,
+    step::{BreakReason, NeverStopper, ResumeContext, StepStopper},
 };
-#[cfg(feature = "std")]
-use miden_core::deferred::PrecompileWitness;
-use {
-    crate::AdviceProvider,
-    crate::ExecutionError,
-    crate::ExecutionOutput,
-    crate::ExecutionWitness,
-    crate::Host,
-    crate::LoadedMastForest,
-    crate::Stopper,
-    crate::SyncHost,
-    crate::advice::AdviceError,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::SourceInlineCallContext,
-    crate::errors::MapExecErr,
-    crate::errors::MapExecErrNoCtx,
-    crate::PackageSourceDebugContext,
-    crate::errors::malformed_mast_forest_with_context,
-    crate::execution::InternalBreakReason,
-    crate::execution::execute_impl,
-    crate::execution::finish_emit_op_execution,
-    crate::execution::finish_load_mast_forest_from_dyn_start,
-    crate::execution::finish_load_mast_forest_from_external,
-    crate::trace::execution_tracer::ExecutionTracer,
-    crate::tracer::Tracer,
+use crate::{
+    AdviceProvider, Continuation, ExecutionError, ExecutionOutput, ExecutionWitness, FastProcessor,
+    Host, LoadedMastForest, PackageSourceDebugContext, SourceInlineCallContext, Stopper, SyncHost,
+    advice::AdviceError,
+    continuation_stack::ContinuationStack,
+    errors::{MapExecErr, MapExecErrNoCtx, malformed_mast_forest_with_context},
+    execution::{
+        InternalBreakReason, execute_impl, finish_emit_op_execution,
+        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
+    },
+    trace::execution_tracer::ExecutionTracer,
+    tracer::Tracer,
 };
 
 impl FastProcessor {
@@ -178,8 +152,8 @@ impl FastProcessor {
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
     /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional
-    /// precompile witness is returned separately because [`miden_air_definitions::vm::VmTrace`] retains only
-    /// its authenticated root.
+    /// precompile witness is returned separately because [`miden_air_definitions::vm::VmTrace`]
+    /// retains only its authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
@@ -187,12 +161,10 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
         budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
-    ) -> Result<(miden_air_definitions::vm::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use {
-            crate::trace::MAX_TRACE_LEN,
-            crate::trace::build_hasher_chiplet,
-            crate::trace::build_trace,
-            crate::trace::build_trace_with_prebuilt_hasher,
+    ) -> Result<(miden_air_definitions::vm::VmTrace, Option<PrecompileWitness>), ExecutionError>
+    {
+        use crate::trace::{
+            MAX_TRACE_LEN, build_hasher_chiplet, build_trace, build_trace_with_prebuilt_hasher,
         };
 
         if Self::rayon_has_no_parallel_worker() {

@@ -1,22 +1,11 @@
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::RelatedLabel,
-    crate::diagnostics::Report,
-};
-use {
-    miden_core::Felt,
-    miden_core::WORD_SIZE,
-    miden_core::operations::Operation::*,
-};
+use miden_core::{Felt, WORD_SIZE, operations::Operation::*};
 
-use {
-    super::BasicBlockBuilder,
-    super::push_u32_value,
-};
-use {
-    crate::ProcedureContext,
-    crate::fmp::push_offset_fmp_sequence,
+use super::{BasicBlockBuilder, push_u32_value};
+use crate::{
+    ProcedureContext,
+    debuginfo::{SourceSpan, Spanned},
+    diagnostics::{RelatedLabel, Report},
+    fmp::push_offset_fmp_sequence,
 };
 
 // INSTRUCTION PARSERS

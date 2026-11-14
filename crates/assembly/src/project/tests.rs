@@ -1,48 +1,25 @@
-use {
-    std::path::Path,
-    std::process::Command,
-    std::string::String,
-    std::sync::Arc,
-};
+use std::{path::Path, process::Command, string::String, sync::Arc};
 
-use {
-    crate::ast::DebugVarLocation,
-    miden_assembly_syntax::source_file,
-};
-use {
-    crate::mast::BasicBlockNodeBuilder,
-    crate::mast::MastForest,
-    crate::mast::MastNodeExt,
-    crate::mast::MastNodeId,
-    miden_core::operations::Operation,
-    crate::serde::Deserializable,
-    crate::serde::Serializable,
-    crate::serde::SliceReader,
-    crate::utils::Idx,
-    crate::utils::hash_string_to_word,
-};
-use {
-    crate::package::PackageExport,
-    crate::package::PackageModule,
-    crate::package::ProcedureExport,
-    crate::package::Section,
-    crate::package::SectionId,
-    crate::package::debug_info::DEBUG_INFO_VERSION,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceNode,
-    crate::package::debug_info::DebugSourceNodeId,
-    crate::package::debug_info::DebugSourceVar,
-    crate::package::debug_info::PackageDebugInfo,
-    crate::package::debug_info::PackageDebugInfoBuilder,
-};
+use miden_assembly_syntax::source_file;
+use miden_core::operations::Operation;
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
 use super::*;
-use {
-    crate::testing::TestContext,
-    crate::testing::TestRegistry,
-    crate::diagnostics::Report,
+use crate::{
+    ast::DebugVarLocation,
+    diagnostics::Report,
+    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
+    package::{
+        PackageExport, PackageModule, ProcedureExport, Section, SectionId,
+        debug_info::{
+            DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId,
+            DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder,
+        },
+    },
+    serde::{Deserializable, Serializable, SliceReader},
+    testing::{TestContext, TestRegistry},
+    utils::{Idx, hash_string_to_word},
 };
 
 #[test]
@@ -389,8 +366,7 @@ fn debug_bearing_static_package(
 
     let mut exports = Vec::new();
     let mut module_paths = Vec::new();
-    let export_path =
-        crate::PathBuf::new(export).expect("test export path should parse");
+    let export_path = crate::PathBuf::new(export).expect("test export path should parse");
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
     push_export_module_path(&mut module_paths, &export_path);
@@ -400,8 +376,8 @@ fn debug_bearing_static_package(
             .expect("test package marker block should build");
         forest.make_root(marker_root);
         let marker_digest = forest[marker_root].digest();
-        let marker_path = crate::PathBuf::new(marker_export)
-            .expect("test marker export path should parse");
+        let marker_path =
+            crate::PathBuf::new(marker_export).expect("test marker export path should parse");
         let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
         let marker_path = Arc::from(marker_path.into_boxed_path());
         push_export_module_path(&mut module_paths, &marker_path);
@@ -462,8 +438,7 @@ fn push_export_module_path(
     export_path: &Arc<crate::Path>,
 ) {
     let module_path = export_path.parent().expect("export path should have a module path");
-    let module_path: Arc<crate::Path> =
-        Arc::from(module_path.to_path_buf().into_boxed_path());
+    let module_path: Arc<crate::Path> = Arc::from(module_path.to_path_buf().into_boxed_path());
     if !module_paths.iter().any(|path| path.as_ref() == module_path.as_ref()) {
         module_paths.push(module_path);
     }

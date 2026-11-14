@@ -1,20 +1,10 @@
 use alloc::string::ToString;
 
-use {
-    super::SMT_DEPTH,
-    super::SmtLeaf,
-    super::SmtProofError,
-    super::SparseMerklePath,
-    crate::Word,
-};
-use {
-    crate::merkle::InnerNodeInfo,
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
-    crate::EMPTY_WORD,
+use super::{SMT_DEPTH, SmtLeaf, SmtProofError, SparseMerklePath};
+use crate::{
+    EMPTY_WORD, Word,
+    merkle::InnerNodeInfo,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 /// A proof which can be used to assert presence (or absence) of key-value pairs

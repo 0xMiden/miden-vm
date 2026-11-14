@@ -5,52 +5,35 @@
 //! the current width-neutral packing.
 
 use alloc::vec::Vec;
-use {
-    core::borrow::BorrowMut,
-    core::mem::size_of,
-};
+use core::{borrow::BorrowMut, mem::size_of};
 
-use {
-    miden_air_definitions::vm::ControllerCols,
-    miden_air_definitions::vm::CoreCols,
-    miden_air_definitions::vm::logup::HasherMsg,
-    miden_air_definitions::vm::logup::RangeMsg,
-    miden_air_definitions::vm::trace::MainTrace,
-    miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
-    miden_air_definitions::vm::trace::and8_lookup::RANGE_CHECK_LOOKUP_COL,
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
-    miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH,
-    miden_air_definitions::vm::trace::chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
+use miden_air_definitions::vm::{
+    ControllerCols, CoreCols,
+    logup::{HasherMsg, RangeMsg},
+    trace::{
+        MainTrace, RowIndex,
+        and8_lookup::{NUM_AND8_LOOKUP_COLS, RANGE_CHECK_LOOKUP_COL},
+        chiplets::hasher::{
+            CONTROLLER_ROWS_PER_HASHER_OP_FELT, MAX_MERKLE_DEPTH, MERKLE_DEPTH_RANGE_SCALE,
+        },
+    },
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::crypto::hash::Eidos,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::SimpleSmt,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::PrimeField64,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt, Word, ZERO,
+    advice::AdviceInputs,
+    crypto::{
+        hash::Eidos,
+        merkle::{MerklePath, MerkleStore, SimpleSmt},
+    },
+    field::{PrimeCharacteristicRing, PrimeField64},
+    operations::{Operation, opcodes},
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_utils_testing::stack,
-    miden_utils_testing::stack_inputs_from_ints,
-};
+use miden_utils_testing::{stack, stack_inputs_from_ints};
 
-use {
-    super::build_trace_from_ops,
-    super::build_trace_from_ops_with_inputs,
-    super::lookup_harness::Expectations,
-    super::lookup_harness::InteractionLog,
-};
-use {
-    miden_core::advice::AdviceInputs,
-    miden_air_definitions::vm::trace::RowIndex,
+use super::{
+    build_trace_from_ops, build_trace_from_ops_with_inputs,
+    lookup_harness::{Expectations, InteractionLog},
 };
 
 const CONTROLLER_WIDTH: usize = size_of::<ControllerCols<u8>>();
@@ -396,7 +379,11 @@ fn find_op_row(main: &MainTrace, opcode: u8) -> RowIndex {
     panic!("no row with opcode 0x{opcode:02x} in trace");
 }
 
-fn assert_merkle_depth_range_checks(trace: &miden_air_definitions::vm::VmTrace, opcode: u8, expected_depth: u16) {
+fn assert_merkle_depth_range_checks(
+    trace: &miden_air_definitions::vm::VmTrace,
+    opcode: u8,
+    expected_depth: u16,
+) {
     let log = InteractionLog::new(trace);
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcode);

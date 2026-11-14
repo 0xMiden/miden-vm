@@ -1,40 +1,21 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
-use {
-    miden_assembly::Assembler,
-    miden_debug_types::DefaultSourceManager,
+use miden_assembly::Assembler;
+use miden_core::{
+    Felt, ZERO,
+    mast::error_code_from_msg,
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
-use {
-    miden_core::Felt,
-    miden_core::ZERO,
-    miden_core::mast::error_code_from_msg,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::program::StackInputs,
-};
+use miden_debug_types::DefaultSourceManager;
 use proptest::prelude::*;
 
-use {
-    super::op_u32add,
-    super::op_u32add3,
-    super::op_u32and,
-    super::op_u32assert2,
-    super::op_u32div,
-    super::op_u32madd,
-    super::op_u32mul,
-    super::op_u32split,
-    super::op_u32sub,
-    super::op_u32xor,
+use super::{
+    op_u32add, op_u32add3, op_u32and, op_u32assert2, op_u32div, op_u32madd, op_u32mul, op_u32split,
+    op_u32sub, op_u32xor,
 };
-use {
-    crate::DefaultHost,
-    crate::ExecutionError,
-    crate::execution::operations::execute_op,
-    crate::FastProcessor,
-    crate::fast::NoopTracer,
-    crate::operation::OperationError,
+use crate::{
+    DefaultHost, ExecutionError, FastProcessor, execution::operations::execute_op,
+    fast::NoopTracer, operation::OperationError,
 };
 
 // CASTING OPERATIONS

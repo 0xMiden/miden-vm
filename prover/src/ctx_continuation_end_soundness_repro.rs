@@ -27,30 +27,18 @@
 //! transition. The controls failed before the fix as well, so they are what pins each
 //! rejection to the END transition specifically rather than to the harness.
 
-use {
-    alloc::vec,
-    alloc::vec::Vec,
-};
+use alloc::{vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::RowIndex;
-use {
-    miden_core::Felt,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::Program,
+use miden_core::{
+    Felt,
+    mast::{BasicBlockNodeBuilder, MastForest},
+    operations::{Operation, opcodes},
+    program::{Program, StackInputs},
 };
-use {
-    miden_processor::DefaultHost,
-    miden_processor::FastProcessor,
-    miden_core::program::StackInputs,
-};
+use miden_processor::{DefaultHost, FastProcessor};
 
-use {
-    crate::repro_harness::ReproTrace,
-    crate::repro_harness::core_row_mut,
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 // HARNESS
 // ================================================================================================

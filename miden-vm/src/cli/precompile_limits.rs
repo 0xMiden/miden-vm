@@ -1,11 +1,7 @@
 use clap::Args;
-use {
-    miden_processor::ExecutionOptions,
-    miden_precompiles::HASH_WORK,
-    miden_precompiles::MSM_WORK,
-    miden_core::deferred::PrecompileLimits,
-    miden_core::deferred::WorkLimit,
-};
+use miden_core::deferred::{PrecompileLimits, WorkLimit};
+use miden_precompiles::{HASH_WORK, MSM_WORK};
+use miden_processor::ExecutionOptions;
 
 use super::utils::parse_byte_size;
 
@@ -73,9 +69,8 @@ impl PrecompileArgs {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
-    use {
-        miden_precompiles::default_execution_precompile_limits,
-        miden_precompiles::default_verification_precompile_limits,
+    use miden_precompiles::{
+        default_execution_precompile_limits, default_verification_precompile_limits,
     };
 
     use super::*;

@@ -1,29 +1,19 @@
-use {
-    alloc::collections::BTreeSet,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    sync::Arc,
 };
 
-use {
-    miden_assembly_syntax_cst::Parse as CstParse,
-    miden_assembly_syntax_cst::SyntaxKind,
-    miden_assembly_syntax_cst::SyntaxToken,
-    miden_assembly_syntax_cst::ast::AstNode,
-    miden_assembly_syntax_cst::ast::Path as CstPath,
-    miden_assembly_syntax_cst::ast::Visibility as CstVisibility,
-    miden_assembly_syntax_cst::rowan,
-};
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
+use miden_assembly_syntax_cst::{
+    Parse as CstParse, SyntaxKind, SyntaxToken,
+    ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
+    rowan,
 };
 
-use {
-    crate::Path,
-    crate::ast,
-    crate::parser::ParsingError,
+use crate::{
+    Path, ast,
+    debuginfo::{SourceFile, SourceSpan, Span},
+    parser::ParsingError,
 };
 
 /// Shared lowering state for a single CST-to-AST pass.

@@ -1,15 +1,9 @@
 use alloc::vec::Vec;
 
-use {
-    miden_ace::instruction::MAX_ID,
-    miden_ace::instruction::encode_instruction,
-};
+use miden_ace::instruction::{MAX_ID, encode_instruction};
+use miden_core::{Felt, ZERO};
 
 use super::*;
-use {
-    miden_core::Felt,
-    miden_core::ZERO,
-};
 
 #[derive(Debug)]
 pub enum EncodingError {

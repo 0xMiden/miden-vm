@@ -1,10 +1,8 @@
 use alloc::format;
 
+use miden_project::{Package as ProjectPackage, Target};
+
 use crate::diagnostics::Report;
-use {
-    miden_project::Package as ProjectPackage,
-    miden_project::Target,
-};
 
 pub enum ProjectTargetSelector<'a> {
     Library,

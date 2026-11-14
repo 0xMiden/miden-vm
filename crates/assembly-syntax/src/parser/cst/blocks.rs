@@ -1,34 +1,20 @@
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
+use alloc::{string::ToString, vec::Vec};
+
+use miden_assembly_syntax_cst::{
+    SyntaxElement, SyntaxKind, SyntaxToken,
+    ast::{
+        AstNode, Block as CstBlock, DoWhileOp as CstDoWhileOp, IfOp as CstIfOp,
+        Instruction as CstInstruction, Operation as CstOperation, RepeatOp as CstRepeatOp,
+        WhileOp as CstWhileOp,
+    },
+    rowan,
 };
 
-use {
-    miden_assembly_syntax_cst::SyntaxElement,
-    miden_assembly_syntax_cst::SyntaxKind,
-    miden_assembly_syntax_cst::SyntaxToken,
-    miden_assembly_syntax_cst::ast::AstNode,
-    miden_assembly_syntax_cst::ast::Block as CstBlock,
-    miden_assembly_syntax_cst::ast::DoWhileOp as CstDoWhileOp,
-    miden_assembly_syntax_cst::ast::IfOp as CstIfOp,
-    miden_assembly_syntax_cst::ast::Instruction as CstInstruction,
-    miden_assembly_syntax_cst::ast::Operation as CstOperation,
-    miden_assembly_syntax_cst::ast::RepeatOp as CstRepeatOp,
-    miden_assembly_syntax_cst::ast::WhileOp as CstWhileOp,
-    miden_assembly_syntax_cst::rowan,
+use super::{
+    context::LoweringContext, fragments::lower_u32_immediate_token,
+    instructions::try_lower_instruction,
 };
-use crate::debuginfo::SourceSpan;
-
-use {
-    super::context::LoweringContext,
-    super::fragments::lower_u32_immediate_token,
-    super::instructions::try_lower_instruction,
-};
-use {
-    crate::MAX_CONTROL_FLOW_NESTING,
-    crate::ast,
-    crate::parser::ParsingError,
-};
+use crate::{MAX_CONTROL_FLOW_NESTING, ast, debuginfo::SourceSpan, parser::ParsingError};
 
 /// Lowers `block` and rejects source-level empty bodies using `empty_message`.
 ///

@@ -1,6 +1,5 @@
-use crate::debuginfo::Spanned;
-
 use super::*;
+use crate::debuginfo::Spanned;
 
 pub struct MasmSourceProvider;
 

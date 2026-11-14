@@ -1,46 +1,28 @@
 mod symbol_resolver;
 
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::diagnostics::Report,
-    crate::ast,
-    crate::ast::GlobalItemIndex,
-    crate::ast::Ident,
-    crate::ast::ItemIndex,
-    crate::ast::ModuleIndex,
-    crate::Path,
-    crate::ast::SymbolResolution,
-    crate::ast::SymbolResolutionError,
-    crate::ast::constants::ConstEnvironment,
-    crate::ast::constants::ConstEvalError,
-    crate::ast::constants::eval::CachedConstantValue,
-    crate::ast::types,
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::LabeledSpan,
-    crate::diagnostics::RelatedError,
-    crate::diagnostics::Severity,
-    crate::diagnostics::diagnostic,
-    miden_assembly_syntax::module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 
-pub use {
-    self::symbol_resolver::SymbolResolutionContext,
-    self::symbol_resolver::SymbolResolver,
-};
+pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
 use super::SymbolItem;
-use crate::LinkerError;
+use crate::{
+    LinkerError, Path,
+    ast::{
+        self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, SymbolResolution,
+        SymbolResolutionError,
+        constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
+        types,
+    },
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::{LabeledSpan, RelatedError, Report, Severity, diagnostic},
+};
 
 /// A [Resolver] is used to perform symbol resolution in the context of a specific module.
 ///

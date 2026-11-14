@@ -2,27 +2,15 @@ use alloc::vec::Vec;
 use core::mem;
 
 use num::Integer;
-use crate::parallel::*;
 
-use {
-    super::EmptySubtreeRoots,
-    super::InnerNode,
-    super::InnerNodes,
-    super::Leaves,
-    super::MerkleError,
-    super::MutationSet,
-    super::NodeIndex,
-    super::SMT_DEPTH,
-    super::Smt,
-    super::SmtLeaf,
-    super::SparseMerkleTreeReader,
-    crate::Word,
+use super::{
+    EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
+    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader,
 };
-use {
-    crate::merkle::smt::Map,
-    crate::merkle::smt::NodeMutation,
-    crate::merkle::smt::NodeMutations,
-    crate::merkle::smt::SmtLeafError,
+use crate::{
+    Word,
+    merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError},
+    parallel::*,
 };
 
 #[cfg(test)]

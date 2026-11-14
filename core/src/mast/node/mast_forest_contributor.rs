@@ -2,25 +2,15 @@ use alloc::vec::Vec;
 
 use miden_utils_core_derive::MastForestContributor;
 
-use {
-    super::BasicBlockNodeBuilder,
-    super::CallNodeBuilder,
-    super::DynNodeBuilder,
-    super::ExternalNodeBuilder,
-    super::JoinNodeBuilder,
-    super::LoopNodeBuilder,
-    super::MastNodeExt,
-    super::SplitNodeBuilder,
+use super::{
+    BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+    LoopNodeBuilder, MastNodeExt, SplitNodeBuilder,
 };
-use {
-    crate::Felt,
-    crate::Word,
-    crate::chiplets::hasher,
-    crate::mast::MastForest,
-    crate::mast::MastForestError,
-    crate::mast::MastNode,
-    crate::mast::MastNodeId,
-    crate::utils::LookupByIdx,
+use crate::{
+    Felt, Word,
+    chiplets::hasher,
+    mast::{MastForest, MastForestError, MastNode, MastNodeId},
+    utils::LookupByIdx,
 };
 
 const CHILD_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
@@ -169,12 +159,10 @@ impl proptest::prelude::Arbitrary for MastNodeBuilder {
 
 #[cfg(test)]
 mod fingerprint_invariant_tests {
-    use {
-        crate::Felt,
-        crate::mast::BasicBlockNodeBuilder,
-        crate::mast::MastForest,
-        crate::mast::MastForestContributor,
-        crate::operations::Operation,
+    use crate::{
+        Felt,
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+        operations::Operation,
     };
 
     #[test]
@@ -206,16 +194,13 @@ mod fingerprint_invariant_tests {
 
 #[cfg(test)]
 mod round_trip_tests {
-    use crate::Felt;
-
-    use {
-        crate::Word,
-        crate::mast::BasicBlockNodeBuilder,
-        crate::mast::DenseMastForestBuilder,
-        crate::mast::MastNodeBuilder,
-        crate::mast::MastNodeExt,
-        crate::mast::node::mast_forest_contributor::MastForestContributor,
-        crate::operations::Operation,
+    use crate::{
+        Felt, Word,
+        mast::{
+            BasicBlockNodeBuilder, DenseMastForestBuilder, MastNodeBuilder, MastNodeExt,
+            node::mast_forest_contributor::MastForestContributor,
+        },
+        operations::Operation,
     };
 
     #[test]

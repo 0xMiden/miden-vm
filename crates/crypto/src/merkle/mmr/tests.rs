@@ -2,31 +2,17 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 
-use {
-    crate::hash::eidos::Eidos,
-    crate::merkle::InnerNodeInfo,
-    crate::Word,
-    super::Mmr,
-    super::MmrError,
-    super::MmrPeaks,
-    super::PartialMmr,
-    super::full::NodeStore,
-    super::nodes_from_mask,
-};
-use {
-    crate::hash::eidos::BLOCK_LEN,
-    crate::hash::eidos::domains::MMR_PEAKS,
-    crate::merkle::MerkleError,
-    crate::merkle::MerklePath,
-    crate::merkle::MerkleTree,
-    crate::merkle::NodeIndex,
-    crate::merkle::int_to_node,
-    crate::merkle::mmr::InOrderIndex,
-    crate::merkle::mmr::MmrPath,
-    crate::merkle::mmr::MmrProof,
-    crate::merkle::mmr::forest::Forest,
-    crate::merkle::mmr::forest::TreeSizeIterator,
-    crate::merkle::mmr::forest::high_bitmask,
+use super::{Mmr, MmrError, MmrPeaks, PartialMmr, full::NodeStore, nodes_from_mask};
+use crate::{
+    Word,
+    hash::eidos::{BLOCK_LEN, Eidos, domains::MMR_PEAKS},
+    merkle::{
+        InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex, int_to_node,
+        mmr::{
+            InOrderIndex, MmrPath, MmrProof,
+            forest::{Forest, TreeSizeIterator, high_bitmask},
+        },
+    },
 };
 
 #[test]
@@ -1500,10 +1486,7 @@ fn test_mmr_old_proof_num_peaks_exceeds_current_num_peaks() {
 mod property_tests {
     use proptest::prelude::*;
 
-    use {
-        super::Forest,
-        super::leaf_to_corresponding_tree,
-    };
+    use super::{Forest, leaf_to_corresponding_tree};
 
     proptest! {
         #[test]

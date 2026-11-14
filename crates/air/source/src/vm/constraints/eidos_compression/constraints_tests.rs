@@ -1,47 +1,34 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::field::Field,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::QuadFelt,
+use miden_core::{
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
-use {
-    miden_stark::air::AirBuilder,
-    miden_stark::air::ConstraintDegrees,
-    miden_stark::air::ExtensionBuilder,
-    miden_stark::air::PermutationAirBuilder,
-    miden_stark::air::RowWindow,
-    miden_stark::lookup::ConstraintLookupBuilder,
-    miden_stark::lookup::LookupAir,
+use miden_stark::{
+    air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
+    lookup::{ConstraintLookupBuilder, LookupAir},
 };
-use miden_core::utils::RowMajorMatrix;
 
-use {
-    super::constraints::enforce_footer_rows,
-    super::constraints::enforce_fused_rows,
-    super::constraints::enforce_inactive_footer_input_aux,
-    super::constraints::enforce_inactive_footer_output_aux,
-    super::layout::*,
-    super::lookup::FOOTER_INPUT_COLUMN,
-    super::lookup::FOOTER_OUTPUT_COLUMN,
-    super::model::initial_working_state,
-    super::periodic::get_periodic_column_values,
-    super::schedule::EIDOS_COMPRESSION_IV,
-    super::schedule::G_IDX_DIAG,
-    super::schedule::fused_step_at,
-    super::selectors::EidosCompressionSelectors,
-    super::test_support::generate_felt_trace_block_with_initial_state_for_test,
-    super::test_support::rewrite_felt_footer_for_test,
-    super::trace::EidosCompressionFeltRow,
-    super::trace::TraceMode,
-    super::trace::generate_felt_trace_block,
-    super::trace::generate_felt_trace_block_with_cycle_id,
+use super::{
+    constraints::{
+        enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
+        enforce_inactive_footer_output_aux,
+    },
+    layout::*,
+    lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
+    model::initial_working_state,
+    periodic::get_periodic_column_values,
+    schedule::{EIDOS_COMPRESSION_IV, G_IDX_DIAG, fused_step_at},
+    selectors::EidosCompressionSelectors,
+    test_support::{
+        generate_felt_trace_block_with_initial_state_for_test, rewrite_felt_footer_for_test,
+    },
+    trace::{
+        EidosCompressionFeltRow, TraceMode, generate_felt_trace_block,
+        generate_felt_trace_block_with_cycle_id,
+    },
 };
-use {
-    crate::vm::Felt,
-    crate::vm::MidenAir,
-    crate::vm::constraints::and8_lookup::eidos::normalize,
-};
+use crate::vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize};
 
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,

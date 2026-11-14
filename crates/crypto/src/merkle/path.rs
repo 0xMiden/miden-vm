@@ -1,23 +1,14 @@
 use alloc::vec::Vec;
-use {
-    core::num::NonZero,
-    core::ops::Deref,
-    core::ops::DerefMut,
+use core::{
+    num::NonZero,
+    ops::{Deref, DerefMut},
 };
 
-use {
-    crate::hash::eidos::Eidos,
-    super::InnerNodeInfo,
-    super::MerkleError,
-    super::NodeIndex,
-    crate::Word,
-};
-use {
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use super::{InnerNodeInfo, MerkleError, NodeIndex};
+use crate::{
+    Word,
+    hash::eidos::Eidos,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // MERKLE PATH
@@ -317,10 +308,9 @@ impl Deserializable for RootPath {
 
 #[cfg(test)]
 mod tests {
-    use {
-        crate::merkle::MerklePath,
-        crate::merkle::int_to_node,
-        crate::utils::Serializable,
+    use crate::{
+        merkle::{MerklePath, int_to_node},
+        utils::Serializable,
     };
 
     #[test]
@@ -334,9 +324,7 @@ mod tests {
     /// These cases cover the length-prefix boundaries explicitly, including the maximum.
     #[test]
     fn serialization_roundtrip_boundary_lengths() {
-        use crate::utils::Deserializable;
-
-        use crate::merkle::MerklePath;
+        use crate::{merkle::MerklePath, utils::Deserializable};
 
         for len in [65usize, 254, 255] {
             let path = MerklePath::new((0..len as u64).map(int_to_node).collect());

@@ -1,20 +1,12 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use {
-    alloc::string::String,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
-use {
-    core::fmt,
-    core::ops::Range,
-};
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::{fmt, ops::Range};
 
-use crate::debuginfo::SourceSpan;
-use {
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::miette,
+use crate::{
+    debuginfo::SourceSpan,
+    diagnostics::{Diagnostic, miette},
 };
 
 // LITERAL ERROR KIND

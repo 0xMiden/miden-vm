@@ -1,24 +1,18 @@
 use miden_air_definitions::vm::trace::RowIndex;
-use {
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::QuadFelt,
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 
-use {
-    crate::ContextId,
-    miden_core::Felt,
-    crate::AceError,
-    crate::errors::AceEvalError,
-    crate::processor::MemoryInterface,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::processor::SystemInterface,
-    crate::trace::chiplets::CircuitEvaluation,
-    crate::trace::chiplets::MAX_EVAL_CIRCUIT_WIRES,
-    crate::trace::chiplets::MAX_NUM_ACE_WIRES,
-    crate::trace::chiplets::PTR_OFFSET_ELEM,
-    crate::trace::chiplets::PTR_OFFSET_WORD,
-    crate::tracer::Tracer,
+use crate::{
+    AceError, ContextId,
+    errors::AceEvalError,
+    processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
+    trace::chiplets::{
+        CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,
+        PTR_OFFSET_WORD,
+    },
+    tracer::Tracer,
 };
 
 /// Checks that the evaluation of an arithmetic circuit is equal to zero.

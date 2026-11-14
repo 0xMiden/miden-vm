@@ -1,16 +1,9 @@
 //! Contains the metadata definition for each persisted tree in the forest.
 
-use {
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
-};
-
-use {
-    crate::Word,
-    crate::merkle::smt::VersionId,
+use crate::{
+    Word,
+    merkle::smt::VersionId,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 /// The basic metadata stored for each tree in the forest.

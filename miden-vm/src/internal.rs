@@ -1,45 +1,22 @@
-use {
-    std::collections::BTreeMap,
-    std::collections::HashMap,
-    std::path::Path,
-    std::path::PathBuf,
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
 };
 
-use {
-    miden_assembly::diagnostics::IntoDiagnostic,
-    miden_assembly::diagnostics::Report,
-    miden_assembly::diagnostics::WrapErr,
-};
-use {
-    miden_core::Felt,
-    miden_core::WORD_SIZE,
-    miden_core::field::PrimeField64,
-    miden_core::field::QuotientMap,
-    miden_core::serde::read_file_bounded,
-};
-use serde::Deserialize;
-pub use {
-    tracing::Level,
-    tracing::event,
-    tracing::instrument,
-};
-
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 #[cfg(test)]
 use miden_core::crypto::merkle::NodeIndex;
-use {
-    miden_processor::ExecutionOptions,
-    miden_core::program::StackInputs,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::advice::AdviceInputs,
-    miden_processor::advice::AdviceProvider,
-    miden_core::advice::AdviceStack,
-    miden_core::crypto::merkle::SmtWitness,
-    miden_core::serde::BudgetedReader,
-    miden_core::serde::ByteReader,
-    miden_core::serde::Deserializable,
-    miden_core::serde::SliceReader,
+use miden_core::{
+    Felt, WORD_SIZE, Word, ZERO,
+    advice::{AdviceInputs, AdviceStack},
+    crypto::merkle::SmtWitness,
+    field::{PrimeField64, QuotientMap},
+    program::StackInputs,
+    serde::{BudgetedReader, ByteReader, Deserializable, SliceReader, read_file_bounded},
 };
+use miden_processor::{ExecutionOptions, advice::AdviceProvider};
+use serde::Deserialize;
+pub use tracing::{Level, event, instrument};
 
 mod merkle_builder;
 
@@ -381,14 +358,14 @@ mod budget_tests;
 
 #[cfg(test)]
 mod tests {
-    use {
-        std::fs,
-        std::time::SystemTime,
-        std::time::UNIX_EPOCH,
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::*;
     use miden_core::crypto::merkle::MerkleStore;
+
+    use super::*;
 
     fn test_file_path(name: &str) -> PathBuf {
         let id = SystemTime::now()
@@ -473,11 +450,9 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_preserve_multiple_versions_and_leaf_preimages() {
-        use {
-            miden_core::crypto::merkle::LeafIndex,
-            miden_core::crypto::merkle::PartialSmt,
-            miden_core::crypto::merkle::Smt,
-            miden_core::serde::Serializable,
+        use miden_core::{
+            crypto::merkle::{LeafIndex, PartialSmt, Smt},
+            serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -525,12 +500,11 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_share_nodes_across_large_tree_versions() {
-        use {
-            miden_processor::advice::AdviceProvider,
-            miden_core::crypto::merkle::PartialSmt,
-            miden_core::crypto::merkle::Smt,
-            miden_core::serde::Serializable,
+        use miden_core::{
+            crypto::merkle::{PartialSmt, Smt},
+            serde::Serializable,
         };
+        use miden_processor::advice::AdviceProvider;
 
         let step = u64::MAX / 2048;
         let keys: Vec<_> = (0..2048u64)
@@ -595,10 +569,9 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_charge_the_combined_advice_budget() {
-        use {
-            miden_core::crypto::merkle::PartialSmt,
-            miden_core::crypto::merkle::Smt,
-            miden_core::serde::Serializable,
+        use miden_core::{
+            crypto::merkle::{PartialSmt, Smt},
+            serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -635,10 +608,7 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_limit_total_encoded_bytes() {
-        use {
-            miden_core::crypto::merkle::PartialSmt,
-            miden_core::serde::Serializable,
-        };
+        use miden_core::{crypto::merkle::PartialSmt, serde::Serializable};
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
         let copies = 600;
@@ -665,10 +635,7 @@ mod tests {
 
     #[test]
     fn test_smt_witness_inputs_reject_invalid_hex_and_trailing_bytes() {
-        use {
-            miden_core::crypto::merkle::PartialSmt,
-            miden_core::serde::Serializable,
-        };
+        use miden_core::{crypto::merkle::PartialSmt, serde::Serializable};
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
         let mut wrong_version = bytes.clone();

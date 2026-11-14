@@ -1,11 +1,9 @@
 use alloc::sync::Arc;
 
-use crate::debuginfo::FileLineCol;
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
+
+use crate::debuginfo::FileLineCol;
 
 /// Debug information describing one source-level function in an active inline call chain.
 #[derive(Clone, Debug, Eq, PartialEq)]

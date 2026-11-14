@@ -1,29 +1,16 @@
-use {
-    alloc::borrow::Cow,
-    alloc::vec::Vec,
-};
-use {
-    core::iter,
-    core::iter::FusedIterator,
-    core::num::NonZero,
+use alloc::{borrow::Cow, vec::Vec};
+use core::{
+    iter::{self, FusedIterator},
+    num::NonZero,
 };
 
-use {
-    super::EmptySubtreeRoots,
-    super::InnerNodeInfo,
-    super::MerkleError,
-    super::MerklePath,
-    super::NodeIndex,
-    crate::Word,
-    super::smt::SMT_MAX_DEPTH,
+use super::{
+    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, smt::SMT_MAX_DEPTH,
 };
-use {
-    crate::hash::eidos::Eidos,
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use crate::{
+    Word,
+    hash::eidos::Eidos,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 /// A different representation of [`MerklePath`] designed for memory efficiency for Merkle paths
@@ -486,15 +473,10 @@ fn path_depth_iter(tree_depth: u8) -> impl ExactSizeIterator<Item = NonZero<u8>>
 mod arbitrary {
     use proptest::prelude::*;
 
-    use {
-        super::MerklePath,
-        super::SparseMerklePath,
-    };
-    use {
-        crate::Word,
-        crate::merkle::MerkleProof,
-        crate::merkle::RootPath,
-        crate::merkle::smt::SMT_MAX_DEPTH,
+    use super::{MerklePath, SparseMerklePath};
+    use crate::{
+        Word,
+        merkle::{MerkleProof, RootPath, smt::SMT_MAX_DEPTH},
     };
 
     impl Arbitrary for MerkleProof {
@@ -569,30 +551,21 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
-    use {
-        core::num::NonZero,
-        core::ops::Deref,
-        core::ops::DerefMut,
+    use core::{
+        num::NonZero,
+        ops::{Deref, DerefMut},
     };
 
     use assert_matches::assert_matches;
 
     use super::SparseMerklePath;
-    use {
-        crate::Felt,
-        crate::ONE,
-        crate::Word,
-        crate::merkle::EmptySubtreeRoots,
-        crate::merkle::MerkleError,
-        crate::merkle::MerklePath,
-        crate::merkle::MerkleTree,
-        crate::merkle::NodeIndex,
-        crate::merkle::smt::LeafIndex,
-        crate::merkle::smt::SMT_MAX_DEPTH,
-        crate::merkle::smt::SimpleSmt,
-        crate::merkle::smt::Smt,
-        crate::merkle::smt::SparseMerkleTreeReader,
-        crate::merkle::sparse_path::path_depth_iter,
+    use crate::{
+        Felt, ONE, Word,
+        merkle::{
+            EmptySubtreeRoots, MerkleError, MerklePath, MerkleTree, NodeIndex,
+            smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt, Smt, SparseMerkleTreeReader},
+            sparse_path::path_depth_iter,
+        },
     };
 
     /// Regression: `from_parts` used to cast the computed depth to `u8` before the max-depth
@@ -621,11 +594,7 @@ mod tests {
     /// than construct an internally inconsistent path.
     #[test]
     fn deserialization_rejects_mask_bits_beyond_the_declared_depth() {
-        use {
-            crate::utils::ByteWriter,
-            crate::utils::Deserializable,
-            crate::utils::Serializable,
-        };
+        use crate::utils::{ByteWriter, Deserializable, Serializable};
 
         let mut bytes = Vec::new();
         bytes.write_u8(2);
@@ -636,10 +605,7 @@ mod tests {
 
     #[test]
     fn binary_serialization_roundtrips_valid_boundary_paths() {
-        use {
-            crate::utils::Deserializable,
-            crate::utils::Serializable,
-        };
+        use crate::utils::{Deserializable, Serializable};
 
         let node = Word::from([ONE, ONE, ONE, ONE]);
         for (depth, empty_nodes_mask) in [

@@ -1,12 +1,11 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::serde::BudgetedReader,
-    miden_core::serde::SliceReader,
+use miden_core::{
+    mast::MastForestId,
+    serde::{BudgetedReader, SliceReader},
 };
 
 use super::*;
-use miden_core::mast::MastForestId;
 
 #[test]
 fn memory_reads_replay_rejects_oversized_queue_lengths_before_allocation() {

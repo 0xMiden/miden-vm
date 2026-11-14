@@ -1,28 +1,14 @@
 //! Compiler-side ACE stream construction and node packing.
 
-use {
-    alloc::format,
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{format, string::ToString, vec::Vec};
 
-use {
-    miden_core::Felt,
-    miden_core::field::ExtensionField,
-};
+use miden_core::{Felt, field::ExtensionField};
 
-use {
-    crate::AceError,
-    crate::compiler::circuit::AceCircuit,
-    crate::compiler::circuit::AceNode,
-    crate::compiler::circuit::AceOp,
-    crate::compiler::circuit::AceOpNode,
-    crate::encode::ACE_READ_ROW_EF_NODES,
-    crate::encode::ADV_PIPE_BLOCK_FELTS,
-    crate::encode::BASE_FELTS_PER_EF,
-    crate::encode::EncodedCircuit,
-    crate::instruction::MAX_ID,
-    crate::instruction::encode_instruction,
+use crate::{
+    AceError,
+    compiler::circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
+    encode::{ACE_READ_ROW_EF_NODES, ADV_PIPE_BLOCK_FELTS, BASE_FELTS_PER_EF, EncodedCircuit},
+    instruction::{MAX_ID, encode_instruction},
 };
 
 /// Constants are padded to an even number of EF nodes (full READ rows).

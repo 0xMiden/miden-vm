@@ -5,10 +5,7 @@ use super::*;
 
 #[test]
 fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
@@ -27,10 +24,7 @@ fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
 
 #[test]
 fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
@@ -58,10 +52,7 @@ fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
 
 #[test]
 fn asm_import_direct_digest_invoke_assembles_without_source_import() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let program = r#"
         begin
@@ -88,7 +79,8 @@ fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
 
     use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let program = r#"
         begin
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -109,7 +101,8 @@ fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
 
     use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let program = r#"
         proc helper
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -131,7 +124,8 @@ fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings
 
     use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 
@@ -154,7 +148,8 @@ fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_wa
 
     use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 
@@ -197,7 +192,8 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
 
     use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::debuginfo::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 
@@ -215,10 +211,7 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
 
 #[test]
 fn asm_import_source_digest_import_is_rejected_without_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let program = r#"
         use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -241,10 +234,7 @@ fn asm_import_source_digest_import_is_rejected_without_panicking() {
 
 #[test]
 fn invoking_local_type_alias_returns_error_instead_of_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
 
@@ -271,10 +261,7 @@ fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
 
 #[test]
 fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
-    use {
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
     let lib_src = source_file!(

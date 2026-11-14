@@ -2,33 +2,19 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 
-use {
-    crate::EMPTY_WORD,
-    super::LeafIndex,
-    super::NodeIndex,
-    super::SMT_DEPTH,
-    super::Smt,
-    super::SmtLeaf,
-};
-use {
-    crate::Felt,
-    crate::ONE,
-    crate::Word,
-    crate::hash::eidos::Eidos,
-    crate::hash::eidos::domains::SMT_BUCKET_LEAF,
-    crate::merkle::EmptySubtreeRoots,
-    crate::merkle::smt::Map,
-    crate::merkle::smt::MutationSet,
-    crate::merkle::smt::NodeMutation,
-    crate::merkle::smt::SmtLeafError,
-    crate::merkle::smt::SmtProofError,
-    crate::merkle::smt::SparseMerkleTree,
-    crate::merkle::smt::SparseMerkleTreeReader,
-    crate::merkle::smt::full::MAX_LEAF_ENTRIES,
-    crate::merkle::store::MerkleStore,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use super::{LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
+use crate::{
+    EMPTY_WORD, Felt, ONE, Word,
+    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
+    merkle::{
+        EmptySubtreeRoots,
+        smt::{
+            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
+            SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
+        },
+        store::MerkleStore,
+    },
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 // SMT

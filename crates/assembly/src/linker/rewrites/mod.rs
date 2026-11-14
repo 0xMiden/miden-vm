@@ -1,12 +1,10 @@
 mod module;
 
-use {
-    crate::ast::GlobalItemIndex,
-    miden_assembly_syntax::module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 
 pub use self::module::ModuleRewriter;
 use super::*;
+use crate::ast::GlobalItemIndex;
 
 /// Validate references in `symbol` and fold constant expressions before marking it linked.
 ///

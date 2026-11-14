@@ -46,70 +46,44 @@ mod resolver;
 mod rewrites;
 mod symbols;
 
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
-use {
-    core::cell::RefCell,
-    core::ops::ControlFlow,
-    core::ops::Index,
+use core::{
+    cell::RefCell,
+    ops::{ControlFlow, Index},
 };
 
-use {
-    crate::diagnostics::Report,
-    crate::ast,
-    crate::ast::AttributeSet,
-    crate::ast::GlobalItemIndex,
-    crate::ast::InvocationTarget,
-    crate::ast::ItemIndex,
-    crate::ast::Module,
-    crate::ast::ModuleIndex,
-    crate::Path,
-    crate::ast::SymbolResolution,
-    crate::ast::Visibility,
-    crate::ast::types,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    miden_assembly_syntax::module::ItemInfo,
-    miden_assembly_syntax::module::ModuleDescriptor,
-};
-use {
-    miden_core::Word,
-    miden_core::program::KernelDescriptor,
-};
-use crate::package::Package as MastPackage;
-use {
-    smallvec::SmallVec,
-    smallvec::smallvec,
-};
+use miden_assembly_syntax::module::{ItemInfo, ModuleDescriptor};
+use miden_core::{Word, program::KernelDescriptor};
+use smallvec::{SmallVec, smallvec};
 
-pub use {
-    self::callgraph::CallGraph,
-    self::callgraph::CycleError,
-    self::errors::LinkerError,
-    self::library::LinkLibrary,
-    self::library::Linkage,
-    self::namespaces::NamespaceGraph,
-    self::resolver::ResolverCache,
-    self::resolver::SymbolResolutionContext,
-    self::resolver::SymbolResolver,
-    self::symbols::Import,
-    self::symbols::Symbol,
-    self::symbols::SymbolItem,
+pub use self::{
+    callgraph::{CallGraph, CycleError},
+    errors::LinkerError,
+    library::{LinkLibrary, Linkage},
+    namespaces::NamespaceGraph,
+    resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
+    symbols::{Import, Symbol, SymbolItem},
 };
-use {
-    self::module::LinkModule,
-    self::module::ModuleSource,
-    self::namespaces::ResolvedImports,
-    self::resolver::*,
+use self::{
+    module::{LinkModule, ModuleSource},
+    namespaces::ResolvedImports,
+    resolver::*,
+};
+use crate::{
+    Path, ast,
+    ast::{
+        AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
+        SymbolResolution, Visibility, types,
+    },
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::Report,
+    package::Package as MastPackage,
 };
 
 /// Selects how [`Linker::link`] handles a static cycle in the call graph.
@@ -1049,10 +1023,7 @@ impl Linker {
         span: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
-        use {
-            crate::ast::TypeResolver,
-            crate::ast::constants::ConstEnvironment,
-        };
+        use crate::ast::{TypeResolver, constants::ConstEnvironment};
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
@@ -1146,37 +1117,25 @@ impl Index<GlobalItemIndex> for Linker {
 
 #[cfg(test)]
 mod tests {
-    use {
-        std::collections::BTreeSet,
-        std::panic::AssertUnwindSafe,
-        std::panic::catch_unwind,
-        std::string::String,
-        std::sync::Arc,
+    use std::{
+        collections::BTreeSet,
+        panic::{AssertUnwindSafe, catch_unwind},
+        string::String,
+        sync::Arc,
     };
 
-    use {
-        crate::ast::Ident,
-        crate::ast::InvocationTarget,
-        crate::ast::InvokeKind,
-        crate::ast::ItemIndex,
-        crate::Path,
-        crate::ast::SymbolResolutionError,
-        crate::ast::Visibility,
-        crate::ast::types,
-        crate::debuginfo::SourceSpan,
-        crate::debuginfo::Span,
-        miden_assembly_syntax::module::ItemInfo,
-        miden_assembly_syntax::module::TypeInfo,
-    };
-    use miden_core::Felt;
+    use miden_assembly_syntax::module::{ItemInfo, TypeInfo};
+    use miden_core::{Felt, advice::AdviceMap};
 
     use super::*;
-    use {
-        crate::Assembler,
-        crate::ast::Module,
-        crate::testing::TestContext,
-        crate::testing::source_file,
-        miden_core::advice::AdviceMap,
+    use crate::{
+        Assembler, Path,
+        ast::{
+            Ident, InvocationTarget, InvokeKind, ItemIndex, Module, SymbolResolutionError,
+            Visibility, types,
+        },
+        debuginfo::{SourceSpan, Span},
+        testing::{TestContext, source_file},
     };
 
     #[test]

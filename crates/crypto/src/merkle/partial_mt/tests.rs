@@ -1,21 +1,14 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
-use {
-    super::super::MerkleError,
-    super::super::MerkleTree,
-    super::super::NodeIndex,
-    super::super::PartialMerkleTree,
-    super::super::int_to_node,
-    super::super::store::MerkleStore,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    super::InnerNodeInfo,
-    super::MerkleProof,
-    crate::utils::Serializable,
-    crate::Word,
+use super::{
+    super::{
+        MerkleError, MerkleTree, NodeIndex, PartialMerkleTree, int_to_node, store::MerkleStore,
+    },
+    InnerNodeInfo, MerkleProof,
+};
+use crate::{
+    Word,
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 // TEST DATA

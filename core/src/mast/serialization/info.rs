@@ -1,20 +1,10 @@
-use {
-    super::NodeDataOffset,
-    super::basic_blocks::BasicBlockDataDecoder,
-};
+use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 #[cfg(test)]
 use crate::mast::node::MastNodeExt;
-use {
-    crate::mast::MastForestContributor,
-    crate::mast::MastNode,
-    crate::mast::MastNodeId,
-    crate::Word,
-    crate::mast::node::MastNodeBuilder,
-    crate::serde::ByteReader,
-    crate::serde::ByteWriter,
-    crate::serde::Deserializable,
-    crate::serde::DeserializationError,
-    crate::serde::Serializable,
+use crate::{
+    Word,
+    mast::{MastForestContributor, MastNode, MastNodeId, node::MastNodeBuilder},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // CONSTANTS
@@ -385,10 +375,7 @@ impl Deserializable for MastNodeInfo {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use {
-        super::MastNodeEntry,
-        super::MastNodeInfo,
-    };
+    use super::{MastNodeEntry, MastNodeInfo};
     use crate::Word;
 
     impl Arbitrary for MastNodeEntry {

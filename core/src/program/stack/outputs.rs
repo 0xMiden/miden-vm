@@ -1,20 +1,10 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use {
-    super::MIN_STACK_DEPTH,
-    super::get_num_stack_values,
-};
-use {
-    crate::Felt,
-    crate::WORD_SIZE,
-    crate::Word,
-    crate::ZERO,
-    crate::serde::ByteReader,
-    crate::serde::ByteWriter,
-    crate::serde::Deserializable,
-    crate::serde::DeserializationError,
-    crate::serde::Serializable,
+use super::{MIN_STACK_DEPTH, get_num_stack_values};
+use crate::{
+    Felt, WORD_SIZE, Word, ZERO,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // STACK OUTPUTS
@@ -183,10 +173,7 @@ pub enum OutputError {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use {
-        super::MIN_STACK_DEPTH,
-        super::StackOutputs,
-    };
+    use super::{MIN_STACK_DEPTH, StackOutputs};
     use crate::Felt;
 
     impl Arbitrary for StackOutputs {

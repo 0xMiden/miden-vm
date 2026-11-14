@@ -3,12 +3,12 @@ mod masm;
 use alloc::borrow::Cow;
 use core::ops::ControlFlow;
 
-use crate::debuginfo::SourceManager;
 use miden_package_registry::PackageRegistryAndProvider;
 use miden_project::ProjectDependencyGraph;
 
 pub use self::masm::MasmSourceProvider;
 use super::*;
+use crate::debuginfo::SourceManager;
 
 /// This struct provides important context about the current target being assembled to
 /// implementations of the [ProjectSourceProvider] trait.

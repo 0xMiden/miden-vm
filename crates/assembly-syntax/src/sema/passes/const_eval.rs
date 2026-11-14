@@ -1,27 +1,16 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use {
-    miden_core::events::EventId,
-    miden_core::utils::hash_string_to_word,
-};
-use {
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
+use miden_core::{events::EventId, utils::hash_string_to_word};
 
-use {
-    crate::Felt,
-    crate::ast::constants::ConstEnvironment,
-    crate::ast::constants::ConstEvalError,
-    crate::ast::constants::eval::CachedConstantValue,
-    crate::ast::*,
-    crate::parser::IntValue,
-    crate::parser::PushValue,
-    crate::parser::WordValue,
+use crate::{
+    Felt,
+    ast::{
+        constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
+        *,
+    },
+    debuginfo::{Span, Spanned},
+    parser::{IntValue, PushValue, WordValue},
 };
 
 /// This visitor evaluates all constant expressions and folds them to literals.

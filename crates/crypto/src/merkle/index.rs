@@ -1,16 +1,9 @@
 use core::fmt::Display;
 
-use {
-    crate::Felt,
-    super::MerkleError,
-    crate::Word,
-};
-use {
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use super::MerkleError;
+use crate::{
+    Felt, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // NODE INDEX
@@ -315,11 +308,7 @@ mod arbitrary {
             ],
         ) {
             use alloc::vec::Vec;
-            use {
-                crate::utils::Deserializable,
-                crate::utils::DeserializationError,
-                crate::utils::Serializable,
-            };
+            use crate::utils::{Deserializable, DeserializationError, Serializable};
 
             // Serialization writes depth as u8 LE and position as u64 LE.
             let mut encoded = Vec::new();

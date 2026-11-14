@@ -1,44 +1,29 @@
-use {
-    alloc::collections::btree_map::Entry,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::vec::Vec,
+use alloc::{
+    collections::btree_map::Entry,
+    string::{String, ToString},
+    vec::Vec,
 };
 
-use {
-    miden_assembly_syntax_cst::ast::AdviceMap as CstAdviceMap,
-    miden_assembly_syntax_cst::ast::AstNode,
-    miden_assembly_syntax_cst::ast::BeginBlock as CstBeginBlock,
-    miden_assembly_syntax_cst::ast::Constant as CstConstant,
-    miden_assembly_syntax_cst::ast::ExternPackage as CstExternPackage,
-    miden_assembly_syntax_cst::ast::Import as CstImport,
-    miden_assembly_syntax_cst::ast::ImportKind as CstImportKind,
-    miden_assembly_syntax_cst::ast::Item as CstItem,
-    miden_assembly_syntax_cst::ast::Namespace as CstNamespace,
-    miden_assembly_syntax_cst::ast::Procedure as CstProcedure,
-    miden_assembly_syntax_cst::ast::Submodule as CstSubmodule,
-    miden_assembly_syntax_cst::ast::TypeDecl as CstTypeDecl,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+use miden_assembly_syntax_cst::ast::{
+    AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
+    ExternPackage as CstExternPackage, Import as CstImport, ImportKind as CstImportKind,
+    Item as CstItem, Namespace as CstNamespace, Procedure as CstProcedure,
+    Submodule as CstSubmodule, TypeDecl as CstTypeDecl,
 };
 
-use {
-    super::blocks::lower_required_block,
-    super::context::LoweringContext,
-    super::fragments::lower_advice_map_decl,
-    super::fragments::lower_attribute,
-    super::fragments::lower_constant_expr,
-    super::fragments::lower_enum_decl_from_body,
-    super::fragments::lower_function_type_from_signature,
-    super::fragments::lower_type_expr_from_alias_body,
+use super::{
+    blocks::lower_required_block,
+    context::LoweringContext,
+    fragments::{
+        lower_advice_map_decl, lower_attribute, lower_constant_expr, lower_enum_decl_from_body,
+        lower_function_type_from_signature, lower_type_expr_from_alias_body,
+    },
 };
-use {
-    crate::diagnostics::Report,
-    crate::ast,
-    crate::parser::ParsingError,
+use crate::{
+    ast,
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::Report,
+    parser::ParsingError,
 };
 
 /// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser

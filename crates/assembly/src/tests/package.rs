@@ -1,10 +1,9 @@
-use crate::serde::Serializable;
-use crate::package::Package;
-use {
-    proptest::prelude::*,
-    proptest::test_runner::Config,
-    proptest::test_runner::TestRunner,
+use proptest::{
+    prelude::*,
+    test_runner::{Config, TestRunner},
 };
+
+use crate::{package::Package, serde::Serializable};
 
 // PACKAGE SERIALIZATION AND DESERIALIZATION
 // ================================================================================================

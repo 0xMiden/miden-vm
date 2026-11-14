@@ -10,11 +10,9 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use {
-    core::fmt,
-    core::fmt::Display,
-    core::fmt::LowerHex,
-    core::ops::ControlFlow,
+use core::{
+    fmt::{self, Display, LowerHex},
+    ops::ControlFlow,
 };
 
 use miden_mast_package::debug_info::DebugSourceNodeId;
@@ -29,31 +27,24 @@ mod host;
 mod processor;
 mod tracer;
 
-use {
-    miden_core::deferred::Digest,
-    miden_core::deferred::Node,
-    miden_core::deferred::PrecompileError,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::serde::Deserializable,
-    miden_core::serde::Serializable,
+use miden_air_definitions::vm::trace::RowIndex;
+use miden_core::{
+    deferred::{Digest, Node, PrecompileError},
+    mast::ExecutableMastForest,
+    serde::{Deserializable, Serializable},
 };
 
-use {
-    crate::advice::AdviceProvider,
-    crate::continuation_stack::ContinuationStack,
-    crate::errors::MapExecErr,
-    crate::processor::Processor,
-    crate::processor::SystemInterface,
-    miden_air_definitions::vm::trace::RowIndex,
+use crate::{
+    advice::AdviceProvider,
+    continuation_stack::ContinuationStack,
+    errors::MapExecErr,
+    processor::{Processor, SystemInterface},
 };
 
 #[cfg(any(test, feature = "testing"))]
 mod test_utils;
 #[cfg(any(test, feature = "testing"))]
-pub use {
-    test_utils::ProcessorStateSnapshot,
-    test_utils::TestHost,
-};
+pub use test_utils::{ProcessorStateSnapshot, TestHost};
 
 #[cfg(test)]
 mod tests;
@@ -61,111 +52,59 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use {
-    continuation_stack::Continuation,
-    continuation_stack::SourceInlineCallContext,
+pub use continuation_stack::{Continuation, SourceInlineCallContext};
+pub use errors::{
+    AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
+    advice_error_with_package_source_context, event_error_with_package_source_context,
+    procedure_not_found_with_package_source_context,
 };
-pub use {
-    errors::AceError,
-    errors::ExecutionError,
-    errors::HostError,
-    errors::MemoryError,
-    errors::PackageSourceDebugContext,
-    errors::advice_error_with_package_source_context,
-    errors::event_error_with_package_source_context,
-    errors::procedure_not_found_with_package_source_context,
-};
-pub use {
-    execution_options::ExecutionOptions,
-    execution_options::ExecutionOptionsError,
-};
+pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
 pub(crate) use fast::BreakReason;
-pub use {
-    fast::DebugCallFrame,
-    fast::DebugCallFrameResolver,
-    fast::DebugFrameOrigin,
-    fast::ExecutionOutput,
-    fast::FastProcessor,
-    fast::ResumeContext,
+pub use fast::{
+    DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput, FastProcessor,
+    ResumeContext,
 };
-pub use {
-    host::BaseHost,
-    host::FutureMaybeSend,
-    host::Host,
-    host::LoadedMastForest,
-    host::MastForestStore,
-    host::MemMastForestStore,
-    host::SyncHost,
-    host::debug::StdoutWriter,
-    host::debug::format_value,
-    host::debug::write_interval,
-    host::debug::write_stack,
-    host::default::DefaultHost,
-    host::default::HostLibrary,
+pub use host::{
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
+    SyncHost,
+    debug::{StdoutWriter, format_value, write_interval, write_stack},
+    default::{DefaultHost, HostLibrary},
 };
-pub use {
-    miden_core::EMPTY_WORD,
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::WORD_SIZE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::crypto,
-    miden_core::deferred::PrecompileWitness,
-    miden_core::field,
-    miden_core::mast,
-    miden_core::program::ExecutionClaim,
-    miden_core::program::InputError,
-    miden_core::program::KernelDescriptor,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::program::Program,
-    miden_core::program::ProgramInfo,
-    miden_core::program::StackInputs,
-    miden_core::program::StackOutputs,
-    miden_core::serde,
-    miden_core::utils,
+pub use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto,
+    deferred::PrecompileWitness,
+    field, mast,
+    program::{
+        ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
+        StackInputs, StackOutputs,
+    },
+    serde, utils,
 };
-pub use {
-    trace::ExecutionWitness,
-    trace::VmWitness,
-};
+pub use trace::{ExecutionWitness, VmWitness};
 
 pub mod advice {
-    pub use {
-        miden_core::advice::AdviceInputs,
-        miden_core::advice::AdviceMap,
-        miden_core::advice::AdviceStack,
-    };
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
 
-    pub use {
-        super::host::AdviceMutation,
-        super::host::advice::AdviceError,
-        super::host::advice::AdviceProvider,
+    pub use super::host::{
+        AdviceMutation,
+        advice::{AdviceError, AdviceProvider},
     };
 }
 
 pub mod event {
     pub use miden_core::events::*;
 
-    pub use {
-        crate::host::handlers::EventError,
-        crate::host::handlers::EventHandler,
-        crate::host::handlers::EventHandlerRegistry,
-        crate::host::handlers::NoopEventHandler,
-        crate::host::handlers::TraceError,
-        crate::host::handlers::TraceHandler,
-        crate::host::handlers::TraceHandlerRegistry,
+    pub use crate::host::handlers::{
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
 }
 
 pub mod operation {
     pub use miden_core::operations::*;
 
-    pub use {
-        crate::errors::BinaryValueErrorContext,
-        crate::errors::OperationError,
-    };
+    pub use crate::errors::{BinaryValueErrorContext, OperationError};
 }
 
 pub mod trace;

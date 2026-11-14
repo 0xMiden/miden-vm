@@ -1,21 +1,11 @@
 //! Common committed-row geometry and independent symbolic security-shape validation.
 use miden_ace::EXT_DEGREE;
 #[cfg(any(test, feature = "compiler"))]
-use {
-    miden_core::Felt,
-    miden_core::field::QuadFelt,
-};
+use miden_core::{Felt, field::QuadFelt};
 #[cfg(any(test, feature = "compiler"))]
-use {
-    miden_stark::air::ConstraintCounts,
-    miden_stark::air::ConstraintDegrees,
-    miden_stark::air::LiftedAir,
-};
+use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 #[cfg(any(test, feature = "compiler"))]
-use {
-    miden_stark::security::AirShape,
-    miden_stark::security::LookupShape,
-};
+use miden_stark::security::{AirShape, LookupShape};
 
 #[cfg(any(test, feature = "compiler"))]
 pub(crate) fn derive_air_shape<A: LiftedAir<Felt, QuadFelt>>(
