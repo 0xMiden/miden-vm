@@ -35,8 +35,8 @@ use {
     miden_core::Word,
     crate::advice::AdviceError,
     crate::event::EventError,
-    crate::event::EventId,
-    crate::event::EventName,
+    miden_core::events::EventId,
+    miden_core::events::EventName,
     crate::fast::SystemEventError,
     crate::utils::to_hex,
 };

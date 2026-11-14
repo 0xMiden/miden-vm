@@ -54,7 +54,7 @@ use {
     crate::advice::AdviceMutation,
     crate::event::EventError,
     crate::event::EventHandler,
-    crate::event::EventName,
+    miden_core::events::EventName,
     crate::event::TraceError,
     crate::event::TraceHandler,
     crate::operation::Operation,
