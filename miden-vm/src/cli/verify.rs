@@ -15,10 +15,10 @@ use {
 };
 use miden_mast_package::Package;
 use {
-    miden_vm::ExecutionClaim,
-    miden_vm::KernelDescriptor,
+    miden_core::program::ExecutionClaim,
+    miden_core::program::KernelDescriptor,
     miden_vm::PrecompileStatus,
-    miden_vm::ProgramInfo,
+    miden_core::program::ProgramInfo,
     miden_vm::default_verification_precompile_limits,
     miden_vm::internal::InputFile,
 };

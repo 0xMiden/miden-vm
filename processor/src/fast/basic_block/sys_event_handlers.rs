@@ -565,7 +565,7 @@ mod tests {
     use super::*;
     use {
         crate::ExecutionOptions,
-        crate::StackInputs,
+        miden_core::program::StackInputs,
         crate::fast::FastProcessor,
     };
 

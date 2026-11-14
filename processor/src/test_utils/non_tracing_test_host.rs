@@ -89,8 +89,8 @@ mod tests {
         crate::AdviceInputs,
         crate::ExecutionOptions,
         crate::FastProcessor,
-        crate::Program,
-        crate::StackInputs,
+        miden_core::program::Program,
+        miden_core::program::StackInputs,
     };
 
     /// A host which does not implement `on_trace` should still execute trace events gracefully via

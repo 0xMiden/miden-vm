@@ -14,7 +14,7 @@ use {
     crate::BreakReason,
     crate::ContextId,
     crate::ExecutionError,
-    crate::KernelDescriptor,
+    miden_core::program::KernelDescriptor,
     crate::Stopper,
     miden_core::Word,
     crate::continuation_stack::Continuation,

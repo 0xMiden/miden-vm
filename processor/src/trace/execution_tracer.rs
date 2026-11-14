@@ -55,7 +55,7 @@ use {
     crate::ExecutionError,
     crate::FastProcessor,
     miden_core::Felt,
-    crate::MIN_STACK_DEPTH,
+    miden_core::program::MIN_STACK_DEPTH,
     miden_core::ONE,
     crate::RowIndex,
     miden_core::Word,
