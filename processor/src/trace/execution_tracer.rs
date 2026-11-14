@@ -83,7 +83,7 @@ use {
     crate::trace::chiplets::PTR_OFFSET_WORD,
     crate::tracer::OperationHelperRegisters,
     crate::tracer::Tracer,
-    crate::utils::Idx,
+    miden_core::utils::Idx,
 };
 
 // STATE SNAPSHOT

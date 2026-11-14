@@ -8,7 +8,7 @@ use {
     crate::mast::MastForest,
     crate::mast::MastForestRootMap,
     crate::mast::MastNodeExt,
-    miden_core::utils::Idx,
+    crate::utils::Idx,
 };
 use miden_project::Linkage;
 

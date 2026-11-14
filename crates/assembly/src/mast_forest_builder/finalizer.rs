@@ -22,7 +22,7 @@ use {
     crate::mast::MastNodeBuilder,
     crate::mast::MastNodeId,
     crate::mast::SplitNodeBuilder,
-    miden_core::utils::IndexVec,
+    crate::utils::IndexVec,
 };
 use {
     miden_mast_package::debug_info::DebugFunctionIdx,

@@ -1630,7 +1630,7 @@ mod tests {
         miden_core::mast::SplitNodeBuilder,
         miden_core::operations::Operation,
         miden_core::serde::Serializable,
-        miden_core::utils::IndexVec,
+        miden_utils_indexing::IndexVec,
     };
     use {
         miden_debug_types::ByteIndex,

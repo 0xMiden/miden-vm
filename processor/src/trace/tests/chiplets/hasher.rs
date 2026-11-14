@@ -61,7 +61,7 @@ use {
 use {
     miden_core::advice::AdviceInputs,
     crate::RowIndex,
-    crate::utils::ToElements,
+    miden_core::utils::ToElements,
 };
 
 // RESPONSE-SIDE DISPATCH

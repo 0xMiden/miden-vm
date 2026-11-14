@@ -1,5 +1,5 @@
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_utils_indexing::IndexVec;
+use miden_core::utils::IndexVec;
 
 use {
     miden_core::Felt,

@@ -35,7 +35,7 @@ use {
     miden_core::serde::DeserializationError,
     miden_core::serde::Serializable,
     miden_core::serde::SliceReader,
-    miden_core::utils::IndexVec,
+    miden_utils_indexing::IndexVec,
 };
 
 use {
