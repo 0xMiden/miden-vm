@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use core::mem;
 
-use p3_maybe_rayon::prelude::*;
-
 use super::{
     CONSTRUCTION_SUBTREE_BATCH_SIZE, IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, NUM_IN_MEMORY_NODES,
     ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, SmtStorageReader, StorageError, Subtree,
@@ -18,6 +16,7 @@ use crate::{
         },
         large::{LargeSmtResult, to_memory_index},
     },
+    parallel::*,
 };
 
 // CONSTRUCTION

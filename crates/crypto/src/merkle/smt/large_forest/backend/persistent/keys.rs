@@ -1,11 +1,10 @@
 //! This module contains the definition of the various key types necessary for querying the backing
 //! persistent DB.
 
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use crate::{
+    merkle::{NodeIndex, smt::LineageId},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-
-use crate::merkle::{NodeIndex, smt::LineageId};
 
 // LEAF KEY
 // ================================================================================================

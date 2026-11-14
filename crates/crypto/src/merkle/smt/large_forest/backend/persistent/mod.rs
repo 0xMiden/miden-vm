@@ -40,7 +40,6 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 use core::ffi::c_int;
 use std::{collections::HashMap, mem};
 
-use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
 use num::Integer;
 use rayon::prelude::*;
 use rocksdb as db;
@@ -77,6 +76,7 @@ use crate::{
             persistent_hash::ensure_hash_scheme,
         },
     },
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 // TYPE ALIASES

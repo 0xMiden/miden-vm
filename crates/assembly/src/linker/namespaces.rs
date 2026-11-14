@@ -5,14 +5,13 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{
+use super::{Linker, LinkerError, ModuleSource};
+use crate::{
     Path, PathBuf,
     ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     diagnostics::RelatedLabel,
 };
-
-use super::{Linker, LinkerError, ModuleSource};
 
 /// A graph of modules, concrete items, submodule declarations, and imports known to the linker.
 ///
@@ -1010,7 +1009,7 @@ fn item_path(linker: &Linker, item: GlobalItemIndex) -> Arc<Path> {
 fn source_file(
     source_manager: &dyn SourceManager,
     span: SourceSpan,
-) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
+) -> Option<Arc<crate::debuginfo::SourceFile>> {
     source_manager.get(span.source_id()).ok()
 }
 
@@ -1018,18 +1017,19 @@ fn source_file(
 mod tests {
     use alloc::{boxed::Box, sync::Arc};
 
-    use miden_assembly_syntax::{
-        Parse, Path,
-        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
-    };
+    use miden_assembly_syntax::Parse;
 
     use super::*;
+    use crate::{
+        Path,
+        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
+    };
 
     fn parse_module(
         source_manager: Arc<dyn SourceManager>,
         name: &str,
         source: &str,
-    ) -> Box<miden_assembly_syntax::ast::Module> {
+    ) -> Box<crate::ast::Module> {
         source_manager
             .load(SourceLanguage::Masm, name.into(), source.to_string())
             .parse(false, source_manager)

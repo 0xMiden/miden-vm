@@ -8,11 +8,12 @@ use core::{assert_matches, cell::Cell, str::FromStr};
 
 use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Linkage, Path,
+    Assembler, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
 };
 use miden_core::{
     ONE, Word,
+    advice::{AdviceInputs, AdviceMap},
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
@@ -23,8 +24,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
-    Span, Uri,
+    ByteIndex, DefaultSourceManager, Location, SourceContent, SourceFile, SourceLanguage,
+    SourceManager, SourceSpan, Span, Uri,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
@@ -38,9 +39,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
-    SyncHost,
-    advice::{AdviceMap, AdviceMutation},
+    BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor, SyncHost,
+    advice::AdviceMutation,
     event::EventError,
     operation::OperationError,
     processor::{StackInterface, SystemInterface},

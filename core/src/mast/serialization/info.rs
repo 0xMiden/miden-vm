@@ -2,7 +2,8 @@ use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 #[cfg(test)]
 use crate::mast::node::MastNodeExt;
 use crate::{
-    mast::{MastForestContributor, MastNode, MastNodeId, Word, node::MastNodeBuilder},
+    Word,
+    mast::{MastForestContributor, MastNode, MastNodeId, node::MastNodeBuilder},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

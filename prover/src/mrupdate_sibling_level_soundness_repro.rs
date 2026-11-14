@@ -22,13 +22,13 @@ use miden_air_definitions::vm::{
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
+    crypto::merkle::{MerklePath, MerkleStore},
     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder},
     operations::{Operation, opcodes},
-    program::{Program, StackOutputs},
+    program::{Program, StackInputs, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::merkle::{MerklePath, store::MerkleStore};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 

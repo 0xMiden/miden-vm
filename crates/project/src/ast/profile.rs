@@ -1,10 +1,11 @@
 use alloc::sync::Arc;
 
+use miden_assembly_syntax::debuginfo::{SourceId, Span};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::parsing::SetSourceId;
-use crate::{Metadata, SourceId, Span};
+use crate::Metadata;
 
 /// Represents configuration options for a specific build profile, e.g. `release`
 #[derive(Default, Debug, Clone)]

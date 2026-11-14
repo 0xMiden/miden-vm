@@ -4,10 +4,12 @@ use core::borrow::Borrow;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Spanned};
 
 use super::MetaExpr;
-use crate::ast::Ident;
+use crate::{
+    ast::Ident,
+    debuginfo::{SourceSpan, Spanned},
+};
 
 /// Represents the metadata of a key-value [crate::ast::Attribute], i.e. `@props(key = value)`
 #[derive(Debug, Clone)]

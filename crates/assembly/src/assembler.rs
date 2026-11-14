@@ -13,41 +13,39 @@ use alloc::{
 
 use miden_assembly_syntax::{
     ExportedTypeUse, MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
-    ast::{
-        self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
-        SymbolResolution, Visibility, types::FunctionType,
-    },
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     module::ItemInfo,
 };
 use miden_core::{
     WORD_SIZE, Word,
-    mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     program::KernelDescriptor,
-    serde::Serializable,
 };
-use miden_mast_package::{
-    ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
-    PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
-    debug_info::{DebugFunctionIdx, DebugSourceNodeId, PackageDebugInfo},
-};
-use miden_project::{Linkage, TargetType};
 
 use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
-    GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
-    ast::Path,
+    Linkage, Path, Procedure, ProcedureContext,
+    ast::{
+        self, AttributeSet, GlobalItemIndex, Ident, InvocationTarget, InvokeKind, ItemIndex,
+        ModuleIndex, ModuleKind, SymbolResolution, Visibility, types::FunctionType,
+    },
     basic_block_builder::{ActiveInlineCall, BasicBlockBuilder},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{
         Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
         SymbolResolver,
     },
+    mast::{MastNodeExt, MastNodeId},
     mast_forest_builder::{
         MastForestBuilder, MastNodeRef, MastNodeUse, SourceNodeRef, StaticLibrary,
     },
+    package::{
+        ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
+        PackageSubmodule, ProcedureExport, Section, SectionId, TargetType, TypeExport,
+        debug_info::{DebugFunctionIdx, DebugSourceNodeId, PackageDebugInfo},
+    },
+    serde::Serializable,
 };
 
 /// Maximum number of locals a single procedure may allocate.
@@ -1074,7 +1072,7 @@ impl Assembler {
     fn finish_library_product(
         self,
         name: PackageId,
-        mast_forest: miden_core::mast::MastForest,
+        mast_forest: crate::mast::MastForest,
         #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
@@ -1084,7 +1082,7 @@ impl Assembler {
         let package = Box::new(
             Package::create_with_modules(
                 name,
-                miden_mast_package::Version::new(0, 0, 0),
+                crate::package::Version::new(0, 0, 0),
                 kind,
                 mast,
                 exports.into_values(),
@@ -1127,7 +1125,7 @@ impl Assembler {
         self,
         name: PackageId,
         namespace: Arc<Path>,
-        mast_forest: miden_core::mast::MastForest,
+        mast_forest: crate::mast::MastForest,
         #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         entrypoint: MastNodeId,
         entrypoint_source_id: Option<DebugSourceNodeId>,
@@ -1139,7 +1137,7 @@ impl Assembler {
         let package = Box::new(
             Package::create(
                 name,
-                miden_mast_package::Version::new(0, 0, 0),
+                crate::package::Version::new(0, 0, 0),
                 TargetType::Executable,
                 mast,
                 vec![PackageExport::Procedure(

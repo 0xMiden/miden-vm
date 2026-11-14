@@ -14,8 +14,10 @@
 //! and both single-half controls were unaffected.
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{Felt, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_core::{
+    Felt, field::Field, operations::opcodes, program::StackInputs, utils::RowMajorMatrix,
+};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 

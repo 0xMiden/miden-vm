@@ -5,16 +5,16 @@ use alloc::{
 use core::borrow::BorrowMut;
 
 use miden_air_definitions::vm::{
-    CoreCols, TraceLenSummary,
+    CoreCols, TraceLenSummary, VmTrace,
     trace::{MainTrace, RowIndex},
 };
 use miden_core::{
     Felt,
-    program::{ExecutionClaim, StackOutputs},
+    deferred::DeferredRoot,
+    program::{ExecutionClaim, ProgramInfo, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction, PrecompileStatus, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::trace::VmTrace;
 use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 use miden_vm_stark::prover::prove;
 
@@ -33,9 +33,9 @@ pub struct ReproTrace {
     chiplets: RowMajorMatrix<Felt>,
     eidos_compression: RowMajorMatrix<Felt>,
     and8: RowMajorMatrix<Felt>,
-    program_info: miden_processor::ProgramInfo,
-    init_stack: miden_processor::StackInputs,
-    precompile_root: miden_core::deferred::DeferredRoot,
+    program_info: ProgramInfo,
+    init_stack: StackInputs,
+    precompile_root: DeferredRoot,
     outputs: StackOutputs,
     last_program_row: RowIndex,
     summary: TraceLenSummary,

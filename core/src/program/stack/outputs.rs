@@ -91,7 +91,7 @@ impl StackOutputs {
     where
         I: IntoIterator<Item = u64>,
     {
-        use miden_crypto::field::QuotientMap;
+        use crate::field::QuotientMap;
 
         // Validate stack elements
         let values = iter

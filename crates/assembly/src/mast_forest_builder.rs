@@ -4,35 +4,33 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    ast::DebugInlineCallInfo,
-    debuginfo::{FileLineCol, SourceManager},
-};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
     chiplets::hasher,
+    operations::{AssemblyOp, Operation},
+};
+
+use super::{LinkerError, Procedure};
+use crate::{
+    ast::{DebugInlineCallInfo, GlobalItemIndex},
+    debuginfo::{FileLineCol, SourceManager},
+    diagnostics::{IntoDiagnostic, Report, WrapErr, report},
+    linker::LinkLibrary,
     mast::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, JoinNode, LoopNode, MastForest,
         MastForestRootMap, MastNode, MastNodeExt, OpBatch, SplitNode, error_code_from_msg,
     },
-    operations::{AssemblyOp, Operation},
+    package::{
+        ManifestValidationError,
+        debug_info::{
+            DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugLocIdx,
+            DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar, FunctionInfo,
+            PackageDebugInfo,
+        },
+    },
     serde::Serializable,
     utils::{IndexVec, bytes_to_packed_u32_elements},
-};
-use miden_mast_package::{
-    ManifestValidationError,
-    debug_info::{
-        DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugLocIdx, DebugSourceAsmOp,
-        DebugSourceInlineCall, DebugSourceVar, FunctionInfo, PackageDebugInfo,
-    },
-};
-
-use super::{GlobalItemIndex, LinkerError, Procedure};
-use crate::{
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
-    linker::LinkLibrary,
-    report,
 };
 
 mod finalizer;
@@ -586,11 +584,7 @@ impl MastForestBuilder {
     }
 
     /// Retains the public linkage identity of a re-export without inventing a definition.
-    pub(crate) fn record_exported_function(
-        &mut self,
-        gid: GlobalItemIndex,
-        path: &miden_assembly_syntax::Path,
-    ) {
+    pub(crate) fn record_exported_function(&mut self, gid: GlobalItemIndex, path: &crate::Path) {
         let Some(index) = self.procedure_function_index(gid) else {
             return;
         };
@@ -672,8 +666,7 @@ impl MastForestBuilder {
         source_ref: SourceNodeRef,
         active_inline_calls: &[DebugSourceInlineCall],
         cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
-    ) -> Result<miden_mast_package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report>
-    {
+    ) -> Result<crate::package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report> {
         let mut pending = self.debug_info[source_ref]
             .children
             .iter()
@@ -734,7 +727,7 @@ impl MastForestBuilder {
         source_ref: SourceNodeRef,
         active_inline_calls: &[DebugSourceInlineCall],
         cloned: &BTreeMap<SourceNodeRef, SourceNodeRef>,
-    ) -> miden_mast_package::debug_info::SourceNode<MastNodeRef, SourceNodeRef> {
+    ) -> crate::package::debug_info::SourceNode<MastNodeRef, SourceNodeRef> {
         let mut source_node = self.debug_info[source_ref].clone();
         let is_external_boundary = self.external_boundary_source_refs.contains(&source_ref);
         let child_refs = source_node
@@ -894,7 +887,7 @@ impl MastForestBuilder {
     ) -> Result<SourceNodeRef, Report> {
         let source_ref = self
             .debug_info
-            .add_node(miden_mast_package::debug_info::SourceNode {
+            .add_node(crate::package::debug_info::SourceNode {
                 exec_node: exec_ref,
                 children: child_refs,
                 op_start: op_start.try_into().expect("invalid op start"),
@@ -1186,7 +1179,7 @@ impl MastForestBuilder {
         procedure: &Procedure,
         source_manager: &dyn SourceManager,
     ) -> Result<(), Report> {
-        use miden_assembly_syntax::ast::types::Type;
+        use crate::ast::types::Type;
 
         let source_name = procedure.source_name_fully_qualified(source_manager)?;
         if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
@@ -1765,28 +1758,27 @@ mod tests {
         sync::Arc,
     };
 
-    use miden_assembly_syntax::{
-        ast::{DebugVarInfo, DebugVarLocation},
-        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
-    };
-    use miden_core::{
-        mast::{MastNodeBuilder, MastNodeId},
-        operations::Operation,
-        serde::Serializable,
-        utils::Idx,
-    };
-    use miden_mast_package::{
-        Package, PackageExport, PackageId, PathBuf, ProcedureExport, Section, SectionId,
-        TargetType, Version,
-        debug_info::{
-            DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
-            DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
-            PackageDebugInfo, PackageDebugInfoBuilder,
-        },
-    };
+    use miden_core::operations::Operation;
     use proptest::prelude::*;
 
     use super::*;
+    use crate::{
+        PathBuf,
+        ast::{DebugVarInfo, DebugVarLocation},
+        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+        mast::{MastNodeBuilder, MastNodeId},
+        package::{
+            Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType,
+            Version,
+            debug_info::{
+                DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
+                DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
+                PackageDebugInfo, PackageDebugInfoBuilder,
+            },
+        },
+        serde::Serializable,
+        utils::Idx,
+    };
 
     #[test]
     fn inline_range_remapping_batches_all_endpoints() {

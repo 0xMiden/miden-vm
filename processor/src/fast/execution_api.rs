@@ -1,6 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
+#[cfg(feature = "std")]
+use miden_core::deferred::PrecompileWitness;
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeId},
@@ -12,20 +14,16 @@ use miden_mast_package::debug_info::{
 use tracing::instrument;
 
 use super::{
-    FastProcessor, NoopTracer,
+    NoopTracer,
     external::maybe_use_caller_error_context,
     step::{BreakReason, NeverStopper, ResumeContext, StepStopper},
 };
-#[cfg(feature = "std")]
-use crate::PrecompileWitness;
 use crate::{
-    AdviceProvider, ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest,
-    Stopper, SyncHost,
+    AdviceProvider, Continuation, ExecutionError, ExecutionOutput, ExecutionWitness, FastProcessor,
+    Host, LoadedMastForest, PackageSourceDebugContext, SourceInlineCallContext, Stopper, SyncHost,
     advice::AdviceError,
-    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    errors::{
-        MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
-    },
+    continuation_stack::ContinuationStack,
+    errors::{MapExecErr, MapExecErrNoCtx, malformed_mast_forest_with_context},
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
@@ -154,8 +152,8 @@ impl FastProcessor {
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
     /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional
-    /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
-    /// its authenticated root.
+    /// precompile witness is returned separately because [`miden_air_definitions::vm::VmTrace`]
+    /// retains only its authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
@@ -163,7 +161,8 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
         budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
-    ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
+    ) -> Result<(miden_air_definitions::vm::VmTrace, Option<PrecompileWitness>), ExecutionError>
+    {
         use crate::trace::{
             MAX_TRACE_LEN, build_hasher_chiplet, build_trace, build_trace_with_prebuilt_hasher,
         };
@@ -545,7 +544,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using an async host.
-    pub async fn execute_with_tracer<T>(
+    async fn execute_with_tracer<T>(
         mut self,
         program: &Program,
         host: &mut impl Host,
@@ -614,7 +613,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using a sync host.
-    pub fn execute_with_tracer_sync<T>(
+    fn execute_with_tracer_sync<T>(
         mut self,
         program: &Program,
         host: &mut impl SyncHost,
@@ -1314,7 +1313,7 @@ impl FastProcessor {
             None => host.get_mast_forest(&node_digest).ok_or_else(|| {
                 match (package_debug_info, source_node_id) {
                     (Some(debug_info), Some(source_node_id)) => {
-                        crate::errors::procedure_not_found_with_package_source_context(
+                        crate::procedure_not_found_with_package_source_context(
                             node_digest,
                             PackageSourceDebugContext::new(debug_info, source_node_id),
                             host,
@@ -1376,7 +1375,7 @@ impl FastProcessor {
                 } else {
                     return Err(match (package_debug_info, source_node_id) {
                         (Some(debug_info), Some(source_node_id)) => {
-                            crate::errors::procedure_not_found_with_package_source_context(
+                            crate::procedure_not_found_with_package_source_context(
                                 node_digest,
                                 PackageSourceDebugContext::new(debug_info, source_node_id),
                                 host,
@@ -1674,7 +1673,7 @@ impl FastProcessor {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use super::FastProcessor;
+    use crate::FastProcessor;
 
     #[test]
     fn sole_rayon_worker_requires_buffered_trace_building() {

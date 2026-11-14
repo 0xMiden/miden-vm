@@ -1,15 +1,12 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
+use miden_core::mast::{ExecutableMastForest, MastNodeExt, MastNodeId};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BreakReason,
-    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    execution::InternalBreakReason,
-    mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
-    operation::OperationError,
-    option_map_break_reason,
+    BreakReason, Continuation, SourceInlineCallContext, continuation_stack::ContinuationStack,
+    execution::InternalBreakReason, operation::OperationError, option_map_break_reason,
     tracer::Tracer,
 };
 

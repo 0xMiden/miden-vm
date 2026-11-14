@@ -1,5 +1,9 @@
 use alloc::collections::BTreeMap;
 
+use miden_assembly_syntax::{
+    debuginfo::{SourceId, Span},
+    diagnostics::RelatedLabel,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +11,7 @@ use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
-use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, Uri};
+use crate::{Map, MetadataSet, Uri, semver::Version as SemVer};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -58,13 +62,15 @@ mod semver_serde {
     use alloc::string::{String, ToString};
     use core::{fmt, marker::PhantomData};
 
+    use miden_assembly_syntax::debuginfo::Span;
     use serde::{
         Serialize,
         de::{self, MapAccess, Visitor},
         ser::SerializeMap,
     };
 
-    use super::{MaybeInherit, SemVer, Span};
+    use super::MaybeInherit;
+    use crate::semver::Version as SemVer;
 
     pub fn serialize<S>(
         value: &Option<Span<MaybeInherit<SemVer>>>,
@@ -106,9 +112,7 @@ mod semver_serde {
                 value
                     .parse()
                     .map(|version| Some(Span::unknown(MaybeInherit::Value(version))))
-                    .map_err(|error: miden_assembly_syntax::VersionError| {
-                        E::custom(error.to_string())
-                    })
+                    .map_err(|error: crate::semver::Error| E::custom(error.to_string()))
             }
 
             fn visit_string<E>(self, value: String) -> Result<Self::Value, E>

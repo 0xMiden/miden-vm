@@ -6,13 +6,14 @@ use core::borrow::Borrow;
 use once_cell::sync::Lazy;
 
 use super::{
-    Eidos, EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree,
-    NodeIndex, PartialMerkleTree, RootPath, Word,
+    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree, NodeIndex,
+    PartialMerkleTree, RootPath,
     mmr::Mmr,
     smt::{SimpleSmt, Smt},
 };
 use crate::{
-    Map,
+    Map, Word,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -704,7 +705,8 @@ mod arbitrary {
 
     use proptest::prelude::*;
 
-    use super::{MerkleStore, StoreNode, Word};
+    use super::{MerkleStore, StoreNode};
+    use crate::Word;
 
     impl Arbitrary for MerkleStore {
         type Parameters = ();

@@ -16,6 +16,7 @@ use miden_stark::{
     config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs as LmcsTrait,
     proof::StarkProofData,
+    security::ProofSecurityParameters,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
@@ -23,7 +24,7 @@ use serde_wincode::SerdeCompat;
 use crate::setup::{
     commitments,
     config::{PRECOMPILE_RELATION_DIGEST, eidos_config},
-    security::{self, ProofSecurityParameters},
+    security,
 };
 
 /// Verifies a precompile STARK against an explicit deferred root and returns its authenticated

@@ -5,24 +5,22 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
-    debuginfo::{Location, Span},
-    diagnostics::Report,
-};
 use miden_core::{
     Felt,
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
-};
 
 use crate::{
     ProcedureContext,
     assembler::BodyWrapper,
+    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
+    debuginfo::{Location, Span},
+    diagnostics::Report,
     mast_forest_builder::{MastForestBuilder, MastNodeUse},
+    package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+    },
 };
 
 // PENDING ASM OP
@@ -293,7 +291,7 @@ impl BasicBlockBuilder<'_> {
     pub fn push_debug_inline_call(
         &mut self,
         inline_call: &DebugInlineCallInfo,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
+        source_manager: &dyn crate::debuginfo::SourceManager,
     ) {
         let Some(call_site_span) =
             source_manager.file_line_col_to_span(inline_call.call_site().clone())

@@ -4,11 +4,11 @@ use core::fmt;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use crate::{
     Felt, Path,
     ast::{ConstantValue, Ident},
+    debuginfo::{SourceSpan, Span, Spanned},
     parser::{IntValue, WordValue},
 };
 

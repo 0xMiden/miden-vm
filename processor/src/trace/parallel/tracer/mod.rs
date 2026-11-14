@@ -1,7 +1,11 @@
 use alloc::sync::Arc;
 
 use miden_air_definitions::vm::{StackCols, SystemCols};
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    mast::{ExecutableMastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
+    program::MIN_STACK_DEPTH,
+};
 
 use super::{
     super::{
@@ -15,10 +19,9 @@ use super::{
     processor::ReplayProcessor,
 };
 use crate::{
-    ExecutionError, Felt, ONE, Word, ZERO,
-    continuation_stack::{Continuation, ContinuationStack},
+    Continuation, ExecutionError,
+    continuation_stack::ContinuationStack,
     errors::MapExecErrNoCtx,
-    mast::{ExecutableMastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
     trace::trace_state::{EndBlockFlags, EndBlockStackEntryKind},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -442,7 +445,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             return Ok(());
         }
 
-        use Continuation::*;
+        use crate::Continuation::*;
 
         let result = (|| -> Result<(), ExecutionError> {
             let continuation = self.continuation.as_ref().ok_or(ExecutionError::Internal(

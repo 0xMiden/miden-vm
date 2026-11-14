@@ -13,7 +13,6 @@ use alloc::{
 };
 
 use miden_core::{Word, chiplets::hasher};
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
@@ -22,7 +21,11 @@ pub use self::{
     errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
     passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
-use crate::{ast::*, parser::WordValue};
+use crate::{
+    ast::*,
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    parser::WordValue,
+};
 
 /// Constructs and validates a [Module], given the forms constituting the module body.
 ///

@@ -82,12 +82,10 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// Returns an error if the name is empty or is in the reserved namespace.
 pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
     if event.as_str().is_empty() {
-        return Err(crate::errors::HostError::EmptyEventName.into());
+        return Err(crate::HostError::EmptyEventName.into());
     }
     if event.is_reserved() {
-        return Err(
-            crate::errors::HostError::ReservedEventNamespace { event: event.clone() }.into()
-        );
+        return Err(crate::HostError::ReservedEventNamespace { event: event.clone() }.into());
     }
     Ok(())
 }
@@ -152,7 +150,7 @@ impl EventHandlerRegistry {
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => {
-                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+                return Err(crate::HostError::DuplicateEventHandler { event }.into());
             },
         };
         Ok(())
@@ -289,7 +287,7 @@ impl TraceHandlerRegistry {
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => {
-                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+                return Err(crate::HostError::DuplicateEventHandler { event }.into());
             },
         };
         Ok(())
@@ -355,7 +353,10 @@ impl Debug for TraceHandlerRegistry {
 mod tests {
     use alloc::{sync::Arc, vec::Vec};
 
-    use miden_core::events::{EventId, EventName, SystemEvent};
+    use miden_core::{
+        events::{EventId, EventName, SystemEvent},
+        program::StackInputs,
+    };
 
     use super::{
         EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
@@ -363,7 +364,7 @@ mod tests {
     };
     use crate::{
         BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, ProcessorState,
-        StackInputs, advice::AdviceMutation,
+        advice::AdviceMutation,
     };
 
     #[derive(Debug, thiserror::Error)]

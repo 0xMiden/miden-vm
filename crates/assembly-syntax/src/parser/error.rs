@@ -4,8 +4,10 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Range};
 
-use miden_debug_types::SourceSpan;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use crate::{
+    debuginfo::SourceSpan,
+    diagnostics::{Diagnostic, miette},
+};
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -370,11 +372,11 @@ pub enum ParsingError {
     UndefinedSubmodule {
         name: crate::ast::Ident,
         basename: alloc::boxed::Box<str>,
-        directory: miden_debug_types::Uri,
+        directory: crate::debuginfo::Uri,
         #[label]
         span: SourceSpan,
         #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+        source_file: Option<Arc<crate::debuginfo::SourceFile>>,
     },
     #[error(
         "invalid submodule declaration '{name}': submodules must not have the same name as their parent"
@@ -382,25 +384,25 @@ pub enum ParsingError {
     #[diagnostic(help("occurred while parsing {parent_module_uri}"))]
     SelfReferentialSubmodule {
         name: crate::ast::Ident,
-        parent_module_uri: miden_debug_types::Uri,
+        parent_module_uri: crate::debuginfo::Uri,
         #[label(
             "module source resolution rules require this declaration to resolve to the current source file"
         )]
         span: SourceSpan,
         #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+        source_file: Option<Arc<crate::debuginfo::SourceFile>>,
     },
     #[error(
         "conflicting submodule paths detected: '{name}' can be parsed from either '{first}' and '{second}', but not both"
     )]
     AmbiguousSubmoduleLocation {
         name: crate::ast::Ident,
-        first: miden_debug_types::Uri,
-        second: miden_debug_types::Uri,
+        first: crate::debuginfo::Uri,
+        second: crate::debuginfo::Uri,
         #[label]
         span: SourceSpan,
         #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+        source_file: Option<Arc<crate::debuginfo::SourceFile>>,
     },
     #[error(
         "invalid submodule declaration '{name}': module source '{module_uri}' is already reachable through another submodule declaration"
@@ -408,11 +410,11 @@ pub enum ParsingError {
     #[diagnostic(help("each module source file can only be owned by one module in a module tree"))]
     DuplicateSubmoduleSource {
         name: crate::ast::Ident,
-        module_uri: miden_debug_types::Uri,
+        module_uri: crate::debuginfo::Uri,
         #[label("this declaration resolves to an already visited module source")]
         span: SourceSpan,
         #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+        source_file: Option<Arc<crate::debuginfo::SourceFile>>,
     },
     #[error("conflicting attributes for procedure definition")]
     #[diagnostic()]

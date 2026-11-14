@@ -1,15 +1,16 @@
 use core::ops::ControlFlow;
 
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    mast::{CallNode, ExecutableMastForest, MastNodeId},
+};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
-    continuation_stack::Continuation,
+    BaseHost, BreakReason, ContextId, Continuation, MapExecErr, Stopper,
     execution::{
         ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
         get_next_ctx_id,
     },
-    mast::{CallNode, ExecutableMastForest, MastNodeId},
     operation::OperationError,
     option_map_break_reason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},

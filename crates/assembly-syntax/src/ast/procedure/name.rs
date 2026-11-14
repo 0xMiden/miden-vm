@@ -9,12 +9,11 @@ use core::{
     str::FromStr,
 };
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
-
 use crate::{
     Path, PathBuf,
     ast::{CaseKindError, Ident, IdentError},
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::{IntoDiagnostic, Report, miette},
 };
 
 // QUALIFIED PROCEDURE NAME

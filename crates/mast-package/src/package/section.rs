@@ -7,9 +7,9 @@ use alloc::{
 };
 use core::{fmt, str::FromStr};
 
-use miden_assembly_syntax::DisplayHex;
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use miden_core::{
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::DisplayHex,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;

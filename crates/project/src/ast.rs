@@ -22,6 +22,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_assembly_syntax::{
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, Label, RelatedError, Report, miette},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +36,6 @@ pub use self::{
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
 };
-use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
 
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]

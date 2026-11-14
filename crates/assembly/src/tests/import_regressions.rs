@@ -77,9 +77,10 @@ fn asm_import_direct_digest_invoke_assembles_without_source_import() {
 fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
     use std::sync::Arc;
 
-    use crate::DefaultSourceManager;
+    use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let program = r#"
         begin
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -98,9 +99,10 @@ fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
 fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
     use std::sync::Arc;
 
-    use crate::DefaultSourceManager;
+    use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let program = r#"
         proc helper
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -120,9 +122,10 @@ fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
 fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
     use std::sync::Arc;
 
-    use crate::DefaultSourceManager;
+    use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 
@@ -143,9 +146,10 @@ fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_wa
 {
     use std::sync::Arc;
 
-    use crate::DefaultSourceManager;
+    use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 
@@ -186,9 +190,10 @@ fn kernel_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are
 fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
     use std::sync::Arc;
 
-    use crate::DefaultSourceManager;
+    use crate::debuginfo::DefaultSourceManager;
 
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn crate::debuginfo::SourceManager> =
+        Arc::new(DefaultSourceManager::default());
     let module = r#"
         namespace m
 

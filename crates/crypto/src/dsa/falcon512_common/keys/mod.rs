@@ -2,10 +2,6 @@ use super::{
     Signature,
     math::{FalconFelt, Polynomial},
 };
-use crate::{
-    Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-};
 
 mod public_key;
 pub use public_key::PublicKey;

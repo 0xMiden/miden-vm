@@ -11,7 +11,7 @@ use super::{
     op_fri_ext2fold4, reorder_bitrev4,
 };
 use crate::{
-    fast::FastProcessor,
+    FastProcessor,
     processor::{Processor, SystemInterface},
 };
 

@@ -5,9 +5,10 @@ use miden_air_definitions::vm::{
     BitwiseOpCols,
     trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
 };
+use miden_core::{Felt, ZERO};
 
 use super::{assert_u32, count_and8};
-use crate::{Felt, ZERO, operation::OperationError, trace::ChipletTraceFragment};
+use crate::{operation::OperationError, trace::ChipletTraceFragment};
 
 #[cfg(test)]
 mod tests;
@@ -73,7 +74,7 @@ struct BitwiseOp {
 /// - `a*` and `b*` are little-endian input bytes.
 /// - `c*` are bytewise `a & b` witnesses.
 #[derive(Debug)]
-pub struct Bitwise {
+pub(crate) struct Bitwise {
     entries: Vec<BitwiseOp>,
 }
 

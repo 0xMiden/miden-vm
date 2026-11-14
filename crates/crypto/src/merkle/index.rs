@@ -1,7 +1,10 @@
 use core::fmt::Display;
 
-use super::{Felt, MerkleError, Word};
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use super::MerkleError;
+use crate::{
+    Felt, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // NODE INDEX
 // ================================================================================================

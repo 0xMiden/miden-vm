@@ -1,7 +1,8 @@
 use alloc::format;
 
-use miden_assembly_syntax::diagnostics::Report;
 use miden_project::{Package as ProjectPackage, Target};
+
+use crate::diagnostics::Report;
 
 pub enum ProjectTargetSelector<'a> {
     Library,

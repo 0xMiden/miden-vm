@@ -1,12 +1,22 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_air_definitions::vm::trace::chiplets::hasher::{
-    CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::hasher::{
+        CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
+    },
 };
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
+    EMPTY_WORD, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
+    mast::{
+        BasicBlockNode, JoinNode, LoopNode, MastForest, MastForestId, MastNode, MastNodeExt,
+        MastNodeId, SparseMastForest, SparseMastForestBuilder, SplitNode, VisitKind,
+    },
     operations::Operation,
+    program::MIN_STACK_DEPTH,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::Idx,
 };
 
 use super::{
@@ -22,18 +32,11 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    AceError, ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE,
-    RowIndex, Word, ZERO,
-    continuation_stack::{Continuation, ContinuationStack},
-    crypto::merkle::MerklePath,
-    mast::{
-        BasicBlockNode, JoinNode, LoopNode, MastForest, MastForestId, MastNode, MastNodeExt,
-        MastNodeId, SparseMastForest, SparseMastForestBuilder, SplitNode, VisitKind,
-    },
+    AceError, ContextId, Continuation, ExecutionError, FastProcessor,
+    continuation_stack::ContinuationStack,
     processor::{Processor, StackInterface, SystemInterface},
     trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     tracer::{OperationHelperRegisters, Tracer},
-    utils::Idx,
 };
 
 // STATE SNAPSHOT
@@ -1306,8 +1309,9 @@ impl Default for HasherChipletShim {
 
 #[cfg(test)]
 mod serialization_tests {
+    use miden_core::mast::BasicBlockNodeBuilder;
+
     use super::*;
-    use crate::mast::BasicBlockNodeBuilder;
 
     fn empty_trace_generation_context(fragment_size: usize, max_stack_depth: usize) -> TraceReplay {
         TraceReplay {

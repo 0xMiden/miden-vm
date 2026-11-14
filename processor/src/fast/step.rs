@@ -7,8 +7,8 @@ use miden_core::{mast::MastForest, program::KernelDescriptor};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
+    Continuation, ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
+    continuation_stack::ContinuationStack,
 };
 
 // RESUME CONTEXT
@@ -155,7 +155,7 @@ fn check_if_continuation_stack_too_large<F>(
 
 /// The reason why execution was interrupted.
 #[derive(Debug)]
-pub enum BreakReason<F> {
+pub(crate) enum BreakReason<F> {
     /// An execution error occurred
     Err(ExecutionError),
     /// Execution was stopped by a [`Stopper`]. Provides the continuation to add to the continuation

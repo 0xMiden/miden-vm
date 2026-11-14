@@ -5,14 +5,15 @@ mod value;
 use alloc::string::String;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-
 pub use self::{
     eval::{ConstEnvironment, ConstEvalError},
     expr::{ConstantExpr, ConstantOp, HashKind},
     value::ConstantValue,
 };
-use crate::ast::{DocString, Ident, Visibility};
+use crate::{
+    ast::{DocString, Ident, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
+};
 
 // CONSTANT
 // ================================================================================================

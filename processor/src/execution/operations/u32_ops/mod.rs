@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
+use miden_core::{Felt, ZERO};
 use paste::paste;
 
 use crate::{
-    ExecutionError, Felt, ZERO,
+    ExecutionError,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},

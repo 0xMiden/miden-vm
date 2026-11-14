@@ -1,17 +1,18 @@
 use core::ops::ControlFlow;
 
+use miden_core::{
+    mast::{BasicBlockNode, ExecutableMastForest, MastNodeId},
+    operations::Operation,
+};
 use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
-    BaseHost, BreakReason, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
-    errors::PackageSourceDebugContext,
+    BaseHost, BreakReason, Continuation, PackageSourceDebugContext, Stopper,
+    continuation_stack::ContinuationStack,
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
     },
-    mast::{BasicBlockNode, ExecutableMastForest, MastNodeId},
-    operation::Operation,
     option_map_break_reason,
     processor::Processor,
     tracer::Tracer,

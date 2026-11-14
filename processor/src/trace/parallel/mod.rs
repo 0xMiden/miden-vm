@@ -3,7 +3,8 @@ use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air_definitions::vm::{
-    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
+    AIRS, ChipletsLengths, CoreCols, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols,
+    TraceLenSummary, VmTrace,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
         SYS_TRACE_WIDTH,
@@ -12,7 +13,7 @@ use miden_air_definitions::vm::{
     },
 };
 use miden_core::{
-    ONE, Word, ZERO,
+    Felt, ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     mast::{MastForestId, SparseMastForest},
     operations::opcodes,
@@ -33,11 +34,10 @@ use super::{
     },
 };
 use crate::{
-    ContextId, ExecutionError,
-    continuation_stack::{Continuation, ContinuationStack},
+    ContextId, Continuation, ExecutionError, VmWitness,
+    continuation_stack::ContinuationStack,
     errors::MapExecErrNoCtx,
     trace::{
-        ChipletsLengths, TraceLenSummary, VmTrace, VmWitness,
         chiplets::{Ace, AeadStream, Bitwise, Hasher, KernelRom, Memory},
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,

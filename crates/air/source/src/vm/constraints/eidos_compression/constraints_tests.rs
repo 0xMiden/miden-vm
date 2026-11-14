@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
 
-use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
+};
 use miden_stark::{
     air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
     lookup::{ConstraintLookupBuilder, LookupAir},
 };
-use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     constraints::{

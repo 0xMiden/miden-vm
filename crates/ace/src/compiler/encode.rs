@@ -2,7 +2,7 @@
 
 use alloc::{format, string::ToString, vec::Vec};
 
-use miden_crypto::{Felt, field::ExtensionField};
+use miden_core::{Felt, field::ExtensionField};
 
 use crate::{
     AceError,

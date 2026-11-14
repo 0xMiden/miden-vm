@@ -33,7 +33,7 @@ fn controller_len(controller_rows: usize) -> usize {
 #[cfg(feature = "testing")]
 use miden_core::chiplets::eidos_compression;
 use miden_core::{
-    ONE, ZERO,
+    Felt, ONE, Word as Digest, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     field::PrimeCharacteristicRing,
@@ -41,9 +41,8 @@ use miden_core::{
 };
 
 use super::{
-    BLOCK_LEN, ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, MerklePath, Selectors, absorb_into_state, get_digest, init_state,
-    init_state_from_words,
+    BLOCK_LEN, ChipletTraceFragment, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
+    MR_UPDATE_OLD, Selectors, absorb_into_state, get_digest, init_state, init_state_from_words,
 };
 
 // HASH AND COMPRESSION MODE TESTS
@@ -120,7 +119,7 @@ fn hasher_build_merkle_root_depth_1() {
     let path0 = tree.get_path(NodeIndex::new(1, 0).unwrap()).unwrap();
     let (_, root) = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
-    assert_eq!(root, compute_path_root(leaves[0], &path0, 0));
+    assert_eq!(root, tree.root());
 
     let trace = build_trace(hasher);
 
@@ -151,7 +150,7 @@ fn hasher_build_merkle_root_depth_3() {
     let path = tree.get_path(NodeIndex::new(3, 5).unwrap()).unwrap();
     let (_, root) = hasher.build_merkle_root(leaves[5], &path, Felt::from_u8(5));
 
-    assert_eq!(root, compute_path_root(leaves[5], &path, 5));
+    assert_eq!(root, tree.root());
 
     let trace = build_trace(hasher);
 
@@ -173,14 +172,7 @@ fn hasher_update_merkle_root() {
     let path = tree.get_path(NodeIndex::new(2, index).unwrap()).unwrap();
     let new_leaf: Digest = [Felt::from_u8(100), ZERO, ZERO, ZERO].into();
 
-    let update = hasher.update_merkle_root(
-        leaves[index as usize],
-        new_leaf,
-        &path,
-        Felt::new_unchecked(index),
-    );
-
-    assert_eq!(update.get_old_root(), compute_path_root(leaves[index as usize], &path, index));
+    hasher.update_merkle_root(leaves[index as usize], new_leaf, &path, Felt::new_unchecked(index));
 
     let trace = build_trace(hasher);
 
@@ -196,6 +188,12 @@ fn hasher_update_merkle_root() {
     // Same index, same direction bits, levels restart at zero
     check_merkle_controller_row(&trace, 2, MR_UPDATE_NEW, 1, 0, true, false, ONE, ONE);
     check_merkle_controller_row(&trace, 3, MR_UPDATE_NEW, 0, 1, false, true, ONE, ZERO);
+
+    assert_eq!(merkle_root_at(&trace, path.len() - 1), tree.root());
+    assert_eq!(
+        merkle_root_at(&trace, 2 * path.len() - 1),
+        path.compute_root(index, new_leaf).unwrap(),
+    );
 
     for row in 4..controller_len(4) {
         assert_eq!(trace[0][row], PADDING[0], "padding s0 at row {row}");
@@ -304,10 +302,7 @@ fn hash_memoization_control_blocks() {
     let h2: Digest = rand::random::<[Felt; 4]>().into();
     let domain = Felt::from_u8(7); // arbitrary domain
 
-    // Compute the expected hash
-    let state = super::init_state_from_words_with_domain(&h1, &h2, domain);
-    let compressed = compress_state(state);
-    let expected_hash: Digest = get_digest(&compressed);
+    let expected_hash = hasher::merge_in_mast_domain(&[h1, h2], domain);
 
     let mut hasher = Hasher::default();
 
@@ -453,10 +448,7 @@ fn hash_memoization_basic_blocks_check() {
     assert_eq!(loop_digest, loop_body_hash);
 
     // Hash Join2 = hash(BB1, Loop)
-    let join2_state =
-        super::init_state_from_words_with_domain(&bb1_digest, &loop_digest, Felt::from_u8(7));
-    let join2_compressed = compress_state(join2_state);
-    let join2_hash = get_digest(&join2_compressed);
+    let join2_hash = hasher::merge_in_mast_domain(&[bb1_digest, loop_digest], Felt::from_u8(7));
     let (_join2_addr, join2_digest) =
         hasher.hash_control_block(bb1_digest, loop_digest, Felt::from_u8(7), join2_hash);
     assert_eq!(join2_digest, join2_hash);
@@ -467,10 +459,7 @@ fn hash_memoization_basic_blocks_check() {
     assert_ne!(bb1_addr, bb2_addr, "memoized BB2 should have a different address");
 
     // Hash Join1 = hash(Join2, BB2)
-    let join1_state =
-        super::init_state_from_words_with_domain(&join2_digest, &bb2_digest, Felt::from_u8(7));
-    let join1_compressed = compress_state(join1_state);
-    let join1_hash = get_digest(&join1_compressed);
+    let join1_hash = hasher::merge_in_mast_domain(&[join2_digest, bb2_digest], Felt::from_u8(7));
     let (_join1_addr, join1_digest) =
         hasher.hash_control_block(join2_digest, bb2_digest, Felt::from_u8(7), join1_hash);
     assert_eq!(join1_digest, join1_hash);
@@ -537,7 +526,8 @@ fn hash_memoization_basic_blocks_check() {
 
 /// Builds a hasher test view with controller rows followed by standalone compression blocks.
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
-    let (controller_len, compression_len) = hasher.region_lengths();
+    let controller_len = hasher.trace_len();
+    let compression_len = hasher.eidos_compression_trace_len();
     let trace_len = controller_len + compression_len;
     let mut band = Felt::zero_vec(TEST_TRACE_WIDTH * trace_len);
     let mut controller_trace = Felt::zero_vec(TRACE_WIDTH * controller_len);
@@ -631,6 +621,11 @@ fn check_controller_row(
         if is_merkle_selector(selectors) { ONE } else { ZERO },
         "controller discriminator at row {row}"
     );
+}
+
+/// Returns the root digest emitted by one Merkle controller row.
+fn merkle_root_at(trace: &[Vec<Felt>], row: usize) -> Digest {
+    Digest::new(core::array::from_fn(|i| trace[STATE_COL_RANGE.start + BLOCK_LEN + i][row]))
 }
 
 /// Checks one Merkle controller row.
@@ -761,20 +756,6 @@ fn random_state_with_packed_cv() -> HasherState {
         *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
     }
     state
-}
-
-fn compute_path_root(value: Digest, path: &MerklePath, mut index: u64) -> Digest {
-    let mut root = value;
-    for &sibling in path.iter() {
-        let state = match index & 1 {
-            0 => init_state_from_words(&root, &sibling),
-            1 => init_state_from_words(&sibling, &root),
-            _ => unreachable!(),
-        };
-        root = get_digest(&compress_state(state));
-        index >>= 1;
-    }
-    root
 }
 
 fn init_leaves(values: &[u64]) -> Vec<Digest> {

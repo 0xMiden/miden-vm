@@ -21,8 +21,9 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    Path, Report,
+    Path,
     ast::{self, QualifiedProcedureName},
+    diagnostics::Report,
     module::ModuleDescriptor,
 };
 #[cfg(feature = "std")]
@@ -1574,7 +1575,7 @@ mod tests {
     use core::{assert_matches, str::FromStr};
 
     use miden_assembly_syntax::ast::{
-        DebugVarLocation, Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
+        DebugVarLocation, Path as AstPath, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
         Felt, Word,
@@ -1585,13 +1586,13 @@ mod tests {
         },
         operations::Operation,
         serde::Serializable,
-        utils::IndexVec,
     };
     use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Uri};
+    use miden_utils_indexing::IndexVec;
 
     use super::*;
     use crate::{
-        Dependency, Version,
+        Dependency, PathBuf, Version,
         debug_info::{
             DebugFileIdx, DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx,
             DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId,

@@ -2,8 +2,8 @@
 
 use std::{format, string::String};
 
-use miden_core::{Felt, Word};
-use miden_crypto::hash::eidos::{Eidos, domains::GENERIC_FELT_SEQUENCE};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
+use miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE;
 use miden_stark::QuotientRecompositionInputs;
 
 use crate::AceError;

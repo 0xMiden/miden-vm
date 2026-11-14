@@ -1,19 +1,23 @@
 use alloc::boxed::Box;
 
-use miden_air_definitions::vm::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH},
+};
 use miden_core::{
+    Felt, ONE, Word, ZERO,
     chiplets::{eidos_compression, hasher::CV_RANGE},
     crypto::merkle::MerklePath,
+    field::{BasedVectorSpace, QuadFelt},
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    BaseHost, ContextId, ExecutionError, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
+    BaseHost, ContextId, ExecutionError, MemoryError, PackageSourceDebugContext,
     errors::{
         CryptoError, IoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner,
-        OperationError, PackageSourceDebugContext,
+        OperationError,
     },
-    field::{BasedVectorSpace, QuadFelt},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,

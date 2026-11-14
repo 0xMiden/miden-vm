@@ -139,7 +139,7 @@ mod tests {
 
     use miden_core::Felt;
 
-    use super::{format_value, write_interval, write_stack};
+    use crate::{format_value, write_interval, write_stack};
 
     #[test]
     fn write_stack_full_uses_tree_style() {

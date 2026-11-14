@@ -6,14 +6,13 @@ mod tests;
 
 use alloc::{collections::BTreeMap, string::ToString};
 
-use miden_field::Word;
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-};
-
-use crate::merkle::{
-    EmptySubtreeRoots, NodeIndex,
-    smt::{LeafIndex, SMT_DEPTH, SmtLeaf},
+use crate::{
+    Word,
+    merkle::{
+        EmptySubtreeRoots, NodeIndex,
+        smt::{LeafIndex, SMT_DEPTH, SmtLeaf},
+    },
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // UNIQUE NODES

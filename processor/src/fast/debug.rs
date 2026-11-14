@@ -632,8 +632,9 @@ fn frame(
 mod tests {
     use alloc::{boxed::Box, format};
 
-    use miden_assembly::{Assembler, DefaultSourceManager};
+    use miden_assembly::Assembler;
     use miden_core::serde::Serializable;
+    use miden_debug_types::DefaultSourceManager;
     use miden_mast_package::debug_info::PackageDebugInfoBuilder;
 
     use super::*;

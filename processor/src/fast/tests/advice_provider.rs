@@ -1,7 +1,7 @@
 use miden_assembly::package::Package;
 
 use super::*;
-use crate::test_utils::TestHost;
+use crate::TestHost;
 
 #[test]
 fn test_advice_provider() {

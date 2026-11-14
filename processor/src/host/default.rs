@@ -336,7 +336,7 @@ mod tests {
     use miden_core::{mast::BasicBlockNodeBuilder, operations::Operation};
 
     use super::{super::handlers::NoopEventHandler, *};
-    use crate::errors::HostError;
+    use crate::HostError;
 
     /// Builds a library with one procedure and one handler per event name.
     fn library(events: &[&'static str]) -> HostLibrary {

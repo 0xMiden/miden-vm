@@ -735,7 +735,7 @@ impl Deserializable for Felt {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::Felt;
+    use crate::Felt;
 
     impl Arbitrary for Felt {
         type Parameters = ();
@@ -803,12 +803,10 @@ mod arbitrary_boundary_tests {
         test_runner::TestRunner,
     };
 
-    use super::{
-        Felt,
-        arbitrary::{
-            CANONICAL_EDGES, NONCANONICAL_EDGES, arb_felt_canonical, arb_felt_noncanonical,
-        },
+    use super::arbitrary::{
+        CANONICAL_EDGES, NONCANONICAL_EDGES, arb_felt_canonical, arb_felt_noncanonical,
     };
+    use crate::Felt;
 
     /// The boundary values are reachable BY CONSTRUCTION — pin it
     /// empirically so a future refactor of the branch gating cannot

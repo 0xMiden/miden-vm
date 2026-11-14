@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use miden_crypto::field::TwoAdicField;
+use miden_core::field::TwoAdicField;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 
 use crate::layout::InputKey;

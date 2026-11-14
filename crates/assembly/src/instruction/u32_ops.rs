@@ -1,8 +1,4 @@
-use miden_assembly_syntax::{
-    ParsingError,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{RelatedLabel, Report},
-};
+use miden_assembly_syntax::ParsingError;
 use miden_core::{
     Felt, ZERO,
     events::SystemEvent,
@@ -13,6 +9,8 @@ use super::{field_ops::append_pow2_op, push_u32_value};
 use crate::{
     MAX_U32_ROTATE_VALUE, MAX_U32_SHIFT_VALUE, ProcedureContext,
     basic_block_builder::BasicBlockBuilder,
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{RelatedLabel, Report},
 };
 
 /// This enum is intended to determine the mode of operation passed to the parsing function

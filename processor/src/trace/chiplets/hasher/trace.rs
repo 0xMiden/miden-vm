@@ -5,11 +5,11 @@ use miden_air_definitions::vm::{
     ControllerCols,
     trace::chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
 };
-use miden_core::chiplets::eidos_compression;
+use miden_core::{Felt, ONE, ZERO, chiplets::eidos_compression};
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, ONE,
-    STATE_WIDTH, Selectors, ZERO,
+    ChipletTraceFragment, HasherState, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, STATE_WIDTH,
+    Selectors,
 };
 
 // HASHER OPERATION

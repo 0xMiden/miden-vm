@@ -1,11 +1,14 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
 use midenc_hir_type::{AddressSpace, Type, TypeRepr, TypeTemplate};
 
 use super::{
-    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
+    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, SymbolResolution,
     SymbolResolutionError, Visibility, types,
+};
+use crate::{
+    Path,
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 /// Maximum allowed nesting depth of type expressions during parsing and resolution.
@@ -1283,10 +1286,12 @@ mod tests {
     use alloc::{string::ToString, sync::Arc};
     use core::str::FromStr;
 
-    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
-
     use super::*;
-    use crate::{ast::Form, prettier::PrettyPrint};
+    use crate::{
+        ast::Form,
+        debuginfo::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri},
+        prettier::PrettyPrint,
+    };
 
     struct DummyResolver {
         source_manager: Arc<dyn SourceManager>,

@@ -619,7 +619,7 @@ fn test_insert_batch_large_dataset() {
 
 #[test]
 fn test_flat_layout_index_zero_unused_in_instance() {
-    use crate::merkle::Eidos;
+    use crate::hash::eidos::Eidos;
 
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::<_>::new(storage).unwrap();
@@ -648,7 +648,7 @@ fn test_flat_layout_index_zero_unused_in_instance() {
 
 #[test]
 fn test_flat_layout_after_insertion() {
-    use crate::merkle::{Eidos, EmptySubtreeRoots};
+    use crate::{hash::eidos::Eidos, merkle::EmptySubtreeRoots};
 
     // Insert a value and verify the flat layout is updated correctly
     let storage = MemoryStorage::new();
@@ -684,7 +684,10 @@ fn test_flat_layout_after_insertion() {
 
 #[test]
 fn test_flat_layout_children_relationship() {
-    use crate::merkle::{Eidos, EmptySubtreeRoots, NodeIndex};
+    use crate::{
+        hash::eidos::Eidos,
+        merkle::{EmptySubtreeRoots, NodeIndex},
+    };
 
     // Insert multiple values and verify parent-child relationships in the flat layout
     let storage = MemoryStorage::new();

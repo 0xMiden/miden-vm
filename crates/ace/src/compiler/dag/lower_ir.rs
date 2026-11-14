@@ -99,8 +99,10 @@
 use miden_constraint_compiler::ir::{
     CapturedConstraints, Graph, Leaf, Node, NodeId as IrNodeId, OpKind,
 };
-use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+};
 
 use super::{
     builder::DagBuilder,

@@ -1,12 +1,17 @@
 //! VM lookup integration checks for the shared LogUp framework.
 
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_stark::lookup::{
-    Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
+use miden_core::{
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use miden_stark::{
+    air::LiftedAir,
+    lookup::{
+        Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
+    },
+};
 
-use crate::vm::{Felt, LiftedAir};
+use crate::vm::Felt;
 
 /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
 /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many
@@ -14,10 +19,10 @@ use crate::vm::{Felt, LiftedAir};
 /// boundaries and the cyclic closing edge.
 #[test]
 fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
-    use miden_stark::lookup::build_lookup_fractions;
+    use miden_stark::{air::BaseAir, lookup::build_lookup_fractions};
 
     use crate::vm::{
-        BaseAir, MidenAir,
+        MidenAir,
         logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     };
 
@@ -73,7 +78,7 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
 #[test]
 #[should_panic(expected = "auxiliary trace width must accommodate all LogUp columns")]
 fn logup_rejects_width_smaller_than_lookup_columns() {
-    use crate::vm::BaseAir;
+    use miden_stark::air::BaseAir;
 
     let air = crate::vm::MidenAir::EIDOS_COMPRESSION;
     let main = RowMajorMatrix::new(Felt::zero_vec(32 * air.width()), air.width());
@@ -85,7 +90,7 @@ fn logup_rejects_width_smaller_than_lookup_columns() {
 
 #[test]
 fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
-    use crate::vm::BaseAir;
+    use miden_stark::air::BaseAir;
 
     let air = crate::vm::MidenAir::AND8_LOOKUP;
     let main = RowMajorMatrix::new(Felt::zero_vec(8 * air.width()), air.width());

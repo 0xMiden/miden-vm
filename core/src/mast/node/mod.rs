@@ -23,8 +23,6 @@ mod join_node;
 pub use join_node::{JoinNode, JoinNodeBuilder};
 
 mod split_node;
-use miden_crypto::{Felt, Word};
-use miden_formatting::prettier::PrettyPrint;
 pub use split_node::{SplitNode, SplitNodeBuilder};
 
 mod loop_node;
@@ -37,8 +35,10 @@ pub(super) use mast_forest_contributor::fingerprint_with_child_fingerprints;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder, MastNodeContext};
 
 use crate::{
+    Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
+    prettier::PrettyPrint,
 };
 
 pub trait MastNodeExt {

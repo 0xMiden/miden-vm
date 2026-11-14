@@ -1,12 +1,14 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    Word,
+use miden_core::Word;
+
+use crate::{
     mast::{MastNode, OpBatch},
+    package::debug_info::{
+        DebugFunctionIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+        SourceNodeIdMarker,
+    },
     utils::newtype_id,
-};
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar, SourceNodeIdMarker,
 };
 
 /// Content-equivalence key used while interning pending MAST nodes.

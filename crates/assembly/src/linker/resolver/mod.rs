@@ -8,22 +8,21 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    Report,
+use miden_assembly_syntax::module::ItemInfo;
+
+pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
+use super::SymbolItem;
+use crate::{
+    LinkerError, Path,
     ast::{
-        self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, Path, SymbolResolution,
+        self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, SymbolResolution,
         SymbolResolutionError,
         constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
         types,
     },
     debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
-    diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
-    module::ItemInfo,
+    diagnostics::{LabeledSpan, RelatedError, Report, Severity, diagnostic},
 };
-
-pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
-use super::SymbolItem;
-use crate::LinkerError;
 
 /// A [Resolver] is used to perform symbol resolution in the context of a specific module.
 ///

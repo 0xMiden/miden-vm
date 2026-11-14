@@ -7,9 +7,8 @@ use alloc::{
 };
 use std::path::Path as FsPath;
 
-use miden_assembly_syntax::diagnostics::Report;
-use miden_core::{Word, utils::hash_string_to_word};
-use miden_package_registry::{PackageId, PackageRegistry, PackageRegistryAndProvider};
+use miden_core::Word;
+use miden_package_registry::{PackageRegistry, PackageRegistryAndProvider};
 use miden_project::{
     Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
@@ -20,7 +19,9 @@ use super::{
     PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
     SourceProviderRegistry, providers::TargetAssemblyContext,
 };
-use crate::SourceManager;
+use crate::{
+    debuginfo::SourceManager, diagnostics::Report, package::PackageId, utils::hash_string_to_word,
+};
 
 // DEPENDENCY GRAPH
 // ================================================================================================

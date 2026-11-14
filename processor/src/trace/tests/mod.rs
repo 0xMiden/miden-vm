@@ -1,18 +1,16 @@
 use alloc::vec::Vec;
 
-use miden_air_definitions::vm::PublicInputs;
+use miden_air_definitions::vm::{PublicInputs, VmTrace};
 use miden_core::{
+    Felt,
+    advice::AdviceInputs,
     deferred::TRUE_DIGEST,
     mast::{BasicBlockNodeBuilder, MastForest},
     operations::Operation,
-    program::Program,
+    program::{Program, StackInputs},
 };
 
-use super::VmTrace;
-use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
-    trace::build_trace,
-};
+use crate::{DefaultHost, ExecutionOptions, FastProcessor, trace::build_trace};
 
 mod chiplets;
 mod decoder;

@@ -1,8 +1,8 @@
 /// The representation of a single Merkle path.
 use alloc::vec::Vec;
 
-use super::{super::MerklePath, MmrError, forest::Forest};
-use crate::Word;
+use super::{MmrError, forest::Forest};
+use crate::{Word, merkle::MerklePath};
 
 // MMR PROOF
 // ================================================================================================

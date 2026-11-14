@@ -1,24 +1,27 @@
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Path, PathBuf,
+    Assembler, Path, PathBuf,
     ast::{Module, ModuleKind},
     testing::{Pattern, TestContext, regex, source_file},
 };
 use miden_core::{
+    ONE, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{MerkleStore, MerkleTree},
+    events::EventName,
     mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
+    operations::Operation,
+    program::{KernelDescriptor, Program, StackInputs},
 };
-use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
-    Program, StackInputs, SyncHost, Word, ZERO,
-    advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
-    operation::Operation,
+    BaseHost, DefaultHost, FastProcessor, LoadedMastForest, ProcessorState, SyncHost,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler, TraceError, TraceHandler},
 };
 
 macro_rules! assert_diagnostic_lines {

@@ -2,7 +2,8 @@ use alloc::string::String;
 
 use thiserror::Error;
 
-use super::{NodeIndex, Word, smt::MAX_LEAF_ENTRIES};
+use super::{NodeIndex, smt::MAX_LEAF_ENTRIES};
+use crate::Word;
 
 #[derive(Debug, Error)]
 pub enum MerkleError {

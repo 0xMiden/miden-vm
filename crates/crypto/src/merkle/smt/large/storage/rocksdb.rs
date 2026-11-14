@@ -460,7 +460,7 @@ impl SmtStorageReader for RocksDbStorage {
     /// - `Ok(...)` if all fetches succeed.
     /// - `Err(StorageError)` if any RocksDB access or deserialization fails.
     fn get_subtrees(&self, indices: &[NodeIndex]) -> StorageResult<Vec<Option<Subtree>>> {
-        use p3_maybe_rayon::prelude::*;
+        use crate::parallel::*;
 
         let mut depth_buckets: [Vec<(usize, NodeIndex)>; 6] = Default::default();
 
@@ -966,7 +966,7 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::Backend`: If any column family is missing or a RocksDB write error occurs.
     fn apply(&mut self, updates: StorageUpdates) -> StorageResult<()> {
-        use p3_maybe_rayon::prelude::*;
+        use crate::parallel::*;
 
         let mut batch = WriteBatch::default();
 
@@ -1717,7 +1717,7 @@ impl SmtStorageReader for RocksDbSnapshotStorage {
 
     /// Retrieves multiple subtrees from the snapshot.
     fn get_subtrees(&self, indices: &[NodeIndex]) -> StorageResult<Vec<Option<Subtree>>> {
-        use p3_maybe_rayon::prelude::*;
+        use crate::parallel::*;
 
         let mut depth_buckets: [Vec<(usize, NodeIndex)>; 6] = Default::default();
 

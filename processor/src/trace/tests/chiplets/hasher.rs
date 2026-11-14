@@ -21,7 +21,7 @@ use miden_air_definitions::vm::{
     ControllerCols,
     logup::{HasherMsg, SiblingBit, SiblingMsg},
     trace::{
-        MainTrace,
+        MainTrace, RowIndex,
         chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
         log_deferred::{
             HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
@@ -30,12 +30,14 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
     chiplets::eidos_compression,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     deferred::DEFERRED_AND_INIT_CV,
     mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
+    utils::ToElements,
 };
 use miden_utils_testing::{stack, stack_inputs_from_ints};
 use rstest::rstest;
@@ -44,7 +46,6 @@ use super::super::{
     build_trace_from_ops_with_inputs, build_trace_from_program,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{AdviceInputs, RowIndex, trace::utils::build_span_with_respan_ops};
 
 // RESPONSE-SIDE DISPATCH
 // ================================================================================================
@@ -588,6 +589,36 @@ fn mrupdate_hasher_bus() {
 
 // HELPERS
 // ================================================================================================
+
+/// Builds an 18-op basic block payload that straddles a RESPAN batch boundary, plus the initial
+/// values its `Push` ops emit. Consumed by decoder / hasher tests that exercise multi-batch
+/// SPAN execution.
+fn build_span_with_respan_ops() -> (Vec<Operation>, Vec<Felt>) {
+    let iv = [1, 3, 5, 7, 9, 11, 13, 15, 17].to_elements();
+    let ops = alloc::vec![
+        Operation::Push(iv[0]),
+        Operation::Push(iv[1]),
+        Operation::Push(iv[2]),
+        Operation::Push(iv[3]),
+        Operation::Push(iv[4]),
+        Operation::Push(iv[5]),
+        Operation::Push(iv[6]),
+        // next batch
+        Operation::Push(iv[7]),
+        Operation::Push(iv[8]),
+        Operation::Add,
+        // drops to make sure stack overflow is empty on exit
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+    ];
+    (ops, iv)
+}
 
 fn single_block_program(ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();

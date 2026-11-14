@@ -8,10 +8,10 @@ use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
     operations::{Operation, opcodes},
-    program::{Program, StackOutputs},
+    program::{Program, StackInputs, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -39,7 +39,7 @@ fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     Program::new(mast_forest.into(), root)
 }
 
-fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
+fn execute(program: &Program, stack: &[u64]) -> miden_air_definitions::vm::VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())

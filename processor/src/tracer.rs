@@ -9,8 +9,8 @@ use miden_core::{
 };
 
 use crate::{
-    AceError, ContextId, ExecutionError,
-    continuation_stack::{Continuation, ContinuationStack},
+    AceError, ContextId, Continuation, ExecutionError,
+    continuation_stack::ContinuationStack,
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
 
@@ -57,7 +57,7 @@ use crate::{
 /// any auxiliary information they need by accessing the processor state before or after each clock
 /// cycle. However, experiments show that this requires redoing too much work in the tracer already
 /// performed by the processor, which degrades performance.
-pub trait Tracer {
+pub(crate) trait Tracer {
     type Processor;
 
     /// The forest representation passed to this tracer's [`start_clock_cycle`] /

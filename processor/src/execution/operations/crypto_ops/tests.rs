@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
     chiplets::{
         eidos_compression,
         hasher::{CV_RANGE, compress_state},
@@ -17,9 +18,9 @@ use super::{
     validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
 use crate::{
-    AdviceInputs, ContextId,
-    errors::{IoError, MemoryError, OperationError},
-    fast::{FastProcessor, NoopTracer},
+    ContextId, FastProcessor, MemoryError,
+    errors::{IoError, OperationError},
+    fast::NoopTracer,
     processor::{Processor, SystemInterface},
 };
 

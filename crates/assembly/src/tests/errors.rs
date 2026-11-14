@@ -65,7 +65,7 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResult {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use miden_assembly_syntax::{
+    use crate::{
         ast::{
             DebugVarInfo, DebugVarLocation, Instruction, Op,
             types::{ArrayType, Type},

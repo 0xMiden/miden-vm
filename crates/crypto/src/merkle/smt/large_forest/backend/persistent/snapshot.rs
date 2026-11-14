@@ -2,7 +2,6 @@ use alloc::{sync::Arc, vec::Vec};
 use core::mem::ManuallyDrop;
 use std::collections::HashMap;
 
-use miden_serde_utils::{Deserializable, Serializable};
 use rocksdb as db;
 
 use super::{
@@ -22,6 +21,7 @@ use crate::{
             TreeEntry, TreeWithRoot, VersionId, full::concurrent::SUBTREE_DEPTH,
         },
     },
+    utils::{Deserializable, Serializable},
 };
 
 // PERSISTENT BACKEND SNAPSHOT INNER

@@ -1,10 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 
+use miden_core::Word;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
-    BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
-    event::EventError,
+    BaseHost, LoadedMastForest, ProcessorState, SyncHost, advice::AdviceMutation, event::EventError,
 };
 
 /// A minimal testing host that records regular events.
@@ -69,9 +69,13 @@ impl SyncHost for NonTracingTestHost {
 #[cfg(test)]
 mod tests {
     use miden_assembly::Assembler;
+    use miden_core::{
+        advice::AdviceInputs,
+        program::{Program, StackInputs},
+    };
 
     use super::NonTracingTestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use crate::{ExecutionOptions, FastProcessor};
 
     /// A host which does not implement `on_trace` should still execute trace events gracefully via
     /// the default no-op implementation, and trace events must not be routed to `on_event`.

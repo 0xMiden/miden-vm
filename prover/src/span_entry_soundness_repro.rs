@@ -6,10 +6,10 @@ use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     Felt,
     operations::opcodes,
-    program::StackOutputs,
+    program::{StackInputs, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 

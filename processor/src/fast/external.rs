@@ -1,12 +1,10 @@
 use miden_mast_package::debug_info::PackageDebugInfo;
 
 use crate::{
-    BaseHost, ExecutionError,
-    continuation_stack::{Continuation, ContinuationStack},
-    errors::{
-        OperationError, PackageSourceDebugContext, procedure_not_found_with_context,
-        procedure_not_found_with_package_source_context,
-    },
+    BaseHost, Continuation, ExecutionError, PackageSourceDebugContext,
+    continuation_stack::ContinuationStack,
+    errors::{OperationError, procedure_not_found_with_context},
+    procedure_not_found_with_package_source_context,
 };
 
 // HELPERS

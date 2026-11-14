@@ -19,19 +19,16 @@ mod workspace;
 
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
-};
+#[cfg(feature = "serde")]
+use miden_assembly_syntax::debuginfo::{SourceFile, SourceId};
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
-#[cfg(feature = "serde")]
 use miden_assembly_syntax::{
-    debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
+    debuginfo::{SourceSpan, Span},
+    diagnostics::Report,
 };
 pub use miden_mast_package::TargetType;
+pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use toml::Value;

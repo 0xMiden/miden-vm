@@ -1,5 +1,7 @@
+use miden_assembly_syntax::debuginfo::{SourceId, Span};
+
 use super::{parsing::SetSourceId, *};
-use crate::{Linkage, SourceId, Span, Uri, VersionRequirement};
+use crate::{Linkage, Uri, VersionRequirement};
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]

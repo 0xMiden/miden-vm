@@ -3,13 +3,12 @@
 
 use alloc::{boxed::Box, vec::Vec};
 
-use p3_air::BaseAir;
 use p3_challenger::CanObserve;
 use p3_field::{Algebra, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::{
-    LiftedAirBuilder,
+    BaseAir, LiftedAirBuilder,
     symbolic::{
         AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt, eval_air,
     },

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use miden_air::vm::{MidenMultiAir, config};
 use miden_air_definitions::vm::{
-    AeadStreamCols, ControllerCols, MidenAir,
+    AeadStreamCols, ControllerCols, MidenAir, VmTrace,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{
         CHIPLETS_WIDTH, RowIndex,
@@ -34,12 +34,15 @@ use miden_air_definitions::vm::{
     },
 };
 use miden_core::{
-    Word,
+    Felt, Word,
+    advice::AdviceInputs,
     crypto::{
         hash::Eidos,
         merkle::{MerkleStore, MerkleTree},
     },
     field::{PrimeCharacteristicRing, QuadFelt},
+    operations::Operation,
+    program::StackInputs,
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
@@ -51,10 +54,8 @@ use miden_stark::{
 use miden_vm_stark::setup::config::eidos_config;
 
 use super::{
-    Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,
-    lookup_harness::InteractionLog,
+    build_trace_from_ops, build_trace_from_ops_with_inputs, lookup_harness::InteractionLog,
 };
-use crate::{AdviceInputs, StackInputs, operation::Operation};
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;
 const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 16;

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 #[cfg(feature = "std")]
 use std::fs;
 
-use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName};
+use miden_assembly_syntax::ast::{Ident, Path as AstPath, ProcedureName};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -23,15 +23,15 @@ use miden_core::{
     serde::{
         BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
-    utils::IndexVec,
 };
+use miden_utils_indexing::IndexVec;
 
 use super::{
     MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section, VERSION,
 };
 use crate::{
     Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule, PackageSubmodule,
-    ProcedureExport, SectionId, TargetType,
+    PathBuf, ProcedureExport, SectionId, TargetType,
     debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfoBuilder},
 };
 

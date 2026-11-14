@@ -112,7 +112,7 @@ impl From<u32> for RowIndex {
     }
 }
 
-impl miden_utils_indexing::Idx for RowIndex {}
+impl miden_core::utils::Idx for RowIndex {}
 
 impl Serializable for RowIndex {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

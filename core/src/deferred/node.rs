@@ -3,14 +3,12 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::mem::size_of;
 
-use miden_crypto::{
-    ZERO,
-    hash::eidos::{Eidos, EidosDomain, EidosFrame},
-};
+use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 
 use super::{DEFERRED_AND_FRAME, DeferredError, deferred_chunks_frame};
 use crate::{
-    Felt, Word,
+    Felt, Word, ZERO,
+    crypto::hash::Eidos,
     program::domain::{DeferredAndDomain, DeferredChunksDomain},
     utils::bytes_to_packed_u32_elements,
 };

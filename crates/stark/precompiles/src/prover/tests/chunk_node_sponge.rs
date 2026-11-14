@@ -4,10 +4,10 @@ use std::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    crypto::hash::Keccak256,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix, bytes_to_packed_u32_elements},
 };
-use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees},
     lookup::{

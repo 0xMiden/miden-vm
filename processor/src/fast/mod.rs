@@ -10,6 +10,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO,
+    advice::AdviceInputs,
     deferred::{DeferredState, Digest, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -21,10 +22,9 @@ use miden_mast_package::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    ProcessorState,
-    advice::AdviceError,
-    continuation_stack::{Continuation, ContinuationStack},
+    ContextId, Continuation, ExecutionError, ExecutionOptions, LoadedMastForest, ProcessorState,
+    advice::{AdviceError, AdviceProvider},
+    continuation_stack::ContinuationStack,
     errors::MapExecErrNoCtx,
     operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
@@ -41,7 +41,8 @@ mod step;
 pub use basic_block::SystemEventError;
 pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
-pub use step::{BreakReason, ResumeContext};
+pub(crate) use step::BreakReason;
+pub use step::ResumeContext;
 
 #[cfg(test)]
 mod tests;

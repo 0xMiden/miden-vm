@@ -5,26 +5,30 @@ use miden_air_definitions::vm::trace::{
     chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
 };
 use miden_core::{
-    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
+    Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
+    mast::{
+        BasicBlockNode, ExecutableMastForest, MastForestId, MastNode, MastNodeExt, MastNodeId,
+        OpBatch, SparseMastForest,
+    },
+    program::MIN_STACK_DEPTH,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         read_bounded_len,
     },
+    utils::Idx,
 };
 
 use crate::{
-    AceError, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    AceError, ContextId, ExecutionError, MemoryError,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
-    crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForestId, MastNodeId, SparseMastForest},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
     trace::chiplets::{AEAD_STREAM_CYCLE_LEN, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
     tracer::merkle_index_helper_values,
-    utils::Idx,
 };
 
 mod serde;
@@ -936,7 +940,7 @@ impl IntoIterator for KernelReplay {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
-pub struct AceReplay {
+pub(crate) struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
 
@@ -1688,15 +1692,16 @@ mod arbitrary {
     extern crate alloc;
 
     use miden_air_definitions::vm::trace::RowIndex;
+    use miden_core::{Felt, Word, program::MIN_STACK_DEPTH};
     use proptest::prelude::*;
 
     use super::{
         AdviceReplay, BitwiseOp, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
         CoreTraceState, DecoderState, ExecutionContextReplay, ExecutionContextSystemInfo,
-        KernelReplay, MIN_STACK_DEPTH, MemoryReadsReplay, MemoryWritesReplay, NodeEndData,
-        RangeCheckReplayValues, RangeCheckerReplay, StackState, SystemState,
+        KernelReplay, MemoryReadsReplay, MemoryWritesReplay, NodeEndData, RangeCheckReplayValues,
+        RangeCheckerReplay, StackState, SystemState,
     };
-    use crate::{ContextId, Felt, Word};
+    use crate::ContextId;
 
     impl Arbitrary for SystemState {
         type Parameters = ();
@@ -2024,7 +2029,12 @@ mod arbitrary {
 
 #[cfg(any(test, feature = "arbitrary"))]
 mod arbitrary_replays {
-    use miden_core::mast::{MastForestId, MastNodeId};
+    use miden_air_definitions::vm::trace::RowIndex;
+    use miden_core::{
+        Felt, Word,
+        crypto::merkle::MerklePath,
+        mast::{MastForestId, MastNodeId},
+    };
     use proptest::prelude::*;
 
     use super::{
@@ -2033,7 +2043,7 @@ mod arbitrary_replays {
         HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
         StackOverflowReplay,
     };
-    use crate::{ContextId, Felt, RowIndex, Word, crypto::merkle::MerklePath};
+    use crate::ContextId;
 
     impl Arbitrary for StackOverflowReplay {
         type Parameters = ();

@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::{
-    CHIPLETS_WIDTH,
+    CHIPLETS_WIDTH, RowIndex,
     and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS,
@@ -12,13 +12,11 @@ use miden_air_definitions::vm::trace::{
     },
     eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
-use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::KernelDescriptor};
+use miden_core::{Felt, ONE, ZERO, field::PrimeCharacteristicRing};
 
 use crate::{
-    Felt, ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
     operation::OperationError,
-    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
+    trace::{ChipletTraceFragment, range::RangeChecker},
 };
 
 mod aead_stream;
@@ -46,10 +44,8 @@ mod memory;
 pub(crate) use memory::Memory;
 
 mod ace;
-pub use ace::{
-    Ace, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES,
-    MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD,
-};
+pub(crate) use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
+pub use ace::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES};
 
 mod kernel_rom;
 pub(crate) use kernel_rom::KernelRom;
@@ -60,11 +56,11 @@ mod tests;
 // TRACE
 // ================================================================================================
 
-pub struct ChipletsTrace {
+pub(crate) struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-pub struct EidosCompressionTrace {
+pub(crate) struct EidosCompressionTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
@@ -90,7 +86,7 @@ pub struct EidosCompressionTrace {
 /// The controller ends on an eight-row boundary so AEAD starts at phase zero. Controller
 /// columns 22 and 23 hold the Merkle/padding flag and row address, respectively.
 #[derive(Debug)]
-pub struct Chiplets {
+pub(crate) struct Chiplets {
     pub hasher: Hasher,
     pub(crate) aead_stream: AeadStream,
     pub bitwise: Bitwise,
@@ -100,21 +96,6 @@ pub struct Chiplets {
 }
 
 impl Chiplets {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns a new chiplet set instantiated with the provided kernel descriptor.
-    pub fn new(kernel: KernelDescriptor) -> Self {
-        Self {
-            hasher: Hasher::default(),
-            aead_stream: AeadStream::default(),
-            bitwise: Bitwise::default(),
-            memory: Memory::default(),
-            ace: Ace::default(),
-            kernel_rom: KernelRom::new(kernel),
-        }
-    }
-
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
@@ -322,30 +303,5 @@ fn fill_padding_rows(band: &mut [Felt]) {
     let (rows, _) = band.as_chunks_mut::<W>();
     for row in rows {
         row[..5].fill(ONE);
-    }
-}
-
-// HELPER STRUCTS
-// ================================================================================================
-
-/// Result of a Merkle tree node update.
-///
-/// Contains the old root, the new root, and the trace row where the computation started.
-#[derive(Debug, Copy, Clone)]
-pub struct MerkleRootUpdate {
-    address: Felt,
-    old_root: Word,
-    new_root: Word,
-}
-
-impl MerkleRootUpdate {
-    pub fn get_address(&self) -> Felt {
-        self.address
-    }
-    pub fn get_old_root(&self) -> Word {
-        self.old_root
-    }
-    pub fn get_new_root(&self) -> Word {
-        self.new_root
     }
 }

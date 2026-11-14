@@ -7,10 +7,12 @@ use num::Zero;
 
 use super::{
     super::{FALCON_ENCODING_BITS, FalconVariant, LOG_N, N, PK_LEN},
-    ByteReader, ByteWriter, Deserializable, DeserializationError, FalconFelt, Felt, Polynomial,
-    Serializable, Signature,
+    FalconFelt, Polynomial, Signature,
 };
-use crate::{SequentialCommit, Word};
+use crate::{
+    Felt, SequentialCommit, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // PUBLIC KEY
 // ================================================================================================

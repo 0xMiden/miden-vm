@@ -8,11 +8,10 @@ use alloc::{string::ToString, vec::Vec};
 use core::error::Error;
 
 use itertools::Itertools;
-use miden_field::{Felt, Word};
 use proptest::prelude::*;
 
 use crate::{
-    EMPTY_WORD, Map, ONE, ZERO,
+    EMPTY_WORD, Felt, Map, ONE, Word, ZERO,
     merkle::smt::{
         Backend, BackendReader, ForestInMemoryBackend, LargeSmtForest, LeafIndex, LineageId,
         MAX_LEAF_ENTRIES, RootInfo, SMT_DEPTH, Smt, SmtForestOperation, SmtForestUpdateBatch,

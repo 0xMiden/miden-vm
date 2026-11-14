@@ -1,5 +1,4 @@
-use miden_core::{Felt, Word};
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 
 use super::{
     model::low_output,

@@ -24,8 +24,7 @@ use rand::{
 };
 use thiserror::Error;
 
-use super::Felt;
-use crate::utils::bytes_to_hex_string;
+use crate::{Felt, utils::bytes_to_hex_string};
 
 #[cfg(test)]
 mod tests;
@@ -783,7 +782,7 @@ macro_rules! word {
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::{Felt, Word};
+    use crate::{Felt, Word};
 
     impl Arbitrary for Word {
         type Parameters = ();

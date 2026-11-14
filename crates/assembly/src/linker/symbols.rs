@@ -1,14 +1,14 @@
 use alloc::{boxed::Box, sync::Arc};
 use core::cell::{Cell, RefCell};
 
-use miden_assembly_syntax::{
-    Path,
-    ast::{self, GlobalItemIndex, Ident, ImportKind, Visibility},
-    debuginfo::{SourceSpan, Span, Spanned},
-    module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 
 use super::LinkStatus;
+use crate::{
+    Path, ast,
+    ast::{GlobalItemIndex, Ident, ImportKind, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
+};
 
 /// A [Symbol] is a named, linkable item defined within a module.
 #[derive(Debug, Clone)]

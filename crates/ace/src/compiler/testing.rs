@@ -5,8 +5,10 @@
 //! validating the ACE pipeline from both within ace-codegen tests and from
 //! downstream integration tests (e.g. in miden-air).
 
-use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use miden_core::{
+    Felt,
+    field::{ExtensionField, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
+};
 use miden_stark::air::symbolic::{
     BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
     SymbolicExpressionExt, eval_air,

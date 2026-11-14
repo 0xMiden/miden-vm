@@ -1,9 +1,4 @@
-use miden_assembly_syntax::{
-    ast::{ImmU16, Instruction},
-    debuginfo::{Span, Spanned},
-    diagnostics::{RelatedLabel, Report},
-    parser::{IntValue, PushValue},
-};
+use miden_assembly_syntax::parser::{IntValue, PushValue};
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
     events::SystemEvent,
@@ -11,8 +6,13 @@ use miden_core::{
 };
 
 use crate::{
-    Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastNodeUse, push_value_ops,
+    Assembler, ProcedureContext,
+    ast::{ImmU16, Instruction, InvokeKind},
+    basic_block_builder::BasicBlockBuilder,
+    debuginfo::{Span, Spanned},
+    diagnostics::{RelatedLabel, Report},
+    mast_forest_builder::MastNodeUse,
+    push_value_ops,
 };
 
 mod crypto_ops;

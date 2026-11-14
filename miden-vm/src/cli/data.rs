@@ -10,12 +10,16 @@ use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
-    serde::Deserializable,
 };
-use miden_core::{Felt, field::QuotientMap, serde::read_file_bounded};
+use miden_core::{
+    Felt, Word,
+    field::QuotientMap,
+    program::{Program, StackOutputs},
+    proof::ExecutionProof,
+    serde::{Deserializable, SliceReader, read_file_bounded},
+};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::{field::Empty, instrument};
 

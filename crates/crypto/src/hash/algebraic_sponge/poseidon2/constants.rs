@@ -1,11 +1,11 @@
 // HASH FUNCTION DEFINING CONSTANTS
 // ================================================================================================
-use miden_field::Felt;
 use p3_goldilocks::{
     GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS, GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12,
 };
 
 use super::STATE_WIDTH;
+use crate::Felt;
 
 /// Number of either initial or terminal external rounds.
 pub(crate) const NUM_EXTERNAL_ROUNDS_HALF: usize = GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS;

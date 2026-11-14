@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 
-use super::{EMPTY_WORD, LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
+use super::{LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
 use crate::{
-    Felt, ONE, Word,
+    EMPTY_WORD, Felt, ONE, Word,
     hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
     merkle::{
         EmptySubtreeRoots,

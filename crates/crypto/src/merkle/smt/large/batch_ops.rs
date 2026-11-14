@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 use core::mem;
 
 use num::Integer;
-use p3_maybe_rayon::prelude::*;
 
 use super::{
     IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LargeSmtResult, LoadedLeaves, MutatedLeaves,
@@ -18,6 +17,7 @@ use crate::{
             process_sorted_pairs_to_leaves,
         },
     },
+    parallel::*,
 };
 
 // TYPES

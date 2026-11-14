@@ -1,8 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 
-use super::EMPTY_WORD;
 use crate::{
-    Felt, Word,
+    EMPTY_WORD, Felt, Word,
     hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
     merkle::smt::{LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},

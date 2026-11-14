@@ -2,14 +2,13 @@ use std::borrow::Cow;
 
 use miden_core::{
     Felt,
-    field::{Algebra, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::field::PrimeCharacteristicRing;
 use miden_stark::air::{
     AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
     symbolic::{AirLayout, SymbolicAirBuilder},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{

@@ -1,7 +1,8 @@
+use miden_core::{Felt, operations::Operation};
+
 use crate::{
-    BaseHost, ExecutionError, Felt,
-    errors::{MapExecErrWithOpIdx, PackageSourceDebugContext},
-    operation::Operation,
+    BaseHost, ExecutionError, PackageSourceDebugContext,
+    errors::MapExecErrWithOpIdx,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };

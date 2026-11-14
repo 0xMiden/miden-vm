@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use miden_assembly_syntax::debuginfo::Uri;
-use miden_mast_package::debug_info::PackageDebugInfo;
+use crate::{debuginfo::Uri, package::debug_info::PackageDebugInfo};
 
 pub(super) fn trim_paths(debug_info: &mut PackageDebugInfo, trimmer: &SourcePathTrimmer) {
     debug_info.trim_file_paths(move |path| {
@@ -54,9 +53,8 @@ impl SourcePathTrimmer {
 
 #[cfg(test)]
 mod tests {
-    use miden_mast_package::debug_info::PackageDebugInfoBuilder;
-
     use super::*;
+    use crate::package::debug_info::PackageDebugInfoBuilder;
 
     #[cfg(unix)]
     #[test]

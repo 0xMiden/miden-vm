@@ -1,6 +1,6 @@
 //! Challenge lowering for verifier DAG construction.
 
-use miden_crypto::field::Field;
+use miden_core::field::Field;
 
 use super::dag::{DagBuilder, NodeId};
 use crate::{InputKey, InputLayout};

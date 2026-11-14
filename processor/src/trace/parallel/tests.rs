@@ -1,11 +1,12 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_air_definitions::vm::{
-    MidenAir,
+    MidenAir, VmTrace,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
+    advice::AdviceInputs,
     crypto::merkle::MerklePath,
     field::QuadFelt,
     mast::{
@@ -24,7 +25,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
     trace::trace_state::MemoryReadsReplay,
 };
 

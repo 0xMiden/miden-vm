@@ -3,8 +3,6 @@ mod symbol_table;
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-
 use self::symbol_table::LocalSymbolTable;
 pub use self::{
     error::SymbolResolutionError,
@@ -14,6 +12,7 @@ use super::{GlobalItemIndex, ModuleIndex};
 use crate::{
     Path, Word,
     ast::{Ident, ItemIndex},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 /// Represents the result of resolving a symbol

@@ -1,16 +1,12 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_formatting::{
-    hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, text},
-};
-
 use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
     mast::{MastForest, MastForestError, MastNodeId},
-    utils::LookupByIdx,
+    prettier::{Document, PrettyPrint, const_text, text},
+    utils::{LookupByIdx, ToHex},
 };
 
 // EXTERNAL NODE

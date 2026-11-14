@@ -9,7 +9,6 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use miden_field::Felt;
 use proptest::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -17,7 +16,7 @@ use tempfile::{TempDir, tempdir};
 
 use super::{LEAVES_CF, PersistentBackend, Result};
 use crate::{
-    EMPTY_WORD, Word,
+    EMPTY_WORD, Felt, Word,
     merkle::smt::{
         Backend, BackendError, BackendReader, LargeSmtForest, LineageId, Smt, SmtForestUpdateBatch,
         SmtUpdateBatch, TreeEntry, TreeWithRoot, VersionId,

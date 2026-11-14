@@ -2,14 +2,12 @@
 mod signing_key {
     use alloc::string::{String, ToString};
 
-    use miden_field::{Felt, Word};
-    use miden_serde_utils::{Deserializable, Serializable};
-
     use crate::{
-        SequentialCommit,
+        Felt, SequentialCommit, Word,
         dsa::eddsa_25519_sha512::{PublicKey, SigningKey, UncheckedVerificationError},
         hash::eidos::Eidos,
         rand::test_utils::seeded_rng,
+        utils::{Deserializable, Serializable},
     };
 
     #[test]
@@ -273,9 +271,7 @@ mod signature {
 
     /// Generates a deterministic 64-byte Ed25519 signature from the given RNG seed.
     fn make_sig_bytes(rng_seed: [u8; 32]) -> [u8; 64] {
-        use miden_field::Word;
-
-        use crate::dsa::eddsa_25519_sha512::SigningKey;
+        use crate::{Word, dsa::eddsa_25519_sha512::SigningKey};
         let mut rng = seeded_rng(rng_seed);
         let sk = SigningKey::with_rng(&mut rng);
         sk.sign(Word::default()).inner.to_bytes()
@@ -357,11 +353,10 @@ mod signature {
 }
 
 mod key_exchange_key {
-    use miden_serde_utils::{Deserializable, Serializable};
-
     use crate::{
         dsa::eddsa_25519_sha512::{KeyExchangeKey, PublicKey},
         rand::test_utils::seeded_rng,
+        utils::{Deserializable, Serializable},
     };
 
     #[test]

@@ -2,14 +2,14 @@ use alloc::{format, string::ToString};
 
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
-    program::ExecutionClaim,
+    program::{ExecutionClaim, ProgramInfo, StackInputs, StackOutputs},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
     },
 };
 
-use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
+use crate::{AdviceProvider, ExecutionOutput};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -310,18 +310,20 @@ impl Deserializable for VmWitness {
 mod wire_tests {
     use miden_assembly::Assembler;
     use miden_core::{
+        Felt,
         deferred::TRUE_DIGEST,
-        mast::{BasicBlockNodeBuilder, MastForest},
+        mast::{BasicBlockNodeBuilder, MastForest, MastNodeId},
         operations::Operation,
-        program::Program,
+        program::{Program, StackInputs},
+        serde::Serializable,
     };
     use rstest::rstest;
 
     use super::{
-        ExecutionWitness, Serializable, build_trace,
+        build_trace,
         trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
     };
-    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use crate::{DefaultHost, ExecutionError, ExecutionWitness, FastProcessor};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -548,7 +550,7 @@ mod wire_tests {
 
         // A carried witness with an explicitly empty VM-side root is not a valid transport shape.
         let tampered = ExecutionWitness {
-            vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
+            vm: crate::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
             precompile: Some(precompile),
         };
         let err = ExecutionWitness::read_from_bytes(&tampered.to_bytes())

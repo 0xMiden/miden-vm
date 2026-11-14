@@ -5,9 +5,10 @@ use core::{
 };
 
 use super::{
-    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word, smt::SMT_MAX_DEPTH,
+    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, smt::SMT_MAX_DEPTH,
 };
 use crate::{
+    Word,
     hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

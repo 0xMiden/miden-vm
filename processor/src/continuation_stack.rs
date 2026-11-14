@@ -699,7 +699,7 @@ mod arbitrary {
     use miden_core::mast::{MastForestId, MastNodeId};
     use proptest::prelude::*;
 
-    use super::{Continuation, ContinuationStack};
+    use crate::{Continuation, continuation_stack::ContinuationStack};
 
     impl Arbitrary for Continuation<MastForestId> {
         type Parameters = ();

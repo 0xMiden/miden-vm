@@ -18,7 +18,6 @@ use alloc::{
 use core::{iter::FusedIterator, ops::Index, slice};
 
 use super::{
-    super::{InnerNodeInfo, MerklePath},
     MmrDelta, MmrError, MmrPath, MmrPeaks, MmrProof,
     forest::{Forest, TreeSizeIterator},
     nodes_from_mask,
@@ -26,6 +25,7 @@ use super::{
 use crate::{
     Word,
     hash::eidos::Eidos,
+    merkle::{InnerNodeInfo, MerklePath},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

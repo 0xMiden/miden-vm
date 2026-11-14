@@ -1,6 +1,5 @@
-use miden_assembly_syntax::debuginfo::Spanned;
-
 use super::*;
+use crate::debuginfo::Spanned;
 
 pub struct MasmSourceProvider;
 

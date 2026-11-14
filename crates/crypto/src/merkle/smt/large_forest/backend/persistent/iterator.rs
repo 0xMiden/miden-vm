@@ -2,7 +2,6 @@
 
 use alloc::boxed::Box;
 
-use miden_serde_utils::Deserializable;
 use rocksdb as db;
 
 use crate::{
@@ -10,6 +9,7 @@ use crate::{
     merkle::smt::{
         LineageId, SmtLeaf, TreeEntry, large_forest::backend::persistent::keys::LeafKey,
     },
+    utils::Deserializable,
 };
 
 // TYPE ALIASES

@@ -16,7 +16,7 @@ use miden_core::{
 };
 
 use super::SystemEventError;
-use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
+use crate::{FastProcessor, MemoryError, advice::AdviceProvider};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================

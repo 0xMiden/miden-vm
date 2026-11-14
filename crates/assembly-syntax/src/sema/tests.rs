@@ -4,14 +4,13 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debug_types::{Span, Spanned};
-
 use crate::{
     MAX_REPEAT_COUNT, Path,
     ast::{
         Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
         TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
     },
+    debuginfo::{Span, Spanned},
     diagnostics::reporting::PrintDiagnostic,
     sema::{SemanticAnalysisError, SyntaxError},
     testing::SyntaxTestContext,
@@ -29,7 +28,7 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
     }
 }
 
-fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str) {
+fn assert_symbol_conflict(error: &crate::diagnostics::Report, symbol: &str) {
     let syntax_error = syntax_error(error);
 
     let (span, prev_span) = syntax_error
@@ -67,11 +66,11 @@ fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str)
     );
 }
 
-fn syntax_error(error: &miden_utils_diagnostics::Report) -> &SyntaxError {
+fn syntax_error(error: &crate::diagnostics::Report) -> &SyntaxError {
     error.downcast_ref::<SyntaxError>().expect("expected SyntaxError report")
 }
 
-fn assert_undefined_symbol(error: &miden_utils_diagnostics::Report) {
+fn assert_undefined_symbol(error: &crate::diagnostics::Report) {
     let syntax_error = syntax_error(error);
     assert!(
         syntax_error.errors.iter().any(|err| matches!(
@@ -87,7 +86,7 @@ fn assert_undefined_symbol(error: &miden_utils_diagnostics::Report) {
     );
 }
 
-fn unused_import_slices(error: &miden_utils_diagnostics::Report) -> Vec<String> {
+fn unused_import_slices(error: &crate::diagnostics::Report) -> Vec<String> {
     let syntax_error = syntax_error(error);
     syntax_error
         .errors

@@ -1,25 +1,25 @@
 use alloc::{boxed::Box, collections::BTreeMap, format, vec::Vec};
 use core::fmt::Debug;
 
-use miden_core::{
-    advice::AdviceMap,
-    mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
-        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
-    },
-    utils::IndexVec,
-};
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNodeId,
-    DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder, SourceNode,
-};
+use miden_core::advice::AdviceMap;
 
 use super::{
     MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
     compute_operations_and_adjust_mappings, remap_inline_ranges,
 };
-use crate::diagnostics::{Diagnostic, Report, miette};
+use crate::{
+    diagnostics::{Diagnostic, Report, miette},
+    mast::{
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
+    },
+    package::debug_info::{
+        DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceInlineCall,
+        DebugSourceNodeId, DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder, SourceNode,
+    },
+    utils::IndexVec,
+};
 
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {

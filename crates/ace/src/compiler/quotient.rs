@@ -4,7 +4,7 @@
 //! chunks. They are intentionally centralized to keep DAG lowering and tests
 //! aligned.
 
-use miden_crypto::field::{ExtensionField, Field};
+use miden_core::field::{ExtensionField, Field};
 
 use crate::{
     compiler::dag::{DagBuilder, NodeId},

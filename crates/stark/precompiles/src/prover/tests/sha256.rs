@@ -8,10 +8,10 @@ use std::{
 use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos::Relation as EidosRelation;
 use miden_core::{
     Felt,
+    crypto::hash::Sha256,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::hash::sha2::Sha256;
 use miden_stark::{
     air::{BaseAir, LiftedAir},
     lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},

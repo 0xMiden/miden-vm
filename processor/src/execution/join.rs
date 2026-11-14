@@ -1,10 +1,10 @@
 use core::ops::ControlFlow;
 
+use miden_core::mast::{ExecutableMastForest, JoinNode, MastNodeId};
+
 use crate::{
-    BaseHost, BreakReason, Stopper,
-    continuation_stack::Continuation,
+    BaseHost, BreakReason, Continuation, Stopper,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{ExecutableMastForest, JoinNode, MastNodeId},
     processor::Processor,
     tracer::Tracer,
 };

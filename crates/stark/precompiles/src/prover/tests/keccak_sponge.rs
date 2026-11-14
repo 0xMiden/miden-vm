@@ -10,9 +10,9 @@ use std::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    crypto::hash::Keccak256,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir},
     lookup::debug::{ValidateLayout, ValidateLookupAir},

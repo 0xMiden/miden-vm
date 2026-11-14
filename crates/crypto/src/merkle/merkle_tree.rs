@@ -1,9 +1,10 @@
 use alloc::{string::String, vec::Vec};
 use core::{fmt, slice};
 
-use super::{Eidos, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word};
+use super::{InnerNodeInfo, MerkleError, MerklePath, NodeIndex};
 use crate::{
-    hash::eidos::{PACKED_LANES, PackedDigest, pack_digest_lanes, unpack_digest_lane},
+    Word,
+    hash::eidos::{Eidos, PACKED_LANES, PackedDigest, pack_digest_lanes, unpack_digest_lane},
     utils::{assume_init_vec, uninit_vector, word_to_hex},
 };
 

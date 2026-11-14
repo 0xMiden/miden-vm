@@ -8,7 +8,7 @@ fn replace_nops_with_named_inline_call_markers(
     procedure: &mut Procedure,
     markers: &[Option<&str>],
 ) -> Result<(), Report> {
-    use miden_assembly_syntax::ast::DebugInlineCallInfo;
+    use crate::ast::DebugInlineCallInfo;
 
     let mut markers = markers.iter();
     for op in procedure.body_mut().iter_mut() {
@@ -45,9 +45,9 @@ fn replace_nops_with_named_inline_call_markers(
 }
 
 fn reachable_source_nodes(
-    debug_info: &miden_mast_package::debug_info::PackageDebugInfo,
-    root: miden_mast_package::debug_info::DebugSourceNodeId,
-) -> BTreeSet<miden_mast_package::debug_info::DebugSourceNodeId> {
+    debug_info: &crate::package::debug_info::PackageDebugInfo,
+    root: crate::package::debug_info::DebugSourceNodeId,
+) -> BTreeSet<crate::package::debug_info::DebugSourceNodeId> {
     let mut reachable = BTreeSet::new();
     let mut worklist = vec![root];
     while let Some(source_node_id) = worklist.pop() {
@@ -425,7 +425,7 @@ fn compact_inline_ranges_survive_padding_and_static_linking() -> TestResult {
     let info = package.debug_info().into_diagnostic()?.unwrap();
     let mut checked = BTreeSet::new();
     for (source_index, node) in info.nodes().iter().enumerate() {
-        let source_id = miden_mast_package::debug_info::DebugSourceNodeId::from(
+        let source_id = crate::package::debug_info::DebugSourceNodeId::from(
             u32::try_from(source_index).unwrap(),
         );
         for operation in &node.asm_ops {
@@ -479,7 +479,7 @@ fn many_inline_ranges_survive_padding_and_static_linking() -> TestResult {
     let info = package.debug_info().into_diagnostic()?.unwrap();
     let mut checked = BTreeSet::new();
     for (source_index, node) in info.nodes().iter().enumerate() {
-        let source_id = miden_mast_package::debug_info::DebugSourceNodeId::from(
+        let source_id = crate::package::debug_info::DebugSourceNodeId::from(
             u32::try_from(source_index).unwrap(),
         );
         for operation in &node.asm_ops {
@@ -642,8 +642,10 @@ fn plain_exec_preserves_canonical_definitions() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
-    use miden_assembly_syntax::debuginfo::{SourceLanguage, Uri};
-    use miden_core::serde::{Deserializable, Serializable};
+    use crate::{
+        debuginfo::{SourceLanguage, Uri},
+        serde::{Deserializable, Serializable},
+    };
 
     let source = "proc leaf push.42 end\nproc wrapper exec.leaf end\nbegin\n exec.wrapper\n drop\n exec.wrapper\n drop\nend";
     let assemble = |text: &str| {
@@ -663,9 +665,8 @@ fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
     let baseline = include_bytes!("fixtures/exec-source-identity.mast");
     assert_eq!(wrapper_package.mast_forest().to_bytes(), baseline.as_slice());
     let debug = wrapper_package.debug_info().into_diagnostic()?.unwrap();
-    let decoded =
-        miden_mast_package::debug_info::PackageDebugInfo::read_from_bytes(&debug.to_bytes())
-            .into_diagnostic()?;
+    let decoded = crate::package::debug_info::PackageDebugInfo::read_from_bytes(&debug.to_bytes())
+        .into_diagnostic()?;
     assert_eq!(decoded, debug);
     assert_ne!(
         debug.to_bytes(),
@@ -757,7 +758,7 @@ fn plain_exec_inline_ranges_cover_only_inlined_operations() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_imported_alias_identity() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let library = Assembler::new(context.source_manager()).assemble_library(
@@ -818,7 +819,7 @@ fn plain_exec_preserves_imported_alias_identity() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_reexported_function_identity() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let root =
@@ -880,8 +881,10 @@ fn plain_exec_preserves_reexported_function_identity() -> TestResult {
 
 #[test]
 fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
-    use miden_core::serde::Serializable;
-    use miden_mast_package::{SectionId, debug_info::PackageDebugInfoBuilder};
+    use crate::{
+        package::{SectionId, debug_info::PackageDebugInfoBuilder},
+        serde::Serializable,
+    };
 
     let context = TestContext::default();
     let mut library = Assembler::new(context.source_manager()).assemble_library(
@@ -921,7 +924,7 @@ fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_dynamic_dependency_reexports() -> TestResult {
-    use miden_core::serde::{Deserializable, Serializable};
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let dependency = Assembler::new(context.source_manager()).assemble_library(

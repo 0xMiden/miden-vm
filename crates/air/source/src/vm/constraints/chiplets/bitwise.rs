@@ -5,8 +5,10 @@
 //! each AND witness onto the canonical `(a_byte, b_byte, a_byte xor b_byte)` relation; the chiplet
 //! response bus recomposes the VM-facing `(op, a, b, result)` message.
 
+use miden_stark::air::AirBuilder;
+
 use crate::vm::{
-    AirBuilder, MidenAirBuilder,
+    MidenAirBuilder,
     constraints::chiplets::{columns::BitwiseOpCols, selectors::ChipletSelectors},
 };
 

@@ -1,6 +1,7 @@
 use alloc::{string::String, vec::Vec};
 
-use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
+use super::{BATCH_SIZE, GROUP_SIZE};
+use crate::{Felt, ZERO, operations::Operation};
 
 // OPERATION BATCH
 // ================================================================================================

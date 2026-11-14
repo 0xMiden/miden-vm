@@ -9,13 +9,12 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use miden_field::Felt;
 use proptest::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use crate::{
-    EMPTY_WORD, Word,
+    EMPTY_WORD, Felt, Word,
     merkle::smt::{
         Backend, BackendError, BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
         large_forest::{

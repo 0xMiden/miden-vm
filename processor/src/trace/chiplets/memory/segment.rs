@@ -3,11 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::WORD_SIZE;
+use miden_core::{Felt, WORD_SIZE, Word};
 
-use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
-use crate::{ContextId, MemoryAddress};
+use super::INIT_MEM_VALUE;
+use crate::{ContextId, MemoryError};
 
 // MEMORY SEGMENT TRACE
 // ================================================================================================
@@ -18,93 +17,9 @@ use crate::{ContextId, MemoryAddress};
 /// Within each segment, the memory is word-addressable. That is, four field elements are located
 /// at each memory address, and we can read and write elements to/from memory in groups of four.
 #[derive(Debug, Default)]
-pub struct MemorySegmentTrace(BTreeMap<u32, Vec<MemorySegmentAccess>>);
+pub(super) struct MemorySegmentTrace(BTreeMap<u32, Vec<MemorySegmentAccess>>);
 
 impl MemorySegmentTrace {
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the element located at the specified address, or None if the address hasn't been
-    /// accessed previously.
-    ///
-    /// Unlike read() which modifies the memory access trace, this method returns the value at the
-    /// specified address (if one exists) without altering the memory access trace.
-    pub fn get_value(&self, addr: u32) -> Option<Felt> {
-        let (word_addr, addr_idx_in_word) = addr_to_word_addr_and_idx(addr);
-
-        match self.0.get(&word_addr) {
-            Some(addr_trace) => {
-                addr_trace.last().map(|access| access.word()[addr_idx_in_word as usize])
-            },
-            None => None,
-        }
-    }
-
-    /// Returns the word located in memory starting at the specified address, which must be word
-    /// aligned.
-    ///
-    /// # Errors
-    /// - Returns an error if `addr` is not word aligned.
-    pub fn get_word(&self, addr: u32) -> Result<Option<Word>, ()> {
-        if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(());
-        }
-
-        let (word_addr, _) = addr_to_word_addr_and_idx(addr);
-
-        match self.0.get(&word_addr) {
-            Some(addr_trace) => Ok(addr_trace.last().map(MemorySegmentAccess::word)),
-            None => Ok(None),
-        }
-    }
-
-    /// Returns the entire memory state at the beginning of the specified cycle.
-    pub fn get_state_at(&self, clk: RowIndex) -> Vec<(MemoryAddress, Felt)> {
-        let mut result: Vec<(MemoryAddress, Felt)> = Vec::new();
-
-        if clk == 0 {
-            return result;
-        }
-
-        // since we record memory state at the end of a given cycle, to get memory state at the
-        // beginning of a cycle, we need to look at the previous cycle. that is, memory state at the
-        // end of the previous cycle is the same as memory state the the beginning of the current
-        // cycle.
-        let search_clk: u64 = (clk - 1).into();
-
-        for (&addr, addr_trace) in self.0.iter() {
-            match addr_trace
-                .binary_search_by(|access| access.clk().as_canonical_u64().cmp(&search_clk))
-            {
-                Ok(i) => {
-                    let word_addr = addr_trace[i].word();
-                    result.extend([
-                        (MemoryAddress(addr), word_addr[0]),
-                        (MemoryAddress(addr + 1), word_addr[1]),
-                        (MemoryAddress(addr + 2), word_addr[2]),
-                        (MemoryAddress(addr + 3), word_addr[3]),
-                    ]);
-                },
-                Err(i) => {
-                    // Binary search finds the index of the data with the specified clock cycle.
-                    // Decrement the index to get the trace from the previously accessed clock
-                    // cycle to insert into the results.
-                    if i > 0 {
-                        let word_addr = addr_trace[i - 1].word();
-                        result.extend([
-                            (MemoryAddress(addr), word_addr[0]),
-                            (MemoryAddress(addr + 1), word_addr[1]),
-                            (MemoryAddress(addr + 2), word_addr[2]),
-                            (MemoryAddress(addr + 3), word_addr[3]),
-                        ]);
-                    }
-                },
-            }
-        }
-
-        result
-    }
-
     // STATE MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -328,12 +243,6 @@ impl MemorySegmentTrace {
                 }
             },
         }
-    }
-
-    /// Returns the number of words that were accessed at least once.
-    #[cfg(test)]
-    pub(super) fn num_accessed_words(&self) -> usize {
-        self.0.len()
     }
 }
 

@@ -31,8 +31,8 @@ mod sealed {
     #[doc(hidden)]
     pub trait Joinable {}
 
-    impl Joinable for crate::ast::Path {}
-    impl Joinable for crate::ast::PathBuf {}
+    impl Joinable for crate::Path {}
+    impl Joinable for crate::PathBuf {}
 }
 
 impl Join<Path> for Path {

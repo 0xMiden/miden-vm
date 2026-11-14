@@ -10,11 +10,11 @@ use miden_core::{
     deferred::TRUE_DIGEST,
     mast::{BasicBlockNodeBuilder, MastForest},
     operations::{Operation, opcodes},
-    program::{ExecutionClaim, Program, StackOutputs},
+    program::{ExecutionClaim, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, FastProcessor};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 use miden_vm_stark::prover::prove;

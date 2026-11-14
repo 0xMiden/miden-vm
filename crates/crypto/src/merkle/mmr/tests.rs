@@ -2,16 +2,12 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 
-use super::{
-    super::{Eidos, InnerNodeInfo, Word},
-    Mmr, MmrError, MmrPeaks, PartialMmr,
-    full::NodeStore,
-    nodes_from_mask,
-};
+use super::{Mmr, MmrError, MmrPeaks, PartialMmr, full::NodeStore, nodes_from_mask};
 use crate::{
-    hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
+    Word,
+    hash::eidos::{BLOCK_LEN, Eidos, domains::MMR_PEAKS},
     merkle::{
-        MerkleError, MerklePath, MerkleTree, NodeIndex, int_to_node,
+        InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex, int_to_node,
         mmr::{
             InOrderIndex, MmrPath, MmrProof,
             forest::{Forest, TreeSizeIterator, high_bitmask},

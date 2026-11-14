@@ -5,16 +5,19 @@ use std::{
     path::{Path as FsPath, PathBuf},
 };
 
-use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
-use miden_core::serde::Deserializable;
-use miden_mast_package::{Package as MastPackage, SectionId, TargetType};
-use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
+use miden_package_registry::{PackageCache, Version as PackageVersion};
 use miden_project::{
-    Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
+    Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
     ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, ast::Module};
+use crate::{
+    Assembler, Linkage,
+    ast::{Module, ModuleKind},
+    diagnostics::Report,
+    package::{Package as MastPackage, PackageId, SectionId, TargetType},
+    serde::Deserializable,
+};
 
 mod build_provenance;
 mod dependency_graph;
@@ -731,7 +734,7 @@ where
     fn load_canonical_package(
         &self,
         package_id: &PackageId,
-        version: &miden_project::SemVer,
+        version: &crate::package::Version,
     ) -> Result<Option<Arc<MastPackage>>, Report> {
         let Some(record) = self.store.get_by_semver(package_id, version) else {
             return Ok(None);
@@ -742,7 +745,7 @@ where
     fn try_reuse_registered_source_package(
         &self,
         package_id: &PackageId,
-        version: &miden_project::SemVer,
+        version: &crate::package::Version,
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,

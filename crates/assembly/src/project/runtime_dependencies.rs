@@ -1,11 +1,12 @@
 use alloc::{collections::BTreeMap, format, sync::Arc};
 
-use miden_assembly_syntax::diagnostics::Report;
-use miden_mast_package::{Dependency as PackageDependency, Package as MastPackage};
-use miden_package_registry::PackageId;
 use miden_project::Linkage;
 
-use crate::project::ResolvedPackage;
+use crate::{
+    diagnostics::Report,
+    package::{Dependency as PackageDependency, Package as MastPackage, PackageId},
+    project::ResolvedPackage,
+};
 
 // RUNTIME DEPENDENCIES
 // ================================================================================================

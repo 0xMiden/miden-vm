@@ -1,6 +1,8 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::lookup::{LookupAir, ProverLookupBuilder};
-use p3_security::budget::{AirShape, LookupShape};
+use miden_stark::{
+    lookup::{LookupAir, ProverLookupBuilder},
+    security::{AirShape, LookupShape},
+};
 
 use crate::precompiles::{
     ChipletAir,

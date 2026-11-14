@@ -12,11 +12,11 @@ use rand_chacha::ChaCha20Rng;
 
 use super::{
     COLS_PER_SUBTREE, InnerNode, Map, NodeIndex, NodeMutations, PairComputations, SMT_DEPTH,
-    SUBTREE_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, SubtreeLeaf, SubtreeLeavesIter, Word,
+    SUBTREE_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, SubtreeLeaf, SubtreeLeavesIter,
     build_subtree,
 };
 use crate::{
-    EMPTY_WORD, Felt, ONE, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{MerkleError, smt::LeafIndex},
 };
 
@@ -309,7 +309,7 @@ fn test_singlethreaded_subtrees() {
 /// The parallel version of `test_singlethreaded_subtree()`.
 #[test]
 fn test_multithreaded_subtrees() {
-    use p3_maybe_rayon::prelude::*;
+    use crate::parallel::*;
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 64;
     let entries = generate_entries(PAIR_COUNT);
     let control = Smt::with_entries_sequential(entries.clone()).unwrap();

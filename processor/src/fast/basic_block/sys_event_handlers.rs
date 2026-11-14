@@ -13,7 +13,7 @@ use super::deferred_handlers::{
     handle_deferred_export_witness, handle_deferred_register, handle_deferred_register_data,
     handle_deferred_root_to_stack,
 };
-use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
+use crate::{FastProcessor, MemoryError, advice::AdviceError, errors::OperationError};
 
 // SYSTEM EVENT ERROR
 // ================================================================================================
@@ -540,10 +540,12 @@ fn push_transformed_stack_top(
 mod tests {
     use alloc::vec;
 
-    use miden_core::{Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore};
+    use miden_core::{
+        Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore, program::StackInputs,
+    };
 
     use super::*;
-    use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
+    use crate::{ExecutionOptions, FastProcessor};
 
     /// Tests that `insert_compress_into_adv_map` produces the same key as compressing the same
     /// state directly, and stores the two block words (first 8 elements) as the values.

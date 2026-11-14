@@ -6,13 +6,11 @@ mod instructions;
 
 use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::LabeledSpan;
-
 use self::{context::LoweringContext, forms::lower_source_file};
 use crate::{
-    Report, ast,
-    diagnostics::{Diagnostic, Severity, miette, miette::MietteDiagnostic},
+    ast,
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, LabeledSpan, Report, Severity, miette, miette::MietteDiagnostic},
 };
 
 /// User-facing syntax diagnostics produced by the CST-backed parser entry point.

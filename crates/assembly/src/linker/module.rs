@@ -1,7 +1,10 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{cell::Cell, ops::Index};
 
-use miden_assembly_syntax::{
+use miden_core::advice::AdviceMap;
+
+use super::{Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
+use crate::{
     Path,
     ast::{
         ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
@@ -9,8 +12,6 @@ use miden_assembly_syntax::{
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
-
-use super::{AdviceMap, Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
 
 /// The source from which a [LinkModule] was derived.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

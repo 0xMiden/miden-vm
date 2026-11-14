@@ -3,10 +3,10 @@ use core::mem::size_of;
 use sha3::Digest as Sha3Digest;
 
 use super::{
-    Felt, HasherExt,
+    HasherExt,
     digest::{DIGEST256_BYTES, Digest256},
 };
-use crate::field::BasedVectorSpace;
+use crate::{Felt, field::BasedVectorSpace};
 
 #[cfg(test)]
 mod tests;
