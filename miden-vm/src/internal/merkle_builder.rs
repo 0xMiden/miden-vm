@@ -14,9 +14,9 @@ use {
     miden_core::Word,
 };
 use {
-    crate::crypto::merkle::EmptySubtreeRoots,
-    crate::crypto::merkle::MerkleError,
-    crate::crypto::merkle::NodeIndex,
+    miden_core::crypto::merkle::EmptySubtreeRoots,
+    miden_core::crypto::merkle::MerkleError,
+    miden_core::crypto::merkle::NodeIndex,
 };
 
 /// Emits each final parent immediately; an error from `merge` stops construction.

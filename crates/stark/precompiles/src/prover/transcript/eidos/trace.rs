@@ -14,7 +14,7 @@ use {
     miden_core::deferred::EidosFrame,
     miden_core::utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::crypto::hash::Eidos;
 
 use {
     super::compression::layout::BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN,

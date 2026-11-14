@@ -23,8 +23,8 @@ use {
 };
 
 use {
-    super::super::InnerNodeInfo,
-    super::super::MerklePath,
+    crate::merkle::InnerNodeInfo,
+    crate::merkle::MerklePath,
     super::MmrDelta,
     super::MmrError,
     super::MmrPath,

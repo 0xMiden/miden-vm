@@ -38,7 +38,7 @@ use {
     miden_core::ZERO,
     crate::advice::AdviceError,
     crate::continuation_stack::ContinuationStack,
-    crate::crypto::merkle::MerklePath,
+    miden_core::crypto::merkle::MerklePath,
     crate::errors::OperationError,
     miden_core::mast::MastForestId,
     miden_core::mast::MastNodeId,
@@ -2097,7 +2097,7 @@ mod arbitrary_replays {
         miden_core::Felt,
         crate::RowIndex,
         miden_core::Word,
-        crate::crypto::merkle::MerklePath,
+        miden_core::crypto::merkle::MerklePath,
     };
 
     impl Arbitrary for StackOverflowReplay {

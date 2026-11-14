@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use assert_matches::assert_matches;
 
 use {
-    super::super::Eidos,
-    super::super::InnerNodeInfo,
+    crate::hash::eidos::Eidos,
+    crate::merkle::InnerNodeInfo,
     crate::Word,
     super::Mmr,
     super::MmrError,

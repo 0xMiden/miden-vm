@@ -8,7 +8,7 @@ use core::mem::size_of;
 
 use {
     crate::ZERO,
-    miden_crypto::hash::eidos::Eidos,
+    crate::crypto::hash::Eidos,
     miden_crypto::hash::eidos::EidosDomain,
     miden_crypto::hash::eidos::EidosFrame,
 };

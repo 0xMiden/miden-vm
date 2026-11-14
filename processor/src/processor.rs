@@ -11,7 +11,7 @@ use {
     crate::MemoryError,
     miden_core::Word,
     crate::advice::AdviceError,
-    crate::crypto::merkle::MerklePath,
+    miden_core::crypto::merkle::MerklePath,
     crate::errors::OperationError,
 };
 

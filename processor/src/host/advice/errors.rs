@@ -12,7 +12,7 @@ use {
 use {
     miden_core::Felt,
     miden_core::Word,
-    crate::crypto::merkle::MerkleError,
+    miden_core::crypto::merkle::MerkleError,
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]

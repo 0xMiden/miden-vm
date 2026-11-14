@@ -8,7 +8,7 @@ use {
 };
 
 use {
-    super::Eidos,
+    crate::hash::eidos::Eidos,
     super::InnerNodeInfo,
     super::MerkleError,
     super::MerklePath,

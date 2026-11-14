@@ -14,8 +14,8 @@ use {
     miden_core::serde::Serializable,
 };
 use {
-    miden_crypto::hash::keccak::Keccak256,
-    miden_crypto::hash::sha2::Sha256,
+    miden_core::crypto::hash::Keccak256,
+    miden_core::crypto::hash::Sha256,
     miden_crypto::hash::sha2::Sha512,
 };
 use {

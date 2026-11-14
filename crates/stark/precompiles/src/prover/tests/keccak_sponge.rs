@@ -18,7 +18,7 @@ use {
     miden_core::field::PrimeCharacteristicRing,
     miden_core::field::QuadFelt,
 };
-use miden_crypto::hash::keccak::Keccak256;
+use miden_core::crypto::hash::Keccak256;
 use {
     miden_stark::air::BaseAir,
     miden_stark::air::ConstraintDegrees,

@@ -2,7 +2,7 @@ use {
     miden_core::Felt,
     miden_core::Word,
 };
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::crypto::hash::Eidos;
 
 use {
     super::model::low_output,

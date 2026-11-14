@@ -36,7 +36,7 @@ use {
     super::ChipletTraceFragment,
     miden_core::Felt,
     super::HasherState,
-    super::MerklePath,
+    miden_core::crypto::merkle::MerklePath,
     miden_core::ONE,
     miden_core::mast::OpBatch,
     super::RangeChecker,

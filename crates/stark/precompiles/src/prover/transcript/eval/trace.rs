@@ -47,7 +47,7 @@ use {
     miden_core::deferred::fold_deferred_root,
     miden_core::utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::crypto::hash::Eidos;
 use {
     miden_precompiles::CurveId,
     miden_precompiles::CurvePrecompile,

@@ -13,7 +13,7 @@ use {
     miden_core::utils::RowMajorMatrix,
     miden_core::utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::keccak::Keccak256;
+use miden_core::crypto::hash::Keccak256;
 use {
     miden_stark::air::BaseAir,
     miden_stark::air::ConstraintDegrees,

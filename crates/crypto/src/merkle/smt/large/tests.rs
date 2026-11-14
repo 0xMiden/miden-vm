@@ -634,7 +634,7 @@ fn test_insert_batch_large_dataset() {
 
 #[test]
 fn test_flat_layout_index_zero_unused_in_instance() {
-    use crate::merkle::Eidos;
+    use crate::hash::eidos::Eidos;
 
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::<_>::new(storage).unwrap();
@@ -664,7 +664,7 @@ fn test_flat_layout_index_zero_unused_in_instance() {
 #[test]
 fn test_flat_layout_after_insertion() {
     use {
-        crate::merkle::Eidos,
+        crate::hash::eidos::Eidos,
         crate::merkle::EmptySubtreeRoots,
     };
 
@@ -703,7 +703,7 @@ fn test_flat_layout_after_insertion() {
 #[test]
 fn test_flat_layout_children_relationship() {
     use {
-        crate::merkle::Eidos,
+        crate::hash::eidos::Eidos,
         crate::merkle::EmptySubtreeRoots,
         crate::merkle::NodeIndex,
     };

@@ -465,7 +465,7 @@ mod tests {
             miden_core::serde::Deserializable,
             miden_core::serde::Serializable,
         };
-        use miden_crypto::hash::blake::Blake3_256;
+        use miden_core::crypto::hash::Blake3_256;
 
         let vm = VmProof::read_from_bytes(include_bytes!("../../tests/fixtures/vm_eidos_v1_0.bin"))
             .expect("valid VM proof fixture encoding");

@@ -244,7 +244,7 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::eidos::Eidos;
+    use crate::crypto::hash::Eidos;
 
     use super::*;
 

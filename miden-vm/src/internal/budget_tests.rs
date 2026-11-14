@@ -10,10 +10,10 @@ use {
 
 use super::*;
 use {
-    crate::crypto::merkle::MerkleStore,
-    crate::crypto::merkle::MerkleTree,
-    crate::crypto::merkle::PartialMerkleTree,
-    crate::crypto::merkle::SimpleSmt,
+    miden_core::crypto::merkle::MerkleStore,
+    miden_core::crypto::merkle::MerkleTree,
+    miden_core::crypto::merkle::PartialMerkleTree,
+    miden_core::crypto::merkle::SimpleSmt,
 };
 
 // Keep an independent full-tree oracle for the streamed construction path.
@@ -157,8 +157,8 @@ fn right_edge_depth_64_partition() -> Vec<((u8, u64), String)> {
 #[test]
 fn witness_and_legacy_trees_share_the_same_budget() {
     use {
-        crate::crypto::merkle::PartialSmt,
-        crate::crypto::merkle::Smt,
+        miden_core::crypto::merkle::PartialSmt,
+        miden_core::crypto::merkle::Smt,
         miden_core::serde::Serializable,
     };
 

@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use {
     crate::Word as Digest,
-    miden_crypto::hash::eidos::Eidos,
+    crate::crypto::hash::Eidos,
     miden_crypto::hash::eidos::EidosDomain,
     miden_crypto::hash::eidos::FeltSequence,
 };

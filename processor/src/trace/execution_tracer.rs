@@ -62,7 +62,7 @@ use {
     miden_core::ZERO,
     crate::continuation_stack::Continuation,
     crate::continuation_stack::ContinuationStack,
-    crate::crypto::merkle::MerklePath,
+    miden_core::crypto::merkle::MerklePath,
     miden_core::mast::BasicBlockNode,
     miden_core::mast::JoinNode,
     miden_core::mast::LoopNode,

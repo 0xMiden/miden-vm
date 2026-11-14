@@ -16,7 +16,7 @@ use {
     miden_core::utils::Matrix,
     miden_core::utils::RowMajorMatrix,
 };
-use miden_crypto::hash::sha2::Sha256;
+use miden_core::crypto::hash::Sha256;
 use {
     miden_stark::air::BaseAir,
     miden_stark::air::LiftedAir,

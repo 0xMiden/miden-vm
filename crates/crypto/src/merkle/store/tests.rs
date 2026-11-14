@@ -11,7 +11,7 @@ use {
 };
 
 use {
-    super::Eidos,
+    crate::hash::eidos::Eidos,
     super::EmptySubtreeRoots,
     super::MerkleError,
     super::MerklePath,

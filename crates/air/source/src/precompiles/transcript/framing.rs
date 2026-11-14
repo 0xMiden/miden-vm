@@ -6,7 +6,7 @@ use {
     miden_core::Felt,
     miden_core::field::PrimeCharacteristicRing,
 };
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::crypto::hash::Eidos;
 
 /// Derives a symbolic packed initial CV from `(domain_tag, param0, param1, param2)`.
 pub(crate) fn initial_cv_from_frame<E>(frame: [E; 4]) -> [E; 4]

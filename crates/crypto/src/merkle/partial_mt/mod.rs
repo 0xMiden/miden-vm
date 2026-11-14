@@ -8,7 +8,7 @@ use core::fmt;
 
 use {
     crate::EMPTY_WORD,
-    super::Eidos,
+    crate::hash::eidos::Eidos,
     super::InnerNodeInfo,
     super::MerkleError,
     super::MerklePath,
