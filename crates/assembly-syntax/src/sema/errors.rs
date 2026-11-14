@@ -9,8 +9,8 @@ use {
 use core::fmt;
 
 use {
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceSpan,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceSpan,
 };
 use {
     miden_utils_diagnostics::Diagnostic,

@@ -3,8 +3,8 @@ use core::ops::Range;
 use {
     miden_core::Felt,
     miden_assembly_syntax::ast::Immediate,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::parser::ParsingError,
     miden_assembly_syntax::parser::WordValue,

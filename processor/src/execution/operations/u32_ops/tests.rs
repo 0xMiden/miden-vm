@@ -5,7 +5,7 @@ use {
 
 use {
     miden_assembly::Assembler,
-    miden_assembly::DefaultSourceManager,
+    miden_debug_types::DefaultSourceManager,
 };
 use {
     miden_core::Felt,

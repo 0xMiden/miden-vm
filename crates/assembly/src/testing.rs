@@ -14,8 +14,8 @@ use {
     miden_assembly_syntax::Path,
     miden_assembly_syntax::ast::Module,
     miden_assembly_syntax::ast::ModuleKind,
-    miden_assembly_syntax::debuginfo::DefaultSourceManager,
-    miden_assembly_syntax::debuginfo::SourceManager,
+    crate::debuginfo::DefaultSourceManager,
+    crate::debuginfo::SourceManager,
     miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::diagnostics::reporting::ReportHandlerOpts,
     miden_assembly_syntax::diagnostics::reporting::set_hook,
@@ -31,7 +31,7 @@ pub use {
 #[cfg(feature = "testing")]
 use {
     miden_assembly_syntax::ast::Form,
-    miden_assembly_syntax::debuginfo::SourceFile,
+    crate::debuginfo::SourceFile,
 };
 use miden_core::program::Program;
 use miden_mast_package::PackageId;

@@ -12,7 +12,7 @@ use {
     miden_assembly_syntax::debuginfo::SourceId,
     miden_assembly_syntax::debuginfo::SourceSpan,
     miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Uri,
+    crate::Uri,
 };
 
 /// This type is used to represent package information which may be inherited within a workspace.

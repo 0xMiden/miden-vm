@@ -17,7 +17,7 @@ use {
     miden_assembly_syntax_cst::ast::WhileOp as CstWhileOp,
     miden_assembly_syntax_cst::rowan,
 };
-use miden_debug_types::SourceSpan;
+use crate::debuginfo::SourceSpan;
 
 use {
     super::context::LoweringContext,

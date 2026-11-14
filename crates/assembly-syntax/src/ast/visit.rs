@@ -52,7 +52,7 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_debug_types::Span;
+use crate::debuginfo::Span;
 
 use super::immediate::ErrorMsg;
 use {

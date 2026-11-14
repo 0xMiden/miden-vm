@@ -6,8 +6,8 @@ use {
 };
 
 use {
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceManager,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceManager,
 };
 
 use {

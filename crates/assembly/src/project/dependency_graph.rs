@@ -36,7 +36,7 @@ use {
     super::SourceProviderRegistry,
     super::providers::TargetAssemblyContext,
 };
-use crate::SourceManager;
+use crate::debuginfo::SourceManager;
 
 // DEPENDENCY GRAPH
 // ================================================================================================

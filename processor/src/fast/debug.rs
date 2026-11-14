@@ -648,7 +648,7 @@ mod tests {
 
     use {
         miden_assembly::Assembler,
-        miden_assembly::DefaultSourceManager,
+        miden_debug_types::DefaultSourceManager,
     };
     use miden_core::serde::Serializable;
     use miden_mast_package::debug_info::PackageDebugInfoBuilder;

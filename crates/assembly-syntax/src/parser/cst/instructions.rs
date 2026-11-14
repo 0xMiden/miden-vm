@@ -13,8 +13,8 @@ use {
     miden_assembly_syntax_cst::rowan,
 };
 use {
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
 };
 
 use {

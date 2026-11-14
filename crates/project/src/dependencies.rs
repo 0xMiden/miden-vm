@@ -15,8 +15,8 @@ pub use self::graph::*;
 use {
     crate::Diagnostic,
     crate::Linkage,
-    crate::SourceSpan,
-    crate::Span,
+    miden_assembly_syntax::debuginfo::SourceSpan,
+    miden_assembly_syntax::debuginfo::Span,
     crate::Uri,
     crate::VersionReq,
     crate::VersionRequirement,

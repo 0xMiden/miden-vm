@@ -13,10 +13,10 @@ use {
 };
 
 use {
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceLanguage,
-    miden_debug_types::SourceManager,
-    miden_debug_types::Uri,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceLanguage,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::Uri,
 };
 use {
     miden_utils_diagnostics::IntoDiagnostic,
@@ -138,7 +138,7 @@ impl ModuleParser {
     where
         P: AsRef<std::path::Path>,
     {
-        use miden_debug_types::SourceManagerExt;
+        use crate::debuginfo::SourceManagerExt;
         use {
             miden_utils_diagnostics::IntoDiagnostic,
             miden_utils_diagnostics::WrapErr,
@@ -159,7 +159,7 @@ impl ModuleParser {
         source: impl ToString,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
-        use miden_debug_types::SourceContent;
+        use crate::debuginfo::SourceContent;
 
         let source = source.to_string();
         let source_file = match path {
@@ -299,8 +299,8 @@ where
     F: FnMut(Box<ast::Module>) -> Result<(), Report>,
 {
     use {
-        miden_debug_types::Spanned,
-        miden_debug_types::Uri,
+        crate::debuginfo::Spanned,
+        crate::debuginfo::Uri,
     };
 
     struct ModuleEntry {

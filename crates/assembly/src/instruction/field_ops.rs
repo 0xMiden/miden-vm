@@ -1,8 +1,8 @@
 use {
     miden_core::Felt,
     miden_assembly_syntax::ParsingError,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
     miden_assembly_syntax::diagnostics::RelatedError,
     miden_assembly_syntax::diagnostics::RelatedLabel,
     miden_assembly_syntax::diagnostics::Report,

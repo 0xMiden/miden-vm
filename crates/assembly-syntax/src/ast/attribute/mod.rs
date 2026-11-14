@@ -11,8 +11,8 @@ use {
     miden_core::serde::Serializable,
 };
 use {
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Spanned,
 };
 
 pub use {

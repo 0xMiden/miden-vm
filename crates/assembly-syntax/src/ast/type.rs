@@ -6,10 +6,10 @@ use {
 };
 
 use {
-    miden_debug_types::SourceManager,
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 use {
     midenc_hir_type::AddressSpace,
@@ -1313,11 +1313,11 @@ mod tests {
     use core::str::FromStr;
 
     use {
-        miden_debug_types::DefaultSourceManager,
-        miden_debug_types::SourceFile,
-        miden_debug_types::SourceId,
-        miden_debug_types::SourceLanguage,
-        miden_debug_types::Uri,
+        crate::debuginfo::DefaultSourceManager,
+        crate::debuginfo::SourceFile,
+        crate::debuginfo::SourceId,
+        crate::debuginfo::SourceLanguage,
+        crate::debuginfo::Uri,
     };
 
     use super::*;

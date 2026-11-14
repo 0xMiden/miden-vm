@@ -49,8 +49,8 @@ use miden_project::Linkage;
 use {
     crate::Assembler,
     crate::PathBuf,
-    crate::SourceSpan,
-    crate::Span,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
     crate::assembler::MAX_PROC_LOCALS,
     crate::ast::Block,
     crate::ast::Instruction,

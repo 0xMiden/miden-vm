@@ -3,7 +3,7 @@ mod masm;
 use alloc::borrow::Cow;
 use core::ops::ControlFlow;
 
-use miden_assembly_syntax::debuginfo::SourceManager;
+use crate::debuginfo::SourceManager;
 use miden_package_registry::PackageRegistryAndProvider;
 use miden_project::ProjectDependencyGraph;
 

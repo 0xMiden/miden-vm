@@ -24,9 +24,9 @@ use {
     miden_core::field::PrimeField64,
 };
 use {
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
-    miden_debug_types::Spanned,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
 };
 
 use {
@@ -1560,10 +1560,10 @@ mod tests {
         miden_assembly_syntax_cst::parse_source_file,
     };
     use {
-        miden_debug_types::SourceFile,
-        miden_debug_types::SourceId,
-        miden_debug_types::SourceLanguage,
-        miden_debug_types::Uri,
+        crate::debuginfo::SourceFile,
+        crate::debuginfo::SourceId,
+        crate::debuginfo::SourceLanguage,
+        crate::debuginfo::Uri,
     };
     use pretty_assertions::assert_eq;
 
@@ -1614,22 +1614,22 @@ end
             ast::FunctionType::new(
                 ast::types::CallConv::Fast,
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                         ast::types::Type::Felt
                     )),
                     ast::TypeExpr::Ptr(
                         ast::PointerType::new(ast::TypeExpr::Primitive(
-                            miden_debug_types::Span::unknown(ast::types::Type::U8),
+                            crate::debuginfo::Span::unknown(ast::types::Type::U8),
                         ))
                         .with_address_space(ast::types::AddressSpace::Byte),
                     ),
                 ],
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                         ast::types::Type::I1
                     )),
                     ast::TypeExpr::Array(ast::ArrayType::new(
-                        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                             ast::types::Type::U32
                         )),
                         4,
@@ -1661,11 +1661,11 @@ end
     }
 
     fn variadic() -> ast::TypeExpr {
-        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Variadic))
+        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::Variadic))
     }
 
     fn felt() -> ast::TypeExpr {
-        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Felt))
+        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::Felt))
     }
 
     #[test]
@@ -1769,18 +1769,18 @@ end
                 None,
                 [
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: crate::debuginfo::SourceSpan::UNKNOWN,
                         name: ast::Ident::new("x").unwrap(),
-                        ty: ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ty: ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                             ast::types::Type::U32,
                         )),
                     },
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: crate::debuginfo::SourceSpan::UNKNOWN,
                         name: ast::Ident::new("y").unwrap(),
                         ty: ast::TypeExpr::Ptr(
                             ast::PointerType::new(ast::TypeExpr::Primitive(
-                                miden_debug_types::Span::unknown(ast::types::Type::U8),
+                                crate::debuginfo::Span::unknown(ast::types::Type::U8),
                             ))
                             .with_address_space(ast::types::AddressSpace::Byte),
                         ),
@@ -1892,7 +1892,7 @@ end
     #[test]
     fn mast_root_literal_matches_word_to_hex_byte_order() {
         use miden_core::Felt;
-        use miden_debug_types::SourceSpan;
+        use crate::debuginfo::SourceSpan;
 
         use crate::parser::WordValue;
 

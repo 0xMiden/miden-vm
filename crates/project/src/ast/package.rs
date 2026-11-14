@@ -17,8 +17,8 @@ use {
     crate::MetadataSet,
     crate::RelatedLabel,
     crate::SemVer,
-    crate::SourceId,
-    crate::Span,
+    miden_assembly_syntax::debuginfo::SourceId,
+    miden_assembly_syntax::debuginfo::Span,
     crate::Uri,
 };
 
@@ -88,7 +88,7 @@ mod semver_serde {
     use {
         super::MaybeInherit,
         super::SemVer,
-        super::Span,
+        miden_assembly_syntax::debuginfo::Span,
     };
 
     pub fn serialize<S>(

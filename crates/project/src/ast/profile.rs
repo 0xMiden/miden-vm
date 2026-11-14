@@ -9,8 +9,8 @@ use {
 use super::parsing::SetSourceId;
 use {
     crate::Metadata,
-    crate::SourceId,
-    crate::Span,
+    miden_assembly_syntax::debuginfo::SourceId,
+    miden_assembly_syntax::debuginfo::Span,
 };
 
 /// Represents configuration options for a specific build profile, e.g. `release`

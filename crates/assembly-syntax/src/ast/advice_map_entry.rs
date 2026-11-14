@@ -4,8 +4,8 @@ use {
 };
 
 use {
-    miden_debug_types::SourceSpan,
-    miden_debug_types::Span,
+    crate::debuginfo::SourceSpan,
+    crate::debuginfo::Span,
 };
 
 use super::DocString;

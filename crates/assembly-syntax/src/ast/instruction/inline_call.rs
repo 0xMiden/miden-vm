@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_debug_types::FileLineCol;
+use crate::debuginfo::FileLineCol;
 #[cfg(feature = "serde")]
 use {
     serde::Deserialize,

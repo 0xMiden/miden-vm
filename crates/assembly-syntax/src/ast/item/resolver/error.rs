@@ -4,9 +4,9 @@
 use alloc::sync::Arc;
 
 use {
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceManager,
-    miden_debug_types::SourceSpan,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceManager,
+    crate::debuginfo::SourceSpan,
 };
 
 use {

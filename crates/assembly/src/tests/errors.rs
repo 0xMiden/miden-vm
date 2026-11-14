@@ -75,8 +75,8 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
         miden_assembly_syntax::ast::Op,
         miden_assembly_syntax::ast::types::ArrayType,
         miden_assembly_syntax::ast::types::Type,
-        miden_assembly_syntax::debuginfo::SourceSpan,
-        miden_assembly_syntax::debuginfo::Span,
+        crate::debuginfo::SourceSpan,
+        crate::debuginfo::Span,
     };
 
     let context = TestContext::default();

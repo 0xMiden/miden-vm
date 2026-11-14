@@ -1,8 +1,8 @@
 use {
     miden_assembly_syntax::ast::ImmU16,
     miden_assembly_syntax::ast::Instruction,
-    miden_assembly_syntax::debuginfo::Span,
-    miden_assembly_syntax::debuginfo::Spanned,
+    crate::debuginfo::Span,
+    crate::debuginfo::Spanned,
     miden_assembly_syntax::diagnostics::RelatedLabel,
     miden_assembly_syntax::diagnostics::Report,
     miden_assembly_syntax::parser::IntValue,

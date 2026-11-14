@@ -5,10 +5,10 @@ use {
 use core::assert_matches;
 
 use {
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceId,
-    miden_debug_types::SourceLanguage,
-    miden_debug_types::Uri,
+    crate::debuginfo::SourceFile,
+    crate::debuginfo::SourceId,
+    crate::debuginfo::SourceLanguage,
+    crate::debuginfo::Uri,
 };
 
 use super::*;
@@ -1391,7 +1391,7 @@ fn parse_package_visibility_on_all_declarations() {
 #[test]
 fn package_visibility_survives_ast_roundtrip() {
     let source = "namespace root\npub(package) mod api\npub(package) use {helper} from self::api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) proc entry nop end\n";
-    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let source_manager = Arc::new(crate::debuginfo::DefaultSourceManager::default());
     let module = ModuleParser::new(Some(ast::ModuleKind::Library))
         .parse_str(None, source, source_manager.clone())
         .expect("package visibility should parse");

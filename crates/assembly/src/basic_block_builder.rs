@@ -10,8 +10,8 @@ use {
     miden_assembly_syntax::ast::DebugInlineCallInfo,
     miden_assembly_syntax::ast::DebugVarInfo,
     miden_assembly_syntax::ast::Instruction,
-    miden_assembly_syntax::debuginfo::Location,
-    miden_assembly_syntax::debuginfo::Span,
+    crate::debuginfo::Location,
+    crate::debuginfo::Span,
     miden_assembly_syntax::diagnostics::Report,
 };
 use {
@@ -303,7 +303,7 @@ impl BasicBlockBuilder<'_> {
     pub fn push_debug_inline_call(
         &mut self,
         inline_call: &DebugInlineCallInfo,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
+        source_manager: &dyn crate::debuginfo::SourceManager,
     ) {
         let Some(call_site_span) =
             source_manager.file_line_col_to_span(inline_call.call_site().clone())

@@ -17,7 +17,7 @@ use {
     miden_core::serde::Serializable,
     miden_core::serde::read_bounded_len,
 };
-use miden_debug_types::Location;
+use crate::debuginfo::Location;
 #[cfg(feature = "serde")]
 use {
     serde::Deserialize,
@@ -700,8 +700,8 @@ mod tests {
         miden_core::serde::SliceReader,
     };
     use {
-        miden_debug_types::ByteIndex,
-        miden_debug_types::Uri,
+        crate::debuginfo::ByteIndex,
+        crate::debuginfo::Uri,
     };
 
     use super::*;

@@ -7,8 +7,8 @@ use {
 
 use {
     miden_assembly_syntax::ast::DebugInlineCallInfo,
-    miden_assembly_syntax::debuginfo::FileLineCol,
-    miden_assembly_syntax::debuginfo::SourceManager,
+    crate::debuginfo::FileLineCol,
+    crate::debuginfo::SourceManager,
 };
 use {
     miden_core::Felt,
@@ -1805,11 +1805,11 @@ mod tests {
     use {
         miden_assembly_syntax::ast::DebugVarInfo,
         miden_assembly_syntax::ast::DebugVarLocation,
-        miden_assembly_syntax::debuginfo::ByteIndex,
-        miden_assembly_syntax::debuginfo::ColumnNumber,
-        miden_assembly_syntax::debuginfo::LineNumber,
-        miden_assembly_syntax::debuginfo::Location,
-        miden_assembly_syntax::debuginfo::Uri,
+        crate::debuginfo::ByteIndex,
+        crate::debuginfo::ColumnNumber,
+        crate::debuginfo::LineNumber,
+        crate::debuginfo::Location,
+        crate::debuginfo::Uri,
     };
     use {
         crate::mast::MastNodeBuilder,
