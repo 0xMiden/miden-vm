@@ -13,71 +13,48 @@
 //!    construction over a real matrix, and the dense `LookupFractions` buffer all line up.
 //! 4. **Constraint agreement**: the trace and its prover-built auxiliary columns satisfy the AIR.
 
-use {
-    alloc::boxed::Box,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, vec::Vec};
 use core::borrow::BorrowMut;
 use std::collections::HashMap;
 
-use {
-    miden_air::vm::MidenMultiAir,
-    miden_air::vm::config,
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_definitions::vm::{
+    AeadStreamCols, ControllerCols, MidenAir, VmTrace,
+    logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
+    trace::{
+        CHIPLETS_WIDTH, RowIndex,
+        and8_lookup::{
+            AND8_TABLE_ROWS, BYTE_PAIR_RELATION_COUNT, BytePairRelation, NUM_AND8_LOOKUP_COLS,
+            RANGE_CHECK_LOOKUP_COL,
+        },
+        eidos_compression::{
+            EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
+            NUM_EIDOS_COMPRESSION_COLS,
+        },
+    },
 };
-use {
-    miden_air_definitions::vm::AeadStreamCols,
-    miden_air_definitions::vm::ControllerCols,
-    miden_air_definitions::vm::MidenAir,
-    miden_air_definitions::vm::logup::BusId,
-    miden_air_definitions::vm::logup::HasherCompressionLinkMsg,
-    miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
-    miden_air_definitions::vm::trace::CHIPLETS_WIDTH,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::and8_lookup::AND8_TABLE_ROWS,
-    miden_air_definitions::vm::trace::and8_lookup::BYTE_PAIR_RELATION_COUNT,
-    miden_air_definitions::vm::trace::and8_lookup::BytePairRelation,
-    miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
-    miden_air_definitions::vm::trace::and8_lookup::RANGE_CHECK_LOOKUP_COL,
-    miden_air_definitions::vm::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
-    miden_air_definitions::vm::trace::eidos_compression::F_COMPRESSION_MULTIPLICITY_COL,
-    miden_air_definitions::vm::trace::eidos_compression::F_MODE_COL,
-    miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    crypto::{
+        hash::Eidos,
+        merkle::{MerkleStore, MerkleTree},
+    },
+    field::{PrimeCharacteristicRing, QuadFelt},
+    operations::Operation,
+    program::StackInputs,
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_core::Word,
-    miden_core::crypto::hash::Eidos,
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::MerkleTree,
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::field::QuadFelt,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
-};
-use {
-    miden_stark::StarkConfig,
-    miden_stark::air::BaseAir,
-    miden_stark::air::ProverStatement,
-    miden_stark::air::Statement,
-    miden_stark::debug,
-    miden_stark::lookup::Challenges,
-    miden_stark::lookup::LookupFractions,
-    miden_stark::lookup::LookupMessage,
-    miden_stark::lookup::accumulate,
-    miden_stark::lookup::build_lookup_fractions,
+use miden_stark::{
+    StarkConfig,
+    air::{BaseAir, ProverStatement, Statement},
+    debug,
+    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
 };
 use miden_vm_stark::setup::config::eidos_config;
 
-use {
-    miden_core::Felt,
-    miden_air_definitions::vm::VmTrace,
-    super::build_trace_from_ops,
-    super::build_trace_from_ops_with_inputs,
-    super::lookup_harness::InteractionLog,
-};
-use {
-    miden_core::advice::AdviceInputs,
-    miden_core::program::StackInputs,
-    miden_core::operations::Operation,
+use super::{
+    build_trace_from_ops, build_trace_from_ops_with_inputs, lookup_harness::InteractionLog,
 };
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;

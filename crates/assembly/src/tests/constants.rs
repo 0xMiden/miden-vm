@@ -187,10 +187,7 @@ fn ancestor_module_alias_keeps_local_constant_live() -> TestResult {
         },
         _ => None,
     });
-    assert_eq!(
-        value,
-        Some(&crate::ast::ConstantValue::Int(Span::unknown(7u8.into())))
-    );
+    assert_eq!(value, Some(&crate::ast::ConstantValue::Int(Span::unknown(7u8.into()))));
     Ok(())
 }
 

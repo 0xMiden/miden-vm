@@ -1,26 +1,14 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceSpan,
-};
-use {
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::miette,
-};
-
-use {
-    crate::Path,
-    crate::ast::SymbolResolutionError,
-    crate::ast::constants::ConstEvalError,
+use crate::{
+    Path,
+    ast::{SymbolResolutionError, constants::ConstEvalError},
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, miette},
 };
 
 /// The high-level error type for all semantic analysis errors.
@@ -96,7 +84,10 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
     },
     #[error("invalid namespace '{path}': {err}")]
-    InvalidNamespacePath { path: Arc<Path>, err: crate::ast::PathError },
+    InvalidNamespacePath {
+        path: Arc<Path>,
+        err: crate::ast::PathError,
+    },
     #[error("invalid namespace declaration: must be placed before any other item in the module")]
     MisplacedNamespaceDeclaration {
         #[label("make sure this declaration precedes other declarations in this module")]

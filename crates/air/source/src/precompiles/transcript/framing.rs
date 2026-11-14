@@ -2,11 +2,7 @@
 
 use core::array;
 
-use {
-    miden_core::Felt,
-    miden_core::field::PrimeCharacteristicRing,
-};
-use miden_core::crypto::hash::Eidos;
+use miden_core::{Felt, crypto::hash::Eidos, field::PrimeCharacteristicRing};
 
 /// Derives a symbolic packed initial CV from `(domain_tag, param0, param1, param2)`.
 pub(crate) fn initial_cv_from_frame<E>(frame: [E; 4]) -> [E; 4]
@@ -19,11 +15,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_core::deferred::DEFERRED_AND_FRAME,
-        miden_core::deferred::EidosFrame,
-        miden_core::deferred::deferred_chunks_frame,
-    };
+    use miden_core::deferred::{DEFERRED_AND_FRAME, EidosFrame, deferred_chunks_frame};
 
     use super::initial_cv_from_frame;
 

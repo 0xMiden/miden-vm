@@ -1,41 +1,22 @@
 use alloc::vec::Vec;
 use core::mem;
 
-use crate::parallel::*;
-
-use {
-    super::CONSTRUCTION_SUBTREE_BATCH_SIZE,
-    super::IN_MEMORY_DEPTH,
-    super::LargeSmt,
-    super::LargeSmtError,
-    super::NUM_IN_MEMORY_NODES,
-    super::ROOT_MEMORY_INDEX,
-    super::SMT_DEPTH,
-    super::SmtStorage,
-    super::SmtStorageReader,
-    super::StorageError,
-    super::Subtree,
+use super::{
+    CONSTRUCTION_SUBTREE_BATCH_SIZE, IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, NUM_IN_MEMORY_NODES,
+    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, SmtStorageReader, StorageError, Subtree,
 };
-use {
-    crate::EMPTY_WORD,
-    crate::Word,
-    crate::hash::eidos::Eidos,
-    crate::merkle::smt::EmptySubtreeRoots,
-    crate::merkle::smt::InnerNode,
-    crate::merkle::smt::Map,
-    crate::merkle::smt::MerkleError,
-    crate::merkle::smt::NodeIndex,
-    crate::merkle::smt::Smt,
-    crate::merkle::smt::SmtLeaf,
-    crate::merkle::smt::SparseMerkleTree,
-    crate::merkle::smt::SparseMerkleTreeReader,
-    crate::merkle::smt::full::concurrent::PairComputations,
-    crate::merkle::smt::full::concurrent::SUBTREE_DEPTH,
-    crate::merkle::smt::full::concurrent::SubtreeLeaf,
-    crate::merkle::smt::full::concurrent::SubtreeLeavesIter,
-    crate::merkle::smt::full::concurrent::build_subtree,
-    crate::merkle::smt::large::LargeSmtResult,
-    crate::merkle::smt::large::to_memory_index,
+use crate::{
+    EMPTY_WORD, Word,
+    hash::eidos::Eidos,
+    merkle::smt::{
+        EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
+        SparseMerkleTreeReader,
+        full::concurrent::{
+            PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
+        },
+        large::{LargeSmtResult, to_memory_index},
+    },
+    parallel::*,
 };
 
 // CONSTRUCTION

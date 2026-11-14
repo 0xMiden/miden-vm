@@ -1,36 +1,21 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
 };
 
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceInputs,
-    miden_core::advice::AdviceMap,
-    miden_core::advice::AdviceStack,
-    miden_core::chiplets::hasher,
-    miden_core::crypto::merkle::InnerNodeInfo,
-    miden_core::crypto::merkle::MerkleError,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::NodeIndex,
+use miden_core::{
+    Felt, Word,
+    advice::{AdviceInputs, AdviceMap, AdviceStack},
+    chiplets::hasher,
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
 };
 #[cfg(test)]
-use {
-    miden_core::crypto::hash::Blake3_256,
-    miden_core::serde::Serializable,
-};
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
 
-use {
-    crate::ExecutionOptions,
-    crate::advice::AdviceMutation,
-    crate::processor::AdviceProviderInterface,
-};
+use crate::{ExecutionOptions, advice::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
 // ================================================================================================
@@ -789,26 +774,17 @@ impl AdviceProviderInterface for AdviceProvider {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::collections::BTreeMap,
-        alloc::vec,
-        alloc::vec::Vec,
+    use alloc::{collections::BTreeMap, vec, vec::Vec};
+
+    use miden_core::{
+        Felt, WORD_SIZE, Word,
+        advice::{AdviceInputs, AdviceMap, AdviceStack},
+        crypto::merkle::{MerkleStore, MerkleTree},
     };
 
-    use miden_core::WORD_SIZE;
-
-    use crate::advice::AdviceProvider;
-    use {
-        miden_core::advice::AdviceInputs,
-        crate::ExecutionOptions,
-        miden_core::Felt,
-        miden_core::Word,
-        crate::advice::AdviceError,
-        miden_core::advice::AdviceMap,
-        crate::advice::AdviceMutation,
-        miden_core::advice::AdviceStack,
-        miden_core::crypto::merkle::MerkleStore,
-        miden_core::crypto::merkle::MerkleTree,
+    use crate::{
+        ExecutionOptions,
+        advice::{AdviceError, AdviceMutation, AdviceProvider},
     };
 
     fn make_leaf(seed: u64) -> Word {

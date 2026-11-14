@@ -1,26 +1,14 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-};
-use {
-    core::cell::Cell,
-    core::cell::RefCell,
-};
+use alloc::{boxed::Box, sync::Arc};
+use core::cell::{Cell, RefCell};
 
-use {
-    crate::Path,
-    crate::ast,
-    crate::ast::GlobalItemIndex,
-    crate::ast::Ident,
-    crate::ast::ImportKind,
-    crate::ast::Visibility,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    miden_assembly_syntax::module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 
 use super::LinkStatus;
+use crate::{
+    Path, ast,
+    ast::{GlobalItemIndex, Ident, ImportKind, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
+};
 
 /// A [Symbol] is a named, linkable item defined within a module.
 #[derive(Debug, Clone)]

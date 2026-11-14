@@ -1,17 +1,10 @@
 use alloc::vec::Vec;
 use core::panic::Location;
 
-use {
-    crate::advice::AdviceMap,
-    super::MastForest,
-    super::MastForestError,
-    super::serialization,
-};
-use {
-    crate::serde::BudgetedReader,
-    crate::serde::ByteReader,
-    crate::serde::DeserializationError,
-    crate::serde::SliceReader,
+use super::{MastForest, MastForestError, serialization};
+use crate::{
+    advice::AdviceMap,
+    serde::{BudgetedReader, ByteReader, DeserializationError, SliceReader},
 };
 
 /// A [`MastForest`] deserialized from untrusted input that has not yet been validated.

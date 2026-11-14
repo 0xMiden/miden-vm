@@ -1,19 +1,10 @@
 #[cfg(all(feature = "std", feature = "serde"))]
-use {
-    std::string::String,
-    std::string::ToString,
-};
+use std::string::{String, ToString};
 #[cfg(feature = "std")]
-use {
-    std::boxed::Box,
-    std::path::Path,
-};
+use std::{boxed::Box, path::Path};
 
 #[cfg(all(feature = "std", feature = "serde"))]
-use {
-    miden_assembly_syntax::debuginfo::SourceManager,
-    miden_assembly_syntax::diagnostics::Label,
-};
+use miden_assembly_syntax::{debuginfo::SourceManager, diagnostics::Label};
 
 use crate::*;
 

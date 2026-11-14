@@ -1,10 +1,5 @@
-use {
-    miden_package_registry::InvalidVersionError,
-    miden_package_registry::SemVer,
-    miden_package_registry::SemVerError,
-    miden_package_registry::Version,
-    miden_package_registry::VersionReq,
-    miden_package_registry::VersionRequirement,
+use miden_package_registry::{
+    InvalidVersionError, SemVer, SemVerError, Version, VersionReq, VersionRequirement,
 };
 
 #[test]

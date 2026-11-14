@@ -3,98 +3,49 @@ pub(super) mod debuginfo;
 pub(crate) mod error;
 mod product;
 
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    miden_assembly_syntax::ExportedTypeUse,
-    miden_assembly_syntax::MAX_CONTROL_FLOW_NESTING,
-    miden_assembly_syntax::MAX_REPEAT_COUNT,
-    miden_assembly_syntax::Parse,
-    miden_assembly_syntax::SemanticAnalysisError,
-    crate::ast,
-    crate::ast::AttributeSet,
-    crate::ast::Ident,
-    crate::ast::InvocationTarget,
-    crate::ast::InvokeKind,
-    crate::ast::ItemIndex,
-    crate::ast::ModuleKind,
-    crate::ast::SymbolResolution,
-    crate::ast::Visibility,
-    crate::ast::types::FunctionType,
-    crate::debuginfo::DefaultSourceManager,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::RelatedLabel,
-    crate::diagnostics::Report,
-    miden_assembly_syntax::module::ItemInfo,
+use miden_assembly_syntax::{
+    ExportedTypeUse, MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
+    module::ItemInfo,
 };
-use {
-    miden_core::WORD_SIZE,
-    miden_core::Word,
-    crate::mast::MastNodeExt,
-    crate::mast::MastNodeId,
-    miden_core::operations::AssemblyOp,
-    miden_core::operations::Operation,
-    miden_core::program::KernelDescriptor,
-    crate::serde::Serializable,
-};
-use {
-    crate::package::ConstantExport,
-    crate::package::Package,
-    crate::package::PackageDebugInfoError,
-    crate::package::PackageExport,
-    crate::package::PackageId,
-    crate::package::PackageModule,
-    crate::package::PackageSubmodule,
-    crate::package::ProcedureExport,
-    crate::package::Section,
-    crate::package::SectionId,
-    crate::package::TypeExport,
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugSourceNodeId,
-    crate::package::debug_info::PackageDebugInfo,
-};
-use {
-    crate::Linkage,
-    crate::package::TargetType,
+use miden_core::{
+    WORD_SIZE, Word,
+    operations::{AssemblyOp, Operation},
+    program::KernelDescriptor,
 };
 
-use {
-    self::error::AssemblerError,
-    self::product::AssemblyProduct,
-};
-use {
-    crate::ast::GlobalItemIndex,
-    crate::ast::ModuleIndex,
-    crate::Procedure,
-    crate::ProcedureContext,
-    crate::Path,
-    crate::basic_block_builder::ActiveInlineCall,
-    crate::basic_block_builder::BasicBlockBuilder,
-    crate::fmp::fmp_end_frame_sequence,
-    crate::fmp::fmp_initialization_sequence,
-    crate::fmp::fmp_start_frame_sequence,
-    crate::linker::Import,
-    crate::linker::LinkLibrary,
-    crate::linker::Linker,
-    crate::linker::LinkerError,
-    crate::linker::SymbolItem,
-    crate::linker::SymbolResolutionContext,
-    crate::linker::SymbolResolver,
-    crate::mast_forest_builder::MastForestBuilder,
-    crate::mast_forest_builder::MastNodeRef,
-    crate::mast_forest_builder::MastNodeUse,
-    crate::mast_forest_builder::SourceNodeRef,
-    crate::mast_forest_builder::StaticLibrary,
+use self::{error::AssemblerError, product::AssemblyProduct};
+use crate::{
+    Linkage, Path, Procedure, ProcedureContext,
+    ast::{
+        self, AttributeSet, GlobalItemIndex, Ident, InvocationTarget, InvokeKind, ItemIndex,
+        ModuleIndex, ModuleKind, SymbolResolution, Visibility, types::FunctionType,
+    },
+    basic_block_builder::{ActiveInlineCall, BasicBlockBuilder},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
+    fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
+    linker::{
+        Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
+        SymbolResolver,
+    },
+    mast::{MastNodeExt, MastNodeId},
+    mast_forest_builder::{
+        MastForestBuilder, MastNodeRef, MastNodeUse, SourceNodeRef, StaticLibrary,
+    },
+    package::{
+        ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
+        PackageSubmodule, ProcedureExport, Section, SectionId, TargetType, TypeExport,
+        debug_info::{DebugFunctionIdx, DebugSourceNodeId, PackageDebugInfo},
+    },
+    serde::Serializable,
 };
 
 /// Maximum number of locals a single procedure may allocate.

@@ -3,31 +3,18 @@ mod set;
 
 use core::fmt;
 
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Spanned,
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-pub use {
-    self::meta::BorrowedMeta,
-    self::meta::Meta,
-    self::meta::MetaExpr,
-    self::meta::MetaItem,
-    self::meta::MetaKeyValue,
-    self::meta::MetaList,
-    self::set::AttributeSet,
-    self::set::AttributeSetEntry,
+pub use self::{
+    meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},
+    set::{AttributeSet, AttributeSetEntry},
 };
-use {
-    crate::ast::Ident,
-    crate::prettier,
+use crate::{
+    ast::Ident,
+    debuginfo::{SourceSpan, Spanned},
+    prettier,
 };
 
 /// An [Attribute] represents some named metadata attached to a Miden Assembly procedure.
@@ -275,11 +262,7 @@ impl proptest::arbitrary::Arbitrary for Attribute {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::arbitrary::any,
-            proptest::prop_oneof,
-            proptest::strategy::Strategy,
-        };
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
 
         prop_oneof![
             any::<Ident>().prop_map(Self::Marker),

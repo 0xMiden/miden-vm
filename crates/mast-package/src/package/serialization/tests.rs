@@ -1,65 +1,38 @@
 #[cfg(feature = "std")]
 use alloc::format;
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec,
-    alloc::vec::Vec,
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
 };
 use core::assert_matches;
 use std::collections::BTreeMap;
 #[cfg(feature = "std")]
 use std::fs;
 
-use {
-    miden_assembly_syntax::ast::Ident,
-    miden_assembly_syntax::ast::Path as AstPath,
-    crate::PathBuf,
-    miden_assembly_syntax::ast::ProcedureName,
+use miden_assembly_syntax::ast::{Ident, Path as AstPath, ProcedureName};
+use miden_core::{
+    Felt, Word,
+    advice::AdviceMap,
+    mast::{
+        BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNode, MastNodeExt,
+        MastNodeId,
+    },
+    operations::Operation,
+    serde::{
+        BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceMap,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::DenseMastForestBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    miden_core::operations::Operation,
-    miden_core::serde::BudgetedReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-    miden_core::serde::SliceReader,
-    miden_utils_indexing::IndexVec,
-};
+use miden_utils_indexing::IndexVec;
 
-use {
-    super::MAGIC_PACKAGE,
-    super::PACKAGE_BYTE_READ_BUDGET_MULTIPLIER,
-    super::Package,
-    super::PackageManifest,
-    super::Section,
-    super::VERSION,
+use super::{
+    MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section, VERSION,
 };
-use {
-    crate::Dependency,
-    crate::ManifestValidationError,
-    crate::PackageExport,
-    crate::PackageId,
-    crate::PackageModule,
-    crate::PackageSubmodule,
-    crate::ProcedureExport,
-    crate::SectionId,
-    crate::TargetType,
-    crate::debug_info::DebugSourceAsmOp,
-    crate::debug_info::DebugSourceNode,
-    crate::debug_info::DebugSourceNodeId,
-    crate::debug_info::PackageDebugInfoBuilder,
+use crate::{
+    Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule, PackageSubmodule,
+    PathBuf, ProcedureExport, SectionId, TargetType,
+    debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfoBuilder},
 };
 
 fn build_single_node_forest(
@@ -187,10 +160,9 @@ fn package_bytes_with_sections_count(count: usize) -> Vec<u8> {
 
 #[test]
 fn package_serialization_roundtrip() {
-    use {
-        proptest::prelude::*,
-        proptest::test_runner::Config,
-        proptest::test_runner::TestRunner,
+    use proptest::{
+        prelude::*,
+        test_runner::{Config, TestRunner},
     };
 
     // since the test is quite expensive, 128 cases should be enough to cover all edge cases

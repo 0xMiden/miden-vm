@@ -1,36 +1,22 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use {
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
+use miden_core::{
+    Word,
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
+    program::KernelDescriptor,
 };
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
-use {
-    crate::BaseHost,
-    crate::BreakReason,
-    crate::ContextId,
-    crate::ExecutionError,
-    miden_core::program::KernelDescriptor,
-    crate::Stopper,
-    miden_core::Word,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::SourceInlineCallContext,
-    crate::PackageSourceDebugContext,
-    crate::host::default::NoopHost,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeId,
-    crate::operation::OperationError,
-    crate::option_map_break_reason,
-    crate::processor::Processor,
-    crate::processor::SystemInterface,
-    crate::tracer::OperationHelperRegisters,
-    crate::tracer::Tracer,
+use crate::{
+    BaseHost, BreakReason, ContextId, Continuation, ExecutionError, PackageSourceDebugContext,
+    SourceInlineCallContext, Stopper,
+    continuation_stack::ContinuationStack,
+    host::default::NoopHost,
+    operation::OperationError,
+    option_map_break_reason,
+    processor::{Processor, SystemInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod basic_block;

@@ -1,44 +1,27 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::chiplets::eidos_compression,
-    miden_core::chiplets::hasher::CV_RANGE,
-    miden_core::chiplets::hasher::compress_state,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::MerkleTree,
-    miden_core::crypto::merkle::NodeIndex,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::QuadFelt,
-    miden_core::program::StackInputs,
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
+    chiplets::{
+        eidos_compression,
+        hasher::{CV_RANGE, compress_state},
+    },
+    crypto::merkle::{MerklePath, MerkleStore, MerkleTree, NodeIndex},
+    field::{BasedVectorSpace, QuadFelt},
+    program::StackInputs,
 };
 use proptest::prelude::*;
 
-use {
-    super::op_aead_stream,
-    super::op_compress,
-    super::op_horner_eval_base,
-    super::op_horner_eval_ext,
-    super::op_mpverify,
-    super::op_mrupdate,
-    super::validate_materialized_merkle_path_length,
-    super::validate_merkle_depth,
-    super::validate_merkle_path_length,
+use super::{
+    op_aead_stream, op_compress, op_horner_eval_base, op_horner_eval_ext, op_mpverify, op_mrupdate,
+    validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
-use {
-    miden_core::advice::AdviceInputs,
-    crate::ContextId,
-    crate::errors::IoError,
-    crate::MemoryError,
-    crate::errors::OperationError,
-    crate::FastProcessor,
-    crate::fast::NoopTracer,
-    crate::processor::Processor,
-    crate::processor::SystemInterface,
+use crate::{
+    ContextId, FastProcessor, MemoryError,
+    errors::{IoError, OperationError},
+    fast::NoopTracer,
+    processor::{Processor, SystemInterface},
 };
 
 // CONSTANTS
@@ -880,10 +863,7 @@ mod merkle_validation {
     use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;
-    use {
-        crate::errors::CryptoError,
-        crate::errors::OperationError,
-    };
+    use crate::errors::{CryptoError, OperationError};
 
     #[test]
     fn validator_accepts_supported_boundaries() {

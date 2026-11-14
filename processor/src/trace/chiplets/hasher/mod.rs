@@ -1,53 +1,30 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use {
-    miden_air_definitions::vm::trace::and8_lookup::BYTE_LOOKUP_COUNT_LEN,
-    miden_air_definitions::vm::trace::and8_lookup::byte_pair_count_index,
-    miden_air_definitions::vm::trace::chiplets::hasher::BLOCK_LEN,
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
-    miden_air_definitions::vm::trace::chiplets::hasher::DIGEST_RANGE,
-    miden_air_definitions::vm::trace::chiplets::hasher::HASH_ABSORB,
-    miden_air_definitions::vm::trace::chiplets::hasher::LINEAR_HASH,
-    miden_air_definitions::vm::trace::chiplets::hasher::MP_VERIFY,
-    miden_air_definitions::vm::trace::chiplets::hasher::MR_UPDATE_NEW,
-    miden_air_definitions::vm::trace::chiplets::hasher::MR_UPDATE_OLD,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
-    miden_air_definitions::vm::trace::chiplets::hasher::Selectors,
-    miden_air_definitions::vm::trace::eidos_compression::ByteLookupRecorder,
-    miden_air_definitions::vm::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
-    miden_air_definitions::vm::trace::eidos_compression::EidosCompressionByteLookup,
-    miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
-    miden_air_definitions::vm::trace::eidos_compression::TraceMode as EidosCompressionTraceMode,
-    miden_air_definitions::vm::trace::eidos_compression::retag_felt_trace_block_cycle_id,
-    miden_air_definitions::vm::trace::eidos_compression::write_felt_trace_block_into_zeroed_with_lookups as write_eidos_compression_felt_trace_block,
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    and8_lookup::{BYTE_LOOKUP_COUNT_LEN, byte_pair_count_index},
+    chiplets::hasher::{
+        BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
+        MR_UPDATE_NEW, MR_UPDATE_OLD, STATE_WIDTH, Selectors,
+    },
+    eidos_compression::{
+        ByteLookupRecorder, EIDOS_COMPRESSION_CYCLE_LEN, EidosCompressionByteLookup,
+        NUM_EIDOS_COMPRESSION_COLS, TraceMode as EidosCompressionTraceMode,
+        retag_felt_trace_block_cycle_id,
+        write_felt_trace_block_into_zeroed_with_lookups as write_eidos_compression_felt_trace_block,
+    },
 };
-use {
-    miden_core::chiplets::eidos_compression,
-    miden_core::chiplets::hasher::compress_state,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt, ONE, Word as Digest, ZERO,
+    chiplets::{eidos_compression, hasher::compress_state},
+    crypto::merkle::MerklePath,
+    mast::OpBatch,
+    utils::RowMajorMatrix,
 };
 use rayon::prelude::*;
 
-use {
-    super::ChipletTraceFragment,
-    miden_core::Felt,
-    super::HasherState,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::ONE,
-    miden_core::mast::OpBatch,
-    super::RangeChecker,
-    miden_core::Word as Digest,
-    miden_core::ZERO,
-    super::build_and8_lookup_trace,
-};
-use {
-    crate::ContextId,
-    miden_air_definitions::vm::trace::RowIndex,
-};
+use super::{ChipletTraceFragment, HasherState, RangeChecker, build_and8_lookup_trace};
+use crate::ContextId;
 
 mod trace;
 use trace::HasherTrace;

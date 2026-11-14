@@ -1,26 +1,14 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::ZERO,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::program::StackInputs,
+use miden_core::{
+    Felt, ONE, ZERO,
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 
-use {
-    super::dup_nth,
-    super::op_cswap,
-    super::op_cswapw,
-    super::op_pad,
-    super::op_push,
-    super::op_swap,
-    super::op_swap_double_word,
-};
-use {
-    crate::FastProcessor,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
+use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};
+use crate::{
+    FastProcessor,
+    processor::{Processor, StackInterface},
 };
 
 // TESTS

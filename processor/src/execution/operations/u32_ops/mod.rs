@@ -1,16 +1,13 @@
 use alloc::vec::Vec;
 
+use miden_core::{Felt, ZERO};
 use paste::paste;
 
-use {
-    crate::ExecutionError,
-    miden_core::Felt,
-    miden_core::ZERO,
-    crate::operation::OperationError,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::tracer::OperationHelperRegisters,
-    crate::tracer::Tracer,
+use crate::{
+    ExecutionError,
+    operation::OperationError,
+    processor::{Processor, StackInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]

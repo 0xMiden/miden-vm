@@ -1,63 +1,27 @@
-use {
-    alloc::boxed::Box,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 
-use {
-    miden_assembly::Assembler,
-    miden_debug_types::DefaultSourceManager,
-    miden_assembly::Path,
-    miden_assembly::PathBuf,
-    miden_assembly::ast::Module,
-    miden_assembly::ast::ModuleKind,
-    miden_assembly::testing::Pattern,
-    miden_assembly::testing::TestContext,
-    miden_assembly::testing::regex,
-    miden_assembly::testing::source_file,
+use miden_assembly::{
+    Assembler, Path, PathBuf,
+    ast::{Module, ModuleKind},
+    testing::{Pattern, TestContext, regex, source_file},
 };
-use {
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::MerkleTree,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::error_code_from_msg,
+use miden_core::{
+    ONE, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap},
+    crypto::merkle::{MerkleStore, MerkleTree},
+    events::EventName,
+    mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
+    operations::Operation,
+    program::{KernelDescriptor, Program, StackInputs},
 };
-use {
-    miden_debug_types::Location,
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceManager,
-    miden_debug_types::SourceSpan,
-};
-use {
-    miden_utils_testing::crypto::init_merkle_leaves,
-    miden_utils_testing::crypto::init_merkle_store,
-};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
-use {
-    crate::BaseHost,
-    crate::DefaultHost,
-    crate::FastProcessor,
-    miden_core::program::KernelDescriptor,
-    crate::LoadedMastForest,
-    miden_core::ONE,
-    crate::ProcessorState,
-    miden_core::program::Program,
-    miden_core::program::StackInputs,
-    crate::SyncHost,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::advice::AdviceInputs,
-    miden_core::advice::AdviceMap,
-    crate::advice::AdviceMutation,
-    crate::event::EventError,
-    crate::event::EventHandler,
-    miden_core::events::EventName,
-    crate::event::TraceError,
-    crate::event::TraceHandler,
-    miden_core::operations::Operation,
+use crate::{
+    BaseHost, DefaultHost, FastProcessor, LoadedMastForest, ProcessorState, SyncHost,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler, TraceError, TraceHandler},
 };
 
 macro_rules! assert_diagnostic_lines {

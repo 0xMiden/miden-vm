@@ -1,24 +1,11 @@
-use {
-    miden_core::Felt,
-    miden_assembly_syntax::ParsingError,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::diagnostics::RelatedError,
-    crate::diagnostics::RelatedLabel,
-    crate::diagnostics::Report,
-};
-use {
-    miden_core::events::SystemEvent,
-    miden_core::field::Field,
-    miden_core::operations::Operation::*,
-};
+use miden_assembly_syntax::ParsingError;
+use miden_core::{Felt, events::SystemEvent, field::Field, operations::Operation::*};
 
 use super::BasicBlockBuilder;
-use {
-    crate::MAX_DYNAMIC_EXP_BITS,
-    crate::ONE,
-    crate::ProcedureContext,
-    crate::ZERO,
+use crate::{
+    MAX_DYNAMIC_EXP_BITS, ONE, ProcedureContext, ZERO,
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{RelatedError, RelatedLabel, Report},
 };
 
 /// Field element representing TWO in the base field of the VM.

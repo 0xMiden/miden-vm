@@ -1,27 +1,12 @@
-use {
-    alloc::string::String,
-    alloc::sync::Arc,
-};
+use alloc::{string::String, sync::Arc};
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+use super::{
+    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Procedure, SubmoduleDecl,
+    TypeAlias, TypeDecl,
 };
-
-use {
-    super::AdviceMapEntry,
-    super::Block,
-    super::Constant,
-    super::EnumType,
-    super::Ident,
-    super::ImportDecl,
-    super::Item,
-    crate::Path,
-    super::Procedure,
-    super::SubmoduleDecl,
-    super::TypeAlias,
-    super::TypeDecl,
+use crate::{
+    Path,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 /// This type represents the top-level forms of a Miden Assembly module

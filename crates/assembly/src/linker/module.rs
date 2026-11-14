@@ -1,37 +1,16 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
-use {
-    core::cell::Cell,
-    core::ops::Index,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::{cell::Cell, ops::Index};
 
-use {
-    crate::Path,
-    crate::ast::ItemIndex,
-    crate::ast::LocalSymbol,
-    crate::ast::LocalSymbolResolver,
-    crate::ast::ModuleIndex,
-    crate::ast::ModuleKind,
-    crate::ast::SubmoduleDecl,
-    crate::ast::SymbolResolution,
-    crate::ast::SymbolResolutionError,
-    crate::ast::SymbolTable,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
+use miden_core::advice::AdviceMap;
 
-use {
-    miden_core::advice::AdviceMap,
-    super::Import,
-    super::LinkStatus,
-    super::Symbol,
-    super::SymbolResolver,
-    super::namespaces::ResolvedUse,
+use super::{Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
+use crate::{
+    Path,
+    ast::{
+        ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
+        SymbolResolution, SymbolResolutionError, SymbolTable,
+    },
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 /// The source from which a [LinkModule] was derived.

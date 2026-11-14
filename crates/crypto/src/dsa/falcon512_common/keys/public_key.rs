@@ -1,36 +1,17 @@
 //! Public key types for the Miden Falcon512 variants.
 
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
-use {
-    core::fmt,
-    core::marker::PhantomData,
-    core::ops::Deref,
-};
+use alloc::{string::ToString, vec::Vec};
+use core::{fmt, marker::PhantomData, ops::Deref};
 
 use num::Zero;
 
-use {
-    super::super::FALCON_ENCODING_BITS,
-    super::super::FalconVariant,
-    super::super::LOG_N,
-    super::super::N,
-    super::super::PK_LEN,
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    super::FalconFelt,
-    crate::Felt,
-    super::Polynomial,
-    crate::utils::Serializable,
-    super::Signature,
+use super::{
+    super::{FALCON_ENCODING_BITS, FalconVariant, LOG_N, N, PK_LEN},
+    FalconFelt, Polynomial, Signature,
 };
-use {
-    crate::SequentialCommit,
-    crate::Word,
+use crate::{
+    Felt, SequentialCommit, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // PUBLIC KEY

@@ -4,46 +4,27 @@ mod passes;
 #[cfg(test)]
 mod tests;
 
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::collections::VecDeque,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    miden_core::Word,
-    miden_core::chiplets::hasher,
-};
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
+use miden_core::{Word, chiplets::hasher};
 use smallvec::SmallVec;
 
-use {
-    self::passes::LocalInvokeTarget,
-    self::passes::VerifyInvokeTargets,
+use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
+pub use self::{
+    context::AnalysisContext,
+    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
+    passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
-pub use {
-    self::context::AnalysisContext,
-    self::errors::ExportedTypeUse,
-    self::errors::LimitKind,
-    self::errors::SemanticAnalysisError,
-    self::errors::SyntaxError,
-    self::passes::ConstEvalVisitor,
-    self::passes::VerifyRepeatCounts,
-};
-use {
-    crate::ast::*,
-    crate::parser::WordValue,
+use crate::{
+    ast::*,
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    parser::WordValue,
 };
 
 /// Constructs and validates a [Module], given the forms constituting the module body.

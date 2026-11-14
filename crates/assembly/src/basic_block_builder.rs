@@ -1,38 +1,26 @@
-use {
-    alloc::borrow::Borrow,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    borrow::Borrow,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::ast::DebugInlineCallInfo,
-    crate::ast::DebugVarInfo,
-    crate::ast::Instruction,
-    crate::debuginfo::Location,
-    crate::debuginfo::Span,
-    crate::diagnostics::Report,
-};
-use {
-    miden_core::Felt,
-    miden_core::events::SystemEvent,
-    miden_core::operations::AssemblyOp,
-    miden_core::operations::Operation,
-};
-use {
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugLocIdx,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceInlineCall,
-    crate::package::debug_info::DebugSourceVar,
+use miden_core::{
+    Felt,
+    events::SystemEvent,
+    operations::{AssemblyOp, Operation},
 };
 
-use {
-    crate::ProcedureContext,
-    crate::assembler::BodyWrapper,
-    crate::mast_forest_builder::MastForestBuilder,
-    crate::mast_forest_builder::MastNodeUse,
+use crate::{
+    ProcedureContext,
+    assembler::BodyWrapper,
+    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
+    debuginfo::{Location, Span},
+    diagnostics::Report,
+    mast_forest_builder::{MastForestBuilder, MastNodeUse},
+    package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+    },
 };
 
 // PENDING ASM OP

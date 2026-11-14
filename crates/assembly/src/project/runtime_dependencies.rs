@@ -1,18 +1,12 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::format,
-    alloc::sync::Arc,
-};
+use alloc::{collections::BTreeMap, format, sync::Arc};
 
-use crate::diagnostics::Report;
-use {
-    crate::package::Dependency as PackageDependency,
-    crate::package::Package as MastPackage,
-};
-use crate::package::PackageId;
 use miden_project::Linkage;
 
-use crate::project::ResolvedPackage;
+use crate::{
+    diagnostics::Report,
+    package::{Dependency as PackageDependency, Package as MastPackage, PackageId},
+    project::ResolvedPackage,
+};
 
 // RUNTIME DEPENDENCIES
 // ================================================================================================

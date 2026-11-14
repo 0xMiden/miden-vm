@@ -1,89 +1,42 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::hasher::{
+        CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
+    },
+};
+use miden_core::{
+    EMPTY_WORD, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
+    mast::{
+        BasicBlockNode, JoinNode, LoopNode, MastForest, MastForestId, MastNode, MastNodeExt,
+        MastNodeId, SparseMastForest, SparseMastForestBuilder, SplitNode, VisitKind,
+    },
+    operations::Operation,
+    program::MIN_STACK_DEPTH,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::Idx,
 };
 
-use {
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP,
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
-    miden_air_definitions::vm::trace::chiplets::hasher::STATE_WIDTH,
+use super::{
+    block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
+    stack::OverflowTable,
+    trace_state::{
+        AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
+        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+    },
+    utils::split_u32_into_u16,
 };
-use {
-    miden_core::FMP_ADDR,
-    miden_core::FMP_INIT_VALUE,
-    miden_core::operations::Operation,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-};
-
-use {
-    super::block_stack::BlockInfo,
-    super::block_stack::BlockStack,
-    super::block_stack::ExecutionContextInfo,
-    super::stack::OverflowTable,
-    super::trace_state::AceReplay,
-    super::trace_state::AdviceReplay,
-    super::trace_state::BitwiseReplay,
-    super::trace_state::BlockAddressReplay,
-    super::trace_state::BlockStackReplay,
-    super::trace_state::CoreTraceFragmentContext,
-    super::trace_state::CoreTraceState,
-    super::trace_state::DecoderState,
-    super::trace_state::ExecutionContextReplay,
-    super::trace_state::ExecutionContextSystemInfo,
-    super::trace_state::ExecutionReplay,
-    super::trace_state::HasherRequestReplay,
-    super::trace_state::HasherResponseReplay,
-    super::trace_state::KernelReplay,
-    super::trace_state::MastForestResolutionReplay,
-    super::trace_state::MemoryReadsReplay,
-    super::trace_state::MemoryWritesReplay,
-    super::trace_state::RangeCheckerReplay,
-    super::trace_state::StackOverflowReplay,
-    super::trace_state::StackState,
-    super::trace_state::SystemState,
-    super::utils::split_u32_into_u16,
-};
-use {
-    crate::AceError,
-    crate::ContextId,
-    miden_core::EMPTY_WORD,
-    crate::ExecutionError,
-    crate::FastProcessor,
-    miden_core::Felt,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::ONE,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_core::Word,
-    miden_core::ZERO,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    miden_core::crypto::merkle::MerklePath,
-    miden_core::mast::BasicBlockNode,
-    miden_core::mast::JoinNode,
-    miden_core::mast::LoopNode,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastForestId,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    miden_core::mast::SparseMastForest,
-    miden_core::mast::SparseMastForestBuilder,
-    miden_core::mast::SplitNode,
-    miden_core::mast::VisitKind,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::processor::SystemInterface,
-    crate::trace::chiplets::CircuitEvaluation,
-    crate::trace::chiplets::PTR_OFFSET_ELEM,
-    crate::trace::chiplets::PTR_OFFSET_WORD,
-    crate::tracer::OperationHelperRegisters,
-    crate::tracer::Tracer,
-    miden_core::utils::Idx,
+use crate::{
+    AceError, ContextId, Continuation, ExecutionError, FastProcessor,
+    continuation_stack::ContinuationStack,
+    processor::{Processor, StackInterface, SystemInterface},
+    trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 // STATE SNAPSHOT
@@ -1356,8 +1309,9 @@ impl Default for HasherChipletShim {
 
 #[cfg(test)]
 mod serialization_tests {
-    use super::*;
     use miden_core::mast::BasicBlockNodeBuilder;
+
+    use super::*;
 
     fn empty_trace_generation_context(fragment_size: usize, max_stack_depth: usize) -> TraceReplay {
         TraceReplay {

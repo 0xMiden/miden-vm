@@ -1,23 +1,13 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceMap,
-    miden_core::advice::AdviceStack,
-    miden_core::crypto::merkle::InnerNodeInfo,
-    miden_core::events::EventId,
-    miden_core::events::EventName,
+use miden_core::{
+    Felt, Word,
+    advice::{AdviceMap, AdviceStack},
+    crypto::merkle::InnerNodeInfo,
+    events::{EventId, EventName},
 };
-use {
-    miden_debug_types::Location,
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceSpan,
-};
+use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::ProcessorState;
 
@@ -28,17 +18,10 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use {
-    handlers::EventError,
-    handlers::TraceError,
-};
+use handlers::{EventError, TraceError};
 
 mod mast_forest_store;
-pub use {
-    mast_forest_store::LoadedMastForest,
-    mast_forest_store::MastForestStore,
-    mast_forest_store::MemMastForestStore,
-};
+pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
 // ADVICE MAP MUTATIONS
 // ================================================================================================
@@ -269,11 +252,9 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 
 #[cfg(test)]
 mod tests {
-    use {
-        crate::advice::AdviceMutation,
-        miden_core::advice::AdviceStack,
-        miden_core::Felt,
-    };
+    use miden_core::{Felt, advice::AdviceStack};
+
+    use crate::advice::AdviceMutation;
 
     /// The iterator helper must be indistinguishable from building the stack by hand, so that a
     /// handler can switch to it without changing what the VM sees.

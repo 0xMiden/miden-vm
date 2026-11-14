@@ -1,18 +1,9 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
-use {
-    super::Ident,
-    crate::Path,
-    super::Visibility,
+use super::{Ident, Visibility};
+use crate::{
+    Path,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 /// The explicit source form used by an import declaration.

@@ -1,24 +1,11 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::diagnostics::Report;
 use miden_mast_package::Package as MastPackage;
 
-use {
-    crate::PackageCache,
-    crate::PackageId,
-    crate::PackageIndex,
-    crate::PackageProvider,
-    crate::PackageRecord,
-    crate::PackageRegistry,
-    crate::PackageStore,
-    crate::PackageVersions,
-    crate::SemVer,
-    crate::Version,
-    crate::VersionRequirement,
+use crate::{
+    PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,
+    PackageStore, PackageVersions, SemVer, Version, VersionRequirement,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -249,31 +236,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::vec,
-        alloc::vec::Vec,
-    };
+    use alloc::{vec, vec::Vec};
 
-    use {
-        miden_assembly_syntax::ast::Path as AstPath,
-        miden_assembly_syntax::ast::PathBuf,
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
+    use miden_core::{
+        mast::{
+            BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId,
+        },
+        operations::Operation,
     };
-    use {
-        miden_core::mast::BasicBlockNodeBuilder,
-        miden_core::mast::DenseMastForestBuilder,
-        miden_core::mast::MastForest,
-        miden_core::mast::MastNodeExt,
-        miden_core::mast::MastNodeId,
-        miden_core::operations::Operation,
-    };
-    use {
-        miden_mast_package::Dependency,
-        miden_mast_package::Package,
-        miden_mast_package::PackageExport,
-        miden_mast_package::ProcedureExport,
-        miden_mast_package::Section,
-        miden_mast_package::SectionId,
-        miden_mast_package::TargetType,
+    use miden_mast_package::{
+        Dependency, Package, PackageExport, ProcedureExport, Section, SectionId, TargetType,
     };
 
     use super::*;

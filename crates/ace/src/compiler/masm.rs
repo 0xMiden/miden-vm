@@ -1,18 +1,9 @@
 //! Rendering support for the relation-local MASM ACE evaluator wrapper.
 
-use {
-    std::format,
-    std::string::String,
-};
+use std::{format, string::String};
 
-use {
-    miden_core::Felt,
-    miden_core::Word,
-};
-use {
-    miden_core::crypto::hash::Eidos,
-    miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
-};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
+use miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE;
 use miden_stark::QuotientRecompositionInputs;
 
 use crate::AceError;
@@ -249,10 +240,7 @@ mod tests {
     use miden_core::Felt;
     use miden_stark::QuotientRecompositionInputs;
 
-    use {
-        super::MasmConstraintsEvalConfig,
-        super::render_masm_constraints_eval,
-    };
+    use super::{MasmConstraintsEvalConfig, render_masm_constraints_eval};
 
     fn config() -> MasmConstraintsEvalConfig<'static> {
         MasmConstraintsEvalConfig {

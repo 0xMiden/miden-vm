@@ -1,23 +1,13 @@
 use core::fmt;
 
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use {
-    crate::ast::HashKind,
-    crate::ast::Ident,
-    crate::parser::IntValue,
-    crate::parser::WordValue,
+use crate::{
+    ast::{HashKind, Ident},
+    debuginfo::{SourceSpan, Span, Spanned},
+    parser::{IntValue, WordValue},
 };
 
 // CONSTANT VALUE
@@ -164,11 +154,7 @@ impl proptest::arbitrary::Arbitrary for ConstantValue {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::arbitrary::any,
-            proptest::prop_oneof,
-            proptest::strategy::Strategy,
-        };
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
 
         prop_oneof![
             any::<IntValue>().prop_map(|n| Self::Int(Span::unknown(n))),

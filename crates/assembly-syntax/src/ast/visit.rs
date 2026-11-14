@@ -52,14 +52,12 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use crate::debuginfo::Span;
-
 use super::immediate::ErrorMsg;
-use {
-    crate::Felt,
-    crate::ast::*,
-    crate::parser::PushValue,
-    crate::parser::WordValue,
+use crate::{
+    Felt,
+    ast::*,
+    debuginfo::Span,
+    parser::{PushValue, WordValue},
 };
 
 /// Represents an immutable AST visitor, whose "early return" type is `T` (by default `()`).

@@ -1,20 +1,11 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec,
-};
+use alloc::{collections::BTreeMap, vec};
 
 use miden_air_definitions::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
-use {
-    miden_core::field::PrimeCharacteristicRing,
-    miden_core::program::KernelDescriptor,
+use miden_core::{
+    Felt, Word as Digest, ZERO, field::PrimeCharacteristicRing, program::KernelDescriptor,
 };
 
-use {
-    super::ChipletTraceFragment,
-    miden_core::Felt,
-    miden_core::Word as Digest,
-    miden_core::ZERO,
-};
+use super::ChipletTraceFragment;
 use crate::errors::OperationError;
 
 #[cfg(test)]

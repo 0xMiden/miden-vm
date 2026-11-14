@@ -1,24 +1,15 @@
 #[cfg(feature = "arbitrary")]
 use alloc::vec;
-use {
-    alloc::borrow::Cow,
-    alloc::borrow::ToOwned,
-    alloc::format,
-    alloc::string::String,
-    alloc::string::ToString,
+use alloc::{
+    borrow::{Cow, ToOwned},
+    format,
+    string::{String, ToString},
 };
-use {
-    core::fmt,
-    core::str::FromStr,
-};
+use core::{fmt, str::FromStr};
 
-use miden_core::utils::DisplayHex;
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
+use miden_core::{
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::DisplayHex,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -262,12 +253,7 @@ impl Arbitrary for SectionId {
 mod tests {
     use alloc::vec::Vec;
 
-    use {
-        miden_core::serde::ByteWriter,
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
-        miden_core::serde::SliceReader,
-    };
+    use miden_core::serde::{ByteWriter, Deserializable, Serializable, SliceReader};
 
     use super::*;
 

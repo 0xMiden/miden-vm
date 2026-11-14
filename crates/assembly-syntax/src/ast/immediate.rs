@@ -1,15 +1,10 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
-use {
-    crate::Felt,
-    crate::ast::Ident,
+use crate::{
+    Felt,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 /// An 8-bit unsigned immediate

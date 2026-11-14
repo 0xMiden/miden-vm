@@ -1,83 +1,45 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::ast::DebugInlineCallInfo,
-    crate::debuginfo::FileLineCol,
-    crate::debuginfo::SourceManager,
-};
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceMap,
-    miden_core::chiplets::hasher,
-    crate::mast::BasicBlockNode,
-    crate::mast::BasicBlockNodeBuilder,
-    crate::mast::CallNode,
-    crate::mast::DynNode,
-    crate::mast::JoinNode,
-    crate::mast::LoopNode,
-    crate::mast::MastForest,
-    crate::mast::MastForestRootMap,
-    crate::mast::MastNode,
-    crate::mast::MastNodeExt,
-    crate::mast::OpBatch,
-    crate::mast::SplitNode,
-    crate::mast::error_code_from_msg,
-    miden_core::operations::AssemblyOp,
-    miden_core::operations::Operation,
-    crate::serde::Serializable,
-    crate::utils::IndexVec,
-    crate::utils::bytes_to_packed_u32_elements,
-};
-use {
-    crate::package::ManifestValidationError,
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugInfoBuilder,
-    crate::package::debug_info::DebugInfoTableRemapping,
-    crate::package::debug_info::DebugLocIdx,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceInlineCall,
-    crate::package::debug_info::DebugSourceVar,
-    crate::package::debug_info::FunctionInfo,
-    crate::package::debug_info::PackageDebugInfo,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceMap,
+    chiplets::hasher,
+    operations::{AssemblyOp, Operation},
 };
 
-use {
-    crate::ast::GlobalItemIndex,
-    super::LinkerError,
-    super::Procedure,
-};
-use {
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::Report,
-    crate::diagnostics::WrapErr,
-    crate::linker::LinkLibrary,
-    crate::diagnostics::report,
+use super::{LinkerError, Procedure};
+use crate::{
+    ast::{DebugInlineCallInfo, GlobalItemIndex},
+    debuginfo::{FileLineCol, SourceManager},
+    diagnostics::{IntoDiagnostic, Report, WrapErr, report},
+    linker::LinkLibrary,
+    mast::{
+        BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, JoinNode, LoopNode, MastForest,
+        MastForestRootMap, MastNode, MastNodeExt, OpBatch, SplitNode, error_code_from_msg,
+    },
+    package::{
+        ManifestValidationError,
+        debug_info::{
+            DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugLocIdx,
+            DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar, FunctionInfo,
+            PackageDebugInfo,
+        },
+    },
+    serde::Serializable,
+    utils::{IndexVec, bytes_to_packed_u32_elements},
 };
 
 mod finalizer;
-use {
-    finalizer::BuiltMastForest,
-    finalizer::MastForestFinalizer,
-};
+use finalizer::{BuiltMastForest, MastForestFinalizer};
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
-use {
-    pending_record::MastNodeKey,
-    pending_record::PendingMastNode,
-    pending_record::PendingMastNodeDraft,
-    pending_record::PendingMastNodeKind,
-};
-pub(crate) use {
-    pending_record::MastNodeRef,
-    pending_record::SourceNodeRef,
-};
+use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind};
+pub(crate) use pending_record::{MastNodeRef, SourceNodeRef};
 mod static_import;
 
 /// One use of an interned execution node together with its exact source/debug occurrence.
@@ -622,11 +584,7 @@ impl MastForestBuilder {
     }
 
     /// Retains the public linkage identity of a re-export without inventing a definition.
-    pub(crate) fn record_exported_function(
-        &mut self,
-        gid: GlobalItemIndex,
-        path: &crate::Path,
-    ) {
+    pub(crate) fn record_exported_function(&mut self, gid: GlobalItemIndex, path: &crate::Path) {
         let Some(index) = self.procedure_function_index(gid) else {
             return;
         };
@@ -708,8 +666,7 @@ impl MastForestBuilder {
         source_ref: SourceNodeRef,
         active_inline_calls: &[DebugSourceInlineCall],
         cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
-    ) -> Result<crate::package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report>
-    {
+    ) -> Result<crate::package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report> {
         let mut pending = self.debug_info[source_ref]
             .children
             .iter()
@@ -1795,54 +1752,33 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::collections::BTreeSet,
-        alloc::string::String,
-        alloc::string::ToString,
-        alloc::sync::Arc,
+    use alloc::{
+        collections::BTreeSet,
+        string::{String, ToString},
+        sync::Arc,
     };
 
-    use {
-        crate::ast::DebugVarInfo,
-        crate::ast::DebugVarLocation,
-        crate::debuginfo::ByteIndex,
-        crate::debuginfo::ColumnNumber,
-        crate::debuginfo::LineNumber,
-        crate::debuginfo::Location,
-        crate::debuginfo::Uri,
-    };
-    use {
-        crate::mast::MastNodeBuilder,
-        crate::mast::MastNodeId,
-        miden_core::operations::Operation,
-        crate::serde::Serializable,
-        crate::utils::Idx,
-    };
-    use {
-        crate::package::Package,
-        crate::package::PackageExport,
-        crate::package::PackageId,
-        crate::PathBuf,
-        crate::package::ProcedureExport,
-        crate::package::Section,
-        crate::package::SectionId,
-        crate::package::TargetType,
-        crate::package::Version,
-        crate::package::debug_info::DebugFieldInfo,
-        crate::package::debug_info::DebugPrimitiveType,
-        crate::package::debug_info::DebugSourceAsmOp,
-        crate::package::debug_info::DebugSourceInlineCall,
-        crate::package::debug_info::DebugSourceNode,
-        crate::package::debug_info::DebugSourceVar,
-        crate::package::debug_info::DebugTypeIdx,
-        crate::package::debug_info::DebugTypeInfo,
-        crate::package::debug_info::FunctionInfo,
-        crate::package::debug_info::PackageDebugInfo,
-        crate::package::debug_info::PackageDebugInfoBuilder,
-    };
+    use miden_core::operations::Operation;
     use proptest::prelude::*;
 
     use super::*;
+    use crate::{
+        PathBuf,
+        ast::{DebugVarInfo, DebugVarLocation},
+        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+        mast::{MastNodeBuilder, MastNodeId},
+        package::{
+            Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType,
+            Version,
+            debug_info::{
+                DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
+                DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
+                PackageDebugInfo, PackageDebugInfoBuilder,
+            },
+        },
+        serde::Serializable,
+        utils::Idx,
+    };
 
     #[test]
     fn inline_range_remapping_batches_all_endpoints() {

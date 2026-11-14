@@ -1,45 +1,28 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec::Vec,
+use alloc::{collections::BTreeMap, vec::Vec};
+use core::{borrow::BorrowMut, fmt::Debug};
+
+use miden_air_definitions::vm::{
+    MemoryCols,
+    trace::{
+        RowIndex,
+        chiplets::memory::{
+            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+            TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        },
+    },
 };
-use {
-    core::borrow::BorrowMut,
-    core::fmt::Debug,
+use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, field::batch_inversion_allow_zeros,
 };
 
-use {
-    miden_air_definitions::vm::MemoryCols,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_ELEMENT,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_WORD,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_READ,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_WRITE,
-    miden_air_definitions::vm::trace::chiplets::memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+use super::{
+    super::utils::{split_element_u32_into_u16, split_u32_into_u16},
+    ChipletTraceFragment, RangeChecker,
 };
-
-use {
-    super::super::utils::split_element_u32_into_u16,
-    super::super::utils::split_u32_into_u16,
-    super::ChipletTraceFragment,
-    super::RangeChecker,
-};
-use {
-    crate::ContextId,
-    miden_core::EMPTY_WORD,
-    miden_core::Felt,
-    crate::MemoryError,
-    miden_core::ONE,
-    miden_core::WORD_SIZE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::field::batch_inversion_allow_zeros,
-};
+use crate::{ContextId, MemoryError};
 
 mod segment;
-use {
-    segment::MemoryOperation,
-    segment::MemorySegmentTrace,
-};
+use segment::{MemoryOperation, MemorySegmentTrace};
 
 #[cfg(test)]
 mod tests;

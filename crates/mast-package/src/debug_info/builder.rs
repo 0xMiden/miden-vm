@@ -1,47 +1,21 @@
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-};
+use alloc::{boxed::Box, sync::Arc};
 
-use {
-    miden_assembly_syntax::diagnostics::Report,
-    miden_assembly_syntax::ast::types::EnumRef,
-    miden_assembly_syntax::ast::types::RecTypeRef,
-    miden_assembly_syntax::ast::types::StructRef,
+use miden_assembly_syntax::{
+    ast::types::{EnumRef, RecTypeRef, StructRef},
+    diagnostics::Report,
 };
 use miden_core::mast::MastNodeId;
-use {
-    miden_debug_types::Location,
-    miden_debug_types::Uri,
-};
-use {
-    miden_utils_indexing::Idx,
-    miden_utils_indexing::IndexedVecError,
-};
+use miden_debug_types::{Location, Uri};
+use miden_utils_indexing::{Idx, IndexedVecError};
 
-use {
-    super::DebugErrorMessage,
-    super::DebugInfo,
-    super::DebugLoc,
-    super::DebugLocIdx,
-    super::DebugSourceNodeId,
-    super::FunctionInfo,
-    super::FxHashMap,
-    super::FxHashSet,
-    super::SourceNode,
-    super::SourceNodeIdMarker,
-    super::types::DebugFileIdx,
-    super::types::DebugFileInfo,
-    super::types::DebugFunctionIdx,
-    super::types::DebugStringIdx,
-    super::types::DebugTypeIdx,
-    super::types::DebugTypeInfo,
+use super::{
+    DebugErrorMessage, DebugInfo, DebugLoc, DebugLocIdx, DebugSourceNodeId, FunctionInfo,
+    FxHashMap, FxHashSet, SourceNode, SourceNodeIdMarker,
+    types::{
+        DebugFileIdx, DebugFileInfo, DebugFunctionIdx, DebugStringIdx, DebugTypeIdx, DebugTypeInfo,
+    },
 };
-use {
-    crate::debug_info::DebugFieldInfo,
-    crate::debug_info::DebugPrimitiveType,
-    crate::debug_info::DebugVariantInfo,
-};
+use crate::debug_info::{DebugFieldInfo, DebugPrimitiveType, DebugVariantInfo};
 
 // PACKAGE DEBUG INFO BUILDER
 // ================================================================================================
@@ -648,10 +622,9 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
         declared_ty: Option<&miden_assembly_syntax::ast::TypeExpr>,
         ty: &miden_assembly_syntax::ast::types::Type,
     ) -> Result<DebugTypeIdx, Report> {
-        use {
-            miden_assembly_syntax::ast::TypeExpr,
-            miden_assembly_syntax::ast::types::StructType,
-            miden_assembly_syntax::ast::types::Type,
+        use miden_assembly_syntax::ast::{
+            TypeExpr,
+            types::{StructType, Type},
         };
         Ok(match ty {
             Type::I1 => self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Bool)),
@@ -808,21 +781,12 @@ fn declared_type_name(
 mod tests {
     use alloc::sync::Arc;
 
-    use {
-        miden_assembly_syntax::Path,
-        miden_assembly_syntax::ast::types::CallConv,
-        miden_assembly_syntax::ast::types::EnumType,
-        miden_assembly_syntax::ast::types::FunctionType,
-        miden_assembly_syntax::ast::types::StructType,
-        miden_assembly_syntax::ast::types::Type,
-        miden_assembly_syntax::ast::types::Variant,
+    use miden_assembly_syntax::{
+        Path,
+        ast::types::{CallConv, EnumType, FunctionType, StructType, Type, Variant},
     };
     use miden_core::Word;
-    use {
-        miden_debug_types::ColumnNumber,
-        miden_debug_types::LineNumber,
-        miden_debug_types::Uri,
-    };
+    use miden_debug_types::{ColumnNumber, LineNumber, Uri};
     use miden_utils_indexing::Idx;
 
     use super::*;

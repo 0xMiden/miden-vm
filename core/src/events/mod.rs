@@ -1,24 +1,11 @@
-use {
-    alloc::borrow::Cow,
-    alloc::string::String,
-};
-use {
-    core::fmt::Display,
-    core::fmt::Formatter,
-};
+use alloc::{borrow::Cow, string::String};
+use core::fmt::{Display, Formatter};
 
-use {
-    crate::field::PrimeField64,
-    crate::serde::ByteReader,
-    crate::serde::ByteWriter,
-    crate::serde::Deserializable,
-    crate::serde::DeserializationError,
-    crate::serde::Serializable,
-};
-
-use {
-    crate::Felt,
-    crate::utils::hash_string_to_word,
+use crate::{
+    Felt,
+    field::PrimeField64,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::hash_string_to_word,
 };
 
 mod sys_events;

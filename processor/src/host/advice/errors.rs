@@ -3,17 +3,8 @@
 
 use alloc::vec::Vec;
 
-use miden_core::deferred::PrecompileError;
-use {
-    miden_utils_diagnostics::Diagnostic,
-    miden_utils_diagnostics::miette,
-};
-
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::crypto::merkle::MerkleError,
-};
+use miden_core::{Felt, Word, crypto::merkle::MerkleError, deferred::PrecompileError};
+use miden_utils_diagnostics::{Diagnostic, miette};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {

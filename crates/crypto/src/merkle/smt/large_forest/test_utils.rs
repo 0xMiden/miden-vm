@@ -4,46 +4,24 @@
 /// Placeholder entry count for tests that do not exercise or assert entry count behavior.
 pub const UNUSED_ENTRY_COUNT: usize = 0;
 
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 use core::error::Error;
 
 use itertools::Itertools;
-use {
-    crate::Felt,
-    crate::Word,
-};
 use proptest::prelude::*;
 
-use {
-    crate::EMPTY_WORD,
-    crate::Map,
-    crate::ONE,
-    crate::ZERO,
-    crate::merkle::smt::Backend,
-    crate::merkle::smt::BackendReader,
-    crate::merkle::smt::ForestInMemoryBackend,
-    crate::merkle::smt::LargeSmtForest,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::LineageId,
-    crate::merkle::smt::MAX_LEAF_ENTRIES,
-    crate::merkle::smt::RootInfo,
-    crate::merkle::smt::SMT_DEPTH,
-    crate::merkle::smt::Smt,
-    crate::merkle::smt::SmtForestOperation,
-    crate::merkle::smt::SmtForestUpdateBatch,
-    crate::merkle::smt::SmtProof,
-    crate::merkle::smt::SmtUpdateBatch,
-    crate::merkle::smt::TreeId,
-    crate::merkle::smt::VersionId,
-    crate::merkle::smt::large_forest::backend::BackendError,
-    crate::merkle::smt::large_forest::backend::Result as BackendResult,
-    crate::merkle::smt::large_forest::root::TreeEntry,
-    crate::merkle::smt::large_forest::root::TreeWithRoot,
-    crate::merkle::smt::large_forest::utils::AppliedLineageMutation,
-    crate::merkle::smt::large_forest::utils::LineageMutation,
+use crate::{
+    EMPTY_WORD, Felt, Map, ONE, Word, ZERO,
+    merkle::smt::{
+        Backend, BackendReader, ForestInMemoryBackend, LargeSmtForest, LeafIndex, LineageId,
+        MAX_LEAF_ENTRIES, RootInfo, SMT_DEPTH, Smt, SmtForestOperation, SmtForestUpdateBatch,
+        SmtProof, SmtUpdateBatch, TreeId, VersionId,
+        large_forest::{
+            backend::{BackendError, Result as BackendResult},
+            root::{TreeEntry, TreeWithRoot},
+            utils::{AppliedLineageMutation, LineageMutation},
+        },
+    },
 };
 
 // CONSTANTS

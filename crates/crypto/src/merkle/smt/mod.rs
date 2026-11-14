@@ -1,129 +1,62 @@
 //! Sparse Merkle Tree (SMT) data structures.
 
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
-use {
-    core::fmt,
-    core::fmt::Display,
-    core::hash::Hash,
+use alloc::{string::ToString, vec::Vec};
+use core::{
+    fmt::{self, Display},
+    hash::Hash,
 };
 
-use {
-    super::EmptySubtreeRoots,
-    super::InnerNodeInfo,
-    super::MerkleError,
-    super::NodeIndex,
-    super::SparseMerklePath,
-};
-use {
-    crate::Map,
-    crate::Set,
-    crate::Word,
-    crate::hash::eidos::Eidos,
-    crate::utils::ByteReader,
-    crate::utils::ByteWriter,
-    crate::utils::Deserializable,
-    crate::utils::DeserializationError,
-    crate::utils::Serializable,
+use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
+use crate::{
+    Map, Set, Word,
+    hash::eidos::Eidos,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 mod full;
-pub use {
-    full::MAX_LEAF_ENTRIES,
-    full::SMT_DEPTH,
-    full::Smt,
-    full::SmtLeaf,
-    full::SmtLeafError,
-    full::SmtProof,
-    full::SmtProofError,
-};
+pub use full::{MAX_LEAF_ENTRIES, SMT_DEPTH, Smt, SmtLeaf, SmtLeafError, SmtProof, SmtProofError};
 
 #[cfg(feature = "concurrent")]
 mod large;
 #[cfg(feature = "internal")]
-pub use {
-    full::concurrent::SubtreeLeaf,
-    full::concurrent::build_subtree_for_bench,
-};
+pub use full::concurrent::{SubtreeLeaf, build_subtree_for_bench};
 #[cfg(feature = "concurrent")]
-pub use {
-    large::LargeSmt,
-    large::LargeSmtError,
-    large::LargeSmtResult,
-    large::MemoryStorage,
-    large::MemoryStorageSnapshot,
-    large::SmtStorage,
-    large::SmtStorageReader,
-    large::StorageError,
-    large::StorageResult,
-    large::StorageUpdateParts,
-    large::StorageUpdates,
-    large::Subtree,
-    large::SubtreeError,
-    large::SubtreeUpdate,
+pub use large::{
+    LargeSmt, LargeSmtError, LargeSmtResult, MemoryStorage, MemoryStorageSnapshot, SmtStorage,
+    SmtStorageReader, StorageError, StorageResult, StorageUpdateParts, StorageUpdates, Subtree,
+    SubtreeError, SubtreeUpdate,
 };
 #[cfg(feature = "rocksdb")]
-pub use {
-    large::RocksDbBloomFilterBitsPerKey,
-    large::RocksDbConfig,
-    large::RocksDbDurabilityMode,
-    large::RocksDbMemoryBudget,
-    large::RocksDbSnapshotStorage,
-    large::RocksDbStorage,
-    large::RocksDbTuningOptions,
-    large::RocksDbWriteBufferManagerBudget,
+pub use large::{
+    RocksDbBloomFilterBitsPerKey, RocksDbConfig, RocksDbDurabilityMode, RocksDbMemoryBudget,
+    RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
 };
 
 #[cfg(feature = "rocksdb")]
 mod persistent_hash;
 
 mod large_forest;
-pub use {
-    large_forest::AppliedLineageMutation,
-    large_forest::Backend,
-    large_forest::BackendError,
-    large_forest::BackendReader,
-    large_forest::Config as ForestConfig,
-    large_forest::DEFAULT_MAX_HISTORY_VERSIONS as FOREST_DEFAULT_MAX_HISTORY_VERSIONS,
-    large_forest::InMemoryBackend as ForestInMemoryBackend,
-    large_forest::InMemoryBackendSnapshot as ForestInMemoryBackendReader,
-    large_forest::LargeSmtForest,
-    large_forest::LargeSmtForestError,
-    large_forest::LineageId,
-    large_forest::LineageMutation,
-    large_forest::LineageMutationKind,
-    large_forest::MIN_HISTORY_VERSIONS as FOREST_MIN_HISTORY_VERSIONS,
-    large_forest::RootInfo,
-    large_forest::SmtForestMutationSet,
-    large_forest::SmtForestOperation,
-    large_forest::SmtForestUpdateBatch,
-    large_forest::SmtUpdateBatch,
-    large_forest::TreeEntry,
-    large_forest::TreeId,
-    large_forest::TreeWithRoot,
-    large_forest::VersionId,
+pub use large_forest::{
+    AppliedLineageMutation, Backend, BackendError, BackendReader, Config as ForestConfig,
+    DEFAULT_MAX_HISTORY_VERSIONS as FOREST_DEFAULT_MAX_HISTORY_VERSIONS,
+    InMemoryBackend as ForestInMemoryBackend,
+    InMemoryBackendSnapshot as ForestInMemoryBackendReader, LargeSmtForest, LargeSmtForestError,
+    LineageId, LineageMutation, LineageMutationKind,
+    MIN_HISTORY_VERSIONS as FOREST_MIN_HISTORY_VERSIONS, RootInfo, SmtForestMutationSet,
+    SmtForestOperation, SmtForestUpdateBatch, SmtUpdateBatch, TreeEntry, TreeId, TreeWithRoot,
+    VersionId,
 };
 #[cfg(feature = "persistent-forest")]
-pub use {
-    large_forest::PersistentBackend as ForestPersistentBackend,
-    large_forest::PersistentBackendConfig,
-    large_forest::PersistentBackendReader as ForestPersistentBackendReader,
+pub use large_forest::{
+    PersistentBackend as ForestPersistentBackend, PersistentBackendConfig,
+    PersistentBackendReader as ForestPersistentBackendReader,
 };
 
 mod simple;
-pub use {
-    simple::SimpleSmt,
-    simple::SimpleSmtProof,
-};
+pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-pub use {
-    partial::PartialSmt,
-    partial::SmtWitness,
-    partial::UniqueNodes,
-};
+pub use partial::{PartialSmt, SmtWitness, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
 
@@ -945,11 +878,8 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
 mod arbitrary {
     use proptest::prelude::*;
 
-    use {
-        super::InnerNode,
-        super::NodeMutation,
-        crate::Word,
-    };
+    use super::{InnerNode, NodeMutation};
+    use crate::Word;
 
     impl Arbitrary for InnerNode {
         type Parameters = ();
@@ -982,15 +912,8 @@ mod arbitrary {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::LeafIndex,
-        super::NodeIndex,
-        super::SMT_MAX_DEPTH,
-    };
-    use {
-        crate::utils::Deserializable,
-        crate::utils::Serializable,
-    };
+    use super::{LeafIndex, NodeIndex, SMT_MAX_DEPTH};
+    use crate::utils::{Deserializable, Serializable};
 
     #[test]
     fn leaf_index_read_from_rejects_depth_mismatch() {
@@ -1033,10 +956,7 @@ pub(crate) mod test_gen {
 
     use proptest::prelude::*;
 
-    use {
-        crate::Felt,
-        crate::Word,
-    };
+    use crate::{Felt, Word};
 
     /// Entries grouped by a deliberately-shared leaf position (the most significant element,
     /// `key[3]`, since `LeafIndex::<SMT_DEPTH>::from(key)` uses `key[3].as_canonical_u64()`).

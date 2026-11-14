@@ -1,32 +1,16 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::Path,
-    crate::PathBuf,
-    crate::ast::GlobalItemIndex,
-    crate::ast::ImportKind,
-    crate::ast::ItemIndex,
-    crate::ast::ModuleIndex,
-    crate::ast::SymbolResolutionError,
-    crate::ast::Visibility,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::RelatedLabel,
-};
-
-use {
-    super::Linker,
-    super::LinkerError,
-    super::ModuleSource,
+use super::{Linker, LinkerError, ModuleSource};
+use crate::{
+    Path, PathBuf,
+    ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::RelatedLabel,
 };
 
 /// A graph of modules, concrete items, submodule declarations, and imports known to the linker.
@@ -1031,21 +1015,15 @@ fn source_file(
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::boxed::Box,
-        alloc::sync::Arc,
-    };
+    use alloc::{boxed::Box, sync::Arc};
 
-    use {
-        miden_assembly_syntax::Parse,
-        crate::Path,
-        crate::debuginfo::DefaultSourceManager,
-        crate::debuginfo::SourceLanguage,
-        crate::debuginfo::SourceManager,
-        crate::debuginfo::Span,
-    };
+    use miden_assembly_syntax::Parse;
 
     use super::*;
+    use crate::{
+        Path,
+        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
+    };
 
     fn parse_module(
         source_manager: Arc<dyn SourceManager>,

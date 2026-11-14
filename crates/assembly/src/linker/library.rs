@@ -1,16 +1,13 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::module::ModuleDescriptor;
 use miden_core::Word;
-use {
-    crate::package::ManifestValidationError,
-    crate::mast::MastForest,
-    crate::package::Package,
-};
 pub use miden_project::Linkage;
+
+use crate::{
+    mast::MastForest,
+    package::{ManifestValidationError, Package},
+};
 
 /// Represents an assembled module or modules to use when resolving references while linking,
 /// as well as the method by which referenced symbols will be linked into the assembled MAST.

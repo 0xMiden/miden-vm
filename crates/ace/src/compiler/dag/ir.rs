@@ -1,13 +1,7 @@
-use {
-    core::sync::atomic::AtomicUsize,
-    core::sync::atomic::Ordering,
-};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_core::field::TwoAdicField;
-use {
-    p3_dft::Radix2DFTSmallBatch,
-    p3_dft::TwoAdicSubgroupDft,
-};
+use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 
 use crate::layout::InputKey;
 

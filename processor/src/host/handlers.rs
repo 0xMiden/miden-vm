@@ -1,26 +1,14 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::btree_map::Entry,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
+    vec::Vec,
 };
-use {
-    core::error::Error,
-    core::fmt,
-    core::fmt::Debug,
-};
+use core::{error::Error, fmt, fmt::Debug};
 
-use {
-    miden_core::events::EventId,
-    miden_core::events::EventName,
-};
+use miden_core::events::{EventId, EventName};
 
-use {
-    crate::ExecutionError,
-    crate::ProcessorState,
-    crate::advice::AdviceMutation,
-};
+use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -97,9 +85,7 @@ pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionErro
         return Err(crate::HostError::EmptyEventName.into());
     }
     if event.is_reserved() {
-        return Err(
-            crate::HostError::ReservedEventNamespace { event: event.clone() }.into()
-        );
+        return Err(crate::HostError::ReservedEventNamespace { event: event.clone() }.into());
     }
     Ok(())
 }
@@ -365,35 +351,20 @@ impl Debug for TraceHandlerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::sync::Arc,
-        alloc::vec::Vec,
+    use alloc::{sync::Arc, vec::Vec};
+
+    use miden_core::{
+        events::{EventId, EventName, SystemEvent},
+        program::StackInputs,
     };
 
-    use {
-        miden_core::events::EventId,
-        miden_core::events::EventName,
-        miden_core::events::SystemEvent,
+    use super::{
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
-
-    use {
-        super::EventError,
-        super::EventHandler,
-        super::EventHandlerRegistry,
-        super::NoopEventHandler,
-        super::TraceError,
-        super::TraceHandler,
-        super::TraceHandlerRegistry,
-    };
-    use {
-        crate::BaseHost,
-        crate::DefaultHost,
-        crate::ExecutionError,
-        crate::FastProcessor,
-        crate::HostError,
-        crate::ProcessorState,
-        miden_core::program::StackInputs,
-        crate::advice::AdviceMutation,
+    use crate::{
+        BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, ProcessorState,
+        advice::AdviceMutation,
     };
 
     #[derive(Debug, thiserror::Error)]

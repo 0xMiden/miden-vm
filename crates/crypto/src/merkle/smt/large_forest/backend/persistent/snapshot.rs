@@ -1,44 +1,27 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::mem::ManuallyDrop;
 use std::collections::HashMap;
 
-use {
-    crate::utils::Deserializable,
-    crate::utils::Serializable,
-};
 use rocksdb as db;
 
-use {
-    super::super::BackendError,
-    super::super::Result,
-    super::LEAVES_CF,
-    super::iterator::PersistentBackendEntriesIterator,
-    super::keys::LeafKey,
-    super::keys::SubtreeKey,
-    super::lineage_entries_read_options,
-    super::subtree_cf_name,
-    super::tree_metadata::TreeMetadata,
+use super::{
+    super::{BackendError, Result},
+    LEAVES_CF,
+    iterator::PersistentBackendEntriesIterator,
+    keys::{LeafKey, SubtreeKey},
+    lineage_entries_read_options, subtree_cf_name,
+    tree_metadata::TreeMetadata,
 };
-use {
-    crate::Word,
-    crate::merkle::EmptySubtreeRoots,
-    crate::merkle::NodeIndex,
-    crate::merkle::SparseMerklePath,
-    crate::merkle::smt::BackendReader,
-    crate::merkle::smt::InnerNode,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::LineageId,
-    crate::merkle::smt::SMT_DEPTH,
-    crate::merkle::smt::SmtLeaf,
-    crate::merkle::smt::SmtProof,
-    crate::merkle::smt::Subtree,
-    crate::merkle::smt::TreeEntry,
-    crate::merkle::smt::TreeWithRoot,
-    crate::merkle::smt::VersionId,
-    crate::merkle::smt::full::concurrent::SUBTREE_DEPTH,
+use crate::{
+    Word,
+    merkle::{
+        EmptySubtreeRoots, NodeIndex, SparseMerklePath,
+        smt::{
+            BackendReader, InnerNode, LeafIndex, LineageId, SMT_DEPTH, SmtLeaf, SmtProof, Subtree,
+            TreeEntry, TreeWithRoot, VersionId, full::concurrent::SUBTREE_DEPTH,
+        },
+    },
+    utils::{Deserializable, Serializable},
 };
 
 // PERSISTENT BACKEND SNAPSHOT INNER

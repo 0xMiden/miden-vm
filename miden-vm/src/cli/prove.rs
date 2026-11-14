@@ -1,40 +1,27 @@
-use {
-    std::fs,
-    std::io,
-    std::path::Path,
-    std::path::PathBuf,
-    std::time::Instant,
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    time::Instant,
 };
 
 use clap::Parser;
-use {
-    miden_assembly::diagnostics::Report,
-    miden_assembly::diagnostics::WrapErr,
+use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_core::{
+    deferred::PrecompileLimits,
+    proof::{HashFunction, PrecompileStatus},
 };
 use miden_core_lib::CoreLibrary;
-use {
-    miden_processor::DefaultHost,
-    miden_processor::ExecutionOptions,
-    miden_processor::FastProcessor,
-};
-use {
-    miden_core::proof::HashFunction,
-    miden_core::deferred::PrecompileLimits,
-    miden_core::proof::PrecompileStatus,
-    miden_prover::Prover,
-    miden_vm::internal::InputFile,
-};
+use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
+use miden_prover::Prover;
+use miden_vm::internal::InputFile;
 
-use {
-    super::data::Libraries,
-    super::data::OutputFile,
-    super::data::ProofFile,
-    super::precompile_limits::PrecompileArgs,
-    super::utils::get_masm_program,
-    super::utils::get_masp_package,
-    super::utils::load_package_with_handlers,
-    super::utils::load_program_package_with_handlers,
-    super::utils::parse_byte_size,
+use super::{
+    data::{Libraries, OutputFile, ProofFile},
+    precompile_limits::PrecompileArgs,
+    utils::{
+        get_masm_program, get_masp_package, load_package_with_handlers,
+        load_program_package_with_handlers, parse_byte_size,
+    },
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -360,21 +347,11 @@ fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<boo
 
 #[cfg(test)]
 mod tests {
-    use {
-        std::fs,
-        std::sync::Arc,
-    };
+    use std::{fs, sync::Arc};
 
-    use {
-        miden_core::deferred::DeferredState,
-        miden_core::deferred::Node,
-        miden_core::deferred::PrecompileRegistry,
-        miden_core::deferred::TRUE_DIGEST,
-    };
-    use {
-        miden_prover::ProverError,
-        miden_precompiles::default_verification_precompile_limits,
-    };
+    use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+    use miden_precompiles::default_verification_precompile_limits;
+    use miden_prover::ProverError;
 
     use super::*;
 

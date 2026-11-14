@@ -1,36 +1,22 @@
 //! Trace generation for the deferred transcript's 32-row Eidos compression chiplet.
 
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
 use miden_air_definitions::precompiles::primitives::byte_pair_lut::eidos::Rotation;
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::deferred::EidosFrame,
-    miden_core::utils::RowMajorMatrix,
-};
-use miden_core::crypto::hash::Eidos;
+use miden_core::{Felt, Word, crypto::hash::Eidos, deferred::EidosFrame, utils::RowMajorMatrix};
 
-use {
-    super::compression::layout::BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN,
-    super::compression::layout::NUM_COLS as NUM_EIDOS_COMPRESSION_COLS,
-    super::compression::trace::ByteLookupRecorder,
-    super::compression::trace::EidosCompressionByteLookup,
-    super::compression::trace::retag_felt_trace_block_cycle_id,
-    super::compression::trace::set_cycle_metadata,
-    super::compression::trace::write_felt_trace_block_into_zeroed_with_lookups,
+use super::compression::{
+    layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
+    trace::{
+        ByteLookupRecorder, EidosCompressionByteLookup, retag_felt_trace_block_cycle_id,
+        set_cycle_metadata, write_felt_trace_block_into_zeroed_with_lookups,
+    },
 };
-use {
-    crate::prover::primitives::byte_pair_lut::BytePairLutRequires,
-    crate::prover::primitives::byte_pair_lut::BytePairOp,
-    crate::prover::relations::ProvideMult,
-    crate::prover::transcript::eidos::NUM_MAIN_COLS,
-    crate::prover::transcript::eidos::digest::EidosDigest,
+use crate::prover::{
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
+    relations::ProvideMult,
+    transcript::eidos::{NUM_MAIN_COLS, digest::EidosDigest},
 };
 
 #[cfg(test)]

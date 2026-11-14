@@ -1,28 +1,19 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use assert_matches::assert_matches;
 use proptest::prelude::*;
 
-use {
-    super::super::MerkleError,
-    super::super::SimpleSmt,
-    crate::Word,
-    super::NodeIndex,
+use super::{
+    super::{MerkleError, SimpleSmt},
+    NodeIndex,
 };
-use {
-    crate::EMPTY_WORD,
-    crate::hash::eidos::Eidos,
-    crate::merkle::EmptySubtreeRoots,
-    crate::merkle::InnerNodeInfo,
-    crate::merkle::MerklePath,
-    crate::merkle::MerkleTree,
-    crate::merkle::int_to_leaf,
-    crate::merkle::int_to_node,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::SparseMerkleTreeReader,
+use crate::{
+    EMPTY_WORD, Word,
+    hash::eidos::Eidos,
+    merkle::{
+        EmptySubtreeRoots, InnerNodeInfo, MerklePath, MerkleTree, int_to_leaf, int_to_node,
+        smt::{LeafIndex, SparseMerkleTreeReader},
+    },
 };
 
 // TEST DATA

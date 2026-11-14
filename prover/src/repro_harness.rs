@@ -1,39 +1,22 @@
-use {
-    alloc::format,
-    alloc::string::String,
-    alloc::string::ToString,
+use alloc::{
+    format,
+    string::{String, ToString},
 };
 use core::borrow::BorrowMut;
 
-use {
-    miden_air_definitions::vm::CoreCols,
-    miden_air_definitions::vm::TraceLenSummary,
-    miden_air_definitions::vm::trace::MainTrace,
-    miden_air_definitions::vm::trace::RowIndex,
+use miden_air_definitions::vm::{
+    CoreCols, TraceLenSummary, VmTrace,
+    trace::{MainTrace, RowIndex},
 };
-use {
-    miden_core::Felt,
-    miden_core::program::ExecutionClaim,
-    miden_core::program::StackOutputs,
-    miden_core::proof::ExecutionProof,
-    miden_core::proof::HashFunction,
-    miden_core::proof::PrecompileStatus,
-    miden_core::proof::VmProof,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt,
+    deferred::DeferredRoot,
+    program::{ExecutionClaim, ProgramInfo, StackInputs, StackOutputs},
+    proof::{ExecutionProof, HashFunction, PrecompileStatus, VmProof},
+    utils::{Matrix, RowMajorMatrix},
 };
-use miden_air_definitions::vm::VmTrace;
-use {
-    miden_verifier::VerificationError,
-    miden_verifier::VerificationOutcome,
-    miden_verifier::Verifier,
-};
-use {
-    miden_vm_stark::prover::prove,
-    miden_core::program::ProgramInfo,
-    miden_core::program::StackInputs,
-    miden_core::deferred::DeferredRoot,
-};
+use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
+use miden_vm_stark::prover::prove;
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {

@@ -1,23 +1,12 @@
-use {
-    core::borrow::Borrow,
-    core::fmt,
-    core::str::FromStr,
-};
+use core::{borrow::Borrow, fmt, str::FromStr};
 
 use miden_core::Word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
 
-use crate::VersionRequirement;
-use {
-    crate::SemVer,
-    crate::SemVerError,
-};
+use crate::{SemVer, SemVerError, VersionRequirement};
 
 /// The error type raised when attempting to parse a [Version] from a string.
 #[derive(Debug, thiserror::Error)]

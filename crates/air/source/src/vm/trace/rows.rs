@@ -1,28 +1,12 @@
-use {
-    alloc::boxed::Box,
-    alloc::vec::Vec,
-};
-use {
-    core::fmt::Display,
-    core::fmt::Formatter,
-    core::ops::Add,
-    core::ops::AddAssign,
-    core::ops::Bound,
-    core::ops::Index,
-    core::ops::IndexMut,
-    core::ops::Mul,
-    core::ops::RangeBounds,
-    core::ops::Sub,
-    core::ops::SubAssign,
+use alloc::{boxed::Box, vec::Vec};
+use core::{
+    fmt::{Display, Formatter},
+    ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
 };
 
-use {
-    miden_core::Felt,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
+use miden_core::{
+    Felt,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // ROW INDEX
@@ -353,10 +337,7 @@ mod arbitrary {
 mod tests {
     use alloc::collections::BTreeMap;
 
-    use {
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
-    };
+    use miden_core::serde::{Deserializable, Serializable};
 
     #[test]
     fn row_index_ops() {

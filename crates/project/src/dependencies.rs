@@ -1,27 +1,17 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 mod graph;
 
-use {
-    alloc::format,
-    alloc::sync::Arc,
-    alloc::vec,
-};
+use alloc::{format, sync::Arc, vec};
 use core::fmt;
 
-use miden_assembly_syntax::debuginfo::Spanned;
+use miden_assembly_syntax::{
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::{Diagnostic, miette},
+};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use {
-    miden_assembly_syntax::diagnostics::Diagnostic,
-    crate::Linkage,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::debuginfo::Span,
-    crate::Uri,
-    crate::VersionReq,
-    crate::VersionRequirement,
-    miden_assembly_syntax::diagnostics::miette,
-};
+use crate::{Linkage, Uri, VersionReq, VersionRequirement};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]

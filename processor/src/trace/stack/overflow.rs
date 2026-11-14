@@ -1,10 +1,6 @@
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::utils::IndexVec;
+use miden_core::{Felt, ZERO, utils::IndexVec};
 
-use {
-    miden_core::Felt,
-    miden_core::ZERO,
-};
 use crate::operation::OperationError;
 
 // OVERFLOW TABLE

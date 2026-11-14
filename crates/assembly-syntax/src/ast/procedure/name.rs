@@ -1,33 +1,19 @@
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
 };
-use {
-    core::fmt,
-    core::hash::Hash,
-    core::hash::Hasher,
-    core::ops::Deref,
-    core::str::FromStr,
+use core::{
+    fmt,
+    hash::{Hash, Hasher},
+    ops::Deref,
+    str::FromStr,
 };
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-use {
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::Report,
-    crate::diagnostics::miette,
-};
-
-use {
-    crate::Path,
-    crate::PathBuf,
-    crate::ast::CaseKindError,
-    crate::ast::Ident,
-    crate::ast::IdentError,
+use crate::{
+    Path, PathBuf,
+    ast::{CaseKindError, Ident, IdentError},
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::{IntoDiagnostic, Report, miette},
 };
 
 // QUALIFIED PROCEDURE NAME

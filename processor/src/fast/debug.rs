@@ -1,31 +1,20 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::sync::Arc,
-    alloc::vec,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec,
+    vec::Vec,
 };
 
-use {
-    miden_core::Word,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
+use miden_core::{
+    Word,
+    mast::{MastForest, MastNodeExt, MastNodeId},
 };
-use {
-    miden_mast_package::debug_info::DebugFunctionIdx,
-    miden_mast_package::debug_info::DebugFunctionInfo,
-    miden_mast_package::debug_info::DebugSourceNode,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::DebugStringIdx,
-    miden_mast_package::debug_info::PackageDebugInfo,
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugFunctionInfo, DebugSourceNode, DebugSourceNodeId, DebugStringIdx,
+    PackageDebugInfo,
 };
 
-use {
-    crate::Continuation,
-    crate::ResumeContext,
-    crate::continuation_stack::DebugActivationId,
-};
+use crate::{Continuation, ResumeContext, continuation_stack::DebugActivationId};
 
 /// Evidence used to recover a source-level frame. Inferred frames are best-effort and may omit
 /// optimized callers; consumers must distinguish them from frames identified by source identity.
@@ -641,26 +630,18 @@ fn frame(
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::boxed::Box,
-        alloc::format,
-    };
+    use alloc::{boxed::Box, format};
 
-    use {
-        miden_assembly::Assembler,
-        miden_debug_types::DefaultSourceManager,
-    };
+    use miden_assembly::Assembler;
     use miden_core::serde::Serializable;
+    use miden_debug_types::DefaultSourceManager;
     use miden_mast_package::debug_info::PackageDebugInfoBuilder;
 
     use super::*;
 
     #[test]
     fn inline_depth_index_respects_adjacent_nested_and_point_ranges() {
-        use {
-            miden_mast_package::debug_info::DebugLocIdx,
-            miden_mast_package::debug_info::DebugSourceInlineCall,
-        };
+        use miden_mast_package::debug_info::{DebugLocIdx, DebugSourceInlineCall};
         let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
             .assemble_program("program", "begin push.7 drop end")
             .unwrap();

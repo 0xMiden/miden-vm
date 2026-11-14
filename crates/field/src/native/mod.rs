@@ -1,72 +1,37 @@
 //! Off-chain implementation of [`crate::Felt`].
 
-use {
-    alloc::format,
-    alloc::vec,
-    alloc::vec::Vec,
-};
-use {
-    core::array,
-    core::fmt,
-    core::hash::Hash,
-    core::hash::Hasher,
-    core::iter::Product,
-    core::iter::Sum,
-    core::mem::align_of,
-    core::mem::size_of,
-    core::ops::Add,
-    core::ops::AddAssign,
-    core::ops::Div,
-    core::ops::DivAssign,
-    core::ops::Mul,
-    core::ops::MulAssign,
-    core::ops::Neg,
-    core::ops::Sub,
-    core::ops::SubAssign,
+use alloc::{format, vec, vec::Vec};
+use core::{
+    array, fmt,
+    hash::{Hash, Hasher},
+    iter::{Product, Sum},
+    mem::{align_of, size_of},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-use {
-    miden_serde_utils::ByteReader,
-    miden_serde_utils::ByteWriter,
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::DeserializationError,
-    miden_serde_utils::Serializable,
+use miden_serde_utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use num_bigint::BigUint;
 use p3_challenger::UniformSamplingField;
-use {
-    p3_field::Field,
-    p3_field::InjectiveMonomial,
-    p3_field::Packable,
-    p3_field::PermutationMonomial,
-    p3_field::PrimeCharacteristicRing,
-    p3_field::PrimeField,
-    p3_field::PrimeField64,
-    p3_field::RawDataSerializable,
-    p3_field::TwoAdicField,
-    p3_field::extension::Binomial,
-    p3_field::extension::BinomiallyExtendable,
-    p3_field::extension::ExtensionAlgebra,
-    p3_field::extension::HasTwoAdicBinomialExtension,
-    p3_field::extension::binomial_mul,
-    p3_field::extension::binomial_square,
-    p3_field::impl_raw_serializable_primefield64,
-    p3_field::integers::QuotientMap,
-    p3_field::quotient_map_large_iint,
-    p3_field::quotient_map_large_uint,
-    p3_field::quotient_map_small_int,
+use p3_field::{
+    Field, InjectiveMonomial, Packable, PermutationMonomial, PrimeCharacteristicRing, PrimeField,
+    PrimeField64, RawDataSerializable, TwoAdicField,
+    extension::{
+        Binomial, BinomiallyExtendable, ExtensionAlgebra, HasTwoAdicBinomialExtension,
+        binomial_mul, binomial_square,
+    },
+    impl_raw_serializable_primefield64,
+    integers::QuotientMap,
+    quotient_map_large_iint, quotient_map_large_uint, quotient_map_small_int,
 };
 use p3_goldilocks::Goldilocks;
 use p3_util::flatten_to_base;
-use {
-    rand::Rng,
-    rand::distr::Distribution,
-    rand::distr::StandardUniform,
+use rand::{
+    Rng,
+    distr::{Distribution, StandardUniform},
 };
-use {
-    subtle::ConditionallySelectable,
-    subtle::ConstantTimeLess,
-};
+use subtle::{ConditionallySelectable, ConstantTimeLess};
 
 #[cfg(any(
     all(target_arch = "x86_64", target_feature = "avx2"),
@@ -829,26 +794,19 @@ mod arbitrary {
 }
 
 #[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
-pub use {
-    arbitrary::arb_felt_canonical,
-    arbitrary::arb_felt_noncanonical,
-};
+pub use arbitrary::{arb_felt_canonical, arb_felt_noncanonical};
 
 #[cfg(all(test, not(all(target_family = "wasm", miden))))]
 mod arbitrary_boundary_tests {
-    use {
-        proptest::strategy::Strategy,
-        proptest::strategy::ValueTree,
-        proptest::test_runner::TestRunner,
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
     };
 
-    use {
-        crate::Felt,
-        super::arbitrary::CANONICAL_EDGES,
-        super::arbitrary::NONCANONICAL_EDGES,
-        super::arbitrary::arb_felt_canonical,
-        super::arbitrary::arb_felt_noncanonical,
+    use super::arbitrary::{
+        CANONICAL_EDGES, NONCANONICAL_EDGES, arb_felt_canonical, arb_felt_noncanonical,
     };
+    use crate::Felt;
 
     /// The boundary values are reachable BY CONSTRUCTION — pin it
     /// empirically so a future refactor of the branch gating cannot

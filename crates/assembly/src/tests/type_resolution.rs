@@ -5,14 +5,9 @@ use super::*;
 
 #[test]
 fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
-    use {
-        crate::ast::types::AddressSpace,
-        crate::ast::types::PointerType,
-        crate::ast::types::Type,
-    };
-    use {
-        crate::package::Package,
-        crate::package::PackageExport,
+    use crate::{
+        ast::types::{AddressSpace, PointerType, Type},
+        package::{Package, PackageExport},
     };
 
     let context = TestContext::new();
@@ -65,8 +60,7 @@ fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
 
 #[test]
 fn variadic_procedure_signatures_resolve() -> TestResult {
-    use crate::ast::types::Type;
-    use crate::package::PackageExport;
+    use crate::{ast::types::Type, package::PackageExport};
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -145,10 +139,7 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
 
 #[test]
 fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
-    use {
-        crate::package::Package,
-        crate::package::PackageExport,
-    };
+    use crate::package::{Package, PackageExport};
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(

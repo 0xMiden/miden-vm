@@ -1,30 +1,17 @@
 use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
-use {
-    miden_core::events::EventId,
-    miden_core::events::SystemEvent,
-};
-use {
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
+use miden_core::events::{EventId, SystemEvent};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
-use {
-    crate::BaseHost,
-    crate::Host,
-    crate::SyncHost,
-    crate::advice::AdviceMutation,
-    crate::errors::MapExecErrWithOpIdx,
-    crate::PackageSourceDebugContext,
-    crate::errors::advice_error_with_context,
-    crate::advice_error_with_package_source_context,
-    crate::errors::event_error_with_context,
-    crate::event_error_with_package_source_context,
-    crate::event::EventError,
-    crate::BreakReason,
-    crate::FastProcessor,
-    crate::host::handlers::TraceError,
+use crate::{
+    BaseHost, BreakReason, FastProcessor, Host, PackageSourceDebugContext, SyncHost,
+    advice::AdviceMutation,
+    advice_error_with_package_source_context,
+    errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
+    event::EventError,
+    event_error_with_package_source_context,
+    host::handlers::TraceError,
 };
 
 mod deferred_handlers;

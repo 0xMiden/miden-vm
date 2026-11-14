@@ -5,24 +5,14 @@ mod value;
 use alloc::string::String;
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+pub use self::{
+    eval::{ConstEnvironment, ConstEvalError},
+    expr::{ConstantExpr, ConstantOp, HashKind},
+    value::ConstantValue,
 };
-
-pub use {
-    self::eval::ConstEnvironment,
-    self::eval::ConstEvalError,
-    self::expr::ConstantExpr,
-    self::expr::ConstantOp,
-    self::expr::HashKind,
-    self::value::ConstantValue,
-};
-use {
-    crate::ast::DocString,
-    crate::ast::Ident,
-    crate::ast::Visibility,
+use crate::{
+    ast::{DocString, Ident, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 // CONSTANT

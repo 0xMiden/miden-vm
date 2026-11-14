@@ -1,27 +1,16 @@
 use alloc::sync::Arc;
 
-use {
-    crate::ast::Attribute,
-    crate::ast::AttributeSet,
-    crate::ast::MetaExpr,
-    crate::Path,
-    crate::PathBuf,
-    crate::ast::Visibility,
-    crate::ast::types::FunctionType,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Spanned,
-    crate::diagnostics::Report,
-};
 use miden_core::Word;
 
-use {
-    crate::ast::GlobalItemIndex,
-    super::assembler::MAX_PROC_LOCALS,
-    super::assembler::error::AssemblerError,
-    super::mast_forest_builder::MastNodeRef,
-    super::mast_forest_builder::MastNodeUse,
-    super::mast_forest_builder::SourceNodeRef,
+use super::{
+    assembler::{MAX_PROC_LOCALS, error::AssemblerError},
+    mast_forest_builder::{MastNodeRef, MastNodeUse, SourceNodeRef},
+};
+use crate::{
+    Path, PathBuf,
+    ast::{Attribute, AttributeSet, GlobalItemIndex, MetaExpr, Visibility, types::FunctionType},
+    debuginfo::{SourceManager, SourceSpan, Spanned},
+    diagnostics::Report,
 };
 
 // PROCEDURE CONTEXT
@@ -360,22 +349,14 @@ impl Spanned for Procedure {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::sync::Arc,
-        alloc::vec,
-    };
-
-    use {
-        crate::PathBuf,
-        crate::ast::Attribute,
-        crate::ast::Ident,
-        crate::ast::MetaExpr,
-        crate::debuginfo::DefaultSourceManager,
-        crate::debuginfo::SourceLanguage,
-        crate::debuginfo::Uri,
-    };
+    use alloc::{sync::Arc, vec};
 
     use super::*;
+    use crate::{
+        PathBuf,
+        ast::{Attribute, Ident, MetaExpr},
+        debuginfo::{DefaultSourceManager, SourceLanguage, Uri},
+    };
 
     /// Constructs a [Procedure] with `attrs` attached, for testing attribute accessors.
     fn procedure_with_attributes(attrs: vec::IntoIter<Attribute>) -> Procedure {

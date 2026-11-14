@@ -5,31 +5,18 @@
 
 use alloc::vec::Vec;
 
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::deferred::DEFERRED_AND_FRAME,
-    miden_core::deferred::DEFERRED_CHUNKS_DOMAIN,
-    miden_core::deferred::DataChunk,
-    miden_core::deferred::DeferredError,
-    miden_core::deferred::Digest,
-    miden_core::deferred::EidosFrame,
-    miden_core::deferred::MAX_DEFERRED_WIRE_ELEMENTS,
-    miden_core::deferred::Node,
-    miden_core::deferred::NodeType,
-    miden_core::deferred::PrecompileError,
-    miden_core::deferred::TRUE_DIGEST,
-    miden_core::serde::Serializable,
-    miden_core::utils::bytes_to_packed_u32_elements,
+use miden_core::{
+    Felt, Word, ZERO,
+    deferred::{
+        DEFERRED_AND_FRAME, DEFERRED_CHUNKS_DOMAIN, DataChunk, DeferredError, Digest, EidosFrame,
+        MAX_DEFERRED_WIRE_ELEMENTS, Node, NodeType, PrecompileError, TRUE_DIGEST,
+    },
+    serde::Serializable,
+    utils::bytes_to_packed_u32_elements,
 };
 
 use super::SystemEventError;
-use {
-    crate::advice::AdviceProvider,
-    crate::MemoryError,
-    crate::FastProcessor,
-};
+use crate::{FastProcessor, MemoryError, advice::AdviceProvider};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
@@ -350,11 +337,9 @@ fn decode_frame_from_cv(cv: Word) -> Result<EidosFrame, SystemEventError> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        miden_core::deferred::EidosFrame,
-        miden_core::deferred::deferred_chunks_frame,
-        miden_core::program::StackInputs,
-        miden_core::program::domain::DomainTag,
+    use miden_core::{
+        deferred::{EidosFrame, deferred_chunks_frame},
+        program::{StackInputs, domain::DomainTag},
     };
     use miden_precompiles::Keccak256Precompile;
 
@@ -362,15 +347,9 @@ mod tests {
 
     #[test]
     fn push_deferred_root_preserves_state_on_advice_budget_failure() {
-        use {
-            miden_core::WORD_SIZE,
-            miden_core::crypto::merkle::MerkleStore,
-        };
+        use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
 
-        use {
-            crate::ExecutionOptions,
-            crate::advice::AdviceError,
-        };
+        use crate::{ExecutionOptions, advice::AdviceError};
 
         let mut processor = FastProcessor::new(StackInputs::default());
         let root = processor.deferred_state_mut().log_statement(TRUE_DIGEST).unwrap();
@@ -428,15 +407,9 @@ mod tests {
 
     #[test]
     fn export_witness_preserves_existing_advice_on_budget_failure() {
-        use {
-            miden_core::WORD_SIZE,
-            miden_core::crypto::merkle::MerkleStore,
-        };
+        use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
 
-        use {
-            crate::ExecutionOptions,
-            crate::advice::AdviceError,
-        };
+        use crate::{ExecutionOptions, advice::AdviceError};
 
         let mut processor = FastProcessor::new(StackInputs::default());
         let digest = processor

@@ -1,14 +1,10 @@
-use {
-    crate::BaseHost,
-    crate::ExecutionError,
-    miden_core::Felt,
-    crate::errors::MapExecErrWithOpIdx,
-    crate::PackageSourceDebugContext,
-    miden_core::operations::Operation,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::tracer::OperationHelperRegisters,
-    crate::tracer::Tracer,
+use miden_core::{Felt, operations::Operation};
+
+use crate::{
+    BaseHost, ExecutionError, PackageSourceDebugContext,
+    errors::MapExecErrWithOpIdx,
+    processor::{Processor, StackInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod crypto_ops;

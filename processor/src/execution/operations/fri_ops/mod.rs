@@ -1,14 +1,12 @@
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::ZERO,
-    crate::errors::OperationError,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::Field,
-    miden_core::field::QuadFelt,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::tracer::OperationHelperRegisters,
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{BasedVectorSpace, Field, QuadFelt},
+};
+
+use crate::{
+    errors::OperationError,
+    processor::{Processor, StackInterface},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]

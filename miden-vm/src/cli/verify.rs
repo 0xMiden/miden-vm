@@ -1,34 +1,22 @@
-use {
-    std::path::PathBuf,
-    std::sync::Arc,
-    std::time::Instant,
-};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
-use {
-    miden_assembly::Assembler,
-    miden_assembly::DefaultSourceManager,
-    miden_assembly::diagnostics::IntoDiagnostic,
-    miden_assembly::diagnostics::Report,
-    miden_assembly::diagnostics::Result,
-    miden_assembly::diagnostics::WrapErr,
+use miden_assembly::{
+    Assembler, DefaultSourceManager,
+    diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
+};
+use miden_core::{
+    program::{ExecutionClaim, KernelDescriptor, ProgramInfo},
+    proof::PrecompileStatus,
 };
 use miden_mast_package::Package;
-use {
-    miden_core::program::ExecutionClaim,
-    miden_core::program::KernelDescriptor,
-    miden_core::proof::PrecompileStatus,
-    miden_core::program::ProgramInfo,
-    miden_precompiles::default_verification_precompile_limits,
-    miden_vm::internal::InputFile,
-};
+use miden_precompiles::default_verification_precompile_limits;
+use miden_verifier::Verifier;
+use miden_vm::internal::InputFile;
 
-use {
-    super::data::OutputFile,
-    super::data::ProgramHash,
-    super::data::ProofFile,
-    super::precompile_limits::PrecompileArgs,
-    miden_verifier::Verifier,
+use super::{
+    data::{OutputFile, ProgramHash, ProofFile},
+    precompile_limits::PrecompileArgs,
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -245,10 +233,7 @@ fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Rep
 
 #[cfg(test)]
 mod tests {
-    use {
-        std::fs,
-        std::fs::File,
-    };
+    use std::{fs, fs::File};
 
     use super::*;
 

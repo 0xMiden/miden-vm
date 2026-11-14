@@ -1,15 +1,10 @@
 use core::ops::ControlFlow;
 
-use crate::debuginfo::Spanned;
-
-use {
-    crate::MAX_REPEAT_COUNT,
-    crate::ast::Immediate,
-    crate::ast::Op,
-    crate::ast::Visit,
-    crate::ast::visit::visit_op,
-    crate::sema::AnalysisContext,
-    crate::sema::SemanticAnalysisError,
+use crate::{
+    MAX_REPEAT_COUNT,
+    ast::{Immediate, Op, Visit, visit::visit_op},
+    debuginfo::Spanned,
+    sema::{AnalysisContext, SemanticAnalysisError},
 };
 
 pub struct VerifyRepeatCounts<'a> {

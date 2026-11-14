@@ -1,46 +1,34 @@
 #[cfg(any(feature = "std", feature = "testing"))]
 use alloc::vec::Vec;
-use {
-    alloc::boxed::Box,
-    alloc::sync::Arc,
-};
+use alloc::{boxed::Box, sync::Arc};
 
-#[cfg(feature = "std")]
-use miden_core::Word;
+use miden_assembly_syntax::Parse;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
-use {
-    miden_assembly_syntax::Parse,
-    crate::Path,
-    crate::ast::Module,
-    crate::ast::ModuleKind,
-    crate::debuginfo::DefaultSourceManager,
-    crate::debuginfo::SourceManager,
-    crate::diagnostics::Report,
-    crate::diagnostics::reporting::ReportHandlerOpts,
-    crate::diagnostics::reporting::set_hook,
+pub use miden_assembly_syntax::{
+    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
 };
-pub use {
-    miden_assembly_syntax::assert_diagnostic,
-    miden_assembly_syntax::assert_diagnostic_lines,
-    miden_assembly_syntax::parse_module,
-    miden_assembly_syntax::regex,
-    miden_assembly_syntax::source_file,
-    miden_assembly_syntax::testing::Pattern,
-};
-#[cfg(feature = "testing")]
-use {
-    crate::ast::Form,
-    crate::debuginfo::SourceFile,
-};
-use miden_core::program::Program;
-use crate::package::PackageId;
 #[cfg(feature = "std")]
-use crate::package::TargetType;
+use miden_core::Word;
+use miden_core::program::Program;
 
-use crate::assembler::Assembler;
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
+#[cfg(feature = "std")]
+use crate::package::TargetType;
+use crate::{
+    Path,
+    assembler::Assembler,
+    ast::{Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceManager},
+    diagnostics::{
+        Report,
+        reporting::{ReportHandlerOpts, set_hook},
+    },
+    package::PackageId,
+};
+#[cfg(feature = "testing")]
+use crate::{ast::Form, debuginfo::SourceFile};
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
@@ -212,31 +200,22 @@ pub use self::package_features::TestRegistry;
 
 #[cfg(feature = "std")]
 mod package_features {
-    use {
-        std::collections::BTreeMap,
-        std::string::String,
-        std::sync::Arc,
-        std::sync::Mutex,
+    use std::{
+        collections::BTreeMap,
+        string::String,
+        sync::{Arc, Mutex},
     };
 
-    use {
-        crate::package::Package,
-        crate::package::PackageId,
-    };
-    use {
-        miden_package_registry::PackageCache,
-        miden_package_registry::PackageIndex,
-        miden_package_registry::PackageProvider,
-        miden_package_registry::PackageRecord,
-        miden_package_registry::PackageRegistry,
-        miden_package_registry::PackageStore,
-        miden_package_registry::PackageVersions,
-        miden_package_registry::Version,
-        miden_package_registry::VersionRequirement,
+    use miden_package_registry::{
+        PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
+        PackageVersions, Version, VersionRequirement,
     };
 
     use super::*;
-    use crate::ProjectTargetSelector;
+    use crate::{
+        ProjectTargetSelector,
+        package::{Package, PackageId},
+    };
 
     /// A simple in-memory package index/registry
     #[derive(Default)]
@@ -470,6 +449,7 @@ mod package_features {
             use alloc::string::ToString;
 
             use miden_assembly_syntax::source_file;
+
             use crate::package::Dependency;
 
             let export_path = Path::new(export);

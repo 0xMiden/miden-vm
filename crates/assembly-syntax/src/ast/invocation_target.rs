@@ -1,16 +1,10 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
-use {
-    crate::Path,
-    crate::Word,
-    crate::ast::Ident,
+use crate::{
+    Path, Word,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 // INVOKE
@@ -113,9 +107,7 @@ impl Spanned for InvocationTarget {
 
 impl crate::prettier::PrettyPrint for InvocationTarget {
     fn render(&self) -> crate::prettier::Document {
-        use crate::DisplayHex;
-
-        use crate::prettier::*;
+        use crate::{DisplayHex, prettier::*};
 
         match self {
             Self::MastRoot(digest) => display(DisplayHex(digest.as_bytes().as_slice())),

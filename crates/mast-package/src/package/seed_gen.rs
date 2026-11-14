@@ -1,67 +1,26 @@
-use {
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec,
-    alloc::vec::Vec,
-};
-use {
-    std::fs,
-    std::path::Path,
-    std::println,
-};
+use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
+use std::{fs, path::Path, println};
 
-use {
-    miden_assembly_syntax::ast::DebugVarLocation,
-    miden_assembly_syntax::ast::Path as AstPath,
-    crate::PathBuf,
-    miden_assembly_syntax::ast::types::ArrayType,
-    miden_assembly_syntax::ast::types::CallConv,
-    miden_assembly_syntax::ast::types::EnumType,
-    miden_assembly_syntax::ast::types::FunctionType,
-    miden_assembly_syntax::ast::types::StructType,
-    miden_assembly_syntax::ast::types::Type,
-    miden_assembly_syntax::ast::types::TypeRepr,
-    miden_assembly_syntax::ast::types::Variant,
-    crate::Version,
+use miden_assembly_syntax::ast::{
+    DebugVarLocation, Path as AstPath,
+    types::{ArrayType, CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
 };
-use {
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::DenseMastForestBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    miden_core::operations::Operation,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::Serializable,
-    miden_core::serde::SliceReader,
+use miden_core::{
+    mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId},
+    operations::Operation,
+    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
-use {
-    miden_debug_types::ByteIndex,
-    miden_debug_types::Uri,
-};
+use miden_debug_types::{ByteIndex, Uri};
 use zerocopy::IntoBytes;
 
-use {
-    super::PackageId,
-    super::TargetType,
-};
-use {
-    crate::Package,
-    crate::PackageExport,
-    crate::ProcedureExport,
-    crate::Section,
-    crate::SectionId,
-    crate::debug_info::DebugSourceAsmOp,
-    crate::debug_info::DebugSourceNode,
-    crate::debug_info::DebugSourceVar,
-    crate::debug_info::DebugTypeInfo,
-    crate::debug_info::MAX_DEBUG_INFO_STRING_ROWS,
-    crate::debug_info::MAX_DEBUG_INFO_STRING_SIZE,
-    crate::debug_info::MAX_DEBUG_INFO_TYPE_ROWS,
-    crate::debug_info::PackageDebugInfo,
-    crate::debug_info::PackageDebugInfoBuilder,
+use super::{PackageId, TargetType};
+use crate::{
+    Package, PackageExport, PathBuf, ProcedureExport, Section, SectionId, Version,
+    debug_info::{
+        DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo,
+        MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
+        PackageDebugInfo, PackageDebugInfoBuilder,
+    },
 };
 
 fn build_forest() -> (MastForest, MastNodeId) {

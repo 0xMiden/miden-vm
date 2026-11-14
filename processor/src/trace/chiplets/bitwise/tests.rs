@@ -1,24 +1,16 @@
-use {
-    alloc::vec,
-    alloc::vec::Vec,
-};
+use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
-use {
-    miden_air_definitions::vm::BitwiseOpCols,
-    miden_air_definitions::vm::trace::and8_lookup::BYTE_LOOKUP_COUNT_LEN,
-    miden_air_definitions::vm::trace::chiplets::bitwise::BITWISE_AND,
-    miden_air_definitions::vm::trace::chiplets::bitwise::BITWISE_XOR,
-    miden_air_definitions::vm::trace::chiplets::bitwise::OP_CYCLE_LEN,
-    miden_air_definitions::vm::trace::chiplets::bitwise::TRACE_WIDTH,
+use miden_air_definitions::vm::{
+    BitwiseOpCols,
+    trace::{
+        and8_lookup::BYTE_LOOKUP_COUNT_LEN,
+        chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
+    },
 };
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
-use {
-    super::Bitwise,
-    super::ChipletTraceFragment,
-    miden_core::Felt,
-};
+use super::{Bitwise, ChipletTraceFragment};
 
 #[test]
 fn bitwise_init() {

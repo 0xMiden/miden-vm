@@ -1,13 +1,9 @@
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::ZERO,
-    miden_core::field::Field,
-    crate::operation::BinaryValueErrorContext,
-    crate::operation::OperationError,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::tracer::OperationHelperRegisters,
+use miden_core::{Felt, ONE, ZERO, field::Field};
+
+use crate::{
+    operation::{BinaryValueErrorContext, OperationError},
+    processor::{Processor, StackInterface},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]

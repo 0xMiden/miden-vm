@@ -1,8 +1,6 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::collections::VecDeque,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    vec::Vec,
 };
 
 use crate::ast::GlobalItemIndex;
@@ -286,11 +284,7 @@ impl CallGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use {
-        crate::ast::GlobalItemIndex,
-        crate::ast::ModuleIndex,
-        crate::ast::ItemIndex,
-    };
+    use crate::ast::{GlobalItemIndex, ItemIndex, ModuleIndex};
 
     const A: ModuleIndex = ModuleIndex::const_new(1);
     const B: ModuleIndex = ModuleIndex::const_new(2);

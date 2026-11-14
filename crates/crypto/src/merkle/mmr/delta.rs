@@ -1,9 +1,7 @@
 use alloc::vec::Vec;
 
-use {
-    crate::Word,
-    super::forest::Forest,
-};
+use super::forest::Forest;
+use crate::Word;
 
 /// Container for the update data of a [super::PartialMmr]
 #[derive(Debug)]

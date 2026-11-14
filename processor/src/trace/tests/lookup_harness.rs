@@ -16,26 +16,14 @@
 
 use alloc::vec::Vec;
 
-use {
-    miden_air_definitions::vm::MidenAir,
-    miden_air_definitions::vm::logup::BusId,
-    miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+use miden_air_definitions::vm::{
+    MidenAir, VmTrace,
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
-use {
-    miden_core::field::QuadFelt,
-    miden_core::utils::RowMajorMatrix,
-};
-use {
-    miden_stark::air::BaseAir,
-    miden_stark::lookup::Challenges,
-    miden_stark::lookup::LookupFractions,
-    miden_stark::lookup::LookupMessage,
-    miden_stark::lookup::build_lookup_fractions,
-};
-
-use {
-    miden_core::Felt,
-    miden_air_definitions::vm::VmTrace,
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 
 // INTERACTION LOG

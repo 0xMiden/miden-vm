@@ -642,13 +642,9 @@ fn plain_exec_preserves_canonical_definitions() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
-    use {
-        crate::debuginfo::SourceLanguage,
-        crate::debuginfo::Uri,
-    };
-    use {
-        crate::serde::Deserializable,
-        crate::serde::Serializable,
+    use crate::{
+        debuginfo::{SourceLanguage, Uri},
+        serde::{Deserializable, Serializable},
     };
 
     let source = "proc leaf push.42 end\nproc wrapper exec.leaf end\nbegin\n exec.wrapper\n drop\n exec.wrapper\n drop\nend";
@@ -669,9 +665,8 @@ fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
     let baseline = include_bytes!("fixtures/exec-source-identity.mast");
     assert_eq!(wrapper_package.mast_forest().to_bytes(), baseline.as_slice());
     let debug = wrapper_package.debug_info().into_diagnostic()?.unwrap();
-    let decoded =
-        crate::package::debug_info::PackageDebugInfo::read_from_bytes(&debug.to_bytes())
-            .into_diagnostic()?;
+    let decoded = crate::package::debug_info::PackageDebugInfo::read_from_bytes(&debug.to_bytes())
+        .into_diagnostic()?;
     assert_eq!(decoded, debug);
     assert_ne!(
         debug.to_bytes(),
@@ -763,10 +758,7 @@ fn plain_exec_inline_ranges_cover_only_inlined_operations() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_imported_alias_identity() -> TestResult {
-    use {
-        crate::serde::Deserializable,
-        crate::serde::Serializable,
-    };
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let library = Assembler::new(context.source_manager()).assemble_library(
@@ -827,10 +819,7 @@ fn plain_exec_preserves_imported_alias_identity() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_reexported_function_identity() -> TestResult {
-    use {
-        crate::serde::Deserializable,
-        crate::serde::Serializable,
-    };
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let root =
@@ -892,10 +881,9 @@ fn plain_exec_preserves_reexported_function_identity() -> TestResult {
 
 #[test]
 fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
-    use crate::serde::Serializable;
-    use {
-        crate::package::SectionId,
-        crate::package::debug_info::PackageDebugInfoBuilder,
+    use crate::{
+        package::{SectionId, debug_info::PackageDebugInfoBuilder},
+        serde::Serializable,
     };
 
     let context = TestContext::default();
@@ -936,10 +924,7 @@ fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
 
 #[test]
 fn plain_exec_preserves_dynamic_dependency_reexports() -> TestResult {
-    use {
-        crate::serde::Deserializable,
-        crate::serde::Serializable,
-    };
+    use crate::serde::{Deserializable, Serializable};
 
     let context = TestContext::default();
     let dependency = Assembler::new(context.source_manager()).assemble_library(

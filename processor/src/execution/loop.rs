@@ -1,26 +1,17 @@
 use core::ops::ControlFlow;
 
-use {
-    crate::BaseHost,
-    crate::BreakReason,
-    crate::MapExecErr,
-    miden_core::ONE,
-    crate::Stopper,
-    miden_core::ZERO,
-    crate::Continuation,
-    crate::execution::ExecutionState,
-    crate::execution::finalize_clock_cycle,
-    crate::execution::finalize_clock_cycle_with_continuation,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::LoopNode,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeId,
-    crate::operation::BinaryValueErrorContext,
-    crate::operation::OperationError,
-    crate::option_map_break_reason,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::tracer::Tracer,
+use miden_core::{
+    ONE, ZERO,
+    mast::{ExecutableMastForest, LoopNode, MastNode, MastNodeId},
+};
+
+use crate::{
+    BaseHost, BreakReason, Continuation, MapExecErr, Stopper,
+    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    operation::{BinaryValueErrorContext, OperationError},
+    option_map_break_reason,
+    processor::{Processor, StackInterface},
+    tracer::Tracer,
 };
 
 // LOOP NODE PROCESSING

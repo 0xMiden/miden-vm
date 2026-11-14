@@ -1,46 +1,28 @@
-use {
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
 };
 use core::fmt::Debug;
 
-use {
-    miden_core::Word,
-    crate::mast::BasicBlockNode,
-    crate::mast::ExecutableMastForest,
-    crate::mast::MastForest,
-    crate::mast::MastNode,
-    crate::mast::MastNodeExt,
-    crate::mast::MastNodeId,
-    crate::mast::SubtreeIterator,
-};
-use {
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugInfoTableRemapping,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceInlineCall,
-    crate::package::debug_info::DebugSourceNodeId,
-    crate::package::debug_info::DebugSourceVar,
-    crate::package::debug_info::FunctionInfo,
-    crate::package::debug_info::PackageDebugInfo,
-};
+use miden_core::Word;
 
-use {
-    super::MastForestBuilder,
-    super::MastNodeRef,
-    super::MastNodeUse,
-    super::PendingMastNodeDraft,
-    super::PendingMastNodeKind,
-    super::SourceNodeRef,
-    super::remap_inline_ranges,
+use super::{
+    MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
+    SourceNodeRef, remap_inline_ranges,
 };
-use {
-    crate::ast::GlobalItemIndex,
-    crate::diagnostics::IntoDiagnostic,
-    crate::diagnostics::Report,
-    crate::linker::LinkLibrary,
+use crate::{
+    ast::GlobalItemIndex,
+    diagnostics::{IntoDiagnostic, Report},
+    linker::LinkLibrary,
+    mast::{
+        BasicBlockNode, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
+        SubtreeIterator,
+    },
+    package::debug_info::{
+        DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
+        DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
+    },
 };
 
 #[derive(Clone, Copy)]

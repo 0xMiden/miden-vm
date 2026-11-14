@@ -1,9 +1,5 @@
-use {
-    crate::package::Dependency,
-    crate::package::debug_info::PackageDebugInfo,
-};
-
 use super::*;
+use crate::package::{Dependency, debug_info::PackageDebugInfo};
 
 pub struct AssemblyProduct {
     package: Box<Package>,
@@ -96,13 +92,11 @@ fn linked_kernel_package_section(package: &Package) -> Section {
 
 #[cfg(test)]
 mod tests {
-    use {
-        crate::package::debug_info::MAX_DEBUG_INFO_STRING_SIZE,
-        crate::package::debug_info::PackageDebugInfoBuilder,
-    };
-
     use super::*;
-    use crate::testing::TestContext;
+    use crate::{
+        package::debug_info::{MAX_DEBUG_INFO_STRING_SIZE, PackageDebugInfoBuilder},
+        testing::TestContext,
+    };
 
     #[test]
     fn artifact_rejects_debug_info_beyond_standard_decoder_limits() {

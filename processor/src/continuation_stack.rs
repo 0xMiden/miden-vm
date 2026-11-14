@@ -1,27 +1,12 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
-use {
-    core::sync::atomic::AtomicU64,
-    core::sync::atomic::Ordering,
-};
+use alloc::{sync::Arc, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
 
-use {
-    miden_core::mast::MastForestId,
-    miden_core::mast::MastNodeId,
-    miden_core::program::Program,
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
+use miden_core::{
+    mast::{MastForestId, MastNodeId},
+    program::Program,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use {
-    miden_mast_package::debug_info::DebugSourceInlineCall,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
+use miden_mast_package::debug_info::{DebugSourceInlineCall, DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -711,16 +696,10 @@ impl Deserializable for ContinuationStack<MastForestId> {
 
 #[cfg(any(test, feature = "arbitrary"))]
 mod arbitrary {
-    use {
-        miden_core::mast::MastForestId,
-        miden_core::mast::MastNodeId,
-    };
+    use miden_core::mast::{MastForestId, MastNodeId};
     use proptest::prelude::*;
 
-    use {
-        crate::Continuation,
-        crate::continuation_stack::ContinuationStack,
-    };
+    use crate::{Continuation, continuation_stack::ContinuationStack};
 
     impl Arbitrary for Continuation<MastForestId> {
         type Parameters = ();
@@ -787,12 +766,9 @@ mod tests {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastForest;
-    use {
-        miden_mast_package::debug_info::DebugFunctionIdx,
-        miden_mast_package::debug_info::DebugLocIdx,
-        miden_mast_package::debug_info::DebugSourceInlineCall,
-        miden_mast_package::debug_info::DebugSourceNode,
-        miden_mast_package::debug_info::PackageDebugInfoBuilder,
+    use miden_mast_package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceInlineCall, DebugSourceNode,
+        PackageDebugInfoBuilder,
     };
 
     use super::*;
@@ -1022,17 +998,11 @@ mod tests {
 
 #[cfg(test)]
 mod wire_contract_pin {
-    use {
-        alloc::vec,
-        alloc::vec::Vec,
-    };
+    use alloc::{vec, vec::Vec};
 
-    use {
-        miden_core::mast::MastForestId,
-        miden_core::mast::MastNodeId,
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
-        miden_core::serde::SliceReader,
+    use miden_core::{
+        mast::{MastForestId, MastNodeId},
+        serde::{Deserializable, Serializable, SliceReader},
     };
 
     use super::*;

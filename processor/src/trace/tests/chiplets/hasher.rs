@@ -17,51 +17,34 @@
 
 use alloc::vec::Vec;
 
-use {
-    miden_air_definitions::vm::ControllerCols,
-    miden_air_definitions::vm::logup::HasherMsg,
-    miden_air_definitions::vm::logup::SiblingBit,
-    miden_air_definitions::vm::logup::SiblingMsg,
-    miden_air_definitions::vm::trace::MainTrace,
-    miden_air_definitions::vm::trace::chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
-    miden_air_definitions::vm::trace::log_deferred::HELPER_ADDR_IDX,
-    miden_air_definitions::vm::trace::log_deferred::HELPER_STATE_PREV_RANGE,
-    miden_air_definitions::vm::trace::log_deferred::STACK_STATE_NEW_RANGE,
-    miden_air_definitions::vm::trace::log_deferred::STACK_STMNT_RANGE,
+use miden_air_definitions::vm::{
+    ControllerCols,
+    logup::{HasherMsg, SiblingBit, SiblingMsg},
+    trace::{
+        MainTrace, RowIndex,
+        chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
+        log_deferred::{
+            HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
+        },
+    },
 };
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::chiplets::eidos_compression,
-    miden_core::crypto::merkle::MerkleStore,
-    miden_core::crypto::merkle::MerkleTree,
-    miden_core::crypto::merkle::NodeIndex,
-    miden_core::deferred::DEFERRED_AND_INIT_CV,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::SplitNodeBuilder,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::Program,
+use miden_core::{
+    Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
+    chiplets::eidos_compression,
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    deferred::DEFERRED_AND_INIT_CV,
+    mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
+    operations::{Operation, opcodes},
+    program::Program,
+    utils::ToElements,
 };
-use {
-    miden_utils_testing::stack,
-    miden_utils_testing::stack_inputs_from_ints,
-};
+use miden_utils_testing::{stack, stack_inputs_from_ints};
 use rstest::rstest;
 
-use {
-    super::super::build_trace_from_ops_with_inputs,
-    super::super::build_trace_from_program,
-    super::super::lookup_harness::Expectations,
-    super::super::lookup_harness::InteractionLog,
-};
-use {
-    miden_core::advice::AdviceInputs,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_core::utils::ToElements,
+use super::super::{
+    build_trace_from_ops_with_inputs, build_trace_from_program,
+    lookup_harness::{Expectations, InteractionLog},
 };
 
 // RESPONSE-SIDE DISPATCH

@@ -1,35 +1,20 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::collections::BTreeSet,
-    alloc::collections::VecDeque,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    crate::debuginfo::SourceFile,
-    crate::debuginfo::SourceManager,
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-use {
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::Severity,
-};
-
-use {
-    super::SemanticAnalysisError,
-    super::SyntaxError,
-};
-use {
-    crate::ast::constants::ConstEvalError,
-    crate::ast::constants::eval::CachedConstantValue,
-    crate::ast::*,
-    crate::PathBuf,
+use super::{SemanticAnalysisError, SyntaxError};
+use crate::{
+    PathBuf,
+    ast::{
+        constants::{ConstEvalError, eval::CachedConstantValue},
+        *,
+    },
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::{Diagnostic, Severity},
 };
 
 /// This maintains the state for semantic analysis of a single [Module].
@@ -468,37 +453,22 @@ impl AnalysisContext {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::boxed::Box,
-        alloc::string::String,
-        alloc::sync::Arc,
-    };
+    use alloc::{boxed::Box, string::String, sync::Arc};
     use core::cell::Cell;
 
     use super::AnalysisContext;
-    use {
-        crate::Path,
-        crate::PathBuf,
-        crate::ast::Constant,
-        crate::ast::ConstantExpr,
-        crate::ast::ConstantOp,
-        crate::ast::ConstantValue,
-        crate::ast::Ident,
-        crate::ast::Import,
-        crate::ast::Module,
-        crate::ast::ModuleImport,
-        crate::ast::ModuleKind,
-        crate::ast::Visibility,
-        crate::ast::constants,
-        crate::ast::constants::eval::CachedConstantValue,
-        crate::debuginfo::DefaultSourceManager,
-        crate::debuginfo::SourceContent,
-        crate::debuginfo::SourceLanguage,
-        crate::debuginfo::SourceManager,
-        crate::debuginfo::SourceSpan,
-        crate::debuginfo::Span,
-        crate::debuginfo::Uri,
-        crate::parser::IntValue,
+    use crate::{
+        Path, PathBuf,
+        ast::{
+            Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module, ModuleImport,
+            ModuleKind, Visibility,
+            constants::{self, eval::CachedConstantValue},
+        },
+        debuginfo::{
+            DefaultSourceManager, SourceContent, SourceLanguage, SourceManager, SourceSpan, Span,
+            Uri,
+        },
+        parser::IntValue,
     };
 
     struct CountingEnv<'a> {

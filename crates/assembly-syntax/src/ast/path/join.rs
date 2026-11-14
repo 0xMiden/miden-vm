@@ -1,8 +1,4 @@
-use {
-    alloc::boxed::Box,
-    alloc::string::String,
-    alloc::sync::Arc,
-};
+use alloc::{boxed::Box, string::String, sync::Arc};
 
 use super::*;
 use crate::ast;

@@ -1,47 +1,22 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::format,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, format, string::ToString, sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
-use {
-    std::fs,
-    std::path::Path as FsPath,
-    std::path::PathBuf,
+use std::{
+    fs,
+    path::{Path as FsPath, PathBuf},
 };
 
-use {
-    crate::ast::ModuleKind,
-    crate::diagnostics::Report,
-};
-use crate::serde::Deserializable;
-use {
-    crate::package::Package as MastPackage,
-    crate::package::SectionId,
-    crate::package::TargetType,
-};
-use {
-    miden_package_registry::PackageCache,
-    crate::package::PackageId,
-    miden_package_registry::Version as PackageVersion,
-};
-use {
-    crate::Linkage,
-    miden_project::Package as ProjectPackage,
-    miden_project::PreassembledDependencyMetadata,
-    miden_project::Profile,
-    miden_project::ProjectDependencyNodeProvenance,
-    miden_project::ProjectSource,
-    miden_project::ProjectSourceOrigin,
-    miden_project::Target,
+use miden_package_registry::{PackageCache, Version as PackageVersion};
+use miden_project::{
+    Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
+    ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
-use {
-    crate::Assembler,
-    crate::ast::Module,
+use crate::{
+    Assembler, Linkage,
+    ast::{Module, ModuleKind},
+    diagnostics::Report,
+    package::{Package as MastPackage, PackageId, SectionId, TargetType},
+    serde::Deserializable,
 };
 
 mod build_provenance;
@@ -51,18 +26,14 @@ mod providers;
 mod runtime_dependencies;
 mod target_selector;
 
-use {
-    self::build_provenance::PackageBuildProvenance,
-    self::dependency_graph::DependencyGraph,
-    self::runtime_dependencies::RuntimeDependencies,
+use self::{
+    build_provenance::PackageBuildProvenance, dependency_graph::DependencyGraph,
+    runtime_dependencies::RuntimeDependencies,
 };
-pub use {
-    self::post_process::PackagePostProcessor,
-    self::post_process::PostProcessContext,
-    self::providers::MasmSourceProvider,
-    self::providers::ProjectSourceProvider,
-    self::providers::TargetAssemblyContext,
-    self::target_selector::ProjectTargetSelector,
+pub use self::{
+    post_process::{PackagePostProcessor, PostProcessContext},
+    providers::{MasmSourceProvider, ProjectSourceProvider, TargetAssemblyContext},
+    target_selector::ProjectTargetSelector,
 };
 
 #[cfg(test)]

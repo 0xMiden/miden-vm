@@ -13,57 +13,41 @@ mod fixed_boundary_codegen;
 #[cfg(any(test, feature = "constants-tools"))]
 pub(crate) mod pvm_ood_frames;
 
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::vec,
-    alloc::vec::Vec,
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
 };
 
-use {
-    miden_air::precompiles::ChipletAir,
-    miden_air::precompiles::ChipletMultiAir,
-    miden_air::precompiles::NUM_CHIPLETS,
-    miden_air::precompiles::policy::precompile_pcs_params,
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, policy::precompile_pcs_params,
 };
-use {
-    miden_core::Felt,
-    miden_core::Word,
-    miden_core::advice::AdviceInputs,
-    miden_core::deferred::DeferredClaim,
-    miden_core::deferred::MAX_PRECOMPILE_ROOTS,
-    miden_core::field::QuadFelt,
-    miden_core::proof::HashFunction,
-    miden_core::proof::MAX_STARK_PROOF_BYTES,
-    miden_core::proof::PrecompileProof,
-    miden_core::proof::StarkProof as SerializedStarkProof,
+use miden_core::{
+    Felt, Word,
+    advice::AdviceInputs,
+    deferred::{DeferredClaim, MAX_PRECOMPILE_ROOTS},
+    field::QuadFelt,
+    proof::{
+        HashFunction, MAX_STARK_PROOF_BYTES, PrecompileProof, StarkProof as SerializedStarkProof,
+    },
 };
 use miden_serde_utils::deserialize_schema_exact;
-use {
-    miden_stark::StarkConfig,
-    miden_stark::VerifierInstance,
-    miden_stark::air::LiftedAir,
-    miden_stark::air::Statement,
-    miden_stark::config::observe_protocol_params,
-    miden_stark::proof::StarkProof,
-    miden_stark::proof::StarkProofData,
-    miden_stark::recursive::advice::AdviceError,
-    miden_stark::recursive::advice::MerkleAdvice,
-    miden_stark::recursive::advice::append_proof_payload,
-    miden_stark::recursive::advice::build_merkle_advice,
-    miden_stark::recursive::advice::package_for_request,
-    miden_stark::recursive::advice::security_parameter_words,
+use miden_stark::{
+    StarkConfig, VerifierInstance,
+    air::{LiftedAir, Statement},
+    config::observe_protocol_params,
+    proof::{StarkProof, StarkProofData},
+    recursive::advice::{
+        AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
+        security_parameter_words,
+    },
 };
 use serde_wincode::SerdeCompat;
 
-use {
-    self::ace::proof_order_from_log_heights,
-    self::ace::shared_pvm_recursive_circuit,
-};
-use {
-    crate::setup::commitments,
-    crate::setup::config::EidosConfig,
-    crate::setup::config::eidos_config,
+use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
+use crate::setup::{
+    commitments,
+    config::{EidosConfig, eidos_config},
 };
 
 type Challenge = QuadFelt;
@@ -349,8 +333,7 @@ mod tests {
     /// Pins the complete packaged advice for the current PVM proof fixture.
     #[test]
     fn packaged_advice_matches_current_fixture() {
-        use miden_core::serde::Serializable;
-        use miden_core::crypto::hash::Blake3_256;
+        use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
         let root: [Felt; 4] = include_str!("../../tests/fixtures/pvm_eidos_v1_0.root")
             .split_ascii_whitespace()

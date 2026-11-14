@@ -1,16 +1,7 @@
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
-};
-
-use {
-    super::Block,
-    super::Immediate,
-    super::Instruction,
-};
+use super::{Block, Immediate, Instruction};
+use crate::debuginfo::{SourceSpan, Span, Spanned};
 
 /// Represents the Miden Assembly instruction set syntax
 ///

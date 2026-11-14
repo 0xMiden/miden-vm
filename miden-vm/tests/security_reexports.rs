@@ -1,8 +1,4 @@
-use {
-    miden_vm::ProofSecurityParameters,
-    miden_vm::ProvenSecurityReport,
-    miden_vm::SecurityReport,
-};
+use miden_vm::{ProofSecurityParameters, ProvenSecurityReport, SecurityReport};
 
 #[test]
 fn security_types_are_available_through_the_vm_crate() {

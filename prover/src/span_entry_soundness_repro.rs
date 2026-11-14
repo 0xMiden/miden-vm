@@ -3,23 +3,15 @@
 use alloc::vec;
 
 use miden_air_definitions::vm::trace::RowIndex;
-use {
-    miden_core::Felt,
-    miden_core::operations::opcodes,
-    miden_core::program::StackOutputs,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt,
+    operations::opcodes,
+    program::{StackInputs, StackOutputs},
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_processor::DefaultHost,
-    miden_processor::FastProcessor,
-    miden_core::program::StackInputs,
-};
+use miden_processor::{DefaultHost, FastProcessor};
 
-use {
-    crate::repro_harness::ReproTrace,
-    crate::repro_harness::core_row_mut,
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 /// Width of the trailing `RangeCols { multiplicity, value }` segment of `CoreCols`.
 ///

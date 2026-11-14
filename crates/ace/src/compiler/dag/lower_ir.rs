@@ -96,35 +96,22 @@
 //! wrapped subtree (mirroring the tree lowering's `ExtLeaf::Base` case). Fields
 //! are concrete (`Felt`/`QuadFelt`), matching the capture frontend.
 
-use {
-    miden_constraint_compiler::ir::CapturedConstraints,
-    miden_constraint_compiler::ir::Graph,
-    miden_constraint_compiler::ir::Leaf,
-    miden_constraint_compiler::ir::Node,
-    miden_constraint_compiler::ir::NodeId as IrNodeId,
-    miden_constraint_compiler::ir::OpKind,
+use miden_constraint_compiler::ir::{
+    CapturedConstraints, Graph, Leaf, Node, NodeId as IrNodeId, OpKind,
 };
-use {
-    miden_core::Felt,
-    miden_core::field::QuadFelt,
-};
-use {
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::PrimeCharacteristicRing,
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
 };
 
-use {
-    super::builder::DagBuilder,
-    super::ir::AceDag,
-    super::ir::NodeId,
-    super::ir::PeriodicColumnData,
-    super::periodic::build_periodic_nodes,
+use super::{
+    builder::DagBuilder,
+    ir::{AceDag, NodeId, PeriodicColumnData},
+    periodic::build_periodic_nodes,
 };
-use {
-    crate::compiler::quotient::build_quotient_recomposition_dag,
-    crate::compiler::randomness,
-    crate::layout::InputKey,
-    crate::layout::InputLayout,
+use crate::{
+    compiler::{quotient::build_quotient_recomposition_dag, randomness},
+    layout::{InputKey, InputLayout},
 };
 
 /// Build the verifier-equivalent root expression DAG (see the module docs)

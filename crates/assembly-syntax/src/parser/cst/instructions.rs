@@ -1,39 +1,24 @@
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
 
-use {
-    miden_assembly_syntax_cst::SyntaxKind,
-    miden_assembly_syntax_cst::SyntaxToken,
-    miden_assembly_syntax_cst::ast::AstNode,
-    miden_assembly_syntax_cst::ast::Instruction as CstInstruction,
-    miden_assembly_syntax_cst::rowan,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
+use miden_assembly_syntax_cst::{
+    SyntaxKind, SyntaxToken,
+    ast::{AstNode, Instruction as CstInstruction},
+    rowan,
 };
 
-use {
-    super::context::LoweringContext,
-    super::fragments::ParsedNumeric,
-    super::fragments::lower_u32_immediate_token,
-    super::fragments::parse_decimal_u64,
-    super::fragments::parse_numeric_token,
+use super::{
+    context::LoweringContext,
+    fragments::{ParsedNumeric, lower_u32_immediate_token, parse_decimal_u64, parse_numeric_token},
 };
-use {
-    crate::Felt,
-    crate::Word,
-    crate::ast,
-    crate::ast::Immediate,
-    crate::ast::Instruction,
-    crate::ast::SystemEventNode,
-    crate::parser::LiteralErrorKind,
-    crate::parser::ParsingError,
-    crate::parser::PushValue,
+use crate::{
+    Felt, Word,
+    ast::{self, Immediate, Instruction, SystemEventNode},
+    debuginfo::{SourceSpan, Span},
+    parser::{LiteralErrorKind, ParsingError, PushValue},
 };
 
 /// Attempts to lower a CST instruction node into one or more AST ops.

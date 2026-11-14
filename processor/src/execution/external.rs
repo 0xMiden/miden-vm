@@ -1,26 +1,13 @@
-use {
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use {
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
+use miden_core::mast::{ExecutableMastForest, MastNodeExt, MastNodeId};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
-use {
-    crate::BreakReason,
-    crate::Continuation,
-    crate::continuation_stack::ContinuationStack,
-    crate::SourceInlineCallContext,
-    crate::execution::InternalBreakReason,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    crate::operation::OperationError,
-    crate::option_map_break_reason,
-    crate::tracer::Tracer,
+use crate::{
+    BreakReason, Continuation, SourceInlineCallContext, continuation_stack::ContinuationStack,
+    execution::InternalBreakReason, operation::OperationError, option_map_break_reason,
+    tracer::Tracer,
 };
 
 // EXTERNAL NODE PROCESSING
@@ -132,26 +119,18 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::sync::Arc;
-    use {
-        core::assert_matches,
-        core::ops::ControlFlow,
-    };
+    use core::{assert_matches, ops::ControlFlow};
 
-    use {
-        miden_core::Felt,
-        miden_core::mast::BasicBlockNodeBuilder,
-        miden_core::mast::ExternalNodeBuilder,
-        miden_core::mast::MastForest,
-        miden_core::operations::Operation,
-        miden_core::program::Program,
+    use miden_core::{
+        Felt,
+        mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest},
+        operations::Operation,
+        program::Program,
     };
     use miden_mast_package::debug_info::DebugSourceNodeId;
 
     use super::*;
-    use {
-        crate::Continuation,
-        crate::fast::NoopTracer,
-    };
+    use crate::{Continuation, fast::NoopTracer};
 
     #[test]
     fn loaded_external_forest_starts_without_source_sidecar() {

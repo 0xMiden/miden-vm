@@ -1,53 +1,24 @@
-use {
-    alloc::boxed::Box,
-    alloc::collections::BTreeMap,
-    alloc::format,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, format, vec::Vec};
 use core::fmt::Debug;
 
-use {
-    miden_core::advice::AdviceMap,
-    crate::mast::BasicBlockNode,
-    crate::mast::BasicBlockNodeBuilder,
-    crate::mast::CallNodeBuilder,
-    crate::mast::DynNodeBuilder,
-    crate::mast::ExternalNodeBuilder,
-    crate::mast::JoinNodeBuilder,
-    crate::mast::LoopNodeBuilder,
-    crate::mast::MastForest,
-    crate::mast::MastForestContributor,
-    crate::mast::MastForestError,
-    crate::mast::MastNode,
-    crate::mast::MastNodeBuilder,
-    crate::mast::MastNodeId,
-    crate::mast::SplitNodeBuilder,
-    crate::utils::IndexVec,
-};
-use {
-    crate::package::debug_info::DebugFunctionIdx,
-    crate::package::debug_info::DebugInfoBuilder,
-    crate::package::debug_info::DebugSourceAsmOp,
-    crate::package::debug_info::DebugSourceInlineCall,
-    crate::package::debug_info::DebugSourceNodeId,
-    crate::package::debug_info::DebugSourceVar,
-    crate::package::debug_info::PackageDebugInfo,
-    crate::package::debug_info::PackageDebugInfoBuilder,
-    crate::package::debug_info::SourceNode,
-};
+use miden_core::advice::AdviceMap;
 
-use {
-    super::MastNodeRef,
-    super::PendingMastNode,
-    super::PendingMastNodeKind,
-    super::SourceNodeRef,
-    super::compute_operations_and_adjust_mappings,
-    super::remap_inline_ranges,
+use super::{
+    MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
+    compute_operations_and_adjust_mappings, remap_inline_ranges,
 };
-use {
-    crate::diagnostics::Diagnostic,
-    crate::diagnostics::Report,
-    crate::diagnostics::miette,
+use crate::{
+    diagnostics::{Diagnostic, Report, miette},
+    mast::{
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
+    },
+    package::debug_info::{
+        DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceInlineCall,
+        DebugSourceNodeId, DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder, SourceNode,
+    },
+    utils::IndexVec,
 };
 
 /// Result of finalizing a [`super::MastForestBuilder`].

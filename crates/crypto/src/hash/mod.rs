@@ -1,7 +1,5 @@
 //! Cryptographic hash functions, including standalone application primitives.
 
-
-
 /// Generic digest types for binary hash functions.
 pub(crate) mod digest;
 
@@ -27,12 +25,9 @@ pub mod stateful;
 pub mod poseidon2 {
     pub use p3_goldilocks::Poseidon2Goldilocks;
 
-    pub use {
-        super::algebraic_sponge::poseidon2::Poseidon2,
-        super::algebraic_sponge::poseidon2::Poseidon2Challenger,
-        super::algebraic_sponge::poseidon2::Poseidon2Compression,
-        super::algebraic_sponge::poseidon2::Poseidon2Hasher,
-        super::algebraic_sponge::poseidon2::Poseidon2Permutation256,
+    pub use super::algebraic_sponge::poseidon2::{
+        Poseidon2, Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher,
+        Poseidon2Permutation256,
     };
 }
 

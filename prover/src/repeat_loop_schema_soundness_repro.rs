@@ -1,62 +1,36 @@
 //! Prover and verifier regressions for the LOOP body and REPEAT parent constraints.
 
-use {
-    alloc::vec,
-    alloc::vec::Vec,
-};
-use {
-    core::borrow::Borrow,
-    core::borrow::BorrowMut,
-};
+use alloc::{vec, vec::Vec};
+use core::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 
 use miden_air::vm::MidenAir;
-use {
-    miden_air_definitions::vm::ChipletActiveFlags,
-    miden_air_definitions::vm::ChipletCols,
-    miden_air_definitions::vm::ControllerCols,
-    miden_air_definitions::vm::logup::BlockHashMsg,
-    miden_air_definitions::vm::logup::BusId,
-    miden_air_definitions::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
-    miden_air_definitions::vm::trace::MIN_TRACE_LEN,
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::hasher::HASH_ABSORB,
-    miden_air_definitions::vm::trace::chiplets::hasher::LINEAR_HASH,
-    miden_air_definitions::vm::trace::chiplets::hasher::PADDING,
-    miden_air_definitions::vm::trace::eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
-    miden_air_definitions::vm::trace::eidos_compression::retag_felt_trace_block_cycle_id,
+use miden_air_definitions::vm::{
+    ChipletActiveFlags, ChipletCols, ControllerCols, VmTrace,
+    logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
+    trace::{
+        MIN_TRACE_LEN, RowIndex,
+        chiplets::hasher::{HASH_ABSORB, LINEAR_HASH, PADDING},
+        eidos_compression::{NUM_EIDOS_COMPRESSION_COLS, retag_felt_trace_block_cycle_id},
+    },
 };
-use {
-    miden_core::Felt,
-    miden_core::field::QuadFelt,
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::LoopNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::operations::Operation,
-    miden_core::operations::opcodes,
-    miden_core::program::Program,
-    miden_core::program::StackOutputs,
-    miden_core::utils::Matrix,
-    miden_core::utils::RowMajorMatrix,
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
+    operations::{Operation, opcodes},
+    program::{Program, StackInputs, StackOutputs},
+    utils::{Matrix, RowMajorMatrix},
 };
-use {
-    miden_processor::DefaultHost,
-    miden_processor::FastProcessor,
-    miden_core::program::StackInputs,
-    miden_air_definitions::vm::VmTrace,
-    miden_processor::trace::chiplets::build_external_eidos_compression_traces,
+use miden_processor::{
+    DefaultHost, FastProcessor, trace::chiplets::build_external_eidos_compression_traces,
 };
-use {
-    miden_stark::air::BaseAir,
-    miden_stark::lookup::Challenges,
-    miden_stark::lookup::LookupMessage,
-    miden_stark::lookup::build_lookup_fractions,
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
 
-use {
-    crate::repro_harness::ReproTrace,
-    crate::repro_harness::core_row_mut,
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();

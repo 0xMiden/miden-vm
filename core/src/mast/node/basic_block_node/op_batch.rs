@@ -1,15 +1,7 @@
-use {
-    alloc::string::String,
-    alloc::vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 
-use {
-    super::BATCH_SIZE,
-    crate::Felt,
-    super::GROUP_SIZE,
-    crate::operations::Operation,
-    crate::ZERO,
-};
+use super::{BATCH_SIZE, GROUP_SIZE};
+use crate::{Felt, ZERO, operations::Operation};
 
 // OPERATION BATCH
 // ================================================================================================
@@ -616,10 +608,7 @@ mod op_batch_tests {
     use proptest::prelude::*;
 
     use super::*;
-    use {
-        crate::mast::BasicBlockNode,
-        crate::mast::arbitrary::BasicBlockNodeParams,
-    };
+    use crate::mast::{BasicBlockNode, arbitrary::BasicBlockNodeParams};
 
     #[test]
     fn test_op_idx_in_batch_to_group() {

@@ -2,28 +2,15 @@ mod expr;
 mod kv;
 mod list;
 
-use {
-    alloc::collections::BTreeMap,
-    alloc::string::String,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::fmt;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-};
-
-pub use {
-    self::expr::MetaExpr,
-    self::kv::MetaKeyValue,
-    self::list::MetaList,
-};
-use {
-    crate::Felt,
-    crate::ast::Ident,
-    crate::parser::WordValue,
+pub use self::{expr::MetaExpr, kv::MetaKeyValue, list::MetaList};
+use crate::{
+    Felt,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span},
+    parser::WordValue,
 };
 
 /// Represents the metadata provided as arguments to an attribute.

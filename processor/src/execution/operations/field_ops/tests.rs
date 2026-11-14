@@ -1,29 +1,14 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::Felt,
-    miden_core::ONE,
-    miden_core::ZERO,
-    miden_core::field::BasedVectorSpace,
-    miden_core::field::Field,
-    miden_core::field::QuadFelt,
-    miden_core::program::MIN_STACK_DEPTH,
-    miden_core::program::StackInputs,
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{BasedVectorSpace, Field, QuadFelt},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 
-use {
-    super::op_add,
-    super::op_and,
-    super::op_eq,
-    super::op_eqz,
-    super::op_expacc,
-    super::op_ext2mul,
-    super::op_incr,
-    super::op_inv,
-    super::op_mul,
-    super::op_neg,
-    super::op_not,
-    super::op_or,
+use super::{
+    op_add, op_and, op_eq, op_eqz, op_expacc, op_ext2mul, op_incr, op_inv, op_mul, op_neg, op_not,
+    op_or,
 };
 use crate::FastProcessor;
 

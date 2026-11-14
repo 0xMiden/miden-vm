@@ -1,19 +1,11 @@
 use alloc::string::ToString;
 
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
+use miden_core::{
+    Word,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use {
-    crate::PackageId,
-    crate::TargetType,
-    crate::Version,
-    miden_core::Word,
-};
+use crate::{PackageId, TargetType, Version};
 
 /// A package dependency
 #[derive(Debug, Clone, PartialEq, Eq)]

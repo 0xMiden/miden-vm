@@ -1,7 +1,6 @@
-use {
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::vec::Vec,
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
 };
 use core::fmt;
 
@@ -136,18 +135,11 @@ pub fn format_value<T: ToString>(value: Option<T>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use {
-        alloc::string::String,
-        alloc::vec,
-    };
+    use alloc::{string::String, vec};
 
     use miden_core::Felt;
 
-    use {
-        crate::format_value,
-        crate::write_interval,
-        crate::write_stack,
-    };
+    use crate::{format_value, write_interval, write_stack};
 
     #[test]
     fn write_stack_full_uses_tree_style() {

@@ -3,25 +3,16 @@
 mod multi_air;
 mod recursive;
 
-pub use {
-    miden_ace::compiler::CapturedAir,
-    miden_ace::compiler::CompiledRelation,
-    miden_ace::compiler::LayoutKind,
-};
-use {
-    miden_stark::security::AirShape,
-    miden_stark::security::LookupShape,
-};
+pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
+use miden_stark::security::{AirShape, LookupShape};
 
-pub use {
-    self::multi_air::build_canonical_multi_air_ace_circuit,
-    self::recursive::build_recursive_verifier_ace_circuit,
-    self::recursive::recursive_verifier_ace_config,
+pub use self::{
+    multi_air::build_canonical_multi_air_ace_circuit,
+    recursive::{build_recursive_verifier_ace_circuit, recursive_verifier_ace_config},
 };
-use {
-    crate::shared::geometry::NUM_OOD_POINTS,
-    crate::vm::AIRS,
-    crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+use crate::{
+    shared::geometry::NUM_OOD_POINTS,
+    vm::{AIRS, logup::MIDEN_MAX_MESSAGE_WIDTH},
 };
 
 /// Derive the security shape for tooling and differential validation.

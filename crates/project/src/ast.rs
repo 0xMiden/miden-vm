@@ -13,41 +13,28 @@ mod target;
 mod tests;
 mod workspace;
 
-use {
-    alloc::boxed::Box,
-    alloc::format,
-    alloc::string::String,
-    alloc::string::ToString,
-    alloc::sync::Arc,
-    alloc::vec,
-    alloc::vec::Vec,
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
 };
 
+use miden_assembly_syntax::{
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, Label, RelatedError, Report, miette},
+};
 #[cfg(feature = "serde")]
-use {
-    serde::Deserialize,
-    serde::Serialize,
-};
+use serde::{Deserialize, Serialize};
 
-pub use {
-    self::dependency::DependencySpec,
-    self::package::PackageConfig,
-    self::package::PackageDetail,
-    self::package::PackageTable,
-    self::package::ProjectFile,
-    self::profile::Profile,
-    self::target::BinTarget,
-    self::target::LibTarget,
-    self::workspace::WorkspaceFile,
-};
-use {
-    miden_assembly_syntax::diagnostics::Diagnostic,
-    miden_assembly_syntax::diagnostics::Label,
-    miden_assembly_syntax::diagnostics::RelatedError,
-    miden_assembly_syntax::diagnostics::Report,
-    miden_assembly_syntax::debuginfo::SourceFile,
-    miden_assembly_syntax::debuginfo::SourceSpan,
-    miden_assembly_syntax::diagnostics::miette,
+pub use self::{
+    dependency::DependencySpec,
+    package::{PackageConfig, PackageDetail, PackageTable, ProjectFile},
+    profile::Profile,
+    target::{BinTarget, LibTarget},
+    workspace::WorkspaceFile,
 };
 
 /// Represents all possible variants of `miden-project.toml`

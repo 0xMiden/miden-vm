@@ -1,31 +1,20 @@
 use core::ops::ControlFlow;
 
-use {
-    miden_core::FMP_ADDR,
-    miden_core::FMP_INIT_VALUE,
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    mast::{CallNode, ExecutableMastForest, MastNodeId},
 };
 
-use {
-    crate::BaseHost,
-    crate::BreakReason,
-    crate::ContextId,
-    crate::MapExecErr,
-    crate::Stopper,
-    crate::Continuation,
-    crate::execution::ExecutionState,
-    crate::execution::finalize_clock_cycle,
-    crate::execution::finalize_clock_cycle_with_continuation,
-    crate::execution::get_next_ctx_id,
-    miden_core::mast::CallNode,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastNodeId,
-    crate::operation::OperationError,
-    crate::option_map_break_reason,
-    crate::processor::MemoryInterface,
-    crate::processor::Processor,
-    crate::processor::StackInterface,
-    crate::processor::SystemInterface,
-    crate::tracer::Tracer,
+use crate::{
+    BaseHost, BreakReason, ContextId, Continuation, MapExecErr, Stopper,
+    execution::{
+        ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
+        get_next_ctx_id,
+    },
+    operation::OperationError,
+    option_map_break_reason,
+    processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
+    tracer::Tracer,
 };
 
 // CALL NODE PROCESSORS

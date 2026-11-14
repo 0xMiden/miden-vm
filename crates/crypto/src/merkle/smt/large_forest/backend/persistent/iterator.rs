@@ -2,15 +2,14 @@
 
 use alloc::boxed::Box;
 
-use crate::utils::Deserializable;
 use rocksdb as db;
 
-use {
-    crate::Word,
-    crate::merkle::smt::LineageId,
-    crate::merkle::smt::SmtLeaf,
-    crate::merkle::smt::TreeEntry,
-    crate::merkle::smt::large_forest::backend::persistent::keys::LeafKey,
+use crate::{
+    Word,
+    merkle::smt::{
+        LineageId, SmtLeaf, TreeEntry, large_forest::backend::persistent::keys::LeafKey,
+    },
+    utils::Deserializable,
 };
 
 // TYPE ALIASES

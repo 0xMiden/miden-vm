@@ -1,12 +1,9 @@
 use alloc::string::String;
 
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Span,
-    crate::debuginfo::Spanned,
+use crate::{
+    debuginfo::{SourceSpan, Span, Spanned},
+    prettier::PrettyPrint,
 };
-
-use crate::prettier::PrettyPrint;
 
 /// Represents a documentation string in Miden Assembly
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

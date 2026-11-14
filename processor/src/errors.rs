@@ -1,45 +1,24 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use {
-    alloc::boxed::Box,
-    alloc::string::String,
-    alloc::sync::Arc,
-    alloc::vec::Vec,
-};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
-use {
-    miden_core::deferred::PrecompileError,
-    miden_core::program::MIN_STACK_DEPTH,
+use miden_core::{
+    Felt, Word,
+    deferred::PrecompileError,
+    events::{EventId, EventName},
+    program::MIN_STACK_DEPTH,
+    utils::to_hex,
 };
-use {
-    miden_debug_types::Location,
-    miden_debug_types::SourceFile,
-    miden_debug_types::SourceSpan,
+use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_mast_package::{
+    PackageDebugInfoError,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use {
-    miden_mast_package::PackageDebugInfoError,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::PackageDebugInfo,
-};
-use {
-    miden_utils_diagnostics::Diagnostic,
-    miden_utils_diagnostics::miette,
-};
+use miden_utils_diagnostics::{Diagnostic, miette};
 
-use {
-    crate::BaseHost,
-    crate::ContextId,
-    miden_core::Felt,
-    miden_core::Word,
-    crate::advice::AdviceError,
-    crate::event::EventError,
-    miden_core::events::EventId,
-    miden_core::events::EventName,
-    crate::fast::SystemEventError,
-    miden_core::utils::to_hex,
-};
+use crate::{BaseHost, ContextId, advice::AdviceError, event::EventError, fast::SystemEventError};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -1128,15 +1107,9 @@ mod error_assertions {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastNodeId;
-    use {
-        miden_debug_types::ByteIndex,
-        miden_debug_types::SourceId,
-        miden_debug_types::Uri,
-    };
-    use {
-        miden_mast_package::debug_info::DebugSourceAsmOp,
-        miden_mast_package::debug_info::DebugSourceNode,
-        miden_mast_package::debug_info::PackageDebugInfoBuilder,
+    use miden_debug_types::{ByteIndex, SourceId, Uri};
+    use miden_mast_package::debug_info::{
+        DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder,
     };
 
     use super::*;

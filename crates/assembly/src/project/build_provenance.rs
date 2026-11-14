@@ -1,26 +1,16 @@
-use {
-    alloc::format,
-    alloc::string::String,
-    alloc::vec::Vec,
-};
+use alloc::{format, string::String, vec::Vec};
 
-use crate::diagnostics::Report;
-use {
-    miden_core::Word,
-    crate::serde::Deserializable,
-    crate::serde::Serializable,
-    crate::serde::SliceReader,
-    crate::utils::hash_string_to_word,
-};
-use {
-    crate::package::Package as MastPackage,
-    crate::package::Section,
-    crate::package::SectionId,
-};
+use miden_core::Word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
 use super::PackageBuildSettings;
+use crate::{
+    diagnostics::Report,
+    package::{Package as MastPackage, Section, SectionId},
+    serde::{Deserializable, Serializable, SliceReader},
+    utils::hash_string_to_word,
+};
 
 // PACKAGE BUILD PROVENANCE
 // ================================================================================================

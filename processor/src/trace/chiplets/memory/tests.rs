@@ -1,39 +1,25 @@
 use alloc::vec::Vec;
-use {
-    core::assert_matches,
-    core::ops::Range,
+use core::{assert_matches, ops::Range};
+
+use miden_air_definitions::vm::trace::{
+    RowIndex,
+    chiplets::memory::{
+        MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+        TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+    },
+};
+use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    field::{Field, PrimeCharacteristicRing},
 };
 
-use {
-    miden_air_definitions::vm::trace::RowIndex,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_ELEMENT,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_ACCESS_WORD,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_READ,
-    miden_air_definitions::vm::trace::chiplets::memory::MEMORY_WRITE,
-    miden_air_definitions::vm::trace::chiplets::memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+use super::{
+    Memory,
+    segment::{MemoryAccessType, MemoryOperation},
 };
-use {
-    miden_core::ONE,
-    miden_core::WORD_SIZE,
-    miden_core::Word,
-    miden_core::ZERO,
-    miden_core::field::Field,
-    miden_core::field::PrimeCharacteristicRing,
-};
-
-use {
-    miden_core::EMPTY_WORD,
-    miden_core::Felt,
-    super::Memory,
-    super::segment::MemoryAccessType,
-    super::segment::MemoryOperation,
-};
-use {
-    crate::ContextId,
-    crate::MemoryAddress,
-    crate::MemoryError,
-    crate::trace::ChipletTraceFragment,
-    crate::trace::range::RangeChecker,
+use crate::{
+    ContextId, MemoryAddress, MemoryError,
+    trace::{ChipletTraceFragment, range::RangeChecker},
 };
 
 // Chiplet-local column indices used by the memory trace tests.

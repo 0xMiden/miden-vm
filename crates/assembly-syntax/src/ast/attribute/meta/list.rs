@@ -1,19 +1,14 @@
 use alloc::vec::Vec;
 
-use {
-    miden_core::serde::ByteReader,
-    miden_core::serde::ByteWriter,
-    miden_core::serde::Deserializable,
-    miden_core::serde::DeserializationError,
-    miden_core::serde::Serializable,
-};
-use {
-    crate::debuginfo::SourceSpan,
-    crate::debuginfo::Spanned,
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
 use super::MetaExpr;
-use crate::ast::Ident;
+use crate::{
+    ast::Ident,
+    debuginfo::{SourceSpan, Spanned},
+};
 
 /// Represents the metadata of a named list [crate::ast::Attribute], i.e. `@name(item0, .., itemN)`
 #[derive(Debug, Clone)]
@@ -122,10 +117,7 @@ impl proptest::arbitrary::Arbitrary for MetaList {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use {
-            proptest::arbitrary::any,
-            proptest::strategy::Strategy,
-        };
+        use proptest::{arbitrary::any, strategy::Strategy};
 
         let name = any::<Ident>();
         let items = proptest::collection::vec(any::<MetaExpr>(), 1..3);

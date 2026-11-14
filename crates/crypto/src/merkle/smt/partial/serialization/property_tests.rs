@@ -1,26 +1,17 @@
 #![cfg(test)]
 //! Contains the property tests for the new serialization mechanism for the `PartialSmt` type.
 
-use {
-    alloc::collections::BTreeMap,
-    alloc::vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
-use {
-    crate::Felt,
-    crate::Word,
-};
-use {
-    crate::utils::Deserializable,
-    crate::utils::Serializable,
-};
 use proptest::prelude::*;
 
-use {
-    crate::merkle::NodeIndex,
-    crate::merkle::smt::LeafIndex,
-    crate::merkle::smt::SmtLeaf,
-    crate::merkle::smt::UniqueNodes,
+use crate::{
+    Felt, Word,
+    merkle::{
+        NodeIndex,
+        smt::{LeafIndex, SmtLeaf, UniqueNodes},
+    },
+    utils::{Deserializable, Serializable},
 };
 // GENERATORS
 // ================================================================================================

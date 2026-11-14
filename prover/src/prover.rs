@@ -1,31 +1,15 @@
-use {
-    alloc::string::ToString,
-    alloc::vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 
-use {
-    miden_core::Word,
-    miden_core::deferred::PrecompileLimits,
-    miden_core::proof::ExecutionProof,
-    miden_core::proof::HashFunction,
-    miden_core::proof::PrecompileProof,
-    miden_core::proof::PrecompileStatus,
-    miden_core::proof::VmProof,
+use miden_core::{
+    Word,
+    advice::AdviceInputs,
+    deferred::{PrecompileLimits, PrecompileWitness},
+    program::{Program, StackInputs, StackOutputs},
+    proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
-use {
-    miden_processor::ExecutionError,
-    miden_processor::ExecutionOptions,
-    miden_processor::ExecutionWitness,
-    miden_processor::FastProcessor,
-    miden_core::deferred::PrecompileWitness,
-    miden_core::program::Program,
-    miden_core::program::StackInputs,
-    miden_core::program::StackOutputs,
-    miden_processor::SyncHost,
-    miden_processor::VmWitness,
-    miden_core::advice::AdviceInputs,
-    miden_processor::trace::VmTrace,
-    miden_processor::trace::build_trace,
+use miden_processor::{
+    ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, SyncHost, VmWitness,
+    trace::{VmTrace, build_trace},
 };
 
 use crate::PrecompileProvingError;
@@ -373,12 +357,8 @@ mod tests {
     fn trivial_precompile_witness() -> PrecompileWitness {
         use alloc::sync::Arc;
 
-        use {
-            miden_core::deferred::DeferredState,
-            miden_core::deferred::Node,
-            miden_core::deferred::PrecompileLimits,
-            miden_core::deferred::PrecompileRegistry,
-            miden_core::deferred::TRUE_DIGEST,
+        use miden_core::deferred::{
+            DeferredState, Node, PrecompileLimits, PrecompileRegistry, TRUE_DIGEST,
         };
 
         let registry = Arc::new(PrecompileRegistry::new());
