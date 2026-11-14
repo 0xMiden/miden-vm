@@ -44,10 +44,36 @@ impl LiftedAir for OperationFixture {
             &values,
             &[Felt::from_u64(3), Felt::from_u64(5)],
         ));
+        // Equivalent constant spellings normalize before native coefficient selection.
+        let constants = [B::Expr::from_u64(3), B::Expr::from_u64(5)];
+        sink.assert_zero(B::Expr::dot_product(&values, &constants));
+        sink.assert_zero(x.dup() * Felt::from_u64(7));
+        sink.assert_zero(x.dup() * B::Expr::from_u64(7));
+        let public = inputs.public(0);
+        let dynamic_coefficients = [public.dup(), x.square()];
+        // A public input has degree zero but is not a known literal coefficient.
+        sink.assert_zero(B::Expr::dot_product(&values, &dynamic_coefficients));
         let a = frame.aux.current[0].dup();
         let b = frame.aux.current[1].dup();
         let ext = [a.dup(), b.dup()];
         sink.assert_zero_ext(<B::ExtExpr as Algebra<B::Expr>>::mixed_dot_product(&ext, &values));
+        sink.assert_zero_ext(<B::ExtExpr as Algebra<B::Expr>>::mixed_dot_product(&ext, &constants));
+        let extension_constants = constants.map(B::ExtExpr::from);
+        sink.assert_zero_ext(B::ExtExpr::dot_product(&ext, &extension_constants));
+        sink.assert_zero_ext(a.dup() * B::Expr::from_u64(7));
+        sink.assert_zero_ext(a.dup() * B::ExtExpr::from(B::Expr::from_u64(7)));
+        // Explicit lifts of runtime base expressions still permit mixed dispatch.
+        let lifted_coefficients = dynamic_coefficients.map(B::ExtExpr::from);
+        sink.assert_zero_ext(B::ExtExpr::dot_product(&ext, &lifted_coefficients));
+        let mixed_coefficients =
+            [B::ExtExpr::from(B::Expr::from_u64(7)), B::ExtExpr::from(public.dup())];
+        sink.assert_zero_ext(B::ExtExpr::dot_product(&ext, &mixed_coefficients));
+        // One genuine extension coefficient requires a homogeneous dot. Its
+        // challenge-only operation is prepared, while the public input stays dynamic.
+        let extension_coefficients = [B::ExtExpr::from(public), inputs.challenge(0).square()];
+        sink.assert_zero_ext(B::ExtExpr::dot_product(&ext, &extension_coefficients));
+        // Mixed subtraction must preserve operand order when the left input is a lift.
+        sink.assert_zero_ext(B::ExtExpr::from(x.dup()) - a.dup());
         let long_values: [B::ExtExpr; 17] = core::array::from_fn(|_| a.dup());
         let long_coeffs: [B::Expr; 17] = core::array::from_fn(|_| y.dup());
         sink.assert_zero_ext(<B::ExtExpr as Algebra<B::Expr>>::batched_linear_combination(

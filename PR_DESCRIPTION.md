@@ -106,7 +106,7 @@ rule table, and duplicate emitter/preparation path have already been removed.
 | A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Implemented |
 | A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Implemented |
 | A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Implemented |
-| A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Approved, pending |
+| A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Implemented |
 | A8 | Regenerate affected current artifacts and run focused validation | Approved, pending |
 
 A1 normalizes the representation; A2 updates its source-identity namespace in a separate commit. Establish the semantic checks in A3/A7 before
@@ -500,7 +500,7 @@ A1–A7, rather than expecting the old test count to remain fixed.
 - [x] A4 — delete archived AIR references; retain useful cases as current tests.
 - [x] A5 — delete old PVM proof-version artifacts; retain current negative verification coverage.
 - [x] A6 — remove duplicated/historical documentation and preserve minimal provenance.
-- [ ] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
+- [x] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
 - [ ] A8 — regenerate affected current outputs and validate the completed implementation.
 
 The checklist records implementation progress. Final artifact regeneration and validation are

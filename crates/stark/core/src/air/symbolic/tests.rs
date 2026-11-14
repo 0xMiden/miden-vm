@@ -35,6 +35,17 @@ fn evaluate<D: Domain>(expression: &Expr<F, EF, D>) -> EF {
     })
 }
 
+fn assert_wire_roundtrip<D: Domain>(expression: &Expr<F, EF, D>, expected: EF) -> Expr<F, EF, D> {
+    let wire = serde_json::to_value(expression).unwrap();
+    let restored: Expr<F, EF, D> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(evaluate(expression), expected);
+    assert_eq!(evaluate(&restored), expected);
+    assert_eq!(restored.as_ref().domain(), expression.as_ref().domain());
+    assert_eq!(restored.degree_multiple(), expression.degree_multiple());
+    assert_eq!(serde_json::to_value(&restored).unwrap(), wire);
+    restored
+}
+
 #[test]
 fn ring_overrides_capture_merged_nodes_and_evaluate() {
     let a = x();
@@ -61,7 +72,7 @@ fn ring_overrides_capture_merged_nodes_and_evaluate() {
         (a.andn(&b), (EF::ONE - av) * bv),
     ];
     for (expression, expected) in cases {
-        assert_eq!(evaluate(&expression), expected);
+        assert_wire_roundtrip(&expression, expected);
     }
     assert!(matches!(a.square().view(), ExprView::Exp { power: 2, .. }));
     assert!(matches!(a.cube().view(), ExprView::Exp { power: 3, .. }));
@@ -84,11 +95,11 @@ fn reduction_nodes_preserve_operations_and_empty_identities() {
     assert!(matches!(homogeneous.view(), ExprView::LinearCombination { .. }));
     for value in [&mixed, &batched] {
         assert!(matches!(value.view(), ExprView::LinearCombination { .. }));
-        assert_eq!(evaluate(value), EF::from(F::new(47)));
+        assert_wire_roundtrip(value, EF::from(F::new(47)));
     }
-    assert_eq!(evaluate(&sum), EF::from(F::new(5)));
-    assert_eq!(evaluate(&product), EF::from(F::new(6)));
-    assert_eq!(evaluate(&homogeneous), EF::from(F::new(13)));
+    assert_wire_roundtrip(&sum, EF::from(F::new(5)));
+    assert_wire_roundtrip(&product, EF::from(F::new(6)));
+    assert_wire_roundtrip(&homogeneous, EF::from(F::new(13)));
     assert_eq!(evaluate(&core::iter::empty::<B>().sum::<B>()), EF::ZERO);
     assert_eq!(evaluate(&core::iter::empty::<B>().product::<B>()), EF::ONE);
     assert_eq!(evaluate(&B::sum_array::<0>(&[])), EF::ZERO);
@@ -118,6 +129,56 @@ fn mixed_operators_normalize_constants_and_lift_dynamic_base_values() {
     assert!(matches!(lifted.view(), ExprView::Lift { .. }));
     assert_eq!(evaluate(&lifted.to_base().unwrap()), evaluate(&x()));
     assert!(z().to_base().is_none());
+}
+
+#[test]
+fn compound_base_only_extension_expressions_recover_base_operations() {
+    let a = E::from(x());
+    let b = E::from(y());
+    let values = [a.clone(), b.clone()];
+    let cases = [
+        (a.clone() + b.clone(), F::new(5)),
+        (a.clone() - b.clone(), -F::ONE),
+        (a.clone() * b.clone(), F::new(6)),
+        (-a.clone(), -F::new(2)),
+        (values.iter().cloned().sum::<E>(), F::new(5)),
+        (values.iter().cloned().product::<E>(), F::new(6)),
+        (E::dot_product(&values, &values), F::new(13)),
+        (a.exp_u64(5), F::new(32)),
+        (a.exp_power_of_2(3), F::new(256)),
+        (a.mul_2exp_u64(4), F::new(32)),
+        (a.div_2exp_u64(3), F::ONE / F::new(4)),
+        (a.bool_check(), F::new(2)),
+    ];
+    for (expression, expected) in cases {
+        let recovered = expression.to_base().expect("all leaves belong to the base field");
+        assert_eq!(evaluate(&expression), EF::from(expected));
+        assert_eq!(evaluate(&recovered), EF::from(expected));
+        assert_eq!(recovered.degree_multiple(), expression.degree_multiple());
+        recovered.as_ref().fold(|node, view, _: &[()]| {
+            assert_eq!(node.domain(), ExpressionDomain::Base);
+            assert!(!matches!(view, ExprView::Lift { .. }));
+        });
+    }
+
+    let shared = a + b;
+    let recovered = (shared.clone() * shared).to_base().unwrap();
+    match recovered.view() {
+        ExprView::Mul { x, y } => {
+            assert!(x.identity().is_some());
+            assert_eq!(x.identity(), y.identity());
+        },
+        _ => panic!("expected shared multiplication"),
+    }
+    let non_base = EF::from_basis_coefficients_fn(|_| F::ONE);
+    for expression in [
+        z(),
+        z() + x(),
+        E::extension_constant(non_base),
+        E::dot_product(&[E::from(x())], &[E::extension_constant(non_base)]),
+    ] {
+        assert!(expression.to_base().is_none(), "extension-only leaves cannot be converted");
+    }
 }
 
 fn assert_same_normal_form<D: Domain>(expressions: &[Expr<F, EF, D>]) {
@@ -241,6 +302,10 @@ fn full_extension_constants_fold_without_requiring_base_membership() {
 
 #[test]
 fn degree_profiles_use_checked_multiplication_and_source_domains() {
+    assert_eq!(x().checked_poly_degree(8, &[]), Ok(7));
+    assert_eq!(x().square().checked_poly_degree(8, &[]), Ok(14));
+    assert_eq!(x().exp_u64(8).checked_poly_degree(8, &[]), Ok(56));
+    assert_eq!(x().exp_power_of_2(3).checked_poly_degree(8, &[]), Ok(56));
     let expression = (x() + B::is_transition()).square();
     assert_eq!(expression.degree_multiple(), 2);
     assert_eq!(expression.poly_degree(8, &[]), 14);
@@ -248,6 +313,7 @@ fn degree_profiles_use_checked_multiplication_and_source_domains() {
     let large = x().exp_power_of_2(usize::BITS as usize - 1);
     assert_eq!(large.checked_poly_degree(3, &[]), Err(ExpressionError::DegreeOverflow));
     let public: B = BaseInput::Public { index: 0 }.into();
+    assert_eq!(public.checked_poly_degree(8, &[]), Ok(0));
     assert_eq!(public.exp_power_of_2(usize::MAX).degree_multiple(), 0);
     assert_eq!(public.exp_power_of_2(usize::MAX).checked_poly_degree(8, &[]), Ok(0));
     assert_eq!(public.exp_u64(u64::MAX).checked_poly_degree(8, &[]), Ok(0));
@@ -297,6 +363,55 @@ fn fold_and_wire_preserve_sharing_at_the_operation_root() {
         _ => panic!("expected addition"),
     }
     assert_eq!(evaluate(&restored), evaluate(&root));
+}
+
+#[test]
+fn current_wire_preserves_extension_domains_leaves_and_shared_operations() {
+    let base_value = EF::from(F::new(2));
+    let extension_value =
+        EF::from_basis_coefficients_fn(|i| if i == 0 { F::new(5) } else { F::ONE });
+    let constant = EF::from_basis_coefficients_fn(|i| F::new(i as u64 + 7));
+    let a = z();
+    let b = E::from(x());
+    let values = [a.clone(), b.clone()];
+    let cases = [
+        (b.clone(), base_value),
+        (a.clone() + b.clone(), extension_value + base_value),
+        (a.clone() - b.clone(), extension_value - base_value),
+        (a.clone() * b.clone(), extension_value * base_value),
+        (-a.clone(), -extension_value),
+        (values.iter().cloned().sum::<E>(), extension_value + base_value),
+        (values.iter().cloned().product::<E>(), extension_value * base_value),
+        (E::dot_product(&values, &values), extension_value.square() + base_value.square()),
+        (a.exp_u64(5), extension_value.exp_u64(5)),
+        (a.exp_power_of_2(3), extension_value.exp_u64(8)),
+        (a.mul_2exp_u64(4), extension_value * EF::from(F::new(16))),
+        (a.div_2exp_u64(3), extension_value / EF::from(F::new(8))),
+        (a.bool_check(), extension_value * (extension_value - EF::ONE)),
+    ];
+    for (operation, expected) in cases {
+        let root = operation.clone() + operation;
+        let restored = assert_wire_roundtrip(&root, expected.double());
+        match restored.view() {
+            ExprView::Add { x, y } => {
+                assert_eq!(x.domain(), ExpressionDomain::Extension);
+                assert_eq!(y.domain(), ExpressionDomain::Extension);
+                assert!(x.identity().is_some());
+                assert_eq!(x.identity(), y.identity());
+            },
+            _ => panic!("expected two references to a shared operation"),
+        }
+    }
+    for (expression, expected) in [
+        (E::from(F::new(7)), EF::from(F::new(7))),
+        (E::extension_constant(constant), constant),
+        (z(), extension_value),
+        (E::from(B::is_first_row()), EF::ONE),
+        (E::from(B::is_last_row()), EF::ONE),
+        (E::from(B::is_transition()), EF::ONE),
+    ] {
+        assert_wire_roundtrip(&expression, expected);
+    }
 }
 
 #[test]
