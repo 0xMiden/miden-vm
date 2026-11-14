@@ -31,8 +31,8 @@ use {
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
     crate::serde::Serializable,
-    miden_core::utils::IndexVec,
-    miden_core::utils::bytes_to_packed_u32_elements,
+    crate::utils::IndexVec,
+    crate::utils::bytes_to_packed_u32_elements,
 };
 use {
     miden_mast_package::ManifestValidationError,
@@ -1816,7 +1816,7 @@ mod tests {
         crate::mast::MastNodeId,
         miden_core::operations::Operation,
         crate::serde::Serializable,
-        miden_core::utils::Idx,
+        crate::utils::Idx,
     };
     use {
         miden_mast_package::Package,

@@ -52,7 +52,7 @@ use {
     crate::trace::chiplets::CircuitEvaluation,
     crate::trace::chiplets::MAX_EVAL_CIRCUIT_INVOCATIONS,
     crate::tracer::merkle_index_helper_values,
-    crate::utils::Idx,
+    miden_core::utils::Idx,
 };
 
 mod serde;

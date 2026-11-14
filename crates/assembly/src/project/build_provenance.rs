@@ -10,7 +10,7 @@ use {
     crate::serde::Deserializable,
     crate::serde::Serializable,
     crate::serde::SliceReader,
-    miden_core::utils::hash_string_to_word,
+    crate::utils::hash_string_to_word,
 };
 use {
     miden_mast_package::Package as MastPackage,

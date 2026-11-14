@@ -4,7 +4,7 @@ use {
     miden_core::Word,
     crate::mast::MastNode,
     crate::mast::OpBatch,
-    miden_core::utils::newtype_id,
+    crate::utils::newtype_id,
 };
 use {
     miden_mast_package::debug_info::DebugFunctionIdx,

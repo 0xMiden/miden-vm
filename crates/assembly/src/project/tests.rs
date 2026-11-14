@@ -18,8 +18,8 @@ use {
     crate::serde::Deserializable,
     crate::serde::Serializable,
     crate::serde::SliceReader,
-    miden_core::utils::Idx,
-    miden_core::utils::hash_string_to_word,
+    crate::utils::Idx,
+    crate::utils::hash_string_to_word,
 };
 use {
     miden_mast_package::PackageExport,

@@ -11,7 +11,7 @@ use std::path::Path as FsPath;
 use miden_assembly_syntax::diagnostics::Report;
 use {
     miden_core::Word,
-    miden_core::utils::hash_string_to_word,
+    crate::utils::hash_string_to_word,
 };
 use {
     miden_package_registry::PackageId,

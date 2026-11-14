@@ -3,7 +3,7 @@ use {
     alloc::vec::Vec,
 };
 
-use miden_core::utils::IndexVec;
+use crate::utils::IndexVec;
 
 use {
     super::MastNodeRef,

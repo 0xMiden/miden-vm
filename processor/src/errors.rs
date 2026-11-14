@@ -38,7 +38,7 @@ use {
     miden_core::events::EventId,
     miden_core::events::EventName,
     crate::fast::SystemEventError,
-    crate::utils::to_hex,
+    miden_core::utils::to_hex,
 };
 
 // EXECUTION ERROR
