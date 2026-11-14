@@ -9,7 +9,7 @@ use {
     miden_core::program::Program,
 };
 
-use super::VmTrace;
+use miden_air_definitions::vm::VmTrace;
 use {
     miden_core::advice::AdviceInputs,
     crate::DefaultHost,

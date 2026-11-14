@@ -31,7 +31,7 @@ use {
     crate::crypto::merkle::MerklePath,
     crate::operation::OperationError,
     crate::trace::ChipletTraceFragment,
-    crate::trace::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
     crate::trace::range::RangeChecker,
 };
 

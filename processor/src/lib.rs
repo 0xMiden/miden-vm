@@ -45,7 +45,7 @@ use {
     crate::errors::MapExecErr,
     crate::processor::Processor,
     crate::processor::SystemInterface,
-    crate::trace::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
 };
 
 #[cfg(any(test, feature = "testing"))]

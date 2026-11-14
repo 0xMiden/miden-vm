@@ -57,7 +57,7 @@ use {
     miden_core::Felt,
     miden_core::program::MIN_STACK_DEPTH,
     miden_core::ONE,
-    crate::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
     miden_core::Word,
     miden_core::ZERO,
     crate::continuation_stack::Continuation,

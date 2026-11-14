@@ -61,7 +61,7 @@ use {
     crate::ProcessorState,
     crate::event::NoopEventHandler,
     crate::event::TraceError,
-    crate::trace::VmTrace,
+    miden_air_definitions::vm::VmTrace,
     crate::trace::build_trace,
 };
 

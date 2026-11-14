@@ -178,7 +178,7 @@ impl FastProcessor {
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
     /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional
-    /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
+    /// precompile witness is returned separately because [`miden_air_definitions::vm::VmTrace`] retains only
     /// its authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
@@ -187,7 +187,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
         budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
-    ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
+    ) -> Result<(miden_air_definitions::vm::VmTrace, Option<PrecompileWitness>), ExecutionError> {
         use {
             crate::trace::MAX_TRACE_LEN,
             crate::trace::build_hasher_chiplet,

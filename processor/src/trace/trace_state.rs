@@ -2095,7 +2095,7 @@ mod arbitrary_replays {
     use {
         crate::ContextId,
         miden_core::Felt,
-        crate::RowIndex,
+        miden_air_definitions::vm::trace::RowIndex,
         miden_core::Word,
         miden_core::crypto::merkle::MerklePath,
     };

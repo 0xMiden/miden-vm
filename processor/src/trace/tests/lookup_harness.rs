@@ -35,7 +35,7 @@ use {
 
 use {
     miden_core::Felt,
-    super::VmTrace,
+    miden_air_definitions::vm::VmTrace,
 };
 
 // INTERACTION LOG

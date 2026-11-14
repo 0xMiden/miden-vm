@@ -46,7 +46,7 @@ use {
 };
 use {
     crate::ContextId,
-    crate::RowIndex,
+    miden_air_definitions::vm::trace::RowIndex,
 };
 
 mod trace;
