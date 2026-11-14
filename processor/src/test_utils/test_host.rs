@@ -15,7 +15,7 @@ use {
 };
 
 #[cfg(test)]
-use crate::mast::MastForest;
+use miden_core::mast::MastForest;
 use {
     crate::BaseHost,
     crate::LoadedMastForest,

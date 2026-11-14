@@ -5,9 +5,9 @@ use {
 
 use miden_assembly_syntax::ast;
 use {
-    miden_core::mast::MastForest,
-    miden_core::mast::MastForestRootMap,
-    miden_core::mast::MastNodeExt,
+    crate::mast::MastForest,
+    crate::mast::MastForestRootMap,
+    crate::mast::MastNodeExt,
     miden_core::utils::Idx,
 };
 use miden_project::Linkage;

@@ -27,8 +27,8 @@ use {
     miden_core::Word,
     miden_core::events::EventId,
     miden_core::field::PrimeField64,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeExt,
+    crate::mast::MastNode,
+    crate::mast::MastNodeExt,
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
     miden_core::program::Program,
@@ -36,7 +36,7 @@ use {
     miden_core::serde::Serializable,
 };
 use {
-    miden_mast_package::MastForest,
+    crate::mast::MastForest,
     miden_mast_package::Package,
     miden_mast_package::PackageExport,
     miden_mast_package::PackageModule,

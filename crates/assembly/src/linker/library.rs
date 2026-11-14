@@ -7,7 +7,7 @@ use miden_assembly_syntax::module::ModuleDescriptor;
 use miden_core::Word;
 use {
     miden_mast_package::ManifestValidationError,
-    miden_mast_package::MastForest,
+    crate::mast::MastForest,
     miden_mast_package::Package,
 };
 pub use miden_project::Linkage;

@@ -46,7 +46,7 @@ use {
     crate::FastProcessor,
     miden_core::program::KernelDescriptor,
     crate::RowIndex,
-    crate::operation::Operation,
+    miden_core::operations::Operation,
     crate::trace::trace_state::AeadStreamReplayEntry,
 };
 

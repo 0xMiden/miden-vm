@@ -6,7 +6,7 @@ use {
 };
 
 use super::*;
-use crate::mast::MastForestId;
+use miden_core::mast::MastForestId;
 
 #[test]
 fn memory_reads_replay_rejects_oversized_queue_lengths_before_allocation() {

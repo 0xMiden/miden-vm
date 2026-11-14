@@ -57,7 +57,7 @@ use {
     miden_core::events::EventName,
     crate::event::TraceError,
     crate::event::TraceHandler,
-    crate::operation::Operation,
+    miden_core::operations::Operation,
 };
 
 macro_rules! assert_diagnostic_lines {

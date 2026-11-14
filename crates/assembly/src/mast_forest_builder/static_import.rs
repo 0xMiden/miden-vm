@@ -8,13 +8,13 @@ use core::fmt::Debug;
 
 use {
     miden_core::Word,
-    miden_core::mast::BasicBlockNode,
-    miden_core::mast::ExecutableMastForest,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNode,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
-    miden_core::mast::SubtreeIterator,
+    crate::mast::BasicBlockNode,
+    crate::mast::ExecutableMastForest,
+    crate::mast::MastForest,
+    crate::mast::MastNode,
+    crate::mast::MastNodeExt,
+    crate::mast::MastNodeId,
+    crate::mast::SubtreeIterator,
 };
 use {
     miden_mast_package::debug_info::DebugFunctionIdx,

@@ -7,7 +7,7 @@ use {
     super::BATCH_SIZE,
     crate::Felt,
     super::GROUP_SIZE,
-    super::Operation,
+    crate::operations::Operation,
     crate::ZERO,
 };
 
