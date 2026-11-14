@@ -113,7 +113,7 @@ impl Spanned for InvocationTarget {
 
 impl crate::prettier::PrettyPrint for InvocationTarget {
     fn render(&self) -> crate::prettier::Document {
-        use miden_core::utils::DisplayHex;
+        use crate::DisplayHex;
 
         use crate::prettier::*;
 

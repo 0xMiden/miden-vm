@@ -48,7 +48,7 @@ use {
     crate::Felt,
     crate::Word,
 };
-use miden_formatting::prettier::PrettyPrint;
+use crate::prettier::PrettyPrint;
 pub use {
     split_node::SplitNode,
     split_node::SplitNodeBuilder,
