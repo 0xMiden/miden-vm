@@ -11,8 +11,8 @@ use {
     miden_stark::lookup::build_logup_aux_trace_with_width,
 };
 use {
-    p3_matrix::Matrix,
-    p3_matrix::dense::RowMajorMatrix,
+    miden_core::utils::Matrix,
+    miden_core::utils::RowMajorMatrix,
 };
 
 use {

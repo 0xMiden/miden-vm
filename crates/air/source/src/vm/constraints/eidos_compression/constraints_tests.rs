@@ -14,7 +14,7 @@ use {
     miden_stark::lookup::ConstraintLookupBuilder,
     miden_stark::lookup::LookupAir,
 };
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::utils::RowMajorMatrix;
 
 use {
     super::constraints::enforce_footer_rows,
