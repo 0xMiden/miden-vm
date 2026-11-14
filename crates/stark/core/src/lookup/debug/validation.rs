@@ -18,6 +18,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
+use air::symbolic::{AuxInput, BaseInput, ExprView, RowOffset};
 use miden_crypto::{
     Felt,
     field::{BinomialExtensionField, PrimeCharacteristicRing},
@@ -28,7 +29,7 @@ use super::super::{Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, Look
 use crate::{air, lookup};
 
 type QuadFelt = BinomialExtensionField<Felt, 2>;
-type NativeExpr = air::symbolic::SymbolicExpression<Felt>;
+type NativeExpr = air::symbolic::SymbolicExpression<Felt, QuadFelt>;
 type NativeExprEF = air::symbolic::SymbolicExpressionExt<Felt, QuadFelt>;
 
 // VALIDATION ERROR
@@ -140,16 +141,16 @@ where
     let offsets = [RowOffset::Current, RowOffset::Next];
     let main: [Vec<_>; 2] = offsets.map(|offset| {
         (0..spec.main_width)
-            .map(|index| NativeExpr::input(BaseInput::Main { offset, index }))
+            .map(|index| NativeExpr::input(BaseInput::Main { row: offset, column: index }))
             .collect()
     });
     let preprocessed: [Vec<_>; 2] = offsets.map(|offset| {
         (0..spec.preprocessed_width())
-            .map(|index| NativeExpr::input(BaseInput::Preprocessed { offset, index }))
+            .map(|index| NativeExpr::input(BaseInput::Preprocessed { row: offset, column: index }))
             .collect()
     });
     let periodic: Vec<_> = (0..spec.periodic_columns.len())
-        .map(|index| NativeExpr::input(BaseInput::Periodic(index)))
+        .map(|index| NativeExpr::input(BaseInput::Periodic { index }))
         .collect();
     let sampled = SampledRow::new(spec.main_width, spec.preprocessed_width(), periodic.len());
     let frame = lookup::LookupFrame {
@@ -188,8 +189,8 @@ impl<'r> NativeValidationBuilder<'r> {
         use crate::air::symbolic::AuxInput;
         Self {
             sym_challenges: Challenges::new(
-                NativeExprEF::input(AuxInput::Challenge(0)),
-                NativeExprEF::input(AuxInput::Challenge(1)),
+                NativeExprEF::input(AuxInput::Challenge { index: 0 }),
+                NativeExprEF::input(AuxInput::Challenge { index: 1 }),
                 air.max_message_width(),
                 air.num_bus_ids(),
             ),
@@ -285,58 +286,41 @@ struct RowValuation<'r> {
     beta: QuadFelt,
 }
 
-impl RowValuation<'_> {
+impl<'r> RowValuation<'r> {
+    #[cfg(test)]
     fn eval_native_base(&self, expression: &NativeExpr) -> Felt {
-        use crate::air::symbolic::{BaseInput, BaseLeaf, SymbolicExpr};
-        match expression {
-            SymbolicExpr::Leaf(leaf) => match leaf {
-                BaseLeaf::Constant(value) => *value,
-                BaseLeaf::Input(input) => match input {
-                    BaseInput::Main { offset, index } => {
-                        [self.current, self.next][offset.index()][*index]
-                    },
-                    BaseInput::Preprocessed { offset, index } => {
-                        [self.preprocessed_current, self.preprocessed_next][offset.index()][*index]
-                    },
-                    BaseInput::Periodic(index) => self.periodic[*index],
-                    BaseInput::Public(_) => panic!("unexpected public leaf in LookupAir::eval"),
+        expression.as_ref().evaluate(|_, view| self.eval_base_leaf(view))
+    }
+
+    fn eval_base_leaf(&self, view: ExprView<'_, Felt, QuadFelt>) -> Felt {
+        match view {
+            ExprView::BaseConstant(c) => *c,
+            ExprView::BaseInput(input) => match input {
+                BaseInput::Main { row: RowOffset::Current, column } => self.current[column],
+                BaseInput::Main { row: RowOffset::Next, column } => self.next[column],
+                BaseInput::Periodic { index } => self.periodic[index],
+                BaseInput::Preprocessed { row: RowOffset::Current, column } => {
+                    self.preprocessed_current[column]
                 },
-                BaseLeaf::IsFirstRow | BaseLeaf::IsLastRow | BaseLeaf::IsTransition => {
-                    panic!("selector leaf {leaf:?} unexpected in LookupAir::eval")
+                BaseInput::Preprocessed { row: RowOffset::Next, column } => {
+                    self.preprocessed_next[column]
                 },
+                BaseInput::Public { .. } => panic!("unexpected public leaf in LookupAir::eval"),
             },
-            SymbolicExpr::Add { x, y, .. } => self.eval_native_base(x) + self.eval_native_base(y),
-            SymbolicExpr::Sub { x, y, .. } => self.eval_native_base(x) - self.eval_native_base(y),
-            SymbolicExpr::Mul { x, y, .. } => self.eval_native_base(x) * self.eval_native_base(y),
-            SymbolicExpr::Neg { x, .. } => -self.eval_native_base(x),
+            _ => panic!("unexpected leaf in LookupAir::eval"),
         }
     }
 
-    fn eval_native_ext(&self, expression: &NativeExprEF) -> QuadFelt {
-        use crate::air::symbolic::{AuxInput, ExtLeaf, SymbolicExpr};
-        match expression {
-            SymbolicExpr::Leaf(leaf) => match leaf {
-                ExtLeaf::Base(inner) => self.eval_native_base(inner).into(),
-                ExtLeaf::ExtConstant(value) => *value,
-                ExtLeaf::Input(input) => match input {
-                    AuxInput::Challenge(0) => self.alpha,
-                    AuxInput::Challenge(1) => self.beta,
-                    AuxInput::Challenge(index) => {
-                        panic!("unexpected challenge index {index} in LookupAir::eval")
-                    },
-                    AuxInput::Trace { .. } | AuxInput::Export(_) => {
-                        panic!("unexpected {input:?} leaf in LookupAir::eval")
-                    },
-                },
-            },
-            SymbolicExpr::Add { x, y, .. } => self.eval_native_ext(x) + self.eval_native_ext(y),
-            SymbolicExpr::Sub { x, y, .. } => self.eval_native_ext(x) - self.eval_native_ext(y),
-            SymbolicExpr::Mul { x, y, .. } => self.eval_native_ext(x) * self.eval_native_ext(y),
-            SymbolicExpr::Neg { x, .. } => -self.eval_native_ext(x),
-        }
+    fn eval_native_ext(&self, expr: &NativeExprEF) -> QuadFelt {
+        expr.as_ref().evaluate(|_, view| match view {
+            ExprView::ExtensionConstant(c) => *c,
+            ExprView::AuxInput(AuxInput::Challenge { index: 0 }) => self.alpha,
+            ExprView::AuxInput(AuxInput::Challenge { index: 1 }) => self.beta,
+            ExprView::AuxInput(input) => panic!("unexpected {input:?} in LookupAir::eval"),
+            other => self.eval_base_leaf(other).into(),
+        })
     }
 }
-
 fn finish_columns(
     error: Option<ValidationError>,
     declared: usize,
@@ -947,20 +931,17 @@ mod tests {
             alpha,
             beta,
         };
-        let native_base =
-            NativeExpr::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })
-                + NativeExpr::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })
-                    * Felt::from_u32(2)
-                + NativeExpr::input(BaseInput::Preprocessed {
-                    offset: RowOffset::Current,
-                    index: 0,
-                }) * Felt::from_u32(3)
-                + NativeExpr::input(BaseInput::Preprocessed { offset: RowOffset::Next, index: 0 })
-                    * Felt::from_u32(4)
-                + NativeExpr::input(BaseInput::Periodic(0)) * Felt::from_u32(5);
+        let native_base = NativeExpr::input(BaseInput::Main { row: RowOffset::Current, column: 0 })
+            + NativeExpr::input(BaseInput::Main { row: RowOffset::Next, column: 0 })
+                * Felt::from_u32(2)
+            + NativeExpr::input(BaseInput::Preprocessed { row: RowOffset::Current, column: 0 })
+                * Felt::from_u32(3)
+            + NativeExpr::input(BaseInput::Preprocessed { row: RowOffset::Next, column: 0 })
+                * Felt::from_u32(4)
+            + NativeExpr::input(BaseInput::Periodic { index: 0 }) * Felt::from_u32(5);
         let native = NativeExprEF::from(native_base)
-            + NativeExprEF::input(AuxInput::Challenge(0))
-            + NativeExprEF::input(AuxInput::Challenge(1)) * Felt::TWO;
+            + NativeExprEF::input(AuxInput::Challenge { index: 0 })
+            + NativeExprEF::input(AuxInput::Challenge { index: 1 }) * Felt::TWO;
         let expected = QuadFelt::from(Felt::from_u32(55)) + alpha + beta.double();
         assert_eq!(valuation.eval_native_ext(&native), expected);
     }
@@ -971,7 +952,7 @@ mod tests {
         let sampled = SampledRow::new(1, 1, 1);
         sampled
             .valuation()
-            .eval_native_base(&NativeExpr::input(air::symbolic::BaseInput::Public(0)));
+            .eval_native_base(&NativeExpr::input(air::symbolic::BaseInput::Public { index: 0 }));
     }
 
     #[test]
@@ -980,6 +961,6 @@ mod tests {
         let sampled = SampledRow::new(1, 1, 1);
         let _ = sampled
             .valuation()
-            .eval_native_ext(&NativeExprEF::input(air::symbolic::AuxInput::Export(0)));
+            .eval_native_ext(&NativeExprEF::input(air::symbolic::AuxInput::Export { index: 0 }));
     }
 }

@@ -7,15 +7,13 @@ use p3_field::{ExtensionField, Field};
 use super::{
     AirFrame, AirSpec, ConstraintMeta, LiftedAir, LiftedAirBuilder, Rows, Selectors, SpecError,
     UniformInputs,
-    symbolic::{
-        AuxInput, BaseInput, BaseLeaf, RowOffset, SymbolicExpression, SymbolicExpressionExt,
-    },
+    symbolic::{AuxInput, BaseInput, RowOffset, SymbolicExpression, SymbolicExpressionExt},
 };
 
 /// One assertion in global emission order, including repeated and zero-gated assertions.
 #[derive(Clone, Debug)]
 pub enum Assertion<F: Field, EF: ExtensionField<F> = F> {
-    Base(SymbolicExpression<F>),
+    Base(SymbolicExpression<F, EF>),
     Extension(SymbolicExpressionExt<F, EF>),
 }
 
@@ -54,7 +52,7 @@ impl<F: Field, EF: ExtensionField<F>> SymbolicSink<F, EF> {
 
 impl<F: Field, EF: ExtensionField<F>> LiftedAirBuilder for SymbolicSink<F, EF> {
     type F = F;
-    type Expr = SymbolicExpression<F>;
+    type Expr = SymbolicExpression<F, EF>;
     type ExtExpr = SymbolicExpressionExt<F, EF>;
 
     fn emit_base(&mut self, value: Self::Expr, meta: ConstraintMeta<'_>) {
@@ -98,30 +96,34 @@ where
     let row_offsets = [RowOffset::Current, RowOffset::Next];
     let main: [Vec<_>; 2] = row_offsets.map(|offset| {
         (0..spec.main_width)
-            .map(|index| SymbolicExpression::input(BaseInput::Main { offset, index }))
+            .map(|index| SymbolicExpression::input(BaseInput::Main { row: offset, column: index }))
             .collect()
     });
     let preprocessed: [Vec<_>; 2] = row_offsets.map(|offset| {
         (0..spec.preprocessed_width())
-            .map(|index| SymbolicExpression::input(BaseInput::Preprocessed { offset, index }))
+            .map(|index| {
+                SymbolicExpression::input(BaseInput::Preprocessed { row: offset, column: index })
+            })
             .collect()
     });
     let aux: [Vec<_>; 2] = row_offsets.map(|offset| {
         (0..spec.aux_width)
-            .map(|index| SymbolicExpressionExt::input(AuxInput::Trace { offset, index }))
+            .map(|index| {
+                SymbolicExpressionExt::input(AuxInput::Trace { row: offset, column: index })
+            })
             .collect()
     });
     let periodic: Vec<_> = (0..spec.periodic_columns.len())
-        .map(|index| SymbolicExpression::input(BaseInput::Periodic(index)))
+        .map(|index| SymbolicExpression::input(BaseInput::Periodic { index }))
         .collect();
     let public: Vec<_> = (0..spec.num_public_values)
-        .map(|index| SymbolicExpression::input(BaseInput::Public(index)))
+        .map(|index| SymbolicExpression::input(BaseInput::Public { index }))
         .collect();
     let challenges: Vec<_> = (0..spec.num_challenges)
-        .map(|index| SymbolicExpressionExt::input(AuxInput::Challenge(index)))
+        .map(|index| SymbolicExpressionExt::input(AuxInput::Challenge { index }))
         .collect();
     let exports: Vec<_> = (0..spec.num_exports)
-        .map(|index| SymbolicExpressionExt::input(AuxInput::Export(index)))
+        .map(|index| SymbolicExpressionExt::input(AuxInput::Export { index }))
         .collect();
     let frame = AirFrame {
         main: Rows { current: &main[0], next: &main[1] },
@@ -132,9 +134,9 @@ where
         aux: Rows { current: &aux[0], next: &aux[1] },
         periodic: &periodic,
         selectors: Selectors {
-            first: SymbolicExpression::Leaf(BaseLeaf::IsFirstRow),
-            last: SymbolicExpression::Leaf(BaseLeaf::IsLastRow),
-            transition: SymbolicExpression::Leaf(BaseLeaf::IsTransition),
+            first: SymbolicExpression::is_first_row(),
+            last: SymbolicExpression::is_last_row(),
+            transition: SymbolicExpression::is_transition(),
         },
     };
     let inputs = UniformInputs {
@@ -164,7 +166,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
-    use crate::air::{Frame, Inputs, PreprocessedSpec};
+    use crate::air::{Frame, Inputs, PreprocessedSpec, symbolic::ExprView};
 
     struct Source {
         spec_calls: AtomicUsize,
@@ -215,6 +217,6 @@ mod tests {
         assert!(matches!(capture.assertions[0], Assertion::Base(_)));
         assert!(matches!(capture.assertions[1], Assertion::Extension(_)));
         assert!(matches!(&capture.assertions[2],
-            Assertion::Base(SymbolicExpression::Leaf(BaseLeaf::Constant(value))) if *value == F::ZERO));
+            Assertion::Base(value) if matches!(value.view(), ExprView::BaseConstant(value) if *value == F::ZERO)));
     }
 }

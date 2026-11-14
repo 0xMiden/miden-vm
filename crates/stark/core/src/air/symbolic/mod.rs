@@ -1,17 +1,725 @@
-//! Owned symbolic arithmetic for native AIR expression inputs.
-//!
-//! The arithmetic and flattened serde representation are adapted from pinned p3-air 0.8.0.
-//! Input addresses are local, field-independent values; there are no upstream builder windows or
-//! `Copy` variable wrappers. See the adjacent README and license files for provenance.
-//!
-//! Cached raw degrees are diagnostics of trusted expression construction. Sound capacity checks
-//! must independently analyze the tree at the actual trace height rather than trust those caches.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Derived from p3-air 0.8.0; see README.md for provenance and local changes.
 
-mod base;
-mod extension;
+//! Owned symbolic algebra with shared operations and typed source domains.
+mod expression;
+pub(crate) mod expression_ext;
 mod flatten;
-mod tree;
+mod input;
+#[cfg(test)]
+mod tests;
+mod traversal;
 
-pub use base::{BaseInput, BaseLeaf, RowOffset, SymbolicExpression};
-pub use extension::{AuxInput, ExtLeaf, SymbolicExpressionExt};
-pub use tree::{SymLeaf, SymbolicExpr};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::{
+    fmt,
+    iter::{Product, Sum},
+    marker::PhantomData,
+    ops,
+};
+use p3_field::{Algebra, Dup, ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing};
+use serde::{Deserialize, Serialize};
+
+pub use expression::SymbolicExpression;
+pub use expression_ext::SymbolicExpressionExt;
+pub use input::{AuxInput, BaseInput, RowOffset};
+pub use traversal::{ExprChildren, ExprList, ExprRef, ExprView};
+
+/// Source algebra of an expression. Base polynomials may evaluate in an extension at OOD points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExpressionDomain {
+    Base,
+    Extension,
+}
+
+/// Scalar overload retained by an arithmetic operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CoefficientDomain {
+    Same,
+    Base,
+    BaseConstant,
+    ExtensionConstant,
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+/// A sealed marker selecting the source algebra of an expression.
+pub trait Domain: sealed::Sealed + Clone + fmt::Debug {
+    const DOMAIN: ExpressionDomain;
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Base;
+#[derive(Clone, Copy, Debug)]
+pub struct Extension;
+impl sealed::Sealed for Base {}
+impl sealed::Sealed for Extension {}
+impl Domain for Base {
+    const DOMAIN: ExpressionDomain = ExpressionDomain::Base;
+}
+impl Domain for Extension {
+    const DOMAIN: ExpressionDomain = ExpressionDomain::Extension;
+}
+
+/// A symbolic value. Leaves are inline so ring identities can be associated constants;
+/// operations, their operands, and checked degree caches are shared by `Arc`.
+///
+/// Auxiliary expressions cannot be used as base expressions:
+///
+/// ```compile_fail
+/// use miden_stark::air::symbolic::{AuxInput, SymbolicExpression};
+/// use p3_goldilocks::Goldilocks;
+/// let _: SymbolicExpression<Goldilocks> = AuxInput::Challenge { index: 0 }.into();
+/// ```
+///
+/// Even when both domains use the same numerical field, their handles are distinct:
+///
+/// ```compile_fail
+/// use miden_stark::air::symbolic::{SymbolicExpression, SymbolicExpressionExt};
+/// use p3_goldilocks::Goldilocks;
+/// let extension = SymbolicExpressionExt::<Goldilocks, Goldilocks>::from(Goldilocks::new(1));
+/// let _: SymbolicExpression<Goldilocks> = extension;
+/// ```
+#[derive(Clone, Debug)]
+pub struct Expr<F, EF = F, D = Base> {
+    raw: RawExpr<F, EF>,
+    marker: PhantomData<D>,
+}
+#[derive(Clone, Debug)]
+enum RawExpr<F, EF> {
+    BaseConstant { value: F, domain: ExpressionDomain },
+    ExtensionConstant(EF),
+    BaseInput(BaseInput),
+    AuxInput(AuxInput),
+    IsFirstRow,
+    IsLastRow,
+    IsTransition,
+    Node(Arc<Node<F, EF>>),
+}
+#[derive(Debug)]
+struct Node<F, EF> {
+    domain: ExpressionDomain,
+    degree_multiple: usize,
+    op: Op<F, EF>,
+}
+#[derive(Debug)]
+enum Op<F, EF> {
+    Lift(RawExpr<F, EF>),
+    Add {
+        x: RawExpr<F, EF>,
+        y: RawExpr<F, EF>,
+        coefficient_domain: CoefficientDomain,
+    },
+    Sub {
+        x: RawExpr<F, EF>,
+        y: RawExpr<F, EF>,
+        coefficient_domain: CoefficientDomain,
+    },
+    Mul {
+        x: RawExpr<F, EF>,
+        y: RawExpr<F, EF>,
+        coefficient_domain: CoefficientDomain,
+    },
+    Neg(RawExpr<F, EF>),
+    Sum(Box<[RawExpr<F, EF>]>),
+    Product(Box<[RawExpr<F, EF>]>),
+    LinearCombination {
+        values: Box<[RawExpr<F, EF>]>,
+        coefficients: Box<[RawExpr<F, EF>]>,
+        coefficient_domain: CoefficientDomain,
+    },
+    Exp {
+        x: RawExpr<F, EF>,
+        power: u64,
+    },
+    ExpPowerOf2 {
+        x: RawExpr<F, EF>,
+        power_log: usize,
+    },
+    ScalePow2 {
+        x: RawExpr<F, EF>,
+        exponent: i128,
+    },
+    BoolCheck(RawExpr<F, EF>),
+}
+/// Invalid expression structure or an unrepresentable structural degree bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpressionError {
+    DegreeOverflow,
+    InvalidDomain,
+    InvalidLength,
+    InvalidScale,
+    CharacteristicTwo,
+}
+impl fmt::Display for ExpressionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::DegreeOverflow => "symbolic polynomial degree overflow",
+            Self::InvalidDomain => "invalid symbolic operand domain",
+            Self::InvalidLength => "mismatched symbolic operand lengths",
+            Self::InvalidScale => "power-of-two scale exponent exceeds u64 magnitude",
+            Self::CharacteristicTwo => "division by two in characteristic two",
+        })
+    }
+}
+impl core::error::Error for ExpressionError {}
+
+impl<F, EF> RawExpr<F, EF> {
+    fn domain(&self) -> ExpressionDomain {
+        match self {
+            RawExpr::BaseConstant { domain, .. } => *domain,
+            RawExpr::ExtensionConstant(_) | RawExpr::AuxInput(_) => ExpressionDomain::Extension,
+            RawExpr::Node(node) => node.domain,
+            _ => ExpressionDomain::Base,
+        }
+    }
+    fn degree_multiple(&self) -> usize {
+        match self {
+            RawExpr::BaseInput(input) => input.degree_multiple(),
+            RawExpr::AuxInput(input) => input.degree_multiple(),
+            RawExpr::IsFirstRow | RawExpr::IsLastRow => 1,
+            RawExpr::Node(node) => node.degree_multiple,
+            _ => 0,
+        }
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> RawExpr<F, EF> {
+    fn constant(&self) -> Option<EF> {
+        match self {
+            RawExpr::BaseConstant { value, .. } => Some(EF::from(*value)),
+            RawExpr::ExtensionConstant(value) => Some(*value),
+            RawExpr::Node(node) => match &node.op {
+                Op::Lift(value) => value.constant(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    fn from_constant(domain: ExpressionDomain, value: EF) -> Self {
+        if let Some(value) = value.as_base() {
+            RawExpr::BaseConstant { value, domain }
+        } else {
+            assert_eq!(
+                domain,
+                ExpressionDomain::Extension,
+                "extension constant in base expression"
+            );
+            RawExpr::ExtensionConstant(value)
+        }
+    }
+    fn node(domain: ExpressionDomain, op: Op<F, EF>) -> Result<Self, ExpressionError> {
+        validate_op(domain, &op)?;
+        let degree_multiple = traversal::op_degree(&op, |value| Ok(value.degree_multiple()))?;
+        Ok(RawExpr::Node(Arc::new(Node { domain, degree_multiple, op })))
+    }
+}
+fn scalar_valid<F, EF>(
+    domain: ExpressionDomain,
+    value: &RawExpr<F, EF>,
+    scalar: CoefficientDomain,
+) -> bool {
+    match scalar {
+        CoefficientDomain::Same => value.domain() == domain,
+        CoefficientDomain::Base => value.domain() == ExpressionDomain::Base,
+        CoefficientDomain::BaseConstant => {
+            value.domain() == ExpressionDomain::Base
+                && matches!(value, RawExpr::BaseConstant { .. })
+        },
+        CoefficientDomain::ExtensionConstant => {
+            domain == ExpressionDomain::Extension
+                && value.domain() == ExpressionDomain::Extension
+                && matches!(value, RawExpr::ExtensionConstant(_) | RawExpr::BaseConstant { .. })
+        },
+    }
+}
+fn validate_op<F: Field, EF: ExtensionField<F>>(
+    domain: ExpressionDomain,
+    op: &Op<F, EF>,
+) -> Result<(), ExpressionError> {
+    let same = |value: &RawExpr<F, EF>| value.domain() == domain;
+    let valid = match op {
+        Op::Lift(value) => {
+            domain == ExpressionDomain::Extension && value.domain() == ExpressionDomain::Base
+        },
+        Op::Add { x, y, coefficient_domain }
+        | Op::Sub { x, y, coefficient_domain }
+        | Op::Mul { x, y, coefficient_domain } => {
+            same(x) && scalar_valid(domain, y, *coefficient_domain)
+        },
+        Op::Neg(x) | Op::Exp { x, .. } | Op::ExpPowerOf2 { x, .. } | Op::BoolCheck(x) => same(x),
+        Op::ScalePow2 { x, exponent } => {
+            if exponent.unsigned_abs() > u128::from(u64::MAX) {
+                return Err(ExpressionError::InvalidScale);
+            }
+            if *exponent < 0 && F::TWO.is_zero() {
+                return Err(ExpressionError::CharacteristicTwo);
+            }
+            same(x)
+        },
+        Op::Sum(values) | Op::Product(values) => values.iter().all(same),
+        Op::LinearCombination { values, coefficients, coefficient_domain } => {
+            if values.len() != coefficients.len() {
+                return Err(ExpressionError::InvalidLength);
+            }
+            values.iter().all(same)
+                && coefficients.iter().all(|v| scalar_valid(domain, v, *coefficient_domain))
+        },
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ExpressionError::InvalidDomain)
+    }
+}
+
+impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
+    fn from_raw(raw: RawExpr<F, EF>) -> Self {
+        assert_eq!(raw.domain(), D::DOMAIN, "invalid symbolic expression domain");
+        Self { raw, marker: PhantomData }
+    }
+    fn operation(op: Op<F, EF>) -> Self {
+        Self::from_raw(RawExpr::node(D::DOMAIN, op).expect("valid symbolic operation and degree"))
+    }
+    pub fn as_ref(&self) -> ExprRef<'_, F, EF> {
+        ExprRef { raw: &self.raw }
+    }
+    pub fn view(&self) -> ExprView<'_, F, EF> {
+        self.as_ref().view()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_cached_degree_for_test(&mut self, degree: usize) {
+        let RawExpr::Node(node) = &mut self.raw else {
+            panic!("only operation nodes have a degree cache");
+        };
+        Arc::get_mut(node).expect("test operation is uniquely owned").degree_multiple = degree;
+    }
+
+    pub fn degree_multiple(&self) -> usize {
+        self.raw.degree_multiple()
+    }
+    pub fn degree_multiple_with_transition(&self, transition_degree: usize) -> usize {
+        self.as_ref().degree_multiple_with_transition(transition_degree)
+    }
+    pub fn poly_degree(&self, trace_len: usize, periodic_periods: &[usize]) -> usize {
+        self.as_ref().poly_degree(trace_len, periodic_periods)
+    }
+    pub fn checked_poly_degree(
+        &self,
+        trace_len: usize,
+        periodic_periods: &[usize],
+    ) -> Result<usize, ExpressionError> {
+        self.as_ref().checked_poly_degree(trace_len, periodic_periods)
+    }
+    pub fn evaluate<R: PrimeCharacteristicRing>(
+        &self,
+        leaf: impl FnMut(ExprRef<'_, F, EF>, ExprView<'_, F, EF>) -> R,
+    ) -> R {
+        self.as_ref().evaluate(leaf)
+    }
+    pub fn is_first_row() -> Self {
+        Self::base_leaf(RawExpr::IsFirstRow)
+    }
+    pub fn is_last_row() -> Self {
+        Self::base_leaf(RawExpr::IsLastRow)
+    }
+    pub fn is_transition() -> Self {
+        Self::base_leaf(RawExpr::IsTransition)
+    }
+    fn base_leaf(raw: RawExpr<F, EF>) -> Self {
+        if D::DOMAIN == ExpressionDomain::Base {
+            Self::from_raw(raw)
+        } else {
+            Self::operation(Op::Lift(raw))
+        }
+    }
+    fn binary(self, rhs: SymbolicOperand<F, EF, D>, kind: Binary) -> Self {
+        if let (Some(x), Some(y)) = (self.raw.constant(), rhs.raw.constant()) {
+            let value = match kind {
+                Binary::Add => x + y,
+                Binary::Sub => x - y,
+                Binary::Mul => x * y,
+            };
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
+        }
+        if rhs.raw.constant().is_some_and(|value| value.is_zero()) {
+            return match kind {
+                Binary::Add | Binary::Sub => self,
+                Binary::Mul => Self::ZERO,
+            };
+        }
+        if matches!(kind, Binary::Mul) && rhs.raw.constant().is_some_and(|value| value.is_one()) {
+            return self;
+        }
+        let left_zero = self.raw.constant().is_some_and(|value| value.is_zero());
+        let left_one = self.raw.constant().is_some_and(|value| value.is_one());
+        if left_zero || (left_one && matches!(kind, Binary::Mul)) {
+            if left_zero && matches!(kind, Binary::Mul) {
+                return Self::ZERO;
+            }
+            let right = if rhs.raw.domain() == D::DOMAIN {
+                Self::from_raw(rhs.raw)
+            } else {
+                Self::operation(Op::Lift(rhs.raw))
+            };
+            return if matches!(kind, Binary::Sub) { -right } else { right };
+        }
+        let op = match kind {
+            Binary::Add => Op::Add {
+                x: self.raw,
+                y: rhs.raw,
+                coefficient_domain: rhs.coefficient_domain,
+            },
+            Binary::Sub => Op::Sub {
+                x: self.raw,
+                y: rhs.raw,
+                coefficient_domain: rhs.coefficient_domain,
+            },
+            Binary::Mul => Op::Mul {
+                x: self.raw,
+                y: rhs.raw,
+                coefficient_domain: rhs.coefficient_domain,
+            },
+        };
+        Self::operation(op)
+    }
+    fn unary(
+        self,
+        op: impl FnOnce(RawExpr<F, EF>) -> Op<F, EF>,
+        constant: impl FnOnce(EF) -> EF,
+    ) -> Self {
+        if let Some(value) = self.raw.constant() {
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, constant(value)));
+        }
+        Self::operation(op(self.raw))
+    }
+    fn sum_values(values: Vec<RawExpr<F, EF>>) -> Self {
+        if values.is_empty() {
+            return Self::ZERO;
+        }
+        if values.len() == 1 {
+            return Self::from_raw(values.into_iter().next().unwrap());
+        }
+        if let Some(value) =
+            values.iter().try_fold(EF::ZERO, |sum, value| Some(sum + value.constant()?))
+        {
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
+        }
+        Self::operation(Op::Sum(values.into_boxed_slice()))
+    }
+    fn product_values(values: Vec<RawExpr<F, EF>>) -> Self {
+        if values.is_empty() {
+            return Self::ONE;
+        }
+        if values.len() == 1 {
+            return Self::from_raw(values.into_iter().next().unwrap());
+        }
+        if let Some(value) = values
+            .iter()
+            .try_fold(EF::ONE, |product, value| Some(product * value.constant()?))
+        {
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
+        }
+        Self::operation(Op::Product(values.into_boxed_slice()))
+    }
+    fn linear_combination(
+        values: Vec<RawExpr<F, EF>>,
+        coefficients: Vec<RawExpr<F, EF>>,
+        coefficient_domain: CoefficientDomain,
+    ) -> Self {
+        assert_eq!(values.len(), coefficients.len(), "linear-combination lengths differ");
+        if values.is_empty() {
+            return Self::ZERO;
+        }
+        if let Some(value) = values
+            .iter()
+            .zip(&coefficients)
+            .try_fold(EF::ZERO, |sum, (value, coefficient)| {
+                Some(sum + value.constant()? * coefficient.constant()?)
+            })
+        {
+            return Self::from_raw(RawExpr::from_constant(D::DOMAIN, value));
+        }
+        Self::operation(Op::LinearCombination {
+            values: values.into_boxed_slice(),
+            coefficients: coefficients.into_boxed_slice(),
+            coefficient_domain,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Binary {
+    Add,
+    Sub,
+    Mul,
+}
+/// Operand produced by the sealed-shape conversion used by symbolic operators.
+#[doc(hidden)]
+pub struct SymbolicOperand<F, EF, D> {
+    raw: RawExpr<F, EF>,
+    coefficient_domain: CoefficientDomain,
+    marker: PhantomData<D>,
+}
+/// Converts an operand without erasing whether it is a scalar or an algebra value.
+#[doc(hidden)]
+pub trait IntoSymbolicOperand<F, EF, D> {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D>;
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for Expr<F, EF, D> {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
+        SymbolicOperand {
+            raw: self.raw,
+            coefficient_domain: CoefficientDomain::Same,
+            marker: PhantomData,
+        }
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for F {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
+        SymbolicOperand {
+            raw: RawExpr::BaseConstant {
+                value: self,
+                domain: ExpressionDomain::Base,
+            },
+            coefficient_domain: CoefficientDomain::BaseConstant,
+            marker: PhantomData,
+        }
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> IntoSymbolicOperand<F, EF, Extension> for Expr<F, EF, Base> {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, Extension> {
+        SymbolicOperand {
+            raw: self.raw,
+            coefficient_domain: CoefficientDomain::Base,
+            marker: PhantomData,
+        }
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for BaseInput {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
+        SymbolicOperand {
+            raw: RawExpr::BaseInput(self),
+            coefficient_domain: if D::DOMAIN == ExpressionDomain::Base {
+                CoefficientDomain::Same
+            } else {
+                CoefficientDomain::Base
+            },
+            marker: PhantomData,
+        }
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> IntoSymbolicOperand<F, EF, Extension> for AuxInput {
+    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, Extension> {
+        SymbolicOperand {
+            raw: RawExpr::AuxInput(self),
+            coefficient_domain: CoefficientDomain::Same,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<F: Field, EF: ExtensionField<F>, D: Domain> From<F> for Expr<F, EF, D> {
+    fn from(value: F) -> Self {
+        Self::from_raw(RawExpr::BaseConstant { value, domain: D::DOMAIN })
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> From<BaseInput> for Expr<F, EF, D> {
+    fn from(input: BaseInput) -> Self {
+        Self::base_leaf(RawExpr::BaseInput(input))
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> From<AuxInput> for Expr<F, EF, Extension> {
+    fn from(input: AuxInput) -> Self {
+        Self::from_raw(RawExpr::AuxInput(input))
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> From<Expr<F, EF, Base>> for Expr<F, EF, Extension> {
+    fn from(value: Expr<F, EF, Base>) -> Self {
+        Self::operation(Op::Lift(value.raw))
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> Default for Expr<F, EF, D> {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> Dup for Expr<F, EF, D> {
+    fn dup(&self) -> Self {
+        self.clone()
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> PrimeCharacteristicRing for Expr<F, EF, D> {
+    type PrimeSubfield = F::PrimeSubfield;
+    const ZERO: Self = Self {
+        raw: RawExpr::BaseConstant { value: F::ZERO, domain: D::DOMAIN },
+        marker: PhantomData,
+    };
+    const ONE: Self = Self {
+        raw: RawExpr::BaseConstant { value: F::ONE, domain: D::DOMAIN },
+        marker: PhantomData,
+    };
+    const TWO: Self = Self {
+        raw: RawExpr::BaseConstant { value: F::TWO, domain: D::DOMAIN },
+        marker: PhantomData,
+    };
+    const NEG_ONE: Self = Self {
+        raw: RawExpr::BaseConstant { value: F::NEG_ONE, domain: D::DOMAIN },
+        marker: PhantomData,
+    };
+    fn from_prime_subfield(value: Self::PrimeSubfield) -> Self {
+        F::from_prime_subfield(value).into()
+    }
+    fn double(&self) -> Self {
+        self.mul_2exp_u64(1)
+    }
+    fn halve(&self) -> Self {
+        self.div_2exp_u64(1)
+    }
+    fn square(&self) -> Self {
+        self.exp_u64(2)
+    }
+    fn cube(&self) -> Self {
+        self.exp_u64(3)
+    }
+    fn bool_check(&self) -> Self {
+        self.clone().unary(Op::BoolCheck, |value| value.bool_check())
+    }
+    fn exp_u64(&self, power: u64) -> Self {
+        match power {
+            0 => Self::ONE,
+            1 => self.clone(),
+            _ => self.clone().unary(|x| Op::Exp { x, power }, |value| value.exp_u64(power)),
+        }
+    }
+    fn exp_const_u64<const POWER: u64>(&self) -> Self {
+        self.exp_u64(POWER)
+    }
+    fn exp_power_of_2(&self, power_log: usize) -> Self {
+        if power_log == 0 {
+            return self.clone();
+        }
+        self.clone()
+            .unary(|x| Op::ExpPowerOf2 { x, power_log }, |value| value.exp_power_of_2(power_log))
+    }
+    fn mul_2exp_u64(&self, exp: u64) -> Self {
+        if exp == 0 {
+            return self.clone();
+        }
+        self.clone().unary(
+            |x| Op::ScalePow2 { x, exponent: i128::from(exp) },
+            |value| value.mul_2exp_u64(exp),
+        )
+    }
+    fn div_2exp_u64(&self, exp: u64) -> Self {
+        assert!(!F::TWO.is_zero(), "division by two in characteristic two");
+        if exp == 0 {
+            return self.clone();
+        }
+        self.clone().unary(
+            |x| Op::ScalePow2 { x, exponent: -i128::from(exp) },
+            |value| value.div_2exp_u64(exp),
+        )
+    }
+    fn sum_array<const N: usize>(input: &[Self]) -> Self {
+        assert_eq!(N, input.len());
+        Self::sum_values(input.iter().map(|value| value.raw.clone()).collect())
+    }
+    fn dot_product<const N: usize>(lhs: &[Self; N], rhs: &[Self; N]) -> Self {
+        Self::linear_combination(
+            lhs.iter().map(|v| v.raw.clone()).collect(),
+            rhs.iter().map(|v| v.raw.clone()).collect(),
+            CoefficientDomain::Same,
+        )
+    }
+}
+
+macro_rules! binary_operator {
+    ($trait:ident, $method:ident, $kind:ident, $assign:ident, $assign_method:ident) => {
+        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: IntoSymbolicOperand<F, EF, D>>
+            ops::$trait<T> for Expr<F, EF, D>
+        {
+            type Output = Self;
+            fn $method(self, rhs: T) -> Self {
+                self.binary(rhs.into_symbolic_operand(), Binary::$kind)
+            }
+        }
+        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: IntoSymbolicOperand<F, EF, D>>
+            ops::$assign<T> for Expr<F, EF, D>
+        {
+            fn $assign_method(&mut self, rhs: T) {
+                *self = self.clone().binary(rhs.into_symbolic_operand(), Binary::$kind);
+            }
+        }
+    };
+}
+binary_operator!(Add, add, Add, AddAssign, add_assign);
+binary_operator!(Sub, sub, Sub, SubAssign, sub_assign);
+binary_operator!(Mul, mul, Mul, MulAssign, mul_assign);
+impl<F: Field, EF: ExtensionField<F>, D: Domain> ops::Neg for Expr<F, EF, D> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        self.unary(Op::Neg, |value| -value)
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> Sum<T> for Expr<F, EF, D> {
+    fn sum<I: Iterator<Item = T>>(iter: I) -> Self {
+        Self::sum_values(iter.map(|value| value.into().raw).collect())
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> Product<T> for Expr<F, EF, D> {
+    fn product<I: Iterator<Item = T>>(iter: I) -> Self {
+        Self::product_values(iter.map(|value| value.into().raw).collect())
+    }
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> Algebra<F> for Expr<F, EF, D> {
+    fn mixed_dot_product<const N: usize>(values: &[Self; N], coefficients: &[F; N]) -> Self {
+        Self::linear_combination(
+            values.iter().map(|v| v.raw.clone()).collect(),
+            coefficients
+                .iter()
+                .map(|v| RawExpr::BaseConstant {
+                    value: *v,
+                    domain: ExpressionDomain::Base,
+                })
+                .collect(),
+            CoefficientDomain::BaseConstant,
+        )
+    }
+    fn batched_linear_combination(values: &[Self], coefficients: &[F]) -> Self {
+        Self::linear_combination(
+            values.iter().map(|v| v.raw.clone()).collect(),
+            coefficients
+                .iter()
+                .map(|v| RawExpr::BaseConstant {
+                    value: *v,
+                    domain: ExpressionDomain::Base,
+                })
+                .collect(),
+            CoefficientDomain::BaseConstant,
+        )
+    }
+}
+impl<F: Field, EF: ExtensionField<F>> Algebra<Expr<F, EF, Base>> for Expr<F, EF, Extension> {
+    fn mixed_dot_product<const N: usize>(
+        values: &[Self; N],
+        coefficients: &[Expr<F, EF, Base>; N],
+    ) -> Self {
+        Self::linear_combination(
+            values.iter().map(|v| v.raw.clone()).collect(),
+            coefficients.iter().map(|v| v.raw.clone()).collect(),
+            CoefficientDomain::Base,
+        )
+    }
+    fn batched_linear_combination(values: &[Self], coefficients: &[Expr<F, EF, Base>]) -> Self {
+        Self::linear_combination(
+            values.iter().map(|v| v.raw.clone()).collect(),
+            coefficients.iter().map(|v| v.raw.clone()).collect(),
+            CoefficientDomain::Base,
+        )
+    }
+}
+impl<F: Field + InjectiveMonomial<N>, EF: ExtensionField<F>, const N: u64> InjectiveMonomial<N>
+    for Expr<F, EF, Base>
+{
+}

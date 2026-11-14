@@ -46,10 +46,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 3214319045014639882
-const ACE_CIRCUIT_DIGEST_1 = 6009003144160433012
-const ACE_CIRCUIT_DIGEST_2 = 5861575214370787649
-const ACE_CIRCUIT_DIGEST_3 = 6941221240305074754
+const ACE_CIRCUIT_DIGEST_0 = 8340001585148533189
+const ACE_CIRCUIT_DIGEST_1 = 2749341894536385359
+const ACE_CIRCUIT_DIGEST_2 = 2933639663038113217
+const ACE_CIRCUIT_DIGEST_3 = 8711610458388138704
 
 # ERRORS
 # =================================================================================================

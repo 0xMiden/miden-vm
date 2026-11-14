@@ -161,18 +161,15 @@ fn finish_capture<F: Field, EF: ExtensionField<F>>(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{borrow::Cow, sync::Arc, vec};
+    use alloc::{borrow::Cow, vec};
 
-    use p3_field::PrimeCharacteristicRing;
+    use p3_field::{Dup, PrimeCharacteristicRing};
 
     use super::*;
     use crate::{
         air::{
             AirAnalysis, DegreeProfile,
-            symbolic::{
-                BaseInput, BaseLeaf, RowOffset, SymbolicExpr, SymbolicExpression,
-                SymbolicExpressionExt,
-            },
+            symbolic::{BaseInput, RowOffset, SymbolicExpression, SymbolicExpressionExt},
         },
         testing::configs::Felt,
     };
@@ -194,17 +191,19 @@ mod tests {
     }
 
     fn input(offset: RowOffset) -> SymbolicExpression<Felt> {
-        SymbolicExpression::input(BaseInput::Main { offset, index: 0 })
+        SymbolicExpression::input(BaseInput::Main { row: offset, column: 0 })
     }
 
     fn square(cache: usize, shared: bool) -> SymbolicExpression<Felt> {
-        let x = Arc::new(input(RowOffset::Current));
+        let x = input(RowOffset::Current) + Felt::ONE;
         let y = if shared {
-            Arc::clone(&x)
+            x.dup()
         } else {
-            Arc::new(input(RowOffset::Current))
+            input(RowOffset::Current) + Felt::ONE
         };
-        SymbolicExpr::Mul { x, y, degree_multiple: cache }
+        let mut expression = x * y;
+        expression.set_cached_degree_for_test(cache);
+        expression
     }
 
     #[test]
@@ -232,7 +231,7 @@ mod tests {
         changed.spec.periodic_columns.to_mut()[0].swap(0, 1);
         cases.push(changed);
         cases.push(raw(input(RowOffset::Next)));
-        cases.push(raw(SymbolicExpression::input(BaseInput::Public(0))));
+        cases.push(raw(SymbolicExpression::input(BaseInput::Public { index: 0 })));
         let mut changed = raw(input(RowOffset::Current));
         changed.assertions[0] =
             Assertion::Extension(SymbolicExpressionExt::from(input(RowOffset::Current)));
@@ -294,8 +293,7 @@ mod tests {
 
     #[test]
     fn repeated_zero_emissions_are_still_part_of_the_relation_identity() {
-        let one =
-            finish_capture(raw(SymbolicExpression::Leaf(BaseLeaf::Constant(Felt::ZERO)))).unwrap();
+        let one = finish_capture(raw(SymbolicExpression::constant(Felt::ZERO))).unwrap();
         let mut repeated = raw(SymbolicExpression::ZERO);
         repeated.assertions.push(Assertion::Base(SymbolicExpression::ZERO));
         repeated.labels.push(None);

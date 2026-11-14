@@ -106,8 +106,8 @@ fn build_ace_dag_from_capture(
     let periodic_data = (!air.periodic_columns.is_empty())
         .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(air.periodic_columns.clone()));
     let dag = build_verifier_dag_from_ir(
-        &air.graph,
-        &air.constraints,
+        air.graph(),
+        air.constraints(),
         &layout,
         periodic_data.as_ref(),
         shared_period,

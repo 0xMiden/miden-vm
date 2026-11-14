@@ -10,6 +10,8 @@ use miden_constraint_compiler::backend::{
 mod precompiles;
 #[path = "build/preparation_pilot.rs"]
 mod preparation_pilot;
+#[path = "build/symbolic_fixture.rs"]
+mod symbolic_fixture;
 
 fn main() {
     precompiles::generate();
@@ -18,6 +20,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build/preparation_fixture.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     preparation_pilot::generate(&out);
+    println!("cargo:rerun-if-changed=build/symbolic_fixture.rs");
+    fs::write(out.join("symbolic_operations_fixture.rs"), symbolic_fixture::generate())
+        .expect("write rich-operation execution fixture");
     let write = |name: &str, contents: String| {
         let path = out.join(name);
         fs::write(&path, contents)
@@ -32,8 +37,7 @@ fn main() {
         .map(|((air, captured), label)| AirEvaluator {
             name: air.file_token(),
             air_label: label,
-            graph: captured.graph(),
-            constraints: captured.constraints(),
+            program: captured.program(),
             descriptor: captured.descriptor(),
         })
         .collect();

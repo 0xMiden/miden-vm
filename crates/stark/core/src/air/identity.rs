@@ -6,112 +6,21 @@
 use alloc::vec::Vec;
 
 use miden_crypto::hash::blake::Blake3_256;
-use p3_field::{ExtensionField, Field};
+use p3_field::Field;
 
-use super::{
-    AirSpec,
-    symbolic::{AuxInput, BaseInput, BaseLeaf},
-};
+use super::AirSpec;
 
-#[derive(Clone, Copy)]
-pub(crate) enum ArithmeticOp {
-    Add,
-    Sub,
-    Mul,
-    Neg,
-}
-
-pub(crate) fn base_leaf<F: Field>(leaf: &BaseLeaf<F>) -> [u8; 32] {
+/// Frame an authored expression node independently of its allocation and degree caches.
+pub(crate) fn expression(node: &[u8]) -> [u8; 32] {
     let mut encoded = Encoding::new(1);
-    match leaf {
-        BaseLeaf::Input(input) => match input {
-            BaseInput::Main { offset, index } | BaseInput::Preprocessed { offset, index } => {
-                encoded.0.push(u8::from(matches!(input, BaseInput::Preprocessed { .. })));
-                encoded.0.push(offset.index() as u8);
-                encoded.count(*index);
-            },
-            BaseInput::Public(index) => {
-                encoded.0.push(2);
-                encoded.count(*index);
-            },
-            BaseInput::Periodic(index) => {
-                encoded.0.push(3);
-                encoded.count(*index);
-            },
-        },
-        BaseLeaf::IsFirstRow => encoded.0.push(4),
-        BaseLeaf::IsLastRow => encoded.0.push(5),
-        BaseLeaf::IsTransition => encoded.0.push(6),
-        BaseLeaf::Constant(value) => {
-            encoded.0.push(7);
-            encoded.field(*value);
-        },
-    }
+    encoded.bytes(node);
     encoded.finish()
 }
 
-pub(crate) fn lifted_base(base: [u8; 32]) -> [u8; 32] {
-    let mut encoded = Encoding::new(16);
-    encoded.0.push(0);
-    encoded.0.extend_from_slice(&base);
-    encoded.finish()
-}
-
-pub(crate) fn aux_input(input: AuxInput) -> [u8; 32] {
-    let mut encoded = Encoding::new(16);
-    match input {
-        AuxInput::Trace { offset, index } => {
-            encoded.0.push(1);
-            encoded.0.push(offset.index() as u8);
-            encoded.count(index);
-        },
-        AuxInput::Challenge(index) => {
-            encoded.0.push(2);
-            encoded.count(index);
-        },
-        AuxInput::Export(index) => {
-            encoded.0.push(3);
-            encoded.count(index);
-        },
-    }
-    encoded.finish()
-}
-
-pub(crate) fn ext_constant<F: Field, EF: ExtensionField<F>>(value: EF) -> [u8; 32] {
-    if value.is_in_basefield() {
-        return lifted_base(base_leaf(&BaseLeaf::Constant(value.as_basis_coefficients_slice()[0])));
-    }
-    let mut encoded = Encoding::new(16);
-    encoded.0.push(4);
-    encoded.count(EF::DIMENSION);
-    for &coefficient in value.as_basis_coefficients_slice() {
-        encoded.field(coefficient);
-    }
-    encoded.finish()
-}
-
-pub(crate) fn operation(
-    extension: bool,
-    op: ArithmeticOp,
-    x: [u8; 32],
-    y: Option<[u8; 32]>,
-) -> [u8; 32] {
-    let tag = match (extension, op) {
-        (false, ArithmeticOp::Add) => 2,
-        (false, ArithmeticOp::Sub) => 3,
-        (false, ArithmeticOp::Mul) => 4,
-        (false, ArithmeticOp::Neg) => 5,
-        (true, ArithmeticOp::Add) => 17,
-        (true, ArithmeticOp::Sub) => 18,
-        (true, ArithmeticOp::Mul) => 19,
-        (true, ArithmeticOp::Neg) => 20,
-    };
-    let mut encoded = Encoding::new(tag);
-    encoded.0.extend_from_slice(&x);
-    if let Some(y) = y {
-        encoded.0.extend_from_slice(&y);
-    }
-    encoded.finish()
+pub(crate) fn field_bytes<F: Field>(value: F) -> Vec<u8> {
+    let bytes: Vec<_> = value.into_bytes().into_iter().collect();
+    assert_eq!(bytes.len(), F::NUM_BYTES, "field encoding byte width");
+    bytes
 }
 
 pub(crate) fn relation<F: Field>(

@@ -27,8 +27,7 @@ pub fn generate() {
         .map(|(air, declaration)| AirEvaluator {
             name: declaration.file_token(),
             air_label: declaration.file_token(),
-            graph: air.graph(),
-            constraints: air.constraints(),
+            program: air.program(),
             descriptor: air.descriptor(),
         })
         .collect();

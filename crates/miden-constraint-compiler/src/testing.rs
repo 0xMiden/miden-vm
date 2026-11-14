@@ -7,7 +7,11 @@ use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
 use miden_stark::air::{self, AirKernel};
 use p3_field::{PackedField, PackedValue};
 
-use crate::ir::{Class, Graph, Leaf, Node, OpKind};
+use crate::ir::{CapturedProgram, Class, Graph, Leaf, Node, OpKind};
+use miden_stark::air::{
+    Assertion,
+    symbolic::{AuxInput, BaseInput, ExprView},
+};
 
 /// Degree of every assertion in each class, preserving its local order. This
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
@@ -39,6 +43,49 @@ fn assertion_degrees(captured: air::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] 
         }
     }
     classes
+}
+
+/// Compare the generated kernel's checked metadata and observed assertion layout to its source.
+pub fn assert_kernel_descriptor<A: air::LiftedAir<F = Felt>, K: AirKernel<F = Felt>>(
+    source: &A,
+    kernel: &K,
+) {
+    let captured = air::capture_with::<_, QuadFelt>(source).expect("authored source capture");
+    let expected = &captured.descriptor;
+    let actual = kernel.descriptor();
+    let (a, e) = (actual.spec(), expected.spec());
+    assert_eq!(
+        (a.main_width, a.aux_width, a.num_public_values, a.num_challenges, a.num_exports),
+        (e.main_width, e.aux_width, e.num_public_values, e.num_challenges, e.num_exports),
+    );
+    assert_eq!(a.preprocessed, e.preprocessed);
+    assert_eq!(a.periodic_columns, e.periodic_columns);
+    assert_eq!(actual.fingerprint(), expected.fingerprint());
+    let (a, e) = (actual.analysis(), expected.analysis());
+    assert_eq!(a.counts(), e.counts());
+    assert_eq!(a.raw_degrees(), e.raw_degrees());
+    assert_eq!(a.layout(), e.layout());
+    assert_eq!(a.degree_profile().ops(), e.degree_profile().ops());
+    assert_eq!(a.degree_profile().roots(), e.degree_profile().roots());
+    for ordinal in 0..e.layout().total_constraints() {
+        assert_eq!(actual.label(ordinal), expected.label(ordinal));
+    }
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
+        actual.spec().as_borrowed(),
+        |frame, inputs, sink| {
+            kernel
+                .bind(inputs)
+                .expect("symbolic dimensions match descriptor")
+                .eval(frame, sink);
+        },
+    )
+    .expect("prepared kernel capture");
+    assert_eq!(observed.descriptor.analysis().layout(), e.layout());
+    let geometry = kernel.geometry();
+    assert_eq!(geometry.main_width, expected.spec().main_width);
+    assert_eq!(geometry.aux_width, expected.spec().aux_width);
+    assert_eq!(geometry.preprocessed_width, expected.spec().preprocessed_width());
+    assert_eq!(geometry.raw_degrees, e.raw_degrees());
 }
 
 /// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children
@@ -102,6 +149,75 @@ fn eval_graph_with(graph: &Graph, mut leaf_value: impl FnMut(Leaf) -> QuadFelt) 
         values.push(value);
     }
     values
+}
+
+/// Compare the owned source expressions with independently evaluated lowered
+/// roots, checking each assertion's class, global ordinal, and value.
+pub fn assert_program_lowering(program: &CapturedProgram, seed: u64) {
+    let lowered = eval_graph(program.graph(), seed);
+    let constraints = program.constraints();
+    let (mut base_index, mut ext_index) = (0, 0);
+    for (ordinal, assertion) in program.assertions().iter().enumerate() {
+        let (expression, root, global) = match assertion {
+            Assertion::Base(expression) => {
+                let index = base_index;
+                base_index += 1;
+                (
+                    expression.as_ref(),
+                    constraints.base_roots[index],
+                    constraints.base_global_indices[index],
+                )
+            },
+            Assertion::Extension(expression) => {
+                let index = ext_index;
+                ext_index += 1;
+                (
+                    expression.as_ref(),
+                    constraints.ext_roots[index],
+                    constraints.ext_global_indices[index],
+                )
+            },
+        };
+        assert_eq!(global, ordinal, "lowered assertion order differs");
+        assert_eq!(eval_expression(expression, seed), lowered[root.index()], "assertion {ordinal}");
+    }
+    assert_eq!(base_index, constraints.base_roots.len());
+    assert_eq!(base_index, constraints.base_global_indices.len());
+    assert_eq!(ext_index, constraints.ext_roots.len());
+    assert_eq!(ext_index, constraints.ext_global_indices.len());
+}
+
+/// Evaluate the source operation vocabulary independently of compiler scheduling.
+pub(crate) fn eval_expression(
+    expression: miden_stark::air::symbolic::ExprRef<'_, Felt, QuadFelt>,
+    seed: u64,
+) -> QuadFelt {
+    expression.evaluate(|_, view| {
+        let leaf = match view {
+            ExprView::BaseConstant(value) => return QuadFelt::from(*value),
+            ExprView::ExtensionConstant(value) => return *value,
+            ExprView::BaseInput(input) => match input {
+                BaseInput::Main { row, column } => {
+                    Leaf::Main { offset: row.index(), index: column }
+                },
+                BaseInput::Preprocessed { row, column } => {
+                    Leaf::Preprocessed { offset: row.index(), index: column }
+                },
+                BaseInput::Public { index } => Leaf::Public(index),
+                BaseInput::Periodic { index } => Leaf::Periodic(index),
+            },
+            ExprView::AuxInput(input) => match input {
+                AuxInput::Trace { row, column } => Leaf::Aux { offset: row.index(), index: column },
+                AuxInput::Challenge { index } => Leaf::Challenge(index),
+                AuxInput::Export { index } => Leaf::PermValue(index),
+            },
+            ExprView::IsFirstRow => Leaf::IsFirst,
+            ExprView::IsLastRow => Leaf::IsLast,
+            ExprView::IsTransition => Leaf::IsTransition,
+            _ => unreachable!("source evaluation interprets operations independently"),
+        };
+        leaf_value(seed, leaf)
+    })
 }
 
 fn leaf_value(seed: u64, leaf: Leaf) -> QuadFelt {
@@ -205,7 +321,7 @@ where
         }
     }
 
-    fn frame(&self) -> air::AirFrame<'_, P, PE> {
+    pub fn frame(&self) -> air::AirFrame<'_, P, PE> {
         air::AirFrame {
             main: air::Rows {
                 current: &self.main[0],
@@ -228,7 +344,7 @@ where
         }
     }
 
-    fn uniforms(&self) -> air::UniformInputs<'_, P, PE> {
+    pub fn inputs(&self) -> air::UniformInputs<'_, P, PE> {
         air::UniformInputs {
             public_values: &self.public,
             challenges: &self.challenges,
@@ -245,8 +361,8 @@ pub struct EvaluationBuilder<P, PE> {
     pub ext_indices: Vec<usize>,
 }
 
-impl<P, PE> EvaluationBuilder<P, PE> {
-    fn new() -> Self {
+impl<P, PE> Default for EvaluationBuilder<P, PE> {
+    fn default() -> Self {
         Self {
             base_constraints: Vec::new(),
             ext_constraints: Vec::new(),
@@ -254,7 +370,9 @@ impl<P, PE> EvaluationBuilder<P, PE> {
             ext_indices: Vec::new(),
         }
     }
+}
 
+impl<P, PE> EvaluationBuilder<P, PE> {
     /// Retain allocations between timing iterations.
     pub fn clear(&mut self) {
         self.base_constraints.clear();
@@ -297,14 +415,14 @@ pub fn assert_concrete_evaluation<K: AirKernel<F = Felt>>(
     let spec = kernel.descriptor().spec();
     let scalar_inputs = EvaluationInputs::<Felt, QuadFelt>::new(spec, seed);
     let packed_inputs = EvaluationInputs::<P, PE>::new(spec, seed);
-    let mut scalar = EvaluationBuilder::new();
+    let mut scalar = EvaluationBuilder::default();
     kernel
-        .bind(scalar_inputs.uniforms())
+        .bind(scalar_inputs.inputs())
         .expect("scalar dimensions")
         .eval(&scalar_inputs.frame(), &mut scalar);
-    let mut packed = EvaluationBuilder::new();
+    let mut packed = EvaluationBuilder::default();
     kernel
-        .bind(packed_inputs.uniforms())
+        .bind(packed_inputs.inputs())
         .expect("packed dimensions")
         .eval(&packed_inputs.frame(), &mut packed);
     for (base, ext) in [
@@ -366,8 +484,8 @@ pub fn time_evaluation<K: AirKernel<F = Felt>>(
         PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
     {
         let inputs = EvaluationInputs::<P, PE>::new(kernel.descriptor().spec(), 0x243f6a8885a308d3);
-        let mut sink = EvaluationBuilder::new();
-        let session = kernel.bind(inputs.uniforms()).expect("timing dimensions");
+        let mut sink = EvaluationBuilder::default();
+        let session = kernel.bind(inputs.inputs()).expect("timing dimensions");
         let frame = inputs.frame();
         session.eval(&frame, &mut sink);
         let start = std::time::Instant::now();

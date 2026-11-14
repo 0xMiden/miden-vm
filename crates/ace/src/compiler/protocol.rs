@@ -1,6 +1,8 @@
 //! Captured AIRs and the geometry shared by relation artifact generators.
 
-use miden_constraint_compiler::ir::{CapturedConstraints, Graph, capture_native};
+use miden_constraint_compiler::ir::{
+    CapturedConstraints, CapturedProgram, Graph, capture_program_native_with_descriptor,
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::{self, ConstraintCounts, ConstraintDegrees};
 
@@ -16,8 +18,7 @@ fn invalid(message: impl Into<String>) -> AceError {
 /// An AIR captured once for both native evaluator and ACE generation.
 #[derive(Debug)]
 pub struct CapturedAir {
-    pub(crate) graph: Graph,
-    pub(crate) constraints: CapturedConstraints,
+    program: CapturedProgram,
     /// Raw AIR widths; the quotient chunk count is derived from this AIR's degree.
     pub(crate) counts: InputCounts,
     pub(crate) degrees: ConstraintDegrees,
@@ -35,7 +36,7 @@ impl CapturedAir {
     /// check the descriptor's actual-height capacity before execution. No fixed-table factory
     /// or witness construction is invoked, and no prover capability is required.
     pub fn new_native<A: air::LiftedAir<F = Felt>>(air: &A) -> Result<Self, AceError> {
-        let (graph, constraints, descriptor) = capture_native(air)
+        let (program, descriptor) = capture_program_native_with_descriptor(air)
             .map_err(|error| invalid(format!("native AIR capture failed: {error}")))?;
         let spec = descriptor.spec();
         if spec.num_challenges != 2 {
@@ -57,8 +58,7 @@ impl CapturedAir {
         let periodic_columns = spec.periodic_columns.to_vec();
         let max_periodic_length = spec.max_periodic_length();
         Ok(Self {
-            graph,
-            constraints,
+            program,
             counts,
             degrees,
             periodic_columns,
@@ -72,12 +72,16 @@ impl CapturedAir {
         &self.descriptor
     }
 
+    pub fn program(&self) -> &CapturedProgram {
+        &self.program
+    }
+
     pub fn graph(&self) -> &Graph {
-        &self.graph
+        self.program.graph()
     }
 
     pub fn constraints(&self) -> &CapturedConstraints {
-        &self.constraints
+        self.program.constraints()
     }
 
     pub fn degrees(&self) -> ConstraintDegrees {

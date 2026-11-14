@@ -1,0 +1,369 @@
+use super::*;
+use alloc::collections::BTreeSet;
+use p3_field::{
+    Algebra, BasedVectorSpace, Dup, PrimeCharacteristicRing, extension::BinomialExtensionField,
+};
+use p3_goldilocks::Goldilocks;
+
+type F = Goldilocks;
+type EF = BinomialExtensionField<F, 2>;
+type B = SymbolicExpression<F, EF>;
+type E = SymbolicExpressionExt<F, EF>;
+fn x() -> B {
+    BaseInput::Main { row: RowOffset::Current, column: 0 }.into()
+}
+fn y() -> B {
+    BaseInput::Main { row: RowOffset::Next, column: 1 }.into()
+}
+fn z() -> E {
+    AuxInput::Trace { row: RowOffset::Current, column: 0 }.into()
+}
+fn evaluate<D: Domain>(expression: &Expr<F, EF, D>) -> EF {
+    expression.evaluate(|_, view| match view {
+        ExprView::BaseConstant(value) => (*value).into(),
+        ExprView::ExtensionConstant(value) => *value,
+        ExprView::BaseInput(input) => F::new(input.index() as u64 + 2).into(),
+        ExprView::AuxInput(input) => EF::from_basis_coefficients_fn(|i| {
+            if i == 0 {
+                F::new(input.index() as u64 + 5)
+            } else {
+                F::ONE
+            }
+        }),
+        ExprView::IsFirstRow | ExprView::IsLastRow | ExprView::IsTransition => EF::ONE,
+        _ => panic!("evaluation callback only receives leaves"),
+    })
+}
+
+#[test]
+fn ring_overrides_capture_merged_nodes_and_evaluate() {
+    let a = x();
+    let b = y();
+    let av = EF::from(F::new(2));
+    let bv = EF::from(F::new(3));
+    let cases = [
+        (a.dup() + b.dup(), av + bv),
+        (a.dup() - b.dup(), av - bv),
+        (a.dup() * b.dup(), av * bv),
+        (-a.dup(), -av),
+        (a.double(), av.double()),
+        (a.halve(), av.halve()),
+        (a.square(), av.square()),
+        (a.cube(), av.cube()),
+        (a.exp_u64(7), av.exp_u64(7)),
+        (a.exp_const_u64::<7>(), av.exp_u64(7)),
+        (a.exp_power_of_2(3), av.exp_u64(8)),
+        (a.mul_2exp_u64(5), av * EF::from(F::new(32))),
+        (a.div_2exp_u64(5), av / EF::from(F::new(32))),
+        (a.bool_check(), av * (av - EF::ONE)),
+        (a.xor(&b), av + bv - (av * bv).double()),
+        (a.xor3(&b, &a), av.xor(&bv).xor(&av)),
+        (a.andn(&b), (EF::ONE - av) * bv),
+    ];
+    for (expression, expected) in cases {
+        assert_eq!(evaluate(&expression), expected);
+    }
+    assert!(matches!(a.square().view(), ExprView::Exp { power: 2, .. }));
+    assert!(matches!(a.cube().view(), ExprView::Exp { power: 3, .. }));
+    assert!(matches!(a.double().view(), ExprView::ScalePow2 { exponent: 1, .. }));
+    assert!(matches!(a.halve().view(), ExprView::ScalePow2 { exponent: -1, .. }));
+    assert!(matches!(a.bool_check().view(), ExprView::BoolCheck { .. }));
+}
+
+#[test]
+fn reduction_nodes_preserve_scalar_classes_and_empty_identities() {
+    let values = [x(), y()];
+    let sum = B::sum_array::<2>(&values);
+    let product: B = values.clone().into_iter().product();
+    let homogeneous = B::dot_product(&values, &values);
+    let coefficients = [F::new(7), F::new(11)];
+    let mixed = <B as Algebra<F>>::mixed_dot_product(&values, &coefficients);
+    let batched = <B as Algebra<F>>::batched_linear_combination(&values, &coefficients);
+    assert!(matches!(sum.view(), ExprView::Sum { .. }));
+    assert!(matches!(product.view(), ExprView::Product { .. }));
+    assert!(matches!(
+        homogeneous.view(),
+        ExprView::LinearCombination {
+            coefficient_domain: CoefficientDomain::Same,
+            ..
+        }
+    ));
+    for value in [&mixed, &batched] {
+        assert!(matches!(
+            value.view(),
+            ExprView::LinearCombination {
+                coefficient_domain: CoefficientDomain::BaseConstant,
+                ..
+            }
+        ));
+        assert_eq!(evaluate(value), EF::from(F::new(47)));
+    }
+    assert_eq!(evaluate(&sum), EF::from(F::new(5)));
+    assert_eq!(evaluate(&product), EF::from(F::new(6)));
+    assert_eq!(evaluate(&homogeneous), EF::from(F::new(13)));
+    assert_eq!(evaluate(&core::iter::empty::<B>().sum::<B>()), EF::ZERO);
+    assert_eq!(evaluate(&core::iter::empty::<B>().product::<B>()), EF::ONE);
+    assert_eq!(evaluate(&B::sum_array::<0>(&[])), EF::ZERO);
+}
+
+#[test]
+fn mixed_operators_and_assignment_keep_the_original_scalar_class() {
+    let mut a = z();
+    a += x();
+    assert!(matches!(
+        a.view(),
+        ExprView::Add {
+            coefficient_domain: CoefficientDomain::Base,
+            ..
+        }
+    ));
+    a *= F::new(3);
+    assert!(matches!(
+        a.view(),
+        ExprView::Mul {
+            coefficient_domain: CoefficientDomain::BaseConstant,
+            ..
+        }
+    ));
+    let extension_scalar = EF::from_basis_coefficients_fn(|i| F::new(i as u64 + 1));
+    a -= extension_scalar;
+    assert!(matches!(
+        a.view(),
+        ExprView::Sub {
+            coefficient_domain: CoefficientDomain::ExtensionConstant,
+            ..
+        }
+    ));
+    assert_eq!(
+        evaluate(&a),
+        (evaluate(&z()) + evaluate(&x())) * EF::from(F::new(3)) - extension_scalar
+    );
+    let lifted: E = x().into();
+    assert!(matches!(lifted.view(), ExprView::Lift { .. }));
+    assert_eq!(evaluate(&lifted.to_base().unwrap()), evaluate(&x()));
+    assert!(z().to_base().is_none());
+}
+
+#[test]
+fn quadratic_square_uses_default_arithmetic_and_symbolic_non_residue_degree() {
+    let inputs = [z(), z() + y()];
+    let w = x().square();
+    let outputs = <E as Algebra<B>>::quadratic_extension_square(&inputs, w.clone());
+    assert!(matches!(outputs[0].view(), ExprView::LinearCombination { .. }));
+    assert!(matches!(outputs[1].view(), ExprView::Mul { .. }));
+    assert_eq!(outputs[0].degree_multiple(), 4);
+    assert_eq!(outputs[1].degree_multiple(), 2);
+    let a0 = evaluate(&inputs[0]);
+    let a1 = evaluate(&inputs[1]);
+    assert_eq!(evaluate(&outputs[0]), a0.square() + evaluate(&w) * a1.square());
+    assert_eq!(evaluate(&outputs[1]), (a0 * a1).double());
+
+    let other_outputs = <E as Algebra<B>>::quadratic_extension_square(&inputs, x().cube());
+    assert_eq!(other_outputs[0].degree_multiple(), 5);
+    assert_eq!(other_outputs[1].degree_multiple(), 2);
+    assert_eq!(evaluate(&other_outputs[1]), evaluate(&outputs[1]));
+    outputs[1].as_ref().fold(|_, view, _: &[()]| {
+        assert!(!matches!(view, ExprView::BaseInput(BaseInput::Main { column: 0, .. })));
+    });
+    assert_eq!(
+        serde_json::to_value(&outputs[1]).unwrap(),
+        serde_json::to_value(&other_outputs[1]).unwrap()
+    );
+
+    let shared = outputs[0].clone() + outputs[1].clone();
+    let combined = shared.clone() * shared;
+    let wire = serde_json::to_value(&combined).unwrap();
+    let restored: E = serde_json::from_value(wire).unwrap();
+    match restored.view() {
+        ExprView::Mul { x, y, .. } => assert_eq!(x.identity(), y.identity()),
+        _ => panic!("expected multiplication of shared scalar expressions"),
+    }
+    assert_eq!(evaluate(&restored), evaluate(&combined));
+}
+
+#[test]
+fn full_extension_constants_fold_without_requiring_base_membership() {
+    let constant = EF::from_basis_coefficients_fn(|i| F::new(i as u64 + 2));
+    let expression = E::extension_constant(constant).square() + E::extension_constant(constant);
+    assert!(matches!(
+        expression.view(),
+        ExprView::ExtensionConstant(_) | ExprView::BaseConstant(_)
+    ));
+    assert_eq!(evaluate(&expression), constant.square() + constant);
+    assert_eq!(expression.degree_multiple(), 0);
+}
+
+#[test]
+fn degree_profiles_use_checked_multiplication_and_source_domains() {
+    let expression = (x() + B::is_transition()).square();
+    assert_eq!(expression.degree_multiple(), 2);
+    assert_eq!(expression.poly_degree(8, &[]), 14);
+    assert_eq!(B::is_transition().degree_multiple_with_transition(1), 1);
+    let large = x().exp_power_of_2(usize::BITS as usize - 1);
+    assert_eq!(large.checked_poly_degree(3, &[]), Err(ExpressionError::DegreeOverflow));
+    let public: B = BaseInput::Public { index: 0 }.into();
+    assert_eq!(public.exp_power_of_2(usize::MAX).degree_multiple(), 0);
+    assert_eq!(public.exp_power_of_2(usize::MAX).checked_poly_degree(8, &[]), Ok(0));
+    assert_eq!(public.exp_u64(u64::MAX).checked_poly_degree(8, &[]), Ok(0));
+    let expression = E::from(x()).square();
+    assert_eq!(expression.as_ref().domain(), ExpressionDomain::Extension);
+    assert_eq!(evaluate(&expression), EF::from(F::new(4)));
+}
+
+#[test]
+fn checked_degree_reuses_shared_subtrees_and_propagates_leaf_errors() {
+    let shared = x().square();
+    let expression = shared.clone() + shared;
+    let mut visits = 0;
+    assert_eq!(
+        expression.as_ref().checked_degree_with(|_, _| {
+            visits += 1;
+            Ok(3)
+        }),
+        Ok(6)
+    );
+    assert_eq!(visits, 1);
+    assert_eq!(
+        expression
+            .as_ref()
+            .checked_degree_with(|_, _| Err(ExpressionError::DegreeOverflow)),
+        Err(ExpressionError::DegreeOverflow)
+    );
+}
+
+#[test]
+fn fold_and_wire_preserve_sharing_at_the_operation_root() {
+    let shared = x() * y();
+    let root = shared.clone() + shared;
+    let mut ids = BTreeSet::new();
+    root.as_ref().fold(|expression, _, _: &[()]| {
+        if let Some(id) = expression.identity() {
+            assert!(ids.insert(id));
+        }
+    });
+    assert_eq!(ids.len(), 2);
+    let wire = serde_json::to_value(&root).unwrap();
+    assert_eq!(wire["version"], 2);
+    assert!(!serde_json::to_string(&wire).unwrap().contains("degree_multiple"));
+    let restored: B = serde_json::from_value(wire).unwrap();
+    match restored.view() {
+        ExprView::Add { x, y, .. } => assert_eq!(x.identity(), y.identity()),
+        _ => panic!("expected addition"),
+    }
+    assert_eq!(evaluate(&restored), evaluate(&root));
+}
+
+#[test]
+fn version_two_wire_rejects_bad_domains_references_lengths_and_degrees() {
+    let original = serde_json::to_value(x() + y()).unwrap();
+    let mut old = original.clone();
+    old["version"] = 1.into();
+    assert!(serde_json::from_value::<B>(old).is_err());
+    let mut forward = original.clone();
+    let root = forward["root"].as_u64().unwrap();
+    forward["nodes"][root as usize]["op"]["Add"]["x"] = root.into();
+    assert!(serde_json::from_value::<B>(forward).is_err());
+    let mut domain = original;
+    domain["nodes"][root as usize]["domain"] = "Extension".into();
+    assert!(serde_json::from_value::<B>(domain).is_err());
+    let values = [x(), y()];
+    let mut lengths = serde_json::to_value(B::dot_product(&values, &values)).unwrap();
+    let root = lengths["root"].as_u64().unwrap() as usize;
+    lengths["nodes"][root]["op"]["LinearCombination"]["coefficients"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    assert!(serde_json::from_value::<B>(lengths).is_err());
+    let mut overflow = serde_json::to_value(x().exp_power_of_2(2)).unwrap();
+    let root = overflow["root"].as_u64().unwrap() as usize;
+    overflow["nodes"][root]["op"]["ExpPowerOf2"]["power_log"] = u64::from(usize::BITS).into();
+    assert!(serde_json::from_value::<B>(overflow).is_err());
+}
+
+#[test]
+fn signed_scaling_preserves_the_full_u64_magnitude() {
+    for expression in [x().mul_2exp_u64(u64::MAX), x().div_2exp_u64(u64::MAX)] {
+        let serialized = serde_json::to_string(&expression).unwrap();
+        let restored: B = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(evaluate(&restored), evaluate(&expression));
+        match restored.view() {
+            ExprView::ScalePow2 { exponent, .. } => {
+                assert_eq!(exponent.unsigned_abs(), u128::from(u64::MAX))
+            },
+            _ => panic!("expected scaling"),
+        }
+    }
+}
+
+#[test]
+fn algebra_trait_matrix_remains_available() {
+    fn algebra<A: Algebra<S>, S>() {}
+    algebra::<B, F>();
+    algebra::<E, F>();
+    algebra::<E, B>();
+    algebra::<E, EF>();
+    algebra::<B, B>();
+    algebra::<E, E>();
+    let _: B = B::ZERO;
+    let _: E = E::ONE;
+    let values = [z(), z()];
+    let mixed = <E as Algebra<B>>::mixed_dot_product(&values, &[x(), y()]);
+    assert!(matches!(
+        mixed.view(),
+        ExprView::LinearCombination {
+            coefficient_domain: CoefficientDomain::Base,
+            ..
+        }
+    ));
+    let literal = <E as Algebra<EF>>::mixed_dot_product(&values, &[EF::ONE, EF::TWO]);
+    assert!(matches!(
+        literal.view(),
+        ExprView::LinearCombination {
+            coefficient_domain: CoefficientDomain::ExtensionConstant,
+            ..
+        }
+    ));
+    let _: [E; 2] = <E as Algebra<F>>::quadratic_extension_square(&values, F::new(7));
+}
+
+#[test]
+fn wire_scalar_domains_cannot_bypass_typed_handles() {
+    let expression = x() + F::new(3);
+    let mut wire = serde_json::to_value(&expression).unwrap();
+    let root = wire["root"].as_u64().unwrap() as usize;
+    let scalar = wire["nodes"][root]["op"]["Add"]["y"].as_u64().unwrap() as usize;
+    wire["nodes"][scalar]["domain"] = serde_json::json!("Extension");
+    assert!(serde_json::from_value::<B>(wire).is_err());
+
+    let expression = z() + EF::from(F::new(3));
+    let mut wire = serde_json::to_value(&expression).unwrap();
+    let root = wire["root"].as_u64().unwrap() as usize;
+    let scalar = wire["nodes"][root]["op"]["Add"]["y"].as_u64().unwrap() as usize;
+    wire["nodes"][scalar]["domain"] = serde_json::json!("Base");
+    wire["nodes"][scalar]["op"] = serde_json::json!({ "BaseConstant": F::new(3) });
+    assert!(serde_json::from_value::<E>(wire).is_err());
+
+    let mut wire = serde_json::to_value(x()).unwrap();
+    wire["nodes"][0]["degree_multiple"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<B>(wire).is_err());
+}
+
+#[test]
+fn constant_aggregates_and_formal_identities_fold_before_emission() {
+    for expression in [B::ZERO + x(), x() + B::ZERO, B::ONE * x(), x() * B::ONE] {
+        assert!(matches!(expression.view(), ExprView::BaseInput(_)));
+    }
+    assert!(matches!((B::ZERO - x()).view(), ExprView::Neg { .. }));
+    assert!(matches!((E::ZERO + x()).view(), ExprView::Lift { .. }));
+    let values = [B::from_u64(2), B::from_u64(3)];
+    for (expression, expected) in [
+        (values.iter().cloned().sum::<B>(), 5),
+        (values.iter().cloned().product::<B>(), 6),
+        (B::dot_product(&values, &values), 13),
+    ] {
+        assert!(matches!(expression.view(), ExprView::BaseConstant(c) if *c == F::new(expected)));
+    }
+    let [c0, c1] = <B as Algebra<F>>::quadratic_extension_square(&values, F::new(7));
+    assert!(matches!(c0.view(), ExprView::BaseConstant(c) if *c == F::new(67)));
+    assert!(matches!(c1.view(), ExprView::BaseConstant(c) if *c == F::new(12)));
+}

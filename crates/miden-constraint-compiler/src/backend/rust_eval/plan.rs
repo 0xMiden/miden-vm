@@ -1,10 +1,12 @@
 //! Rust-only, typed evaluation choices. The captured graph remains authoritative
 //! for ACE and constraint metadata; this plan only changes arithmetic scheduling.
 
-use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
+use super::index::ExpressionIndex;
+use crate::ir::{Class, OpKind};
+use miden_stark::air::symbolic::ExprView;
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
-const MAX_TERMS: usize = 16;
+pub(super) const MAX_TERMS: usize = 16;
 // Reserve array/gather dots for larger regions. Tiny cases keep arithmetic
 // explicit, including small scalar scalings and packed multiplies.
 const MIN_DOT_TERMS: usize = 4;
@@ -18,34 +20,34 @@ pub(super) enum DotKind {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Coefficient {
-    Node(NodeId),
+    Node(usize),
     Scalar(u64),
     One,
 }
 
 #[derive(Debug)]
 pub(super) enum Piece {
-    Node(NodeId),
+    Node(usize),
     Dot {
         kind: DotKind,
-        pairs: Vec<(NodeId, Coefficient)>,
+        pairs: Vec<(usize, Coefficient)>,
     },
 }
 
 #[derive(Debug)]
 pub(super) enum Rewrite {
-    Square(NodeId),
+    Square(usize),
     Scalar {
-        value: NodeId,
+        value: usize,
         scalar: u64,
         op: OpKind,
         reversed: bool,
     },
     Factor {
-        common: NodeId,
+        common: usize,
         scalar: Option<u64>,
-        left: NodeId,
-        right: NodeId,
+        left: usize,
+        right: usize,
     },
     Sum(Vec<Piece>),
 }
@@ -55,71 +57,61 @@ pub(super) fn join(a: Class, b: Class) -> Class {
     if a == Class::Ext { a } else { b }
 }
 
-pub(super) struct Plan<'g> {
-    graph: &'g Graph,
+pub(super) struct Plan<'g, 'a> {
+    graph: &'g ExpressionIndex<'a>,
     uses: Vec<usize>,
 }
 
-impl<'g> Plan<'g> {
-    pub fn new(
-        graph: &'g Graph,
-        constraints: &CapturedConstraints,
-        materialized: &[NodeId],
-    ) -> Self {
+impl<'g, 'a> Plan<'g, 'a> {
+    pub fn new(graph: &'g ExpressionIndex<'a>, materialized: &[usize]) -> Self {
         let mut uses = vec![0; graph.len()];
-        for (_, node) in graph.iter() {
-            match node {
-                Node::Op { x, y, .. } => {
-                    uses[x.index()] += 1;
-                    if let Some(y) = y {
-                        uses[y.index()] += 1;
-                    }
-                },
-                Node::Leaf(Leaf::ExtBase(inner)) => uses[inner.index()] += 1,
-                _ => {},
+        for id in 0..graph.len() {
+            for &child in graph.children(id) {
+                uses[child] += 1;
             }
         }
-        for root in constraints.base_roots.iter().chain(&constraints.ext_roots) {
-            uses[root.index()] += 1;
+        for &(root, _) in &graph.roots {
+            uses[root] += 1;
         }
-        // Cached terms are inputs to row evaluation, even when used by only one graph node.
-        // Parent specializations must not expand their products or sums back into the row.
-        for id in materialized {
-            uses[id.index()] = uses[id.index()].max(2);
+        for &id in materialized {
+            uses[id] = uses[id].max(2);
         }
         Self { graph, uses }
     }
 
-    fn constant(&self, id: NodeId) -> Option<u64> {
-        match self.graph.node(id) {
-            Node::Leaf(Leaf::BaseConst(c)) => Some(c),
-            Node::Leaf(Leaf::ExtBase(inner)) => self.constant(inner),
-            _ => None,
-        }
+    fn constant(&self, id: usize) -> Option<u64> {
+        self.graph.constant(id)
     }
 
-    fn product(&self, id: NodeId) -> Option<(NodeId, NodeId)> {
-        match self.graph.node(id) {
-            Node::Op { op: OpKind::Mul, x, y: Some(y), .. }
-                if self.uses[id.index()] == 1 && x != y =>
-            {
-                Some((x, y))
-            },
+    fn operation(&self, id: usize) -> Option<(Class, OpKind, usize, Option<usize>)> {
+        let op = match self.graph.node(id).view() {
+            ExprView::Add { .. } => OpKind::Add,
+            ExprView::Sub { .. } => OpKind::Sub,
+            ExprView::Mul { .. } => OpKind::Mul,
+            ExprView::Neg { .. } => OpKind::Neg,
+            // Explicit structured calls are opaque to scalar pattern recovery.
+            _ => return None,
+        };
+        let inputs = self.graph.children(id);
+        Some((self.graph.class(id), op, inputs[0], inputs.get(1).copied()))
+    }
+
+    fn product(&self, id: usize) -> Option<(usize, usize)> {
+        match self.operation(id) {
+            Some((_, OpKind::Mul, x, Some(y))) if self.uses[id] == 1 && x != y => Some((x, y)),
             _ => None,
         }
     }
 
     // Only Add is associative here. In particular, never flatten subtraction,
     // cancel selector factors, or use bounded-integer facts about trace limbs.
-    fn terms(&self, id: NodeId, class: Class, root: bool, out: &mut Vec<NodeId>) {
+    fn terms(&self, id: usize, class: Class, root: bool, out: &mut Vec<usize>) {
         if out.len() >= MAX_TERMS {
             out.push(id);
             return;
         }
-        match self.graph.node(id) {
-            Node::Op { class: c, op: OpKind::Add, x, y: Some(y) }
-                if c == class && (root || self.uses[id.index()] == 1) =>
-            {
+        match self.operation(id) {
+            Some((c, OpKind::Add, x, Some(y))) if c == class && (root || self.uses[id] == 1) => {
                 self.terms(x, class, false, out);
                 self.terms(y, class, false, out);
             },
@@ -127,7 +119,7 @@ impl<'g> Plan<'g> {
         }
     }
 
-    fn pair(&self, id: NodeId, class: Class, kind: DotKind) -> Option<(NodeId, Coefficient)> {
+    fn pair(&self, id: usize, class: Class, kind: DotKind) -> Option<(usize, Coefficient)> {
         let product = self.product(id);
         match kind {
             DotKind::Scalar if class == Class::Base => {
@@ -161,7 +153,7 @@ impl<'g> Plan<'g> {
         }
     }
 
-    fn pieces(&self, terms: &[NodeId], class: Class) -> Vec<Piece> {
+    fn pieces(&self, terms: &[usize], class: Class) -> Vec<Piece> {
         let mut pieces = Vec::new();
         let mut start = 0;
         while start < terms.len() {
@@ -191,8 +183,8 @@ impl<'g> Plan<'g> {
         pieces
     }
 
-    pub fn rewrite(&self, id: NodeId) -> Option<Rewrite> {
-        let Node::Op { class, op, x, y: Some(y) } = self.graph.node(id) else {
+    pub fn rewrite(&self, id: usize) -> Option<Rewrite> {
+        let Some((class, op, x, Some(y))) = self.operation(id) else {
             return None;
         };
         if op == OpKind::Mul && x == y {

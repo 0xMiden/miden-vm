@@ -93,7 +93,7 @@
 //!
 //! The IR's base/ext class split is erased here: every DAG value is an
 //! extension-field element, and [`Leaf::ExtBase`] lowers transparently to its
-//! wrapped subtree (mirroring the tree lowering's `ExtLeaf::Base` case). Fields
+//! wrapped subtree (mirroring the symbolic expression's explicit lift). Fields
 //! are concrete (`Felt`/`QuadFelt`), matching the capture frontend.
 
 use miden_constraint_compiler::ir::{

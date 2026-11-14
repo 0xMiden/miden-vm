@@ -154,6 +154,10 @@ impl GraphBuilder {
         self.intern(Key::Op { class, op, x, y }, Node::Op { class, op, x, y })
     }
 
+    pub(crate) fn node(&self, id: NodeId) -> Node {
+        self.nodes[id.index()]
+    }
+
     /// Finish building and freeze into an immutable [`Graph`].
     pub fn freeze(self) -> Graph {
         Graph { nodes: self.nodes }
