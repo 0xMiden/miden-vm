@@ -324,7 +324,7 @@ impl Lowering<'_> {
 mod tests {
     use miden_crypto::field::Algebra;
     use miden_stark::air::symbolic::{
-        CoefficientDomain, RowOffset, SymbolicExpression, SymbolicExpressionExt,
+        RowOffset, SymbolicExpression, SymbolicExpressionExt,
     };
 
     use super::*;
@@ -341,28 +341,21 @@ mod tests {
     }
 
     #[test]
-    fn authored_scalar_overloads_survive_identical_arithmetic_lowering() {
+    fn normalized_constant_spellings_preserve_arithmetic_lowering() {
         let a = main(0);
+        let e = E::from(AuxInput::Challenge { index: 0 });
         let scalar = Felt::from_u64(7);
         let program = CapturedProgram::from_assertions(vec![
             Assertion::Base(a.clone() * scalar),
             Assertion::Base(a * B::from(scalar)),
+            Assertion::Extension(e.clone() * scalar),
+            Assertion::Extension(e.clone() * B::from(scalar)),
+            Assertion::Extension(e * E::extension_constant(QuadFelt::from(scalar))),
         ]);
-        let domains: Vec<_> = program
-            .assertions()
-            .iter()
-            .map(|assertion| {
-                let Assertion::Base(expression) = assertion else {
-                    panic!("base assertion");
-                };
-                let ExprView::Mul { coefficient_domain, .. } = expression.view() else {
-                    panic!("authored multiplication");
-                };
-                coefficient_domain
-            })
-            .collect();
-        assert_eq!(domains, [CoefficientDomain::BaseConstant, CoefficientDomain::Same]);
         assert_eq!(program.constraints().base_roots[0], program.constraints().base_roots[1]);
+        for &root in &program.constraints().ext_roots[1..] {
+            assert_eq!(root, program.constraints().ext_roots[0]);
+        }
         for seed in [0, 42, u64::MAX] {
             assert_program_lowering(&program, seed);
         }

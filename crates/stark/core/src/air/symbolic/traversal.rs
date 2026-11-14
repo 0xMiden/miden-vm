@@ -1,7 +1,5 @@
 //! Borrowed inspection and memoized traversal of the shared symbolic representation.
-use super::{
-    AuxInput, BaseInput, CoefficientDomain, ExpressionDomain, ExpressionError, Op, RawExpr,
-};
+use super::{AuxInput, BaseInput, ExpressionDomain, ExpressionError, Op, RawExpr};
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
@@ -41,7 +39,8 @@ impl<'a, F, EF> ExprList<'a, F, EF> {
         self.values.iter().map(|raw| ExprRef { raw })
     }
 }
-/// Complete borrowed view. Binary scalar overloads retain their coefficient class.
+/// Complete borrowed view. Operation children belong to the result domain;
+/// dynamic base-to-extension conversions are represented by explicit lifts.
 #[derive(Debug)]
 pub enum ExprView<'a, F, EF> {
     BaseConstant(&'a F),
@@ -57,17 +56,14 @@ pub enum ExprView<'a, F, EF> {
     Add {
         x: ExprRef<'a, F, EF>,
         y: ExprRef<'a, F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Sub {
         x: ExprRef<'a, F, EF>,
         y: ExprRef<'a, F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Mul {
         x: ExprRef<'a, F, EF>,
         y: ExprRef<'a, F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Neg {
         x: ExprRef<'a, F, EF>,
@@ -81,7 +77,6 @@ pub enum ExprView<'a, F, EF> {
     LinearCombination {
         values: ExprList<'a, F, EF>,
         coefficients: ExprList<'a, F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Exp {
         x: ExprRef<'a, F, EF>,
@@ -125,30 +120,15 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
             RawExpr::IsTransition => ExprView::IsTransition,
             RawExpr::Node(node) => match &node.op {
                 Op::Lift(value) => ExprView::Lift { value: child(value) },
-                Op::Add { x, y, coefficient_domain } => ExprView::Add {
-                    x: child(x),
-                    y: child(y),
-                    coefficient_domain: *coefficient_domain,
-                },
-                Op::Sub { x, y, coefficient_domain } => ExprView::Sub {
-                    x: child(x),
-                    y: child(y),
-                    coefficient_domain: *coefficient_domain,
-                },
-                Op::Mul { x, y, coefficient_domain } => ExprView::Mul {
-                    x: child(x),
-                    y: child(y),
-                    coefficient_domain: *coefficient_domain,
-                },
+                Op::Add { x, y } => ExprView::Add { x: child(x), y: child(y) },
+                Op::Sub { x, y } => ExprView::Sub { x: child(x), y: child(y) },
+                Op::Mul { x, y } => ExprView::Mul { x: child(x), y: child(y) },
                 Op::Neg(x) => ExprView::Neg { x: child(x) },
                 Op::Sum(values) => ExprView::Sum { values: ExprList { values } },
                 Op::Product(values) => ExprView::Product { values: ExprList { values } },
-                Op::LinearCombination { values, coefficients, coefficient_domain } => {
-                    ExprView::LinearCombination {
-                        values: ExprList { values },
-                        coefficients: ExprList { values: coefficients },
-                        coefficient_domain: *coefficient_domain,
-                    }
+                Op::LinearCombination { values, coefficients } => ExprView::LinearCombination {
+                    values: ExprList { values },
+                    coefficients: ExprList { values: coefficients },
                 },
                 Op::Exp { x, power } => ExprView::Exp { x: child(x), power: *power },
                 Op::ExpPowerOf2 { x, power_log } => {
@@ -388,29 +368,17 @@ pub(super) fn to_base<F: Field, EF: ExtensionField<F>>(
                     },
                     Op::Add { x, y, .. } => RawExpr::node(
                         ExpressionDomain::Base,
-                        Op::Add {
-                            x: walk(x, cache)?,
-                            y: walk(y, cache)?,
-                            coefficient_domain: CoefficientDomain::Same,
-                        },
+                        Op::Add { x: walk(x, cache)?, y: walk(y, cache)? },
                     )
                     .ok(),
                     Op::Sub { x, y, .. } => RawExpr::node(
                         ExpressionDomain::Base,
-                        Op::Sub {
-                            x: walk(x, cache)?,
-                            y: walk(y, cache)?,
-                            coefficient_domain: CoefficientDomain::Same,
-                        },
+                        Op::Sub { x: walk(x, cache)?, y: walk(y, cache)? },
                     )
                     .ok(),
                     Op::Mul { x, y, .. } => RawExpr::node(
                         ExpressionDomain::Base,
-                        Op::Mul {
-                            x: walk(x, cache)?,
-                            y: walk(y, cache)?,
-                            coefficient_domain: CoefficientDomain::Same,
-                        },
+                        Op::Mul { x: walk(x, cache)?, y: walk(y, cache)? },
                     )
                     .ok(),
                     Op::Sum(values) => RawExpr::node(
@@ -448,7 +416,6 @@ pub(super) fn to_base<F: Field, EF: ExtensionField<F>>(
                                 .map(|v| walk(v, cache))
                                 .collect::<Option<Vec<_>>>()?
                                 .into_boxed_slice(),
-                            coefficient_domain: CoefficientDomain::Same,
                         },
                     )
                     .ok(),

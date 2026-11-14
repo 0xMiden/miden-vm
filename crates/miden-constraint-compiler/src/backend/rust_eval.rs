@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use crate::ir::{CapturedProgram, Class, Leaf, Node, OpKind};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
-use miden_stark::air::symbolic::{AuxInput, BaseInput, CoefficientDomain, ExprView};
+use miden_stark::air::symbolic::{AuxInput, BaseInput, ExprView};
 
 mod index;
 mod plan;
@@ -428,22 +428,6 @@ impl<'g, 'a> Emitter<'g, 'a> {
         }
     }
 
-    fn scalar_binary(
-        &mut self,
-        class: Class,
-        op: OpKind,
-        domain: CoefficientDomain,
-        x: usize,
-        y: usize,
-    ) -> String {
-        if domain == CoefficientDomain::Same {
-            return self.binary(class, op, x, y);
-        }
-        let value = self.expr(x, class);
-        let (_, scalar) = self.coefficients(class, domain, &[y]);
-        format!("{value} {} {}", sym(op), scalar[0])
-    }
-
     fn operation(
         &mut self,
         class: Class,
@@ -452,15 +436,9 @@ impl<'g, 'a> Emitter<'g, 'a> {
     ) -> String {
         let ty = self.ty(class);
         match view {
-            ExprView::Add { coefficient_domain, .. } => {
-                self.scalar_binary(class, OpKind::Add, coefficient_domain, inputs[0], inputs[1])
-            },
-            ExprView::Sub { coefficient_domain, .. } => {
-                self.scalar_binary(class, OpKind::Sub, coefficient_domain, inputs[0], inputs[1])
-            },
-            ExprView::Mul { coefficient_domain, .. } => {
-                self.scalar_binary(class, OpKind::Mul, coefficient_domain, inputs[0], inputs[1])
-            },
+            ExprView::Add { .. } => self.binary(class, OpKind::Add, inputs[0], inputs[1]),
+            ExprView::Sub { .. } => self.binary(class, OpKind::Sub, inputs[0], inputs[1]),
+            ExprView::Mul { .. } => self.binary(class, OpKind::Mul, inputs[0], inputs[1]),
             ExprView::Neg { .. } => format!("-{}", self.expr(inputs[0], class)),
             ExprView::Sum { .. } => {
                 let values: Vec<_> = inputs.iter().map(|&id| self.expr(id, class)).collect();
@@ -500,12 +478,11 @@ impl<'g, 'a> Emitter<'g, 'a> {
                 }
             },
             ExprView::BoolCheck { .. } => format!("{}.bool_check()", self.expr(inputs[0], class)),
-            ExprView::LinearCombination { coefficient_domain, .. } => {
+            ExprView::LinearCombination { .. } => {
                 assert_eq!(inputs.len() % 2, 0, "linear combination arity");
                 let n = inputs.len() / 2;
                 let values: Vec<_> = inputs[..n].iter().map(|&id| self.expr(id, class)).collect();
-                let (scalar_ty, coefficients) =
-                    self.coefficients(class, coefficient_domain, &inputs[n..]);
+                let (scalar_ty, coefficients) = self.coefficients(class, &inputs[n..]);
                 let method = if scalar_ty == ty {
                     format!("{ty}::dot_product::<{n}>")
                 } else if n <= MAX_TERMS {
@@ -519,42 +496,31 @@ impl<'g, 'a> Emitter<'g, 'a> {
         }
     }
 
-    fn coefficients(
-        &mut self,
-        class: Class,
-        domain: CoefficientDomain,
-        ids: &[usize],
-    ) -> (&'static str, Vec<String>) {
+    fn coefficients(&mut self, class: Class, ids: &[usize]) -> (&'static str, Vec<String>) {
         let types = self.types();
-        match domain {
-            CoefficientDomain::Same => {
-                (self.ty(class), ids.iter().map(|&id| self.expr(id, class)).collect())
-            },
-            CoefficientDomain::Base => {
-                (types.base, ids.iter().map(|&id| self.expr(id, Class::Base)).collect())
-            },
-            CoefficientDomain::BaseConstant | CoefficientDomain::ExtensionConstant => {
-                // ExtExpr is only promised Algebra<BaseExpr>, not Algebra<Felt>
-                // or Algebra<EF>. A base-embedded coefficient remains usable by
-                // constructing a BaseExpr, while a genuine EF constant is rejected.
-                let scalar_ty = if class == Class::Base { "Felt" } else { types.base };
-                let values = ids
-                    .iter()
-                    .map(|&id| {
-                        let value = self
-                            .graph
-                            .constant(id)
-                            .expect("ext constant with non-base coefficients");
-                        if class == Class::Base {
-                            format!("Felt::from_u64({value})")
-                        } else {
-                            format!("{}::from(Felt::from_u64({value}))", types.base)
-                        }
-                    })
-                    .collect();
-                (scalar_ty, values)
-            },
+        if class == Class::Base && ids.iter().all(|&id| self.graph.constant(id).is_some()) {
+            return (
+                "Felt",
+                ids.iter()
+                    .map(|&id| format!("Felt::from_u64({})", self.graph.constant(id).unwrap()))
+                    .collect(),
+            );
         }
+        // ExtExpr is promised Algebra<BaseExpr>, not Algebra<Felt> or Algebra<EF>.
+        // Explicit lifts and base constants can use the smaller coefficient type.
+        let coefficient_class = if ids.iter().all(|&id| self.graph.value_class(id) == Class::Base) {
+            Class::Base
+        } else {
+            class
+        };
+        (
+            if coefficient_class == Class::Base {
+                types.base
+            } else {
+                types.ext
+            },
+            ids.iter().map(|&id| self.expr(id, coefficient_class)).collect(),
+        )
     }
 
     fn rewrite_rhs(&mut self, class: Class, rewrite: Rewrite) -> String {
@@ -585,8 +551,8 @@ impl<'g, 'a> Emitter<'g, 'a> {
                     let right = self.expr(right, class);
                     return format!("({left} + {right}) * Felt::from_u64({scalar})");
                 }
-                let factor = self.graph.class(common);
-                let sum = plan::join(self.graph.class(left), self.graph.class(right));
+                let factor = self.graph.value_class(common);
+                let sum = plan::join(self.graph.value_class(left), self.graph.value_class(right));
                 let common = self.expr(common, factor);
                 let left = self.expr(left, sum);
                 let right = self.expr(right, sum);
@@ -867,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn linear_combinations_preserve_scalar_domains_and_batch_large_mixed_calls() {
+    fn linear_combinations_infer_scalar_types_and_batch_large_mixed_calls() {
         let values: [B; 4] = core::array::from_fn(main);
         let coefficients: [Felt; 4] = core::array::from_fn(|i| Felt::from_u64(i as u64 + 3));
         let ext_values: [E; 4] = core::array::from_fn(challenge);
@@ -896,6 +862,86 @@ mod tests {
             output.contains("<AB::ExtExpr as Algebra<AB::Expr>>::batched_linear_combination"),
             "{output}"
         );
+    }
+
+    #[test]
+    fn equivalent_constant_spellings_share_native_arithmetic() {
+        let scalar = Felt::from_u64(7);
+        let x = main(0);
+        let e = aux(0);
+        let output = emit(&[
+            Assertion::Base(x.dup() * scalar),
+            Assertion::Base(x * B::from(scalar)),
+            Assertion::Extension(e.dup() * scalar),
+            Assertion::Extension(e.dup() * B::from(scalar)),
+            Assertion::Extension(e.dup() * E::from(scalar)),
+            Assertion::Extension(e * E::extension_constant(QuadFelt::from(scalar))),
+        ]);
+        assert_eq!(output.matches(" * Felt::from_u64(7)").count(), 1, "{output}");
+        let base_assertions: Vec<_> =
+            row(&output).lines().filter(|line| line.contains("builder.emit_base")).collect();
+        assert_eq!(base_assertions.len(), 2);
+        assert_eq!(base_assertions[0], base_assertions[1]);
+        let ext_assertions: Vec<_> =
+            row(&output).lines().filter(|line| line.contains("builder.emit_ext")).collect();
+        assert_eq!(ext_assertions.len(), 4);
+        assert!(ext_assertions.iter().all(|line| *line == ext_assertions[0]));
+        assert!(!output.contains("<AB::ExtExpr as Algebra<Felt>>"), "{output}");
+    }
+
+    #[test]
+    fn equivalent_linear_combination_coefficients_share_native_dispatch() {
+        let values: [B; 4] = core::array::from_fn(main);
+        let extension_values: [E; 4] = core::array::from_fn(aux);
+        let coefficients = [7, 11, 13, 17].map(Felt::from_u64);
+        let base_coefficients = coefficients.map(B::from);
+        let extension_coefficients = coefficients.map(E::from);
+        let output = emit(&[
+            Assertion::Base(B::dot_product(&values, &base_coefficients)),
+            Assertion::Base(<B as Algebra<Felt>>::mixed_dot_product(&values, &coefficients)),
+            Assertion::Extension(E::dot_product(&extension_values, &extension_coefficients)),
+            Assertion::Extension(<E as Algebra<B>>::mixed_dot_product(
+                &extension_values,
+                &base_coefficients,
+            )),
+            Assertion::Extension(<E as Algebra<Felt>>::mixed_dot_product(
+                &extension_values,
+                &coefficients,
+            )),
+        ]);
+        assert_eq!(
+            output.matches("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<4>").count(),
+            1,
+            "{output}"
+        );
+        assert_eq!(
+            output
+                .matches("<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>")
+                .count(),
+            1,
+            "{output}"
+        );
+        assert!(!output.contains("<AB::ExtExpr as Algebra<Felt>>"), "{output}");
+    }
+
+    #[test]
+    fn degree_zero_public_coefficients_remain_dynamic_expressions() {
+        let values: [B; 4] = core::array::from_fn(main);
+        let extension_values: [E; 4] = core::array::from_fn(aux);
+        let coefficients: [B; 4] = core::array::from_fn(|index| BaseInput::Public { index }.into());
+        let lifted_coefficients = coefficients.clone().map(E::from);
+        let output = emit(&[
+            Assertion::Base(B::dot_product(&values, &coefficients)),
+            Assertion::Extension(E::dot_product(&extension_values, &lifted_coefficients)),
+        ]);
+        assert!(output.contains("AB::Expr::dot_product::<4>"), "{output}");
+        assert!(
+            output.contains("<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>"),
+            "{output}"
+        );
+        assert!(output.contains("inputs.public_values[0]"), "{output}");
+        assert!(!output.contains("<AB::Expr as Algebra<Felt>>"), "{output}");
+        assert!(!output.contains("<AB::ExtExpr as Algebra<Felt>>"), "{output}");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Derived from p3-air 0.8.0; see README.md for provenance and local changes.
 
-use super::{Base, BaseInput, Domain, Expr, RawExpr};
+use super::{Base, BaseInput, Expr};
 use p3_field::{ExtensionField, Field};
 
 /// Base-field symbolic value, parameterized by the extension used by its capture session.
@@ -16,6 +16,6 @@ impl<F: Field, EF: ExtensionField<F>> Expr<F, EF, Base> {
 
     /// Construct a base-field constant without depending on a conversion trait.
     pub fn constant(value: F) -> Self {
-        Self::from_raw(RawExpr::BaseConstant { value, domain: Base::DOMAIN })
+        Self::from(value)
     }
 }

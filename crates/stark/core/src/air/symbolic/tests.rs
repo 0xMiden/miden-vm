@@ -71,7 +71,7 @@ fn ring_overrides_capture_merged_nodes_and_evaluate() {
 }
 
 #[test]
-fn reduction_nodes_preserve_scalar_classes_and_empty_identities() {
+fn reduction_nodes_preserve_operations_and_empty_identities() {
     let values = [x(), y()];
     let sum = B::sum_array::<2>(&values);
     let product: B = values.clone().into_iter().product();
@@ -81,21 +81,9 @@ fn reduction_nodes_preserve_scalar_classes_and_empty_identities() {
     let batched = <B as Algebra<F>>::batched_linear_combination(&values, &coefficients);
     assert!(matches!(sum.view(), ExprView::Sum { .. }));
     assert!(matches!(product.view(), ExprView::Product { .. }));
-    assert!(matches!(
-        homogeneous.view(),
-        ExprView::LinearCombination {
-            coefficient_domain: CoefficientDomain::Same,
-            ..
-        }
-    ));
+    assert!(matches!(homogeneous.view(), ExprView::LinearCombination { .. }));
     for value in [&mixed, &batched] {
-        assert!(matches!(
-            value.view(),
-            ExprView::LinearCombination {
-                coefficient_domain: CoefficientDomain::BaseConstant,
-                ..
-            }
-        ));
+        assert!(matches!(value.view(), ExprView::LinearCombination { .. }));
         assert_eq!(evaluate(value), EF::from(F::new(47)));
     }
     assert_eq!(evaluate(&sum), EF::from(F::new(5)));
@@ -107,33 +95,21 @@ fn reduction_nodes_preserve_scalar_classes_and_empty_identities() {
 }
 
 #[test]
-fn mixed_operators_and_assignment_keep_the_original_scalar_class() {
+fn mixed_operators_normalize_constants_and_lift_dynamic_base_values() {
     let mut a = z();
     a += x();
-    assert!(matches!(
-        a.view(),
-        ExprView::Add {
-            coefficient_domain: CoefficientDomain::Base,
-            ..
-        }
-    ));
+    assert!(
+        matches!(a.view(), ExprView::Add { y, .. } if matches!(y.view(), ExprView::Lift { value } if value.domain() == ExpressionDomain::Base))
+    );
     a *= F::new(3);
-    assert!(matches!(
-        a.view(),
-        ExprView::Mul {
-            coefficient_domain: CoefficientDomain::BaseConstant,
-            ..
-        }
-    ));
+    assert!(
+        matches!(a.view(), ExprView::Mul { y, .. } if y.domain() == ExpressionDomain::Extension && matches!(y.view(), ExprView::BaseConstant(c) if *c == F::new(3)))
+    );
     let extension_scalar = EF::from_basis_coefficients_fn(|i| F::new(i as u64 + 1));
     a -= extension_scalar;
-    assert!(matches!(
-        a.view(),
-        ExprView::Sub {
-            coefficient_domain: CoefficientDomain::ExtensionConstant,
-            ..
-        }
-    ));
+    assert!(
+        matches!(a.view(), ExprView::Sub { y, .. } if matches!(y.view(), ExprView::ExtensionConstant(_)))
+    );
     assert_eq!(
         evaluate(&a),
         (evaluate(&z()) + evaluate(&x())) * EF::from(F::new(3)) - extension_scalar
@@ -142,6 +118,76 @@ fn mixed_operators_and_assignment_keep_the_original_scalar_class() {
     assert!(matches!(lifted.view(), ExprView::Lift { .. }));
     assert_eq!(evaluate(&lifted.to_base().unwrap()), evaluate(&x()));
     assert!(z().to_base().is_none());
+}
+
+fn assert_same_normal_form<D: Domain>(expressions: &[Expr<F, EF, D>]) {
+    let expected = serde_json::to_value(&expressions[0]).unwrap();
+    let expected_value = evaluate(&expressions[0]);
+    for expression in expressions {
+        assert_eq!(serde_json::to_value(expression).unwrap(), expected);
+        assert_eq!(evaluate(expression), expected_value);
+    }
+}
+
+#[test]
+fn coefficient_constant_spellings_have_one_normal_form() {
+    let c = F::new(7);
+    assert_same_normal_form(&[x() * c, x() * B::from(c)]);
+    assert_same_normal_form(&[
+        z() * c,
+        z() * B::from(c),
+        z() * E::from(c),
+        z() * EF::from(c),
+        z() * E::extension_constant(EF::from(c)),
+    ]);
+    assert_same_normal_form(&[z() * x(), z() * E::from(x())]);
+    for expression in [
+        E::from(c),
+        E::from(B::from(c)),
+        E::from(EF::from(c)),
+        E::extension_constant(EF::from(c)),
+    ] {
+        assert_eq!(expression.as_ref().domain(), ExpressionDomain::Extension);
+        assert!(matches!(expression.view(), ExprView::BaseConstant(value) if *value == c));
+    }
+    let genuine = EF::from_basis_coefficients_fn(|i| if i == 0 { c } else { F::ONE });
+    assert!(
+        matches!(E::extension_constant(genuine).view(), ExprView::ExtensionConstant(value) if *value == genuine)
+    );
+}
+
+#[test]
+fn linear_combination_coefficients_normalize_into_the_result_domain() {
+    let constants = [F::new(7), F::new(11)];
+    let base_values = [x(), y()];
+    let base_constants = constants.map(B::from);
+    assert_same_normal_form(&[
+        B::dot_product(&base_values, &base_constants),
+        <B as Algebra<F>>::mixed_dot_product(&base_values, &constants),
+        <B as Algebra<F>>::batched_linear_combination(&base_values, &constants),
+    ]);
+    let extension_values = [z(), z() + y()];
+    assert_same_normal_form(&[
+        E::dot_product(&extension_values, &constants.map(E::from)),
+        <E as Algebra<F>>::mixed_dot_product(&extension_values, &constants),
+        <E as Algebra<B>>::mixed_dot_product(&extension_values, &base_constants),
+        <E as Algebra<EF>>::mixed_dot_product(&extension_values, &constants.map(EF::from)),
+        <E as Algebra<F>>::batched_linear_combination(&extension_values, &constants),
+        <E as Algebra<B>>::batched_linear_combination(&extension_values, &base_constants),
+        <E as Algebra<EF>>::batched_linear_combination(&extension_values, &constants.map(EF::from)),
+    ]);
+    let dynamic = <E as Algebra<B>>::mixed_dot_product(&extension_values, &base_values);
+    assert_same_normal_form(&[
+        dynamic.clone(),
+        E::dot_product(&extension_values, &[E::from(x()), E::from(y())]),
+    ]);
+    match dynamic.view() {
+        ExprView::LinearCombination { values, coefficients } => {
+            assert!(values.iter().all(|value| value.domain() == ExpressionDomain::Extension));
+            assert!(coefficients.iter().all(|coefficient| matches!(coefficient.view(), ExprView::Lift { value } if value.domain() == ExpressionDomain::Base)));
+        },
+        _ => panic!("expected linear combination"),
+    }
 }
 
 #[test]
@@ -308,22 +354,60 @@ fn algebra_trait_matrix_remains_available() {
     let _: E = E::ONE;
     let values = [z(), z()];
     let mixed = <E as Algebra<B>>::mixed_dot_product(&values, &[x(), y()]);
-    assert!(matches!(
-        mixed.view(),
-        ExprView::LinearCombination {
-            coefficient_domain: CoefficientDomain::Base,
-            ..
-        }
-    ));
+    assert!(
+        matches!(mixed.view(), ExprView::LinearCombination { coefficients, .. } if coefficients.iter().all(|value| matches!(value.view(), ExprView::Lift { .. })))
+    );
     let literal = <E as Algebra<EF>>::mixed_dot_product(&values, &[EF::ONE, EF::TWO]);
-    assert!(matches!(
-        literal.view(),
-        ExprView::LinearCombination {
-            coefficient_domain: CoefficientDomain::ExtensionConstant,
-            ..
-        }
-    ));
+    assert!(
+        matches!(literal.view(), ExprView::LinearCombination { coefficients, .. } if coefficients.iter().all(|value| value.domain() == ExpressionDomain::Extension && matches!(value.view(), ExprView::BaseConstant(_))))
+    );
     let _: [E; 2] = <E as Algebra<F>>::quadratic_extension_square(&values, F::new(7));
+}
+
+#[test]
+fn wire_normalizes_constant_embeddings_after_validating_domains() {
+    let c = F::new(7);
+    let expected = E::from(c);
+    let lift = serde_json::json!({
+        "version": 2, "root": 1,
+        "nodes": [
+            { "domain": "Base", "op": { "BaseConstant": c } },
+            { "domain": "Extension", "op": { "Lift": { "value": 0 } } }
+        ]
+    });
+    let decoded: E = serde_json::from_value(lift.clone()).unwrap();
+    assert_same_normal_form(&[expected.clone(), decoded]);
+    let embedded = serde_json::json!({
+        "version": 2, "root": 0,
+        "nodes": [{ "domain": "Extension", "op": { "ExtensionConstant": EF::from(c) } }]
+    });
+    let decoded: E = serde_json::from_value(embedded.clone()).unwrap();
+    assert_same_normal_form(&[expected.clone(), decoded]);
+
+    let mut invalid_lift = lift;
+    invalid_lift["nodes"][1]["domain"] = "Base".into();
+    assert!(serde_json::from_value::<B>(invalid_lift).is_err());
+    let mut invalid_embed = embedded;
+    invalid_embed["nodes"][0]["domain"] = "Base".into();
+    assert!(serde_json::from_value::<B>(invalid_embed).is_err());
+    // A constant operation cannot erase an illegal extension-to-base edge.
+    let invalid_binary = serde_json::json!({
+        "version": 2, "root": 2,
+        "nodes": [
+            { "domain": "Base", "op": { "BaseConstant": F::ZERO } },
+            { "domain": "Extension", "op": { "ExtensionConstant": EF::from(c) } },
+            { "domain": "Base", "op": { "Add": { "x": 0, "y": 1 } } }
+        ]
+    });
+    assert!(serde_json::from_value::<B>(invalid_binary).is_err());
+
+    let expression = z() * c;
+    let mut wire = serde_json::to_value(&expression).unwrap();
+    let root = wire["root"].as_u64().unwrap() as usize;
+    let scalar = wire["nodes"][root]["op"]["Mul"]["y"].as_u64().unwrap() as usize;
+    wire["nodes"][scalar]["op"] = serde_json::json!({ "ExtensionConstant": EF::from(c) });
+    let decoded: E = serde_json::from_value(wire).unwrap();
+    assert_same_normal_form(&[expression, decoded]);
 }
 
 #[test]

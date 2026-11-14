@@ -15,10 +15,9 @@ x * BaseExpr::from(Felt::from_u64(7))
 They should normalize to the same useful native computation. Similarly, `(a + b) + c` and
 `a + (b + c)` may have different circuit layouts while evaluating the same polynomial.
 
-**Status:** this is the target PR description and implementation plan for approval. The common
-expression representation and single-emitter foundation are already implemented. Items A1–A8
-below are proposed changes; this document update does not implement them. Code examples marked
-as sketches describe the proposed behavior rather than APIs that already exist.
+**Status:** A1–A8 are approved for implementation as individual commits. The unified expression
+foundation is checkpointed. Completion is tracked in the table and checklist below; examples in
+pending items describe the approved target behavior.
 
 ## Direction and scope
 
@@ -97,20 +96,20 @@ CSE, use counts, and preparation slots. There is no separately owned `RichNode`/
 `RichLeaf` language. The old leaf-constructor enums, compatibility alias, duplicate degree
 rule table, and duplicate emitter/preparation path have already been removed.
 
-## Changes proposed for approval
+## Approved implementation changes
 
-| ID | Proposed change | Status |
+| ID | Change | Status |
 | --- | --- | --- |
-| A1 | Normalize coefficient values/conversions and remove original-overload metadata end to end | Proposed |
-| A2 | Use a clear current source/setup fingerprint policy without semantic-equality or historical-version promises | Proposed |
-| A3 | Replace structural ACE/generated-code comparisons with independent semantic checks and delete redundant helpers | Proposed |
-| A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Proposed |
-| A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Proposed |
-| A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Proposed |
-| A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Proposed |
-| A8 | Regenerate affected current artifacts and run focused validation | Proposed |
+| A1 | Normalize coefficient values/conversions and remove original-overload metadata end to end | Implemented |
+| A2 | Use a clear current source/setup fingerprint policy without semantic-equality or historical-version promises | Approved, pending |
+| A3 | Replace structural ACE/generated-code comparisons with independent semantic checks and delete redundant helpers | Approved, pending |
+| A4 | Delete archived AIR references and comparisons; retain useful scenarios as current tests | Approved, pending |
+| A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Approved, pending |
+| A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Approved, pending |
+| A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Approved, pending |
+| A8 | Regenerate affected current artifacts and run focused validation | Approved, pending |
 
-A1 and A2 should be implemented together. Establish the semantic checks in A3/A7 before
+A1 normalizes the representation; A2 updates its source-identity namespace in a separate commit. Establish the semantic checks in A3/A7 before
 removing their historical/structural predecessors in A4/A5. A6 can run independently; A8 is
 last. The IDs allow approval of the complete plan or specific items.
 
@@ -496,7 +495,7 @@ A1–A7, rather than expecting the old test count to remain fixed.
 
 ## Approval checklist
 
-- [ ] A1 — normalize constants/conversions and infer coefficient dispatch; delete overload metadata.
+- [x] A1 — normalize constants/conversions and infer coefficient dispatch; delete overload metadata.
 - [ ] A2 — keep a clear structural source/setup identity, with no polynomial-canonical or historical-version promise.
 - [ ] A3 — add independent current semantic checks; remove exact structural oracle and unused test helpers.
 - [ ] A4 — delete archived AIR references; retain useful cases as current tests.
@@ -505,6 +504,5 @@ A1–A7, rather than expecting the old test count to remain fixed.
 - [ ] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
 - [ ] A8 — regenerate affected current outputs and validate the completed implementation.
 
-Only this Markdown document has been updated at this stage. Approval of this list authorizes
-the subsequent implementation; no item is presented as completed merely because it appears
-in the target PR description.
+The checklist records implementation progress. Final artifact regeneration and validation are
+recorded under A8 after the preceding changes are complete.

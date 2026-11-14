@@ -591,9 +591,8 @@ impl<F: Field> DegreeWalker<'_, F> {
                 }
                 self.ops[degree]
             },
-            ExprView::LinearCombination { values, coefficients, coefficient_domain } => {
+            ExprView::LinearCombination { values, coefficients } => {
                 encoded.push(19);
-                encoded.push(coefficient_domain as u8);
                 word(&mut encoded, values.iter().count());
                 let mut degree = self.intern(DegreeOp::Constant);
                 for (value, coefficient) in values.iter().zip(coefficients.iter()) {

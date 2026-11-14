@@ -136,7 +136,7 @@ impl<'g, 'a> Plan<'g, 'a> {
             },
             DotKind::Mixed if class == Class::Ext => {
                 if let Some((x, y)) = product {
-                    return match (self.graph.class(x), self.graph.class(y)) {
+                    return match (self.graph.value_class(x), self.graph.value_class(y)) {
                         (Class::Ext, Class::Base) => Some((x, Coefficient::Node(y))),
                         (Class::Base, Class::Ext) => Some((y, Coefficient::Node(x))),
                         _ => None,
@@ -146,7 +146,7 @@ impl<'g, 'a> Plan<'g, 'a> {
             },
             DotKind::Same => {
                 let (x, y) = product?;
-                (self.graph.class(x) == class && self.graph.class(y) == class)
+                (self.graph.value_class(x) == class && self.graph.value_class(y) == class)
                     .then_some((x, Coefficient::Node(y)))
             },
             _ => None,
@@ -205,8 +205,8 @@ impl<'g, 'a> Plan<'g, 'a> {
             for (common, left, other, right) in
                 [(a, b, c, d), (a, b, d, c), (b, a, c, d), (b, a, d, c)]
             {
-                let sum = join(self.graph.class(left), self.graph.class(right));
-                if common == other && join(self.graph.class(common), sum) == class {
+                let sum = join(self.graph.value_class(left), self.graph.value_class(right));
+                if common == other && join(self.graph.value_class(common), sum) == class {
                     return Some(Rewrite::Factor {
                         common,
                         scalar: self.constant(common).filter(|_| class == Class::Base),

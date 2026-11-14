@@ -33,15 +33,6 @@ pub enum ExpressionDomain {
     Extension,
 }
 
-/// Scalar overload retained by an arithmetic operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CoefficientDomain {
-    Same,
-    Base,
-    BaseConstant,
-    ExtensionConstant,
-}
-
 mod sealed {
     pub trait Sealed {}
 }
@@ -109,17 +100,14 @@ enum Op<F, EF> {
     Add {
         x: RawExpr<F, EF>,
         y: RawExpr<F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Sub {
         x: RawExpr<F, EF>,
         y: RawExpr<F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Mul {
         x: RawExpr<F, EF>,
         y: RawExpr<F, EF>,
-        coefficient_domain: CoefficientDomain,
     },
     Neg(RawExpr<F, EF>),
     Sum(Box<[RawExpr<F, EF>]>),
@@ -127,7 +115,6 @@ enum Op<F, EF> {
     LinearCombination {
         values: Box<[RawExpr<F, EF>]>,
         coefficients: Box<[RawExpr<F, EF>]>,
-        coefficient_domain: CoefficientDomain,
     },
     Exp {
         x: RawExpr<F, EF>,
@@ -210,27 +197,14 @@ impl<F: Field, EF: ExtensionField<F>> RawExpr<F, EF> {
     }
     fn node(domain: ExpressionDomain, op: Op<F, EF>) -> Result<Self, ExpressionError> {
         validate_op(domain, &op)?;
+        // Validate the encoded source/result domains before erasing a constant lift.
+        if let Op::Lift(value) = &op {
+            if let Some(value) = value.constant() {
+                return Ok(Self::from_constant(domain, value));
+            }
+        }
         let degree_multiple = traversal::op_degree(&op, |value| Ok(value.degree_multiple()))?;
         Ok(RawExpr::Node(Arc::new(Node { domain, degree_multiple, op })))
-    }
-}
-fn scalar_valid<F, EF>(
-    domain: ExpressionDomain,
-    value: &RawExpr<F, EF>,
-    scalar: CoefficientDomain,
-) -> bool {
-    match scalar {
-        CoefficientDomain::Same => value.domain() == domain,
-        CoefficientDomain::Base => value.domain() == ExpressionDomain::Base,
-        CoefficientDomain::BaseConstant => {
-            value.domain() == ExpressionDomain::Base
-                && matches!(value, RawExpr::BaseConstant { .. })
-        },
-        CoefficientDomain::ExtensionConstant => {
-            domain == ExpressionDomain::Extension
-                && value.domain() == ExpressionDomain::Extension
-                && matches!(value, RawExpr::ExtensionConstant(_) | RawExpr::BaseConstant { .. })
-        },
     }
 }
 fn validate_op<F: Field, EF: ExtensionField<F>>(
@@ -242,11 +216,7 @@ fn validate_op<F: Field, EF: ExtensionField<F>>(
         Op::Lift(value) => {
             domain == ExpressionDomain::Extension && value.domain() == ExpressionDomain::Base
         },
-        Op::Add { x, y, coefficient_domain }
-        | Op::Sub { x, y, coefficient_domain }
-        | Op::Mul { x, y, coefficient_domain } => {
-            same(x) && scalar_valid(domain, y, *coefficient_domain)
-        },
+        Op::Add { x, y } | Op::Sub { x, y } | Op::Mul { x, y } => same(x) && same(y),
         Op::Neg(x) | Op::Exp { x, .. } | Op::ExpPowerOf2 { x, .. } | Op::BoolCheck(x) => same(x),
         Op::ScalePow2 { x, exponent } => {
             if exponent.unsigned_abs() > u128::from(u64::MAX) {
@@ -258,12 +228,11 @@ fn validate_op<F: Field, EF: ExtensionField<F>>(
             same(x)
         },
         Op::Sum(values) | Op::Product(values) => values.iter().all(same),
-        Op::LinearCombination { values, coefficients, coefficient_domain } => {
+        Op::LinearCombination { values, coefficients } => {
             if values.len() != coefficients.len() {
                 return Err(ExpressionError::InvalidLength);
             }
-            values.iter().all(same)
-                && coefficients.iter().all(|v| scalar_valid(domain, v, *coefficient_domain))
+            values.iter().all(same) && coefficients.iter().all(same)
         },
     };
     if valid {
@@ -333,7 +302,7 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
             Self::operation(Op::Lift(raw))
         }
     }
-    fn binary(self, rhs: SymbolicOperand<F, EF, D>, kind: Binary) -> Self {
+    fn binary(self, rhs: Self, kind: Binary) -> Self {
         if let (Some(x), Some(y)) = (self.raw.constant(), rhs.raw.constant()) {
             let value = match kind {
                 Binary::Add => x + y,
@@ -357,29 +326,12 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
             if left_zero && matches!(kind, Binary::Mul) {
                 return Self::ZERO;
             }
-            let right = if rhs.raw.domain() == D::DOMAIN {
-                Self::from_raw(rhs.raw)
-            } else {
-                Self::operation(Op::Lift(rhs.raw))
-            };
-            return if matches!(kind, Binary::Sub) { -right } else { right };
+            return if matches!(kind, Binary::Sub) { -rhs } else { rhs };
         }
         let op = match kind {
-            Binary::Add => Op::Add {
-                x: self.raw,
-                y: rhs.raw,
-                coefficient_domain: rhs.coefficient_domain,
-            },
-            Binary::Sub => Op::Sub {
-                x: self.raw,
-                y: rhs.raw,
-                coefficient_domain: rhs.coefficient_domain,
-            },
-            Binary::Mul => Op::Mul {
-                x: self.raw,
-                y: rhs.raw,
-                coefficient_domain: rhs.coefficient_domain,
-            },
+            Binary::Add => Op::Add { x: self.raw, y: rhs.raw },
+            Binary::Sub => Op::Sub { x: self.raw, y: rhs.raw },
+            Binary::Mul => Op::Mul { x: self.raw, y: rhs.raw },
         };
         Self::operation(op)
     }
@@ -422,11 +374,7 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         }
         Self::operation(Op::Product(values.into_boxed_slice()))
     }
-    fn linear_combination(
-        values: Vec<RawExpr<F, EF>>,
-        coefficients: Vec<RawExpr<F, EF>>,
-        coefficient_domain: CoefficientDomain,
-    ) -> Self {
+    fn linear_combination(values: Vec<RawExpr<F, EF>>, coefficients: Vec<RawExpr<F, EF>>) -> Self {
         assert_eq!(values.len(), coefficients.len(), "linear-combination lengths differ");
         if values.is_empty() {
             return Self::ZERO;
@@ -443,7 +391,6 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         Self::operation(Op::LinearCombination {
             values: values.into_boxed_slice(),
             coefficients: coefficients.into_boxed_slice(),
-            coefficient_domain,
         })
     }
 }
@@ -454,74 +401,9 @@ enum Binary {
     Sub,
     Mul,
 }
-/// Operand produced by the sealed-shape conversion used by symbolic operators.
-#[doc(hidden)]
-pub struct SymbolicOperand<F, EF, D> {
-    raw: RawExpr<F, EF>,
-    coefficient_domain: CoefficientDomain,
-    marker: PhantomData<D>,
-}
-/// Converts an operand without erasing whether it is a scalar or an algebra value.
-#[doc(hidden)]
-pub trait IntoSymbolicOperand<F, EF, D> {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D>;
-}
-impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for Expr<F, EF, D> {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
-        SymbolicOperand {
-            raw: self.raw,
-            coefficient_domain: CoefficientDomain::Same,
-            marker: PhantomData,
-        }
-    }
-}
-impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for F {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
-        SymbolicOperand {
-            raw: RawExpr::BaseConstant {
-                value: self,
-                domain: ExpressionDomain::Base,
-            },
-            coefficient_domain: CoefficientDomain::BaseConstant,
-            marker: PhantomData,
-        }
-    }
-}
-impl<F: Field, EF: ExtensionField<F>> IntoSymbolicOperand<F, EF, Extension> for Expr<F, EF, Base> {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, Extension> {
-        SymbolicOperand {
-            raw: self.raw,
-            coefficient_domain: CoefficientDomain::Base,
-            marker: PhantomData,
-        }
-    }
-}
-impl<F: Field, EF: ExtensionField<F>, D: Domain> IntoSymbolicOperand<F, EF, D> for BaseInput {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, D> {
-        SymbolicOperand {
-            raw: RawExpr::BaseInput(self),
-            coefficient_domain: if D::DOMAIN == ExpressionDomain::Base {
-                CoefficientDomain::Same
-            } else {
-                CoefficientDomain::Base
-            },
-            marker: PhantomData,
-        }
-    }
-}
-impl<F: Field, EF: ExtensionField<F>> IntoSymbolicOperand<F, EF, Extension> for AuxInput {
-    fn into_symbolic_operand(self) -> SymbolicOperand<F, EF, Extension> {
-        SymbolicOperand {
-            raw: RawExpr::AuxInput(self),
-            coefficient_domain: CoefficientDomain::Same,
-            marker: PhantomData,
-        }
-    }
-}
-
 impl<F: Field, EF: ExtensionField<F>, D: Domain> From<F> for Expr<F, EF, D> {
     fn from(value: F) -> Self {
-        Self::from_raw(RawExpr::BaseConstant { value, domain: D::DOMAIN })
+        Self::from_raw(RawExpr::from_constant(D::DOMAIN, EF::from(value)))
     }
 }
 impl<F: Field, EF: ExtensionField<F>, D: Domain> From<BaseInput> for Expr<F, EF, D> {
@@ -629,26 +511,25 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> PrimeCharacteristicRing for Exp
         Self::linear_combination(
             lhs.iter().map(|v| v.raw.clone()).collect(),
             rhs.iter().map(|v| v.raw.clone()).collect(),
-            CoefficientDomain::Same,
         )
     }
 }
 
 macro_rules! binary_operator {
     ($trait:ident, $method:ident, $kind:ident, $assign:ident, $assign_method:ident) => {
-        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: IntoSymbolicOperand<F, EF, D>>
-            ops::$trait<T> for Expr<F, EF, D>
+        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> ops::$trait<T>
+            for Expr<F, EF, D>
         {
             type Output = Self;
             fn $method(self, rhs: T) -> Self {
-                self.binary(rhs.into_symbolic_operand(), Binary::$kind)
+                self.binary(rhs.into(), Binary::$kind)
             }
         }
-        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: IntoSymbolicOperand<F, EF, D>>
-            ops::$assign<T> for Expr<F, EF, D>
+        impl<F: Field, EF: ExtensionField<F>, D: Domain, T: Into<Self>> ops::$assign<T>
+            for Expr<F, EF, D>
         {
             fn $assign_method(&mut self, rhs: T) {
-                *self = self.clone().binary(rhs.into_symbolic_operand(), Binary::$kind);
+                *self = self.clone().binary(rhs.into(), Binary::$kind);
             }
         }
     };
@@ -676,27 +557,13 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Algebra<F> for Expr<F, EF, D> {
     fn mixed_dot_product<const N: usize>(values: &[Self; N], coefficients: &[F; N]) -> Self {
         Self::linear_combination(
             values.iter().map(|v| v.raw.clone()).collect(),
-            coefficients
-                .iter()
-                .map(|v| RawExpr::BaseConstant {
-                    value: *v,
-                    domain: ExpressionDomain::Base,
-                })
-                .collect(),
-            CoefficientDomain::BaseConstant,
+            coefficients.iter().map(|v| Self::from(*v).raw).collect(),
         )
     }
     fn batched_linear_combination(values: &[Self], coefficients: &[F]) -> Self {
         Self::linear_combination(
             values.iter().map(|v| v.raw.clone()).collect(),
-            coefficients
-                .iter()
-                .map(|v| RawExpr::BaseConstant {
-                    value: *v,
-                    domain: ExpressionDomain::Base,
-                })
-                .collect(),
-            CoefficientDomain::BaseConstant,
+            coefficients.iter().map(|v| Self::from(*v).raw).collect(),
         )
     }
 }
@@ -707,15 +574,13 @@ impl<F: Field, EF: ExtensionField<F>> Algebra<Expr<F, EF, Base>> for Expr<F, EF,
     ) -> Self {
         Self::linear_combination(
             values.iter().map(|v| v.raw.clone()).collect(),
-            coefficients.iter().map(|v| v.raw.clone()).collect(),
-            CoefficientDomain::Base,
+            coefficients.iter().map(|v| Self::from(v.clone()).raw).collect(),
         )
     }
     fn batched_linear_combination(values: &[Self], coefficients: &[Expr<F, EF, Base>]) -> Self {
         Self::linear_combination(
             values.iter().map(|v| v.raw.clone()).collect(),
-            coefficients.iter().map(|v| v.raw.clone()).collect(),
-            CoefficientDomain::Base,
+            coefficients.iter().map(|v| Self::from(v.clone()).raw).collect(),
         )
     }
 }

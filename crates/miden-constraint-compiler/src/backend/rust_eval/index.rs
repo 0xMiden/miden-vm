@@ -29,7 +29,7 @@ pub(super) struct ExpressionIndex<'a> {
 }
 
 // Exact keys, rather than allocation identities or arithmetic equivalence, recover
-// structural CSE while keeping distinct authored scalar overloads and boundaries.
+// structural CSE after source normalization while keeping operation boundaries.
 #[derive(PartialEq, Eq, Hash)]
 struct Key<'a> {
     domain: ExpressionDomain,
@@ -105,6 +105,14 @@ impl<'a> ExpressionIndex<'a> {
             ExpressionDomain::Extension => Class::Ext,
         }
     }
+    /// The native operand type before embedding a base value into the extension.
+    /// Base constants and explicit lifts remain usable through `E: Algebra<B>`.
+    pub fn value_class(&self, id: usize) -> Class {
+        match self.node(id).view() {
+            ExprView::BaseConstant(_) | ExprView::Lift { .. } => Class::Base,
+            _ => self.class(id),
+        }
+    }
     pub fn constant(&self, id: usize) -> Option<u64> {
         match self.node(id).view() {
             ExprView::BaseConstant(value) => Some(value.as_canonical_u64()),
@@ -178,16 +186,14 @@ fn parameters(view: View<'_>) -> Vec<u8> {
                 word(&mut bytes, index);
             },
         },
-        ExprView::Add { coefficient_domain, .. }
-        | ExprView::Sub { coefficient_domain, .. }
-        | ExprView::Mul { coefficient_domain, .. }
-        | ExprView::LinearCombination { coefficient_domain, .. } => {
-            bytes.push(coefficient_domain as u8)
-        },
         ExprView::Exp { power, .. } => bytes.extend_from_slice(&power.to_le_bytes()),
         ExprView::ExpPowerOf2 { power_log, .. } => word(&mut bytes, power_log),
         ExprView::ScalePow2 { exponent, .. } => bytes.extend_from_slice(&exponent.to_le_bytes()),
         ExprView::Lift { .. }
+        | ExprView::Add { .. }
+        | ExprView::Sub { .. }
+        | ExprView::Mul { .. }
+        | ExprView::LinearCombination { .. }
         | ExprView::Neg { .. }
         | ExprView::Sum { .. }
         | ExprView::Product { .. }
@@ -212,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn cse_uses_structure_and_retains_domains_overloads_and_operation_parameters() {
+    fn cse_normalizes_constant_spellings_and_retains_domains_and_operation_parameters() {
         let a = main() + main();
         let b = main() + main();
         assert_ne!(a.as_ref().identity(), b.as_ref().identity());
@@ -227,9 +233,46 @@ mod tests {
         ];
         let index = ExpressionIndex::new(&assertions);
         assert_eq!(index.roots[0], index.roots[1]);
-        assert_ne!(index.roots[2], index.roots[3]);
+        assert_eq!(index.roots[2], index.roots[3]);
         assert_ne!(index.roots[4], index.roots[5]);
         assert_eq!(index.roots[6].1, Class::Ext);
+    }
+
+    #[test]
+    fn extension_constants_and_linear_combinations_share_normalized_structure() {
+        use miden_crypto::field::Algebra;
+
+        let scalar = Felt::from_u64(7);
+        let value = E::from(AuxInput::Trace { row: RowOffset::Current, column: 0 });
+        let coefficients = [Felt::from_u64(7), Felt::from_u64(11)];
+        let base_coefficients = coefficients.map(B::from);
+        let extension_coefficients = coefficients.map(E::from);
+        let base_values = [main(), main().square()];
+        let extension_values = [value.clone(), value.clone().square()];
+        let assertions = vec![
+            Assertion::Extension(value.clone() * scalar),
+            Assertion::Extension(value.clone() * B::from(scalar)),
+            Assertion::Extension(value.clone() * E::from(scalar)),
+            Assertion::Extension(value * E::extension_constant(QuadFelt::from(scalar))),
+            Assertion::Base(B::dot_product(&base_values, &base_coefficients)),
+            Assertion::Base(<B as Algebra<Felt>>::mixed_dot_product(&base_values, &coefficients)),
+            Assertion::Extension(E::dot_product(&extension_values, &extension_coefficients)),
+            Assertion::Extension(<E as Algebra<B>>::mixed_dot_product(
+                &extension_values,
+                &base_coefficients,
+            )),
+            Assertion::Extension(<E as Algebra<Felt>>::mixed_dot_product(
+                &extension_values,
+                &coefficients,
+            )),
+        ];
+        let index = ExpressionIndex::new(&assertions);
+        for root in &index.roots[1..4] {
+            assert_eq!(*root, index.roots[0]);
+        }
+        assert_eq!(index.roots[4], index.roots[5]);
+        assert_eq!(index.roots[6], index.roots[7]);
+        assert_eq!(index.roots[6], index.roots[8]);
     }
 
     #[test]

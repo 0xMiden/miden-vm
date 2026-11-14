@@ -7,7 +7,6 @@ pub mod capture;
 pub mod graph;
 pub mod program;
 
-pub use miden_stark::air::symbolic::CoefficientDomain;
 pub use program::CapturedProgram;
 
 pub use analyze::{OpCounts, op_counts};

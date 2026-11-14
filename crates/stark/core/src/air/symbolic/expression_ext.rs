@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Derived from p3-air 0.8.0; see README.md for provenance and local changes.
 
-use super::{
-    AuxInput, Base, CoefficientDomain, Expr, Extension, IntoSymbolicOperand, RawExpr,
-    SymbolicOperand,
-};
-use core::marker::PhantomData;
+use super::{AuxInput, Base, Expr, ExpressionDomain, Extension, RawExpr};
 use p3_field::{
     Algebra, ExtensionField, Field,
     extension::{
@@ -27,7 +23,7 @@ impl<F: Field, EF: ExtensionField<F>> Expr<F, EF, Extension> {
     /// Construct an extension constant. A named constructor avoids overlap between
     /// generic `From<F>` and `From<EF>` when the extension is the base field itself.
     pub fn extension_constant(value: EF) -> Self {
-        Self::from_raw(RawExpr::ExtensionConstant(value))
+        Self::from_raw(RawExpr::from_constant(ExpressionDomain::Extension, value))
     }
     /// Recover a base expression only when the tree contains no extension-only leaves.
     pub fn to_base(&self) -> Option<Expr<F, EF, Base>> {
@@ -42,19 +38,13 @@ macro_rules! extension_algebra {
         where F: Field, $extension: ExtensionField<F> {
             fn from(value: $extension) -> Self { Self::extension_constant(value) }
         }
-        impl<$($generic)*> IntoSymbolicOperand<F, $extension, Extension> for $extension
-        where F: Field, $extension: ExtensionField<F> {
-            fn into_symbolic_operand(self) -> SymbolicOperand<F, $extension, Extension> {
-                SymbolicOperand { raw: RawExpr::ExtensionConstant(self), coefficient_domain: CoefficientDomain::ExtensionConstant, marker: PhantomData }
-            }
-        }
         impl<$($generic)*> Algebra<$extension> for Expr<F, $extension, Extension>
         where F: Field, $extension: ExtensionField<F> {
             fn mixed_dot_product<const N: usize>(values: &[Self; N], coefficients: &[$extension; N]) -> Self {
-                Self::linear_combination(values.iter().map(|v| v.raw.clone()).collect(), coefficients.iter().map(|v| RawExpr::ExtensionConstant(*v)).collect(), CoefficientDomain::ExtensionConstant)
+                Self::linear_combination(values.iter().map(|v| v.raw.clone()).collect(), coefficients.iter().map(|v| Self::extension_constant(*v).raw).collect())
             }
             fn batched_linear_combination(values: &[Self], coefficients: &[$extension]) -> Self {
-                Self::linear_combination(values.iter().map(|v| v.raw.clone()).collect(), coefficients.iter().map(|v| RawExpr::ExtensionConstant(*v)).collect(), CoefficientDomain::ExtensionConstant)
+                Self::linear_combination(values.iter().map(|v| v.raw.clone()).collect(), coefficients.iter().map(|v| Self::extension_constant(*v).raw).collect())
             }
         }
     };
