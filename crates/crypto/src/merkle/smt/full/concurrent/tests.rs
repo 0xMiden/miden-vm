@@ -330,7 +330,7 @@ fn test_singlethreaded_subtrees() {
 /// The parallel version of `test_singlethreaded_subtree()`.
 #[test]
 fn test_multithreaded_subtrees() {
-    use p3_maybe_rayon::prelude::*;
+    use crate::parallel::*;
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 64;
     let entries = generate_entries(PAIR_COUNT);
     let control = Smt::with_entries_sequential(entries.clone()).unwrap();

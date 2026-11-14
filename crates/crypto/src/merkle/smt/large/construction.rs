@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::mem;
 
-use p3_maybe_rayon::prelude::*;
+use crate::parallel::*;
 
 use {
     super::CONSTRUCTION_SUBTREE_BATCH_SIZE,

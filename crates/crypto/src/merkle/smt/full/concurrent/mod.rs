@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use num::Integer;
-use p3_maybe_rayon::prelude::*;
+use crate::parallel::*;
 
 use {
     super::EmptySubtreeRoots,

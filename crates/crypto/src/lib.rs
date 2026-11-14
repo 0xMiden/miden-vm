@@ -140,7 +140,7 @@ pub trait SequentialCommit {
 // ================================================================================================
 
 mod batch_inversion {
-    use p3_maybe_rayon::prelude::*;
+    use crate::parallel::*;
 
     use {
         crate::Felt,
