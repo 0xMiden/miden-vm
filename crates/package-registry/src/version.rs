@@ -13,7 +13,7 @@ use {
     serde::Serialize,
 };
 
-use super::VersionRequirement;
+use crate::VersionRequirement;
 use {
     crate::SemVer,
     crate::SemVerError,

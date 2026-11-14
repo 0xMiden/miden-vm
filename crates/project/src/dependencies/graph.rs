@@ -32,7 +32,7 @@ use {
     miden_package_registry::PackageRecord,
     miden_package_registry::PackageRegistry,
     miden_package_registry::PackageResolver,
-    miden_package_registry::Version,
+    crate::Version,
 };
 
 use {
@@ -41,8 +41,9 @@ use {
     crate::GitRevision,
     crate::Linkage,
     crate::Package,
-    crate::SemVer,
+    crate::semver::Version as SemVer,
     crate::VersionRequirement,
+    crate::semver::VersionReq,
 };
 
 /// The [ProjectDependencyGraph] represents a materialized dependency graph rooted at a specific
@@ -924,7 +925,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     fn ensure_version_req_matches(
         &self,
         dependency_name: impl AsRef<str>,
-        requirement: &miden_package_registry::VersionReq,
+        requirement: &VersionReq,
         actual: &SemVer,
     ) -> Result<(), Report> {
         if requirement.matches(actual) {

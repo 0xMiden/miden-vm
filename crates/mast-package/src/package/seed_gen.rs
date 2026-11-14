@@ -22,7 +22,7 @@ use {
     miden_assembly_syntax::ast::types::Type,
     miden_assembly_syntax::ast::types::TypeRepr,
     miden_assembly_syntax::ast::types::Variant,
-    miden_assembly_syntax::semver::Version,
+    crate::Version,
 };
 use {
     miden_core::mast::BasicBlockNodeBuilder,
