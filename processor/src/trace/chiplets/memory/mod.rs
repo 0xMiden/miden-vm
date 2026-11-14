@@ -32,7 +32,7 @@ use {
     miden_core::WORD_SIZE,
     miden_core::Word,
     miden_core::ZERO,
-    crate::field::batch_inversion_allow_zeros,
+    miden_core::field::batch_inversion_allow_zeros,
 };
 
 mod segment;

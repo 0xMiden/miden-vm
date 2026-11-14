@@ -570,7 +570,7 @@ mod arbitrary {
         super::ContextId,
         super::EvalNode,
         miden_core::Felt,
-        super::QuadFelt,
+        miden_core::field::QuadFelt,
         super::ReadNode,
         super::WireBus,
     };

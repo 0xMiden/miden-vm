@@ -28,7 +28,7 @@ impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutatio
 mod tests {
     use {
         miden_field::PackedValue,
-        miden_field::PrimeCharacteristicRing,
+        crate::field::PrimeCharacteristicRing,
     };
 
     use super::*;

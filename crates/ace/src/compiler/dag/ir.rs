@@ -3,7 +3,7 @@ use {
     core::sync::atomic::Ordering,
 };
 
-use miden_crypto::field::TwoAdicField;
+use miden_core::field::TwoAdicField;
 use {
     p3_dft::Radix2DFTSmallBatch,
     p3_dft::TwoAdicSubgroupDft,

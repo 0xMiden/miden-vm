@@ -248,7 +248,7 @@ pub mod testing {
         super::ChipletMultiAir,
         super::Felt,
         miden_core::deferred::PrecompileLimits,
-        super::QuadFelt,
+        miden_core::field::QuadFelt,
         super::WitnessSession,
         super::import_witnesses_with_roots,
         super::memory,

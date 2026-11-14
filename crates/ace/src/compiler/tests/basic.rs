@@ -5,7 +5,7 @@ use {
     miden_core::field::Algebra,
     miden_core::field::QuadFelt,
 };
-use miden_crypto::field::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 use {
     miden_stark::air::AirBuilder,
     miden_stark::air::BaseAir,

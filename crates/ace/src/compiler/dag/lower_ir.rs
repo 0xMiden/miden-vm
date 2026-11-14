@@ -109,8 +109,8 @@ use {
     miden_core::field::QuadFelt,
 };
 use {
-    miden_crypto::field::BasedVectorSpace,
-    miden_crypto::field::PrimeCharacteristicRing,
+    miden_core::field::BasedVectorSpace,
+    miden_core::field::PrimeCharacteristicRing,
 };
 
 use {

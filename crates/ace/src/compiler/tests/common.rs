@@ -2,7 +2,7 @@ use {
     miden_core::Felt,
     miden_core::field::QuadFelt,
 };
-use miden_crypto::field::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 
 pub use crate::compiler::testing::eval_folded_constraints;
 use {

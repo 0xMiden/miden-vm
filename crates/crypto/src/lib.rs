@@ -146,7 +146,7 @@ mod batch_inversion {
         crate::Felt,
         crate::ONE,
         crate::ZERO,
-        super::field::Field,
+        crate::field::Field,
     };
 
     /// Parallel batch inversion using Montgomery's trick, with zeros left unchanged.

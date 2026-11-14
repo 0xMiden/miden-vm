@@ -3,7 +3,7 @@
 //! This module provides [`ChainingHasher`] which wraps a regular hasher and
 //! implements stateful hashing via chaining: `H(state || input)`.
 
-use p3_field::Field;
+use crate::field::Field;
 use p3_symmetric::CryptographicHasher;
 
 use {
@@ -177,8 +177,8 @@ mod tests {
 
     use p3_bn254::Bn254;
     use {
-        p3_field::Field,
-        p3_field::RawDataSerializable,
+        crate::field::Field,
+        crate::field::RawDataSerializable,
     };
     use p3_goldilocks::Goldilocks;
     use p3_mersenne_31::Mersenne31;

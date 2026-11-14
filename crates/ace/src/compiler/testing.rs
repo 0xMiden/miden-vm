@@ -10,10 +10,10 @@ use {
     miden_core::field::QuadFelt,
 };
 use {
-    miden_crypto::field::ExtensionField,
-    miden_crypto::field::Field,
-    miden_crypto::field::PrimeCharacteristicRing,
-    miden_crypto::field::TwoAdicField,
+    miden_core::field::ExtensionField,
+    miden_core::field::Field,
+    miden_core::field::PrimeCharacteristicRing,
+    miden_core::field::TwoAdicField,
 };
 use {
     miden_stark::air::symbolic::BaseEntry,
