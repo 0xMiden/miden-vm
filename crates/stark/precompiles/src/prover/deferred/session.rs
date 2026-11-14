@@ -247,7 +247,7 @@ pub mod testing {
     use {
         super::ChipletMultiAir,
         super::Felt,
-        super::PrecompileLimits,
+        miden_core::deferred::PrecompileLimits,
         super::QuadFelt,
         super::WitnessSession,
         super::import_witnesses_with_roots,
@@ -259,7 +259,7 @@ pub mod testing {
         crate::prover::HashFunction,
         crate::prover::PrecompileProof,
         crate::prover::PrecompileProvingError,
-        crate::prover::PrecompileWitness,
+        miden_core::deferred::PrecompileWitness,
         crate::prover::session::SessionTraces,
     };
 

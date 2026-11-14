@@ -59,7 +59,7 @@ use {
     super::super::lookup_harness::InteractionLog,
 };
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::RowIndex,
     crate::utils::ToElements,
 };

@@ -86,7 +86,7 @@ mod tests {
 
     use super::NonTracingTestHost;
     use {
-        crate::AdviceInputs,
+        miden_core::advice::AdviceInputs,
         crate::ExecutionOptions,
         crate::FastProcessor,
         miden_core::program::Program,

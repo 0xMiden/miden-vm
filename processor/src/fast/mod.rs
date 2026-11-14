@@ -36,7 +36,7 @@ use {
 };
 
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::AdviceProvider,
     crate::ContextId,
     crate::ExecutionError,

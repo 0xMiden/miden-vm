@@ -26,7 +26,7 @@ use {
 };
 
 use {
-    super::AdviceMap,
+    miden_core::advice::AdviceMap,
     super::Import,
     super::LinkStatus,
     super::Symbol,

@@ -13,7 +13,7 @@ use {
     miden_core::program::Program,
     miden_core::program::StackInputs,
     crate::advice::AdviceError,
-    crate::advice::AdviceInputs,
+    miden_core::advice::AdviceInputs,
 };
 
 // PROGRAM EXECUTOR

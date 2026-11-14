@@ -11,7 +11,7 @@ use {
 
 use super::VmTrace;
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::DefaultHost,
     crate::ExecutionOptions,
     crate::FastProcessor,

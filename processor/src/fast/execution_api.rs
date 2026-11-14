@@ -31,7 +31,7 @@ use {
     super::step::StepStopper,
 };
 #[cfg(feature = "std")]
-use crate::PrecompileWitness;
+use miden_core::deferred::PrecompileWitness;
 use {
     crate::AdviceProvider,
     crate::ExecutionError,

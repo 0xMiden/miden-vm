@@ -5,7 +5,7 @@ use {
 };
 
 use {
-    super::AdviceMap,
+    crate::advice::AdviceMap,
     super::ForestLayout,
     super::MastForest,
     super::MastNodeEntry,

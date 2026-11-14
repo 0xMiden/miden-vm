@@ -271,7 +271,7 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 mod tests {
     use {
         super::AdviceMutation,
-        super::AdviceStack,
+        miden_core::advice::AdviceStack,
         miden_core::Felt,
     };
 

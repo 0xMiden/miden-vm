@@ -799,14 +799,14 @@ mod tests {
 
     use super::AdviceProvider;
     use {
-        crate::AdviceInputs,
+        miden_core::advice::AdviceInputs,
         crate::ExecutionOptions,
         miden_core::Felt,
         miden_core::Word,
         crate::advice::AdviceError,
-        crate::advice::AdviceMap,
+        miden_core::advice::AdviceMap,
         crate::advice::AdviceMutation,
-        crate::advice::AdviceStack,
+        miden_core::advice::AdviceStack,
         crate::crypto::merkle::MerkleStore,
         crate::crypto::merkle::MerkleTree,
     };

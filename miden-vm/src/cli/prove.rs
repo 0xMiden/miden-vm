@@ -19,7 +19,7 @@ use {
 };
 use {
     miden_vm::HashFunction,
-    miden_vm::PrecompileLimits,
+    miden_core::deferred::PrecompileLimits,
     miden_vm::PrecompileStatus,
     miden_vm::Prover,
     miden_vm::internal::InputFile,
