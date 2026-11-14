@@ -24,7 +24,7 @@ pub use {
     miden_serde_utils::Serializable,
     miden_serde_utils::SliceReader,
 };
-use p3_maybe_rayon::prelude::*;
+use crate::parallel::*;
 
 use {
     crate::Felt,
