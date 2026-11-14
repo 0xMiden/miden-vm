@@ -1,6 +1,6 @@
 //! Pure node encodings used by the joint degree/identity source walk.
 //!
-//! The versioned internal identity excludes sharing, diagnostics and cached degrees. Child order,
+//! The source identity excludes sharing, diagnostics and cached degrees. Child order,
 //! namespaces, addresses and assertion classes/order are significant. These are not protocol pins.
 
 use alloc::vec::Vec;
@@ -66,7 +66,7 @@ struct Encoding(Vec<u8>);
 
 impl Encoding {
     fn new(tag: u8) -> Self {
-        let mut bytes = b"miden-native-air-structure-v1\0".to_vec();
+        let mut bytes = b"miden.native-air.source\0".to_vec();
         bytes.push(tag);
         Self(bytes)
     }

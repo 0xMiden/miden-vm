@@ -30,6 +30,8 @@ use crate::{
 /// supplies a trusted root; ordered fingerprints, blowup and alignment prevent accidentally
 /// reusing it with different relation/configuration metadata. Execution allocation is deliberately
 /// excluded, so a kernel may raise its quotient capacity while reusing the same fixed setup.
+/// Fingerprints identify current source structure; equivalent polynomials and older source
+/// encodings need not have the same identity.
 /// Only the commitment, never these fingerprints, is observed by the protocol transcript.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetupIdentity<C> {

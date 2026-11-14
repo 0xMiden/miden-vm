@@ -1,4 +1,4 @@
-//! Checked relation metadata and versioned structural identity.
+//! Checked source metadata and ordered structural identity.
 
 use alloc::{string::String, vec::Vec};
 
@@ -81,6 +81,12 @@ impl<F: Field> AirDescriptor<F> {
         &self.analysis
     }
 
+    /// Identity of the current ordered source structure and AIR configuration.
+    ///
+    /// Constants, operand domains, and operation parameters contribute to this identity;
+    /// allocation sharing, diagnostics, and the phantom capture extension parameter do not.
+    /// Equivalent polynomials may have different fingerprints. This local setup association
+    /// neither authenticates arbitrary kernel code nor replaces a protocol circuit digest.
     pub fn fingerprint(&self) -> [u8; 32] {
         self.fingerprint
     }
@@ -103,7 +109,7 @@ pub struct Capture<F: Field, EF: ExtensionField<F> = F> {
 ///
 /// # Field encoding contract
 ///
-/// The internal `miden-native-air-structure-v1` identity frames field order and byte width, then
+/// The internal `miden.native-air.source` identity frames field order and byte width, then
 /// uses `Field::into_bytes` for constants and periodic data. A custom field implementation must
 /// supply an injective, canonical, deterministic, target-stable encoding of exactly `NUM_BYTES`
 /// bytes, including an agreed basis for nonprime fields. `RawDataSerializable` alone does not
@@ -168,10 +174,10 @@ mod tests {
     use super::*;
     use crate::{
         air::{
-            AirAnalysis, DegreeProfile,
+            AirAnalysis, DegreeProfile, LiftedAirBuilder,
             symbolic::{BaseInput, RowOffset, SymbolicExpression, SymbolicExpressionExt},
         },
-        testing::configs::Felt,
+        testing::configs::{Felt, QuadFelt},
     };
 
     fn raw(expression: SymbolicExpression<Felt>) -> RawCapture<Felt> {
@@ -252,6 +258,47 @@ mod tests {
         assert_ne!(
             finish_capture(first).unwrap().descriptor.fingerprint(),
             finish_capture(second).unwrap().descriptor.fingerprint()
+        );
+    }
+
+    #[test]
+    fn source_identity_ignores_capture_field_but_binds_actual_extension_coefficients() {
+        fn source_identity<EF: ExtensionField<Felt>>() -> [u8; 32] {
+            capture_from_spec::<Felt, EF>(
+                raw(SymbolicExpression::ZERO).spec,
+                |frame, inputs, sink| {
+                    sink.named("source")
+                        .assert_zero(frame.main.current[0].dup() + Felt::from_u64(7));
+                    sink.assert_zero_ext(inputs.challenge(0) * frame.main.next[0].dup());
+                },
+            )
+            .unwrap()
+            .descriptor
+            .fingerprint()
+        }
+        assert_eq!(
+            source_identity::<Felt>(),
+            source_identity::<QuadFelt>(),
+            "the capture extension parameter is not part of source identity",
+        );
+
+        let constant_identity = |coefficient| {
+            let value =
+                SymbolicExpressionExt::<Felt, QuadFelt>::extension_constant(QuadFelt::new([
+                    Felt::ONE,
+                    coefficient,
+                ]));
+            capture_from_spec::<Felt, QuadFelt>(raw(SymbolicExpression::ZERO).spec, |_, _, sink| {
+                sink.assert_zero_ext(value);
+            })
+            .unwrap()
+            .descriptor
+            .fingerprint()
+        };
+        assert_ne!(
+            constant_identity(Felt::from_u64(2)),
+            constant_identity(Felt::from_u64(3)),
+            "actual extension coefficients remain part of source identity",
         );
     }
 

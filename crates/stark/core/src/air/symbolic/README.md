@@ -28,7 +28,7 @@ heterogeneous linear combinations are recorded directly.
 
 The version-2 topological serialization preserves operation sharing and reconstructs checked
 degree information rather than accepting cached degrees from the wire. The native relation
-fingerprint uses the native structural domain separator and actual operation data; allocation
+fingerprint uses `miden.native-air.source` and actual operation data; allocation
 addresses, node IDs, diagnostics, and phantom extension parameters are excluded. The runtime
 relation descriptor remains independent of the captured expression representation and contains
 checked degree recipes for actual trace heights.
