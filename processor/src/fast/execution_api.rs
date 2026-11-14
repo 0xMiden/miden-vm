@@ -545,7 +545,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using an async host.
-    pub async fn execute_with_tracer<T>(
+    async fn execute_with_tracer<T>(
         mut self,
         program: &Program,
         host: &mut impl Host,
@@ -614,7 +614,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using a sync host.
-    pub fn execute_with_tracer_sync<T>(
+    fn execute_with_tracer_sync<T>(
         mut self,
         program: &Program,
         host: &mut impl SyncHost,

@@ -60,9 +60,10 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
+pub(crate) use fast::BreakReason;
 pub use fast::{
-    BreakReason, DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput,
-    FastProcessor, ResumeContext,
+    DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput, FastProcessor,
+    ResumeContext,
 };
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
@@ -274,7 +275,7 @@ impl<'a> ProcessorState<'a> {
 /// through execution (see [`crate::FastProcessor::step`]) or limiting execution to a certain number
 /// of clock cycles (used in parallel trace generation to fill the trace for a predetermined trace
 /// fragment).
-pub trait Stopper {
+pub(crate) trait Stopper {
     type Processor;
 
     /// The forest representation used by the executor this stopper is paired with.

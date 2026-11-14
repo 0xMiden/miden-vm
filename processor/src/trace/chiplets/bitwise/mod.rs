@@ -73,7 +73,7 @@ struct BitwiseOp {
 /// - `a*` and `b*` are little-endian input bytes.
 /// - `c*` are bytewise `a & b` witnesses.
 #[derive(Debug)]
-pub struct Bitwise {
+pub(crate) struct Bitwise {
     entries: Vec<BitwiseOp>,
 }
 

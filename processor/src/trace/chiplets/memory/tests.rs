@@ -490,6 +490,52 @@ fn append_range_checks_does_not_panic_when_first_access_clk_is_zero() {
 // HELPER STRUCT & FUNCTIONS
 // ================================================================================================
 
+// Non-mutating observations for the assertions above, available only in this test module.
+impl Memory {
+    fn num_accessed_words(&self) -> usize {
+        self.trace.values().map(|segment| segment.inner().len()).sum()
+    }
+
+    fn get_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
+        let index = addr % WORD_SIZE as u32;
+        self.get_word(ctx, addr - index)
+            .expect("word-aligned test address")
+            .map(|word| word[index as usize])
+    }
+
+    fn get_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
+        let Some(segment) = self.trace.get(&ctx) else {
+            return Ok(None);
+        };
+        if !addr.is_multiple_of(WORD_SIZE as u32) {
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
+        }
+        Ok(segment
+            .inner()
+            .get(&addr)
+            .and_then(|accesses| accesses.last())
+            .map(super::segment::MemorySegmentAccess::word))
+    }
+
+    fn get_state_at(&self, ctx: ContextId, clk: RowIndex) -> Vec<(MemoryAddress, Felt)> {
+        let mut state = Vec::new();
+        let Some(segment) = self.trace.get(&ctx) else {
+            return state;
+        };
+        let clk: u64 = clk.into();
+        for (&addr, accesses) in segment.inner() {
+            if let Some(access) =
+                accesses.iter().rev().find(|access| access.clk().as_canonical_u64() < clk)
+            {
+                for (index, &value) in access.word().iter().enumerate() {
+                    state.push((MemoryAddress(addr + index as u32), value));
+                }
+            }
+        }
+        state
+    }
+}
+
 /// Contains data representing a memory access.
 pub struct MemoryAccess {
     operation: MemoryOperation,

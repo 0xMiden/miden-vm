@@ -1,9 +1,9 @@
 use alloc::{collections::BTreeMap, vec};
 
 use miden_air_definitions::vm::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{field::PrimeCharacteristicRing, program::KernelDescriptor};
 
-use super::{ChipletTraceFragment, Felt, KernelDescriptor, Word as Digest, ZERO};
+use super::{ChipletTraceFragment, Felt, Word as Digest, ZERO};
 use crate::errors::OperationError;
 
 #[cfg(test)]
@@ -31,9 +31,8 @@ type ProcHashBytes = [u8; 32];
 ///   chiplet-side CALL add; the INIT add is always emitted with multiplicity 1.
 /// - `h0..h3` is the procedure root digest.
 #[derive(Debug)]
-pub struct KernelRom {
+pub(crate) struct KernelRom {
     access_map: BTreeMap<ProcHashBytes, ProcAccessInfo>,
-    kernel: KernelDescriptor,
 }
 
 impl KernelRom {
@@ -49,7 +48,7 @@ impl KernelRom {
             access_map.insert(proc_hash.into(), ProcAccessInfo::new(proc_hash));
         }
 
-        Self { access_map, kernel }
+        Self { access_map }
     }
 
     // PUBLIC ACCESSORS
@@ -105,14 +104,6 @@ impl KernelRom {
             row[4] = access_info.proc_hash[3];
         }
         trace.copy_rows_from(&values);
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the underlying kernel for this ROM.
-    pub const fn kernel(&self) -> &KernelDescriptor {
-        &self.kernel
     }
 }
 

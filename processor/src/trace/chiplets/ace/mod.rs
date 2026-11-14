@@ -6,7 +6,7 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use crate::trace::ChipletTraceFragment;
 
 mod trace;
-pub use trace::CircuitEvaluation;
+pub(crate) use trace::CircuitEvaluation;
 
 #[cfg(test)]
 mod tests;
@@ -35,7 +35,7 @@ pub const MAX_EVAL_CIRCUIT_INVOCATIONS: u32 = 1 << 5;
 /// During the course of the VM execution, we keep track of all calls to the ACE chiplet in an
 /// [`CircuitEvaluation`] per call. This is then used to generate the full trace of the ACE chiplet.
 #[derive(Debug, Default)]
-pub struct Ace {
+pub(crate) struct Ace {
     circuit_evaluations: BTreeMap<RowIndex, CircuitEvaluation>,
 }
 
