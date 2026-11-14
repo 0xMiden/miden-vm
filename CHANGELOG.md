@@ -14,6 +14,9 @@
 
 #### Fixes
 
+- Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+- Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+
 ## v1.0.0-rc.1 (2026-11-14)
 
 #### Features
@@ -84,12 +87,6 @@
 - [BREAKING] `SignaturePoly` now rejects coefficients whose Falcon compressed encoding exceeds the fixed 625-byte signature polynomial size, so serialization cannot panic on a `TryFrom`-accepted polynomial. The coefficient vector is private, and `From<Polynomial<FalconFelt>>` is replaced by a fallible `TryFrom`. Valid signature bytes and Falcon signing output are unchanged ([#4150](https://github.com/0xMiden/miden-vm/pull/4150)).
 - `build_trace` returns an error instead of panicking when a Merkle path request in an execution witness has an empty path or an index that does not fit in the path's depth ([#4159](https://github.com/0xMiden/miden-vm/pull/4159)).
 - Corrected the `StackInterface::get_word` documentation to show that the top of the stack is `Word[0]` when `start_idx=0` ([#4139](https://github.com/0xMiden/miden-vm/pull/4139)).
-- Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4094](https://github.com/0xMiden/miden-vm/issues/4094)).
-- Restored `no_std` builds for VM and crypto libraries by using `alloc` in the constraint compiler and gating channels, parallel trace building, diagnostic rendering, and codegen file I/O behind their feature flags ([#3927](https://github.com/0xMiden/miden-vm/issues/3927), [#3928](https://github.com/0xMiden/miden-vm/issues/3928), [#3929](https://github.com/0xMiden/miden-vm/issues/3929)).
-- Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3930](https://github.com/0xMiden/miden-vm/issues/3930)).
-- Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
-- The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/issues/4111)).
-- Fixed `DebugInfoBuilder` deduplication of file and error-message rows being quadratic when debug info tables are merged during static linking. The builder now keeps hash indices for these tables ([#4112](https://github.com/0xMiden/miden-vm/issues/4112)).
 
 ## v1.0.0-rc.0 (2026-10-21)
 
