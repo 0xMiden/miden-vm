@@ -16,7 +16,7 @@ use {
     miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS,
 };
 use {
-    p3_security::budget::InstanceShape,
+    miden_stark::security::InstanceShape,
     p3_security::fixed,
 };
 

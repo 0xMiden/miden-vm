@@ -7,8 +7,8 @@ use {
     miden_stark::lookup::ProverLookupBuilder,
 };
 use {
-    p3_security::budget::AirShape,
-    p3_security::budget::LookupShape,
+    miden_stark::security::AirShape,
+    miden_stark::security::LookupShape,
 };
 
 use {

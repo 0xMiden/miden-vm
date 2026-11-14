@@ -6,7 +6,7 @@ use {
     alloc::vec::Vec,
 };
 
-use p3_air::BaseAir;
+use crate::air::BaseAir;
 use p3_challenger::CanObserve;
 use {
     p3_field::Algebra,

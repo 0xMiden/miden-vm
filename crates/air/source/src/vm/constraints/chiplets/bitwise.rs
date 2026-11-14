@@ -6,7 +6,7 @@
 //! response bus recomposes the VM-facing `(op, a, b, result)` message.
 
 use {
-    crate::vm::AirBuilder,
+    miden_stark::air::AirBuilder,
     crate::vm::MidenAirBuilder,
     crate::vm::constraints::chiplets::columns::BitwiseOpCols,
     crate::vm::constraints::chiplets::selectors::ChipletSelectors,

@@ -44,8 +44,8 @@ pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
 mod tests {
     use {
         miden_air::vm::AIRS,
-        miden_air::vm::BaseAir,
-        miden_air::vm::LiftedAir,
+        miden_stark::air::BaseAir,
+        miden_stark::air::LiftedAir,
         miden_air::vm::MidenAir,
         miden_air::vm::config::pcs_params,
     };
