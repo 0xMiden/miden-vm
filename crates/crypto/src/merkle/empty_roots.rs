@@ -1596,7 +1596,7 @@ const EMPTY_SUBTREES: [Word; 256] = [
 mod tests {
     use {
         crate::EMPTY_WORD,
-        super::super::Eidos,
+        crate::hash::eidos::Eidos,
         super::EMPTY_SUBTREES,
         super::EmptySubtreeRoots,
     };

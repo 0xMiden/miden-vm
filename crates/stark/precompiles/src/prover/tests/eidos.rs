@@ -15,7 +15,7 @@ use {
     miden_core::field::QuadFelt,
     miden_core::utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::crypto::hash::Eidos;
 use {
     miden_precompiles::CurvePrecompile,
     miden_precompiles::Keccak256Precompile,

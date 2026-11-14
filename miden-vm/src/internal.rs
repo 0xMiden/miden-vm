@@ -25,7 +25,7 @@ pub use {
 };
 
 #[cfg(test)]
-use crate::crypto::merkle::NodeIndex;
+use miden_core::crypto::merkle::NodeIndex;
 use {
     crate::ExecutionOptions,
     miden_core::program::StackInputs,
@@ -34,7 +34,7 @@ use {
     miden_core::advice::AdviceInputs,
     crate::advice::AdviceProvider,
     miden_core::advice::AdviceStack,
-    crate::crypto::merkle::SmtWitness,
+    miden_core::crypto::merkle::SmtWitness,
     miden_core::serde::BudgetedReader,
     miden_core::serde::ByteReader,
     miden_core::serde::Deserializable,
@@ -388,7 +388,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::crypto::merkle::MerkleStore;
+    use miden_core::crypto::merkle::MerkleStore;
 
     fn test_file_path(name: &str) -> PathBuf {
         let id = SystemTime::now()
@@ -474,9 +474,9 @@ mod tests {
     #[test]
     fn test_smt_witness_inputs_preserve_multiple_versions_and_leaf_preimages() {
         use {
-            crate::crypto::merkle::LeafIndex,
-            crate::crypto::merkle::PartialSmt,
-            crate::crypto::merkle::Smt,
+            miden_core::crypto::merkle::LeafIndex,
+            miden_core::crypto::merkle::PartialSmt,
+            miden_core::crypto::merkle::Smt,
             miden_core::serde::Serializable,
         };
 
@@ -527,8 +527,8 @@ mod tests {
     fn test_smt_witness_inputs_share_nodes_across_large_tree_versions() {
         use {
             crate::advice::AdviceProvider,
-            crate::crypto::merkle::PartialSmt,
-            crate::crypto::merkle::Smt,
+            miden_core::crypto::merkle::PartialSmt,
+            miden_core::crypto::merkle::Smt,
             miden_core::serde::Serializable,
         };
 
@@ -596,8 +596,8 @@ mod tests {
     #[test]
     fn test_smt_witness_inputs_charge_the_combined_advice_budget() {
         use {
-            crate::crypto::merkle::PartialSmt,
-            crate::crypto::merkle::Smt,
+            miden_core::crypto::merkle::PartialSmt,
+            miden_core::crypto::merkle::Smt,
             miden_core::serde::Serializable,
         };
 
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn test_smt_witness_inputs_limit_total_encoded_bytes() {
         use {
-            crate::crypto::merkle::PartialSmt,
+            miden_core::crypto::merkle::PartialSmt,
             miden_core::serde::Serializable,
         };
 
@@ -666,7 +666,7 @@ mod tests {
     #[test]
     fn test_smt_witness_inputs_reject_invalid_hex_and_trailing_bytes() {
         use {
-            crate::crypto::merkle::PartialSmt,
+            miden_core::crypto::merkle::PartialSmt,
             miden_core::serde::Serializable,
         };
 

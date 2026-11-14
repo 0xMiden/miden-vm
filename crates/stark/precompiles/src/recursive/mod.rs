@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn packaged_advice_matches_current_fixture() {
         use miden_core::serde::Serializable;
-        use miden_crypto::hash::blake::Blake3_256;
+        use miden_core::crypto::hash::Blake3_256;
 
         let root: [Felt; 4] = include_str!("../../tests/fixtures/pvm_eidos_v1_0.root")
             .split_ascii_whitespace()

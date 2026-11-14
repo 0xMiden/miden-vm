@@ -13,7 +13,7 @@ pub use {
 use {
     crate::Felt,
     crate::Word,
-    miden_crypto::hash::eidos::Eidos,
+    crate::crypto::hash::Eidos,
     miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
 };
 
@@ -117,7 +117,7 @@ pub fn compress_raw_xof_lanes(state: &[Felt; STATE_WIDTH]) -> [u32; 16] {
 mod tests {
     use {
         miden_crypto::hash::eidos::EidosFrame,
-        miden_crypto::hash::eidos::domain::EidosDomain,
+        miden_crypto::hash::eidos::EidosDomain,
         miden_crypto::hash::eidos::domains::GenericFeltSequenceDomain,
     };
 

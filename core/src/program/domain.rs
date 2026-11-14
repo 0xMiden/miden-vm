@@ -12,7 +12,7 @@ use {
     miden_crypto::hash::eidos::DomainVersion,
     miden_crypto::hash::eidos::FeltSequence,
     miden_crypto::hash::eidos::Transcript,
-    miden_crypto::hash::eidos::domain::EidosDomain,
+    miden_crypto::hash::eidos::EidosDomain,
     miden_crypto::hash::eidos::namespace,
 };
 

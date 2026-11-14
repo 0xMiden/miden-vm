@@ -6,7 +6,7 @@ use core::borrow::Borrow;
 use once_cell::sync::Lazy;
 
 use {
-    super::Eidos,
+    crate::hash::eidos::Eidos,
     super::EmptySubtreeRoots,
     super::InnerNodeInfo,
     super::MerkleError,

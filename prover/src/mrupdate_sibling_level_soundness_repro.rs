@@ -37,8 +37,8 @@ use {
     miden_core::utils::RowMajorMatrix,
 };
 use {
-    miden_crypto::merkle::MerklePath,
-    miden_crypto::merkle::store::MerkleStore,
+    miden_core::crypto::merkle::MerklePath,
+    miden_core::crypto::merkle::MerkleStore,
 };
 use {
     miden_processor::DefaultHost,

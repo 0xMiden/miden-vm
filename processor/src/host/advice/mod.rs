@@ -807,8 +807,8 @@ mod tests {
         miden_core::advice::AdviceMap,
         crate::advice::AdviceMutation,
         miden_core::advice::AdviceStack,
-        crate::crypto::merkle::MerkleStore,
-        crate::crypto::merkle::MerkleTree,
+        miden_core::crypto::merkle::MerkleStore,
+        miden_core::crypto::merkle::MerkleTree,
     };
 
     fn make_leaf(seed: u64) -> Word {

@@ -10,7 +10,7 @@ use {
     miden_core::Word,
 };
 use {
-    miden_crypto::hash::eidos::Eidos,
+    miden_core::crypto::hash::Eidos,
     miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
 };
 use miden_stark::QuotientRecompositionInputs;

@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 
 use {
-    super::super::MerklePath,
+    crate::merkle::MerklePath,
     super::MmrError,
     super::forest::Forest,
 };
