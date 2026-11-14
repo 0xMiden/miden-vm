@@ -18,9 +18,9 @@ use {
 
 use {
     crate::AdviceProvider,
-    crate::ProgramInfo,
-    crate::StackInputs,
-    crate::StackOutputs,
+    miden_core::program::ProgramInfo,
+    miden_core::program::StackInputs,
+    miden_core::program::StackOutputs,
     crate::fast::ExecutionOutput,
 };
 
@@ -355,7 +355,7 @@ mod wire_tests {
         crate::ExecutionError,
         crate::FastProcessor,
         miden_core::Felt,
-        crate::StackInputs,
+        miden_core::program::StackInputs,
         crate::mast::MastNodeId,
     };
 

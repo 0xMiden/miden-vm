@@ -9,7 +9,7 @@ use {
     super::ChipletTraceFragment,
     miden_core::Felt,
     super::KERNEL_ROM_TRACE_WIDTH,
-    super::KernelDescriptor,
+    miden_core::program::KernelDescriptor,
     super::KernelRom,
 };
 use {

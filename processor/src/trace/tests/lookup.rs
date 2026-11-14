@@ -76,7 +76,7 @@ use {
 };
 use {
     crate::AdviceInputs,
-    crate::StackInputs,
+    miden_core::program::StackInputs,
     crate::operation::Operation,
 };
 

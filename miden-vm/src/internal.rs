@@ -28,7 +28,7 @@ pub use {
 use crate::crypto::merkle::NodeIndex;
 use {
     crate::ExecutionOptions,
-    crate::StackInputs,
+    miden_core::program::StackInputs,
     miden_core::Word,
     miden_core::ZERO,
     crate::advice::AdviceInputs,

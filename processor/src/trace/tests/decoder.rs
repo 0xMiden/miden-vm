@@ -59,7 +59,7 @@ use {
 };
 use {
     crate::RowIndex,
-    crate::StackInputs,
+    miden_core::program::StackInputs,
 };
 
 // HELPERS
@@ -1120,7 +1120,7 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     use std::sync::Arc;
 
     use {
-        crate::MIN_STACK_DEPTH,
+        miden_core::program::MIN_STACK_DEPTH,
         crate::mast::DynNodeBuilder,
         crate::operation::opcodes,
     };

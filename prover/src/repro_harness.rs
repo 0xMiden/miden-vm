@@ -28,7 +28,11 @@ use {
     miden_verifier::VerificationOutcome,
     miden_verifier::Verifier,
 };
-use miden_vm_stark::prover::prove;
+use {
+    miden_vm_stark::prover::prove,
+    miden_core::program::ProgramInfo,
+    miden_core::program::StackInputs,
+};
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
@@ -45,8 +49,8 @@ pub struct ReproTrace {
     chiplets: RowMajorMatrix<Felt>,
     eidos_compression: RowMajorMatrix<Felt>,
     and8: RowMajorMatrix<Felt>,
-    program_info: miden_processor::ProgramInfo,
-    init_stack: miden_processor::StackInputs,
+    program_info: ProgramInfo,
+    init_stack: StackInputs,
     precompile_root: miden_core::deferred::DeferredRoot,
     outputs: StackOutputs,
     last_program_row: RowIndex,

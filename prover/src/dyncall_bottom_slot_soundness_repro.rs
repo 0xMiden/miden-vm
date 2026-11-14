@@ -32,7 +32,7 @@ use {
 use {
     miden_processor::DefaultHost,
     miden_processor::FastProcessor,
-    miden_processor::StackInputs,
+    miden_core::program::StackInputs,
 };
 
 use {

@@ -44,7 +44,7 @@ use {
     crate::DefaultHost,
     crate::ExecutionOptions,
     crate::FastProcessor,
-    crate::KernelDescriptor,
+    miden_core::program::KernelDescriptor,
     crate::RowIndex,
     crate::operation::Operation,
     crate::trace::trace_state::AeadStreamReplayEntry,

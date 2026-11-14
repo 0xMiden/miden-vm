@@ -392,7 +392,7 @@ mod tests {
         crate::FastProcessor,
         crate::HostError,
         crate::ProcessorState,
-        crate::StackInputs,
+        miden_core::program::StackInputs,
         crate::advice::AdviceMutation,
     };
 

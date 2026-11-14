@@ -16,7 +16,7 @@ use {
     crate::ExecutionOptions,
     crate::FastProcessor,
     miden_core::Felt,
-    crate::StackInputs,
+    miden_core::program::StackInputs,
     crate::trace::build_trace,
 };
 

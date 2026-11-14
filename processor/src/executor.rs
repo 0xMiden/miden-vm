@@ -10,8 +10,8 @@ use {
     crate::FastProcessor,
     crate::FutureMaybeSend,
     crate::Host,
-    crate::Program,
-    crate::StackInputs,
+    miden_core::program::Program,
+    miden_core::program::StackInputs,
     crate::advice::AdviceError,
     crate::advice::AdviceInputs,
 };
@@ -119,7 +119,7 @@ mod tests {
     use super::*;
     use {
         crate::DefaultHost,
-        crate::StackInputs,
+        miden_core::program::StackInputs,
     };
 
     #[tokio::test(flavor = "current_thread")]

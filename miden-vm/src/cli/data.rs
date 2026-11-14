@@ -28,8 +28,8 @@ use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
 use {
     miden_vm::ExecutionProof,
-    miden_vm::Program,
-    miden_vm::StackOutputs,
+    miden_core::program::Program,
+    miden_core::program::StackOutputs,
     miden_core::Word,
     miden_vm::serde::SliceReader,
 };
