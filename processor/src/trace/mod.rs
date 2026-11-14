@@ -356,7 +356,7 @@ mod wire_tests {
         crate::FastProcessor,
         miden_core::Felt,
         miden_core::program::StackInputs,
-        crate::mast::MastNodeId,
+        miden_core::mast::MastNodeId,
     };
 
     fn execution_witness(source: &str) -> ExecutionWitness {

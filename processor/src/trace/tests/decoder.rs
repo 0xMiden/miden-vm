@@ -1121,8 +1121,8 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
 
     use {
         miden_core::program::MIN_STACK_DEPTH,
-        crate::mast::DynNodeBuilder,
-        crate::operation::opcodes,
+        miden_core::mast::DynNodeBuilder,
+        miden_core::operations::opcodes,
     };
 
     // Build exactly the same program shape as `dyncall_program()` in parallel/tests.rs:
@@ -1209,8 +1209,8 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     use std::sync::Arc;
 
     use {
-        crate::mast::DynNodeBuilder,
-        crate::operation::opcodes,
+        miden_core::mast::DynNodeBuilder,
+        miden_core::operations::opcodes,
     };
 
     const HASH_ADDR: Felt = Felt::new_unchecked(40);

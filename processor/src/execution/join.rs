@@ -8,9 +8,9 @@ use {
     crate::execution::ExecutionState,
     crate::execution::finalize_clock_cycle,
     crate::execution::finalize_clock_cycle_with_continuation,
-    crate::mast::ExecutableMastForest,
-    crate::mast::JoinNode,
-    crate::mast::MastNodeId,
+    miden_core::mast::ExecutableMastForest,
+    miden_core::mast::JoinNode,
+    miden_core::mast::MastNodeId,
     crate::processor::Processor,
     crate::tracer::Tracer,
 };

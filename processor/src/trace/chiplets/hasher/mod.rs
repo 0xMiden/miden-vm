@@ -38,7 +38,7 @@ use {
     super::HasherState,
     super::MerklePath,
     miden_core::ONE,
-    super::OpBatch,
+    miden_core::mast::OpBatch,
     super::RangeChecker,
     miden_core::Word as Digest,
     miden_core::ZERO,

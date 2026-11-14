@@ -63,18 +63,18 @@ use {
     crate::continuation_stack::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::crypto::merkle::MerklePath,
-    crate::mast::BasicBlockNode,
-    crate::mast::JoinNode,
-    crate::mast::LoopNode,
-    crate::mast::MastForest,
-    crate::mast::MastForestId,
-    crate::mast::MastNode,
-    crate::mast::MastNodeExt,
-    crate::mast::MastNodeId,
-    crate::mast::SparseMastForest,
-    crate::mast::SparseMastForestBuilder,
-    crate::mast::SplitNode,
-    crate::mast::VisitKind,
+    miden_core::mast::BasicBlockNode,
+    miden_core::mast::JoinNode,
+    miden_core::mast::LoopNode,
+    miden_core::mast::MastForest,
+    miden_core::mast::MastForestId,
+    miden_core::mast::MastNode,
+    miden_core::mast::MastNodeExt,
+    miden_core::mast::MastNodeId,
+    miden_core::mast::SparseMastForest,
+    miden_core::mast::SparseMastForestBuilder,
+    miden_core::mast::SplitNode,
+    miden_core::mast::VisitKind,
     crate::processor::Processor,
     crate::processor::StackInterface,
     crate::processor::SystemInterface,
@@ -1357,7 +1357,7 @@ impl Default for HasherChipletShim {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
-    use crate::mast::BasicBlockNodeBuilder;
+    use miden_core::mast::BasicBlockNodeBuilder;
 
     fn empty_trace_generation_context(fragment_size: usize, max_stack_depth: usize) -> TraceReplay {
         TraceReplay {

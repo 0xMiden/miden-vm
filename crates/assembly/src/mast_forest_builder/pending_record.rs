@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use {
     miden_core::Word,
-    miden_core::mast::MastNode,
-    miden_core::mast::OpBatch,
+    crate::mast::MastNode,
+    crate::mast::OpBatch,
     miden_core::utils::newtype_id,
 };
 use {

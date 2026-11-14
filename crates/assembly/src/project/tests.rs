@@ -10,10 +10,10 @@ use {
     miden_assembly_syntax::source_file,
 };
 use {
-    miden_core::mast::BasicBlockNodeBuilder,
-    miden_core::mast::MastForest,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
+    crate::mast::BasicBlockNodeBuilder,
+    crate::mast::MastForest,
+    crate::mast::MastNodeExt,
+    crate::mast::MastNodeId,
     miden_core::operations::Operation,
     miden_core::serde::Deserializable,
     miden_core::serde::Serializable,

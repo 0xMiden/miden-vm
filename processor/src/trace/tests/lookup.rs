@@ -77,7 +77,7 @@ use {
 use {
     miden_core::advice::AdviceInputs,
     miden_core::program::StackInputs,
-    crate::operation::Operation,
+    miden_core::operations::Operation,
 };
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;

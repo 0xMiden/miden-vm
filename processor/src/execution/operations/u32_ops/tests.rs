@@ -533,7 +533,7 @@ fn test_op_u32xor_min_stack() {
 // --------------------------------------------------------------------------------------------
 
 fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionError> {
-    use Operation::*;
+    use miden_core::operations::Operation::*;
 
     let mut processor = FastProcessor::new(
         StackInputs::new(&[Felt::new_unchecked(clz as u64), Felt::new_unchecked(n as u64)])

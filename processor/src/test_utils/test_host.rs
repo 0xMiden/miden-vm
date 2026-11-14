@@ -25,7 +25,7 @@ use {
     crate::advice::AdviceMutation,
     crate::event::EventError,
     crate::event::TraceError,
-    crate::mast::MastForest,
+    miden_core::mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.

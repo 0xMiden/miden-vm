@@ -40,8 +40,8 @@ use {
 use {
     miden_core::WORD_SIZE,
     miden_core::Word,
-    miden_core::mast::MastNodeExt,
-    miden_core::mast::MastNodeId,
+    crate::mast::MastNodeExt,
+    crate::mast::MastNodeId,
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
     miden_core::program::KernelDescriptor,
@@ -1121,7 +1121,7 @@ impl Assembler {
     fn finish_library_product(
         self,
         name: PackageId,
-        mast_forest: miden_core::mast::MastForest,
+        mast_forest: crate::mast::MastForest,
         #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
@@ -1174,7 +1174,7 @@ impl Assembler {
         self,
         name: PackageId,
         namespace: Arc<Path>,
-        mast_forest: miden_core::mast::MastForest,
+        mast_forest: crate::mast::MastForest,
         #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         entrypoint: MastNodeId,
         entrypoint_source_id: Option<DebugSourceNodeId>,

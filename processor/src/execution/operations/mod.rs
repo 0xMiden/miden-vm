@@ -4,7 +4,7 @@ use {
     miden_core::Felt,
     crate::errors::MapExecErrWithOpIdx,
     crate::errors::PackageSourceDebugContext,
-    crate::operation::Operation,
+    miden_core::operations::Operation,
     crate::processor::Processor,
     crate::processor::StackInterface,
     crate::tracer::OperationHelperRegisters,
