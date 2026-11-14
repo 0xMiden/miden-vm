@@ -25,7 +25,7 @@ use {
     super::op_not,
     super::op_or,
 };
-use crate::fast::FastProcessor;
+use crate::FastProcessor;
 
 // ARITHMETIC OPERATIONS
 // --------------------------------------------------------------------------------------------

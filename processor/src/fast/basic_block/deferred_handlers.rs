@@ -26,9 +26,9 @@ use {
 
 use super::SystemEventError;
 use {
-    crate::AdviceProvider,
+    crate::advice::AdviceProvider,
     crate::MemoryError,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
 };
 
 // STACK LAYOUT — `DeferredRegister`

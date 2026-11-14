@@ -3,7 +3,7 @@ use {
     crate::ExecutionError,
     miden_core::Felt,
     crate::errors::MapExecErrWithOpIdx,
-    crate::errors::PackageSourceDebugContext,
+    crate::PackageSourceDebugContext,
     miden_core::operations::Operation,
     crate::processor::Processor,
     crate::processor::StackInterface,

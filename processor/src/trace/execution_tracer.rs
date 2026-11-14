@@ -60,7 +60,7 @@ use {
     miden_air_definitions::vm::trace::RowIndex,
     miden_core::Word,
     miden_core::ZERO,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     miden_core::crypto::merkle::MerklePath,
     miden_core::mast::BasicBlockNode,

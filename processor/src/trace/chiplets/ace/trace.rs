@@ -26,7 +26,7 @@ use {
 use super::MAX_NUM_ACE_WIRES;
 use {
     crate::ContextId,
-    crate::errors::AceError,
+    crate::AceError,
 };
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the

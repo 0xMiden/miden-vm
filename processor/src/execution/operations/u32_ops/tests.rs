@@ -32,7 +32,7 @@ use {
     crate::DefaultHost,
     crate::ExecutionError,
     crate::execution::operations::execute_op,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::fast::NoopTracer,
     crate::operation::Operation,
     crate::operation::OperationError,

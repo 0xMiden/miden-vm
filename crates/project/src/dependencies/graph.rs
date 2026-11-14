@@ -1137,7 +1137,7 @@ mod tests {
     };
     use {
         miden_mast_package::Package as MastPackage,
-        miden_mast_package::TargetType,
+        crate::TargetType,
     };
     use {
         miden_package_registry::PackageIndex,

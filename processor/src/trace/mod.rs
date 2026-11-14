@@ -21,7 +21,7 @@ use {
     miden_core::program::ProgramInfo,
     miden_core::program::StackInputs,
     miden_core::program::StackOutputs,
-    crate::fast::ExecutionOutput,
+    crate::ExecutionOutput,
 };
 
 pub(crate) mod utils;
@@ -342,7 +342,7 @@ mod wire_tests {
     use rstest::rstest;
 
     use {
-        super::ExecutionWitness,
+        crate::ExecutionWitness,
         miden_core::serde::Serializable,
         super::build_trace,
         super::trace_state::AeadStreamReplayEntry,
@@ -587,7 +587,7 @@ mod wire_tests {
 
         // A carried witness with an explicitly empty VM-side root is not a valid transport shape.
         let tampered = ExecutionWitness {
-            vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
+            vm: crate::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
             precompile: Some(precompile),
         };
         let err = ExecutionWitness::read_from_bytes(&tampered.to_bytes())

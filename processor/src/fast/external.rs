@@ -3,12 +3,12 @@ use miden_mast_package::debug_info::PackageDebugInfo;
 use {
     crate::BaseHost,
     crate::ExecutionError,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::errors::OperationError,
-    crate::errors::PackageSourceDebugContext,
+    crate::PackageSourceDebugContext,
     crate::errors::procedure_not_found_with_context,
-    crate::errors::procedure_not_found_with_package_source_context,
+    crate::procedure_not_found_with_package_source_context,
 };
 
 // HELPERS

@@ -27,7 +27,7 @@ use {
     crate::MemoryError,
     crate::advice::AdviceError,
     crate::errors::OperationError,
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
 };
 
 // SYSTEM EVENT ERROR
@@ -566,7 +566,7 @@ mod tests {
     use {
         crate::ExecutionOptions,
         miden_core::program::StackInputs,
-        crate::fast::FastProcessor,
+        crate::FastProcessor,
     };
 
     /// Tests that `insert_compress_into_adv_map` produces the same key as compressing the same

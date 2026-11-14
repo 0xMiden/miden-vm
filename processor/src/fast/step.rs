@@ -20,7 +20,7 @@ use {
     crate::FastProcessor,
     crate::SourceInlineCallContext,
     crate::Stopper,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
 };
 

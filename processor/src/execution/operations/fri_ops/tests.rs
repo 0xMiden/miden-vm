@@ -25,7 +25,7 @@ use {
     super::reorder_bitrev4,
 };
 use {
-    crate::fast::FastProcessor,
+    crate::FastProcessor,
     crate::processor::Processor,
     crate::processor::SystemInterface,
 };

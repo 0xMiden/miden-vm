@@ -7,7 +7,7 @@ use {
 use {
     crate::ContextId,
     miden_core::Felt,
-    crate::errors::AceError,
+    crate::AceError,
     crate::errors::AceEvalError,
     crate::processor::MemoryInterface,
     crate::processor::Processor,

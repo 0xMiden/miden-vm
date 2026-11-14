@@ -37,7 +37,7 @@ use {
     crate::ContextId,
     crate::ExecutionError,
     crate::Stopper,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::errors::OperationError,
     crate::execution::InternalBreakReason,

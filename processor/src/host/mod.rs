@@ -270,7 +270,7 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 #[cfg(test)]
 mod tests {
     use {
-        super::AdviceMutation,
+        crate::advice::AdviceMutation,
         miden_core::advice::AdviceStack,
         miden_core::Felt,
     };

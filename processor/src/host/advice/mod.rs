@@ -28,7 +28,7 @@ pub use errors::AdviceError;
 
 use {
     crate::ExecutionOptions,
-    crate::host::AdviceMutation,
+    crate::advice::AdviceMutation,
     crate::processor::AdviceProviderInterface,
 };
 
@@ -797,7 +797,7 @@ mod tests {
 
     use miden_core::WORD_SIZE;
 
-    use super::AdviceProvider;
+    use crate::advice::AdviceProvider;
     use {
         miden_core::advice::AdviceInputs,
         crate::ExecutionOptions,

@@ -29,7 +29,7 @@ use {
     crate::errors::MapExecErrWithOpIdx,
     crate::errors::MerklePathVerificationFailedInner,
     crate::errors::OperationError,
-    crate::errors::PackageSourceDebugContext,
+    crate::PackageSourceDebugContext,
     miden_core::field::BasedVectorSpace,
     miden_core::field::QuadFelt,
     crate::processor::AdviceProviderInterface,

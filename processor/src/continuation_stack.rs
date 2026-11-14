@@ -718,8 +718,8 @@ mod arbitrary {
     use proptest::prelude::*;
 
     use {
-        super::Continuation,
-        super::ContinuationStack,
+        crate::Continuation,
+        crate::continuation_stack::ContinuationStack,
     };
 
     impl Arbitrary for Continuation<MastForestId> {

@@ -21,7 +21,7 @@ use {
     crate::AceError,
     crate::ContextId,
     crate::ExecutionError,
-    crate::continuation_stack::Continuation,
+    crate::Continuation,
     crate::continuation_stack::ContinuationStack,
     crate::trace::chiplets::CircuitEvaluation,
     crate::trace::utils::split_u32_into_u16,
