@@ -975,7 +975,7 @@ mod proof_arbitrary {
         super::HashFunction,
         super::PrecompileProof,
         super::PrecompileStatus,
-        super::PrecompileWitness,
+        crate::deferred::PrecompileWitness,
         super::StarkProof,
         super::VmProof,
     };

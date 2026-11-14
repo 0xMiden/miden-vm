@@ -1177,6 +1177,7 @@ mod tests {
         crate::ast::Module,
         crate::testing::TestContext,
         crate::testing::source_file,
+        miden_core::advice::AdviceMap,
     };
 
     #[test]

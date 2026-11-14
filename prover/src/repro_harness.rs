@@ -32,6 +32,7 @@ use {
     miden_vm_stark::prover::prove,
     miden_core::program::ProgramInfo,
     miden_core::program::StackInputs,
+    miden_core::deferred::DeferredRoot,
 };
 
 /// Returns a mutable view of one core trace row.
@@ -51,7 +52,7 @@ pub struct ReproTrace {
     and8: RowMajorMatrix<Felt>,
     program_info: ProgramInfo,
     init_stack: StackInputs,
-    precompile_root: miden_core::deferred::DeferredRoot,
+    precompile_root: DeferredRoot,
     outputs: StackOutputs,
     last_program_row: RowIndex,
     summary: TraceLenSummary,

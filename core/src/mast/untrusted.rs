@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::panic::Location;
 
 use {
-    super::AdviceMap,
+    crate::advice::AdviceMap,
     super::MastForest,
     super::MastForestError,
     super::serialization,

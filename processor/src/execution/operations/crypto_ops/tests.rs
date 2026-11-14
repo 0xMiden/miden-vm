@@ -30,7 +30,7 @@ use {
     super::validate_merkle_path_length,
 };
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::ContextId,
     crate::errors::IoError,
     crate::errors::MemoryError,

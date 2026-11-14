@@ -39,7 +39,7 @@ use {
     super::Chiplets,
 };
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::ContextId,
     crate::DefaultHost,
     crate::ExecutionOptions,

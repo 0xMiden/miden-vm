@@ -74,14 +74,14 @@ use rstest::rstest;
 
 use super::*;
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::BaseHost,
     crate::DefaultHost,
     crate::LoadedMastForest,
     crate::ProcessorState,
     crate::ProgramExecutor,
     crate::SyncHost,
-    crate::advice::AdviceMap,
+    miden_core::advice::AdviceMap,
     crate::advice::AdviceMutation,
     crate::event::EventError,
     crate::operation::OperationError,

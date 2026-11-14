@@ -3,8 +3,8 @@ use {
     miden_vm::ExecutionOptions,
     miden_vm::HASH_WORK,
     miden_vm::MSM_WORK,
-    miden_vm::PrecompileLimits,
-    miden_vm::WorkLimit,
+    miden_core::deferred::PrecompileLimits,
+    miden_core::deferred::WorkLimit,
 };
 
 use super::utils::parse_byte_size;

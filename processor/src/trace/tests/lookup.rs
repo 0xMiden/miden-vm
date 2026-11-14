@@ -75,7 +75,7 @@ use {
     super::lookup_harness::InteractionLog,
 };
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     miden_core::program::StackInputs,
     crate::operation::Operation,
 };

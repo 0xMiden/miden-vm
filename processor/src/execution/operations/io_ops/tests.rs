@@ -22,7 +22,7 @@ use {
     super::op_pipe,
 };
 use {
-    crate::AdviceInputs,
+    miden_core::advice::AdviceInputs,
     crate::ContextId,
     crate::fast::FastProcessor,
     crate::fast::NoopTracer,
