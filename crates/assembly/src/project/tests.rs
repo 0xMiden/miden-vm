@@ -15,9 +15,9 @@ use {
     crate::mast::MastNodeExt,
     crate::mast::MastNodeId,
     miden_core::operations::Operation,
-    miden_core::serde::Deserializable,
-    miden_core::serde::Serializable,
-    miden_core::serde::SliceReader,
+    crate::serde::Deserializable,
+    crate::serde::Serializable,
+    crate::serde::SliceReader,
     miden_core::utils::Idx,
     miden_core::utils::hash_string_to_word,
 };

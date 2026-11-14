@@ -1,11 +1,11 @@
 //! Contains the metadata definition for each persisted tree in the forest.
 
 use {
-    miden_serde_utils::ByteReader,
-    miden_serde_utils::ByteWriter,
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::DeserializationError,
-    miden_serde_utils::Serializable,
+    crate::utils::ByteReader,
+    crate::utils::ByteWriter,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 
 use {

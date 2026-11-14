@@ -32,8 +32,8 @@ use {
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
     miden_core::program::Program,
-    miden_core::serde::Deserializable,
-    miden_core::serde::Serializable,
+    crate::serde::Deserializable,
+    crate::serde::Serializable,
 };
 use {
     crate::mast::MastForest,

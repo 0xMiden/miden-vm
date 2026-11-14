@@ -6,8 +6,8 @@ use core::mem::ManuallyDrop;
 use std::collections::HashMap;
 
 use {
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::Serializable,
+    crate::utils::Deserializable,
+    crate::utils::Serializable,
 };
 use rocksdb as db;
 

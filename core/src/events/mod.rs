@@ -9,11 +9,11 @@ use {
 
 use {
     crate::field::PrimeField64,
-    miden_crypto::utils::ByteReader,
-    miden_crypto::utils::ByteWriter,
-    miden_crypto::utils::Deserializable,
-    miden_crypto::utils::DeserializationError,
-    miden_crypto::utils::Serializable,
+    crate::serde::ByteReader,
+    crate::serde::ByteWriter,
+    crate::serde::Deserializable,
+    crate::serde::DeserializationError,
+    crate::serde::Serializable,
 };
 
 use {

@@ -344,7 +344,7 @@ mod wire_tests {
 
     use {
         super::ExecutionWitness,
-        super::Serializable,
+        miden_core::serde::Serializable,
         super::build_trace,
         super::trace_state::AeadStreamReplayEntry,
         super::trace_state::BitwiseOp,

@@ -647,8 +647,8 @@ fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
         miden_assembly_syntax::debuginfo::Uri,
     };
     use {
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
+        crate::serde::Deserializable,
+        crate::serde::Serializable,
     };
 
     let source = "proc leaf push.42 end\nproc wrapper exec.leaf end\nbegin\n exec.wrapper\n drop\n exec.wrapper\n drop\nend";
@@ -764,8 +764,8 @@ fn plain_exec_inline_ranges_cover_only_inlined_operations() -> TestResult {
 #[test]
 fn plain_exec_preserves_imported_alias_identity() -> TestResult {
     use {
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
+        crate::serde::Deserializable,
+        crate::serde::Serializable,
     };
 
     let context = TestContext::default();
@@ -828,8 +828,8 @@ fn plain_exec_preserves_imported_alias_identity() -> TestResult {
 #[test]
 fn plain_exec_preserves_reexported_function_identity() -> TestResult {
     use {
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
+        crate::serde::Deserializable,
+        crate::serde::Serializable,
     };
 
     let context = TestContext::default();
@@ -892,7 +892,7 @@ fn plain_exec_preserves_reexported_function_identity() -> TestResult {
 
 #[test]
 fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
-    use miden_core::serde::Serializable;
+    use crate::serde::Serializable;
     use {
         miden_mast_package::SectionId,
         miden_mast_package::debug_info::PackageDebugInfoBuilder,
@@ -937,8 +937,8 @@ fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
 #[test]
 fn plain_exec_preserves_dynamic_dependency_reexports() -> TestResult {
     use {
-        miden_core::serde::Deserializable,
-        miden_core::serde::Serializable,
+        crate::serde::Deserializable,
+        crate::serde::Serializable,
     };
 
     let context = TestContext::default();

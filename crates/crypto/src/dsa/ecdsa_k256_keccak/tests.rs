@@ -12,10 +12,10 @@ mod signing_key {
         crate::Word,
     };
     #[cfg(feature = "std")]
-    use miden_serde_utils::ByteReader;
+    use crate::utils::ByteReader;
     use {
-        miden_serde_utils::Deserializable,
-        miden_serde_utils::Serializable,
+        crate::utils::Deserializable,
+        crate::utils::Serializable,
     };
 
     use {
@@ -316,8 +316,8 @@ mod signing_key {
 
 mod key_exchange_key {
     use {
-        miden_serde_utils::Deserializable,
-        miden_serde_utils::Serializable,
+        crate::utils::Deserializable,
+        crate::utils::Serializable,
     };
 
     use {
@@ -362,8 +362,8 @@ mod signature {
     use alloc::vec::Vec;
 
     use {
-        miden_serde_utils::DeserializationError,
-        miden_serde_utils::Serializable,
+        crate::utils::DeserializationError,
+        crate::utils::Serializable,
     };
 
     use {
@@ -671,7 +671,7 @@ mod signature {
 mod public_key_parsing {
     use alloc::format;
 
-    use miden_serde_utils::Serializable;
+    use crate::utils::Serializable;
 
     use {
         crate::dsa::ecdsa_k256_keccak::PublicKey,

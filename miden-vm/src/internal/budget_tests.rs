@@ -159,7 +159,7 @@ fn witness_and_legacy_trees_share_the_same_budget() {
     use {
         crate::crypto::merkle::PartialSmt,
         crate::crypto::merkle::Smt,
-        crate::serde::Serializable,
+        miden_core::serde::Serializable,
     };
 
     let key = Word::from([1, 2, 3, 7u32]);

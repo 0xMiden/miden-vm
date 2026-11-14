@@ -10,8 +10,8 @@ mod signing_key {
         crate::Word,
     };
     use {
-        miden_serde_utils::Deserializable,
-        miden_serde_utils::Serializable,
+        crate::utils::Deserializable,
+        crate::utils::Serializable,
     };
 
     use {
@@ -378,8 +378,8 @@ mod signature {
 
 mod key_exchange_key {
     use {
-        miden_serde_utils::Deserializable,
-        miden_serde_utils::Serializable,
+        crate::utils::Deserializable,
+        crate::utils::Serializable,
     };
 
     use {

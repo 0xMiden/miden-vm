@@ -35,10 +35,10 @@ use {
     crate::advice::AdviceProvider,
     miden_core::advice::AdviceStack,
     crate::crypto::merkle::SmtWitness,
-    crate::serde::BudgetedReader,
-    crate::serde::ByteReader,
-    crate::serde::Deserializable,
-    crate::serde::SliceReader,
+    miden_core::serde::BudgetedReader,
+    miden_core::serde::ByteReader,
+    miden_core::serde::Deserializable,
+    miden_core::serde::SliceReader,
 };
 
 mod merkle_builder;
@@ -477,7 +477,7 @@ mod tests {
             crate::crypto::merkle::LeafIndex,
             crate::crypto::merkle::PartialSmt,
             crate::crypto::merkle::Smt,
-            crate::serde::Serializable,
+            miden_core::serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -529,7 +529,7 @@ mod tests {
             crate::advice::AdviceProvider,
             crate::crypto::merkle::PartialSmt,
             crate::crypto::merkle::Smt,
-            crate::serde::Serializable,
+            miden_core::serde::Serializable,
         };
 
         let step = u64::MAX / 2048;
@@ -598,7 +598,7 @@ mod tests {
         use {
             crate::crypto::merkle::PartialSmt,
             crate::crypto::merkle::Smt,
-            crate::serde::Serializable,
+            miden_core::serde::Serializable,
         };
 
         let key = Word::from([1, 2, 3, 7u32]);
@@ -637,7 +637,7 @@ mod tests {
     fn test_smt_witness_inputs_limit_total_encoded_bytes() {
         use {
             crate::crypto::merkle::PartialSmt,
-            crate::serde::Serializable,
+            miden_core::serde::Serializable,
         };
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();
@@ -667,7 +667,7 @@ mod tests {
     fn test_smt_witness_inputs_reject_invalid_hex_and_trailing_bytes() {
         use {
             crate::crypto::merkle::PartialSmt,
-            crate::serde::Serializable,
+            miden_core::serde::Serializable,
         };
 
         let bytes = SmtWitness::from(&PartialSmt::default()).to_bytes();

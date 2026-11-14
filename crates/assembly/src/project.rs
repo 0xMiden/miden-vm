@@ -17,7 +17,7 @@ use {
     miden_assembly_syntax::ast::ModuleKind,
     miden_assembly_syntax::diagnostics::Report,
 };
-use miden_core::serde::Deserializable;
+use crate::serde::Deserializable;
 use {
     miden_mast_package::Package as MastPackage,
     miden_mast_package::SectionId,

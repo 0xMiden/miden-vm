@@ -1,4 +1,4 @@
-use miden_core::serde::Serializable;
+use crate::serde::Serializable;
 use miden_mast_package::Package;
 use {
     proptest::prelude::*,

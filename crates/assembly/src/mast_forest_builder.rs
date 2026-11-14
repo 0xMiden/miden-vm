@@ -30,7 +30,7 @@ use {
     crate::mast::error_code_from_msg,
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
-    miden_core::serde::Serializable,
+    crate::serde::Serializable,
     miden_core::utils::IndexVec,
     miden_core::utils::bytes_to_packed_u32_elements,
 };
@@ -1815,7 +1815,7 @@ mod tests {
         crate::mast::MastNodeBuilder,
         crate::mast::MastNodeId,
         miden_core::operations::Operation,
-        miden_core::serde::Serializable,
+        crate::serde::Serializable,
         miden_core::utils::Idx,
     };
     use {

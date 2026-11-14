@@ -11,8 +11,8 @@ use {
     crate::Word,
 };
 use {
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::Serializable,
+    crate::utils::Deserializable,
+    crate::utils::Serializable,
 };
 use proptest::prelude::*;
 
