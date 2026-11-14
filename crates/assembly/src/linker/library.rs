@@ -6,9 +6,9 @@ use {
 use miden_assembly_syntax::module::ModuleDescriptor;
 use miden_core::Word;
 use {
-    miden_mast_package::ManifestValidationError,
+    crate::package::ManifestValidationError,
     crate::mast::MastForest,
-    miden_mast_package::Package,
+    crate::package::Package,
 };
 pub use miden_project::Linkage;
 

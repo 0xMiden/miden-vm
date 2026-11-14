@@ -6,10 +6,10 @@ use {
 
 use crate::diagnostics::Report;
 use {
-    miden_mast_package::Dependency as PackageDependency,
-    miden_mast_package::Package as MastPackage,
+    crate::package::Dependency as PackageDependency,
+    crate::package::Package as MastPackage,
 };
-use miden_package_registry::PackageId;
+use crate::package::PackageId;
 use miden_project::Linkage;
 
 use crate::project::ResolvedPackage;

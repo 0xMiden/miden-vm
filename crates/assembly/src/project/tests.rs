@@ -22,18 +22,18 @@ use {
     crate::utils::hash_string_to_word,
 };
 use {
-    miden_mast_package::PackageExport,
-    miden_mast_package::PackageModule,
-    miden_mast_package::ProcedureExport,
-    miden_mast_package::Section,
-    miden_mast_package::SectionId,
-    miden_mast_package::debug_info::DEBUG_INFO_VERSION,
-    miden_mast_package::debug_info::DebugSourceAsmOp,
-    miden_mast_package::debug_info::DebugSourceNode,
-    miden_mast_package::debug_info::DebugSourceNodeId,
-    miden_mast_package::debug_info::DebugSourceVar,
-    miden_mast_package::debug_info::PackageDebugInfo,
-    miden_mast_package::debug_info::PackageDebugInfoBuilder,
+    crate::package::PackageExport,
+    crate::package::PackageModule,
+    crate::package::ProcedureExport,
+    crate::package::Section,
+    crate::package::SectionId,
+    crate::package::debug_info::DEBUG_INFO_VERSION,
+    crate::package::debug_info::DebugSourceAsmOp,
+    crate::package::debug_info::DebugSourceNode,
+    crate::package::debug_info::DebugSourceNodeId,
+    crate::package::debug_info::DebugSourceVar,
+    crate::package::debug_info::PackageDebugInfo,
+    crate::package::debug_info::PackageDebugInfoBuilder,
 };
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
@@ -3031,7 +3031,7 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
         TargetType::Library,
         runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v1.version.clone(),
             kind: TargetType::Library,
@@ -3073,7 +3073,7 @@ end
         TargetType::Library,
         runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v2.version.clone(),
             kind: TargetType::Library,
@@ -3105,7 +3105,7 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
@@ -3147,7 +3147,7 @@ end
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Kernel,
@@ -3179,7 +3179,7 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
@@ -3221,7 +3221,7 @@ end
         TargetType::Kernel,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,

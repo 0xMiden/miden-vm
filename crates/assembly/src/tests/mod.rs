@@ -37,12 +37,12 @@ use {
 };
 use {
     crate::mast::MastForest,
-    miden_mast_package::Package,
-    miden_mast_package::PackageExport,
-    miden_mast_package::PackageModule,
-    miden_mast_package::PackageSubmodule,
-    miden_mast_package::ProcedureExport,
-    miden_mast_package::TargetType,
+    crate::package::Package,
+    crate::package::PackageExport,
+    crate::package::PackageModule,
+    crate::package::PackageSubmodule,
+    crate::package::ProcedureExport,
+    crate::package::TargetType,
 };
 use miden_project::Linkage;
 

@@ -11,7 +11,7 @@ use {
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
 };
-use miden_mast_package::debug_info::DebugSourceInlineCall;
+use crate::package::debug_info::DebugSourceInlineCall;
 use smallvec::SmallVec;
 
 use {

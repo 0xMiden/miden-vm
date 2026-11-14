@@ -14,7 +14,7 @@ use {
     crate::utils::hash_string_to_word,
 };
 use {
-    miden_package_registry::PackageId,
+    crate::package::PackageId,
     miden_package_registry::PackageRegistry,
     miden_package_registry::PackageRegistryAndProvider,
 };

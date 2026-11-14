@@ -19,13 +19,13 @@ use {
 };
 use crate::serde::Deserializable;
 use {
-    miden_mast_package::Package as MastPackage,
-    miden_mast_package::SectionId,
-    miden_mast_package::TargetType,
+    crate::package::Package as MastPackage,
+    crate::package::SectionId,
+    crate::package::TargetType,
 };
 use {
     miden_package_registry::PackageCache,
-    miden_package_registry::PackageId,
+    crate::package::PackageId,
     miden_package_registry::Version as PackageVersion,
 };
 use {
@@ -763,7 +763,7 @@ where
     fn load_canonical_package(
         &self,
         package_id: &PackageId,
-        version: &miden_project::SemVer,
+        version: &crate::package::Version,
     ) -> Result<Option<Arc<MastPackage>>, Report> {
         let Some(record) = self.store.get_by_semver(package_id, version) else {
             return Ok(None);
@@ -774,7 +774,7 @@ where
     fn try_reuse_registered_source_package(
         &self,
         package_id: &PackageId,
-        version: &miden_project::SemVer,
+        version: &crate::package::Version,
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,

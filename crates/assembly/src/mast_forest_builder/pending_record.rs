@@ -7,11 +7,11 @@ use {
     crate::utils::newtype_id,
 };
 use {
-    miden_mast_package::debug_info::DebugFunctionIdx,
-    miden_mast_package::debug_info::DebugSourceAsmOp,
-    miden_mast_package::debug_info::DebugSourceInlineCall,
-    miden_mast_package::debug_info::DebugSourceVar,
-    miden_mast_package::debug_info::SourceNodeIdMarker,
+    crate::package::debug_info::DebugFunctionIdx,
+    crate::package::debug_info::DebugSourceAsmOp,
+    crate::package::debug_info::DebugSourceInlineCall,
+    crate::package::debug_info::DebugSourceVar,
+    crate::package::debug_info::SourceNodeIdMarker,
 };
 
 /// Content-equivalence key used while interning pending MAST nodes.
