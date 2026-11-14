@@ -3,12 +3,16 @@ use miden_ace::{
     compiler::{
         AceConfig, LayoutKind, build_ace_dag_for_air, emit_circuit,
         testing::{
-            eval_dag, eval_native_constraints, eval_periodic_values, eval_quotient, fill_inputs,
+            AuthoredAssertion, eval_authored_constraints, eval_dag, eval_encoded_circuit,
+            eval_native_constraints, eval_periodic_values, eval_quotient, fill_inputs,
             zps_for_chunk,
         },
     },
 };
-use miden_air_definitions::vm::{AIRS, MIDEN_AIR_COUNT, MidenAir};
+use miden_air_definitions::{
+    precompiles::ChipletAir,
+    vm::{AIRS, MIDEN_AIR_COUNT, MidenAir},
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
 use miden_stark::air::LiftedAir;
@@ -193,6 +197,106 @@ fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
         }
     }
     assert!(layout.index(InputKey::IsFirstAir(MIDEN_AIR_COUNT)).is_none());
+}
+
+/// Compare production ACE values with actual authored AIR execution. The source
+/// builder evaluates both polynomial domains in the extension at an OOD point;
+/// neither graph structure nor source-expression interpretation supplies this oracle.
+fn assert_ace_matches_authored<A: LiftedAir<F = Felt>>(air: &A, label: &str) {
+    const SEEDS: [u64; 4] =
+        [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
+    let captured = miden_stark::air::capture_with::<_, QuadFelt>(air)
+        .expect("checked authored source");
+    let constraint_layout = captured.descriptor.analysis().layout();
+    let spec = air.spec();
+    for layout_kind in [LayoutKind::Native, LayoutKind::Masm] {
+        let config = AceConfig {
+            num_quotient_chunks: 8,
+            layout: layout_kind,
+        };
+        let artifacts = build_ace_dag_for_air(air, config).expect("ACE DAG");
+        let layout = &artifacts.layout;
+        let circuit = emit_circuit(&artifacts.dag, layout.clone()).expect("ACE circuit");
+        let initial_inputs = fill_inputs(layout);
+        for seed in SEEDS {
+            let mut state = seed;
+            let inputs: Vec<_> = initial_inputs
+                .iter()
+                .map(|value| {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let lo = Felt::from_u64(state);
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    *value + QuadFelt::new([lo, Felt::from_u64(state)])
+                })
+                .collect();
+            let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+            let periodic_values =
+                eval_periodic_values::<Felt, QuadFelt>(&spec.periodic_columns, z_k);
+            let assertions =
+                eval_authored_constraints(air, &spec, &inputs, layout, &periodic_values);
+            let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+            let (mut base_indices, mut ext_indices) = (Vec::new(), Vec::new());
+            let mut folded = QuadFelt::ZERO;
+            for (ordinal, assertion) in assertions.iter().enumerate() {
+                let value = match assertion {
+                    AuthoredAssertion::Base(value) => {
+                        base_indices.push(ordinal);
+                        value
+                    },
+                    AuthoredAssertion::Extension(value) => {
+                        ext_indices.push(ordinal);
+                        value
+                    },
+                };
+                folded = folded * alpha + *value;
+            }
+            assert_eq!(
+                base_indices.as_slice(),
+                constraint_layout.base_indices(),
+                "{label} base order"
+            );
+            assert_eq!(
+                ext_indices.as_slice(),
+                constraint_layout.ext_indices(),
+                "{label} extension order"
+            );
+            let vanishing = inputs[layout.index(InputKey::ZPowN).unwrap()] - QuadFelt::ONE;
+            let expected = folded - eval_quotient::<Felt, QuadFelt>(layout, &inputs) * vanishing;
+            assert_eq!(
+                eval_dag(&artifacts.dag, &inputs, layout).expect("DAG evaluation"),
+                expected,
+                "{label} DAG, {layout_kind:?}, seed {seed:#x}"
+            );
+            assert_eq!(
+                circuit.eval(&inputs).expect("circuit evaluation"),
+                expected,
+                "{label} circuit, {layout_kind:?}, seed {seed:#x}"
+            );
+            // Native layouts with an odd input count cannot fill ACE READ rows.
+            // The decoder checks the actual stream and its root-squaring padding.
+            if matches!(layout_kind, LayoutKind::Masm) || layout.total_inputs.is_multiple_of(2) {
+                assert_eq!(
+                    eval_encoded_circuit(&circuit, &inputs),
+                    expected,
+                    "{label} encoded stream, {layout_kind:?}, seed {seed:#x}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn all_vm_airs_ace_matches_authored_execution() {
+    for air in AIRS {
+        assert_ace_matches_authored(&air, &format!("{air:?}"));
+    }
+}
+
+#[test]
+fn all_pvm_airs_ace_matches_authored_execution() {
+    for air in ChipletAir::all() {
+        assert_ace_matches_authored(&air, air.file_token());
+    }
 }
 
 /// The recursive verifier's canonical entry point must be a thin wrapper over the canonical

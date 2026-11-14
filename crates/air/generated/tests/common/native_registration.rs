@@ -1,7 +1,8 @@
 use miden_constraint_compiler::{
     ir::{Graph, capture_kernel_native_into, capture_native_into},
     testing::{
-        assert_concrete_evaluation, constraint_degrees, eval_graph, kernel_constraint_degrees,
+        assert_concrete_evaluation, assert_concrete_evaluations_equal, constraint_degrees,
+        eval_graph, kernel_constraint_degrees,
     },
 };
 use miden_core::Felt;
@@ -35,6 +36,7 @@ where
     let graph = builder.freeze();
     let direct = DirectKernel::new(source).unwrap();
     for seed in seeds {
+        assert_concrete_evaluations_equal(&direct, kernel, *seed);
         assert_concrete_evaluation(&direct, &graph, &authored, *seed);
         assert_concrete_evaluation(kernel, &graph, &authored, *seed);
         let values = eval_graph(&graph, *seed);

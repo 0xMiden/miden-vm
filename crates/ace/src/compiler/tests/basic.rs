@@ -593,7 +593,7 @@ fn test_verifier_dag_matches_manual_eval() {
 /// `eval_periodic_values` reference (dense IDFT + Horner) for a column pair chosen
 /// so one column resolves via the sparse Lagrange path (period 128, 3/128 nonzero)
 /// and the other via the dense Horner path (period 8, fully dense) — see
-/// `build_periodic_nodes` in `dag/lower.rs`.
+/// `build_periodic_nodes` in `dag/periodic.rs`.
 #[test]
 fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let air = MockPeriodicAir;

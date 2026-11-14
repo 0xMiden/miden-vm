@@ -1,13 +1,11 @@
 //! Shared reference oracles for generated evaluator tests.
 
-use std::collections::HashMap;
-
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
 use miden_stark::air::{self, AirKernel};
 use p3_field::{PackedField, PackedValue};
 
-use crate::ir::{CapturedProgram, Class, Graph, Leaf, Node, OpKind};
+use crate::ir::{CapturedProgram, Graph, Leaf, Node, OpKind};
 use miden_stark::air::{
     Assertion,
     symbolic::{AuxInput, BaseInput, ExprView},
@@ -39,7 +37,9 @@ fn assertion_degrees(captured: air::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] 
     for assertion in captured.assertions {
         match assertion {
             air::Assertion::Base(expression) => classes[0].push(expression.degree_multiple()),
-            air::Assertion::Extension(expression) => classes[1].push(expression.degree_multiple()),
+            air::Assertion::Extension(expression) => {
+                classes[1].push(expression.degree_multiple())
+            },
         }
     }
     classes
@@ -86,39 +86,6 @@ pub fn assert_kernel_descriptor<A: air::LiftedAir<F = Felt>, K: AirKernel<F = Fe
     assert_eq!(geometry.aux_width, expected.spec().aux_width);
     assert_eq!(geometry.preprocessed_width, expected.spec().preprocessed_width());
     assert_eq!(geometry.raw_degrees, e.raw_degrees());
-}
-
-/// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children
-/// sorted, so two nodes get equal canonical ids iff their subgraphs are
-/// structurally identical modulo commutative operand order.
-pub fn canonical_ids(graph: &Graph) -> Vec<usize> {
-    #[derive(PartialEq, Eq, Hash)]
-    enum Key {
-        Leaf(Leaf),
-        Lift(usize),
-        Op(Class, OpKind, usize, Option<usize>),
-    }
-    let mut interner: HashMap<Key, usize> = HashMap::new();
-    let mut canon: Vec<usize> = Vec::with_capacity(graph.len());
-    for (_, node) in graph.iter() {
-        let key = match node {
-            Node::Leaf(Leaf::ExtBase(inner)) => Key::Lift(canon[inner.index()]),
-            Node::Leaf(leaf) => Key::Leaf(leaf),
-            Node::Op { class, op, x, y } => {
-                let a = canon[x.index()];
-                let b = y.map(|y| canon[y.index()]);
-                match (op, b) {
-                    (OpKind::Add | OpKind::Mul, Some(b)) => {
-                        Key::Op(class, op, a.min(b), Some(a.max(b)))
-                    },
-                    _ => Key::Op(class, op, a, b),
-                }
-            },
-        };
-        let next = interner.len();
-        canon.push(*interner.entry(key).or_insert(next));
-    }
-    canon
 }
 
 /// Evaluate every node of `graph`, assigning each leaf a value derived from its
@@ -400,6 +367,64 @@ where
         self.ext_indices.push(self.base_constraints.len() + self.ext_constraints.len());
         self.ext_constraints.push(value);
     }
+}
+
+/// Compare two runtime kernels directly on identical scalar and packed inputs.
+/// Assertion classes, global order, duplicates, and zero residuals are retained.
+/// No symbolic capture or arithmetic graph supplies the expected values.
+pub fn assert_concrete_evaluations_equal<S: AirKernel<F = Felt>, K: AirKernel<F = Felt>>(
+    source: &S,
+    generated: &K,
+    seed: u64,
+) {
+    fn compare<S, K, P, PE>(source: &S, generated: &K, seed: u64)
+    where
+        S: AirKernel<F = Felt>,
+        K: AirKernel<F = Felt>,
+        P: PackedField<Scalar = Felt>,
+        PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
+    {
+        let inputs = EvaluationInputs::<P, PE>::new(source.descriptor().spec(), seed);
+        let mut expected = EvaluationBuilder::default();
+        source
+            .bind(inputs.inputs())
+            .expect("source dimensions match its descriptor")
+            .eval(&inputs.frame(), &mut expected);
+        let mut actual = EvaluationBuilder::default();
+        generated
+            .bind(inputs.inputs())
+            .expect("generated dimensions match the source inputs")
+            .eval(&inputs.frame(), &mut actual);
+        assert_eq!(actual.base_indices, expected.base_indices, "base assertion order");
+        assert_eq!(actual.ext_indices, expected.ext_indices, "extension assertion order");
+        assert_eq!(actual.base_constraints.len(), expected.base_constraints.len());
+        assert_eq!(actual.ext_constraints.len(), expected.ext_constraints.len());
+        for (index, (actual, expected)) in
+            actual.base_constraints.iter().zip(&expected.base_constraints).enumerate()
+        {
+            assert_eq!(actual.as_slice(), expected.as_slice(), "base assertion {index}");
+        }
+        for (index, (actual, expected)) in
+            actual.ext_constraints.iter().zip(&expected.ext_constraints).enumerate()
+        {
+            for (coefficient, (actual, expected)) in
+                <PE as BasedVectorSpace<P>>::as_basis_coefficients_slice(actual)
+                    .iter()
+                    .zip(<PE as BasedVectorSpace<P>>::as_basis_coefficients_slice(expected))
+                    .enumerate()
+            {
+                assert_eq!(
+                    actual.as_slice(),
+                    expected.as_slice(),
+                    "extension assertion {index}, coefficient {coefficient}"
+                );
+            }
+        }
+    }
+    type P = <Felt as miden_crypto::field::Field>::Packing;
+    type PE = <QuadFelt as miden_crypto::field::ExtensionField<Felt>>::ExtensionPacking;
+    compare::<_, _, Felt, QuadFelt>(source, generated, seed);
+    compare::<_, _, P, PE>(source, generated, seed);
 }
 
 /// Compare actual scalar/packed kernel execution to independently captured source graph values.

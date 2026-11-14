@@ -2,10 +2,10 @@
 //!
 //! This module lowers captured AIR constraints (`miden-constraint-compiler` IR)
 //! into a DAG that mirrors the verifier evaluation order: constraints are folded
-//! with the composition challenge, divided by the vanishing polynomial, and then
-//! compared against the recomposed quotient. Auxiliary/quotient openings are
+//! with the composition challenge and compared against the recomposed quotient
+//! times the vanishing polynomial. Auxiliary/quotient openings are
 //! provided as base coordinates and merged into extension elements inside the
-//! DAG. Authored source evaluation supplies the independent scalar reference.
+//! DAG. Concrete authored AIR execution supplies an independent semantic oracle.
 
 mod builder;
 mod ir;

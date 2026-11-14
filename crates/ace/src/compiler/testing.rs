@@ -1,8 +1,7 @@
 //! Test helpers for ACE codegen, available under the `testing` feature or `#[cfg(test)]`.
 //!
-//! These provide reference evaluators for symbolic expressions, periodic columns,
-//! constraint folding, quotient recomposition, and DAG evaluation, suitable for
-//! validating the ACE pipeline from both within ace-codegen tests and from
+//! These provide concrete authored AIR execution, periodic-column evaluation, constraint
+//! folding, quotient recomposition, and DAG/encoded-stream evaluation for ACE tests and
 //! downstream integration tests (e.g. in miden-air).
 
 use miden_core::{Felt, field::QuadFelt};
@@ -10,7 +9,11 @@ use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdi
 use miden_stark::air;
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
-use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
+use crate::{
+    AceError, InputCounts, InputKey, InputLayout,
+    compiler::{AceCircuit, AceDag},
+    instruction::{Op, decode_instruction},
+};
 
 /// Evaluates a multi-AIR relation directly from native sources, independently of DAG lowering.
 ///
@@ -98,6 +101,56 @@ pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
     periodic_values: &[QuadFelt],
 ) -> QuadFelt {
     assert_eq!(spec.num_challenges, 2, "ACE source reference requires two challenges");
+    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+    eval_authored_constraints(air, spec, inputs, layout, periodic_values)
+        .into_iter()
+        .fold(QuadFelt::ZERO, |accumulator, assertion| {
+            let (AuthoredAssertion::Base(value) | AuthoredAssertion::Extension(value)) = assertion;
+            accumulator * alpha + value
+        })
+}
+
+/// One concrete authored emission at an OOD point, retaining its source assertion class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthoredAssertion {
+    Base(QuadFelt),
+    Extension(QuadFelt),
+}
+
+#[derive(Default)]
+struct AuthoredSink {
+    assertions: Vec<AuthoredAssertion>,
+}
+
+impl air::LiftedAirBuilder for AuthoredSink {
+    type F = Felt;
+    type Expr = QuadFelt;
+    type ExtExpr = QuadFelt;
+
+    fn emit_base(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
+        self.assertions.push(AuthoredAssertion::Base(value));
+    }
+
+    fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
+        self.assertions.push(AuthoredAssertion::Extension(value));
+    }
+}
+
+/// Execute authored equations directly on concrete ACE openings, independently of symbolic IR.
+///
+/// Both source domains evaluate in `QuadFelt` at the OOD point. Every emission, including its
+/// class, global position, repeated roots and zero gates, remains in the returned sequence.
+/// Only the source's declared challenge openings are read, up to alpha and beta.
+pub fn eval_authored_constraints<A: air::LiftedAir<F = Felt>>(
+    air: &A,
+    spec: &air::AirSpec<'_, Felt>,
+    inputs: &[QuadFelt],
+    layout: &InputLayout,
+    periodic_values: &[QuadFelt],
+) -> Vec<AuthoredAssertion> {
+    assert!(spec.num_challenges <= 2, "ACE supplies at most alpha and beta challenges");
+    assert_eq!(inputs.len(), layout.total_inputs, "ACE input length");
+    assert_eq!(periodic_values.len(), spec.periodic_columns.len(), "periodic input count");
     let main = [0, 1].map(|offset| {
         (0..spec.main_width)
             .map(|index| inputs[layout.index(InputKey::Main { offset, index }).unwrap()])
@@ -124,10 +177,11 @@ pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
     let public_values: Vec<_> = (0..spec.num_public_values)
         .map(|index| inputs[layout.index(InputKey::Public(index)).unwrap()])
         .collect();
-    let challenges = [
-        inputs[layout.index(InputKey::AuxRandAlpha).unwrap()],
-        inputs[layout.index(InputKey::AuxRandBeta).unwrap()],
-    ];
+    let challenges: Vec<_> = [InputKey::AuxRandAlpha, InputKey::AuxRandBeta]
+        .into_iter()
+        .take(spec.num_challenges)
+        .map(|key| inputs[layout.index(key).expect("declared source challenge in ACE layout")])
+        .collect();
     let exports: Vec<_> = (0..spec.num_exports)
         .map(|index| inputs[layout.index(InputKey::AuxBusBoundary(index)).unwrap()])
         .collect();
@@ -148,10 +202,7 @@ pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
             transition: inputs[layout.index(InputKey::IsTransition).unwrap()],
         },
     };
-    let mut folder = ReferenceFolder {
-        alpha: inputs[layout.index(InputKey::Alpha).unwrap()],
-        accumulator: QuadFelt::ZERO,
-    };
+    let mut sink = AuthoredSink::default();
     air::LiftedAir::eval(
         air,
         &frame,
@@ -160,34 +211,9 @@ pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
             challenges: &challenges,
             exports: &exports,
         },
-        &mut folder,
+        &mut sink,
     );
-    folder.accumulator
-}
-
-struct ReferenceFolder {
-    alpha: QuadFelt,
-    accumulator: QuadFelt,
-}
-
-impl ReferenceFolder {
-    fn fold(&mut self, value: QuadFelt) {
-        self.accumulator = self.accumulator * self.alpha + value;
-    }
-}
-
-impl air::LiftedAirBuilder for ReferenceFolder {
-    type F = Felt;
-    type Expr = QuadFelt;
-    type ExtExpr = QuadFelt;
-
-    fn emit_base(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
-        self.fold(value);
-    }
-
-    fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
-        self.fold(value);
-    }
+    sink.assertions
 }
 
 /// Deterministic input filler for layout-sized buffers.
@@ -336,6 +362,49 @@ where
     }
 
     Ok(values[dag.root().index()])
+}
+
+/// Inputs, constant pairs, and operations receive descending node IDs. All arithmetic values
+/// come from decoded instructions; the off-VM operation count only locates the root before
+/// padding. Padding repeatedly squares that root, preserving its zero set rather than its value.
+pub fn eval_encoded_circuit(circuit: &AceCircuit<QuadFelt>, inputs: &[QuadFelt]) -> QuadFelt {
+    let encoded = circuit.to_ace().expect("circuit is ACE encodable");
+    let stream = encoded.instructions();
+    let num_ops = encoded.num_eval_rows();
+    let constant_felts = stream.len().checked_sub(num_ops).expect("operation stream length");
+    assert!(constant_felts.is_multiple_of(2), "constants have two coordinates");
+    let num_constants = constant_felts / 2;
+    assert_eq!(encoded.num_vars(), inputs.len() + num_constants, "ACE input count");
+    let num_nodes = encoded.num_vars() + num_ops;
+    let mut values = vec![None; num_nodes];
+    for (index, &input) in inputs.iter().enumerate() {
+        values[num_nodes - 1 - index] = Some(input);
+    }
+    for (index, pair) in stream[..constant_felts].chunks_exact(2).enumerate() {
+        values[num_nodes - 1 - inputs.len() - index] = Some(QuadFelt::new([pair[0], pair[1]]));
+    }
+    for (index, &instruction) in stream[constant_felts..].iter().enumerate() {
+        let id = num_ops - 1 - index;
+        let (lhs, rhs, op) = decode_instruction(instruction).expect("valid ACE instruction");
+        let (lhs, rhs) = (lhs as usize, rhs as usize);
+        assert!(lhs > id && lhs < num_nodes, "left operand must precede its operation");
+        assert!(rhs > id && rhs < num_nodes, "right operand must precede its operation");
+        let lhs = values[lhs].expect("left operand has been evaluated");
+        let rhs = values[rhs].expect("right operand has been evaluated");
+        values[id] = Some(match op {
+            Op::Add => lhs + rhs,
+            Op::Sub => lhs - rhs,
+            Op::Mul => lhs * rhs,
+        });
+    }
+    let padding = num_ops.checked_sub(circuit.operations.len()).expect("unpadded operation count");
+    let root = values[padding].expect("decoded circuit has a root operation");
+    assert_eq!(
+        values[0].expect("decoded circuit has a final operation"),
+        root.exp_power_of_2(padding),
+        "encoded padding preserves the root's zero set by repeated squaring",
+    );
+    root
 }
 
 fn compute_deltas_and_weights<EF: Field>(
