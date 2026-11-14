@@ -32,6 +32,7 @@ use miden_assembly_syntax::{
     diagnostics::{Label, RelatedError, RelatedLabel},
 };
 pub use miden_mast_package::TargetType;
+pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use toml::Value;

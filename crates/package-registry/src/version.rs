@@ -1,6 +1,5 @@
 use core::{borrow::Borrow, fmt, str::FromStr};
 
-pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer};
 use miden_core::Word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -8,6 +7,7 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::VersionRequirement;
+use crate::{SemVer, SemVerError};
 
 /// The error type raised when attempting to parse a [Version] from a string.
 #[derive(Debug, thiserror::Error)]
