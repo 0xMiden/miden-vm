@@ -96,7 +96,7 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
     },
     #[error("invalid namespace '{path}': {err}")]
-    InvalidNamespacePath { path: Arc<Path>, err: crate::PathError },
+    InvalidNamespacePath { path: Arc<Path>, err: crate::ast::PathError },
     #[error("invalid namespace declaration: must be placed before any other item in the module")]
     MisplacedNamespaceDeclaration {
         #[label("make sure this declaration precedes other declarations in this module")]

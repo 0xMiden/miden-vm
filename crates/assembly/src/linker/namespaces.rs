@@ -8,14 +8,14 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Path,
-    miden_assembly_syntax::PathBuf,
-    miden_assembly_syntax::ast::GlobalItemIndex,
-    miden_assembly_syntax::ast::ImportKind,
-    miden_assembly_syntax::ast::ItemIndex,
-    miden_assembly_syntax::ast::ModuleIndex,
-    miden_assembly_syntax::ast::SymbolResolutionError,
-    miden_assembly_syntax::ast::Visibility,
+    crate::Path,
+    crate::PathBuf,
+    crate::ast::GlobalItemIndex,
+    crate::ast::ImportKind,
+    crate::ast::ItemIndex,
+    crate::ast::ModuleIndex,
+    crate::ast::SymbolResolutionError,
+    crate::ast::Visibility,
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
@@ -1038,7 +1038,7 @@ mod tests {
 
     use {
         miden_assembly_syntax::Parse,
-        miden_assembly_syntax::Path,
+        crate::Path,
         crate::debuginfo::DefaultSourceManager,
         crate::debuginfo::SourceLanguage,
         crate::debuginfo::SourceManager,
@@ -1051,7 +1051,7 @@ mod tests {
         source_manager: Arc<dyn SourceManager>,
         name: &str,
         source: &str,
-    ) -> Box<miden_assembly_syntax::ast::Module> {
+    ) -> Box<crate::ast::Module> {
         source_manager
             .load(SourceLanguage::Masm, name.into(), source.to_string())
             .parse(false, source_manager)

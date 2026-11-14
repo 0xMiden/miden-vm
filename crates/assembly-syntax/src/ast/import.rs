@@ -11,7 +11,7 @@ use {
 
 use {
     super::Ident,
-    super::Path,
+    crate::Path,
     super::Visibility,
 };
 

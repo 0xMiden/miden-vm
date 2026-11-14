@@ -49,7 +49,7 @@ use {
 use {
     miden_assembly_syntax::ast,
     miden_assembly_syntax::ast::AttributeSet,
-    miden_assembly_syntax::ast::PathBuf,
+    crate::PathBuf,
 };
 use {
     miden_core::Word,

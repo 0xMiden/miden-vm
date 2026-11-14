@@ -10,11 +10,11 @@ use {
 
 use {
     miden_core::Felt,
-    miden_assembly_syntax::Path,
+    crate::Path,
     miden_core::Word,
-    miden_assembly_syntax::ast::ModuleIndex,
-    miden_assembly_syntax::ast::SymbolResolutionError,
-    miden_assembly_syntax::ast::constants::ConstEvalError,
+    crate::ast::ModuleIndex,
+    crate::ast::SymbolResolutionError,
+    crate::ast::constants::ConstEvalError,
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
     crate::diagnostics::Diagnostic,

@@ -189,7 +189,7 @@ fn ancestor_module_alias_keeps_local_constant_live() -> TestResult {
     });
     assert_eq!(
         value,
-        Some(&miden_assembly_syntax::ast::ConstantValue::Int(Span::unknown(7u8.into())))
+        Some(&crate::ast::ConstantValue::Int(Span::unknown(7u8.into())))
     );
     Ok(())
 }

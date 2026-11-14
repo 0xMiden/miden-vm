@@ -1612,7 +1612,7 @@ mod tests {
     use {
         miden_assembly_syntax::ast::DebugVarLocation,
         miden_assembly_syntax::ast::Path as AstPath,
-        miden_assembly_syntax::ast::PathBuf,
+        crate::PathBuf,
         miden_assembly_syntax::ast::ProcedureName,
         miden_assembly_syntax::ast::QualifiedProcedureName,
     };

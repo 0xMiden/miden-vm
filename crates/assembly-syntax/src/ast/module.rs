@@ -37,7 +37,7 @@ use {
     super::Import,
     super::Item,
     super::ItemIndex,
-    super::Path,
+    crate::Path,
     super::Procedure,
     super::ProcedureName,
     super::QualifiedProcedureName,

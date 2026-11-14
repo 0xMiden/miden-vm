@@ -18,8 +18,8 @@ use {
 use {
     miden_assembly_syntax::MAX_CONTROL_FLOW_NESTING,
     miden_assembly_syntax::MAX_REPEAT_COUNT,
-    miden_assembly_syntax::ast::Ident,
-    miden_assembly_syntax::ast::Path,
+    crate::ast::Ident,
+    crate::Path,
     crate::diagnostics::WrapErr,
 };
 use {

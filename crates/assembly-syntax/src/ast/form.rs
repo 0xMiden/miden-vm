@@ -17,7 +17,7 @@ use {
     super::Ident,
     super::ImportDecl,
     super::Item,
-    super::Path,
+    crate::Path,
     super::Procedure,
     super::SubmoduleDecl,
     super::TypeAlias,

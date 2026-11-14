@@ -7,9 +7,9 @@ use {
 };
 
 use {
-    miden_assembly_syntax::ast::DebugInlineCallInfo,
-    miden_assembly_syntax::ast::DebugVarInfo,
-    miden_assembly_syntax::ast::Instruction,
+    crate::ast::DebugInlineCallInfo,
+    crate::ast::DebugVarInfo,
+    crate::ast::Instruction,
     crate::debuginfo::Location,
     crate::debuginfo::Span,
     crate::diagnostics::Report,

@@ -204,7 +204,7 @@ impl<'a> LoweringContext<'a> {
         span: SourceSpan,
         raw: &str,
     ) -> Result<Span<Arc<Path>>, ParsingError> {
-        let path = ast::PathBuf::new(&raw).map_err(|error| ParsingError::InvalidLibraryPath {
+        let path = crate::PathBuf::new(&raw).map_err(|error| ParsingError::InvalidLibraryPath {
             span,
             message: error.to_string(),
         })?;

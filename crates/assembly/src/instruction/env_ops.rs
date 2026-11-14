@@ -2,7 +2,7 @@ use core::ops::Range;
 
 use {
     miden_core::Felt,
-    miden_assembly_syntax::ast::Immediate,
+    crate::ast::Immediate,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
     crate::diagnostics::Report,

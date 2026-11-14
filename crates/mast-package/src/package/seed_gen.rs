@@ -13,7 +13,7 @@ use {
 use {
     miden_assembly_syntax::ast::DebugVarLocation,
     miden_assembly_syntax::ast::Path as AstPath,
-    miden_assembly_syntax::ast::PathBuf,
+    crate::PathBuf,
     miden_assembly_syntax::ast::types::ArrayType,
     miden_assembly_syntax::ast::types::CallConv,
     miden_assembly_syntax::ast::types::EnumType,

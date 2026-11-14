@@ -11,9 +11,9 @@ use miden_core::Word;
 pub use miden_assembly_syntax::parser;
 use {
     miden_assembly_syntax::Parse,
-    miden_assembly_syntax::Path,
-    miden_assembly_syntax::ast::Module,
-    miden_assembly_syntax::ast::ModuleKind,
+    crate::Path,
+    crate::ast::Module,
+    crate::ast::ModuleKind,
     crate::debuginfo::DefaultSourceManager,
     crate::debuginfo::SourceManager,
     crate::diagnostics::Report,
@@ -30,7 +30,7 @@ pub use {
 };
 #[cfg(feature = "testing")]
 use {
-    miden_assembly_syntax::ast::Form,
+    crate::ast::Form,
     crate::debuginfo::SourceFile,
 };
 use miden_core::program::Program;

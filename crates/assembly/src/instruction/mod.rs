@@ -1,6 +1,6 @@
 use {
-    miden_assembly_syntax::ast::ImmU16,
-    miden_assembly_syntax::ast::Instruction,
+    crate::ast::ImmU16,
+    crate::ast::Instruction,
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,
     crate::diagnostics::RelatedLabel,

@@ -37,7 +37,7 @@ use {
     super::remap_inline_ranges,
 };
 use {
-    crate::GlobalItemIndex,
+    crate::ast::GlobalItemIndex,
     crate::diagnostics::IntoDiagnostic,
     crate::diagnostics::Report,
     crate::linker::LinkLibrary,
@@ -393,7 +393,7 @@ impl MastForestBuilder {
         gid: GlobalItemIndex,
         library_id: Word,
         library: &LinkLibrary,
-        path: &miden_assembly_syntax::Path,
+        path: &crate::Path,
         source_node: Option<DebugSourceNodeId>,
         mast_root: Word,
     ) -> Result<Option<DebugFunctionIdx>, Report> {
