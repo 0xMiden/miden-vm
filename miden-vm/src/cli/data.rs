@@ -17,7 +17,7 @@ use {
     miden_assembly::diagnostics::Report,
     miden_assembly::diagnostics::WrapErr,
     miden_assembly::report,
-    miden_assembly::serde::Deserializable,
+    miden_core::serde::Deserializable,
 };
 use {
     miden_core::Felt,
@@ -31,7 +31,7 @@ use {
     miden_core::program::Program,
     miden_core::program::StackOutputs,
     miden_core::Word,
-    miden_vm::serde::SliceReader,
+    miden_core::serde::SliceReader,
 };
 use {
     serde::Deserialize,

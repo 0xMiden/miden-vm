@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 
-use miden_serde_utils::Deserializable;
+use crate::utils::Deserializable;
 use rocksdb as db;
 
 use {

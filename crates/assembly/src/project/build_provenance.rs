@@ -7,9 +7,9 @@ use {
 use miden_assembly_syntax::diagnostics::Report;
 use {
     miden_core::Word,
-    miden_core::serde::Deserializable,
-    miden_core::serde::Serializable,
-    miden_core::serde::SliceReader,
+    crate::serde::Deserializable,
+    crate::serde::Serializable,
+    crate::serde::SliceReader,
     miden_core::utils::hash_string_to_word,
 };
 use {
@@ -180,7 +180,7 @@ impl PackageBuildProvenance {
 }
 
 impl Serializable for PackageBuildProvenance {
-    fn write_into<W: miden_core::serde::ByteWriter>(&self, target: &mut W) {
+    fn write_into<W: crate::serde::ByteWriter>(&self, target: &mut W) {
         match self {
             Self::Path {
                 source_hash,
@@ -253,9 +253,9 @@ impl Serializable for PackageBuildProvenance {
 }
 
 impl Deserializable for PackageBuildProvenance {
-    fn read_from<R: miden_core::serde::ByteReader>(
+    fn read_from<R: crate::serde::ByteReader>(
         source: &mut R,
-    ) -> Result<Self, miden_core::serde::DeserializationError> {
+    ) -> Result<Self, crate::serde::DeserializationError> {
         match source.read_u8()? {
             0 => Ok(Self::Path {
                 source_hash: Word::read_from(source)?,
@@ -296,7 +296,7 @@ impl Deserializable for PackageBuildProvenance {
                     trim_paths: source.read_bool()?,
                 },
             }),
-            invalid => Err(miden_core::serde::DeserializationError::InvalidValue(format!(
+            invalid => Err(crate::serde::DeserializationError::InvalidValue(format!(
                 "invalid project source provenance tag '{invalid}'"
             ))),
         }

@@ -48,9 +48,9 @@ use {
 };
 
 use {
-    miden_serde_utils::Deserializable,
-    miden_serde_utils::DeserializationError,
-    miden_serde_utils::Serializable,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
 };
 use num::Integer;
 use rayon::prelude::*;

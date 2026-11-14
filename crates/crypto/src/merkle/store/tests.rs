@@ -3,9 +3,9 @@ use assert_matches::assert_matches;
 use seq_macro::seq;
 #[cfg(feature = "std")]
 use {
-    super::Deserializable,
-    super::DeserializationError,
-    super::Serializable,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
+    crate::utils::Serializable,
     alloc::boxed::Box,
     std::error::Error,
 };

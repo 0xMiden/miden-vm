@@ -10,11 +10,11 @@ use {
     super::super::PartialMerkleTree,
     super::super::int_to_node,
     super::super::store::MerkleStore,
-    super::Deserializable,
-    super::DeserializationError,
+    crate::utils::Deserializable,
+    crate::utils::DeserializationError,
     super::InnerNodeInfo,
     super::MerkleProof,
-    super::Serializable,
+    crate::utils::Serializable,
     crate::Word,
 };
 

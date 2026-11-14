@@ -9,9 +9,9 @@ use miden_serde_utils::SliceReader;
 use proptest::prelude::*;
 
 use {
-    super::Deserializable,
+    miden_serde_utils::Deserializable,
     crate::Felt,
-    super::Serializable,
+    miden_serde_utils::Serializable,
     crate::Word,
 };
 use crate::word;

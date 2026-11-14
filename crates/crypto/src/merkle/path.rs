@@ -334,7 +334,7 @@ mod tests {
     /// These cases cover the length-prefix boundaries explicitly, including the maximum.
     #[test]
     fn serialization_roundtrip_boundary_lengths() {
-        use miden_serde_utils::Deserializable;
+        use crate::utils::Deserializable;
 
         use crate::merkle::MerklePath;
 

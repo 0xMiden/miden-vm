@@ -45,7 +45,7 @@ use {
     miden_core::operations::AssemblyOp,
     miden_core::operations::Operation,
     miden_core::program::KernelDescriptor,
-    miden_core::serde::Serializable,
+    crate::serde::Serializable,
 };
 use {
     miden_mast_package::ConstantExport,
