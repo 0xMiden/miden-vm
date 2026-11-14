@@ -83,7 +83,6 @@ use {
 };
 use {
     miden_core::Word,
-    miden_core::advice::AdviceMap,
     miden_core::program::KernelDescriptor,
 };
 use crate::package::Package as MastPackage;

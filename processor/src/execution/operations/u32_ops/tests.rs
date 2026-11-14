@@ -34,7 +34,6 @@ use {
     crate::execution::operations::execute_op,
     crate::FastProcessor,
     crate::fast::NoopTracer,
-    crate::operation::Operation,
     crate::operation::OperationError,
 };
 
