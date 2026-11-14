@@ -15,9 +15,9 @@ x * BaseExpr::from(Felt::from_u64(7))
 They should normalize to the same useful native computation. Similarly, `(a + b) + c` and
 `a + (b + c)` may have different circuit layouts while evaluating the same polynomial.
 
-**Status:** A1–A8 are approved for implementation as individual commits. The unified expression
-foundation is checkpointed. Completion is tracked in the table and checklist below; examples in
-pending items describe the approved target behavior.
+**Status:** complete. The foundation is checkpointed in `d666c968a`, followed by one commit for
+each of A1–A8. The examples below describe the resulting implementation; abbreviated snippets
+omit unrelated code. Validation results are recorded under A8.
 
 ## Direction and scope
 
@@ -107,11 +107,11 @@ rule table, and duplicate emitter/preparation path have already been removed.
 | A5 | Delete old PVM proof-version fixtures; preserve rejection coverage with current proofs | Implemented |
 | A6 | Consolidate current documentation and remove duplicated/historical implementation prose | Implemented |
 | A7 | Add compact current normalization, conversion, wire, and compiled-evaluation regression tables | Implemented |
-| A8 | Regenerate affected current artifacts and run focused validation | Approved, pending |
+| A8 | Regenerate affected current artifacts and run focused validation | Implemented |
 
-A1 normalizes the representation; A2 updates its source-identity namespace in a separate commit. Establish the semantic checks in A3/A7 before
-removing their historical/structural predecessors in A4/A5. A6 can run independently; A8 is
-last. The IDs identify the separate implementation commits.
+A1 normalizes the representation; A2 updates its source-identity namespace. A3 establishes
+independent semantic checks, A4/A5 remove archives, A6 consolidates documentation, and A7 extends
+current regressions. A8 refreshes affected outputs and validates the completed change.
 
 ### A1. Normalize coefficients instead of recording the original overload
 
@@ -275,7 +275,7 @@ assert_eq!(tree_root, ir_root);
 This requires a second test-only lowering implementation that reproduces node order. It is
 stronger than the intended polynomial contract.
 
-**After — semantic test sketch:**
+**After — semantic check, abbreviated:**
 
 ```rust
 let expected = eval_authored_air_concretely(&air, &frame, &inputs);
@@ -381,8 +381,8 @@ assert!(verify_deferred(&current_proof, incorrect_root).is_err());
 // A test-only altered relation digest also rejects this same current proof.
 ```
 
-Reuse current proof generation/fixtures; do not add a production compatibility registry.
-Keep `fixture_root` and shared imports if current tests still need them.
+The replacement reuses the current fixture and a test-only altered configuration. No production
+compatibility registry is added; `fixture_root` remains in use by current tests.
 
 **Required behavior:** archived versions are gone; current valid proofs verify; incorrect
 current statements/bindings are rejected. Current `v1_0` fixtures remain active correctness
@@ -400,13 +400,12 @@ PR_DESCRIPTION.md                           rationale, examples, and this approv
 symbolic/LICENSE-MIT + LICENSE-APACHE        existing upstream license texts
 ```
 
-Remove `symbolic/README.md` after moving its essential provenance and useful current guidance.
-Update the four copied-source headers that currently point to it. Keep upstream attribution,
-SPDX notices, and the existing license files. The old source-file hash table is optional
-historical material and will not be retained beside the implementation.
+Removed `symbolic/README.md` after moving its essential provenance and current guidance.
+The four copied-source headers now point to module documentation. Upstream attribution, SPDX
+notices, and the existing license files remain. The old source-file hash table is removed; the upstream attribution and licenses remain.
 
-Retire these historical planning/migration documents after moving any still-useful current
-API guidance into the locations above:
+Retired these historical planning/migration documents after moving useful current API guidance
+into the locations above:
 
 ```text
 crates/stark/core/docs/native-air-migration.md
@@ -415,10 +414,9 @@ crates/stark/core/docs/native-air-goal-prompt.md
 crates/stark/core/docs/native-air-completion.md
 ```
 
-Trim the baseline-only and archived-oracle sections from `native-air-design.md`. Update
-references in that guide, `CHANGELOG.md`, and
-`crates/air/source/docs/expression-source-review.md`; remove dangling links and obsolete
-claims that historical comparisons are required.
+The current architecture guide replaces baseline-only and archived-oracle sections. References
+in `CHANGELOG.md` and `crates/air/source/docs/expression-source-review.md` now resolve to current
+documentation; obsolete historical-comparison requirements are removed.
 
 **Required behavior:** one current architecture guide remains; API contracts are near their
 owners; source provenance remains available; no link points to deleted documentation.
@@ -464,12 +462,22 @@ No benchmark is introduced as part of these tests.
 
 ### A8. Regenerate current artifacts and validate the final state
 
-After the code changes, regenerate whatever current outputs change: descriptors/source
-fingerprints, the compiled preparation golden, circuit/shape snapshots, circuit and relation
-digests, MASM constants, verifier roots, and current proof fixtures as necessary. Their old
-bytes or node counts do not constrain the new compiler.
+Generated descriptors were rebuilt with normalized operands and `miden.native-air.source\0`.
+The compiled preparation golden was regenerated. Its only changes are three local binding names
+and their uses; arithmetic, cache slots, and assertion order are unchanged.
 
-Keep the current consistency checks:
+Both current artifact generators pass in `--check` mode:
+
+```sh
+cargo run --offline --locked -p miden-core-lib --features constraints-tools \
+  --bin regenerate-constraints -- --check
+cargo run --offline --locked -p miden-precompiles-stark --features constants-tools \
+  --bin pvm-constants-regen -- --check
+```
+
+Current circuit shapes/digests, relation digests, MASM constants, verifier roots, and proof bytes
+need no further regeneration after the foundation checkpoint. Their current consistency checks
+remain active:
 
 ```text
 current encoded ACE stream -> current circuit digest
@@ -478,21 +486,26 @@ current compiled verifier -> current declared verifier root
 current kernel + preprocessing -> valid setup association
 ```
 
-The symbolic schema's current-version discriminator and checked decoding can remain. Do not
-add readers for older schemas or delete unrelated proof-transport version handling under this
-AIR cleanup.
+The current symbolic schema discriminator and checked decoding remain. No legacy symbolic reader
+was added, and unrelated proof-transport version handling remains outside this cleanup.
 
-Run focused tests for the affected core/compiler, generated scalar/packed evaluation,
-preparation, current ACE, and proof/binding paths. Run Clippy, affected `no_std` checks,
-doctests, scoped formatting, whitespace checks, and searches for removed names/dead links.
-Rust compilation/testing remains subject to the repository's AC/battery guards.
+Observed validation in this implementation session (runs overlap; counts are per run):
 
-The previous implementation passed 93 selected core/compiler tests and 39 production AIR
-checks, plus Clippy, host `no_std`, doctests, and scoped formatting. Those are baseline results;
-they do not validate this unimplemented approval plan. Record the actual new results after
-A1–A7, rather than expecting the old test count to remain fixed.
+| Check | Result |
+| --- | --- |
+| Core/compiler, operation fixture, and preparation-session checks | 105 passed |
+| ACE and VM/PVM generated-source checks, including current circuit/setup pins | 90 passed; 2 existing timing tests skipped |
+| Current input fixture and current-proof binding checks | 12 passed |
+| Exact regenerated golden, capture, degree, row, and auxiliary checks | 14 passed |
+| Final current VM/PVM proof/advice, verifier roots, and affected helper checks | 9 passed |
+| Core doctests, including typed-domain compile failures | 3 passed; 2 existing examples ignored |
+| Clippy: core, compiler, ACE, generated AIR, precompile backend; libraries/tests with warnings denied | Passed |
+| Host `no_std`: `miden-stark` and `miden-air` | Passed |
+| Scoped Rust formatting, whitespace, removed-name and documentation-link checks | Passed |
 
-## Approval checklist
+All Rust builds and tests passed the required AC and heavy-work guards. Benchmarks remain deferred.
+
+## Implementation checklist
 
 - [x] A1 — normalize constants/conversions and infer coefficient dispatch; delete overload metadata.
 - [x] A2 — keep a clear structural source/setup identity, with no polynomial-canonical or historical-version promise.
@@ -501,7 +514,6 @@ A1–A7, rather than expecting the old test count to remain fixed.
 - [x] A5 — delete old PVM proof-version artifacts; retain current negative verification coverage.
 - [x] A6 — remove duplicated/historical documentation and preserve minimal provenance.
 - [x] A7 — restore compact current normalization, conversion, persistence, and execution regressions.
-- [ ] A8 — regenerate affected current outputs and validate the completed implementation.
+- [x] A8 — regenerate affected current outputs and validate the completed implementation.
 
-The checklist records implementation progress. Final artifact regeneration and validation are
-recorded under A8 after the preceding changes are complete.
+Each checklist item corresponds to one implementation commit after the foundation checkpoint.

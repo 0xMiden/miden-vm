@@ -224,10 +224,10 @@ impl<F: Field, EF: ExtensionField<F>> RawExpr<F, EF> {
     fn node(domain: ExpressionDomain, op: Op<F, EF>) -> Result<Self, ExpressionError> {
         validate_op(domain, &op)?;
         // Validate the encoded source/result domains before erasing a constant lift.
-        if let Op::Lift(value) = &op {
-            if let Some(value) = value.constant() {
-                return Ok(Self::from_constant(domain, value));
-            }
+        if let Op::Lift(value) = &op
+            && let Some(value) = value.constant()
+        {
+            return Ok(Self::from_constant(domain, value));
         }
         let degree_multiple = traversal::op_degree(&op, |value| Ok(value.degree_multiple()))?;
         Ok(RawExpr::Node(Arc::new(Node { domain, degree_multiple, op })))

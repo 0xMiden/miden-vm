@@ -380,7 +380,7 @@ pub fn eval_encoded_circuit(circuit: &AceCircuit<QuadFelt>, inputs: &[QuadFelt])
     for (index, &input) in inputs.iter().enumerate() {
         values[num_nodes - 1 - index] = Some(input);
     }
-    for (index, pair) in stream[..constant_felts].chunks_exact(2).enumerate() {
+    for (index, pair) in stream[..constant_felts].as_chunks::<2>().0.iter().enumerate() {
         values[num_nodes - 1 - inputs.len() - index] = Some(QuadFelt::new([pair[0], pair[1]]));
     }
     for (index, &instruction) in stream[constant_felts..].iter().enumerate() {

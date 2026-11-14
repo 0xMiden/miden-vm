@@ -119,7 +119,7 @@ impl ProverAir<QuadFelt> for fixture::AllInputs {
     ) -> Result<AuxTrace<QuadFelt>, Self::Error> {
         let mut accumulator = inputs.challenges[0] + inputs.public_values[0];
         let mut values = Vec::with_capacity(inputs.main.values.len() / 2);
-        for row in inputs.main.values.chunks_exact(2) {
+        for row in inputs.main.values.as_chunks::<2>().0 {
             values.push(accumulator);
             accumulator += row[0];
         }
