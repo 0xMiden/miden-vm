@@ -18,7 +18,7 @@ use miden_assembly_syntax::Report;
 pub use miden_assembly_syntax::{
     debuginfo::Span,
     semver,
-    semver::{Version as SemVer, VersionReq},
+    semver::{Error as SemVerError, Version as SemVer, VersionReq},
 };
 pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
@@ -32,7 +32,7 @@ pub use self::resolver::{
     VersionSet,
 };
 pub use self::{
-    version::{InvalidVersionError, SemVerError, Version},
+    version::{InvalidVersionError, Version},
     version_requirement::VersionRequirement,
 };
 

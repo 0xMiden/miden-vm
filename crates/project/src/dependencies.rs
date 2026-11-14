@@ -5,11 +5,10 @@ use alloc::{format, sync::Arc, vec};
 use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Spanned;
-pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
+use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, VersionReq, VersionRequirement, miette};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
