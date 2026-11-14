@@ -1,7 +1,7 @@
 mod module;
 
 use {
-    miden_assembly_syntax::ast::GlobalItemIndex,
+    crate::ast::GlobalItemIndex,
     miden_assembly_syntax::module::ItemInfo,
 };
 

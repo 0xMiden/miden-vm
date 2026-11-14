@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use {
-    miden_assembly_syntax::Path,
+    crate::Path,
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
     crate::diagnostics::Diagnostic,

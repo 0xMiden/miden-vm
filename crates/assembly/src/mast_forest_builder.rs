@@ -6,7 +6,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::ast::DebugInlineCallInfo,
+    crate::ast::DebugInlineCallInfo,
     crate::debuginfo::FileLineCol,
     crate::debuginfo::SourceManager,
 };
@@ -48,7 +48,7 @@ use {
 };
 
 use {
-    super::GlobalItemIndex,
+    crate::ast::GlobalItemIndex,
     super::LinkerError,
     super::Procedure,
 };
@@ -625,7 +625,7 @@ impl MastForestBuilder {
     pub(crate) fn record_exported_function(
         &mut self,
         gid: GlobalItemIndex,
-        path: &miden_assembly_syntax::Path,
+        path: &crate::Path,
     ) {
         let Some(index) = self.procedure_function_index(gid) else {
             return;
@@ -1222,7 +1222,7 @@ impl MastForestBuilder {
         procedure: &Procedure,
         source_manager: &dyn SourceManager,
     ) -> Result<(), Report> {
-        use miden_assembly_syntax::ast::types::Type;
+        use crate::ast::types::Type;
 
         let source_name = procedure.source_name_fully_qualified(source_manager)?;
         if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
@@ -1803,8 +1803,8 @@ mod tests {
     };
 
     use {
-        miden_assembly_syntax::ast::DebugVarInfo,
-        miden_assembly_syntax::ast::DebugVarLocation,
+        crate::ast::DebugVarInfo,
+        crate::ast::DebugVarLocation,
         crate::debuginfo::ByteIndex,
         crate::debuginfo::ColumnNumber,
         crate::debuginfo::LineNumber,
@@ -1822,7 +1822,7 @@ mod tests {
         miden_mast_package::Package,
         miden_mast_package::PackageExport,
         miden_mast_package::PackageId,
-        miden_mast_package::PathBuf,
+        crate::PathBuf,
         miden_mast_package::ProcedureExport,
         miden_mast_package::Section,
         miden_mast_package::SectionId,

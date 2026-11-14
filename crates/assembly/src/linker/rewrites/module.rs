@@ -6,7 +6,7 @@ use {
 use core::ops::ControlFlow;
 
 use {
-    miden_assembly_syntax::ast::constants::eval::CachedConstantValue,
+    crate::ast::constants::eval::CachedConstantValue,
     crate::diagnostics::RelatedError,
     miden_assembly_syntax::module::ItemInfo,
     miden_assembly_syntax::sema::ConstEvalVisitor,
@@ -17,7 +17,7 @@ use {
 };
 
 use {
-    crate::ModuleIndex,
+    crate::ast::ModuleIndex,
     crate::debuginfo::SourceFile,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,

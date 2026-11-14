@@ -3,7 +3,7 @@ use {
     alloc::sync::Arc,
 };
 
-use miden_assembly_syntax::ast;
+use crate::ast;
 use {
     crate::mast::MastForest,
     crate::mast::MastForestRootMap,

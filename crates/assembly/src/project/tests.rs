@@ -6,7 +6,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::ast::DebugVarLocation,
+    crate::ast::DebugVarLocation,
     miden_assembly_syntax::source_file,
 };
 use {
@@ -390,7 +390,7 @@ fn debug_bearing_static_package(
     let mut exports = Vec::new();
     let mut module_paths = Vec::new();
     let export_path =
-        miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
+        crate::PathBuf::new(export).expect("test export path should parse");
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
     push_export_module_path(&mut module_paths, &export_path);
@@ -400,7 +400,7 @@ fn debug_bearing_static_package(
             .expect("test package marker block should build");
         forest.make_root(marker_root);
         let marker_digest = forest[marker_root].digest();
-        let marker_path = miden_assembly_syntax::ast::PathBuf::new(marker_export)
+        let marker_path = crate::PathBuf::new(marker_export)
             .expect("test marker export path should parse");
         let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
         let marker_path = Arc::from(marker_path.into_boxed_path());
@@ -458,11 +458,11 @@ fn debug_bearing_static_package(
 }
 
 fn push_export_module_path(
-    module_paths: &mut Vec<Arc<miden_assembly_syntax::ast::Path>>,
-    export_path: &Arc<miden_assembly_syntax::ast::Path>,
+    module_paths: &mut Vec<Arc<crate::Path>>,
+    export_path: &Arc<crate::Path>,
 ) {
     let module_path = export_path.parent().expect("export path should have a module path");
-    let module_path: Arc<miden_assembly_syntax::ast::Path> =
+    let module_path: Arc<crate::Path> =
         Arc::from(module_path.to_path_buf().into_boxed_path());
     if !module_paths.iter().any(|path| path.as_ref() == module_path.as_ref()) {
         module_paths.push(module_path);

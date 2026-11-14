@@ -8,12 +8,12 @@ use {
 };
 
 use {
-    miden_assembly_syntax::Path,
-    miden_assembly_syntax::ast,
-    miden_assembly_syntax::ast::GlobalItemIndex,
-    miden_assembly_syntax::ast::Ident,
-    miden_assembly_syntax::ast::ImportKind,
-    miden_assembly_syntax::ast::Visibility,
+    crate::Path,
+    crate::ast,
+    crate::ast::GlobalItemIndex,
+    crate::ast::Ident,
+    crate::ast::ImportKind,
+    crate::ast::Visibility,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
     crate::debuginfo::Spanned,

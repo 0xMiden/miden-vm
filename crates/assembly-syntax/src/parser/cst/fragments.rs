@@ -37,7 +37,7 @@ use {
     crate::Path,
     crate::ast,
     crate::ast::MAX_TYPE_EXPR_NESTING,
-    crate::ast::PathBuf,
+    crate::PathBuf,
     crate::ast::types::AddressSpace,
     crate::ast::types::Type,
     crate::ast::types::TypeRepr,

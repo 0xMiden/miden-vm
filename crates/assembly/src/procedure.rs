@@ -1,13 +1,13 @@
 use alloc::sync::Arc;
 
 use {
-    miden_assembly_syntax::ast::Attribute,
-    miden_assembly_syntax::ast::AttributeSet,
-    miden_assembly_syntax::ast::MetaExpr,
-    miden_assembly_syntax::ast::Path,
-    miden_assembly_syntax::ast::PathBuf,
-    miden_assembly_syntax::ast::Visibility,
-    miden_assembly_syntax::ast::types::FunctionType,
+    crate::ast::Attribute,
+    crate::ast::AttributeSet,
+    crate::ast::MetaExpr,
+    crate::Path,
+    crate::PathBuf,
+    crate::ast::Visibility,
+    crate::ast::types::FunctionType,
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Spanned,
@@ -16,7 +16,7 @@ use {
 use miden_core::Word;
 
 use {
-    super::GlobalItemIndex,
+    crate::ast::GlobalItemIndex,
     super::assembler::MAX_PROC_LOCALS,
     super::assembler::error::AssemblerError,
     super::mast_forest_builder::MastNodeRef,
@@ -366,10 +366,10 @@ mod tests {
     };
 
     use {
-        miden_assembly_syntax::PathBuf,
-        miden_assembly_syntax::ast::Attribute,
-        miden_assembly_syntax::ast::Ident,
-        miden_assembly_syntax::ast::MetaExpr,
+        crate::PathBuf,
+        crate::ast::Attribute,
+        crate::ast::Ident,
+        crate::ast::MetaExpr,
         crate::debuginfo::DefaultSourceManager,
         crate::debuginfo::SourceLanguage,
         crate::debuginfo::Uri,

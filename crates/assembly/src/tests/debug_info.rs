@@ -8,7 +8,7 @@ fn replace_nops_with_named_inline_call_markers(
     procedure: &mut Procedure,
     markers: &[Option<&str>],
 ) -> Result<(), Report> {
-    use miden_assembly_syntax::ast::DebugInlineCallInfo;
+    use crate::ast::DebugInlineCallInfo;
 
     let mut markers = markers.iter();
     for op in procedure.body_mut().iter_mut() {

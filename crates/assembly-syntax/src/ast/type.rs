@@ -24,7 +24,7 @@ use {
     super::GlobalItemIndex,
     super::Ident,
     super::ItemIndex,
-    super::Path,
+    crate::Path,
     super::SymbolResolution,
     super::SymbolResolutionError,
     super::Visibility,

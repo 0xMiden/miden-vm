@@ -14,7 +14,7 @@ use {
 };
 
 use {
-    miden_assembly_syntax::ast::ModuleKind,
+    crate::ast::ModuleKind,
     crate::diagnostics::Report,
 };
 use crate::serde::Deserializable;

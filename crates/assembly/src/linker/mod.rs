@@ -63,17 +63,17 @@ use {
 
 use {
     crate::diagnostics::Report,
-    miden_assembly_syntax::ast,
-    miden_assembly_syntax::ast::AttributeSet,
-    miden_assembly_syntax::ast::GlobalItemIndex,
-    miden_assembly_syntax::ast::InvocationTarget,
-    miden_assembly_syntax::ast::ItemIndex,
-    miden_assembly_syntax::ast::Module,
-    miden_assembly_syntax::ast::ModuleIndex,
-    miden_assembly_syntax::ast::Path,
-    miden_assembly_syntax::ast::SymbolResolution,
-    miden_assembly_syntax::ast::Visibility,
-    miden_assembly_syntax::ast::types,
+    crate::ast,
+    crate::ast::AttributeSet,
+    crate::ast::GlobalItemIndex,
+    crate::ast::InvocationTarget,
+    crate::ast::ItemIndex,
+    crate::ast::Module,
+    crate::ast::ModuleIndex,
+    crate::Path,
+    crate::ast::SymbolResolution,
+    crate::ast::Visibility,
+    crate::ast::types,
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
@@ -992,7 +992,7 @@ impl Linker {
         module_index: ModuleIndex,
         ty: &ast::FunctionType,
     ) -> Result<Arc<types::FunctionType>, LinkerError> {
-        use miden_assembly_syntax::ast::TypeResolver;
+        use crate::ast::TypeResolver;
 
         let cc = ty.cc.clone();
         let mut args = Vec::with_capacity(ty.args.len());
@@ -1051,8 +1051,8 @@ impl Linker {
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
         use {
-            miden_assembly_syntax::ast::TypeResolver,
-            miden_assembly_syntax::ast::constants::ConstEnvironment,
+            crate::ast::TypeResolver,
+            crate::ast::constants::ConstEnvironment,
         };
 
         let symbol_resolver = SymbolResolver::new(self);
@@ -1156,14 +1156,14 @@ mod tests {
     };
 
     use {
-        miden_assembly_syntax::ast::Ident,
-        miden_assembly_syntax::ast::InvocationTarget,
-        miden_assembly_syntax::ast::InvokeKind,
-        miden_assembly_syntax::ast::ItemIndex,
-        miden_assembly_syntax::ast::Path,
-        miden_assembly_syntax::ast::SymbolResolutionError,
-        miden_assembly_syntax::ast::Visibility,
-        miden_assembly_syntax::ast::types,
+        crate::ast::Ident,
+        crate::ast::InvocationTarget,
+        crate::ast::InvokeKind,
+        crate::ast::ItemIndex,
+        crate::Path,
+        crate::ast::SymbolResolutionError,
+        crate::ast::Visibility,
+        crate::ast::types,
         crate::debuginfo::SourceSpan,
         crate::debuginfo::Span,
         miden_assembly_syntax::module::ItemInfo,

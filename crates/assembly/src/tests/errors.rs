@@ -69,12 +69,12 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
     };
 
     use {
-        miden_assembly_syntax::ast::DebugVarInfo,
-        miden_assembly_syntax::ast::DebugVarLocation,
-        miden_assembly_syntax::ast::Instruction,
-        miden_assembly_syntax::ast::Op,
-        miden_assembly_syntax::ast::types::ArrayType,
-        miden_assembly_syntax::ast::types::Type,
+        crate::ast::DebugVarInfo,
+        crate::ast::DebugVarLocation,
+        crate::ast::Instruction,
+        crate::ast::Op,
+        crate::ast::types::ArrayType,
+        crate::ast::types::Type,
         crate::debuginfo::SourceSpan,
         crate::debuginfo::Span,
     };

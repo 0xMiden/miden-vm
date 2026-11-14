@@ -1,10 +1,10 @@
 use alloc::sync::Arc;
 
 use {
-    miden_assembly_syntax::ast::InvocationTarget,
-    miden_assembly_syntax::ast::InvokeKind,
-    miden_assembly_syntax::ast::Path,
-    miden_assembly_syntax::ast::SymbolResolution,
+    crate::ast::InvocationTarget,
+    crate::ast::InvokeKind,
+    crate::Path,
+    crate::ast::SymbolResolution,
     crate::debuginfo::SourceManager,
     crate::debuginfo::SourceSpan,
     crate::debuginfo::Span,
@@ -14,9 +14,9 @@ use {
 use miden_core::Word;
 
 use {
-    crate::GlobalItemIndex,
+    crate::ast::GlobalItemIndex,
     crate::LinkerError,
-    crate::ModuleIndex,
+    crate::ast::ModuleIndex,
     crate::linker::Linker,
     crate::linker::SymbolItem,
     crate::linker::namespaces::NamespaceGraph,

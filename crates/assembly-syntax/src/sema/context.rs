@@ -29,6 +29,7 @@ use {
     crate::ast::constants::ConstEvalError,
     crate::ast::constants::eval::CachedConstantValue,
     crate::ast::*,
+    crate::PathBuf,
 };
 
 /// This maintains the state for semantic analysis of a single [Module].
