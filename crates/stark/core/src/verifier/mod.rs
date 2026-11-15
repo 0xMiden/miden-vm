@@ -22,7 +22,8 @@
 //!
 //! All trace heights must satisfy the protocol's shape checks. An AIR's main trace must also match
 //! the fixed native height of its preprocessed trace, when present, as declared by
-//! [`LiftedAir::log_preprocessed_height`].
+//! [`PreprocessedSpec::log_height`](crate::air::native::PreprocessedSpec::log_height)
+//! in the source's [`AirSpec`](crate::air::native::AirSpec).
 //!
 //! Applications that additionally require a specific trace size must check
 //! [`StarkProofData::log_trace_heights`] against that requirement alongside successful
@@ -102,11 +103,12 @@ where
     MA: MultiAir<F, EF>,
     SC: StarkConfig<F, EF>,
 {
-    /// Bundle a config + statement with an optional preprocessed commitment.
+    /// Borrow a config and statement, owning an optional trusted setup identity.
     ///
-    /// The commitment must be `Some` exactly when some AIR declares preprocessed
-    /// columns; otherwise this errors with
-    /// [`PreprocessedValidationError::PresenceMismatch`].
+    /// The identity must be `Some` exactly when some AIR declares preprocessed columns;
+    /// otherwise this returns [`PreprocessedValidationError::PresenceMismatch`]. Its ordered
+    /// descriptor fingerprints and PCS configuration must match this instance. Construction
+    /// does not build fixed matrices or authenticate the caller's commitment.
     pub fn new(
         config: &'a SC,
         statement: &'a Statement<F, EF, MA>,

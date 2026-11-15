@@ -31,6 +31,64 @@ The system supports **multiple traces of different power-of-two heights of at
 least 2 rows**. Shorter traces are virtually lifted to the maximum height via
 LMCS upsampling, so the PCS and verifier operate on a single uniform view.
 
+## Native AIR API
+
+An equation author needs immutable row inputs and an assertion sink; a prover also needs a
+witness constructor, while optimized execution may prepare reusable terms. The
+[`air::native`](src/air/native/mod.rs) contracts keep these responsibilities separate:
+
+| Capability | Responsibility |
+|------------|----------------|
+| `LiftedAir` | Declares `AirSpec` and evaluates authored equations from borrowed `Frame` and `Inputs` into a `LiftedAirBuilder` sink |
+| `ProverAir<EF>` | Builds owned auxiliary columns and ordered exports from `AuxTraceInputs`, returning recoverable construction errors |
+| `AirKernel` | Provides a checked descriptor, cheap geometry, preparation and row execution; `DirectKernel` executes an authored source |
+| `EvaluationSession` | Borrows the exact uniform input slices and owns the kernel's prepared state for one evaluation pass |
+| `MultiAir` | Groups trusted kernels and supplies statement observation and external assertions |
+
+See the complete [source → DirectKernel → Statement example](src/air/statement.rs) and the
+[source/witness](src/air/native/contracts.rs) and [kernel/session](src/air/native/kernel.rs)
+contracts. The statement example demonstrates collection and observation; proving additionally
+requires a real witness implementation.
+
+Current/next rows are supplied by the caller, including the cyclic last-to-first pair. A filtered
+sink multiplies each emitted relation by its gate, retaining zero-gated assertions. Assertion
+class and global emission order determine alpha indexing; challenges, public inputs and exports
+keep their declared prefixes and order. Source configuration must stay immutable while its
+capture or descriptor is reused.
+
+Descriptors validate schema, expression addressing, assertion metadata and degree analysis.
+The per-proof execution plan checks actual-height degree capacity, quotient allocation and
+domains before transcript work. Generated evaluators, descriptors/geometry and ACE streams
+consume the same canonical authored capture. Native Rust kernels remain trusted code: a
+fingerprint associates a source configuration and does not prove an evaluator implements it.
+
+### Fixed setup ownership
+
+[`Preprocessed::build`](src/preprocessed.rs) validates and owns the raw fixed matrices and their
+committed tree, returning `Result<Option<_>>`; a collection without fixed data returns `Ok(None)`.
+Proving and `check_constraints` borrow the setup's raw matrices. Witness construction receives
+those matrices through `AuxTraceInputs`; lookup divisors are assumed nonzero, while malformed
+metadata or input dimensions produce errors.
+
+Verification owns an optional `SetupIdentity`, associating an already trusted commitment with
+ordered descriptor fingerprints and the PCS blowup/alignment configuration. Its construction
+and verifier setup do not construct tables. The caller supplies a trusted root; this identity
+does not authenticate arbitrary matrix contents or evaluator code.
+
+### Migrating custom AIRs
+
+| Previous interface | Native interface |
+|--------------------|------------------|
+| `BaseAir` dimensions and periodic/fixed metadata | `LiftedAir::spec` with `AirSpec` |
+| Combined builder input access and assertions | Separate borrowed `Frame`, uniform `Inputs`, and output-only sink |
+| `LiftedAir::EvalData`, `prepare(EvalInputs)` | `AirKernel` preparation bound through `EvaluationSession` |
+| Tuple auxiliary witness result | `ProverAir::build_aux_trace(AuxTraceInputs) -> Result<AuxTrace<_>, Error>` |
+| Implicit fixed-table construction by a witness helper | Setup construction followed by borrowed matrices |
+| Verifier commitment argument | Optional owned `SetupIdentity` |
+
+The [retained profiling entrypoints and deliberate workload removals](../../../benches/miden-bench/README.md)
+are documented with the benchmark crate.
+
 ## Notation
 
 - `N = 2^n`: maximum trace height across all traces in a proof.
@@ -61,13 +119,13 @@ See the "Mathematical background" in `src/prover/README.md` and
 
 ### Prover (`prove`)
 
-1. **Validate and bind instance shape** — Validate runtime inputs, call
-   `Statement::observe`, then observe the instance count and log trace heights
-   in instance order.
+1. **Validate and bind instance shape** — Validate runtime inputs and execution plan;
+   observe the optional trusted fixed-data commitment, call `Statement::observe`, then
+   observe the instance count and log trace heights in instance order.
 2. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
    rows, build LMCS tree. Send root.
 3. **Sample randomness** — Squeeze auxiliary randomness from the Fiat-Shamir
-   channel. Build and commit auxiliary traces.
+   channel. Build and commit auxiliary traces, then send ordered exports in proof order.
 4. **Sample challenges** — `alpha` (constraint folding) and `beta`
    (cross-trace accumulation).
 5. **Evaluate per-AIR quotients** — For each trace in ascending height order,
@@ -85,8 +143,9 @@ See the "Mathematical background" in `src/prover/README.md` and
 ### Verifier (`verify`)
 
 1. **Validate and bind instance shape** — Validate proof heights against the
-   AIRs, including their fixed preprocessing heights, call `Statement::observe`, then
-   observe the instance count and log trace heights in instance order.
+   AIRs, including fixed preprocessing heights and degree/allocation capacity; observe the
+   optional trusted fixed-data commitment, call `Statement::observe`, then observe the
+   instance count and log trace heights in instance order.
 2. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
 3. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
 4. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.
@@ -208,15 +267,16 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
 | `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy; `log_quotient_degree`, `DomainError` (incl. the `log_quotient_degree ≤ log_blowup` compat bound) |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
-| `src/prover/mod.rs` | `prove` — orchestration and protocol flow |
+| `src/prover/mod.rs` | `ProverInstance` — orchestration and protocol flow |
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |
-| `src/prover/constraints/` | Constraint evaluation (SIMD) and layout discovery |
+| `src/prover/constraints/` | Prepared kernel evaluation (SIMD) using descriptor assertion order |
 | `src/prover/periodic.rs` | `PeriodicLde` — precomputed periodic column LDEs |
 | `src/prover/quotient.rs` | Quotient upsampling, cyclic extension, and commitment |
-| `src/verifier/mod.rs` | `verify` — orchestration and identity check |
+| `src/verifier/mod.rs` | `VerifierInstance` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProofData`, `StarkProof` — wire artifact and structured parse-only view |
+| `src/plan.rs` | Checked per-proof quotient allocation, degree capacity, domains and instance/proof order |
 | `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
 | `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_stark::air::debug::assert_multi_air_valid` |
 
@@ -229,10 +289,11 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
   challenger. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two and at least 2 rows.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
-- **Quotient degree** — Derived per AIR from symbolic constraint-degree analysis
-  (`log_quotient_degree`); the proof uses the max over AIRs. Degree-2 AIRs are
-  valid and use the protocol's minimum quotient chunk count. Each AIR must
-  satisfy `log_quotient_degree(air) ≤ log_blowup`.
+- **Quotient allocation** — The conservative default chunk count is
+  `next_power_of_two(max(1, raw_max_degree - 1))`. A kernel may request a larger
+  power-of-two allocation; it cannot request less than that floor. Actual-height
+  descriptor analysis separately checks capacity, and the proof uses the maximum
+  allocation over its AIRs. Each allocation must fit the PCS blowup.
 - **Transcript ordering** — `Statement::observe` absorbs statement-owned inputs;
   prover and verifier then observe the instance count and log trace heights in
   instance order. All later observe/squeeze steps must match exactly.

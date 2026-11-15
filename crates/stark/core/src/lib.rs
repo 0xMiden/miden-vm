@@ -7,56 +7,49 @@
 //!
 //! The lifted STARK has three trust domains:
 //!
-//! 1. **AIR = trusted** — [`air::LiftedAir`] / [`air::MultiAir`] implementations are application
-//!    code. Structural mistakes, including an empty AIR collection, may panic; check them in
-//!    tests/setup with [`crate::air::debug::assert_multi_air_valid`] or
+//! 1. **AIR = trusted** — Authored [`air::native::LiftedAir`], executable
+//!    [`air::native::AirKernel`] and collection [`air::MultiAir`] implementations are
+//!    application code. The kernel must implement the relation described by its descriptor.
+//!    A descriptor fingerprint associates configuration; it does not authenticate evaluator code.
+//!    Structural diagnostics are available through [`air::debug::assert_multi_air_valid`] and
 //!    [`debug::assert_prover_setup`].
 //!
 //! 2. **Runtime inputs = validated** — [`Statement::new`](air::Statement::new),
-//!    [`ProverStatement::new`](air::ProverStatement::new), internal trace-order reconstruction, and
-//!    domain checks validate caller/proof shape data and return typed [`ProverError`] /
-//!    [`VerifierError`] values.
+//!    [`ProverStatement::new`](air::ProverStatement::new), setup association and the per-proof
+//!    execution plan validate caller/proof shapes, degree capacity, quotient allocation and
+//!    domains before transcript work. Failures return typed [`ProverError`] / [`VerifierError`].
 //!
-//! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors, constraint
-//!    mismatch, etc.).
+//! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors,
+//!    constraint mismatch, strict transcript consumption and external assertions).
 //!
 //! ## Validated at runtime
 //!
-//! Checked before cryptographic work begins: [`Statement::new`](air::Statement::new) /
-//! [`ProverStatement::new`](air::ProverStatement::new) for caller inputs and prover trace shape,
-//! internal trace-order reconstruction for proof/caller heights, and domain checks for
-//! `log_quotient_degree(air) ≤ log_blowup`:
-//!
-//! - **Shape well-formedness** — ≤ 256 instances, with the maximum LDE order `log_trace_height +
-//!   log_blowup` bounded by the field's two-adicity and the host's `usize` width.
-//! - **Compat** — `log_quotient_degree(air) ≤ log_blowup`, per AIR.
-//! - **Per-AIR instance dimensions** — public values length matches `num_public_values()`, trace
-//!   height is at least 2 rows, trace height ≥ max periodic column length, trace width matches
-//!   `width()` (prover-only), raw height is a power of two (prover-only), `aux_inputs.len() ≤
-//!   max_aux_inputs`.
-//! - **Preprocessed table ownership** — each preprocessed AIR's log trace height equals its
-//!   declared [`log_preprocessed_height`](air::LiftedAir::log_preprocessed_height) before deriving
-//!   proof order.
+//! - **Shape well-formedness** — At most 256 instances; power-of-two heights of at least 2 rows.
+//!   Maximum LDE order is bounded by the field's two-adicity and the host's `usize` width.
+//! - **Per-AIR dimensions** — Public inputs and main trace width match the descriptor schema;
+//!   each height supports its periodic columns and `aux_inputs` fits the collection's budget.
+//! - **Degree capacity** — Actual-height descriptor analysis must fit the kernel's conservative
+//!   quotient allocation, and that allocation must fit the PCS blowup.
+//! - **Preprocessed table ownership** — Each fixed-data AIR's main log height equals
+//!   [`PreprocessedSpec::log_height`](air::native::PreprocessedSpec::log_height) in its source
+//!   schema. Setup validates and owns the fixed matrices; witnesses and diagnostics borrow them.
+//!   [`VerifierInstance::new`] validates an optional owned [`SetupIdentity`] against ordered
+//!   fingerprints and PCS blowup/alignment, without constructing tables. The caller supplies an
+//!   already trusted commitment.
 //!
 //! ## Trusted AIR contracts
 //!
-//! These are AIR implementer responsibilities. Run [`debug::assert_prover_setup`] (or its
-//! components) from your test harness to catch structural mistakes early:
-//!
-//! 1. **AIR structural contract** — non-empty AIR collection, positive aux width, power-of-two
-//!    periodic column lengths, and matching override helpers. Checked by
-//!    [`crate::air::debug::assert_multi_air_valid`]. These are not typed `Statement::new` errors.
-//! 2. **Window size** — only transition window size 2.
-//! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
-//!    regardless of builder implementation.
-//! 4. **Aux trace output** —
-//!    [`build_aux_trace_with_preprocessed`](air::LiftedAir::build_aux_trace_with_preprocessed)
-//!    returns, per AIR, a trace of width `aux_width()`, height matching the main trace, and exactly
-//!    `num_aux_values()` aux values. A malformed output is caught by the prover (LDE/commit panic)
-//!    or by verification, since the verifier re-derives these shapes from the AIR contract.
-//! 5. **Sound [`Statement::eval_external`](air::Statement::eval_external)** — Returns cross-AIR
-//!    assertion values that are zero iff the proof's cross-AIR interactions are well-formed for the
-//!    given aux values and public inputs.
+//! - Source configuration stays immutable while capture or analyzed data is reused. Equation
+//!   structure, assertion class/global order and addressing cannot depend on input values or
+//!   the selected expression backend.
+//! - Row evaluation consumes immutable current/next rows, including the cyclic last-to-first
+//!   pair, separately from the assertion sink and uniform public/challenge/export inputs.
+//! - [`ProverAir::build_aux_trace`](air::native::ProverAir::build_aux_trace) returns owned
+//!   auxiliary columns with the declared width, the main trace's height and ordered exports.
+//!   Recoverable source/input failures are returned; successful output dimensions are trusted
+//!   construction invariants asserted by the prover. Lookup arithmetic assumes nonzero divisors.
+//! - [`Statement::eval_external`](air::Statement::eval_external) must return zero exactly when
+//!   the cross-AIR interactions are well formed for the supplied inputs, exports and heights.
 
 #![no_std]
 

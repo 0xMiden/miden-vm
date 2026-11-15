@@ -8,6 +8,11 @@ common compression equations, physical layout, lookup encoding, and trace coordi
 precompile adapters supply their bus mappings and controller, AEAD, or transcript interfaces.
 Common geometry helpers also live in `shared`.
 
+Authored equations implement `miden_stark::air::native::LiftedAir`; concrete auxiliary witnesses
+implement `ProverAir<EF>`. Setup owns fixed matrices and lends them to witness construction.
+See the [native AIR API](../../stark/core/README.md#native-air-api) and
+[generated runtime wrappers](../generated/README.md).
+
 `vm::MidenAir` evaluates handwritten constraints directly. The constraint compiler captures
 these definitions to generate the evaluators consumed by `miden-air`; independent checks
 compare the generated evaluators and degree metadata against this source. Production AIR
