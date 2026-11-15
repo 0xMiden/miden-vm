@@ -28,6 +28,8 @@
 
 use core::array;
 
+use p3_field::Dup;
+
 use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
     operations::opcodes,
@@ -137,13 +139,13 @@ where
         decoder_next: &DecoderCols<V>,
     ) -> Self
     where
-        V: Copy,
+        V: Dup,
         E: Algebra<V>,
     {
         // Op bit selectors: bits[k][v] returns bit k with value v (0=negated, 1=value).
         let bits: OpBits<E> = array::from_fn(|k| {
-            let val = decoder.op_bits[k];
-            [E::ONE - val, val.into()]
+            let val = decoder.op_bits[k].dup();
+            [E::ONE - val.dup(), val.into()]
         });
         // --- Precomputed multi-bit selector products ---
         // Each array is built iteratively: prev[i>>1] * bits[next_bit][i&1].
@@ -206,7 +208,7 @@ where
         // - 10: HORNEREXT      - 11: PUSH
         // - 12: DYNCALL        - 13: EVALCIRCUIT
         // - 14: LOGDEFERRED  - 15: (unused)
-        let degree5_extra: E = decoder.extra[0].into();
+        let degree5_extra: E = decoder.extra[0].dup().into();
         let degree5_op_flags: [E; NUM_DEGREE_5_OPS] =
             array::from_fn(|i| degree5_extra.clone() * b3210[i].clone());
 
@@ -217,9 +219,9 @@ where
         // - 2: SYSCALL        - 3: CALL
         // - 4: END            - 5: REPEAT
         // - 6: RESPAN         - 7: HALT
-        let degree4_extra = decoder.extra[1];
+        let degree4_extra = decoder.extra[1].dup();
         let degree4_op_flags: [E; NUM_DEGREE_4_OPS] =
-            array::from_fn(|i| b432[i].clone() * degree4_extra);
+            array::from_fn(|i| b432[i].clone() * degree4_extra.dup());
 
         // --- Composite flags ---
         let composite = Self::compute_composite_flags::<V>(
@@ -241,13 +243,14 @@ where
         // - RESPAN = 0b0111_1000 → prefix * b3' * (1-b2')
         // - HALT   = 0b0111_1100 → prefix * b3' * b2'
         let (end_next, repeat_next, respan_next, halt_next) = {
-            let prefix: E = decoder_next.extra[1].into();
-            let prefix = prefix * decoder_next.op_bits[4];
+            let prefix: E = decoder_next.extra[1].dup().into();
+            let prefix = prefix * decoder_next.op_bits[4].dup();
             // b32_next[i] = b3'[i>>1] * b2'[i&1], same pattern as b32 above.
             let b32_next: [E; 4] = {
-                let b3 = decoder_next.op_bits[3];
-                let b2 = decoder_next.op_bits[2];
-                let bits_next: [[E; 2]; 2] = [[E::ONE - b2, b2.into()], [E::ONE - b3, b3.into()]];
+                let b3 = decoder_next.op_bits[3].dup();
+                let b2 = decoder_next.op_bits[2].dup();
+                let bits_next: [[E; 2]; 2] =
+                    [[E::ONE - b2.dup(), b2.into()], [E::ONE - b3.dup(), b3.into()]];
                 array::from_fn(|i| bits_next[1][i >> 1].clone() * bits_next[0][i & 1].clone())
             };
             (
@@ -297,7 +300,7 @@ where
         stack: &StackCols<V>,
     ) -> CompositeFlags<E>
     where
-        V: Copy,
+        V: Dup,
         E: Algebra<V>,
     {
         let PreB0Flags {
@@ -322,7 +325,7 @@ where
 
         // --- END operation with loop flag ---
         let is_loop_end = decoder.end_block_flags().is_loop;
-        let end_loop_flag = op4(opcodes::END) * is_loop_end;
+        let end_loop_flag = op4(opcodes::END) * is_loop_end.dup();
 
         // ── No-shift flags ──────────────────────────────────────────
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
@@ -643,9 +646,9 @@ where
         // otherwise the decoder constraint will fail when executing that operation.
         let control_flow = E::sum_array::<6>(&[
             // +SPAN, JOIN, SPLIT, LOOP    — block starters
-            bits[3][0].clone() * bits[2][1].clone() * decoder.extra[0],
+            bits[3][0].clone() * bits[2][1].clone() * decoder.extra[0].dup(),
             // +END, REPEAT, RESPAN, HALT  — block transitions
-            bits[4][1].clone() * decoder.extra[1],
+            bits[4][1].clone() * decoder.extra[1].dup(),
             // +DYNCALL                    — dynamic execution
             op5(opcodes::DYNCALL),
             // +DYN                        — dynamic execution
@@ -657,8 +660,8 @@ where
         ]);
 
         // Flag if overflow table contains values
-        let overflow: E = stack.b0.into();
-        let overflow = (overflow - E::from_u64(16)) * stack.h0;
+        let overflow: E = stack.b0.dup().into();
+        let overflow = (overflow - E::from_u64(16)) * stack.h0.dup();
 
         CompositeFlags {
             no_shift,

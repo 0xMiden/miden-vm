@@ -133,3 +133,72 @@ impl PermutationAirBuilder for ConstraintEvalBuilder {
         &self.permutation_values
     }
 }
+
+/// Numerical immutable input context for helpers with a separate native assertion sink.
+pub(in crate::vm::constraints) struct ConstraintEvalContext {
+    selectors: miden_stark::air::native::Selectors<Felt>,
+}
+
+impl ConstraintEvalContext {
+    pub(in crate::vm::constraints) fn new() -> Self {
+        Self {
+            selectors: miden_stark::air::native::Selectors {
+                first: Felt::ZERO,
+                last: Felt::ZERO,
+                transition: Felt::ONE,
+            },
+        }
+    }
+
+    pub(in crate::vm::constraints) fn with_row_flags(
+        mut self,
+        first: bool,
+        last: bool,
+        transition: bool,
+    ) -> Self {
+        self.selectors = miden_stark::air::native::Selectors {
+            first: Felt::from_bool(first),
+            last: Felt::from_bool(last),
+            transition: Felt::from_bool(transition),
+        };
+        self
+    }
+
+    pub(in crate::vm::constraints) fn frame<'a>(
+        &self,
+        local: &'a super::columns::CoreCols<Felt>,
+        next: &'a super::columns::CoreCols<Felt>,
+    ) -> miden_stark::air::native::AirFrame<'a, Felt, QuadFelt> {
+        use miden_stark::air::native::{AirFrame, Rows};
+        AirFrame {
+            main: Rows {
+                current: local.as_slice(),
+                next: next.as_slice(),
+            },
+            preprocessed: Rows { current: &[], next: &[] },
+            aux: Rows { current: &[], next: &[] },
+            periodic: &[],
+            selectors: self.selectors,
+        }
+    }
+}
+
+/// Numerical sink with no row, selector, or uniform input access.
+#[derive(Default)]
+pub(in crate::vm::constraints) struct NativeConstraintEvalBuilder {
+    pub(in crate::vm::constraints) evaluations: Vec<QuadFelt>,
+}
+
+impl miden_stark::air::native::LiftedAirBuilder for NativeConstraintEvalBuilder {
+    type F = Felt;
+    type Expr = Felt;
+    type ExtExpr = QuadFelt;
+
+    fn emit_base(&mut self, value: Felt, _: miden_stark::air::native::ConstraintMeta<'_>) {
+        self.evaluations.push(value.into());
+    }
+
+    fn emit_ext(&mut self, value: QuadFelt, _: miden_stark::air::native::ConstraintMeta<'_>) {
+        self.evaluations.push(value);
+    }
+}

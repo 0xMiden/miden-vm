@@ -5,7 +5,10 @@ use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, WindowAccess},
+    air::{
+        ReductionError, WindowAccess,
+        native::migration::{LegacySink, SourceSnapshot},
+    },
     lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir},
 };
 
@@ -84,8 +87,16 @@ impl CoreAir {
         let op_flags =
             constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
-        constraints::enforce_core(builder, local, next, &op_flags);
-        constraints::public_inputs::enforce_main(builder, local);
+        let snapshot = SourceSnapshot::new(builder, 0, self.aux_width());
+        constraints::enforce_core(builder, &snapshot, local, next, &op_flags);
+        let frame = snapshot.frame();
+        let native_local: &CoreCols<AB::Expr> = frame.main.current.borrow();
+        constraints::public_inputs::enforce_main(
+            &frame,
+            snapshot.inputs(),
+            &mut LegacySink::new(builder),
+            native_local,
+        );
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);

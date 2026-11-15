@@ -1,4 +1,5 @@
 use miden_core::program::MIN_STACK_DEPTH;
+use p3_field::Dup;
 
 /// Stack columns in the main execution trace (19 columns).
 #[repr(C)]
@@ -14,10 +15,10 @@ pub struct StackCols<T> {
     pub h0: T,
 }
 
-impl<T: Copy> StackCols<T> {
+impl<T: Dup> StackCols<T> {
     /// Returns the stack element at position `idx` (0 = top of stack).
     pub fn get(&self, idx: usize) -> T {
-        self.top[idx]
+        self.top[idx].dup()
     }
 }
 

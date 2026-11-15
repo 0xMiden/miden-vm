@@ -35,11 +35,11 @@
 
 pub mod columns;
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, MidenAirBuilder,
+    CoreCols, NativeMidenAirBuilder,
     constraints::{constants::F_1, op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -48,30 +48,33 @@ use crate::vm::{
 
 /// Enforces system constraints.
 pub fn enforce_main<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // Clock: starts at 0, increments by 1
     {
-        let builder = &mut builder.when_first_row();
-        builder.assert_zero(local.system.clk);
-        builder.assert_zero(local.system.ctx);
-        for limb in local.system.fn_hash {
-            builder.assert_zero(limb);
+        let builder = &mut builder.when(frame.first_row());
+        builder.assert_zero(local.system.clk.dup());
+        builder.assert_zero(local.system.ctx.dup());
+        for limb in &local.system.fn_hash {
+            builder.assert_zero(limb.dup());
         }
     }
     {
-        builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
+        builder
+            .when(frame.transition())
+            .assert_eq(next.system.clk.dup(), local.system.clk.dup() + F_1);
     }
     // Clearing the deferred obligation is allowed only in the root memory context.
     // The application must ensure every route to this opcode settles the exact root first. See
     // docs/src/design/stack/precompiles.md#rules-for-safe-clearing.
     // The degree-7 opcode selector times ctx has degree 8.
-    builder.when(op_flags.clear_deferred()).assert_zero(local.system.ctx);
+    builder.when(op_flags.clear_deferred()).assert_zero(local.system.ctx.dup());
 
     let f_call = op_flags.call();
     let f_syscall = op_flags.syscall();
@@ -85,18 +88,18 @@ pub fn enforce_main<AB>(
 
     // Execution context transition constraints (see module doc for transition table)
     {
-        let ctx = local.system.ctx;
-        let ctx_next = next.system.ctx;
-        let clk = local.system.clk;
+        let ctx = local.system.ctx.dup();
+        let ctx_next = next.system.ctx.dup();
+        let clk = local.system.clk.dup();
 
         let call_dyncall_flag = f_call.dup() + f_dyncall.dup();
         let change_ctx_flag =
             f_call.dup() + f_syscall.dup() + f_dyncall.dup() + f_restore_caller_frame.dup();
         let default_flag = change_ctx_flag.not();
 
-        builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
-        builder.when(f_syscall).assert_zero(ctx_next);
-        builder.when_transition().when(default_flag).assert_eq(ctx_next, ctx);
+        builder.when(call_dyncall_flag).assert_eq(ctx_next.dup(), clk + F_1);
+        builder.when(f_syscall).assert_zero(ctx_next.dup());
+        builder.when(frame.transition()).when(default_flag).assert_eq(ctx_next, ctx);
     }
 
     // Function hash transition constraints (see module doc for transition table)
@@ -107,14 +110,16 @@ pub fn enforce_main<AB>(
         {
             let builder = &mut builder.when(f_load);
             for i in 0..4 {
-                builder.assert_eq(next.system.fn_hash[i], local.decoder.hasher_state[i]);
+                builder
+                    .assert_eq(next.system.fn_hash[i].dup(), local.decoder.hasher_state[i].dup());
             }
         }
 
-        builder
-            .when_transition()
-            .when(f_preserve)
-            .assert_eq_arrays(next.system.fn_hash, local.system.fn_hash);
+        let builder = &mut builder.when(frame.transition());
+        let builder = &mut builder.when(f_preserve);
+        for i in 0..4 {
+            builder.assert_eq(next.system.fn_hash[i].dup(), local.system.fn_hash[i].dup());
+        }
     }
 }
 
@@ -134,7 +139,7 @@ mod tests {
         constraints::{
             op_flags::{OpFlags, generate_test_row},
             system::columns::SystemCols,
-            test_utils::ConstraintEvalBuilder,
+            test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
         },
     };
 
@@ -161,8 +166,9 @@ mod tests {
         next.system.clk = Felt::ONE;
 
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        let mut builder = ConstraintEvalBuilder::new().with_row_flags(true, false, true);
-        enforce_main(&mut builder, &local, &next, &op_flags);
+        let context = ConstraintEvalContext::new().with_row_flags(true, false, true);
+        let mut builder = NativeConstraintEvalBuilder::default();
+        enforce_main(&context.frame(&local, &next), &mut builder, &local, &next, &op_flags);
 
         assert!(
             builder.evaluations.iter().any(|value| *value != QuadFelt::ZERO),
@@ -174,8 +180,9 @@ mod tests {
     /// constraints from these caller-frame restoration tests.
     fn eval_system(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        let mut builder = ConstraintEvalBuilder::new();
-        enforce_main(&mut builder, local, next, &op_flags);
+        let context = ConstraintEvalContext::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
+        enforce_main(&context.frame(local, next), &mut builder, local, next, &op_flags);
         builder.evaluations
     }
 

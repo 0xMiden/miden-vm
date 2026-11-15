@@ -2,9 +2,10 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing},
 };
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::LiftedAirBuilder;
+use p3_field::Dup;
 
-use crate::vm::{MidenAirBuilder, constraints::utils::BoolNot};
+use crate::vm::{NativeMidenAirBuilder, constraints::utils::BoolNot};
 
 /// Polynomial selectors derived from the two-column operation-batch encoding.
 pub(crate) struct OpBatchSelectors<E> {
@@ -42,26 +43,28 @@ where
 pub(super) fn enforce<AB>(
     builder: &mut AB,
     span_or_respan: AB::Expr,
-    full_batch: AB::Var,
-    batch_size_code: AB::Var,
-    hasher_state: &[AB::Var; 8],
+    full_batch: AB::Expr,
+    batch_size_code: AB::Expr,
+    hasher_state: &[AB::Expr; 8],
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    builder.assert_bool(full_batch);
+    builder.assert_bool(full_batch.dup());
     builder.assert_zero(
-        batch_size_code * (batch_size_code - AB::Expr::ONE) * (batch_size_code + AB::Expr::ONE),
+        batch_size_code.dup()
+            * (batch_size_code.dup() - AB::Expr::ONE)
+            * (batch_size_code.dup() + AB::Expr::ONE),
     );
-    builder.assert_zero(full_batch * batch_size_code);
+    builder.assert_zero(full_batch.dup() * batch_size_code.dup());
 
     // Pin each committed value directly on rows where the encoding is inactive.
     {
-        let builder = &mut builder.when(span_or_respan.not());
-        builder.assert_zero(full_batch);
-        builder.assert_zero(batch_size_code);
+        let builder = &mut builder.when(span_or_respan.dup().not());
+        builder.assert_zero(full_batch.dup());
+        builder.assert_zero(batch_size_code.dup());
     }
 
-    let selectors = OpBatchSelectors::new(full_batch.into(), batch_size_code.into());
+    let selectors = OpBatchSelectors::new(full_batch, batch_size_code);
     let groups_1 = selectors.groups_1(span_or_respan.clone());
     let groups_1_or_2 = groups_1.clone() + selectors.groups_2;
     let groups_1_or_2_or_4 = span_or_respan - selectors.groups_8;
@@ -70,7 +73,7 @@ pub(super) fn enforce<AB>(
     {
         let builder = &mut builder.when(groups_1_or_2_or_4);
         for lane in &hasher_state[4..8] {
-            builder.assert_zero(*lane);
+            builder.assert_zero(lane.dup());
         }
     }
 
@@ -78,12 +81,12 @@ pub(super) fn enforce<AB>(
     {
         let builder = &mut builder.when(groups_1_or_2);
         for lane in &hasher_state[2..4] {
-            builder.assert_zero(*lane);
+            builder.assert_zero(lane.dup());
         }
     }
 
     // Only 1 group: h1 is also unused.
-    builder.when(groups_1).assert_zero(hasher_state[1]);
+    builder.when(groups_1).assert_zero(hasher_state[1].dup());
 }
 
 #[cfg(test)]
@@ -97,7 +100,7 @@ mod tests {
 
     use super::{OpBatchSelectors, enforce};
     use crate::vm::{
-        constraints::test_utils::ConstraintEvalBuilder,
+        constraints::test_utils::NativeConstraintEvalBuilder,
         trace::decoder::{
             OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
         },
@@ -110,7 +113,7 @@ mod tests {
         [full_batch, batch_size_code]: [Felt; 2],
         hasher_state: [Felt; 8],
     ) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
         enforce(&mut builder, span_or_respan, full_batch, batch_size_code, &hasher_state);
         assert_eq!(builder.evaluations.len(), NUM_BATCH_CONSTRAINTS);
         builder.evaluations

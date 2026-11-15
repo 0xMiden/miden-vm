@@ -70,11 +70,11 @@
 pub(crate) mod batch;
 pub mod columns;
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, Felt, MidenAirBuilder,
+    CoreCols, Felt, NativeMidenAirBuilder,
     constraints::{
         constants::{F_1, F_128},
         decoder::columns::DecoderCols,
@@ -89,12 +89,13 @@ use crate::vm::{
 
 /// Enforces decoder main-trace constraints (entry point).
 pub fn enforce_main<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // --- Destructure current-row decoder columns ------------------------------------------------
     let DecoderCols {
@@ -107,10 +108,10 @@ pub fn enforce_main<AB>(
         full_batch,
         batch_size_code,
         extra,
-    } = local.decoder;
-    let [b0, b1, b2, b3, b4, b5, b6] = op_bits;
-    let [e0, e1] = extra;
-    let h0 = hasher_state[0];
+    } = &local.decoder;
+    let [b0, b1, b2, b3, b4, b5, b6] = op_bits.each_ref().map(Dup::dup);
+    let [e0, e1] = extra.each_ref().map(Dup::dup);
+    let h0 = hasher_state[0].dup();
 
     // End-block flags occupy hasher_state[4..8] during END operations.
     let end_flags = local.decoder.end_block_flags();
@@ -126,8 +127,8 @@ pub fn enforce_main<AB>(
         group_count: group_count_next,
         op_index: op_index_next,
         ..
-    } = next.decoder;
-    let h0_next = hasher_state_next[0];
+    } = &next.decoder;
+    let h0_next = hasher_state_next[0].dup();
 
     // --- Cached derived expressions -------------------------------------------------------------
     // These values appear in multiple constraint sections below.
@@ -136,7 +137,7 @@ pub fn enforce_main<AB>(
     // Inside a span, delta_group_count is constrained to be boolean (0 or 1).
     // When delta_group_count = 1, a group has been consumed (either a completed op group or a PUSH
     // immediate). When delta_group_count = 0, the current group is still being decoded.
-    let delta_group_count: AB::Expr = group_count - group_count_next;
+    let delta_group_count: AB::Expr = group_count.dup() - group_count_next.dup();
 
     // PUSH is the only operation with an immediate value. When PUSH executes, it consumes
     // an op group from h0 to read the immediate value pushed onto the stack, causing
@@ -156,26 +157,30 @@ pub fn enforce_main<AB>(
     // adjacent rows so that spans can only be entered and exited through the intended operations.
 
     // Execution starts outside any basic block.
-    builder.when_first_row().assert_zero(in_span);
+    builder.when(frame.first_row()).assert_zero(in_span.dup());
 
     // The in-span flag is binary.
-    builder.assert_bool(in_span);
+    builder.assert_bool(in_span.dup());
 
     // SPAN/RESPAN enter a span; END/RESPAN exit one.
     let enters_span = op_flags.span() + op_flags.respan();
     let exits_span_next = op_flags.end_next() + op_flags.respan_next();
-    let continues_span = in_span * exits_span_next.not();
+    let continues_span = in_span.dup() * exits_span_next.not();
 
     // Gate this row-to-row rule for defense in depth, so correctness does not rely on the cyclic
     // final-to-first instance. That instance would also hold: the final HALT row has in_span = 0,
     // and the first row independently constrains in_span = 0.
-    builder.when_transition().assert_eq(in_span_next, enters_span + continues_span);
+    builder
+        .when(frame.transition())
+        .assert_eq(in_span_next.dup(), enters_span + continues_span);
 
     // =============================================
     // Op-bit binary constraints
     // =============================================
     // Each opcode bit must be 0 or 1.
-    builder.assert_bools(op_bits);
+    for bit in op_bits {
+        builder.assert_bool(bit.dup());
+    }
 
     // =============================================
     // Extra columns (e0, e1) — degree reduction
@@ -187,12 +192,12 @@ pub fn enforce_main<AB>(
     //   e1 = b6 · b5               selects the "11" prefix (degree-4 ops)
 
     // e0 must equal b6 · (1 - b5) · b4.
-    let e0_expected = b6 * b5.into().not() * b4;
-    builder.assert_eq(e0, e0_expected);
+    let e0_expected = b6.dup() * b5.dup().not() * b4.dup();
+    builder.assert_eq(e0.dup(), e0_expected);
 
     // e1 must equal b6 · b5.
-    let e1_expected = b6 * b5;
-    builder.assert_eq(e1, e1_expected);
+    let e1_expected = b6.dup() * b5.dup();
+    builder.assert_eq(e1.dup(), e1_expected);
 
     // =============================================
     // Opcode-bit group constraints
@@ -207,12 +212,14 @@ pub fn enforce_main<AB>(
     //
     // With Boolean opcode bits and constrained e0, b6 - e0 selects prefixes 100 and 11,
     // disjoint from e0's 101 prefix. Under prefix 101, b0 is forbidden only for slot 95.
-    let prefix_100_or_11 = b6 - e0;
-    let prefix_101_with_low_bits_111 = e0 * b3 * b2 * b1;
-    builder.when(prefix_100_or_11 + prefix_101_with_low_bits_111).assert_zero(b0);
+    let prefix_100_or_11 = b6.dup() - e0.dup();
+    let prefix_101_with_low_bits_111 = e0.dup() * b3.dup() * b2.dup() * b1.dup();
+    builder
+        .when(prefix_100_or_11 + prefix_101_with_low_bits_111)
+        .assert_zero(b0.dup());
 
     // Prefix 11 also requires b1 = 0.
-    builder.when(e1).assert_zero(b1);
+    builder.when(e1.dup()).assert_zero(b1.dup());
 
     // =============================================
     // General opcode-semantic constraints
@@ -235,7 +242,12 @@ pub fn enforce_main<AB>(
     // DYN uses h0..h3 for the callee digest in memory and block-hash lookups; h4..h7 are unused.
     {
         let builder = &mut builder.when(op_flags.dyn_op());
-        let hasher_zeros = [hasher_state[4], hasher_state[5], hasher_state[6], hasher_state[7]];
+        let hasher_zeros = [
+            hasher_state[4].dup(),
+            hasher_state[5].dup(),
+            hasher_state[6].dup(),
+            hasher_state[7].dup(),
+        ];
         builder.assert_zeros(hasher_zeros)
     }
 
@@ -245,8 +257,8 @@ pub fn enforce_main<AB>(
     {
         let overflow = op_flags.overflow();
         let builder = &mut builder.when(op_flags.dyncall());
-        builder.assert_eq(hasher_state[4], local.stack.b0 - overflow.dup());
-        builder.when(overflow.not()).assert_zero(hasher_state[5]);
+        builder.assert_eq(hasher_state[4].dup(), local.stack.b0.dup() - overflow.dup());
+        builder.when(overflow.not()).assert_zero(hasher_state[5].dup());
     }
 
     // REPEAT consumes a true loop condition.
@@ -255,7 +267,7 @@ pub fn enforce_main<AB>(
     // END inside a loop: when ending a loop block (is_loop = h5 = 1), top-of-stack must
     // be 0 — the loop exits because the condition became false.
     let loop_condition = local.stack.get(0);
-    builder.when(op_flags.end()).when(is_loop).assert_zero(loop_condition);
+    builder.when(op_flags.end()).when(is_loop.dup()).assert_zero(loop_condition);
 
     // END entry-kind selectors form the same tagged union as `BlockStackMsg`. They are boolean and
     // mutually exclusive: an END consumes either a LOOP continuation or a caller frame, never
@@ -264,10 +276,10 @@ pub fn enforce_main<AB>(
     {
         let restores_caller_frame = end_flags.restores_caller_frame;
         let builder = &mut builder.when(op_flags.end());
-        builder.assert_bool(is_loop);
-        builder.assert_bool(restores_caller_frame);
-        builder.assert_zero(hasher_state[7]);
-        builder.assert_zero(is_loop * restores_caller_frame);
+        builder.assert_bool(is_loop.dup());
+        builder.assert_bool(restores_caller_frame.dup());
+        builder.assert_zero(hasher_state[7].dup());
+        builder.assert_zero(is_loop.dup() * restores_caller_frame);
     }
 
     // `is_loop_body` is intentionally not authenticated by a standalone decoder constraint. The
@@ -278,22 +290,25 @@ pub fn enforce_main<AB>(
 
     // REPEAT can follow only a loop-body END; its own h0..h4 do not authorize the next body.
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(op_flags.repeat_next())
         .assert_one(op_flags.end() * is_loop_body);
 
     // LOOP and REPEAT must enter a body before the loop can return. The body-count lookup
     // authenticates completed iterations; it does not enforce this successor transition.
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(op_flags.loop_op() + op_flags.repeat())
         .assert_zero(op_flags.end_next());
 
     // The first row has no END predecessor, so it cannot be REPEAT.
-    builder.when_first_row().assert_zero(op_flags.repeat());
+    builder.when(frame.first_row()).assert_zero(op_flags.repeat());
 
     // HALT is absorbing: once entered, the VM stays in HALT for all remaining rows.
-    builder.when_transition().when(op_flags.halt()).assert_one(op_flags.halt_next());
+    builder
+        .when(frame.transition())
+        .when(op_flags.halt())
+        .assert_one(op_flags.halt_next());
 
     // =============================================
     // Group count constraints
@@ -314,10 +329,13 @@ pub fn enforce_main<AB>(
     // Inside a span, group_count changes by at most 1. When it does change and this is not a PUSH,
     // h0 must already be 0 (the group was fully decoded).
     {
-        let gate = builder.is_transition() * in_span;
+        let gate = frame.transition() * in_span.dup();
         let builder = &mut builder.when(gate);
         builder.assert_bool(delta_group_count.clone());
-        builder.when(delta_group_count.clone()).when(is_push.not()).assert_zero(h0);
+        builder
+            .when(delta_group_count.clone())
+            .when(is_push.not())
+            .assert_zero(h0.dup());
     }
 
     // SPAN, RESPAN, and PUSH each consume exactly one group (delta_group_count = 1).
@@ -328,12 +346,12 @@ pub fn enforce_main<AB>(
     // If delta_group_count = 1 on this row, the next row cannot be END or RESPAN — those ops need
     // a fresh batch or span closure, not a mid-batch decrement.
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(delta_group_count.clone())
         .assert_zero(op_flags.end_next() + op_flags.respan_next());
 
     // By the time END executes, all groups must have been consumed.
-    builder.when(op_flags.end()).assert_zero(group_count);
+    builder.when(op_flags.end()).assert_zero(group_count.dup());
 
     // =============================================
     // Op group decoding (h0) constraints
@@ -370,17 +388,22 @@ pub fn enforce_main<AB>(
         let f_span = op_flags.span();
         let f_respan = op_flags.respan();
 
-        let same_group_count: AB::Expr = in_span * in_span_next * delta_group_count.not();
-        let op_next: AB::Expr = horner_eval_bits(&op_bits_next);
+        let same_group_count: AB::Expr =
+            in_span.dup() * in_span_next.dup() * delta_group_count.not();
+        let op_next: AB::Expr = horner_eval_bits(op_bits_next);
 
         // When h0 is active, verify the base-128 shift.
-        let h0_shift = h0 - h0_next * F_128 - op_next;
+        let h0_shift = h0.dup() - h0_next.dup() * F_128 - op_next;
         let h0_active = f_span + f_respan + is_push.clone() + same_group_count;
-        builder.when_transition().when(h0_active).assert_zero(h0_shift);
+        builder.when(frame.transition()).when(h0_active).assert_zero(h0_shift);
 
         // Before END or RESPAN, h0 must be empty (all ops in the group consumed).
         let end_or_respan_next = op_flags.end_next() + op_flags.respan_next();
-        builder.when_transition().when(in_span).when(end_or_respan_next).assert_zero(h0);
+        builder
+            .when(frame.transition())
+            .when(in_span.dup())
+            .when(end_or_respan_next)
+            .assert_zero(h0.dup());
     }
 
     // =============================================
@@ -401,29 +424,31 @@ pub fn enforce_main<AB>(
         let new_group: AB::Expr = delta_group_count - is_push;
 
         // SPAN/RESPAN start a fresh batch, so op_index' = 0.
-        builder.when(op_flags.span() + op_flags.respan()).assert_zero(op_index_next);
+        builder
+            .when(op_flags.span() + op_flags.respan())
+            .assert_zero(op_index_next.dup());
 
         // When a new group starts inside a span, op_index' = 0.
         // Gated by in_span to exclude SPAN/RESPAN rows (which are handled above).
         builder
-            .when_transition()
-            .when(in_span)
+            .when(frame.transition())
+            .when(in_span.dup())
             .when(new_group.clone())
-            .assert_zero(op_index_next);
+            .assert_zero(op_index_next.dup());
 
         // When staying in the same group inside a span, op_index increments by 1.
         // Gated by in_span_next to exclude the row before END/RESPAN (where in_span' = 0).
         builder
-            .when_transition()
-            .when(in_span)
-            .when(in_span_next)
+            .when(frame.transition())
+            .when(in_span.dup())
+            .when(in_span_next.dup())
             .when(new_group.not())
-            .assert_eq(op_index_next, op_index + F_1);
+            .assert_eq(op_index_next.dup(), op_index.dup() + F_1);
 
         // op_index must be in [0, 8] — 9 ops per group max.
-        let mut range_check: AB::Expr = op_index.into();
+        let mut range_check: AB::Expr = op_index.dup();
         for i in 1..=8u64 {
-            range_check *= op_index - Felt::new_unchecked(i);
+            range_check *= op_index.dup() - Felt::new_unchecked(i);
         }
         builder.assert_zero(range_check);
     }
@@ -450,9 +475,9 @@ pub fn enforce_main<AB>(
     batch::enforce(
         builder,
         op_flags.span() + op_flags.respan(),
-        full_batch,
-        batch_size_code,
-        &hasher_state,
+        full_batch.dup(),
+        batch_size_code.dup(),
+        hasher_state,
     );
 
     // =============================================
@@ -468,17 +493,17 @@ pub fn enforce_main<AB>(
     // hasher-table address). REPEAT also re-enters the same loop parent for another body
     // iteration.
     builder
-        .when_transition()
-        .when(in_span + op_flags.repeat())
-        .assert_eq(addr_next, addr);
+        .when(frame.transition())
+        .when(in_span.dup() + op_flags.repeat())
+        .assert_eq(addr_next.dup(), addr.dup());
 
     // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_HASHER_OP).
     builder
         .when(op_flags.respan())
-        .assert_eq(addr_next, addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT);
+        .assert_eq(addr_next.dup(), addr.dup() + CONTROLLER_ROWS_PER_HASHER_OP_FELT);
 
     // HALT forces addr = 0 (execution ends at the root block).
-    builder.when(op_flags.halt()).assert_zero(addr);
+    builder.when(op_flags.halt()).assert_zero(addr.dup());
 
     // =============================================
     // Control flow constraint
@@ -491,12 +516,12 @@ pub fn enforce_main<AB>(
     //
     // This also implies in_span = 1 - f_ctrl, so in_span is automatically 0 on
     // control-flow rows and 1 otherwise (given that in_span is binary, enforced above).
-    builder.assert_one(in_span + op_flags.control_flow());
+    builder.assert_one(in_span.dup() + op_flags.control_flow());
 
     // Last-row boundary: the final row must be HALT. The processor pads the trace with
     // HALT rows and the absorbing transition constraint keeps them there; this constraint
     // makes it explicit in the AIR.
-    builder.when_last_row().assert_one(op_flags.halt());
+    builder.when(frame.last_row()).assert_one(op_flags.halt());
 }
 
 #[cfg(test)]
@@ -514,14 +539,15 @@ mod tests {
         CoreCols,
         constraints::{
             op_flags::{OpFlags, generate_test_row},
-            test_utils::ConstraintEvalBuilder,
+            test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
         },
     };
 
     fn eval_decoder(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        let mut builder = ConstraintEvalBuilder::new();
-        enforce_main(&mut builder, local, next, &op_flags);
+        let context = ConstraintEvalContext::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
+        enforce_main(&context.frame(local, next), &mut builder, local, next, &op_flags);
         builder.evaluations
     }
 
