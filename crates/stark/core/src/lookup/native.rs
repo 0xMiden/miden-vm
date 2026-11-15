@@ -14,6 +14,8 @@ mod constraint;
 mod prover;
 
 pub use super::ProverLookupBuilder;
+#[cfg(feature = "std")]
+pub use super::debug::validation::{NativeValidationBuilder, validate_native};
 pub use constraint::{ConstraintLookupBuilder, eval_lookup};
 pub use prover::{LookupError, build_logup_aux_trace, build_lookup_fractions};
 
