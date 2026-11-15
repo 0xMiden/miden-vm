@@ -4,6 +4,9 @@
 //! [`OverrideConstraintDegree`]. The low-degree AIR uses its own quotient domain before its
 //! quotient is lifted to the common commitment domain.
 //!
+//! Matching native kernels validate allocation/profile and memory metadata before the timer;
+//! the timed path retains the existing legacy collection until runtime activation.
+//!
 //! Runs `prove` with two AIRs:
 //! - Synthetic Core AIR: width 72, max constraint degree 9 (so `D = 8`).
 //! - Synthetic Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
@@ -25,15 +28,17 @@
 
 #[path = "support/eidos.rs"]
 mod eidos;
-use std::{borrow::Cow, time::Instant};
+use std::{borrow::Cow, convert::Infallible, time::Instant};
 
 use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
     GenericStarkConfig, ProverInstance,
-    air::{AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess},
+    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, native},
+    memory::ProverMemoryModel,
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -102,37 +107,155 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
+        let aux = native::ProverAir::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("benchmark witness is infallible");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
+        native::migration::eval_source(self, builder);
+    }
+}
+
+impl native::LiftedAir for BenchAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: WIDTH,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
         let log2_hi = self.kind.log2_hi();
 
         // Main recurrence on every column: `next[c] = local[c]^(2^log2_hi + 1)`.
-        // Duplicate the constraint `CONSTRAINTS_PER_COLUMN` times to densify eval work
-        // without changing the trace or the max constraint degree.
+        // Preserve every repeated assertion and its transition selector.
         for _ in 0..CONSTRAINTS_PER_COLUMN {
             for c in 0..WIDTH {
-                let x: AB::Expr = local[c].into();
+                let x: AB::Expr = local[c].dup();
                 let x_hi: AB::Expr = x.exp_power_of_2(log2_hi);
-                builder.when_transition().assert_eq(next[c].into(), x_hi * x);
+                builder.when(frame.transition()).assert_eq(next[c].dup(), x_hi * x);
             }
         }
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
+    }
+}
 
-        // Aux constraint: `aux_local == challenge`, trivial degree-1 identity.
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+impl native::ProverAir<QuadFelt> for BenchAir {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        // Benchmark-owned inputs carry the one challenge and a validated main matrix.
+        Ok(native::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
+    }
+}
+
+/// Benchmark execution capacity without modifying the authored relation's diagnostics.
+struct ConservativeKernel {
+    direct: native::DirectKernel<BenchAir>,
+    chunks: usize,
+}
+
+impl ConservativeKernel {
+    fn new(source: BenchAir, chunks: usize) -> Result<Self, native::QuotientAllocationError> {
+        let kernel = Self {
+            direct: native::DirectKernel::new(source).expect("valid benchmark AIR"),
+            chunks,
+        };
+        native::resolve_quotient_chunks(&kernel)?;
+        Ok(kernel)
+    }
+}
+
+impl native::AirKernel for ConservativeKernel {
+    type F = Felt;
+    type Prepared<B: Algebra<Felt>, E: Algebra<B>> =
+        <native::DirectKernel<BenchAir> as native::AirKernel>::Prepared<B, E>;
+
+    fn descriptor(&self) -> &native::AirDescriptor<Felt> {
+        native::AirKernel::descriptor(&self.direct)
+    }
+
+    fn quotient_chunks(&self) -> Option<usize> {
+        Some(self.chunks)
+    }
+
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        inputs: native::UniformInputs<'_, B, E>,
+    ) -> Self::Prepared<B, E> {
+        native::AirKernel::prepare(&self.direct, inputs)
+    }
+
+    fn eval_row<S: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, S>,
+        inputs: native::Inputs<'_, S>,
+        prepared: &Self::Prepared<S::Expr, S::ExtExpr>,
+        sink: &mut S,
+    ) {
+        native::AirKernel::eval_row(&self.direct, frame, inputs, prepared, sink);
+    }
+}
+
+impl native::LiftedAir for ConservativeKernel {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::LiftedAir::spec(&self.direct)
+    }
+
+    fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, S>,
+        inputs: native::Inputs<'_, S>,
+        sink: &mut S,
+    ) {
+        native::LiftedAir::eval(&self.direct, frame, inputs, sink);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for ConservativeKernel {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native::ProverAir::build_aux_trace(&self.direct, inputs)
     }
 }
 
@@ -270,6 +393,41 @@ fn bench_pcs_params() -> PcsParams {
     .expect("valid PCS params")
 }
 
+/// Inspect matching native execution metadata before entering the unchanged timed proof path.
+fn native_preflight(
+    core: &OverrideConstraintDegree<BenchAir>,
+    chip: &OverrideConstraintDegree<BenchAir>,
+    log_degrees: [usize; 2],
+    heights: [usize; 2],
+    params: &PcsParams,
+) {
+    let kernels = [
+        ConservativeKernel::new(core.inner, 1usize << log_degrees[0])
+            .expect("conservative Core capacity"),
+        ConservativeKernel::new(chip.inner, 1usize << log_degrees[1])
+            .expect("conservative Chip capacity"),
+    ];
+    for (kernel, height) in kernels.iter().zip(heights) {
+        let chunks = native::resolve_quotient_chunks(kernel).expect("valid execution allocation");
+        assert!(
+            chunks <= 1usize << params.log_blowup(),
+            "benchmark allocation exceeds PCS blowup"
+        );
+        native::AirKernel::descriptor(kernel)
+            .analysis()
+            .degree_profile()
+            .validate_capacity(height, chunks)
+            .expect("benchmark degree fits actual height");
+    }
+    let model = ProverMemoryModel::<2>::from_kernels::<QuadFelt, _>(&kernels, params)
+        .expect("native benchmark memory metadata");
+    assert!(
+        model.prover_peak_bytes(&heights).is_some(),
+        "benchmark memory estimate fits host arithmetic"
+    );
+    assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(0));
+}
+
 fn run_prove(
     label: &str,
     core_log_qd: usize,
@@ -288,6 +446,14 @@ fn run_prove(
         inner: BenchAir { kind: BenchAirKind::Chip },
         constraint_degree: constraint_degree_for_log_qd(chip_log_qd),
     };
+
+    native_preflight(
+        &core_air,
+        &chip_air,
+        [core_log_qd, chip_log_qd],
+        [core_height, chip_height],
+        &bench_pcs_params(),
+    );
 
     let core_trace = generate_trace(BenchAirKind::Core.recurrence_power(), core_height);
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
@@ -333,4 +499,78 @@ fn main() {
     // Optimized: Core at natural log_qd=3, Chip at natural log_qd=2. Chip evaluates
     // on chip_height*4 points natively, then upsamples to chip_height*8.
     run_prove("optimized (upsample fires)", 3, 2, core_height, chip_height);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn conservative_capacity_does_not_modify_source_identity_or_analysis() {
+        let source = super::BenchAir { kind: super::BenchAirKind::Chip };
+        let canonical = super::native::capture_with::<_, super::QuadFelt>(&source).unwrap();
+        let natural = super::ConservativeKernel::new(source, 4).unwrap();
+        let raised = super::ConservativeKernel::new(source, 8).unwrap();
+        for kernel in [&natural, &raised] {
+            let descriptor = super::native::AirKernel::descriptor(kernel);
+            assert_eq!(descriptor.fingerprint(), canonical.descriptor.fingerprint());
+            assert_eq!(descriptor.analysis(), canonical.descriptor.analysis());
+            assert_eq!(
+                descriptor.analysis().raw_degrees(),
+                super::native::ConstraintDegrees { base: 5, ext: 1 }
+            );
+            let counts = descriptor.analysis().counts();
+            assert_eq!(
+                (counts.base, counts.ext),
+                (super::CONSTRAINTS_PER_COLUMN * super::WIDTH, 1)
+            );
+            let recaptured = super::native::capture_with::<_, super::QuadFelt>(kernel).unwrap();
+            assert_eq!(recaptured.descriptor.fingerprint(), canonical.descriptor.fingerprint());
+        }
+        assert_eq!(super::native::resolve_quotient_chunks(&natural).unwrap(), 4);
+        assert_eq!(super::native::resolve_quotient_chunks(&raised).unwrap(), 8);
+        let minimum = super::native::AirKernel::descriptor(&raised)
+            .analysis()
+            .degree_profile()
+            .validate_capacity(16, 8)
+            .unwrap();
+        assert_eq!(minimum.quotient_chunks, 4);
+        assert_eq!(super::native::resolve_quotient_chunks(&raised).unwrap(), 8);
+        assert!(matches!(
+            super::ConservativeKernel::new(source, 2),
+            Err(super::native::QuotientAllocationError::BelowConservative {
+                allocated: 2,
+                conservative: 4
+            })
+        ));
+        assert!(matches!(
+            super::ConservativeKernel::new(source, 3),
+            Err(super::native::QuotientAllocationError::InvalidChunks { chunks: 3 })
+        ));
+    }
+
+    #[test]
+    fn baseline_and_optimized_native_metadata_reuse_the_same_memory_accounting() {
+        for chip_chunks in [4, 8] {
+            let kernels = [
+                super::ConservativeKernel::new(
+                    super::BenchAir { kind: super::BenchAirKind::Core },
+                    8,
+                )
+                .unwrap(),
+                super::ConservativeKernel::new(
+                    super::BenchAir { kind: super::BenchAirKind::Chip },
+                    chip_chunks,
+                )
+                .unwrap(),
+            ];
+            let model = super::ProverMemoryModel::<2>::from_kernels::<super::QuadFelt, _>(
+                &kernels,
+                &super::bench_pcs_params(),
+            )
+            .unwrap();
+            assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(0));
+            // 74 coordinates * 8 bytes * (8+1) * (16+32), plus 3904*32 shared bytes,
+            // followed by the one 5/4 safety ceiling. Core retains the common maximum8.
+            assert_eq!(model.prover_peak_bytes(&[16, 32]), Some(475_840));
+        }
+    }
 }
