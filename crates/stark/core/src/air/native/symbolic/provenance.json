@@ -1,0 +1,51 @@
+{
+  "format": 1,
+  "crate": {
+    "name": "p3-air",
+    "version": "0.8.0",
+    "archive_sha256": "be7a317aa82ba3d758229db6dd1e2baa75f9aa6f1179d98b3b1e0c2c6b930d59",
+    "repository": "https://github.com/Plonky3/Plonky3",
+    "commit": "a21e3ed42905040ad49c519e402f018381c12d0c",
+    "path_in_repository": "air",
+    "license": "MIT OR Apache-2.0"
+  },
+  "source_files": [
+    {
+      "path": "src/symbolic/mod.rs",
+      "bytes": 19960,
+      "sha256": "0c40d4ee95ed43e691fd47b30d21446b38357f6adf307b38eb65d583409a9a22"
+    },
+    {
+      "path": "src/symbolic/expression.rs",
+      "bytes": 41695,
+      "sha256": "a168a38b2dbd7f5053c003e4bc4838514df7e0df4a7ef050a9d18a0c73fed2f4"
+    },
+    {
+      "path": "src/symbolic/expression_ext.rs",
+      "bytes": 32354,
+      "sha256": "2878fd86061eb7896b4829cc2f4c336607559145c1e9054813ef20b452ea2d30"
+    },
+    {
+      "path": "src/symbolic/flatten.rs",
+      "bytes": 8963,
+      "sha256": "11341b376739654f433a1077950fbdbe0e896f27097e3a6a950c65c49d1ca384"
+    }
+  ],
+  "licenses": [
+    {
+      "path": "LICENSE-MIT",
+      "bytes": 1086,
+      "sha256": "d6543a1b0a0a51d10b5f8c389324c7dfeba556b7f39815efd292927bde808700",
+      "git_blob_sha1": "ae8393261a5c288d5efe1208b7ea3de22b861f84",
+      "url": "https://github.com/Plonky3/Plonky3/blob/a21e3ed42905040ad49c519e402f018381c12d0c/LICENSE-MIT"
+    },
+    {
+      "path": "LICENSE-APACHE",
+      "bytes": 10848,
+      "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+      "git_blob_sha1": "1e5006dc141e22213c898c27abaded8d936c32f0",
+      "url": "https://github.com/Plonky3/Plonky3/blob/a21e3ed42905040ad49c519e402f018381c12d0c/LICENSE-APACHE"
+    }
+  ],
+  "adaptation": "Arithmetic and flattened serde adapted; local field-independent input addresses replace builder/variable APIs. See README.md."
+}

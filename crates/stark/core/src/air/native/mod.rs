@@ -10,6 +10,7 @@ mod frame;
 #[doc(hidden)]
 pub mod migration;
 mod spec;
+pub mod symbolic;
 
 pub use builder::{ConstraintMeta, ConstraintPath, Filtered, LiftedAirBuilder, Named};
 pub use contracts::{AuxTrace, AuxTraceInputs, LiftedAir, ProverAir};
