@@ -72,12 +72,20 @@ fn run<A: miden_stark::air::AirKernel<F = miden_core::Felt>>(
             }
         }
     }
-    let _ = miden_constraint_compiler::testing::time_evaluation(air, 256);
-    let times = miden_constraint_compiler::testing::time_evaluation(air, iterations);
+    let times = if group == "vm" {
+        time_pair(&AIRS[index], air, iterations, repeat % 2 == 1)
+    } else {
+        time_pair(&ChipletAir::all()[index], air, iterations, repeat % 2 == 1)
+    };
+    println!(
+        "BENCH,control_{policy}/{group}/{index},{repeat},{},{},{iterations}",
+        times[0][0].as_nanos(),
+        times[1][0].as_nanos()
+    );
     println!(
         "BENCH,{policy}/{group}/{index},{repeat},{},{},{iterations}",
-        times[0].as_nanos(),
-        times[1].as_nanos()
+        times[0][1].as_nanos(),
+        times[1][1].as_nanos()
     );
 }
 
@@ -142,4 +150,87 @@ fn sizes(name: &str, circuit: &miden_ace::compiler::AceCircuit<QuadFelt>) {
         encoded.num_eval_rows(),
         encoded.size_in_felt()
     );
+}
+
+#[cfg(feature = "symbolic-experiments")]
+fn time_pair<S, A>(
+    source: &S,
+    candidate: &A,
+    iterations: usize,
+    reverse: bool,
+) -> [[std::time::Duration; 2]; 2]
+where
+    S: miden_stark::air::AirKernel<F = miden_core::Felt>,
+    A: miden_stark::air::AirKernel<F = miden_core::Felt>,
+{
+    fn carriers<S, A, P, PE>(
+        source: &S,
+        candidate: &A,
+        iterations: usize,
+        reverse: bool,
+    ) -> [std::time::Duration; 2]
+    where
+        S: miden_stark::air::AirKernel<F = miden_core::Felt>,
+        A: miden_stark::air::AirKernel<F = miden_core::Felt>,
+        P: p3_field::PackedField<Scalar = miden_core::Felt>,
+        PE: p3_field::Algebra<P>
+            + p3_field::Algebra<QuadFelt>
+            + p3_field::BasedVectorSpace<P>
+            + Copy
+            + Send
+            + Sync,
+    {
+        use miden_constraint_compiler::testing::{EvaluationBuilder, EvaluationInputs};
+        let inputs = EvaluationInputs::<P, PE>::new(source.descriptor().spec(), 0x243f6a8885a308d3);
+        let frame = inputs.frame();
+        let baseline =
+            source.bind(inputs.inputs()).expect("control dimensions match its descriptor");
+        let candidate = candidate
+            .bind(inputs.inputs())
+            .expect("candidate dimensions match the control inputs");
+        let mut builder = EvaluationBuilder::<P, PE>::default();
+        for _ in 0..256 {
+            builder.clear();
+            baseline.eval(std::hint::black_box(&frame), &mut builder);
+            std::hint::black_box(&builder);
+            builder.clear();
+            candidate.eval(std::hint::black_box(&frame), &mut builder);
+            std::hint::black_box(&builder);
+        }
+        fn timed<P, PE>(
+            iterations: usize,
+            builder: &mut EvaluationBuilder<P, PE>,
+            mut evaluate: impl FnMut(&mut EvaluationBuilder<P, PE>),
+        ) -> std::time::Duration {
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                builder.clear();
+                evaluate(builder);
+                std::hint::black_box(&builder);
+            }
+            start.elapsed()
+        }
+        let mut result = [std::time::Duration::ZERO; 2];
+        for arm in if reverse { [1, 0] } else { [0, 1] } {
+            result[arm] = if arm == 0 {
+                timed(iterations, &mut builder, |builder| {
+                    baseline.eval(std::hint::black_box(&frame), builder)
+                })
+            } else {
+                timed(iterations, &mut builder, |builder| {
+                    candidate.eval(std::hint::black_box(&frame), builder)
+                })
+            };
+        }
+        result
+    }
+    [
+        carriers::<_, _, miden_core::Felt, QuadFelt>(source, candidate, iterations, reverse),
+        carriers::<
+            _,
+            _,
+            <miden_core::Felt as miden_core::field::Field>::Packing,
+            <QuadFelt as miden_core::field::ExtensionField<miden_core::Felt>>::ExtensionPacking,
+        >(source, candidate, iterations, reverse),
+    ]
 }

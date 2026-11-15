@@ -11,6 +11,7 @@ use miden_crypto::field::BasedVectorSpace;
 use miden_stark::air::symbolic::{AuxInput, BaseInput, ExprView};
 
 mod plan;
+mod products;
 use plan::{Coefficient, DotKind, MAX_TERMS, Piece, Plan, Rewrite};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +23,11 @@ struct NativeOptions {
     factor_runs: bool,
     fragment_min_uses: usize,
     left_sum_folding: bool,
+    products: products::Mode,
+    cancel_const_offsets: bool,
+    // Scalar, Mixed, Same: synthesized dots only, independent of sum fragments.
+    dot_min_terms: [usize; 3],
+    dot_max_terms: [usize; 3],
 }
 
 impl NativeOptions {
@@ -34,12 +40,16 @@ impl NativeOptions {
             factor_runs: false,
             fragment_min_uses: 0,
             left_sum_folding: false,
+            products: products::Mode::DISABLED,
+            cancel_const_offsets: false,
+            dot_min_terms: [4; 3],
+            dot_max_terms: [16; 3],
         }
     }
 }
 
-impl Default for NativeOptions {
-    fn default() -> Self {
+impl NativeOptions {
+    const fn uniform_fragments() -> Self {
         Self {
             uniform: true,
             fragments: true,
@@ -48,7 +58,18 @@ impl Default for NativeOptions {
     }
 }
 
-/// Scoped host-code-generation experiments. Ordinary emission prepares uniform data and shares sum fragments.
+impl Default for NativeOptions {
+    fn default() -> Self {
+        Self {
+            cancel_const_offsets: true,
+            dot_max_terms: [16, 8, 16],
+            products: products::Mode::PAIRS,
+            ..Self::uniform_fragments()
+        }
+    }
+}
+
+/// Generation-time comparisons; ordinary emission uses the measured production policy.
 #[cfg(any(test, feature = "testing"))]
 #[derive(Clone, Copy, Debug)]
 pub enum NativeExperiment {
@@ -62,6 +83,23 @@ pub enum NativeExperiment {
     FactorRuns,
     FrequentFragments,
     VeryFrequentFragments,
+    /// Compare repeated original factor pairs with uniform preparation and sum fragments.
+    ProductPairs,
+    /// Iteratively combine cached pairs into larger repeated product subsets.
+    ProductSubsets,
+    /// Require at least three selected row uses of each original factor pair.
+    FrequentProductPairs,
+    CancelConstOffsets,
+    /// Emit the measured production policy.
+    Production,
+    DotMin2,
+    DotMin3,
+    DotCap6,
+    DotCap8,
+    MixedDotMin2,
+    MixedDotMin3,
+    MixedDotCap6,
+    MixedDotCap8,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -73,7 +111,44 @@ std::thread_local! {
 #[cfg(any(test, feature = "testing"))]
 pub fn with_native_experiment<T>(mode: NativeExperiment, emit: impl FnOnce() -> T) -> T {
     let options = match mode {
+        NativeExperiment::Production => NativeOptions::default(),
         NativeExperiment::Baseline => NativeOptions::baseline(),
+        NativeExperiment::CancelConstOffsets => NativeOptions {
+            cancel_const_offsets: true,
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::DotMin2 => NativeOptions {
+            dot_min_terms: [2; 3],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::DotMin3 => NativeOptions {
+            dot_min_terms: [3; 3],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::DotCap6 => NativeOptions {
+            dot_max_terms: [6; 3],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::DotCap8 => NativeOptions {
+            dot_max_terms: [8; 3],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::MixedDotMin2 => NativeOptions {
+            dot_min_terms: [4, 2, 4],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::MixedDotMin3 => NativeOptions {
+            dot_min_terms: [4, 3, 4],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::MixedDotCap6 => NativeOptions {
+            dot_max_terms: [16, 6, 16],
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::MixedDotCap8 => NativeOptions {
+            dot_max_terms: [16, 8, 16],
+            ..NativeOptions::uniform_fragments()
+        },
         NativeExperiment::LeftSumFolding => NativeOptions {
             left_sum_folding: true,
             ..NativeOptions::baseline()
@@ -118,6 +193,18 @@ pub fn with_native_experiment<T>(mode: NativeExperiment, emit: impl FnOnce() -> 
             fragments: true,
             signed_dots: true,
             ..NativeOptions::baseline()
+        },
+        NativeExperiment::ProductPairs => NativeOptions {
+            products: products::Mode::PAIRS,
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::ProductSubsets => NativeOptions {
+            products: products::Mode::SUBSETS,
+            ..NativeOptions::uniform_fragments()
+        },
+        NativeExperiment::FrequentProductPairs => NativeOptions {
+            products: products::Mode::FREQUENT_PAIRS,
+            ..NativeOptions::uniform_fragments()
         },
     };
     struct Restore(Option<NativeOptions>);
@@ -240,6 +327,11 @@ pub fn emit_native_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) ->
                 results.push(operand(&precompute.fragment(fragment)));
             }
         }
+        for (fragment, value) in preparation.products.fragments.iter().enumerate() {
+            if value.slot.is_some() {
+                results.push(operand(&precompute.product_fragment(fragment)));
+            }
+        }
         let dependencies = if native_options().uniform {
             "uniform-only"
         } else {
@@ -354,6 +446,7 @@ struct Preparation {
     slots: Vec<Option<usize>>,
     fragments: Vec<SumFragment>,
     replacements: Vec<Option<Vec<FragmentPiece>>>,
+    products: products::Products,
 }
 
 #[derive(Clone)]
@@ -405,11 +498,44 @@ impl Preparation {
         } else {
             (Vec::new(), vec![None; graph.len()])
         };
-        Self { terms, slots, fragments, replacements }
+        let mut preparation = Self {
+            terms,
+            slots,
+            fragments,
+            replacements,
+            products: products::Products::empty(graph.len()),
+        };
+        if options.products != products::Mode::DISABLED {
+            // Observe actual baseline token demand. Dots, scalar rewrites and sum
+            // fragments can consume a source product without emitting that node;
+            // those products must not inflate the new fragment's reuse count.
+            let requested = {
+                let mut baseline = Emitter::new(graph, &preparation, false);
+                for &(root, class) in &graph.roots {
+                    let _ = baseline.expr(root, class);
+                }
+                baseline.tokens.iter().map(Option::is_some).collect::<Vec<_>>()
+            };
+            preparation.products = products::Products::new(
+                graph,
+                &requested,
+                &graph.uniform_dependencies(),
+                options.products,
+                preparation.capacity(),
+            );
+        }
+        preparation
     }
 
     fn capacity(&self) -> usize {
-        self.terms.len() + self.fragments.iter().filter(|fragment| fragment.slot.is_some()).count()
+        self.terms.len()
+            + self.fragments.iter().filter(|fragment| fragment.slot.is_some()).count()
+            + self
+                .products
+                .fragments
+                .iter()
+                .filter(|fragment| fragment.slot.is_some())
+                .count()
     }
 }
 
@@ -520,6 +646,7 @@ struct Emitter<'g, 'a> {
     plan: Plan<'g, 'a>,
     tokens: Vec<Option<Token>>,
     fragment_tokens: Vec<Option<Token>>,
+    product_tokens: Vec<Option<Token>>,
     lines: Vec<String>,
     hoisted: usize,
 }
@@ -533,6 +660,7 @@ impl<'g, 'a> Emitter<'g, 'a> {
             plan: Plan::new(graph, &preparation.terms),
             tokens: vec![None; graph.len()],
             fragment_tokens: vec![None; preparation.fragments.len()],
+            product_tokens: vec![None; preparation.products.fragments.len()],
             lines: Vec::new(),
             hoisted: 0,
         }
@@ -578,6 +706,10 @@ impl<'g, 'a> Emitter<'g, 'a> {
             | ExprView::IsTransition => self.leaf(view),
             _ => {
                 let rhs = if !self.preparing
+                    && let Some(factors) = self.preparation.products.replacements[id].clone()
+                {
+                    self.product_rhs(class, &factors)
+                } else if !self.preparing
                     && let Some(pieces) = self.preparation.replacements[id].clone()
                 {
                     let mut values = Vec::with_capacity(pieces.len());
@@ -601,10 +733,10 @@ impl<'g, 'a> Emitter<'g, 'a> {
     }
 
     fn region_sum(&mut self, class: Class, inputs: &[usize]) -> String {
-        if inputs.len() < 4 {
+        let pieces = self.plan.sum_pieces(inputs, class);
+        if inputs.len() < 4 && !pieces.iter().any(|piece| matches!(piece, Piece::Dot { .. })) {
             self.signed_sum(class, inputs)
         } else {
-            let pieces = self.plan.sum_pieces(inputs, class);
             self.rewrite_rhs(class, Rewrite::Sum(pieces))
         }
     }
@@ -629,6 +761,65 @@ impl<'g, 'a> Emitter<'g, 'a> {
         token
     }
 
+    fn product_factor(&mut self, factor: products::Factor) -> Token {
+        match factor {
+            products::Factor::Source(id) => self.token(id),
+            products::Factor::Fragment(id) => self.product_fragment(id),
+        }
+    }
+
+    fn product_fragment(&mut self, id: usize) -> Token {
+        if let Some(token) = &self.product_tokens[id] {
+            return token.clone();
+        }
+        let fragment = &self.preparation.products.fragments[id];
+        let class = fragment.class;
+        let factors = fragment.factors;
+        let slot = fragment.slot;
+        let token = if !self.preparing
+            && let Some(slot) = slot
+        {
+            self.hoist(Class::Ext, format!("terms[{slot}].dup()"))
+        } else {
+            let x = self.product_factor(factors[0]);
+            let rhs = if factors[0] == factors[1] {
+                format!("{}.square()", operand(&x))
+            } else {
+                let y = self.product_factor(factors[1]);
+                self.binary_tokens(class, OpKind::Mul, &x, &y)
+            };
+            self.hoist(class, rhs)
+        };
+        self.product_tokens[id] = Some(token.clone());
+        token
+    }
+
+    fn product_rhs(&mut self, class: Class, factors: &[products::Factor]) -> String {
+        let mut factors = factors.iter().copied();
+        let mut value = self.product_factor(factors.next().expect("nonempty product region"));
+        let mut remaining = factors.peekable();
+        while let Some(factor) = remaining.next() {
+            let next = self.product_factor(factor);
+            let product_class = plan::join(value.class, next.class);
+            let rhs = self.binary_tokens(product_class, OpKind::Mul, &value, &next);
+            if remaining.peek().is_none() {
+                return if class == Class::Ext && product_class == Class::Base {
+                    format!("{}::from({rhs})", self.types().ext)
+                } else {
+                    assert_eq!(class, product_class, "product result domain");
+                    rhs
+                };
+            }
+            value = self.hoist(product_class, rhs);
+        }
+        if class == Class::Ext && value.class == Class::Base {
+            lift_base_to_ext(&value, self.types())
+        } else {
+            assert_eq!(class, value.class, "product result domain");
+            operand(&value)
+        }
+    }
+
     fn hoist(&mut self, class: Class, rhs: String) -> Token {
         let name = format!("h{}", self.hoisted);
         self.hoisted += 1;
@@ -638,7 +829,7 @@ impl<'g, 'a> Emitter<'g, 'a> {
 
     fn bind(&mut self, id: usize, class: Class, rhs: String) -> Token {
         let prefix = if class == Class::Base { 'b' } else { 'e' };
-        let name = format!("{prefix}{}", id);
+        let name = format!("{prefix}{id}");
         self.lines.push(format!("    let {name} = {rhs};"));
         Token { class, code: name }
     }
@@ -719,18 +910,22 @@ impl<'g, 'a> Emitter<'g, 'a> {
     fn binary(&mut self, class: Class, op: OpKind, x: usize, y: usize) -> String {
         let x = self.token(x);
         let y = self.token(y);
+        self.binary_tokens(class, op, &x, &y)
+    }
+
+    fn binary_tokens(&self, class: Class, op: OpKind, x: &Token, y: &Token) -> String {
         if class == Class::Base {
             assert_eq!(x.class, Class::Base);
             assert_eq!(y.class, Class::Base);
-            return format!("{} {} {}", operand(&x), sym(op), operand(&y));
+            return format!("{} {} {}", operand(x), sym(op), operand(y));
         }
         match (x.class, y.class) {
-            (Class::Ext, _) => format!("{} {} {}", operand(&x), sym(op), operand(&y)),
+            (Class::Ext, _) => format!("{} {} {}", operand(x), sym(op), operand(y)),
             (Class::Base, Class::Ext) if op != OpKind::Sub => {
-                format!("{} {} {}", operand(&y), sym(op), operand(&x))
+                format!("{} {} {}", operand(y), sym(op), operand(x))
             },
             (Class::Base, _) => {
-                format!("{} {} {}", lift_base_to_ext(&x, self.types()), sym(op), operand(&y))
+                format!("{} {} {}", lift_base_to_ext(x, self.types()), sym(op), operand(y))
             },
         }
     }
@@ -909,6 +1104,7 @@ impl<'g, 'a> Emitter<'g, 'a> {
     fn rewrite_rhs(&mut self, class: Class, rewrite: Rewrite) -> String {
         let ty = self.ty(class);
         match rewrite {
+            Rewrite::Alias(id) => self.expr(id, class),
             Rewrite::Square(id) => format!("{}.square()", self.expr(id, class)),
             Rewrite::Scalar { value, scalar, op, reversed } => {
                 let value = self.expr(value, Class::Base);
@@ -1184,11 +1380,32 @@ mod tests {
                 .iter()
                 .map(|node| crate::testing::eval_expression(node.expression, seed))
                 .collect();
+            let mut product_values = Vec::new();
+            for fragment in &preparation.products.fragments {
+                let value = |factor| match factor {
+                    products::Factor::Source(id) => values[id],
+                    products::Factor::Fragment(id) => product_values[id],
+                };
+                product_values.push(value(fragment.factors[0]) * value(fragment.factors[1]));
+            }
+            for (id, factors) in preparation.products.replacements.iter().enumerate() {
+                if let Some(factors) = factors {
+                    let result: QuadFelt = factors
+                        .iter()
+                        .map(|factor| match *factor {
+                            products::Factor::Source(id) => values[id],
+                            products::Factor::Fragment(id) => product_values[id],
+                        })
+                        .product();
+                    assert_eq!(result, values[id], "product region {id} with seed {seed}");
+                }
+            }
             for id in 0..index.len() {
                 let Some(rewrite) = plan.rewrite(id) else {
                     continue;
                 };
                 let result = match rewrite {
+                    Rewrite::Alias(x) => values[x],
                     Rewrite::Square(x) => values[x].square(),
                     Rewrite::Scalar { value, scalar, op, reversed } => {
                         let (mut x, mut y) =
@@ -1246,6 +1463,10 @@ mod tests {
     fn native_experiment_scopes_restore_the_production_policy() {
         assert_eq!(native_options(), NativeOptions::default());
         assert!(native_options().uniform && native_options().fragments);
+        assert!(native_options().cancel_const_offsets);
+        assert_eq!(native_options().products, products::Mode::PAIRS);
+        assert_eq!(native_options().dot_min_terms, [4; 3]);
+        assert_eq!(native_options().dot_max_terms, [16, 8, 16]);
         assert!(!native_options().left_sum_folding);
         with_native_experiment(NativeExperiment::LeftSumFolding, || {
             assert!(native_options().left_sum_folding);
@@ -1263,6 +1484,269 @@ mod tests {
             with_native_experiment(NativeExperiment::Uniform, || panic!("restore experiment"));
         });
         assert_eq!(native_options(), NativeOptions::default());
+    }
+
+    fn synthesized_dots(assertion: Assertion<Felt, QuadFelt>) -> Vec<(DotKind, usize)> {
+        let program = CapturedProgram::from_assertions(vec![assertion]);
+        assert_rewrites_preserve_values(&program);
+        let index = ExpressionIndex::new(program.assertions());
+        let preparation = Preparation::new(&index);
+        let plan = Plan::new(&index, &preparation.terms);
+        let (root, class) = index.roots[0];
+        plan.sum_pieces(&plan.sum_terms(root), class)
+            .into_iter()
+            .filter_map(|piece| match piece {
+                Piece::Dot { kind, pairs } => Some((kind, pairs.len())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn synthesized_dot_thresholds_are_independent_for_scalar_mixed_and_same_operands() {
+        for (mode, minimums) in [
+            (NativeExperiment::UniformFragments, [4, 4, 4]),
+            (NativeExperiment::DotMin2, [2, 2, 2]),
+            (NativeExperiment::DotMin3, [3, 3, 3]),
+            (NativeExperiment::MixedDotMin2, [4, 2, 4]),
+            (NativeExperiment::MixedDotMin3, [4, 3, 4]),
+        ] {
+            with_native_experiment(mode, || {
+                for n in [2, 3, 4] {
+                    let scalar = (0..n).map(|i| main(i) * Felt::from_u64(7 + 2 * i as u64));
+                    let mixed = (0..n).map(|i| {
+                        E::from(AuxInput::Trace { row: RowOffset::Current, column: i })
+                            * E::from(main(i))
+                    });
+                    let same = (0..n).map(|i| main(2 * i) * main(2 * i + 1));
+                    let assertions = [
+                        Assertion::Base(scalar.sum()),
+                        Assertion::Extension(mixed.sum()),
+                        Assertion::Base(same.sum()),
+                    ];
+                    for ((assertion, kind), minimum) in assertions
+                        .into_iter()
+                        .zip([DotKind::Scalar, DotKind::Mixed, DotKind::Same])
+                        .zip(minimums)
+                    {
+                        let expected = if n >= minimum { vec![(kind, n)] } else { Vec::new() };
+                        assert_eq!(
+                            synthesized_dots(assertion.clone()),
+                            expected,
+                            "{mode:?}, {kind:?}, n={n}"
+                        );
+                        // Exercise the emitter as well as the numerical planning oracle.
+                        let output = emit(&[assertion]);
+                        assert_eq!(
+                            output.contains(&format!("dot_product::<{n}>")),
+                            n >= minimum,
+                            "{mode:?}, {kind:?}: {output}"
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn synthesized_dot_caps_do_not_change_fragment_limits_or_operand_types() {
+        for (mode, cap_by_kind) in [
+            (NativeExperiment::DotCap6, [6, 6, 6]),
+            (NativeExperiment::DotCap8, [8, 8, 8]),
+            (NativeExperiment::MixedDotCap6, [16, 6, 16]),
+            (NativeExperiment::MixedDotCap8, [16, 8, 16]),
+        ] {
+            with_native_experiment(mode, || {
+                assert_eq!(MAX_TERMS, 16);
+                let scalar: [B; 17] =
+                    core::array::from_fn(|i| main(i) * Felt::from_u64(7 + 2 * i as u64));
+                let mixed: [E; 17] = core::array::from_fn(|i| {
+                    E::from(AuxInput::Trace { row: RowOffset::Current, column: i })
+                        * E::from(main(i))
+                });
+                let same: [B; 17] = core::array::from_fn(|i| main(2 * i) * main(2 * i + 1));
+                for ((assertion, kind), cap) in [
+                    Assertion::Base(B::sum_array::<17>(&scalar)),
+                    Assertion::Extension(E::sum_array::<17>(&mixed)),
+                    Assertion::Base(B::sum_array::<17>(&same)),
+                ]
+                .into_iter()
+                .zip([DotKind::Scalar, DotKind::Mixed, DotKind::Same])
+                .zip(cap_by_kind)
+                {
+                    let sizes: &[usize] = match cap {
+                        6 => &[6, 6, 5],
+                        8 => &[8, 8],
+                        16 => &[16],
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(
+                        synthesized_dots(assertion.clone()),
+                        sizes.iter().map(|&n| (kind, n)).collect::<Vec<_>>(),
+                        "{mode:?}, {kind:?}"
+                    );
+                    let output = emit(&[assertion]);
+                    let ty = match kind {
+                        DotKind::Scalar => "<AB::Expr as Algebra<Felt>>::mixed_dot_product",
+                        DotKind::Mixed => "<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product",
+                        DotKind::Same => "AB::Expr::dot_product",
+                    };
+                    for &n in sizes {
+                        assert!(output.contains(&format!("{ty}::<{n}>")), "{mode:?}: {output}");
+                    }
+                    assert!(!output.contains(&format!("{ty}::<17>")), "{output}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn small_dot_experiments_keep_specialized_scalars_squares_and_authored_linear_combinations() {
+        for mode in [
+            NativeExperiment::DotMin2,
+            NativeExperiment::DotMin3,
+            NativeExperiment::DotCap6,
+            NativeExperiment::MixedDotCap6,
+        ] {
+            with_native_experiment(mode, || {
+                let x = main(0);
+                let y = main(1);
+                let values: [B; 9] = core::array::from_fn(main);
+                let coefficients: [Felt; 9] =
+                    core::array::from_fn(|i| Felt::from_u64(7 + 2 * i as u64));
+                let assertions = [
+                    Assertion::Base(x.clone() * Felt::TWO + y.clone() * Felt::from_u64(7)),
+                    Assertion::Base(
+                        x.clone() * Felt::from_u64(0x7fff_ffff_8000_0001)
+                            + y.clone() * Felt::from_u64(9),
+                    ),
+                    Assertion::Base(x.clone() * Felt::from_u64(8) + y.clone() * Felt::from_u64(11)),
+                    Assertion::Base(x.square() + y * main(2)),
+                    Assertion::Base(<B as Algebra<Felt>>::mixed_dot_product(
+                        &values,
+                        &coefficients,
+                    )),
+                ];
+                let output = emit(&assertions);
+                for method in [
+                    ".double()",
+                    ".halve()",
+                    ".mul_2exp_u64(3)",
+                    ".square()",
+                    "<AB::Expr as Algebra<Felt>>::mixed_dot_product::<9>",
+                ] {
+                    assert!(output.contains(method), "{mode:?}, missing {method}: {output}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn inverse_literal_offsets_cancel_in_base_and_extension_arithmetic() {
+        with_native_experiment(NativeExperiment::CancelConstOffsets, || {
+            let c = Felt::from_u64(7);
+            for ordering in 0..4 {
+                let base = main(0).square();
+                let ext = challenge(0) * E::from(main(1));
+                let (base, ext) = match ordering {
+                    0 => ((base + c) - c, (ext + c) - c),
+                    1 => ((base - c) + c, (ext - c) + c),
+                    2 => ((B::from(c) + base) - c, (E::from(c) + ext) - c),
+                    3 => (B::from(c) + (base - c), E::from(c) + (ext - c)),
+                    _ => unreachable!(),
+                };
+                // Separate captures keep the offset intermediates single-use.
+                for assertion in [Assertion::Base(base), Assertion::Extension(ext)] {
+                    let program = CapturedProgram::from_assertions(vec![assertion]);
+                    let index = ExpressionIndex::new(program.assertions());
+                    let preparation = Preparation::new(&index);
+                    let plan = Plan::new(&index, &preparation.terms);
+                    assert!(
+                        matches!(plan.rewrite(index.roots[0].0), Some(Rewrite::Alias(_))),
+                        "ordering {ordering}"
+                    );
+                    let output = emit(program.assertions());
+                    assert!(!output.contains("Felt::from_u64(7)"), "{output}");
+                    if ordering == 0 && matches!(&program.assertions()[0], Assertion::Base(_)) {
+                        assert!(output.contains(".square()"), "{output}");
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn inverse_offsets_are_removed_before_surrounding_sum_planning() {
+        let value = main(0) * main(1);
+        let inverse_pair = (value - Felt::ONE) + Felt::ONE;
+        let assertion =
+            Assertion::Base(B::sum_array::<4>(&[main(2), inverse_pair, main(3), main(4)]));
+        let program = CapturedProgram::from_assertions(vec![assertion]);
+        let baseline = with_native_experiment(NativeExperiment::UniformFragments, || {
+            let index = ExpressionIndex::new(program.assertions());
+            Plan::new(&index, &[]).sum_terms(index.roots[0].0).len()
+        });
+        with_native_experiment(NativeExperiment::CancelConstOffsets, || {
+            let index = ExpressionIndex::new(program.assertions());
+            assert_eq!(Plan::new(&index, &[]).sum_terms(index.roots[0].0).len(), baseline - 2);
+            assert_rewrites_preserve_values(&program);
+            let output = emit(program.assertions());
+            assert!(!output.contains("Felt::from_u64(1)"), "{output}");
+        });
+    }
+
+    #[test]
+    fn inverse_offsets_preserve_shared_and_prepared_boundaries() {
+        with_native_experiment(NativeExperiment::CancelConstOffsets, || {
+            let inner = main(0) - Felt::ONE;
+            let assertions = [Assertion::Base(inner.clone() + Felt::ONE), Assertion::Base(inner)];
+            let index = ExpressionIndex::new(&assertions);
+            assert!(!matches!(
+                Plan::new(&index, &[]).rewrite(index.roots[0].0),
+                Some(Rewrite::Alias(_))
+            ));
+            emit(&assertions);
+
+            let value = main(1) + main(2);
+            let assertions =
+                [Assertion::Base((value.clone() - Felt::ONE) + Felt::ONE), Assertion::Base(value)];
+            let index = ExpressionIndex::new(&assertions);
+            // Cancellation must reuse this shared sum rather than opening it in
+            // the fragment pass merely because its old parent was a region root.
+            assert_eq!(Plan::new(&index, &[]).sum_terms(index.roots[0].0), vec![index.roots[1].0]);
+
+            let assertions = [Assertion::Base((main(3) - Felt::ONE) + Felt::ONE)];
+            let index = ExpressionIndex::new(&assertions);
+            let root = index.roots[0].0;
+            let inner = index.children(root)[0];
+            // A preparation boundary is protected even with one source consumer.
+            assert!(!matches!(Plan::new(&index, &[inner]).rewrite(root), Some(Rewrite::Alias(_))));
+        });
+    }
+
+    #[test]
+    fn inverse_offsets_retain_uniform_slots_and_builder_constant_rejections() {
+        with_native_experiment(NativeExperiment::CancelConstOffsets, || {
+            let prepared = (challenge(0) - Felt::ONE) + Felt::ONE;
+            let assertions = [Assertion::Extension(prepared * E::from(main(0)))];
+            let program = CapturedProgram::from_assertions(assertions.to_vec());
+            let index = ExpressionIndex::new(program.assertions());
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.terms.len(), 1);
+            assert_eq!(preparation.capacity(), 1);
+            let output = emit(&assertions);
+            assert!(output.contains("terms[0].dup()"), "{output}");
+            assert!(!output.contains("Felt::from_u64(1)"), "{output}");
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "ext constant with non-base coefficients")]
+    fn inverse_offsets_do_not_erase_unsupported_extension_constants() {
+        with_native_experiment(NativeExperiment::CancelConstOffsets, || {
+            let c = E::extension_constant(QuadFelt::new([Felt::ONE, Felt::ONE]));
+            emit(&[Assertion::Extension((challenge(0) + c.clone()) - c)]);
+        });
     }
 
     #[test]
@@ -1888,5 +2372,228 @@ mod tests {
         let row = row(&output);
         assert!(row.contains("terms[0]") && row.contains("terms[1]"), "{output}");
         assert!(!row.contains("inputs.challenges"), "{output}");
+    }
+
+    #[test]
+    fn product_pairs_share_a_nested_gate_across_eighteen_ordered_assertions() {
+        let transition = B::is_transition();
+        let not_boundary = B::ONE - main(0);
+        let assertions: Vec<_> = (1..=18)
+            .map(|i| Assertion::Base(transition.dup() * (not_boundary.dup() * main(i))))
+            .collect();
+        let baseline =
+            with_native_experiment(NativeExperiment::UniformFragments, || emit(&assertions));
+        assert_eq!(row(&baseline).matches(" * ").count(), 36, "{baseline}");
+        for mode in [NativeExperiment::ProductPairs, NativeExperiment::ProductSubsets] {
+            let output = with_native_experiment(mode, || emit(&assertions));
+            assert_eq!(row(&output).matches(" * ").count(), 19, "{output}");
+            assert_eq!(row(&output).matches("builder.emit_base").count(), 18, "{output}");
+            let columns: Vec<_> = row(&output)
+                .lines()
+                .filter_map(|line| line.split("m0[").nth(1))
+                .map(|tail| tail.split(']').next().unwrap().parse::<usize>().unwrap())
+                .collect();
+            assert_eq!(columns, (0..=18).collect::<Vec<_>>(), "{output}");
+        }
+        assert_eq!(native_options().products, products::Mode::PAIRS);
+    }
+
+    #[test]
+    fn product_subsets_grow_pairs_only_when_selected_reuse_remains_profitable() {
+        let (a, b, c) = (main(0), main(1), main(2));
+        let assertions = vec![
+            Assertion::Base(((a.dup() * main(3)) * b.dup()) * c.dup()),
+            Assertion::Base(((b.dup() * main(4)) * c.dup()) * a.dup()),
+            Assertion::Base(((c * main(5)) * a) * b),
+        ];
+        let pairs = with_native_experiment(NativeExperiment::ProductPairs, || emit(&assertions));
+        let subsets =
+            with_native_experiment(NativeExperiment::ProductSubsets, || emit(&assertions));
+        assert_eq!(row(&pairs).matches(" * ").count(), 7, "{pairs}");
+        assert_eq!(row(&subsets).matches(" * ").count(), 5, "{subsets}");
+
+        let (a, b, c) = (main(0), main(1), main(2));
+        let overlapping = vec![
+            Assertion::Base((a.dup() * b.dup()) * c.dup()),
+            Assertion::Base((a.dup() * b) * main(3)),
+            Assertion::Base((a * c) * main(4)),
+        ];
+        with_native_experiment(NativeExperiment::ProductPairs, || {
+            let index = ExpressionIndex::new(&overlapping);
+            let preparation = Preparation::new(&index);
+            // a*b already exists and is shared. It remains an atom; the
+            // overlapping, merely apparent a*c opportunity has only one use.
+            assert!(preparation.products.fragments.is_empty());
+            let _ = emit(&overlapping);
+        });
+    }
+
+    #[test]
+    fn product_pairs_preserve_shared_intermediates_and_repeated_factor_multiplicity() {
+        let shared = main(0) * main(1);
+        let assertions: Vec<_> = (2..5)
+            .map(|i| Assertion::Base(B::is_transition() * (shared.dup() * main(i))))
+            .collect();
+        with_native_experiment(NativeExperiment::ProductPairs, || {
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            let shared_id = index
+                .nodes
+                .iter()
+                .position(|node| node.expression.identity() == shared.as_ref().identity())
+                .unwrap();
+            assert_eq!(preparation.products.fragments.len(), 1);
+            assert!(
+                preparation.products.fragments[0]
+                    .factors
+                    .contains(&products::Factor::Source(shared_id))
+            );
+            assert!(preparation.products.replacements[shared_id].is_none());
+            let output = emit(&assertions);
+            assert_eq!(row(&output).matches(" * ").count(), 5, "{output}");
+        });
+
+        let x = main(0);
+        let repeated = vec![
+            Assertion::Base((main(1) * x.dup()) * x.dup()),
+            Assertion::Base((main(2) * x.dup()) * x),
+        ];
+        let output = with_native_experiment(NativeExperiment::ProductPairs, || emit(&repeated));
+        assert_eq!(row(&output).matches(".square()").count(), 1, "{output}");
+        assert_eq!(row(&output).matches(" * ").count(), 2, "{output}");
+    }
+
+    #[test]
+    fn product_pair_threshold_uses_actual_disjoint_occurrences() {
+        let gate = B::is_transition();
+        let a = main(0);
+        let assertions = vec![
+            Assertion::Base(gate.dup() * (main(1) * a.dup())),
+            Assertion::Base(a * (main(2) * gate)),
+        ];
+        let pairs = with_native_experiment(NativeExperiment::ProductPairs, || emit(&assertions));
+        let frequent =
+            with_native_experiment(NativeExperiment::FrequentProductPairs, || emit(&assertions));
+        assert_eq!(row(&pairs).matches(" * ").count(), 3, "{pairs}");
+        assert_eq!(row(&frequent).matches(" * ").count(), 4, "{frequent}");
+        let _ = std::panic::catch_unwind(|| {
+            with_native_experiment(NativeExperiment::ProductSubsets, || panic!("restore products"));
+        });
+        assert_eq!(native_options().products, products::Mode::PAIRS);
+    }
+
+    #[test]
+    fn product_pairs_do_not_count_products_already_consumed_by_dot_rewrites() {
+        let (a, b) = (main(0), main(1));
+        let terms = core::array::from_fn::<_, 4, _>(|i| (main(i + 2) * a.dup()) * b.dup());
+        let assertions = [Assertion::Base(B::sum_array::<4>(&terms))];
+        let baseline =
+            with_native_experiment(NativeExperiment::UniformFragments, || emit(&assertions));
+        assert!(row(&baseline).contains("::dot_product::<4>"), "{baseline}");
+        with_native_experiment(NativeExperiment::ProductPairs, || {
+            let index = ExpressionIndex::new(&assertions);
+            assert!(Preparation::new(&index).products.fragments.is_empty());
+            assert_eq!(emit(&assertions), baseline);
+        });
+    }
+
+    #[test]
+    fn product_pairs_keep_base_factors_narrow_and_extension_factors_in_extension_arithmetic() {
+        let a = main(0);
+        let b = main(1);
+        let assertions = vec![
+            Assertion::Extension((aux(0) * a.dup()) * b.dup()),
+            Assertion::Extension((aux(1) * b) * a),
+            Assertion::Base(B::ZERO),
+            Assertion::Extension(E::ZERO),
+        ];
+        with_native_experiment(NativeExperiment::ProductPairs, || {
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.products.fragments.len(), 1);
+            assert_eq!(preparation.products.fragments[0].class, Class::Base);
+            let output = emit(&assertions);
+            let classes: Vec<_> = row(&output)
+                .lines()
+                .filter(|line| line.contains("builder.emit_"))
+                .map(|line| {
+                    if line.contains("emit_base") {
+                        Class::Base
+                    } else {
+                        Class::Ext
+                    }
+                })
+                .collect();
+            assert_eq!(classes, [Class::Ext, Class::Ext, Class::Base, Class::Ext]);
+            let base_products = row(&output)
+                .lines()
+                .filter(|line| line.contains(": AB::Expr =") && line.contains(" * "))
+                .count();
+            assert_eq!(base_products, 1, "{output}");
+        });
+        let assertions = vec![
+            Assertion::Extension((aux(0) * main(0)) * aux(1)),
+            Assertion::Extension((aux(1) * main(1)) * aux(0)),
+        ];
+        with_native_experiment(NativeExperiment::ProductPairs, || {
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.products.fragments.len(), 1);
+            assert_eq!(preparation.products.fragments[0].class, Class::Ext);
+            let _ = emit(&assertions);
+        });
+    }
+
+    #[test]
+    fn product_pairs_preserve_preparation_and_structured_boundaries() {
+        let uniform = challenge(0) * challenge(1);
+        let assertions = vec![
+            Assertion::Extension((aux(0) * uniform.dup()) * main(0)),
+            Assertion::Extension((aux(1) * uniform) * main(0)),
+        ];
+        let output = with_native_experiment(NativeExperiment::ProductSubsets, || emit(&assertions));
+        let rows = row(&output);
+        assert!(rows.contains("terms[0]"), "{output}");
+        assert!(!rows.contains("inputs.challenges"), "{output}");
+
+        let structured: B = [main(0), main(1), main(2)].into_iter().product();
+        let assertions = vec![
+            Assertion::Base(B::is_transition() * (structured.dup() * main(3))),
+            Assertion::Base(B::is_transition() * (structured * main(4))),
+        ];
+        let output = with_native_experiment(NativeExperiment::ProductSubsets, || emit(&assertions));
+        assert_eq!(row(&output).matches(".product::<AB::Expr>()").count(), 1, "{output}");
+    }
+
+    #[test]
+    fn a_new_uniform_product_pair_is_prepared_without_loading_challenges_in_rows() {
+        let assertions = vec![
+            Assertion::Extension((challenge(0) * aux(0)) * challenge(1)),
+            Assertion::Extension((challenge(1) * aux(1)) * challenge(0)),
+        ];
+        with_native_experiment(NativeExperiment::ProductSubsets, || {
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.products.fragments.len(), 1);
+            assert_eq!(preparation.products.fragments[0].slot, Some(0));
+            assert_eq!(preparation.capacity(), 1);
+            let output = emit(&assertions);
+            assert!(!row(&output).contains("inputs.challenges"), "{output}");
+            assert_eq!(row(&output).matches(" * ").count(), 2, "{output}");
+        });
+        let assertions = vec![
+            Assertion::Extension(((challenge(0) * aux(0)) * challenge(1)) * challenge(2)),
+            Assertion::Extension(((challenge(1) * aux(1)) * challenge(2)) * challenge(0)),
+        ];
+        with_native_experiment(NativeExperiment::ProductSubsets, || {
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.products.fragments.len(), 2);
+            assert_eq!(preparation.products.fragments[0].slot, None);
+            assert_eq!(preparation.products.fragments[1].slot, Some(0));
+            assert_eq!(preparation.capacity(), 1);
+            let output = emit(&assertions);
+            assert!(!row(&output).contains("inputs.challenges"), "{output}");
+        });
     }
 }

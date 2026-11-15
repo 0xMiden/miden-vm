@@ -35,14 +35,6 @@ impl BaseInput {
             _ => 1,
         }
     }
-    /// Diagnostic query for validated geometry; capacity uses the native degree profile.
-    pub(crate) fn poly_degree(self, trace_len: usize, periodic_periods: &[usize]) -> usize {
-        match self {
-            Self::Main { .. } | Self::Preprocessed { .. } => trace_len.saturating_sub(1),
-            Self::Public { .. } => 0,
-            Self::Periodic { index } => trace_len - trace_len / periodic_periods[index],
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,13 +54,6 @@ impl AuxInput {
         match self {
             Self::Trace { .. } => 1,
             _ => 0,
-        }
-    }
-    /// Diagnostic query for validated geometry; capacity uses the native degree profile.
-    pub(crate) fn poly_degree(self, trace_len: usize) -> usize {
-        match self {
-            Self::Trace { .. } => trace_len.saturating_sub(1),
-            Self::Challenge { .. } | Self::Export { .. } => 0,
         }
     }
 }

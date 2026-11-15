@@ -6,9 +6,9 @@
 //! Target-specific backends live with their targets; the remaining backends live here.
 //!
 //! Native Rust emission borrows expression views through a temporary index for structural
-//! common-subexpression elimination, use counts, and challenge preparation. Coefficient dispatch
-//! follows normalized operand values and domains. Equivalent arithmetic may have different graph
-//! shapes; correctness checks compare polynomial values, assertion classes, and global order.
+//! common-subexpression elimination, use counts, and uniform-input preparation. Coefficient
+//! dispatch follows normalized operand values and domains. Equivalent arithmetic may have different
+//! graph shapes; correctness checks compare polynomial values, assertion classes, and global order.
 //!
 //! # Invariants
 //!
@@ -19,8 +19,8 @@
 //! 2. **IR node ids are internal.** Ids are deterministic (dense, in walk order) but not part of
 //!    any artifact contract. Digest-visible ordering, such as ACE `DagBuilder` interning order, is
 //!    owned by each backend.
-//! 3. **Determinism.** The same AIR always produces the same captured program, and a backend
-//!    always emits byte-identical output for the same program and backend options.
+//! 3. **Determinism.** The same AIR always produces the same captured program, and a backend always
+//!    emits byte-identical output for the same program and backend options.
 //!
 //! Backend output is never trusted by inspection: each backend is validated
 //! against the hand-written source by oracles living with its consumers.

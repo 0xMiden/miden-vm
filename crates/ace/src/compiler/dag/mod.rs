@@ -19,3 +19,5 @@ pub(crate) use ir::PeriodicColumn;
 pub use ir::{AceDag, DagSnapshot, NodeId, NodeKind, PeriodicColumnData};
 pub use lower_ir::build_verifier_dag_from_ir;
 pub(crate) use normalize::normalize_dag;
+#[cfg(any(test, feature = "testing"))]
+pub use normalize::{ProductSharing, with_product_sharing};

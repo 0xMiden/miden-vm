@@ -152,6 +152,12 @@ factoring patterns. Sum/dot pattern recovery uses bounded regions, and long mixe
 combinations use the batched method. Shared expressions and prepared results remain materialized
 rather than being expanded into every consumer.
 
+Further measured planning shares repeated native product pairs, cancels inverse literal offsets
+such as `(D - 1) + 1`, and caps synthesized mixed dots at eight terms. ACE independently shares
+larger repeated product subsets when they reduce circuit cost. Eidos lookup wrappers use the
+existing doubled-AND XOR equation consistently with the main constraints. These changes preserve
+the source assertion vocabulary and polynomial values.
+
 ACE and arithmetic analyses consume the derived primitive graph, which still has
 `Add`/`Sub`/`Mul`/`Neg` operations. The source vocabulary does not force ACE to add corresponding
 special-purpose gates. There is no additional owned rich-graph language between the symbolic
@@ -217,15 +223,26 @@ attribution and the [MIT](crates/stark/core/src/air/symbolic/LICENSE-MIT) and
 [Apache-2.0](crates/stark/core/src/air/symbolic/LICENSE-APACHE) license texts remain.
 :codex-annotation{index="8"}
 
-The current representation and selected optimizations pass 243 focused tests covering core AIRs,
-compiler behavior, scalar/packed source equivalence, ACE arithmetic, current proof bindings, and
-embedded verifier roots. Clippy with warnings denied, host `no_std`, formatting, and generated
-artifact consistency checks pass. The current VM/PVM proof fixtures are regenerated.
+The final six-crate release run has 578 passes and two pre-existing allocation-test failures.
+Scalar/packed drift, auxiliary-security bounds, ACE arithmetic, current proof bindings, and
+embedded verifier roots pass. Both allocation failures reproduce at the starting commit with the
+same counts; their code is unchanged. After lint cleanup, 164 compiler/ACE tests pass again.
+Standard Clippy with warnings denied, host `no_std`, formatting, and generated-artifact consistency
+checks pass. The stricter project lint flags still report existing style warnings in unchanged
+compiler files. Current VM/PVM proof fixtures and verifier roots are regenerated and checked.
 
-Across all 16 AIRs on the performance core, the geometric mean of per-AIR row-evaluation latency
-falls 6.4% scalar and 6.3% packed, excluding preparation. Raw ACE operations fall from 6,831 to
-6,646 for VM and 13,287 to 12,728 for PVM. The [experiment report](crates/miden-constraint-compiler/docs/symbolic-optimization-results.md)
-records all folding policies, per-AIR regressions, methods, and reproduction commands.
+Raw ACE operations fall from 6,831 to 6,583 for VM and 13,287 to 12,558 for PVM over the optimization
+work in this PR. The [first experiment report](crates/miden-constraint-compiler/docs/symbolic-optimization-results.md)
+records the initial folding and sum-fragment research, which reached 6,646 VM and 12,728 PVM
+operations. The [follow-up report](crates/miden-constraint-compiler/docs/symbolic-optimization-followup.md)
+records the subsequent parallel product, cancellation, dot-size, affine, scheduling, and source
+experiments, including rejected alternatives, per-AIR data, and reproduction commands.
+
+Against that intermediate commit, the cleaned production build's geometric mean of row-evaluation
+latency falls 3.80% scalar and 3.36% packed on a performance core, and 5.56% scalar and 3.67% packed
+on an efficiency core. These are shared-input, paired measurements over all sixteen AIRs on an
+Apple M2 Pro; preparation and allocation are excluded. They are not combined arithmetically with
+the earlier experiment's percentages or presented as end-to-end proving improvements.
 
 Compiler memory consumption and compilation time are not acceptance criteria for this change.
 :codex-annotation{index="5"} :codex-annotation{index="10"}

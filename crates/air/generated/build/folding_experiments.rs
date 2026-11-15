@@ -1,7 +1,9 @@
 //! Opt-in generated alternatives for the manual folding comparison.
 use std::{env, fmt::Write, fs, path::PathBuf};
 
-use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
+use miden_ace::compiler::{
+    CapturedAir, CompiledRelation, LayoutKind, ProductSharing, with_product_sharing,
+};
 use miden_air_definitions::{precompiles::relation, vm};
 use miden_constraint_compiler::{
     backend::{
@@ -39,6 +41,24 @@ pub fn generate() {
             false,
         ),
         ("combined", Policy::StrictNested, NativeExperiment::UniformFragments, true),
+        ("production", Policy::StrictNested, NativeExperiment::Production, true),
+        ("products", Policy::StrictNested, NativeExperiment::ProductPairs, true),
+        ("productsubsets", Policy::StrictNested, NativeExperiment::ProductSubsets, true),
+        (
+            "productfrequent",
+            Policy::StrictNested,
+            NativeExperiment::FrequentProductPairs,
+            true,
+        ),
+        ("cancel", Policy::StrictNested, NativeExperiment::CancelConstOffsets, true),
+        ("dotmin2", Policy::StrictNested, NativeExperiment::DotMin2, true),
+        ("dotmin3", Policy::StrictNested, NativeExperiment::DotMin3, true),
+        ("dotcap6", Policy::StrictNested, NativeExperiment::DotCap6, true),
+        ("dotcap8", Policy::StrictNested, NativeExperiment::DotCap8, true),
+        ("mixedmin2", Policy::StrictNested, NativeExperiment::MixedDotMin2, true),
+        ("mixedmin3", Policy::StrictNested, NativeExperiment::MixedDotMin3, true),
+        ("mixedcap6", Policy::StrictNested, NativeExperiment::MixedDotCap6, true),
+        ("mixedcap8", Policy::StrictNested, NativeExperiment::MixedDotCap8, true),
         ("factor", Policy::StrictNested, NativeExperiment::FactorRuns, false),
         ("frequent", Policy::StrictNested, NativeExperiment::FrequentFragments, true),
         (
@@ -99,8 +119,15 @@ pub fn generate() {
             )
             .unwrap();
             let refs: Vec<_> = captured.iter().collect();
-            let relation = CompiledRelation::from_captured(&refs, 8).unwrap();
-            let circuit = relation.build_circuit(LayoutKind::Masm).unwrap();
+            let product_policy = match name {
+                "production" | "productsubsets" => ProductSharing::Subsets,
+                "products" | "productfrequent" => ProductSharing::Pairs,
+                _ => ProductSharing::Baseline,
+            };
+            let circuit = with_product_sharing(product_policy, || {
+                let relation = CompiledRelation::from_captured(&refs, 8).unwrap();
+                relation.build_circuit(LayoutKind::Masm).unwrap()
+            });
             let encoded = circuit.to_ace().unwrap();
             writeln!(
                 source,

@@ -18,7 +18,7 @@ pub use crate::shared::eidos::lookup::EidosCompressionCols;
 pub(crate) use crate::shared::eidos::lookup::NARROW_BATCH_COLUMNS;
 use crate::{
     shared::eidos::lookup::{
-        LookupMultiplicitySign, NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
+        LookupMultiplicitySign, NarrowLookupConfig, emit_narrow_lookup_columns,
     },
     vm::constraints::{
         and8_lookup::eidos as eidos_lookup,
@@ -82,7 +82,6 @@ const MVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
     relation_bus: mvm_relation_bus,
     range_check_bus: BusId::RangeCheck as usize,
     table_multiplicity_sign: LookupMultiplicitySign::Negative,
-    xor_expression: XorExpression::DoubleAnd,
     pair_name: "narrow_pair",
 };
 

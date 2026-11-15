@@ -6,15 +6,25 @@ use miden_stark::air::symbolic::ExprView;
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
 pub(super) const MAX_TERMS: usize = 16;
-// Reserve array/gather dots for larger regions. Tiny cases keep arithmetic
-// explicit, including small scalar scalings and packed multiplies.
-const MIN_DOT_TERMS: usize = 4;
+// Tiny scalar specializations retain their explicit methods even when an
+// experiment lowers the synthesized-dot threshold below the production minimum.
+const SPECIALIZED_SCALAR_MIN_TERMS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DotKind {
     Same,
     Scalar,
     Mixed,
+}
+
+impl DotKind {
+    fn slot(self) -> usize {
+        match self {
+            Self::Scalar => 0,
+            Self::Mixed => 1,
+            Self::Same => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +52,7 @@ pub(super) enum Piece {
 
 #[derive(Debug)]
 pub(super) enum Rewrite {
+    Alias(usize),
     Square(usize),
     Scalar {
         value: usize,
@@ -118,11 +129,49 @@ impl<'g, 'a> Plan<'g, 'a> {
         }
     }
 
+    /// Cancel only inverse literal offsets, without opening a shared or prepared
+    /// inner sum. Constants are compared in Felt, including normalized negatives;
+    /// no non-base extension literal or structured operation is inspected.
+    fn cancel_const_offsets(&self, id: usize) -> Option<usize> {
+        if !super::native_options().cancel_const_offsets
+            || !matches!(self.graph.node(id).view(), ExprView::Sum { .. })
+        {
+            return None;
+        }
+        let [a, b] = self.graph.children(id) else { return None };
+        for (inner, offset) in [(*a, *b), (*b, *a)] {
+            let Some(offset) = self.constant(offset) else { continue };
+            if self.uses[inner] != 1
+                || self.graph.class(inner) != self.graph.class(id)
+                || !matches!(self.graph.node(inner).view(), ExprView::Sum { .. })
+            {
+                continue;
+            }
+            let [x, y] = self.graph.children(inner) else { continue };
+            for (value, inverse) in [(*x, *y), (*y, *x)] {
+                let Some(inverse) = self.constant(inverse) else {
+                    continue;
+                };
+                let sum = u128::from(offset) + u128::from(inverse);
+                if sum == 0 || sum == u128::from(miden_core::Felt::ORDER) {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
+
     // Flatten only unshared sums. Negation and prepared/shared sums retain
     // their boundaries; no selector or witness facts enter this scheduling pass.
     fn terms(&self, id: usize, class: Class, root: bool, out: &mut Vec<usize>) {
         if out.len() >= MAX_TERMS {
             out.push(id);
+            return;
+        }
+        if (root || self.uses[id] == 1)
+            && let Some(value) = self.cancel_const_offsets(id)
+        {
+            self.terms(value, class, false, out);
             return;
         }
         if matches!(self.graph.node(id).view(), ExprView::Sum { .. })
@@ -261,6 +310,15 @@ impl<'g, 'a> Plan<'g, 'a> {
         best
     }
 
+    fn specialized_scalar_product(&self, id: usize) -> bool {
+        let Some((Class::Base, OpKind::Mul, x, Some(y))) = self.operation(id) else {
+            return false;
+        };
+        [x, y].into_iter().filter_map(|id| self.constant(id)).any(|scalar| {
+            scalar == 2 || scalar == 0x7fff_ffff_8000_0001 || scalar.is_power_of_two()
+        })
+    }
+
     fn pieces(&self, terms: &[usize], class: Class) -> Vec<Piece> {
         let mut pieces = Vec::new();
         let mut start = 0;
@@ -283,14 +341,21 @@ impl<'g, 'a> Plan<'g, 'a> {
             };
             let mut selected = None;
             for kind in [DotKind::Scalar, DotKind::Mixed, DotKind::Same] {
+                let options = super::native_options();
+                let minimum = options.dot_min_terms[kind.slot()];
+                let maximum = options.dot_max_terms[kind.slot()];
                 let pairs: Vec<_> = terms[start..end]
                     .iter()
-                    .take(MAX_TERMS)
+                    .take(maximum)
                     .map_while(|&id| self.pair(id, class, kind))
                     .collect();
                 // Unit terms allow beta^0*x and non-product prefixes, but a dot
                 // must consume a real, single-use multiplication to be useful.
-                if pairs.len() >= MIN_DOT_TERMS
+                if pairs.len() >= minimum
+                    && (pairs.len() >= SPECIALIZED_SCALAR_MIN_TERMS
+                        || !terms[start..start + pairs.len()]
+                            .iter()
+                            .any(|&id| self.specialized_scalar_product(id)))
                     && terms[start..start + pairs.len()].iter().any(|&id| {
                         self.product(id).is_some()
                             || (super::native_options().signed_dots
@@ -315,6 +380,9 @@ impl<'g, 'a> Plan<'g, 'a> {
     }
 
     pub fn rewrite(&self, id: usize) -> Option<Rewrite> {
+        if let Some(value) = self.cancel_const_offsets(id) {
+            return Some(Rewrite::Alias(value));
+        }
         if let Some((class, op, x, Some(y))) = self.operation(id) {
             if op == OpKind::Mul && x == y {
                 return Some(Rewrite::Square(x));

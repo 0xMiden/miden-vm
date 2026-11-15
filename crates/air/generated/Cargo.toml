@@ -23,7 +23,7 @@ arbitrary = ["std", "miden-air-definitions/arbitrary"]
 std = ["miden-air-definitions/std", "miden-core/std", "miden-utils-sync/std"]
 concurrent = ["miden-air-definitions/concurrent", "std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary", "miden-air-definitions/testing"]
-symbolic-experiments = ["miden-stark/std", "miden-stark/testing", "miden-constraint-compiler/testing"]
+symbolic-experiments = ["miden-ace/testing", "miden-stark/std", "miden-stark/testing", "miden-constraint-compiler/testing"]
 
 [package.metadata.cargo-shear]
 # The build-generated constraint evaluators import `p3_field::Dup`.

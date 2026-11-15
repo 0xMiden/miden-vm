@@ -11,7 +11,7 @@ use crate::{
     },
     shared::eidos::{
         EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign,
-        NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
+        NarrowLookupConfig, emit_narrow_lookup_columns,
     },
 };
 
@@ -26,7 +26,6 @@ const PVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
     relation_bus: pvm_relation_bus,
     range_check_bus: BusId::Range16 as usize,
     table_multiplicity_sign: LookupMultiplicitySign::Positive,
-    xor_expression: XorExpression::RepeatedSubtraction,
     pair_name: "lookup_pair",
 };
 
