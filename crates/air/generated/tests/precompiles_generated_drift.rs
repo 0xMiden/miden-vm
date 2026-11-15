@@ -37,6 +37,19 @@ fn native_chunk_node_sponge_registration_keeps_composition_and_prepared_executio
 }
 
 #[test]
+fn native_ec_point_groups_registration_keeps_merged_lookup_and_prepared_execution() {
+    use miden_air::precompiles::native::EcPointStoreGroupsKernel;
+    use miden_air_definitions::precompiles::ec::point_store_groups::EcPointStoreGroupsAir;
+
+    assert_native_registration(
+        &EcPointStoreGroupsAir,
+        &EcPointStoreGroupsAir,
+        &EcPointStoreGroupsKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
 fn native_keccak_round_registration_keeps_source_metadata_and_prepared_execution() {
     use miden_air::precompiles::native::KeccakRoundKernel;
     use miden_air_definitions::precompiles::hash::keccak::round::KeccakRoundAir;

@@ -16,7 +16,7 @@
 //! layer and consuming relations establish parameter validity, including `b ≠ 0` and the uint
 //! bindings under `bound_ptr`.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -24,19 +24,19 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup,
+        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        native as native_lookup,
     },
 };
-use p3_field::Algebra;
+use native::LiftedAirBuilder as _;
+use p3_field::{Algebra, Dup};
 
 use crate::precompiles::{
     ec::EcGroupMsg,
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
 };
 
 // COLUMN LAYOUT
@@ -98,40 +98,91 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&EcGroupsAir, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid EC store auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_main(builder, 0);
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        // Phase 2: LogUp.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+impl native::LiftedAir for EcGroupsAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_main(frame, builder, 0);
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for EcGroupsAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+pub(crate) fn eval_main<AB>(frame: &native::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: native::LiftedAirBuilder<F = Felt>,
 {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store current main row band");
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store next main row band");
 
-    let ptr: AB::Expr = local[COL_PTR].into();
-    let ptr_next: AB::Expr = next[COL_PTR].into();
+    let ptr: AB::Expr = local[COL_PTR].dup();
+    let ptr_next: AB::Expr = next[COL_PTR].dup();
 
     // The ungated chain: ptr = row + 1 for every prover, pads
     // included (they are just mult = 0 rows), so ptr → tuple is
     // injective by construction. The wrap edge is dropped, keeping
     // the cyclic last → first transition free.
-    builder.when_transition().assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
-    builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
+    builder
+        .when(frame.transition())
+        .assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_zero(ptr - AB::Expr::ONE);
 }
 
 // LOOKUP AIR
@@ -154,19 +205,46 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        eval_lookups(builder, 0);
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
+
+impl<LB> native_lookup::LookupAir<LB> for EcGroupsAir
+where
+    LB: native_lookup::LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_lookups(frame, builder, 0);
     }
 }
 
 /// Evaluate this component's LogUp columns in a main-trace column band.
-pub(crate) fn eval_lookups<LB>(builder: &mut LB, main_col_offset: usize)
-where
-    LB: LookupBuilder<F = Felt>,
+pub(crate) fn eval_lookups<LB>(
+    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+    builder: &mut LB,
+    main_col_offset: usize,
+) where
+    LB: native_lookup::LookupBuilder<F = Felt>,
 {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store lookup main row band");
 
     // Pads zero the mult cell, so the provide needs no act gate.
-    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
+    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].dup();
 
     let provide_deg = Deg { v: 1, u: 1 };
     let col_deg = Deg { v: 1, u: 1 };
@@ -184,13 +262,13 @@ where
                                 "provide-ecgroup",
                                 neg_mult,
                                 EcGroupMsg {
-                                    group_ptr: local[COL_PTR].into(),
-                                    a_ptr: local[COL_A_PTR].into(),
-                                    b_ptr: local[COL_B_PTR].into(),
-                                    bound_ptr: local[COL_BOUND_PTR].into(),
-                                    scalar_bound_ptr: local[COL_SBOUND_PTR].into(),
-                                    beta_ptr: local[COL_BETA_PTR].into(),
-                                    lambda_ptr: local[COL_LAMBDA_PTR].into(),
+                                    group_ptr: local[COL_PTR].dup(),
+                                    a_ptr: local[COL_A_PTR].dup(),
+                                    b_ptr: local[COL_B_PTR].dup(),
+                                    bound_ptr: local[COL_BOUND_PTR].dup(),
+                                    scalar_bound_ptr: local[COL_SBOUND_PTR].dup(),
+                                    beta_ptr: local[COL_BETA_PTR].dup(),
+                                    lambda_ptr: local[COL_LAMBDA_PTR].dup(),
                                 },
                                 provide_deg,
                             );

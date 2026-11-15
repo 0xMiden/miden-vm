@@ -23,6 +23,17 @@ define_native_kernel!(
 );
 
 define_native_kernel!(
+    /// Generated execution of the EC point store with its merged group-table lookup.
+    ///
+    /// Curve records remain witness data authenticated by the external relation bindings.
+    EcPointStoreGroupsKernel,
+    descriptor_ec_point_store_groups,
+    precompute_ec_point_store_groups,
+    eval_ec_point_store_groups,
+    EC_POINT_STORE_GROUPS_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the authored Keccak-round relation.
     ///
     /// Construction owns an embedded descriptor without source recapture or fixed-table building.
