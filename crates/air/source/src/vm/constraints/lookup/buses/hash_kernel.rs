@@ -25,17 +25,15 @@
 //! limbs and word-address limbs come from the
 //! [`ChipletCols::memory_cols`](crate::vm::ChipletCols::memory_cols) overlay.
 
-use core::borrow::Borrow;
-
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::super::operations::{aead_stream, merkle};
 use crate::vm::{
     constraints::{
-        chiplets::columns::PeriodicCols,
         lookup::{
-            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+            chiplet_air::{ChipletBusContext, NativeChipletLookupBuilder},
             messages::{BytePairLookupMsg, MemoryMsg, RangeMsg},
         },
         utils::BoolNot,
@@ -66,19 +64,18 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5
 /// Emit the hash-kernel virtual table bus.
 pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
     builder: &mut LB,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let local = ctx.local;
-    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
+    let aead_phase = ctx.periodic.aead_stream.phases.clone();
 
     // --- ACE memory-read setup ---
 
     // Typed ACE chiplet overlay.
     let ace = local.ace_cols();
-    let block_sel: LB::Expr = ace.s_block.into();
+    let block_sel: LB::Expr = ace.s_block.dup();
 
     // ACE row gate comes from the shared `chiplet_active` snapshot; per-mode split by
     // `block_sel`.
@@ -86,14 +83,14 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_ace_read: LB::Expr = is_ace_row.clone() * block_sel.not();
     let f_ace_eval: LB::Expr = is_ace_row * block_sel;
 
-    let ace_clk = ace.clk;
-    let ace_ctx = ace.ctx;
-    let ace_ptr = ace.ptr;
-    let ace_v0 = ace.v_0;
-    let ace_v1 = ace.v_1;
-    let ace_id_1 = ace.id_1;
-    let ace_id_2 = ace.eval().id_2;
-    let ace_eval_op = ace.eval_op;
+    let ace_clk = ace.clk.dup();
+    let ace_ctx = ace.ctx.dup();
+    let ace_ptr = ace.ptr.dup();
+    let ace_v0 = ace.v_0.clone();
+    let ace_v1 = ace.v_1.clone();
+    let ace_id_1 = ace.id_1.dup();
+    let ace_id_2 = ace.eval().id_2.dup();
+    let ace_eval_op = ace.eval_op.dup();
     let bitwise = local.bitwise_cols();
     let normal_bitwise_gate = ctx.chiplet_active.bitwise.clone();
 
@@ -101,10 +98,10 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
 
     let mem_active = ctx.chiplet_active.memory.clone();
     let mem = local.memory_cols();
-    let mem_d0 = mem.d0;
-    let mem_d1 = mem.d1;
-    let mem_w0 = mem.word_addr_lo;
-    let mem_w1 = mem.word_addr_hi;
+    let mem_d0 = mem.d0.dup();
+    let mem_d1 = mem.d1.dup();
+    let mem_w0 = mem.word_addr_lo.dup();
+    let mem_w1 = mem.word_addr_hi.dup();
 
     builder.next_column(
         |col| {
@@ -118,16 +115,12 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     g.remove(
                         "ace_mem_read_word",
                         f_ace_read,
-                        move || {
-                            let clk = ace_clk.into();
-                            let ctx = ace_ctx.into();
-                            let addr = ace_ptr.into();
-                            let word = [
-                                ace_v0.0.into(),
-                                ace_v0.1.into(),
-                                ace_v1.0.into(),
-                                ace_v1.1.into(),
-                            ];
+                        || {
+                            let clk = ace_clk.dup();
+                            let ctx = ace_ctx.dup();
+                            let addr = ace_ptr.dup();
+                            let word =
+                                [ace_v0.0.dup(), ace_v0.1.dup(), ace_v1.0.dup(), ace_v1.1.dup()];
                             MemoryMsg::read_word(ctx, addr, clk, word)
                         },
                         Deg { v: 5, u: 6 },
@@ -137,13 +130,13 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     g.remove(
                         "ace_mem_eval_element",
                         f_ace_eval,
-                        move || {
-                            let clk = ace_clk.into();
-                            let ctx = ace_ctx.into();
-                            let addr = ace_ptr.into();
-                            let id_1: LB::Expr = ace_id_1.into();
-                            let id_2: LB::Expr = ace_id_2.into();
-                            let eval_op: LB::Expr = ace_eval_op.into();
+                        || {
+                            let clk = ace_clk.dup();
+                            let ctx = ace_ctx.dup();
+                            let addr = ace_ptr.dup();
+                            let id_1: LB::Expr = ace_id_1.dup();
+                            let id_2: LB::Expr = ace_id_2.dup();
+                            let eval_op: LB::Expr = ace_eval_op.dup();
                             let element = id_1
                                 + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
                                 + (eval_op + LB::Expr::ONE)
@@ -168,9 +161,9 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                 b.remove(
                                     "bitwise_and8_byte",
                                     BytePairLookupMsg::from_and(
-                                        bitwise.a_bytes[idx].into(),
-                                        bitwise.b_bytes[idx].into(),
-                                        bitwise.and_bytes[idx].into(),
+                                        bitwise.a_bytes[idx].dup(),
+                                        bitwise.b_bytes[idx].dup(),
+                                        bitwise.and_bytes[idx].dup(),
                                     ),
                                     Deg { v: 2, u: 3 },
                                 );
@@ -189,19 +182,19 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     g.batch(
                         "memory_range_checks",
                         mem_active,
-                        move |b| {
+                        |b| {
                             b.remove(
                                 "mem_d0",
-                                RangeMsg { value: mem_d0.into() },
+                                RangeMsg { value: mem_d0.dup() },
                                 Deg { v: 3, u: 4 },
                             );
                             b.remove(
                                 "mem_d1",
-                                RangeMsg { value: mem_d1.into() },
+                                RangeMsg { value: mem_d1.dup() },
                                 Deg { v: 3, u: 4 },
                             );
-                            let w0: LB::Expr = mem_w0.into();
-                            let w1: LB::Expr = mem_w1.into();
+                            let w0: LB::Expr = mem_w0.dup();
+                            let w1: LB::Expr = mem_w1.dup();
                             let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
                             b.remove("mem_w0", RangeMsg { value: w0 }, Deg { v: 3, u: 4 });
                             b.remove("mem_w1", RangeMsg { value: w1 }, Deg { v: 3, u: 4 });

@@ -30,10 +30,12 @@ use miden_stark::{
 use super::{
     and8_lookup_air::And8LookupBuilder,
     buses::LookupOpFlags,
-    chiplet_air::ChipletLookupBuilder,
+    chiplet_air::{ChipletLookupBuilder, NativeChipletLookupBuilder},
     main_air::{MainLookupBuilder, NativeMainLookupBuilder},
 };
-use crate::vm::{CoreCols, Felt};
+use crate::vm::{
+    ChipletCols, CoreCols, Felt, constraints::chiplets::selectors::ChipletActiveFlags,
+};
 
 // CONSTRAINT PATH
 // ================================================================================================
@@ -132,3 +134,27 @@ impl<LB: MainLookupBuilder> NativeMainLookupBuilder for LegacyLookup<'_, LB> {
 
 #[cfg(feature = "std")]
 impl NativeMainLookupBuilder for native_lookup::NativeValidationBuilder<'_> {}
+
+// NATIVE CHIPLET PATHS
+// ================================================================================================
+
+impl<B: native::LiftedAirBuilder<F = Felt>> NativeChipletLookupBuilder
+    for native_lookup::ConstraintLookupBuilder<'_, '_, B>
+{
+}
+
+impl<EF: ExtensionField<Felt>> NativeChipletLookupBuilder for ProverLookupBuilder<'_, Felt, EF> {}
+
+impl<LB: ChipletLookupBuilder> NativeChipletLookupBuilder for LegacyLookup<'_, LB> {
+    fn build_chiplet_active(&self, _local: &ChipletCols<LB::Expr>) -> ChipletActiveFlags<LB::Expr> {
+        // The bridge and hook read one stable row pair. Return owned flags while the original
+        // window is alive, then release all legacy borrows before mutable column callbacks.
+        let builder = self.legacy();
+        let main = builder.main();
+        let local: &ChipletCols<LB::Var> = main.current_slice().borrow();
+        ChipletLookupBuilder::build_chiplet_active(builder, local)
+    }
+}
+
+#[cfg(feature = "std")]
+impl NativeChipletLookupBuilder for native_lookup::NativeValidationBuilder<'_> {}

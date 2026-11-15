@@ -15,21 +15,24 @@ pub use self::{
 };
 use crate::{
     shared::geometry::NUM_OOD_POINTS,
-    vm::{AIRS, CoreAir, EidosCompressionAir, MidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH},
+    vm::{
+        AIRS, And8LookupAir, ChipletsAir, CoreAir, EidosCompressionAir, MidenAir,
+        logup::MIDEN_MAX_MESSAGE_WIDTH,
+    },
 };
 
 /// Canonical authored captures shared by VM evaluator and ACE generation.
 ///
-/// Only complete source ports use native capture; other variants retain their legacy source
-/// route. Pairing declarations with their capture preserves instance order for every backend.
+/// Pairing declarations with their native capture preserves instance order for every backend.
 pub fn capture_vm_airs() -> Result<Vec<(MidenAir, CapturedAir)>, AceError> {
     AIRS.iter()
         .copied()
         .map(|air| {
             let captured = match air {
                 MidenAir::Core => CapturedAir::new_native(&CoreAir),
+                MidenAir::Chiplets => CapturedAir::new_native(&ChipletsAir),
                 MidenAir::EidosCompression => CapturedAir::new_native(&EidosCompressionAir),
-                _ => CapturedAir::new(&air),
+                MidenAir::And8Lookup => CapturedAir::new_native(&And8LookupAir),
             }?;
             Ok((air, captured))
         })

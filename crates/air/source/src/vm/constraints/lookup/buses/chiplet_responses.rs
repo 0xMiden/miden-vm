@@ -12,16 +12,16 @@
 //! rather than splitting into four per-label variants. This keeps the response-column
 //! transition degree at 8; a per-variant split would bump it to 9.
 
-use core::{array, borrow::Borrow};
+use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::super::operations::{aead_stream, merkle};
 use crate::vm::constraints::{
-    chiplets::columns::PeriodicCols,
     lookup::{
-        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        chiplet_air::{ChipletBusContext, NativeChipletLookupBuilder},
         messages::{
             AceInitMsg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
             MemoryResponseMsg,
@@ -47,14 +47,13 @@ pub(in crate::vm::constraints::lookup) const COLUMN_DEG: Deg = Deg { v: 7, u: 8 
 /// Emit the chiplet responses bus.
 pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
     builder: &mut LB,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let local = ctx.local;
     // Read the typed periodic column view used by AEAD stream rows.
-    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
+    let aead_phase = ctx.periodic.aead_stream.phases.clone();
 
     // Typed chiplet-data overlays.
     let ctrl = local.controller_cols();
@@ -64,14 +63,14 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
     let krom = local.kernel_rom_cols();
 
     // Hash-start and continuation flags on controller rows.
-    let hs0: LB::Expr = ctrl.s0.into();
+    let hs0: LB::Expr = ctrl.s0.dup();
     let not_hs0 = hs0.not();
-    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.dup();
     let hash_gate = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
-    let state: [LB::Var; 12] = ctrl.state;
-    let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let state: [LB::Expr; 12] = ctrl.state.clone();
+    let block_lo: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[i].dup());
+    let block_hi: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[4 + i].dup());
 
     // --- Hasher response flags ---
     let f_hash_start: LB::Expr = hash_gate.clone() * hs0;
@@ -83,22 +82,22 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
     let is_bitwise_responding: LB::Expr = ctx.chiplet_active.bitwise.clone();
 
     // ACE init: responds only on ACE start rows.
-    let is_ace_init: LB::Expr = ctx.chiplet_active.ace.clone() * ace.s_start.into();
+    let is_ace_init: LB::Expr = ctx.chiplet_active.ace.clone() * ace.s_start.dup();
 
     // --- Emit everything into a single LogUp column ---
 
     // All hasher response variants use the controller row address so they cancel against
     // the matching request.
-    let row_addr: LB::Expr = ctrl.addr.into();
+    let row_addr: LB::Expr = ctrl.addr.dup();
 
-    // Local helpers: convert the copied Var arrays into Expr arrays.
-    let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
+    // Duplicate expression arrays for synchronous message construction.
+    let full_state = || -> [LB::Expr; 12] { state.clone() };
     let full_block = || -> [LB::Expr; 8] {
         array::from_fn(|i| {
             if i < 4 {
-                block_lo[i].into()
+                block_lo[i].dup()
             } else {
-                block_hi[i - 4].into()
+                block_hi[i - 4].dup()
             }
         })
     };
@@ -141,10 +140,10 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "bitwise",
                         is_bitwise_responding,
                         || {
-                            let bw_op: LB::Expr = bw.op_flag.into();
-                            let a = pack_u32_bytes_le::<_, LB::Expr>(bw.a_bytes);
-                            let b = pack_u32_bytes_le::<_, LB::Expr>(bw.b_bytes);
-                            let and = pack_u32_bytes_le::<_, LB::Expr>(bw.and_bytes);
+                            let bw_op: LB::Expr = bw.op_flag.dup();
+                            let a = pack_u32_bytes_le::<_, LB::Expr>(bw.a_bytes.clone());
+                            let b = pack_u32_bytes_le::<_, LB::Expr>(bw.b_bytes.clone());
+                            let and = pack_u32_bytes_le::<_, LB::Expr>(bw.and_bytes.clone());
                             let xor = a.clone() + b.clone() - and.double();
                             let result = and.clone() + bw_op.clone() * (xor - and);
                             BitwiseMsg { op: bw_op, a, b, result }
@@ -159,16 +158,16 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "memory",
                         ctx.chiplet_active.memory.clone(),
                         || {
-                            let mem_is_read: LB::Expr = mem.is_read.into();
-                            let is_word: LB::Expr = mem.is_word.into();
-                            let mem_idx0: LB::Expr = mem.idx0.into();
-                            let mem_idx1: LB::Expr = mem.idx1.into();
+                            let mem_is_read: LB::Expr = mem.is_read.dup();
+                            let is_word: LB::Expr = mem.is_word.dup();
+                            let mem_idx0: LB::Expr = mem.idx0.dup();
+                            let mem_idx1: LB::Expr = mem.idx1.dup();
 
-                            let addr = mem.word_addr.into()
+                            let addr = mem.word_addr.dup()
                                 + mem_idx1.clone() * LB::Expr::from_u16(2)
                                 + mem_idx0.clone();
 
-                            let word: [LB::Expr; 4] = mem.values.map(LB::Expr::from);
+                            let word: [LB::Expr; 4] = mem.values.clone();
                             let element = word[0].clone() * mem_idx0.not() * mem_idx1.not()
                                 + word[1].clone() * mem_idx0.clone() * mem_idx1.not()
                                 + word[2].clone() * mem_idx0.not() * mem_idx1.clone()
@@ -176,9 +175,9 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
 
                             MemoryResponseMsg {
                                 is_read: mem_is_read,
-                                ctx: mem.ctx.into(),
+                                ctx: mem.ctx.dup(),
                                 addr,
-                                clk: mem.clk.into(),
+                                clk: mem.clk.dup(),
                                 is_word,
                                 element,
                                 word,
@@ -192,12 +191,12 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "ace_init",
                         is_ace_init,
                         || {
-                            let num_eval = ace.read().num_eval.into() + LB::Expr::ONE;
-                            let num_read = ace.id_0.into() + LB::Expr::ONE - num_eval.clone();
+                            let num_eval = ace.read().num_eval.dup() + LB::Expr::ONE;
+                            let num_read = ace.id_0.dup() + LB::Expr::ONE - num_eval.clone();
                             AceInitMsg {
-                                clk: ace.clk.into(),
-                                ctx: ace.ctx.into(),
-                                ptr: ace.ptr.into(),
+                                clk: ace.clk.dup(),
+                                ctx: ace.ctx.dup(),
+                                ptr: ace.ptr.dup(),
                                 num_read,
                                 num_eval,
                             }
@@ -213,8 +212,8 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "kernel_rom",
                         kernel_gate,
                         |b| {
-                            let krom_mult: LB::Expr = krom.multiplicity.into();
-                            let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
+                            let krom_mult: LB::Expr = krom.multiplicity.dup();
+                            let digest: [LB::Expr; 4] = krom.root.clone();
 
                             b.remove(
                                 "kernel_rom_init",

@@ -16,7 +16,7 @@ use miden_stark::lookup::{Deg, LookupBatch, LookupGroup};
 use crate::vm::constraints::{
     chiplets::columns::AeadStreamCols,
     lookup::{
-        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        chiplet_air::{ChipletBusContext, NativeChipletLookupBuilder},
         main_air::{MainBusContext, NativeMainLookupBuilder},
         messages::{
             AeadEidosCompressionInputMsg, AeadEidosCompressionOutputPairMsg, AeadStreamRequestMsg,
@@ -83,10 +83,10 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
 
 pub(in crate::vm::constraints::lookup) fn emit_byte_checks<LB, G>(
     g: &mut G,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
     aead_phase: &[LB::Expr; 8],
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let stream = ctx.local.aead_stream_cols();
@@ -97,19 +97,19 @@ pub(in crate::vm::constraints::lookup) fn emit_byte_checks<LB, G>(
             gate,
             |b| {
                 let bytes = match phase_idx % 4 {
-                    0 => stream.read().bytes,
-                    1 => stream.high_first().bytes,
-                    2 => stream.low_second().bytes,
-                    3 => stream.high_second().bytes,
+                    0 => &stream.read().bytes,
+                    1 => &stream.high_first().bytes,
+                    2 => &stream.low_second().bytes,
+                    3 => &stream.high_second().bytes,
                     _ => unreachable!(),
                 };
                 for idx in 0..4 {
                     b.remove(
                         "aead_stream_byte",
                         BytePairLookupMsg::from_and(
-                            bytes[idx].into(),
-                            bytes[4 + idx].into(),
-                            bytes[8 + idx].into(),
+                            bytes[idx].dup(),
+                            bytes[4 + idx].dup(),
+                            bytes[8 + idx].dup(),
                         ),
                         Deg { v: 2, u: 3 },
                     );
@@ -130,10 +130,10 @@ pub(in crate::vm::constraints::lookup) fn emit_byte_checks<LB, G>(
 
 pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
     g: &mut G,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
     aead_phase: &[LB::Expr; 8],
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let stream = ctx.local.aead_stream_cols();
@@ -147,8 +147,8 @@ pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
             gate,
             || {
                 let row = stream.read();
-                let word = row.plaintext.map(Into::into);
-                MemoryMsg::read_word(row.ctx.into(), row.src_ptr.into(), row.clk.into(), word)
+                let word = row.plaintext.clone();
+                MemoryMsg::read_word(row.ctx.dup(), row.src_ptr.dup(), row.clk.dup(), word)
             },
             Deg { v: 4, u: 5 },
         );
@@ -164,12 +164,12 @@ pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
             || {
                 let row = stream.high_second();
                 let word = [
-                    row.c_prev0.into(),
-                    row.c_prev1.into(),
-                    row.c_prev2.into(),
-                    pack_u32_xor_bytes_le::<_, LB::Expr>(row.bytes),
+                    row.c_prev0.dup(),
+                    row.c_prev1.dup(),
+                    row.c_prev2.dup(),
+                    pack_u32_xor_bytes_le::<_, LB::Expr>(row.bytes.clone()),
                 ];
-                MemoryMsg::write_word(row.ctx.into(), row.dst_ptr.into(), row.clk.into(), word)
+                MemoryMsg::write_word(row.ctx.dup(), row.dst_ptr.dup(), row.clk.dup(), word)
             },
             Deg { v: 4, u: 5 },
         );
@@ -180,10 +180,10 @@ pub(in crate::vm::constraints::lookup) fn emit_memory_io<LB, G>(
 
 pub(in crate::vm::constraints::lookup) fn emit_wiring<LB, G>(
     g: &mut G,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
     aead_phase: &[LB::Expr; 8],
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let stream = ctx.local.aead_stream_cols();
@@ -238,33 +238,33 @@ pub(in crate::vm::constraints::lookup) fn emit_wiring<LB, G>(
 }
 
 fn aead_stream_pair_msg<LB>(
-    stream: &AeadStreamCols<LB::Var>,
-    stream_next: &AeadStreamCols<LB::Var>,
+    stream: &AeadStreamCols<LB::Expr>,
+    stream_next: &AeadStreamCols<LB::Expr>,
     phase_idx: usize,
     first_lane_offset: u16,
 ) -> AeadEidosCompressionOutputPairMsg<LB::Expr>
 where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let (clk, lane_base, value0, value1) = match phase_idx % 4 {
         0 => {
             let row = stream.read();
             let next = stream_next.high_first();
             (
-                row.clk.into(),
-                row.lane_base.into(),
-                stream_b_limb::<LB>(row.bytes),
-                stream_b_limb::<LB>(next.bytes),
+                row.clk.dup(),
+                row.lane_base.dup(),
+                stream_b_limb::<LB>(&row.bytes),
+                stream_b_limb::<LB>(&next.bytes),
             )
         },
         2 => {
             let row = stream.low_second();
             let next = stream_next.high_second();
             (
-                row.clk.into(),
-                row.lane_base.into(),
-                stream_b_limb::<LB>(row.bytes),
-                stream_b_limb::<LB>(next.bytes),
+                row.clk.dup(),
+                row.lane_base.dup(),
+                stream_b_limb::<LB>(&row.bytes),
+                stream_b_limb::<LB>(&next.bytes),
             )
         },
         _ => unreachable!(),
@@ -278,28 +278,28 @@ where
 }
 
 fn aead_stream_request_msg<LB>(
-    stream: &AeadStreamCols<LB::Var>,
+    stream: &AeadStreamCols<LB::Expr>,
     second_half_offset: u16,
 ) -> AeadStreamRequestMsg<LB::Expr>
 where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let row = stream.low_second();
-    let dst_ptr: LB::Expr = row.dst_ptr.into();
-    let lane_base: LB::Expr = row.lane_base.into();
+    let dst_ptr: LB::Expr = row.dst_ptr.dup();
+    let lane_base: LB::Expr = row.lane_base.dup();
     let offset = LB::Expr::from_u16(second_half_offset);
     AeadStreamRequestMsg {
-        ctx: row.ctx.into(),
-        clk: row.clk.into(),
-        src_ptr: row.src_ptr.into(),
+        ctx: row.ctx.dup(),
+        clk: row.clk.dup(),
+        src_ptr: row.src_ptr.dup(),
         dst_ptr: dst_ptr - offset.clone(),
         lane_base: lane_base - offset,
     }
 }
 
-fn stream_b_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
+fn stream_b_limb<LB>(bytes: &[LB::Expr; 12]) -> LB::Expr
 where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
-    pack_u32_bytes_le::<_, LB::Expr>([bytes[4], bytes[5], bytes[6], bytes[7]])
+    pack_u32_bytes_le::<_, LB::Expr>(core::array::from_fn(|i| bytes[4 + i].dup()))
 }

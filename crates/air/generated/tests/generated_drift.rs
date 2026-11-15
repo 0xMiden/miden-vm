@@ -36,6 +36,32 @@ fn native_core_registration_keeps_source_metadata_and_prepared_execution() {
 }
 
 #[test]
+fn native_chiplets_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::vm::native::ChipletsKernel;
+    use miden_air_definitions::vm::{ChipletsAir, MidenAir};
+
+    native_registration::assert_native_registration(
+        &ChipletsAir,
+        &MidenAir::Chiplets,
+        &ChipletsKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
+fn native_and8_registration_keeps_fixed_shape_and_prepared_execution() {
+    use miden_air::vm::native::And8LookupKernel;
+    use miden_air_definitions::vm::{And8LookupAir, MidenAir};
+
+    native_registration::assert_native_registration(
+        &And8LookupAir,
+        &MidenAir::And8Lookup,
+        &And8LookupKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
 fn native_eidos_registration_keeps_source_metadata_and_prepared_execution() {
     use miden_air::vm::native::EidosCompressionKernel;
     use miden_air_definitions::vm::{EidosCompressionAir, MidenAir};

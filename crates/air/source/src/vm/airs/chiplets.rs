@@ -1,20 +1,21 @@
 //! Authored Chiplets AIR constraints and lookup bindings.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
-    air::{
-        ReductionError, WindowAccess,
-        native::migration::{LegacySink, SourceSnapshot},
-    },
-    lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder},
+    air::{ReductionError, native},
+    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
 };
 
-use super::{MidenAir, MidenAirBuilder, boundary::ReduceBoundaryBuilder};
+use super::{MidenAirBuilder, boundary::ReduceBoundaryBuilder};
 use crate::vm::{
-    constraints::{self, columns::ChipletCols, lookup::chiplet_air::ChipletLookupBuilder},
+    constraints::{
+        self,
+        columns::ChipletCols,
+        lookup::chiplet_air::{ChipletLookupBuilder, NativeChipletLookupBuilder},
+    },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
 
@@ -77,21 +78,7 @@ impl ChipletsAir {
     }
 
     pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        let snapshot = SourceSnapshot::new(builder, 0, self.aux_width());
-        let frame = snapshot.frame();
-        let local: &ChipletCols<AB::Expr> = frame.main.current.borrow();
-        let next: &ChipletCols<AB::Expr> = frame.main.next.borrow();
-        {
-            let mut sink = LegacySink::new(builder);
-            let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
-                &frame, &mut sink, local, next,
-            );
-            constraints::enforce_chiplets(&frame, &mut sink, local, next, &selectors);
-        }
-
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
-        self.lookup_eval(&mut lb);
-        lb.finish();
+        native::migration::eval_source(&self, builder);
     }
 
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
@@ -107,14 +94,147 @@ impl ChipletsAir {
     }
 
     pub(super) fn lookup_eval<LB: ChipletLookupBuilder>(self, builder: &mut LB) {
-        let main = builder.main();
-        let local: &ChipletCols<_> = main.current_slice().borrow();
-        let next: &ChipletCols<_> = main.next_slice().borrow();
-
-        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(builder, local, next);
+        native::migration::eval_lookup(&self, builder, 0);
     }
 
     pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, boundary: &mut B) {
         constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
+    }
+}
+
+impl native::LiftedAir for ChipletsAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: constraints::columns::NUM_CHIPLETS_COLS,
+            aux_width: constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len(),
+            num_public_values: 0,
+            num_challenges: crate::vm::trace::AUX_TRACE_RAND_CHALLENGES,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(self.periodic_columns()),
+        }
+    }
+
+    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, B>,
+        inputs: native::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        let local: &ChipletCols<B::Expr> = frame.main.current.borrow();
+        let next: &ChipletCols<B::Expr> = frame.main.next.borrow();
+        let selectors =
+            constraints::chiplets::selectors::build_chiplet_selectors(frame, sink, local, next);
+        constraints::enforce_chiplets(frame, sink, local, next, &selectors);
+        native_lookup::eval_lookup(self, frame, inputs, sink);
+    }
+}
+
+impl<LB: NativeChipletLookupBuilder> native_lookup::LookupAir<LB> for ChipletsAir {
+    fn column_shape(&self) -> &[usize] {
+        &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+    fn num_bus_ids(&self) -> usize {
+        BusId::COUNT
+    }
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(frame, builder);
+    }
+    fn eval_boundary<B: BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
+        constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
+    }
+}
+
+impl<EF: ExtensionField<Felt>> native::ProverAir<EF> for ChipletsAir {
+    type Error = native_lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<native::AuxTrace<EF>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::RowMajorMatrix,
+    };
+    use miden_stark::air::{LiftedAir as LegacyAir, native};
+
+    use super::ChipletsAir;
+    use crate::vm::{MidenAir, constraints::columns::NUM_CHIPLETS_COLS};
+
+    #[test]
+    fn complete_native_chiplets_capture_preserves_ordinary_then_lookup_order() {
+        let captured = native::capture_with::<_, QuadFelt>(&ChipletsAir).unwrap();
+        let spec = captured.descriptor.spec();
+        assert_eq!(spec.main_width, NUM_CHIPLETS_COLS);
+        assert_eq!(spec.aux_width, 4);
+        assert_eq!(spec.num_public_values, 0);
+        assert_eq!(spec.num_challenges, 2);
+        assert_eq!(spec.num_exports, 1);
+        assert!(spec.preprocessed.is_none());
+        assert_eq!(spec.periodic_columns.len(), 8);
+        assert!(spec.periodic_columns.iter().all(|column| column.len() == 8));
+        let counts = captured.descriptor.analysis().counts();
+        assert_eq!(counts.base, 172);
+        assert_eq!(counts.ext, 5);
+        assert!(
+            captured.assertions[..counts.base]
+                .iter()
+                .all(|value| matches!(value, native::Assertion::Base(_)))
+        );
+        assert!(
+            captured.assertions[counts.base..]
+                .iter()
+                .all(|value| matches!(value, native::Assertion::Extension(_)))
+        );
+        #[cfg(feature = "std")]
+        miden_stark::lookup::native::validate_native(&ChipletsAir, spec).unwrap();
+    }
+
+    #[test]
+    fn native_and_legacy_chiplet_witness_values_and_exports_match() {
+        let main = RowMajorMatrix::new(
+            (0..8)
+                .flat_map(|row| {
+                    let mut values = [Felt::ZERO; NUM_CHIPLETS_COLS];
+                    values[23] = Felt::from_usize(row + 1);
+                    values
+                })
+                .collect(),
+            NUM_CHIPLETS_COLS,
+        );
+        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        let native = native::ProverAir::build_aux_trace(
+            &ChipletsAir,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        let (legacy, exports) =
+            <MidenAir as LegacyAir<Felt, QuadFelt>>::build_aux_trace_with_preprocessed(
+                &MidenAir::Chiplets,
+                &main,
+                None,
+                &[],
+                &[],
+                &challenges,
+            );
+        assert_eq!(native.columns.values, legacy.values);
+        assert_eq!(native.exports, exports);
     }
 }

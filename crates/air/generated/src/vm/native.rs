@@ -26,6 +26,28 @@ define_native_kernel!(
 );
 
 define_native_kernel!(
+    /// Generated execution of the authored Chiplets relation, including its lookup columns.
+    ///
+    /// Witness construction remains on [`ChipletsAir`](miden_air_definitions::vm::ChipletsAir).
+    ChipletsKernel,
+    descriptor_chiplets,
+    precompute_chiplets,
+    eval_chiplets,
+    CHIPLETS_PREPARED_TERMS
+);
+
+define_native_kernel!(
+    /// Generated execution of the VM byte-pair table relation.
+    ///
+    /// Setup owns the fixed matrix; this kernel embeds only its shape and relation descriptor.
+    And8LookupKernel,
+    descriptor_and8_lookup,
+    precompute_and8_lookup,
+    eval_and8_lookup,
+    AND8_LOOKUP_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the VM Eidos compression relation and its fingerprint register.
     ///
     /// Witness construction remains on the authored
