@@ -63,6 +63,7 @@ path = "src/bin/pvm_proof_fixture.rs"
 required-features = ["fixture-tools"]
 
 [dev-dependencies]
+p3-field.workspace = true
 p3-security.workspace = true
 insta.workspace = true
 # Known-good secp256k1 reference for EC circuit cross-validation.
