@@ -3,33 +3,16 @@ use miden_ace::EXT_DEGREE;
 #[cfg(any(test, feature = "compiler"))]
 use miden_core::{Felt, field::QuadFelt};
 #[cfg(any(test, feature = "compiler"))]
-use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir, native};
+use miden_stark::air::native;
 #[cfg(any(test, feature = "compiler"))]
 use p3_security::budget::{AirShape, LookupShape};
-
-#[cfg(any(test, feature = "compiler"))]
-pub(crate) fn derive_air_shape<A: LiftedAir<Felt, QuadFelt>>(
-    airs: &[A],
-    lookup: LookupShape,
-    alignment: usize,
-) -> AirShape {
-    let mut constraints = 0;
-    let mut degree = 0;
-    let mut raw_widths = alloc::vec::Vec::with_capacity(airs.len());
-    for air in airs {
-        constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(air).total();
-        degree = degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(air).max());
-        raw_widths.push((air.preprocessed_width(), air.width(), EXT_DEGREE * air.aux_width()));
-    }
-    shape_from_parts(constraints, degree, &raw_widths, lookup, alignment)
-}
 
 /// Source-derived artifact geometry, preserving the conservative quotient allocation policy.
 ///
 /// Each source is captured once. This does not invoke fixed factories or use the tighter
 /// actual-height degree bound, which proof setup must check separately against its allocation.
 #[cfg(any(test, feature = "compiler"))]
-pub(crate) fn derive_native_air_shape<A: native::LiftedAir<F = Felt>>(
+pub(crate) fn derive_air_shape<A: native::LiftedAir<F = Felt>>(
     airs: &[A],
     lookup: LookupShape,
     alignment: usize,
@@ -142,7 +125,7 @@ mod tests {
     #[test]
     fn native_geometry_captures_once_and_pads_each_matrix_independently() {
         let sources = [CountingSource::default(), CountingSource::default()];
-        let shape = derive_native_air_shape(
+        let shape = derive_air_shape(
             &sources,
             LookupShape {
                 fractions_per_row: 2,

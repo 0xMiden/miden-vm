@@ -7,9 +7,7 @@ use miden_air_definitions::{
 };
 use miden_constraint_compiler::backend::{
     rust_descriptor::{self, AirDescriptorEmitter},
-    rust_eval::{
-        AirEvaluator, NativeAirEvaluator, emit_native_optimized_module, emit_optimized_module,
-    },
+    rust_eval::{AirEvaluator, emit_native_optimized_module},
 };
 
 pub fn generate() {
@@ -31,54 +29,21 @@ pub fn generate() {
             air_label: declaration.file_token(),
             graph: air.graph(),
             constraints: air.constraints(),
+            descriptor: air.descriptor(),
         })
         .collect();
-    write("evaluators.rs", emit_optimized_module("", &evals));
-    // Only completed source ports have native descriptors. Both temporary renderings and ACE
-    // consume this one canonical capture, in the unchanged declaration order.
-    let native: Vec<_> = captured
+    let descriptors: Vec<_> = captured
         .airs()
         .iter()
         .zip(&AIRS)
-        .filter_map(|(air, declaration)| {
-            air.descriptor().map(|descriptor| (air, declaration, descriptor))
-        })
-        .collect();
-    let native_evals: Vec<_> = native
-        .iter()
-        .map(|(air, declaration, descriptor)| NativeAirEvaluator {
-            eval: AirEvaluator {
-                name: declaration.file_token(),
-                air_label: declaration.file_token(),
-                graph: air.graph(),
-                constraints: air.constraints(),
-            },
-            descriptor,
-        })
-        .collect();
-    let native_descriptors: Vec<_> = native
-        .iter()
-        .map(|(_, declaration, descriptor)| AirDescriptorEmitter {
+        .map(|(air, declaration)| AirDescriptorEmitter {
             name: declaration.file_token(),
             air_label: declaration.file_token(),
-            descriptor,
+            descriptor: air.descriptor(),
         })
         .collect();
-    write("native_evaluators.rs", emit_native_optimized_module("", &native_evals));
-    write("native_descriptors.rs", rust_descriptor::emit_module("", &native_descriptors));
-    let degree_arms = AIRS
-        .iter()
-        .zip(captured.airs())
-        .map(|(air, capture)| {
-            format!("definitions::ChipletAir::{air:?} => {:?},", capture.degrees())
-        })
-        .collect::<String>();
-    write(
-        "degrees.rs",
-        format!(
-            "fn generated_degrees(air: ChipletAir) -> ConstraintDegrees {{ match air.0 {{ {degree_arms} }} }}"
-        ),
-    );
+    write("native_evaluators.rs", emit_native_optimized_module("", &evals));
+    write("native_descriptors.rs", rust_descriptor::emit_module("", &descriptors));
     let compiled = captured.compile().expect("compile PVM relation");
     let circuit: RecursiveAceCircuit = compiled
         .build_circuit(LayoutKind::Masm)

@@ -7,35 +7,27 @@
 //! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
 //! `miden-constraint-compiler` → `miden-ace` → `miden-air`.
 
-use miden_air_definitions::vm::{AIRS, BaseAir, Felt};
-use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
-use miden_core::field::QuadFelt;
-use miden_stark::air::LiftedAir;
+use miden_air_definitions::vm::AIRS;
+use miden_constraint_compiler::ir::{
+    Class, Graph, Leaf, Node, capture_native, capture_native_into, op_counts,
+};
+
+use miden_stark::air::native::{AirKernel, LiftedAir};
 
 #[test]
 fn generated_adapter_preserves_authored_air_layout() {
     for handwritten in AIRS {
         let air = miden_air::vm::MidenAir(handwritten);
-        assert_eq!(
-            BaseAir::<Felt>::preprocessed_width(&handwritten),
-            BaseAir::<Felt>::preprocessed_width(&air),
-        );
-        assert_eq!(
-            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&handwritten),
-            LiftedAir::<Felt, QuadFelt>::log_preprocessed_height(&air),
-        );
-        assert_eq!(
-            BaseAir::<Felt>::preprocessed_trace(&handwritten),
-            BaseAir::<Felt>::preprocessed_trace(&air),
-        );
+        assert_eq!(handwritten.spec().preprocessed, air.descriptor().spec().preprocessed);
+        assert_eq!(handwritten.build_preprocessed_trace(), air.build_preprocessed_trace());
     }
 }
 
 #[test]
 fn capture_is_deterministic() {
     for air in AIRS {
-        let (g1, c1) = capture(&air);
-        let (g2, c2) = capture(&air);
+        let (g1, c1, _) = capture_native(&air).unwrap();
+        let (g2, c2, _) = capture_native(&air).unwrap();
         assert_eq!(g1, g2);
         assert_eq!(c1.base_roots, c2.base_roots);
         assert_eq!(c1.ext_roots, c2.ext_roots);
@@ -47,7 +39,7 @@ fn capture_is_deterministic() {
 #[test]
 fn ids_are_dense_and_topological() {
     for air in AIRS {
-        let (g, _) = capture(&air);
+        let (g, _, _) = capture_native(&air).unwrap();
         for (id, node) in g.iter() {
             match node {
                 Node::Op { x, y, .. } => {
@@ -70,9 +62,9 @@ fn ids_are_dense_and_topological() {
 fn shared_builder_capture_gives_equal_roots() {
     for air in AIRS {
         let mut b = Graph::builder();
-        let c1 = capture_into(&air, &mut b);
+        let (c1, _) = capture_native_into(&air, &mut b).unwrap();
         let len_after_first = b.len();
-        let c2 = capture_into(&air, &mut b);
+        let (c2, _) = capture_native_into(&air, &mut b).unwrap();
         assert_eq!(c1.base_roots, c2.base_roots);
         assert_eq!(c1.ext_roots, c2.ext_roots);
         // The second capture must not create a single new node.
@@ -85,7 +77,7 @@ fn shared_builder_capture_gives_equal_roots() {
 #[test]
 fn classes_are_sound() {
     for air in AIRS {
-        let (g, _) = capture(&air);
+        let (g, _, _) = capture_native(&air).unwrap();
         for (_, node) in g.iter() {
             match node {
                 Node::Op { class: Class::Base, x, y, .. } => {
@@ -122,7 +114,7 @@ fn classes_are_sound() {
 #[test]
 fn roots_and_indices_are_parallel_and_nonempty() {
     for air in AIRS {
-        let (_, c) = capture(&air);
+        let (_, c, _) = capture_native(&air).unwrap();
         assert_eq!(c.base_roots.len(), c.base_global_indices.len());
         assert_eq!(c.ext_roots.len(), c.ext_global_indices.len());
         assert!(!c.base_roots.is_empty() || !c.ext_roots.is_empty());
@@ -135,7 +127,7 @@ fn roots_and_indices_are_parallel_and_nonempty() {
 #[test]
 fn cse_only_removes_work() {
     for air in AIRS {
-        let (g, c) = capture(&air);
+        let (g, c, _) = capture_native(&air).unwrap();
         let (cse_base, cse_ext) = op_counts(&g);
         assert!(cse_base.total() <= c.naive_base.total());
         assert!(cse_ext.total() <= c.naive_ext.total());

@@ -14,18 +14,11 @@ use std::{collections::HashMap, sync::Arc};
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
-use miden_stark::air::{
-    BaseAir, LiftedAir,
-    native::{
-        self, AirDescriptor, AirKernel, DescriptorError,
-        symbolic::{
-            AuxInput, BaseInput, BaseLeaf as NativeBaseLeaf, ExtLeaf as NativeExtLeaf,
-            SymbolicExpression as NativeExpression, SymbolicExpressionExt as NativeExpressionExt,
-        },
-    },
+use miden_stark::air::native::{
+    self, AirDescriptor, AirKernel, DescriptorError,
     symbolic::{
-        AirLayout, BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpression,
-        SymbolicExpressionExt, eval_air,
+        AuxInput, BaseInput, BaseLeaf as NativeBaseLeaf, ExtLeaf as NativeExtLeaf,
+        SymbolicExpression as NativeExpression, SymbolicExpressionExt as NativeExpressionExt,
     },
 };
 
@@ -54,77 +47,6 @@ pub struct CapturedConstraints {
     pub naive_base: OpCounts,
     /// Ext ops as executed by the hand-written eval (see [`Self::naive_base`]).
     pub naive_ext: OpCounts,
-}
-
-/// Capture `air`'s constraints into a fresh graph.
-///
-/// See [`capture_into`] for semantics and panics.
-pub fn capture<A>(air: &A) -> (Graph, CapturedConstraints)
-where
-    A: LiftedAir<Felt, EF>,
-{
-    let mut builder = GraphBuilder::new();
-    let captured = capture_into(air, &mut builder);
-    (builder.freeze(), captured)
-}
-
-/// Capture `air`'s constraints into an existing [`GraphBuilder`].
-///
-/// Two evaluators captured into the same builder produce equal per-constraint root
-/// ids iff their constraint expressions are structurally identical: hash-consing
-/// canonicalizes both sides to their maximally-shared form. This is the primitive
-/// behind structural drift tests.
-///
-/// # Panics
-///
-/// Panics if the AIR uses main, preprocessed, or aux row offsets greater than 1.
-pub fn capture_into<A>(air: &A, builder: &mut GraphBuilder) -> CapturedConstraints
-where
-    A: LiftedAir<Felt, EF>,
-{
-    capture_into_with(air, builder, |symbolic| eval_air(air, symbolic))
-}
-
-/// Capture a selected part of an AIR into an existing graph using the AIR's input layout.
-///
-/// `eval` supplies the assertions to capture. For example, evaluating only the ordinary lookup
-/// adapter lets an analysis distinguish its assertions from the AIR's other extension constraints.
-/// The same handwritten-source requirement and row-offset restrictions as [`capture_into`] apply.
-pub fn capture_into_with<A>(
-    air: &A,
-    builder: &mut GraphBuilder,
-    eval: impl FnOnce(&mut SymbolicAirBuilder<Felt, EF>),
-) -> CapturedConstraints
-where
-    A: LiftedAir<Felt, EF>,
-{
-    let air_layout = AirLayout {
-        preprocessed_width: BaseAir::<Felt>::preprocessed_width(air),
-        main_width: BaseAir::<Felt>::width(air),
-        num_public_values: BaseAir::<Felt>::num_public_values(air),
-        permutation_width: LiftedAir::<Felt, EF>::aux_width(air),
-        num_permutation_challenges: LiftedAir::<Felt, EF>::num_randomness(air),
-        num_permutation_values: LiftedAir::<Felt, EF>::num_aux_values(air),
-        num_periodic_columns: BaseAir::<Felt>::periodic_columns(air).len(),
-    };
-    let mut symbolic = SymbolicAirBuilder::<Felt, EF>::new(air_layout);
-    eval(&mut symbolic);
-    let base_constraints = symbolic.base_constraints();
-    let ext_constraints = symbolic.extension_constraints();
-    let layout = symbolic.constraint_layout();
-
-    let mut w = Walker::new(builder);
-    let base_roots = base_constraints.iter().map(|c| w.base_node(c)).collect();
-    let ext_roots = ext_constraints.iter().map(|c| w.ext_node(c)).collect();
-
-    CapturedConstraints {
-        base_roots,
-        ext_roots,
-        base_global_indices: layout.base_indices,
-        ext_global_indices: layout.ext_indices,
-        naive_base: w.naive_base,
-        naive_ext: w.naive_ext,
-    }
 }
 
 /// Capture a native authored source into the common IR and retain its checked descriptor.
@@ -240,8 +162,7 @@ fn lower_native(
 /// Walks symbolic expression trees into the graph builder.
 struct Walker<'a> {
     builder: &'a mut GraphBuilder,
-    // A Walker is scoped to one capture and visits either upstream or native ASTs, never both.
-    // The same pointer caches can therefore serve both frontends without retaining old nodes.
+    // Pointer memoization is scoped to one capture; graph interning defines structural identity.
     base_memo: HashMap<usize, NodeId>,
     ext_memo: HashMap<usize, NodeId>,
     naive_base: OpCounts,
@@ -265,117 +186,6 @@ impl<'a> Walker<'a> {
             Class::Ext => self.naive_ext.bump(op),
         }
         self.builder.op(class, op, x, y).0
-    }
-
-    fn base_child(&mut self, c: &Arc<SymbolicExpression<Felt>>) -> NodeId {
-        let ptr = Arc::as_ptr(c) as usize;
-        if let Some(&id) = self.base_memo.get(&ptr) {
-            return id;
-        }
-        let id = self.base_node(c);
-        self.base_memo.insert(ptr, id);
-        id
-    }
-
-    fn base_node(&mut self, e: &SymbolicExpression<Felt>) -> NodeId {
-        match e {
-            SymbolicExpression::Leaf(leaf) => {
-                let leaf = match leaf {
-                    BaseLeaf::Variable(v) => match v.entry {
-                        BaseEntry::Main { offset } if offset <= 1 => {
-                            Leaf::Main { offset, index: v.index }
-                        },
-                        BaseEntry::Main { offset } => {
-                            panic!("unsupported main row offset {offset}")
-                        },
-                        BaseEntry::Public => Leaf::Public(v.index),
-                        BaseEntry::Periodic => Leaf::Periodic(v.index),
-                        BaseEntry::Preprocessed { offset } if offset <= 1 => {
-                            Leaf::Preprocessed { offset, index: v.index }
-                        },
-                        BaseEntry::Preprocessed { offset } => {
-                            panic!("unsupported preprocessed row offset {offset}")
-                        },
-                    },
-                    BaseLeaf::IsFirstRow => Leaf::IsFirst,
-                    BaseLeaf::IsLastRow => Leaf::IsLast,
-                    BaseLeaf::IsTransition => Leaf::IsTransition,
-                    BaseLeaf::Constant(c) => Leaf::BaseConst(c.as_canonical_u64()),
-                };
-                self.builder.leaf(leaf)
-            },
-            SymbolicExpression::Add { x, y, .. } => {
-                let (xi, yi) = (self.base_child(x), self.base_child(y));
-                self.op(Class::Base, OpKind::Add, xi, Some(yi))
-            },
-            SymbolicExpression::Sub { x, y, .. } => {
-                let (xi, yi) = (self.base_child(x), self.base_child(y));
-                self.op(Class::Base, OpKind::Sub, xi, Some(yi))
-            },
-            SymbolicExpression::Mul { x, y, .. } => {
-                let (xi, yi) = (self.base_child(x), self.base_child(y));
-                self.op(Class::Base, OpKind::Mul, xi, Some(yi))
-            },
-            SymbolicExpression::Neg { x, .. } => {
-                let xi = self.base_child(x);
-                self.op(Class::Base, OpKind::Neg, xi, None)
-            },
-        }
-    }
-
-    fn ext_child(&mut self, c: &Arc<SymbolicExpressionExt<Felt, EF>>) -> NodeId {
-        let ptr = Arc::as_ptr(c) as usize;
-        if let Some(&id) = self.ext_memo.get(&ptr) {
-            return id;
-        }
-        let id = self.ext_node(c);
-        self.ext_memo.insert(ptr, id);
-        id
-    }
-
-    fn ext_node(&mut self, e: &SymbolicExpressionExt<Felt, EF>) -> NodeId {
-        match e {
-            SymbolicExpressionExt::Leaf(leaf) => match leaf {
-                ExtLeaf::Base(base) => {
-                    let bid = self.base_node(base);
-                    self.builder.leaf(Leaf::ExtBase(bid))
-                },
-                ExtLeaf::ExtVariable(v) => {
-                    let leaf = match v.entry {
-                        ExtEntry::Permutation { offset } if offset <= 1 => {
-                            Leaf::Aux { offset, index: v.index }
-                        },
-                        ExtEntry::Permutation { offset } => {
-                            panic!("unsupported aux row offset {offset}")
-                        },
-                        ExtEntry::Challenge => Leaf::Challenge(v.index),
-                        ExtEntry::PermutationValue => Leaf::PermValue(v.index),
-                    };
-                    self.builder.leaf(leaf)
-                },
-                ExtLeaf::ExtConstant(c) => {
-                    let coeffs: &[Felt] = c.as_basis_coefficients_slice();
-                    let key = [coeffs[0].as_canonical_u64(), coeffs[1].as_canonical_u64()];
-                    self.builder.leaf(Leaf::ExtConst(key))
-                },
-            },
-            SymbolicExpressionExt::Add { x, y, .. } => {
-                let (xi, yi) = (self.ext_child(x), self.ext_child(y));
-                self.op(Class::Ext, OpKind::Add, xi, Some(yi))
-            },
-            SymbolicExpressionExt::Sub { x, y, .. } => {
-                let (xi, yi) = (self.ext_child(x), self.ext_child(y));
-                self.op(Class::Ext, OpKind::Sub, xi, Some(yi))
-            },
-            SymbolicExpressionExt::Mul { x, y, .. } => {
-                let (xi, yi) = (self.ext_child(x), self.ext_child(y));
-                self.op(Class::Ext, OpKind::Mul, xi, Some(yi))
-            },
-            SymbolicExpressionExt::Neg { x, .. } => {
-                let xi = self.ext_child(x);
-                self.op(Class::Ext, OpKind::Neg, xi, None)
-            },
-        }
     }
 
     fn native_base_child(&mut self, expression: &Arc<NativeExpression<Felt>>) -> NodeId {
@@ -488,15 +298,15 @@ mod tests {
     use std::borrow::Cow;
 
     use miden_core::utils::RowMajorMatrix;
-    use miden_crypto::field::{Algebra, PrimeCharacteristicRing};
-    use miden_stark::air::{ExtensionBuilder, LiftedAirBuilder, native::LiftedAirBuilder as _};
+    use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_stark::air::native::LiftedAirBuilder as _;
     use p3_field::Dup;
 
     use super::*;
 
     struct Source;
 
-    /// The same authored body is evaluated by the old facade and the native source/kernel.
+    /// One authored body supplies source and direct-kernel observations.
     fn relation<S: native::LiftedAirBuilder<F = Felt>>(
         frame: &native::Frame<'_, S>,
         inputs: native::Inputs<'_, S>,
@@ -547,56 +357,6 @@ mod tests {
         }
     }
 
-    impl BaseAir<Felt> for Source {
-        fn width(&self) -> usize {
-            2
-        }
-        fn preprocessed_width(&self) -> usize {
-            1
-        }
-        fn num_public_values(&self) -> usize {
-            1
-        }
-        fn num_periodic_columns(&self) -> usize {
-            1
-        }
-
-        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-            native::LiftedAir::spec(self).periodic_columns
-        }
-    }
-
-    impl LiftedAir<Felt, EF> for Source {
-        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-        fn log_preprocessed_height(&self) -> Option<u8> {
-            Some(2)
-        }
-        fn num_randomness(&self) -> usize {
-            2
-        }
-        fn aux_width(&self) -> usize {
-            1
-        }
-        fn num_aux_values(&self) -> usize {
-            1
-        }
-
-        fn build_aux_trace(
-            &self,
-            _main: &RowMajorMatrix<Felt>,
-            _public: &[Felt],
-            _statement: &[Felt],
-            _challenges: &[EF],
-        ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-            panic!("compiler capture must not construct witnesses")
-        }
-
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-            native::migration::eval_source(self, builder);
-        }
-    }
-
     fn assert_same(left: &CapturedConstraints, right: &CapturedConstraints) {
         assert_eq!(left.base_roots, right.base_roots);
         assert_eq!(left.ext_roots, right.ext_roots);
@@ -605,11 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn native_and_legacy_source_capture_have_the_same_ordered_graph() {
-        let (legacy_graph, legacy) = capture(&Source);
+    fn source_capture_retains_ordered_graph_and_all_input_namespaces() {
         let (native_graph, captured, descriptor) = capture_native(&Source).unwrap();
-        assert_eq!(legacy_graph, native_graph);
-        assert_same(&legacy, &captured);
         assert_eq!(captured.base_global_indices, vec![0, 2, 3, 5]);
         assert_eq!(captured.ext_global_indices, vec![1, 4]);
         assert_eq!(captured.base_roots[0], captured.base_roots[3]);
@@ -652,11 +409,9 @@ mod tests {
     fn shared_graph_kernel_comparison_retains_root_and_global_indices() {
         let kernel = native::DirectKernel::new(Source).unwrap();
         let mut builder = GraphBuilder::new();
-        let legacy = capture_into(&Source, &mut builder);
         let (source, source_descriptor) = capture_native_into(&Source, &mut builder).unwrap();
         let (prepared, observed_descriptor) =
             capture_kernel_native_into(&kernel, &mut builder).unwrap();
-        assert_same(&legacy, &source);
         assert_same(&source, &prepared);
         assert_eq!(source_descriptor.fingerprint(), observed_descriptor.fingerprint());
         assert_eq!(kernel.descriptor().fingerprint(), observed_descriptor.fingerprint());
@@ -666,9 +421,6 @@ mod tests {
     fn selected_capture_maps_quadratic_constants_without_changing_basis_order() {
         let value = EF::new([Felt::from_u32(3), Felt::from_u32(4)]);
         let mut builder = GraphBuilder::new();
-        let legacy = capture_into_with(&Source, &mut builder, |sink| {
-            sink.assert_zero_ext(SymbolicExpressionExt::<Felt, EF>::from(value));
-        });
         let (selected, descriptor) =
             capture_native_into_with(&Source, &mut builder, |_, _, sink| {
                 native::LiftedAirBuilder::assert_zero_ext(
@@ -677,7 +429,6 @@ mod tests {
                 );
             })
             .unwrap();
-        assert_same(&legacy, &selected);
         assert_eq!(selected.base_roots.len(), 0);
         assert_eq!(selected.ext_global_indices, vec![0]);
         assert_eq!(descriptor.analysis().counts().ext, 1);

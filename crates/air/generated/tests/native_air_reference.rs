@@ -9,7 +9,7 @@ use std::fmt::Write;
 use miden_ace::RecursiveAceCircuit;
 use miden_air_definitions::{precompiles, vm};
 use miden_constraint_compiler::{
-    ir::{NodeId, capture},
+    ir::{NodeId, capture_native},
     testing::{constraint_degrees, eval_graph},
 };
 use miden_core::{
@@ -19,8 +19,8 @@ use miden_core::{
 };
 use miden_crypto::hash::blake::Blake3_256;
 use miden_stark::air::{
-    BaseAir, LiftedAir, MultiAir, Statement,
-    native::{self, DirectKernel},
+    MultiAir, Statement,
+    native::{self, DirectKernel, LiftedAir, ProverAir},
 };
 
 const BASE: &str = "614c9f3608e6cc0a80397e8aa60315558f3069f7";
@@ -79,21 +79,21 @@ fn coefficients(value: QuadFelt) -> Vec<u64> {
     value.as_basis_coefficients_slice().iter().map(Felt::as_canonical_u64).collect()
 }
 
-fn metadata<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
-    let periods: Vec<_> = air.periodic_columns().iter().map(Vec::len).collect();
+fn metadata<A: LiftedAir<F = Felt>>(air: &A) -> Record {
+    let periods: Vec<_> = air.spec().periodic_columns.iter().map(Vec::len).collect();
     let [base, ext] = constraint_degrees(air);
     vec![
         (
             "shape",
             format!(
                 "main:{} preprocessed:{} aux:{} public:{} challenges:{} exports:{} preprocessed-log-height:{:?}",
-                air.width(),
-                air.preprocessed_width(),
-                air.aux_width(),
-                air.num_public_values(),
-                air.num_randomness(),
-                air.num_aux_values(),
-                air.log_preprocessed_height(),
+                air.spec().main_width,
+                air.spec().preprocessed_width(),
+                air.spec().aux_width,
+                air.spec().num_public_values,
+                air.spec().num_challenges,
+                air.spec().num_exports,
+                air.spec().preprocessed.map(|shape| shape.log_height),
             ),
         ),
         ("periods", format!("{periods:?}")),
@@ -102,9 +102,9 @@ fn metadata<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
 }
 
 /// Collect owned canonical observations of one authored source, including repeated emissions.
-fn observe_air<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
+fn observe_air<A: ProverAir<QuadFelt, F = Felt>>(air: &A) -> Record {
     let mut record = metadata(air);
-    let (graph, captured) = capture(air);
+    let (graph, captured, _) = capture_native(air).expect("authored native observation capture");
     let [base_degrees, ext_degrees] = constraint_degrees(air);
     assert_eq!(captured.base_roots.len(), base_degrees.len());
     assert_eq!(captured.base_global_indices.len(), base_degrees.len());
@@ -139,7 +139,7 @@ fn observe_air<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
     }
     record.push(("ordered-classes-degrees-v1", layout.digest()));
 
-    let periodic = air.periodic_columns();
+    let periodic = air.spec().periodic_columns;
     let mut periodic_encoding = Encoding::new("periodic");
     periodic_encoding.count(periodic.len());
     for column in periodic.iter() {
@@ -150,7 +150,7 @@ fn observe_air<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
     }
     record.push(("periodic-v1", periodic_encoding.digest()));
 
-    let fixed = air.preprocessed_trace();
+    let fixed = air.build_preprocessed_trace();
     let mut fixed_encoding = Encoding::new("fixed");
     fixed_encoding.0.push(u8::from(fixed.is_some()));
     if let Some(matrix) = &fixed {
@@ -192,19 +192,29 @@ fn observe_air<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
         .chain([2])
         .max()
         .unwrap();
-    let main = RowMajorMatrix::new(vec![Felt::ZERO; height * air.width()], air.width());
-    let public = vec![Felt::ZERO; air.num_public_values()];
-    let challenges: Vec<_> = (0..air.num_randomness())
+    let main = RowMajorMatrix::new(
+        vec![Felt::ZERO; height * air.spec().main_width],
+        air.spec().main_width,
+    );
+    let public = vec![Felt::ZERO; air.spec().num_public_values];
+    let challenges: Vec<_> = (0..air.spec().num_challenges)
         .map(|i| {
             let i = u64::try_from(i).unwrap();
             quad([2 * i + 2, 2 * i + 3])
         })
         .collect();
-    let (aux, exports) =
-        air.build_aux_trace_with_preprocessed(&main, fixed.as_ref(), &public, &[], &challenges);
-    assert_eq!(aux.width(), air.aux_width());
+    let native::AuxTrace { columns: aux, exports } = air
+        .build_aux_trace(native::AuxTraceInputs {
+            main: &main,
+            preprocessed: fixed.as_ref(),
+            public_values: &public,
+            statement: &[],
+            challenges: &challenges,
+        })
+        .expect("authored observation witness inputs");
+    assert_eq!(aux.width(), air.spec().aux_width);
     assert_eq!(aux.height(), height);
-    assert_eq!(exports.len(), air.num_aux_values());
+    assert_eq!(exports.len(), air.spec().num_exports);
     let mut aux_encoding = Encoding::new("aux");
     aux_encoding.count(aux.width());
     aux_encoding.count(aux.height());
@@ -233,7 +243,7 @@ impl<A: native::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A
 }
 
 /// Rebuild setup through source factories, using the existing canonical PCS presets.
-fn setup_record<A: LiftedAir<Felt, QuadFelt> + native::LiftedAir<F = Felt>>(
+fn setup_record<A: LiftedAir<F = Felt>>(
     airs: Vec<A>,
     params: miden_stark::pcs::PcsParams,
     relation: [Felt; 4],
@@ -241,8 +251,8 @@ fn setup_record<A: LiftedAir<Felt, QuadFelt> + native::LiftedAir<F = Felt>>(
     let public = airs
         .iter()
         .enumerate()
-        .filter(|(_, air)| air.num_public_values() != 0)
-        .map(|(index, air)| (index, vec![Felt::ZERO; air.num_public_values()]))
+        .filter(|(_, air)| air.spec().num_public_values != 0)
+        .map(|(index, air)| (index, vec![Felt::ZERO; air.spec().num_public_values]))
         .collect();
     let kernels = airs
         .into_iter()
@@ -328,7 +338,13 @@ fn protocols() -> [(String, Record); 2] {
     ));
     let raw_widths: Vec<_> = precompiles::ChipletAir::all()
         .iter()
-        .map(|air| (air.preprocessed_width(), air.width(), air.aux_width() * miden_ace::EXT_DEGREE))
+        .map(|air| {
+            (
+                air.spec().preprocessed_width(),
+                air.spec().main_width,
+                air.spec().aux_width * miden_ace::EXT_DEGREE,
+            )
+        })
         .collect();
     let max_log_quotient = precompiles::ChipletAir::all()
         .iter()

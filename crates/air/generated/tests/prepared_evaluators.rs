@@ -1,75 +1,13 @@
 //! Compiled regression fixture for challenge preparation and row-cache substitution.
 
-use miden_constraint_compiler::{
-    backend::rust_eval::{AirEvaluator, emit_optimized_module},
-    ir::{Graph, capture, capture_into, capture_into_with},
-};
+use miden_constraint_compiler::ir::Graph;
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air::native;
-use miden_stark::air::{
-    PermutationAirBuilder,
-    symbolic::{SymbolicExpression, SymbolicExpressionExt},
-};
 use p3_field::{Algebra, PrimeCharacteristicRing};
 
 #[path = "../build/preparation_fixture.rs"]
 mod source;
 use source::PreparationFixture;
-
-mod preparation_fixture {
-    include!("fixtures/prepared_evaluators.rs");
-}
-
-#[test]
-fn prepared_emitter_matches_compiled_golden() {
-    let (cached_graph, cached) = capture(&PreparationFixture(true));
-    let (uncached_graph, uncached) = capture(&PreparationFixture(false));
-    let output = emit_optimized_module(
-        "// Compiled golden for native challenge preparation.\n",
-        &[
-            AirEvaluator {
-                name: "cached",
-                air_label: "Cached",
-                graph: &cached_graph,
-                constraints: &cached,
-            },
-            AirEvaluator {
-                name: "uncached",
-                air_label: "Uncached",
-                graph: &uncached_graph,
-                constraints: &uncached,
-            },
-        ],
-    );
-    // The golden pins slot substitution for both terms, including their shared subexpression.
-    // Value equivalence alone would accept recomputing either term in the row evaluator.
-    assert_eq!(output, include_str!("fixtures/prepared_evaluators.rs"));
-
-    for cached in [false, true] {
-        let air = PreparationFixture(cached);
-        let mut graph = Graph::builder();
-        let authored = capture_into(&air, &mut graph);
-        let generated = capture_into_with(&air, &mut graph, |builder| {
-            let challenges: Vec<SymbolicExpressionExt<Felt, QuadFelt>> =
-                builder.permutation_randomness().iter().copied().map(Into::into).collect();
-            if cached {
-                let terms = preparation_fixture::precompute_cached::<SymbolicExpression<Felt>, _>(
-                    &challenges,
-                );
-                preparation_fixture::eval_cached(builder, &terms);
-            } else {
-                let terms = preparation_fixture::precompute_uncached::<SymbolicExpression<Felt>, _>(
-                    &challenges,
-                );
-                preparation_fixture::eval_uncached(builder, &terms);
-            }
-        });
-        assert_eq!(authored.base_roots, generated.base_roots);
-        assert_eq!(authored.ext_roots, generated.ext_roots);
-        assert_eq!(authored.base_global_indices, generated.base_global_indices);
-        assert_eq!(authored.ext_global_indices, generated.ext_global_indices);
-    }
-}
 
 // These outputs are generated from the shared authored fixture during ordinary compilation.
 // They are comparison subjects; neither output is the expected source relation.

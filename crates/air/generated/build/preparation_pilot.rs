@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 use miden_ace::compiler::CapturedAir;
 use miden_constraint_compiler::backend::{
     rust_descriptor::{self, AirDescriptorEmitter},
-    rust_eval::{AirEvaluator, NativeAirEvaluator, emit_native_optimized_module},
+    rust_eval::{AirEvaluator, emit_native_optimized_module},
 };
 
 #[path = "preparation_fixture.rs"]
@@ -36,14 +36,12 @@ pub fn generate(out: &Path) {
     // This only emits Rust: no numerical comparison, proof, observer baseline or test is run here.
     let evaluators: Vec<_> = captured
         .iter()
-        .map(|(name, label, captured)| NativeAirEvaluator {
-            eval: AirEvaluator {
-                name,
-                air_label: label,
-                graph: captured.graph(),
-                constraints: captured.constraints(),
-            },
-            descriptor: captured.descriptor().expect("explicit native fixture capture"),
+        .map(|(name, label, captured)| AirEvaluator {
+            name,
+            air_label: label,
+            graph: captured.graph(),
+            constraints: captured.constraints(),
+            descriptor: captured.descriptor(),
         })
         .collect();
     let descriptors: Vec<_> = captured
@@ -51,7 +49,7 @@ pub fn generate(out: &Path) {
         .map(|(name, label, captured)| AirDescriptorEmitter {
             name,
             air_label: label,
-            descriptor: captured.descriptor().expect("explicit native fixture capture"),
+            descriptor: captured.descriptor(),
         })
         .collect();
     for (name, contents) in [

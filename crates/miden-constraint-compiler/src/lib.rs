@@ -1,4 +1,4 @@
-//! Constraint compiler for Plonky3-based Miden AIRs.
+//! Constraint compiler for independently authored native Miden AIR relations.
 //!
 //! Hand-written constraint definitions — plain Rust `eval` implementations, the
 //! auditable source of truth — are captured symbolically into a hash-consed,

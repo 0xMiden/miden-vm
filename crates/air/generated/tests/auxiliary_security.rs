@@ -13,41 +13,37 @@ use miden_air_definitions::{
     compiler::vm::derive_air_shape,
     vm::{AIRS, MidenAir},
 };
-use miden_constraint_compiler::ir::{GraphBuilder, auxiliary, capture_into, capture_into_with};
-use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::{ConstraintLookupBuilder, LookupAir},
+use miden_constraint_compiler::ir::{
+    GraphBuilder, auxiliary, capture_native_into, capture_native_into_with,
 };
+use miden_stark::{air::native::LiftedAir, lookup::native};
 
 #[test]
 fn native_source_geometry_keeps_the_vm_security_shape() {
-    let native = miden_air_definitions::compiler::vm::derive_native_air_shape().unwrap();
-    assert_eq!(native, derive_air_shape());
+    let native = derive_air_shape().unwrap();
     assert_eq!(native, security::AIR_SHAPE);
 }
 
 #[test]
 fn auxiliary_identities_fit_the_lookup_budget() {
-    let shape = derive_air_shape();
+    let shape = derive_air_shape().unwrap();
     assert_eq!(shape, security::AIR_SHAPE);
     let lookup_shape = shape.lookup.unwrap();
     let lookup_coefficient =
         (u64::from(lookup_shape.max_message_width) + 2) * u64::from(lookup_shape.fractions_per_row);
     for air in AIRS {
         let mut builder = GraphBuilder::new();
-        let full = capture_into(&air, &mut builder);
-        let lookup = capture_into_with(&air, &mut builder, |b| {
-            let mut lb = ConstraintLookupBuilder::new(b, &air);
-            LookupAir::eval(&air, &mut lb);
-            lb.finish();
-        });
+        let (full, _) = capture_native_into(&air, &mut builder).unwrap();
+        let (lookup, _) = capture_native_into_with(&air, &mut builder, |frame, inputs, sink| {
+            native::eval_lookup(&air, frame, inputs, sink);
+        })
+        .unwrap();
         let degree = auxiliary::beta_degree_bound(
             &builder.freeze(),
             &full.ext_roots,
             &lookup.ext_roots,
-            LiftedAir::<Felt, QuadFelt>::aux_width(&air),
-            &air.periodic_columns(),
+            air.spec().aux_width,
+            &air.spec().periodic_columns,
         )
         .unwrap_or_else(|error| panic!("{air:?}: {error}"));
         let expected_degree = match air {

@@ -2,47 +2,13 @@
 
 use std::borrow::Cow;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_crypto::field::{Algebra, PrimeCharacteristicRing};
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, native};
+use miden_core::{Felt, utils::RowMajorMatrix};
+use miden_crypto::field::PrimeCharacteristicRing;
+use miden_stark::air::native;
 use p3_field::Dup;
 
 #[derive(Debug)]
 pub struct PreparationFixture(pub bool);
-
-impl BaseAir<Felt> for PreparationFixture {
-    fn width(&self) -> usize {
-        1
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for PreparationFixture {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-    fn num_randomness(&self) -> usize {
-        2
-    }
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        _main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        _challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        unreachable!("this fixture only evaluates constraints")
-    }
-
-    fn eval<B: LiftedAirBuilder<F = Felt>>(&self, builder: &mut B, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl native::LiftedAir for PreparationFixture {
     type F = Felt;

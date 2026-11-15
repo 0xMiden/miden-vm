@@ -820,7 +820,7 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
 
 #[test]
 fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
-    use miden_stark::air::ConstraintDegrees;
+    use miden_stark::air::native::ConstraintDegrees;
 
     use crate::compiler::CapturedAir;
     for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {

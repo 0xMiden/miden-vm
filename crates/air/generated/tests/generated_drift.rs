@@ -1,20 +1,10 @@
-//! Drift tests: the generated constraint evaluators must be exactly equivalent
-//! to the hand-written definitions they were derived from.
-//!
-//! The Rust optimizer may reassociate sums and factor products. Independent
-//! captures therefore compare polynomial values on arbitrary field assignments,
-//! with separate checks of each constraint's degree, assertion class and order.
-//! Concrete scalar and packed execution also checks specialized method dispatch.
-//! Baseline emission retains structural golden tests in the compiler crate.
-//!
-//! Evaluators are rebuilt automatically from the handwritten definitions.
+//! Generated kernel drift checks anchored to independently authored native source equations.
+//! Scalar and actual packed inputs, assertion class/order/degree, metadata and arbitrary
+//! polynomial assignments remain separate comparisons. The ignored timing case is manual only.
 
 use miden_air::vm::AIRS;
-use miden_constraint_compiler::{
-    ir::{Graph, capture, capture_into},
-    testing::{assert_concrete_evaluation, constraint_degrees, eval_graph},
-};
-use miden_core::{Felt, field::QuadFelt};
+use miden_constraint_compiler::ir::{Graph, capture_kernel_native_into, capture_native_into};
+use miden_stark::air::native::DirectKernel;
 
 const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
@@ -23,129 +13,29 @@ const SEEDS: [u64; 4] =
 mod native_registration;
 
 #[test]
-fn native_production_wrapper_dispatch_matches_each_authored_vm_source() {
+fn production_dispatch_preserves_each_authored_relation() {
     for air in AIRS {
-        native_registration::assert_native_registration(&air.0, &air.0, &air, &SEEDS);
+        native_registration::assert_native_registration(&air.0, &air, &SEEDS);
     }
 }
 
+/// Preserve the production-specific routing guard: these optimized evaluators have structurally
+/// distinct roots. Accidentally capturing their Source forwarding method would compare itself.
 #[test]
-fn native_core_registration_keeps_source_metadata_and_prepared_execution() {
-    use miden_air::vm::native::CoreKernel;
-    use miden_air_definitions::vm::{CoreAir, MidenAir};
-
-    native_registration::assert_native_registration(
-        &CoreAir,
-        &MidenAir::Core,
-        &CoreKernel::new(),
-        &SEEDS,
-    );
-}
-
-#[test]
-fn native_chiplets_registration_keeps_source_metadata_and_prepared_execution() {
-    use miden_air::vm::native::ChipletsKernel;
-    use miden_air_definitions::vm::{ChipletsAir, MidenAir};
-
-    native_registration::assert_native_registration(
-        &ChipletsAir,
-        &MidenAir::Chiplets,
-        &ChipletsKernel::new(),
-        &SEEDS,
-    );
-}
-
-#[test]
-fn native_and8_registration_keeps_fixed_shape_and_prepared_execution() {
-    use miden_air::vm::native::And8LookupKernel;
-    use miden_air_definitions::vm::{And8LookupAir, MidenAir};
-
-    native_registration::assert_native_registration(
-        &And8LookupAir,
-        &MidenAir::And8Lookup,
-        &And8LookupKernel::new(),
-        &SEEDS,
-    );
-}
-
-#[test]
-fn native_eidos_registration_keeps_source_metadata_and_prepared_execution() {
-    use miden_air::vm::native::EidosCompressionKernel;
-    use miden_air_definitions::vm::{EidosCompressionAir, MidenAir};
-
-    native_registration::assert_native_registration(
-        &EidosCompressionAir,
-        &MidenAir::EidosCompression,
-        &EidosCompressionKernel::new(),
-        &SEEDS,
-    );
-}
-
-/// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
-/// hand-written definitions. The emitter flips mixed-class commutative
-/// operands, so honest routing yields raw (pre-canonicalization) root ids that
-/// differ from the handwritten capture's for every AIR. If
-/// the authored and generated AIR types ever route to the same evaluator for
-/// even one AIR, both drift oracles silently compare the generated path against
-/// itself for that AIR — and this test fails instead.
-#[test]
-fn handwritten_and_generated_are_distinct_captures() {
+fn authored_and_prepared_execution_are_distinct_captures() {
     for air in AIRS {
         let mut builder = Graph::builder();
-        let handwritten = capture_into(&air.0, &mut builder);
-        let generated = capture_into(&air, &mut builder);
-        let _ = builder.freeze();
-        let differs = handwritten.base_roots != generated.base_roots
-            || handwritten.ext_roots != generated.ext_roots;
+        let (authored, _) = capture_native_into(&air.0, &mut builder).unwrap();
+        let (generated, _) = capture_kernel_native_into(&air, &mut builder).unwrap();
         assert!(
-            differs,
-            "{} handwritten and generated evaluators captured identically: the drift \
-             oracles would be comparing the generated evaluator against itself",
-            air.name()
+            authored.base_roots != generated.base_roots
+                || authored.ext_roots != generated.ext_roots,
+            "{air:?}: authored and generated captures unexpectedly coincide"
         );
     }
 }
 
-#[test]
-fn generated_evaluators_match_handwritten_values() {
-    for air in AIRS {
-        let (hand_graph, hand) = capture(&air.0);
-        let (gen_graph, generated) = capture(&air);
-        assert_eq!(hand.base_global_indices, generated.base_global_indices);
-        assert_eq!(hand.ext_global_indices, generated.ext_global_indices);
-        assert_eq!(
-            constraint_degrees(&air.0),
-            constraint_degrees(&air),
-            "{} constraint degrees",
-            air.name(),
-        );
-
-        for seed in SEEDS {
-            assert_concrete_evaluation(&air, &hand_graph, &hand, seed);
-            let hand_values = eval_graph(&hand_graph, seed);
-            let gen_values = eval_graph(&gen_graph, seed);
-            // (handwritten root, generated root) with its global constraint
-            // index, base constraints then ext.
-            let pairs = hand
-                .base_roots
-                .iter()
-                .zip(&generated.base_roots)
-                .zip(hand.base_global_indices.iter())
-                .chain(
-                    hand.ext_roots.iter().zip(&generated.ext_roots).zip(&hand.ext_global_indices),
-                );
-            for ((h, g), global) in pairs {
-                assert_eq!(
-                    hand_values[h.index()],
-                    gen_values[g.index()],
-                    "constraint {global} differs (seed {seed:#x})"
-                );
-            }
-        }
-    }
-}
-
-/// Reusable arithmetic-only comparison; run with `--release --ignored --nocapture`.
+/// Reusable arithmetic-only comparison; preparation and input generation precede each timer.
 #[test]
 #[ignore = "manual evaluator timing; use release mode"]
 fn evaluator_timing() {
@@ -154,7 +44,8 @@ fn evaluator_timing() {
         .unwrap_or(256);
     assert!(iterations > 0);
     for air in AIRS {
-        let handwritten = miden_constraint_compiler::testing::time_evaluation(&air.0, iterations);
+        let source = DirectKernel::new(air.0).unwrap();
+        let handwritten = miden_constraint_compiler::testing::time_evaluation(&source, iterations);
         let generated = miden_constraint_compiler::testing::time_evaluation(&air, iterations);
         std::eprintln!(
             "{}: {iterations} evaluations, handwritten scalar={:?} packed={:?}, generated scalar={:?} packed={:?}",
@@ -162,18 +53,7 @@ fn evaluator_timing() {
             handwritten[0],
             handwritten[1],
             generated[0],
-            generated[1],
-        );
-    }
-}
-
-#[test]
-fn generated_degrees_match_handwritten() {
-    use miden_stark::air::{ConstraintDegrees, LiftedAir};
-    for air in AIRS {
-        assert_eq!(
-            <miden_air::vm::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.0)
+            generated[1]
         );
     }
 }

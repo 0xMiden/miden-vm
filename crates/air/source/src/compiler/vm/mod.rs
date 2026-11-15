@@ -10,7 +10,7 @@ pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
     air::native::DescriptorError,
-    lookup::{ProverLookupBuilder, native as native_lookup},
+    lookup::{ProverLookupBuilder, native::LookupAir},
 };
 use p3_security::budget::{AirShape, LookupShape};
 
@@ -33,55 +33,39 @@ pub fn capture_vm_airs() -> Result<Vec<(MidenAir, CapturedAir)>, AceError> {
         .collect()
 }
 
-/// Derive the security shape for tooling and differential validation.
-pub fn derive_air_shape() -> AirShape {
+/// Derive the checked security shape from the authored relation.
+pub fn derive_air_shape() -> Result<AirShape, DescriptorError> {
     crate::shared::geometry::derive_air_shape(
         &AIRS,
-        LookupShape {
-            fractions_per_row: AIRS
-                .iter()
-                .map(|air| air.column_shape().iter().sum::<usize>())
-                .sum::<usize>() as u32,
-            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        },
+        lookup_shape(),
         miden_crypto::hash::eidos::BLOCK_LEN,
     )
 }
 
-/// Derive native source security geometry for tooling without changing runtime selection.
-pub fn derive_native_air_shape() -> Result<AirShape, DescriptorError> {
+fn lookup_shape() -> LookupShape {
     type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
-    crate::shared::geometry::derive_native_air_shape(
-        &AIRS,
-        LookupShape {
-            fractions_per_row: AIRS
-                .iter()
-                .map(|air| {
-                    <MidenAir as native_lookup::LookupAir<ShapeBuilder<'_>>>::column_shape(air)
-                        .iter()
-                        .sum::<usize>()
-                })
-                .sum::<usize>() as u32,
-            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        },
-        miden_crypto::hash::eidos::BLOCK_LEN,
-    )
+    LookupShape {
+        fractions_per_row: AIRS
+            .iter()
+            .map(|air| {
+                <MidenAir as LookupAir<ShapeBuilder<'_>>>::column_shape(air)
+                    .iter()
+                    .sum::<usize>()
+            })
+            .sum::<usize>() as u32,
+        max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
+    }
 }
 
 /// Security shape from the same captured relation used for evaluators and ACE generation.
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
     let geometry = relation.geometry();
-    let fractions_per_row: usize =
-        AIRS.iter().map(|air| air.column_shape().iter().sum::<usize>()).sum();
     AirShape {
         num_composed_constraints: (geometry.num_constraints + geometry.airs.len() - 1) as u32,
         max_constraint_degree: geometry.max_constraint_degree as u32,
         num_quotient_chunks: geometry.num_quotient_chunks as u32,
         max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(geometry.committed_width() as u32 + NUM_OOD_POINTS),
-        lookup: Some(LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        }),
+        lookup: Some(lookup_shape()),
     }
 }

@@ -16,3 +16,12 @@ Plans01/32 describe the expected categories: four VM/twelve precompile entries, 
 
 Using these data files is optional if a clearer independently recorded base oracle is selected. Preserve them unchanged as transfer evidence, and state which expectations are actually used. No oracle regeneration, compilation, test or proof execution has been performed while assembling this handoff.
 
+
+
+Reconstruction retirement adapter (31): the independently authored observer now reads the
+native authored-source capture, checked metadata and fallible witness interfaces so it no
+longer requires the retired upstream AIR traits. This is an API adaptation of the same
+observation recipe, not a newly recorded historical observation. Frozen `reference.txt` and
+`coverage.txt`, format tag, seeds, field/extension encoding and comparable/unknown field policy
+are unchanged. No generated evaluator supplies expected observations. No observer, test or
+numerical comparison was executed and no oracle or protocol pin was regenerated in this step.
