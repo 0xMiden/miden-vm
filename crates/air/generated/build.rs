@@ -8,11 +8,16 @@ use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized
 
 #[path = "build/precompiles.rs"]
 mod precompiles;
+#[path = "build/preparation_pilot.rs"]
+mod preparation_pilot;
 
 fn main() {
     precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build/preparation_pilot.rs");
+    println!("cargo:rerun-if-changed=build/preparation_fixture.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
+    preparation_pilot::generate(&out);
     let write = |name: &str, contents: String| {
         let path = out.join(name);
         fs::write(&path, contents)

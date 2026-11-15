@@ -51,4 +51,6 @@ miden-crypto.workspace = true
 miden-air-definitions = { workspace = true, features = ["std", "compiler"] }
 miden-ace = { workspace = true, features = ["compiler"] }
 miden-core.workspace = true
+miden-stark.workspace = true
+p3-field.workspace = true
 miden-constraint-compiler.workspace = true
